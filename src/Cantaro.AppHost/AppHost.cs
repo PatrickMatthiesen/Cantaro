@@ -11,10 +11,7 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithReference(db);
 
 // Add frontend
-var frontend = builder.AddNpmApp("web", "../Cantaro.Web")
-    .WithReference(api)
-    .WithHttpEndpoint(env: "PORT")
-    .WithExternalHttpEndpoints()
-    .PublishAsDockerFile();
+var frontend = builder.AddViteApp("web", "../Cantaro.Web")
+    .WithReference(api);
 
 builder.Build().Run();
