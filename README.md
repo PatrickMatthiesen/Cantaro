@@ -87,6 +87,7 @@ Cantaro/
 ├── src/
 │   ├── Cantaro.Api/               # ASP.NET Core Web API
 │   ├── Cantaro.AppHost/           # Aspire orchestration
+│   ├── Cantaro.BrowserExtension/  # WXT browser extension
 │   ├── Cantaro.ServiceDefaults/   # Shared Aspire service defaults
 │   └── Cantaro.Web/               # React frontend
 └── Cantaro.sln                    # Solution file
@@ -120,6 +121,19 @@ npm run dev
 ### Database Migrations
 
 (To be added as EF Core migrations are implemented)
+
+### Browser Extension Development
+
+The optional browser extension accelerates playlist sync by detecting changes in real-time:
+
+```bash
+cd src/Cantaro.BrowserExtension
+npm install
+npm run dev              # For Chrome/Edge/Brave
+npm run dev:firefox      # For Firefox
+```
+
+See [Cantaro.BrowserExtension/README.md](src/Cantaro.BrowserExtension/README.md) for detailed instructions on loading and using the extension.
 
 ## Contributing
 
