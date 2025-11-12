@@ -16,13 +16,12 @@ export default defineConfig({
       'https://www.youtube.com/*',
     ],
   },
-  runner: {
-    disabled: false,
-    chromiumArgs: [],
+  webExt: {
+    // disabled: false,
   },
   dev: {
     server: {
-      port: 3000,
+      port: 5174,
     },
   },
 });
