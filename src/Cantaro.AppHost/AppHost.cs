@@ -14,4 +14,8 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
 var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithReference(api);
 
+builder.AddBunApp("browser-extension", "../Cantaro.BrowserExtension", entryPoint: "dev")
+    .WithReference(api)
+    .WithExplicitStart();
+
 builder.Build().Run();
