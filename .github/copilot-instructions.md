@@ -5,7 +5,7 @@
 Precedence
 
 - This file is the authoritative instruction set for AI agents and coding assistants.
-- Other docs (for example, docs/infrastructure.md, docs/agent-extra.md) are supplemental context and must not override this file.
+- Other docs (for example, docs/infrastructure.md) are supplemental context and must not override this file.
 - When in doubt or when contradictions appear, follow this file.
 
 Purpose
@@ -18,11 +18,11 @@ Core context (short)
 - Frontend: React + TypeScript + Vite. Communicates with the API over HTTPS.
 - Extension: TypeScript WebExtension; optional accelerator. Sends events to the backend using Cantaro auth; never stores long-lived third-party refresh tokens.
 
-Local Orchestration (Aspire)
+Orchestration (Aspire)
 
 - Use .NET Aspire for local dev to run the Cantaro backend, PostgreSQL, and the frontend dev server (or built assets).
 - Aspire provides one entrypoint to start services and supplies connection strings and URLs (API, DB, web) via configuration.
-- Aspire is for development convenience only; production is standard containers/VMs.
+- Aspire should be used for production deployment, if possible when the project gets there.
 
 Non-negotiable rules (follow exactly)
 
@@ -67,7 +67,7 @@ Behavior by audience (response style)
 
 Code & output conventions
 
-- Backend: idiomatic ASP.NET Core (target .NET/ASP.NET Core 8+ when practical), DI, layered services/controllers, EF Core for data access; add unit/integration tests for public behavior changes.
+- Backend: idiomatic ASP.NET Core (target .NET/ASP.NET Core 10+ when practical), DI, layered services/controllers, EF Core for data access; add unit/integration tests for public behavior changes.
 - Frontend: React + TypeScript + Vite, minimal state, Prettier-style formatting.
 - Extension: separate content scripts and background/service worker; never store long-lived third-party refresh tokens; not a source of truth.
 - Communication: be direct; call out conflicts with these rules; don’t overpromise (no “perfect realtime sync”).
