@@ -24,4 +24,11 @@ export default defineConfig({
       port: 5174,
     },
   },
+  modules: ['@wxt-dev/module-react'],
+  vite: () => ({
+    // plugins: [tailwindcss()],
+    build: {
+      sourcemap: false,
+    },
+  }),
 });

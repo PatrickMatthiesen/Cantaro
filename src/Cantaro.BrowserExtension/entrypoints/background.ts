@@ -1,9 +1,8 @@
-import browser from 'webextension-polyfill';
-
 export default defineBackground(() => {
   console.log('Cantaro extension background script loaded');
 
   // Listen for messages from content scripts
+  // consider adding Zod validation for message payloads
   browser.runtime.onMessage.addListener(async (message, sender) => {
     console.log('Received message:', message, 'from:', sender.tab?.url);
 

@@ -1,18 +1,17 @@
 {
   "extends": "./.wxt/tsconfig.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
+    // "lib": ["ES2022", "DOM"],
+    // "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
     "types": ["webextension-polyfill"]
   },
-  "include": ["entrypoints/**/*", "components/**/*", "utils/**/*", "wxt.config.ts"]
 }
+// {
+//   "extends": "./.wxt/tsconfig.json",
+//   "compilerOptions": {
+//     "allowImportingTsExtensions": true,
+//     "jsx": "react-jsx"
+//   }
+// }
