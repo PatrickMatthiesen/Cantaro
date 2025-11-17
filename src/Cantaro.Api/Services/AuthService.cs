@@ -29,19 +29,22 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse?> RegisterAsync(RegisterRequest request)
     {
-        // Check if user already exists
-        if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+        // Normalize email to lowercase
+        var normalizedEmail = request.Email.ToLowerInvariant();
+        
+        // Check if user already exists (case-insensitive)
+        if (await _context.Users.AnyAsync(u => u.Email.ToLower() == normalizedEmail))
         {
             return null;
         }
 
-        // Hash the password
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+        // Hash the password with explicit work factor
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password, workFactor: 12);
 
         // Create new user
         var user = new User
         {
-            Email = request.Email,
+            Email = normalizedEmail,
             PasswordHash = passwordHash,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -62,8 +65,11 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse?> LoginAsync(LoginRequest request)
     {
-        // Find user by email
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        // Normalize email to lowercase for case-insensitive comparison
+        var normalizedEmail = request.Email.ToLowerInvariant();
+        
+        // Find user by email (case-insensitive)
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
         if (user == null)
         {
             return null;
@@ -102,8 +108,6 @@ public class AuthService : IAuthService
 
         var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Email, user.Email),
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())

@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -20,20 +21,15 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<ActionResult<AuthResponse>> Register([FromBody] RegisterRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        if (!ModelState.IsValid)
         {
-            return BadRequest(new { message = "Email and password are required" });
-        }
-
-        if (request.Password.Length < 6)
-        {
-            return BadRequest(new { message = "Password must be at least 6 characters long" });
+            return BadRequest(ModelState);
         }
 
         var result = await _authService.RegisterAsync(request);
         if (result == null)
         {
-            return Conflict(new { message = "User with this email already exists" });
+            return BadRequest(new { message = "Registration failed. Please try again." });
         }
 
         return Ok(result);
@@ -42,9 +38,9 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        if (!ModelState.IsValid)
         {
-            return BadRequest(new { message = "Email and password are required" });
+            return BadRequest(ModelState);
         }
 
         var result = await _authService.LoginAsync(request);
@@ -60,7 +56,7 @@ public class AuthController : ControllerBase
     [HttpGet("me")]
     public async Task<ActionResult<UserDto>> GetCurrentUser()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
         if (userIdClaim == null || !int.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized(new { message = "Invalid token" });

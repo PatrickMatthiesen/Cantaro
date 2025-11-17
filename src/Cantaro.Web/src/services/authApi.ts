@@ -1,5 +1,3 @@
-const API_BASE_URL = '/api';
-
 export interface User {
   id: number;
   email: string;
