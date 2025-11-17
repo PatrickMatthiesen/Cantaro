@@ -1,5 +1,5 @@
-// #:sdk Aspire.AppHost.Sdk@13.0.0
-// #:package Aspire.Hosting.JavaScript@13.0.0
+// #:sdk Aspire.AppHost.Sdk@13.1.0-preview.1.25567.3
+// #:package Aspire.Hosting.JavaScript@13.1.0-preview.1.25567.3
 
 var builder = DistributedApplication.CreateBuilder(args);
 

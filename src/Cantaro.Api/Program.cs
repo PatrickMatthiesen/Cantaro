@@ -35,7 +35,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ClockSkew = TimeSpan.Zero
+            ClockSkew = TimeSpan.FromMinutes(5)
         };
     });
 
@@ -104,6 +104,11 @@ if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
+    logger.LogWarning("Applying EF Core migrations automatically on startup (development mode). " +
+        "This is intended for local development only. " +
+        "If multiple instances start simultaneously or if migrations fail, the database may become inconsistent. " +
+        "See the developer setup guide for details.");
     await dbContext.Database.MigrateAsync();
 }
 
