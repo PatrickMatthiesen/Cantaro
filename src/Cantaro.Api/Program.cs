@@ -16,6 +16,10 @@ builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
 
 // Configure JWT authentication
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "DevKey-ChangeInProduction-MinimumLength32Characters";
+if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
+{
+    throw new InvalidOperationException("JWT secret key is too short. It must be at least 32 bytes (256 bits) for HMACSHA256.");
+}
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Cantaro";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "Cantaro";
 
