@@ -38,7 +38,7 @@ class AuthApiClient {
   }
 
   async register(request: RegisterRequest): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE_URL}/auth/register`, {
+    const response = await fetch(`/api/auth/register`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
@@ -53,7 +53,7 @@ class AuthApiClient {
   }
 
   async login(request: LoginRequest): Promise<AuthResponse> {
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+    const response = await fetch(`/api/auth/login`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
@@ -68,7 +68,7 @@ class AuthApiClient {
   }
 
   async getCurrentUser(): Promise<User> {
-    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+    const response = await fetch(`/api/auth/me`, {
       method: 'GET',
       headers: this.getHeaders(true),
     });

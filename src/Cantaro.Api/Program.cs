@@ -4,22 +4,15 @@ using Cantaro.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
 
-// Add PostgreSQL database connection
-var connectionString = builder.Configuration.GetConnectionString("cantaro-db") 
-    ?? throw new InvalidOperationException("Connection string 'cantaro-db' not found.");
-
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString));
-
-// Add health checks with DB connectivity
-builder.Services.AddHealthChecks()
-    .AddDbContextCheck<ApplicationDbContext>();
+// Add PostgreSQL database context
+builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
 
 // Configure JWT authentication
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "DevKey-ChangeInProduction-MinimumLength32Characters";

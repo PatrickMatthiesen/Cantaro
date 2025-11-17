@@ -14,7 +14,8 @@ export const UserProfile = () => {
       padding: '1.5rem',
       border: '1px solid #ccc',
       borderRadius: '8px',
-      backgroundColor: '#f9f9f9'
+      backgroundColor: '#f9f9f9',
+      color: '#333',
     }}>
       <h2>User Profile</h2>
       <div style={{ marginBottom: '1rem' }}>
