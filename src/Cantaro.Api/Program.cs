@@ -1,7 +1,6 @@
 using System.Text;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
-using Cantaro.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -51,9 +50,6 @@ builder.Services.ConfigureApplicationCookie(options =>
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     }
 });
-
-// Register services
-builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add controllers
 builder.Services.AddControllers();
