@@ -32,14 +32,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   useEffect(() => {
     const loadUser = async () => {
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('accessToken');
       if (token) {
         try {
           const currentUser = await authApi.getCurrentUser();
           setUser(currentUser);
         } catch (error) {
           console.error('Failed to load user:', error);
-          localStorage.removeItem('authToken');
         }
       }
       setIsLoading(false);
@@ -50,18 +49,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const login = async (request: LoginRequest) => {
     const response = await authApi.login(request);
-    localStorage.setItem('authToken', response.token);
-    setUser(response.user);
+    if (!response.accessToken) {
+      throw new Error('Invalid login response: missing access token');
+    }
+    localStorage.setItem('accessToken', response.accessToken);
+    localStorage.setItem('refreshToken', response.refreshToken);
+    const currentUser = await authApi.getCurrentUser();
+    setUser(currentUser);
   };
 
   const register = async (request: RegisterRequest) => {
-    const response = await authApi.register(request);
-    localStorage.setItem('authToken', response.token);
-    setUser(response.user);
+    await authApi.register(request);
   };
 
   const logout = () => {
-    localStorage.removeItem('authToken');
+    // TODO: Call logout API endpoint to invalidate tokens server-side
+    localStorage.removeItem('accessToken');
     setUser(null);
   };
 

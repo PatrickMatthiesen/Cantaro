@@ -17,7 +17,8 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
 // Add frontend
 var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithReference(api)
-    .WaitFor(db);
+    .WaitFor(api)
+    .WithEndpoint("http", c => { c.IsExternal = true; c.Port = 8080; c.TargetPort = 5173; c.UriScheme = "http"; });
 
 builder.AddBunApp("browser-extension", "../Cantaro.BrowserExtension", entryPoint: "dev")
     .WithReference(api)

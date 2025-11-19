@@ -41,6 +41,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
+            autoComplete='email'
             style={{
               width: '100%',
               padding: '0.5rem',
@@ -61,6 +62,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={6}
+            autoComplete='current-password'
             style={{
               width: '100%',
               padding: '0.5rem',

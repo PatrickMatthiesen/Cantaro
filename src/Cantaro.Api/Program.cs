@@ -2,9 +2,9 @@ using System.Text;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,53 +15,42 @@ builder.AddServiceDefaults();
 // Add PostgreSQL database context
 builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
 
-// Configure ASP.NET Core Identity
-builder.Services.AddIdentity<User, IdentityRole<int>>(options =>
+builder.Services.AddAuthorization();
+
+builder.Services.AddIdentityApiEndpoints<User>(c =>
 {
     // Password settings - relaxed for development, should be strengthened in production
-    options.Password.RequireDigit = false;
-    options.Password.RequireLowercase = false;
-    options.Password.RequireUppercase = false;
-    options.Password.RequireNonAlphanumeric = false;
-    options.Password.RequiredLength = 6;
-    options.Password.RequiredUniqueChars = 1;
+    c.Password.RequireDigit = false;
+    c.Password.RequireLowercase = false;
+    c.Password.RequireUppercase = false;
+    c.Password.RequireNonAlphanumeric = false;
+    c.Password.RequiredLength = 6;
+    c.Password.RequiredUniqueChars = 1;
 
     // User settings
-    options.User.RequireUniqueEmail = true;
-    
+    c.User.RequireUniqueEmail = true;
+
     // Sign in settings
-    options.SignIn.RequireConfirmedEmail = false;
-    options.SignIn.RequireConfirmedAccount = false;
-})
-.AddEntityFrameworkStores<ApplicationDbContext>()
-.AddDefaultTokenProviders();
+    c.SignIn.RequireConfirmedEmail = false;
+    c.SignIn.RequireConfirmedAccount = false;
+}).AddEntityFrameworkStores<ApplicationDbContext>();
 
-// Configure JWT authentication
-var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key must be configured in application settings");
-if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
+builder.Services.ConfigureApplicationCookie(options =>
 {
-    throw new InvalidOperationException("JWT secret key is too short. It must be at least 32 bytes (256 bits) for HMACSHA256.");
-}
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Cantaro";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "Cantaro";
+    // Makes the cookie last 14 days
+    options.ExpireTimeSpan = TimeSpan.FromDays(14);
+    options.SlidingExpiration = true;
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+    // options.LoginPath = "/api/identity/login";
+    // options.LogoutPath = "/api/identity/logout";
+    // options.SessionStore = 
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    if (builder.Environment.IsProduction())
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ClockSkew = TimeSpan.FromMinutes(5)
-        };
-    });
-
-builder.Services.AddAuthorization();
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    }
+});
 
 // Register services
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -101,6 +90,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Prefix all Identity API endpoints with /api to hit the vite proxy
+app.MapGroup("/api").MapIdentityApi<User>();
 
 var summaries = new[]
 {

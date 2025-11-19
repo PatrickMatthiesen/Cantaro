@@ -32,6 +32,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
 
     try {
       await register({ email, password });
+      onSwitchToLogin();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -53,6 +54,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
+            autoComplete='email'
             style={{
               width: '100%',
               padding: '0.5rem',
@@ -73,6 +75,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={6}
+            autoComplete='new-password'
             style={{
               width: '100%',
               padding: '0.5rem',
@@ -93,6 +96,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
             minLength={6}
+            autoComplete='new-password'
             style={{
               width: '100%',
               padding: '0.5rem',

@@ -15,8 +15,10 @@ export interface LoginRequest {
 }
 
 export interface AuthResponse {
-  token: string;
-  user: User;
+  tokenType: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
 }
 
 class AuthApiClient {
@@ -26,7 +28,7 @@ class AuthApiClient {
     };
 
     if (includeAuth) {
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('accessToken');
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
@@ -35,8 +37,8 @@ class AuthApiClient {
     return headers;
   }
 
-  async register(request: RegisterRequest): Promise<AuthResponse> {
-    const response = await fetch(`/api/auth/register`, {
+  async register(request: RegisterRequest): Promise<void> {
+    const response = await fetch(`/api/register`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
@@ -46,12 +48,10 @@ class AuthApiClient {
       const error = await response.json().catch(() => ({ message: 'Registration failed' }));
       throw new Error(error.message || 'Registration failed');
     }
-
-    return response.json();
   }
 
   async login(request: LoginRequest): Promise<AuthResponse> {
-    const response = await fetch(`/api/auth/login`, {
+    const response = await fetch(`/api/login?useCookies=false`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
@@ -61,6 +61,8 @@ class AuthApiClient {
       const error = await response.json().catch(() => ({ message: 'Login failed' }));
       throw new Error(error.message || 'Login failed');
     }
+
+    console.log('Login response status:', response.status);
 
     return response.json();
   }

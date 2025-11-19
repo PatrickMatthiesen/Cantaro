@@ -6,7 +6,7 @@ type StatusType = 'success' | 'error';
 
 function App() {
   const [apiBaseUrl, setApiBaseUrl] = useState('');
-  const [authToken, setAuthToken] = useState('');
+  const [accessToken, setAccessToken] = useState('');
   const [status, setStatus] = useState<{ message: string; type: StatusType } | null>(null);
   const [loading, setLoading] = useState(true);
   const statusTimeout = useRef<number | null>(null);
@@ -23,13 +23,13 @@ function App() {
     let mounted = true;
 
     browser
-      .storage.local.get(['apiBaseUrl', 'authToken'])
-      .then((config: { apiBaseUrl?: string; authToken?: string }) => {
+      .storage.local.get(['apiBaseUrl', 'accessToken'])
+      .then((config: { apiBaseUrl?: string; accessToken?: string }) => {
         if (!mounted) {
           return;
         }
         setApiBaseUrl(config.apiBaseUrl ?? '');
-        setAuthToken(config.authToken ?? '');
+        setAccessToken(config.accessToken ?? '');
       })
       .catch((error) => {
         console.error('Error loading settings:', error);
@@ -54,7 +54,7 @@ function App() {
     try {
       await browser.storage.local.set({
         apiBaseUrl: apiBaseUrl.trim(),
-        authToken: authToken.trim() || null,
+        accessToken: accessToken.trim() || null,
       });
       showStatus('Settings saved successfully!', 'success');
     } catch (error) {
@@ -82,13 +82,13 @@ function App() {
         </div>
 
         <div className="form-group">
-          <label htmlFor="authToken">Authentication Token (Optional)</label>
+          <label htmlFor="accessToken">Authentication Token (Optional)</label>
           <input
-            id="authToken"
+            id="accessToken"
             type="password"
             placeholder="Your Cantaro auth token"
-            value={authToken}
-            onChange={(event) => setAuthToken(event.target.value)}
+            value={accessToken}
+            onChange={(event) => setAccessToken(event.target.value)}
             disabled={loading}
           />
           <div className="info">Get this from the Cantaro web app after logging in</div>
