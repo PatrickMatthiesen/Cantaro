@@ -135,13 +135,20 @@ When running locally with Aspire in Development mode, migrations are applied aut
 
 ### Authentication
 
-Cantaro uses JWT-based authentication for user accounts:
+Cantaro uses secure cookie-based authentication for user accounts:
 
-- **Register**: POST `/api/auth/register` with `{ "email": "user@example.com", "password": "yourpassword" }`
-- **Login**: POST `/api/auth/login` with `{ "email": "user@example.com", "password": "yourpassword" }`
-- **Get Current User**: GET `/api/auth/me` with `Authorization: Bearer <token>` header
+- **Register**: POST `/api/register` with `{ "email": "user@example.com", "password": "yourpassword" }`
+- **Login**: POST `/api/login?useCookies=true` with `{ "email": "user@example.com", "password": "yourpassword" }`
+- **Logout**: POST `/api/logout` to invalidate the session
+- **Get Current User**: GET `/api/auth/me` (authentication cookie sent automatically)
 
-The JWT token is stored in localStorage on the frontend and included in subsequent API requests.
+Authentication uses httpOnly cookies with the following security features:
+- **HttpOnly**: Prevents JavaScript access (XSS protection)
+- **SameSite=Lax**: CSRF protection
+- **Secure**: HTTPS-only in production
+- **14-day expiration**: With sliding window refresh
+
+The browser automatically includes the authentication cookie in all API requests—no manual token management required.
 
 ### Browser Extension Development
 
