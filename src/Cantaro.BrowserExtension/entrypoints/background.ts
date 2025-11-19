@@ -19,7 +19,7 @@ export default defineBackground(() => {
 
 async function initialize() {
   console.log('Initializing Cantaro extension');
-  
+
   // Check if API base URL is configured
   const config = await browser.storage.local.get('apiBaseUrl');
   if (!config.apiBaseUrl) {
@@ -35,9 +35,9 @@ async function handlePlaylistEvent(payload: any) {
 
   try {
     // Get API configuration
-    const config = await browser.storage.local.get(['apiBaseUrl', 'authToken']);
-    
-    if (!config.authToken) {
+    const config = await browser.storage.local.get(['apiBaseUrl', 'accessToken']);
+
+    if (!config.accessToken) {
       console.warn('No auth token found. User needs to authenticate.');
       return;
     }
@@ -47,7 +47,7 @@ async function handlePlaylistEvent(payload: any) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.authToken}`,
+        'Authorization': `Bearer ${config.accessToken}`,
       },
       body: JSON.stringify(payload),
     });

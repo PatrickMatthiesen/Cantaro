@@ -120,7 +120,28 @@ npm run dev
 
 ### Database Migrations
 
-(To be added as EF Core migrations are implemented)
+EF Core migrations are used to manage the database schema:
+
+```bash
+# Create a new migration
+cd src/Cantaro.Api
+dotnet ef migrations add MigrationName
+
+# Apply migrations to the database
+dotnet ef database update
+```
+
+When running locally with Aspire in Development mode, migrations are applied automatically on startup.
+
+### Authentication
+
+Cantaro uses JWT-based authentication for user accounts:
+
+- **Register**: POST `/api/auth/register` with `{ "email": "user@example.com", "password": "yourpassword" }`
+- **Login**: POST `/api/auth/login` with `{ "email": "user@example.com", "password": "yourpassword" }`
+- **Get Current User**: GET `/api/auth/me` with `Authorization: Bearer <token>` header
+
+The JWT token is stored in localStorage on the frontend and included in subsequent API requests.
 
 ### Browser Extension Development
 
