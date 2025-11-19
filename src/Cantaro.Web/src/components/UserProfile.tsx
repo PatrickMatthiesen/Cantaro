@@ -1,11 +1,24 @@
+import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const UserProfile = () => {
   const { user, logout } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   if (!user) {
     return null;
   }
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <div style={{ 
@@ -31,7 +44,8 @@ export const UserProfile = () => {
         <strong>Member since:</strong> {new Date(user.createdAt).toLocaleDateString()}
       </div>
       <button
-        onClick={logout}
+        onClick={handleLogout}
+        disabled={isLoggingOut}
         style={{
           padding: '0.75rem 1.5rem',
           fontSize: '1rem',
@@ -39,10 +53,11 @@ export const UserProfile = () => {
           color: 'white',
           border: 'none',
           borderRadius: '4px',
-          cursor: 'pointer',
+          cursor: isLoggingOut ? 'not-allowed' : 'pointer',
+          opacity: isLoggingOut ? 0.6 : 1,
         }}
       >
-        Logout
+        {isLoggingOut ? 'Logging out...' : 'Logout'}
       </button>
     </div>
   );
