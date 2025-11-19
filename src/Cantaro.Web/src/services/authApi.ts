@@ -14,33 +14,18 @@ export interface LoginRequest {
   password: string;
 }
 
-export interface AuthResponse {
-  tokenType: string;
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-}
-
 class AuthApiClient {
-  private getHeaders(includeAuth: boolean = false): HeadersInit {
-    const headers: HeadersInit = {
+  private getHeaders(): HeadersInit {
+    return {
       'Content-Type': 'application/json',
     };
-
-    if (includeAuth) {
-      const token = localStorage.getItem('accessToken');
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    }
-
-    return headers;
   }
 
   async register(request: RegisterRequest): Promise<void> {
     const response = await fetch(`/api/register`, {
       method: 'POST',
       headers: this.getHeaders(),
+      credentials: 'include',
       body: JSON.stringify(request),
     });
 
@@ -50,10 +35,11 @@ class AuthApiClient {
     }
   }
 
-  async login(request: LoginRequest): Promise<AuthResponse> {
-    const response = await fetch(`/api/login?useCookies=false`, {
+  async login(request: LoginRequest): Promise<void> {
+    const response = await fetch(`/api/login?useCookies=true`, {
       method: 'POST',
       headers: this.getHeaders(),
+      credentials: 'include',
       body: JSON.stringify(request),
     });
 
@@ -61,16 +47,26 @@ class AuthApiClient {
       const error = await response.json().catch(() => ({ message: 'Login failed' }));
       throw new Error(error.message || 'Login failed');
     }
+  }
 
-    console.log('Login response status:', response.status);
+  async logout(): Promise<void> {
+    const response = await fetch(`/api/logout`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include',
+    });
 
-    return response.json();
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Logout failed' }));
+      throw new Error(error.message || 'Logout failed');
+    }
   }
 
   async getCurrentUser(): Promise<User> {
     const response = await fetch(`/api/auth/me`, {
       method: 'GET',
-      headers: this.getHeaders(true),
+      headers: this.getHeaders(),
+      credentials: 'include',
     });
 
     if (!response.ok) {

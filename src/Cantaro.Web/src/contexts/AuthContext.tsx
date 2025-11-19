@@ -9,11 +9,12 @@ interface AuthContextType {
   isLoading: boolean;
   login: (request: LoginRequest) => Promise<void>;
   register: (request: RegisterRequest) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -32,14 +33,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   useEffect(() => {
     const loadUser = async () => {
-      const token = localStorage.getItem('accessToken');
-      if (token) {
-        try {
-          const currentUser = await authApi.getCurrentUser();
-          setUser(currentUser);
-        } catch (error) {
-          console.error('Failed to load user:', error);
-        }
+      try {
+        const currentUser = await authApi.getCurrentUser();
+        setUser(currentUser);
+      } catch {
+        // User is not authenticated or session expired
+        console.log('No active session');
       }
       setIsLoading(false);
     };
@@ -48,12 +47,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }, []);
 
   const login = async (request: LoginRequest) => {
-    const response = await authApi.login(request);
-    if (!response.accessToken) {
-      throw new Error('Invalid login response: missing access token');
-    }
-    localStorage.setItem('accessToken', response.accessToken);
-    localStorage.setItem('refreshToken', response.refreshToken);
+    await authApi.login(request);
     const currentUser = await authApi.getCurrentUser();
     setUser(currentUser);
   };
@@ -62,10 +56,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await authApi.register(request);
   };
 
-  const logout = () => {
-    // TODO: Call logout API endpoint to invalidate tokens server-side
-    localStorage.removeItem('accessToken');
-    setUser(null);
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      setUser(null);
+    }
   };
 
   const value: AuthContextType = {
