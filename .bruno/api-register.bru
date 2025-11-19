@@ -1,0 +1,27 @@
+meta {
+  name: /api/register
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{host}}:{{webPort}}/api/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "patrickTest@test.dk",
+    "password": "This!sAStrongP4ssw0rd"
+  }
+}
+
+script:pre-request {
+  req.headers.Authorization = undefined
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
