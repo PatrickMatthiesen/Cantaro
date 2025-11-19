@@ -1,10 +1,9 @@
+using Microsoft.AspNetCore.Identity;
+
 namespace Cantaro.Api.Models;
 
-public class User
+public class User : IdentityUser<int>
 {
-    public int Id { get; set; }
-    public required string Email { get; set; }
-    public required string PasswordHash { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

@@ -1,11 +1,9 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Cantaro.Api.Data;
 using Cantaro.Api.Models;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
-using BCrypt.Net;
 
 namespace Cantaro.Api.Services;
 
@@ -18,40 +16,36 @@ public interface IAuthService
 
 public class AuthService : IAuthService
 {
-    private readonly ApplicationDbContext _context;
+    private readonly UserManager<User> _userManager;
+    private readonly SignInManager<User> _signInManager;
     private readonly IConfiguration _configuration;
 
-    public AuthService(ApplicationDbContext context, IConfiguration configuration)
+    public AuthService(
+        UserManager<User> userManager,
+        SignInManager<User> signInManager,
+        IConfiguration configuration)
     {
-        _context = context;
+        _userManager = userManager;
+        _signInManager = signInManager;
         _configuration = configuration;
     }
 
     public async Task<AuthResponse?> RegisterAsync(RegisterRequest request)
     {
-        // Normalize email to lowercase
-        var normalizedEmail = request.Email.ToLowerInvariant();
-        
-        // Check if user already exists (case-insensitive)
-        if (await _context.Users.AnyAsync(u => u.Email.ToLower() == normalizedEmail))
-        {
-            return null;
-        }
-
-        // Hash the password with explicit work factor
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password, workFactor: 12);
-
         // Create new user
         var user = new User
         {
-            Email = normalizedEmail,
-            PasswordHash = passwordHash,
+            UserName = request.Email,
+            Email = request.Email,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync();
+        var result = await _userManager.CreateAsync(user, request.Password);
+        if (!result.Succeeded)
+        {
+            return null;
+        }
 
         // Generate JWT token
         var token = GenerateJwtToken(user);
@@ -65,18 +59,16 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse?> LoginAsync(LoginRequest request)
     {
-        // Normalize email to lowercase for case-insensitive comparison
-        var normalizedEmail = request.Email.ToLowerInvariant();
-        
-        // Find user by email (case-insensitive)
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
+        // Find user by email
+        var user = await _userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
             return null;
         }
 
         // Verify password
-        if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: false);
+        if (!result.Succeeded)
         {
             return null;
         }
@@ -93,7 +85,7 @@ public class AuthService : IAuthService
 
     public async Task<UserDto?> GetUserByIdAsync(int userId)
     {
-        var user = await _context.Users.FindAsync(userId);
+        var user = await _userManager.FindByIdAsync(userId.ToString());
         return user == null ? null : MapToUserDto(user);
     }
 
@@ -109,7 +101,7 @@ public class AuthService : IAuthService
         var claims = new[]
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            new Claim(JwtRegisteredClaimNames.Email, user.Email!),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
@@ -129,7 +121,7 @@ public class AuthService : IAuthService
         return new UserDto
         {
             Id = user.Id,
-            Email = user.Email,
+            Email = user.Email!,
             CreatedAt = user.CreatedAt
         };
     }
