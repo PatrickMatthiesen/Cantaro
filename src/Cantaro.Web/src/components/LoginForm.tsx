@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { PASSWORD_MIN_LENGTH } from '../constants/validation';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -61,7 +62,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={PASSWORD_MIN_LENGTH}
             autoComplete='current-password'
             style={{
               width: '100%',

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { PASSWORD_MIN_LENGTH } from '../constants/validation';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -23,8 +24,8 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long');
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters long`);
       return;
     }
 
@@ -74,7 +75,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={PASSWORD_MIN_LENGTH}
             autoComplete='new-password'
             style={{
               width: '100%',
@@ -95,7 +96,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={PASSWORD_MIN_LENGTH}
             autoComplete='new-password'
             style={{
               width: '100%',
