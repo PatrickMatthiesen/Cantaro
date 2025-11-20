@@ -23,7 +23,25 @@ Cantaro acts as the canonical vessel that holds your music graph and pours it in
 
 ## Getting Started
 
-### Installation
+### Option 1: GitHub Codespaces (Recommended for Quick Start)
+
+The easiest way to get started with Cantaro is using GitHub Codespaces, which provides a pre-configured development environment in your browser:
+
+1. Click the **Code** button on the GitHub repository
+2. Select **Codespaces** tab
+3. Click **Create codespace on main** (or your desired branch)
+
+The environment will automatically install all required dependencies:
+- .NET 10 SDK
+- Node.js 24
+- .NET Aspire CLI
+- EF Core tools
+- Docker support
+- All npm dependencies
+
+Once the setup is complete, you can start developing immediately!
+
+### Option 2: Local Installation
 
 1. Clone the repository:
    ```bash
