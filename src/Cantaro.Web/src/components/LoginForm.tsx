@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { PASSWORD_MIN_LENGTH } from '../constants/validation';
+import { PASSWORD_MIN_LENGTH, loginSchema, type LoginFormData } from '../constants/validation';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -17,6 +17,18 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Validate form data with Zod
+    const formData: LoginFormData = { email, password };
+    const result = loginSchema.safeParse(formData);
+
+    if (!result.success) {
+      // Get the first error message
+      const firstError = result.error.issues[0];
+      setError(firstError.message);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
