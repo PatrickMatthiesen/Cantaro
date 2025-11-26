@@ -3,6 +3,10 @@ set -e
 
 echo "🔧 Installing Cantaro development dependencies..."
 
+# Install Bun
+curl -fsSL https://bun.sh/install | bash
+export PATH="$HOME/.bun/bin:$PATH"
+
 # Install Aspire CLI
 echo "📦 Installing Aspire CLI..."
 curl -sSL https://aspire.dev/install.sh | bash
@@ -25,7 +29,7 @@ cd ../..
 # Install Node.js dependencies for the browser extension
 echo "📦 Installing browser extension dependencies..."
 cd src/Cantaro.BrowserExtension
-npm install
+bun install
 cd ../..
 
 echo "✅ Development environment setup complete!"
