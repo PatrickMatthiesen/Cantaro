@@ -3,6 +3,9 @@
 
 var builder = DistributedApplication.CreateBuilder(args);
 
+var youtubeClientId = builder.AddParameter("YouTubeClientId", secret: true);
+var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: true);
+
 // Add PostgreSQL database
 var postgres = builder.AddPostgres("postgres")
     .WithHostPort(5432)
@@ -11,6 +14,8 @@ var db = postgres.AddDatabase("cantaro-db");
 
 // Add API service
 var api = builder.AddProject<Projects.Cantaro_Api>("api")
+    .WithEnvironment("YouTube:ClientId", youtubeClientId)
+    .WithEnvironment("YouTube:ClientSecret", youtubeClientSecret)
     .WithReference(db)
     .WaitFor(db);
 
