@@ -1,6 +1,7 @@
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,17 +27,20 @@ public class YouTubeController : ControllerBase
     private readonly UserManager<User> _userManager;
     private readonly IConfiguration _configuration;
     private readonly ILogger<YouTubeController> _logger;
+    private readonly IDataProtector _stateProtector;
 
     public YouTubeController(
         YouTubeService youtubeService,
         UserManager<User> userManager,
         IConfiguration configuration,
-        ILogger<YouTubeController> logger)
+        ILogger<YouTubeController> logger,
+        IDataProtectionProvider dataProtectionProvider)
     {
         _youtubeService = youtubeService;
         _userManager = userManager;
         _configuration = configuration;
         _logger = logger;
+        _stateProtector = dataProtectionProvider.CreateProtector("YouTube.OAuth.State");
     }
 
     /// <summary>
@@ -65,9 +69,9 @@ public class YouTubeController : ControllerBase
     {
         var userId = await GetCurrentUserIdAsync();
         
-        // Generate a state parameter that includes the user ID and return URL for security
-        var state = Convert.ToBase64String(
-            System.Text.Encoding.UTF8.GetBytes($"{userId}:{returnUrl ?? "/youtube"}"));
+        // Generate a cryptographically protected state parameter
+        var stateData = $"{userId}:{DateTime.UtcNow.Ticks}:{returnUrl ?? "/youtube"}";
+        var state = _stateProtector.Protect(stateData);
 
         var baseUrl = GetBaseUrl();
         var redirectUri = $"{baseUrl}/api/youtube/callback";
@@ -81,7 +85,7 @@ public class YouTubeController : ControllerBase
     /// OAuth callback from Google
     /// </summary>
     [HttpGet("callback")]
-    [AllowAnonymous] // Callback is from Google, user session is validated via state
+    [AllowAnonymous] // Callback is from Google, user session is validated via encrypted state
     public async Task<ActionResult> Callback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error)
     {
         if (!string.IsNullOrEmpty(error))
@@ -97,17 +101,27 @@ public class YouTubeController : ControllerBase
 
         try
         {
-            // Parse state to get user ID and return URL
-            var stateBytes = Convert.FromBase64String(state);
-            var stateString = System.Text.Encoding.UTF8.GetString(stateBytes);
-            var stateParts = stateString.Split(':', 2);
+            // Decrypt and parse state to get user ID and return URL
+            var stateData = _stateProtector.Unprotect(state);
+            var stateParts = stateData.Split(':', 3);
             
-            if (!int.TryParse(stateParts[0], out var userId))
+            if (stateParts.Length < 2 || !int.TryParse(stateParts[0], out var userId))
             {
                 return Redirect("/youtube?error=invalid_state");
             }
 
-            var returnUrl = stateParts.Length > 1 ? stateParts[1] : "/youtube";
+            // Validate state is not too old (max 10 minutes)
+            if (long.TryParse(stateParts[1], out var ticks))
+            {
+                var stateTime = new DateTime(ticks, DateTimeKind.Utc);
+                if (DateTime.UtcNow - stateTime > TimeSpan.FromMinutes(10))
+                {
+                    _logger.LogWarning("YouTube OAuth state expired for user {UserId}", userId);
+                    return Redirect("/youtube?error=state_expired");
+                }
+            }
+
+            var returnUrl = stateParts.Length > 2 ? stateParts[2] : "/youtube";
 
             var baseUrl = GetBaseUrl();
             var redirectUri = $"{baseUrl}/api/youtube/callback";
@@ -117,6 +131,11 @@ public class YouTubeController : ControllerBase
             _logger.LogInformation("Successfully connected YouTube account for user {UserId}", userId);
 
             return Redirect($"{returnUrl}?connected=true");
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            _logger.LogWarning(ex, "Invalid or tampered YouTube OAuth state");
+            return Redirect("/youtube?error=invalid_state");
         }
         catch (Exception ex)
         {

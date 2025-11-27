@@ -131,7 +131,8 @@ public class YouTubeService
         var channelResponse = await channelRequest.ExecuteAsync();
         var channel = channelResponse.Items?.FirstOrDefault();
 
-        var externalAccountId = channel?.Id ?? $"google_{userId}";
+        // Use channel ID if available, otherwise generate a unique fallback ID
+        var externalAccountId = channel?.Id ?? $"yt_user_{Guid.NewGuid():N}";
         var displayName = channel?.Snippet?.Title ?? "Unknown";
 
         // Check if account already exists
@@ -140,11 +141,22 @@ public class YouTubeService
 
         if (existingAccount != null)
         {
-            existingAccount.ExternalAccountId = externalAccountId;
+            // Only update external account ID if we got a real channel ID
+            if (channel?.Id != null)
+            {
+                existingAccount.ExternalAccountId = externalAccountId;
+            }
             existingAccount.DisplayName = displayName;
-            existingAccount.EncryptedRefreshToken = tokenResponse.RefreshToken != null
-                ? _tokenEncryption.Encrypt(tokenResponse.RefreshToken)
-                : existingAccount.EncryptedRefreshToken;
+            // Only update refresh token if we received a new one
+            if (tokenResponse.RefreshToken != null)
+            {
+                existingAccount.EncryptedRefreshToken = _tokenEncryption.Encrypt(tokenResponse.RefreshToken);
+                _logger.LogInformation("Updated refresh token for YouTube account of user {UserId}", userId);
+            }
+            else
+            {
+                _logger.LogDebug("No new refresh token received for user {UserId}, keeping existing token", userId);
+            }
             existingAccount.Scopes = tokenResponse.Scope;
             existingAccount.TokenExpiresAt = tokenResponse.IssuedUtc.AddSeconds(tokenResponse.ExpiresInSeconds ?? 3600);
             existingAccount.UpdatedAt = DateTime.UtcNow;
