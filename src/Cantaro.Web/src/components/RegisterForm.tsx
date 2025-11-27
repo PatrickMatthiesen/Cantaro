@@ -43,11 +43,16 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
   };
 
   return (
-    <div style={{ maxWidth: '400px', margin: '0 auto', padding: '2rem' }}>
-      <h2>Register</h2>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label htmlFor="email" style={{ display: 'block', marginBottom: '0.5rem' }}>
+    <div className="space-y-6 text-left text-white">
+      <div className="space-y-2">
+        <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Create account</p>
+        <h2 className="text-3xl font-semibold">Join Cantaro</h2>
+        <p className="text-sm text-slate-400">Provision your secure workspace in a few seconds.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="space-y-2">
+          <label htmlFor="email" className="text-sm font-medium text-slate-200">
             Email
           </label>
           <input
@@ -56,18 +61,14 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            autoComplete='email'
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              fontSize: '1rem',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-            }}
+            autoComplete="email"
+            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            placeholder="you@example.com"
           />
         </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label htmlFor="password" style={{ display: 'block', marginBottom: '0.5rem' }}>
+
+        <div className="space-y-2">
+          <label htmlFor="password" className="text-sm font-medium text-slate-200">
             Password
           </label>
           <input
@@ -77,19 +78,15 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            autoComplete='new-password'
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              fontSize: '1rem',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-            }}
+            autoComplete="new-password"
+            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            placeholder="••••••••"
           />
         </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label htmlFor="confirmPassword" style={{ display: 'block', marginBottom: '0.5rem' }}>
-            Confirm Password
+
+        <div className="space-y-2">
+          <label htmlFor="confirmPassword" className="text-sm font-medium text-slate-200">
+            Confirm password
           </label>
           <input
             type="password"
@@ -98,51 +95,35 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            autoComplete='new-password'
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              fontSize: '1rem',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-            }}
+            autoComplete="new-password"
+            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            placeholder="Repeat password"
           />
         </div>
+
         {error && (
-          <div style={{ color: 'red', marginBottom: '1rem' }}>
+          <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {error}
           </div>
         )}
+
         <button
           type="submit"
           disabled={isLoading}
-          style={{
-            width: '100%',
-            padding: '0.75rem',
-            fontSize: '1rem',
-            backgroundColor: '#646cff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-          }}
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-brand-400 to-fuchsia-500 px-4 py-3 text-base font-semibold text-white shadow-[0_20px_60px_rgba(168,85,247,0.35)] transition hover:translate-y-0.5 hover:shadow-[0_30px_80px_rgba(168,85,247,0.45)] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isLoading ? 'Registering...' : 'Register'}
+          {isLoading ? 'Creating account…' : 'Create secure account'}
         </button>
       </form>
-      <p style={{ marginTop: '1rem', textAlign: 'center' }}>
-        Already have an account?{' '}
+
+      <p className="text-center text-sm text-slate-400">
+        Already registered?{' '}
         <button
+          type="button"
           onClick={onSwitchToLogin}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#646cff',
-            textDecoration: 'underline',
-            cursor: 'pointer',
-          }}
+          className="font-semibold text-white underline-offset-4 transition hover:text-brand-200"
         >
-          Login
+          Back to sign in
         </button>
       </p>
     </div>
