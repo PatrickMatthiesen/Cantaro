@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { PASSWORD_MIN_LENGTH, registerSchema, type RegisterFormData } from '../constants/validation';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -18,13 +19,14 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
     e.preventDefault();
     setError('');
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
+    // Validate form data with Zod
+    const formData: RegisterFormData = { email, password, confirmPassword };
+    const result = registerSchema.safeParse(formData);
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long');
+    if (!result.success) {
+      // Get the first error message
+      const firstError = result.error.issues[0];
+      setError(firstError.message);
       return;
     }
 
@@ -74,7 +76,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={PASSWORD_MIN_LENGTH}
             autoComplete='new-password'
             style={{
               width: '100%',
@@ -95,7 +97,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={PASSWORD_MIN_LENGTH}
             autoComplete='new-password'
             style={{
               width: '100%',
