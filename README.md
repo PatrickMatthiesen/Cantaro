@@ -9,16 +9,18 @@ Cantaro acts as the canonical vessel that holds your music graph and pours it in
 ## Architecture
 
 - **Backend**: ASP.NET Core 10 Web API (C#)
-- **Frontend**: React + TypeScript + Vite
+- **Frontend**: React + TypeScript + Vite (Node till bun works in aspire)
+- **Extension**: React + TypeScript + WXT (Bun)
 - **Database**: PostgreSQL
 - **Orchestration**: .NET Aspire 13
-- **Package Manager**: npm/bun
+- **Package Manager**: Bun
 
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [.NET Aspire 13](https://learn.microsoft.com/dotnet/aspire/)
-- [Node.js](https://nodejs.org/) (LTS version recommended)
+- [Bun](https://bun.sh/) 1.3+
+- [Node.js](https://nodejs.org/) (for tooling/VS Code integrations)
 - [Docker](https://www.docker.com/) (for PostgreSQL and local development)
 
 ## Getting Started
@@ -34,10 +36,11 @@ The easiest way to get started with Cantaro is using GitHub Codespaces, which pr
 The environment will automatically install all required dependencies:
 - .NET 10 SDK
 - Node.js 24
+- Bun 1.3
 - .NET Aspire CLI
 - EF Core tools
 - Docker support
-- All npm dependencies
+- All Bun-managed dependencies
 
 Once the setup is complete, you can start developing immediately!
 
@@ -49,15 +52,27 @@ Once the setup is complete, you can start developing immediately!
    cd Cantaro
    ```
 
-2. Install .NET Aspire templates (if not already installed):
+2. Install the required tools
+
+   Either run the [post-create script](.devcontainer/post-create.sh) or install manually:
+
+   - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+   - [.NET Aspire 13](https://aspire.dev/)
+   - [Node.js](https://nodejs.org/) (Latest version recommended)
+   - [Bun](https://bun.sh/) 1.3+
+   - Container runtime supported by Aspire, for example:
+      - [Docker](https://www.docker.com/) (for PostgreSQL)
+      - [Podman](https://podman.io/) (alternative to Docker)
+
+2. Install Aspire
    ```bash
-   dotnet new install Aspire.ProjectTemplates
+   curl -sSL https://aspire.dev/install.sh | bash
    ```
 
 3. Install frontend dependencies:
    ```bash
    cd src/Cantaro.Web
-   npm install
+   bun install
    cd ../..
    ```
 
@@ -86,13 +101,13 @@ Access the services:
 
 Build all projects:
 ```bash
-dotnet build Cantaro.sln
+aspire do build
 ```
 
 Build frontend for production:
 ```bash
 cd src/Cantaro.Web
-npm run build
+bun run build
 ```
 
 ## Project Structure
@@ -109,7 +124,6 @@ Cantaro/
 │   ├── Cantaro.ServiceDefaults/   # Shared Aspire service defaults
 │   └── Cantaro.Web/               # React frontend
 └── Cantaro.sln                    # Solution file
-
 ```
 
 ## Core Features (Planned)
@@ -121,20 +135,6 @@ Cantaro/
 - 🌐 **Open Source**: Built on open standards and open data
 
 ## Development
-
-### API Development
-
-```bash
-cd src/Cantaro.Api
-dotnet watch run
-```
-
-### Frontend Development
-
-```bash
-cd src/Cantaro.Web
-npm run dev
-```
 
 ### Database Migrations
 
@@ -149,7 +149,7 @@ dotnet ef migrations add MigrationName
 dotnet ef database update
 ```
 
-When running locally with Aspire in Development mode, migrations are applied automatically on startup.
+When running locally with Aspire in Development mode, migrations are applied automatically on startup. Meaning you just need to create the migration and restart the API.
 
 ### Authentication
 
@@ -174,9 +174,9 @@ The optional browser extension accelerates playlist sync by detecting changes in
 
 ```bash
 cd src/Cantaro.BrowserExtension
-npm install
-npm run dev              # For Chrome/Edge/Brave
-npm run dev:firefox      # For Firefox
+bun install
+bun run dev              # For Chrome/Edge/Brave
+bun run dev:firefox      # For Firefox
 ```
 
 See [Cantaro.BrowserExtension/README.md](src/Cantaro.BrowserExtension/README.md) for detailed instructions on loading and using the extension.
@@ -187,7 +187,7 @@ Contributions are welcome! Please read our contributing guidelines before submit
 
 ## License
 
-(To be added)
+This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
