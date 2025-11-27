@@ -12,10 +12,13 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        "github.copilot",
         "ms-dotnettools.csharp",
         "ms-dotnettools.csdevkit",
         "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "microsoft-aspire.aspire-vscode",
+        "oven.bun-vscode"
       ],
       "settings": {
         "editor.formatOnSave": true
