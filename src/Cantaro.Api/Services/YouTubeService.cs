@@ -131,8 +131,6 @@ public class YouTubeService
         var channelResponse = await channelRequest.ExecuteAsync();
         var channel = channelResponse.Items?.FirstOrDefault();
 
-        // Use channel ID if available, otherwise generate a unique fallback ID
-        var externalAccountId = channel?.Id ?? $"yt_user_{Guid.NewGuid():N}";
         var displayName = channel?.Snippet?.Title ?? "Unknown";
 
         // Check if account already exists
@@ -141,11 +139,13 @@ public class YouTubeService
 
         if (existingAccount != null)
         {
-            // Only update external account ID if we got a real channel ID
+            // Update external account ID only if we got a real channel ID from the API
             if (channel?.Id != null)
             {
-                existingAccount.ExternalAccountId = externalAccountId;
+                existingAccount.ExternalAccountId = channel.Id;
             }
+            // Keep existing ExternalAccountId if we didn't get a channel ID
+            
             existingAccount.DisplayName = displayName;
             // Only update refresh token if we received a new one
             if (tokenResponse.RefreshToken != null)
@@ -163,6 +163,9 @@ public class YouTubeService
         }
         else
         {
+            // Use channel ID if available, otherwise generate a unique fallback ID for new accounts
+            var externalAccountId = channel?.Id ?? $"yt_user_{Guid.NewGuid():N}";
+            
             existingAccount = new ConnectedServiceAccount
             {
                 UserId = userId,
