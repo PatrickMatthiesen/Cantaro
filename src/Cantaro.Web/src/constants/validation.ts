@@ -9,8 +9,19 @@ export const PASSWORD_MIN_LENGTH = 6;
 export const PASSWORD_MIN_UNIQUE_CHARS = 1;
 
 /**
+ * Email regex that requires a valid TLD (at least 2 characters).
+ * This matches the backend EmailWithTldAttribute validation.
+ * Examples: user@example.com ✓, user@domain.dk ✓, user@local ✗
+ */
+export const EMAIL_WITH_TLD_REGEX = /^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/i;
+
+/**
  * Zod validation schemas for authentication forms
  */
+
+const emailValidation = z
+  .string()
+  .regex(EMAIL_WITH_TLD_REGEX, 'Invalid email address. Email must include a valid domain with a TLD (e.g., example@domain.com)');
 
 const passwordValidation = z
   .string()
@@ -21,12 +32,12 @@ const passwordValidation = z
   }, `Password must contain at least ${PASSWORD_MIN_UNIQUE_CHARS} unique character(s)`);
 
 export const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: emailValidation,
   password: passwordValidation,
 });
 
 export const registerSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: emailValidation,
   password: passwordValidation,
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
