@@ -1,10 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
+import type { SVGProps } from 'react';
 import { youtubeApi } from '../services/youtubeApi';
 import type { ConnectedAccountStatus, YouTubePlaylist, YouTubePlaylistItem } from '../services/youtubeApi';
 
-function YouTubeIcon() {
+function YouTubeIcon({ ariaLabel, ...props }: { ariaLabel?: string } & SVGProps<SVGSVGElement>) {
+  // By default the icon is decorative (aria-hidden=true). If ariaLabel is provided,
+  // expose it to assistive tech by setting role="img" and aria-label.
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden={!ariaLabel}
+      role={ariaLabel ? 'img' : undefined}
+      aria-label={ariaLabel}
+      {...props}
+    >
       <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
     </svg>
   );
@@ -148,7 +160,10 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
 
           {!status?.isConnected ? (
             <section className="rounded-[32px] border border-white/10 bg-slate-900/80 p-10 text-left">
-              <div className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200">
+              <div 
+                className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200"
+                aria-label="YouTube not connected" 
+              >
                 <YouTubeIcon /> Not connected
               </div>
               <h2 className="mt-6 text-3xl font-semibold text-white">Connect your YouTube account</h2>
@@ -192,7 +207,11 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
                       className="h-56 w-full rounded-2xl object-cover"
                     />
                   ) : (
-                    <div className="flex h-56 w-full items-center justify-center rounded-2xl bg-white/5">
+                    <div
+                      className="flex h-56 w-full items-center justify-center rounded-2xl bg-white/5"
+                      role="img"
+                      aria-label="No playlist thumbnail available"
+                    >
                       <YouTubeIcon />
                     </div>
                   )}
@@ -293,7 +312,11 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
                           className="h-48 w-full object-cover"
                         />
                       ) : (
-                        <div className="flex h-48 w-full items-center justify-center bg-white/5">
+                        <div
+                          className="flex h-48 w-full items-center justify-center bg-white/5"
+                          role="img"
+                          aria-label="No playlist thumbnail available"
+                        >
                           <YouTubeIcon />
                         </div>
                       )}

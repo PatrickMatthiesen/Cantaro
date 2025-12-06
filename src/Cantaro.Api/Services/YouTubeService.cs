@@ -349,7 +349,7 @@ public class YouTubeService
 
         var refreshToken = _tokenEncryption.Decrypt(account.EncryptedRefreshToken);
 
-        var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+        using var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
         {
             ClientSecrets = new ClientSecrets
             {

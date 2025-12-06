@@ -196,7 +196,7 @@ public class YouTubeController : ControllerBase
             return BadRequest(new { error = "Playlist ID is required" });
         }
         // YouTube playlist IDs: typically alphanumeric with _, -, and reasonable length
-        if (playlistId.Length > 100 || !playlistId.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+        if (playlistId.Length < 11 || playlistId.Length > 100 || !playlistId.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-'))
         {
             return BadRequest(new { error = "Invalid playlist ID format" });
         }
