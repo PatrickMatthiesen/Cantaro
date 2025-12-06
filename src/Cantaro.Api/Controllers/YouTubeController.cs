@@ -45,6 +45,7 @@ public class YouTubeController : ControllerBase
 
     /// <summary>
     /// Gets the connection status of the user's YouTube account
+    /// <returns>ConnectedAccountDto with connection details, or ConnectedAccountDto with IsConnected: false</returns>
     /// </summary>
     [HttpGet("status")]
     public async Task<ActionResult<ConnectedAccountDto>> GetStatus()
@@ -229,9 +230,12 @@ public class YouTubeController : ControllerBase
     private string GetBaseUrl()
     {
         // In development, use the configured API URL or construct from request
-        var apiUrl = _configuration["ApiBaseUrl"];
-        if (!string.IsNullOrEmpty(apiUrl))
-            return apiUrl.TrimEnd('/');
+        // var apiUrls = _configuration["ASPNETCORE_URLS"];
+        // if (!string.IsNullOrEmpty(apiUrls))
+        // {   
+        //     var url = apiUrls.Split(';').First();
+        //     return url.TrimEnd('/');
+        // }
 
         var request = HttpContext.Request;
         return $"{request.Scheme}://{request.Host}";

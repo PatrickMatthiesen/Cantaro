@@ -7,6 +7,7 @@ using Google.Apis.Services;
 using Google.Apis.YouTube.v3;
 using Google.Apis.YouTube.v3.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace Cantaro.Api.Services;
 
@@ -20,7 +21,7 @@ public class YouTubePlaylistDto
     public string? Description { get; set; }
     public string? ThumbnailUrl { get; set; }
     public int ItemCount { get; set; }
-    public DateTime? PublishedAt { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
 }
 
 /// <summary>
@@ -34,7 +35,7 @@ public class YouTubePlaylistItemDto
     public string? ThumbnailUrl { get; set; }
     public string? ChannelTitle { get; set; }
     public int Position { get; set; }
-    public DateTime? PublishedAt { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
 }
 
 /// <summary>
@@ -59,6 +60,22 @@ public class YouTubeService
         _dbContext = dbContext;
         _tokenEncryption = tokenEncryption;
         _logger = logger;
+    }
+
+    private static DateTimeOffset? ParsePublishedAtRaw(string? publishedAtRaw)
+    {
+        if (string.IsNullOrWhiteSpace(publishedAtRaw))
+            return null;
+
+        // Try a forgiving parse; assume UTC when no offset is present and adjust to UTC
+        if (DateTimeOffset.TryParse(publishedAtRaw, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto))
+        {
+            return dto;
+        }
+
+        // If the API returns an unexpected format, return null rather than throw
+        return null;
     }
 
     /// <summary>
@@ -145,7 +162,7 @@ public class YouTubeService
                 existingAccount.ExternalAccountId = channel.Id;
             }
             // Keep existing ExternalAccountId if we didn't get a channel ID
-            
+
             existingAccount.DisplayName = displayName;
             // Only update refresh token if we received a new one
             if (tokenResponse.RefreshToken != null)
@@ -171,7 +188,7 @@ public class YouTubeService
 
             // Use channel ID if available, otherwise generate a unique fallback ID for new accounts
             var externalAccountId = channel?.Id ?? $"yt_user_{Guid.NewGuid():N}";
-            
+
             existingAccount = new ConnectedServiceAccount
             {
                 UserId = userId,
@@ -265,6 +282,18 @@ public class YouTubeService
             {
                 foreach (var playlist in response.Items)
                 {
+                    if (playlist == null)
+                    {
+                        _logger.LogWarning("Encountered null playlist item for user {UserId}", userId);
+                        continue;
+                    }
+
+                    if (playlist.Snippet == null)
+                    {
+                        _logger.LogWarning("Encountered playlist with null snippet for user {UserId}, playlist ID {PlaylistId}", userId, playlist.Id);
+                        continue;
+                    }
+
                     playlists.Add(new YouTubePlaylistDto
                     {
                         Id = playlist.Id,
@@ -273,7 +302,7 @@ public class YouTubeService
                         ThumbnailUrl = playlist.Snippet.Thumbnails?.Medium?.Url
                             ?? playlist.Snippet.Thumbnails?.Default__?.Url,
                         ItemCount = (int)(playlist.ContentDetails?.ItemCount ?? 0),
-                        PublishedAt = playlist.Snippet.PublishedAtDateTimeOffset?.UtcDateTime
+                        PublishedAt = ParsePublishedAtRaw(playlist.Snippet?.PublishedAtRaw)
                     });
                 }
             }
@@ -317,6 +346,18 @@ public class YouTubeService
             {
                 foreach (var item in response.Items)
                 {
+                    if (item == null)
+                    {
+                        _logger.LogWarning("Encountered null playlist item for user {UserId}", userId);
+                        continue;
+                    }
+
+                    if (item.Snippet == null)
+                    {
+                        _logger.LogWarning("Encountered playlist with null snippet for user {UserId}, playlist ID {PlaylistId}", userId, item.Id);
+                        continue;
+                    }
+
                     items.Add(new YouTubePlaylistItemDto
                     {
                         VideoId = item.ContentDetails.VideoId,
@@ -326,7 +367,7 @@ public class YouTubeService
                             ?? item.Snippet.Thumbnails?.Default__?.Url,
                         ChannelTitle = item.Snippet.VideoOwnerChannelTitle,
                         Position = (int)(item.Snippet.Position ?? 0),
-                        PublishedAt = item.Snippet.PublishedAtDateTimeOffset?.UtcDateTime
+                        PublishedAt = ParsePublishedAtRaw(item.Snippet?.PublishedAtRaw)
                     });
                 }
             }

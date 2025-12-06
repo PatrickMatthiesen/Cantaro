@@ -71,7 +71,7 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
   }, [loadStatus, loadPlaylists]);
 
   const handleConnect = () => {
-    window.location.href = youtubeApi.getConnectUrl('/youtube');
+    window.location.href = youtubeApi.getConnectUrl(window.location.href);
   };
 
   const handleDisconnect = async () => {
