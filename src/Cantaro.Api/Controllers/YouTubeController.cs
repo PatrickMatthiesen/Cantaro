@@ -121,6 +121,14 @@ public class YouTubeController : ControllerBase
                 }
             }
 
+            // Defense-in-depth: if user is authenticated, verify the state userId matches
+            var currentUser = await _userManager.GetUserAsync(User);
+            if (currentUser != null && currentUser.Id != userId)
+            {
+                _logger.LogWarning("State userId {StateUserId} doesn't match authenticated user {ActualUserId}", userId, currentUser.Id);
+                return Redirect("/youtube?error=user_mismatch");
+            }
+
             var returnUrl = stateParts.Length > 2 ? stateParts[2] : "/youtube";
 
             var baseUrl = GetBaseUrl();
@@ -182,6 +190,17 @@ public class YouTubeController : ControllerBase
     [HttpGet("playlists/{playlistId}/items")]
     public async Task<ActionResult<List<YouTubePlaylistItemDto>>> GetPlaylistItems(string playlistId)
     {
+        // Validate playlistId: non-empty, matches YouTube playlist ID format
+        if (string.IsNullOrWhiteSpace(playlistId))
+        {
+            return BadRequest(new { error = "Playlist ID is required" });
+        }
+        // YouTube playlist IDs: typically alphanumeric with _, -, and reasonable length
+        if (playlistId.Length > 100 || !playlistId.All(c => char.IsLetterOrDigit(c) || c == '_' || c == '-'))
+        {
+            return BadRequest(new { error = "Invalid playlist ID format" });
+        }
+
         try
         {
             var userId = await GetCurrentUserIdAsync();

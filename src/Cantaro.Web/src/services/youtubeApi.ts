@@ -73,7 +73,15 @@ class YouTubeApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
+      if (response.status === 401) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      if (response.status === 403) {
+        throw new Error('YouTube account not connected or access denied.');
+      }
+      const error = await response.json().catch(() => ({ 
+        error: `Failed to fetch playlists (HTTP ${response.status})` 
+      }));
       throw new Error(error.error || 'Failed to fetch playlists');
     }
 
@@ -88,7 +96,15 @@ class YouTubeApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to fetch playlist items' }));
+      if (response.status === 401) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+      if (response.status === 403) {
+        throw new Error('YouTube account not connected or access denied.');
+      }
+      const error = await response.json().catch(() => ({ 
+        error: `Failed to fetch playlist items (HTTP ${response.status})` 
+      }));
       throw new Error(error.error || 'Failed to fetch playlist items');
     }
 

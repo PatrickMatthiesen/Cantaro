@@ -153,7 +153,7 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
               </div>
               <h2 className="mt-6 text-3xl font-semibold text-white">Connect your YouTube account</h2>
               <p className="mt-4 max-w-2xl text-sm text-slate-300">
-                We use Authorization Code + PKCE and store refresh tokens encrypted at rest inside Cantaro—never in the browser or extension.
+                We use Authorization Code flow and store refresh tokens encrypted at rest inside Cantaro—never in the browser or extension.
               </p>
               <div className="mt-8 grid gap-4 md:grid-cols-3">
                 {['Secure OAuth redirect', 'Encrypted refresh token', 'Adapter-level rate limiting'].map((item) => (

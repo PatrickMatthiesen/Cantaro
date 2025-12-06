@@ -102,7 +102,7 @@ public class YouTubeService
         var clientSecret = _configuration["YouTube:ClientSecret"]
             ?? throw new InvalidOperationException("YouTube:ClientSecret is not configured");
 
-        var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+        using var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
         {
             ClientSecrets = new ClientSecrets
             {
@@ -119,7 +119,7 @@ public class YouTubeService
 
         // Get user info from Google
         var credential = new UserCredential(flow, userId.ToString(), tokenResponse);
-        var youtubeService = new Google.Apis.YouTube.v3.YouTubeService(new BaseClientService.Initializer
+        using var youtubeService = new Google.Apis.YouTube.v3.YouTubeService(new BaseClientService.Initializer
         {
             HttpClientInitializer = credential,
             ApplicationName = "Cantaro"
@@ -163,6 +163,12 @@ public class YouTubeService
         }
         else
         {
+            // For new accounts, refresh token is required for background sync
+            if (tokenResponse.RefreshToken == null)
+            {
+                throw new InvalidOperationException("No refresh token received from Google. User may need to revoke access at https://myaccount.google.com/permissions and reconnect.");
+            }
+
             // Use channel ID if available, otherwise generate a unique fallback ID for new accounts
             var externalAccountId = channel?.Id ?? $"yt_user_{Guid.NewGuid():N}";
             
@@ -172,9 +178,7 @@ public class YouTubeService
                 Service = ServiceName,
                 ExternalAccountId = externalAccountId,
                 DisplayName = displayName,
-                EncryptedRefreshToken = tokenResponse.RefreshToken != null
-                    ? _tokenEncryption.Encrypt(tokenResponse.RefreshToken)
-                    : null,
+                EncryptedRefreshToken = _tokenEncryption.Encrypt(tokenResponse.RefreshToken),
                 Scopes = tokenResponse.Scope,
                 TokenExpiresAt = tokenResponse.IssuedUtc.AddSeconds(tokenResponse.ExpiresInSeconds ?? 3600),
                 CreatedAt = DateTime.UtcNow,
@@ -206,6 +210,23 @@ public class YouTubeService
 
         if (account != null)
         {
+            // Revoke the token with Google before deleting locally
+            if (!string.IsNullOrEmpty(account.EncryptedRefreshToken))
+            {
+                try
+                {
+                    var refreshToken = _tokenEncryption.Decrypt(account.EncryptedRefreshToken);
+                    using var httpClient = new HttpClient();
+                    await httpClient.PostAsync($"https://oauth2.googleapis.com/revoke?token={Uri.EscapeDataString(refreshToken)}", null);
+                    _logger.LogInformation("Revoked YouTube token for user {UserId}", userId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to revoke YouTube token for user {UserId}", userId);
+                    // Continue with local deletion even if revocation fails
+                }
+            }
+
             _dbContext.ConnectedServiceAccounts.Remove(account);
             await _dbContext.SaveChangesAsync();
         }
@@ -219,12 +240,20 @@ public class YouTubeService
         var account = await GetConnectedAccountAsync(userId)
             ?? throw new InvalidOperationException("YouTube account not connected");
 
-        var youtubeService = await CreateYouTubeServiceAsync(account);
+        using var youtubeService = await CreateYouTubeServiceAsync(account);
         var playlists = new List<YouTubePlaylistDto>();
         string? nextPageToken = null;
+        const int maxPages = 20; // Limit to ~1000 playlists to prevent runaway requests
+        int pageCount = 0;
 
         do
         {
+            if (++pageCount > maxPages)
+            {
+                _logger.LogWarning("Hit max page limit ({MaxPages}) fetching playlists for user {UserId}", maxPages, userId);
+                break;
+            }
+
             var request = youtubeService.Playlists.List("snippet,contentDetails");
             request.Mine = true;
             request.MaxResults = 50;
@@ -263,12 +292,20 @@ public class YouTubeService
         var account = await GetConnectedAccountAsync(userId)
             ?? throw new InvalidOperationException("YouTube account not connected");
 
-        var youtubeService = await CreateYouTubeServiceAsync(account);
+        using var youtubeService = await CreateYouTubeServiceAsync(account);
         var items = new List<YouTubePlaylistItemDto>();
         string? nextPageToken = null;
+        const int maxPages = 40; // Limit to ~2000 items to prevent runaway requests
+        int pageCount = 0;
 
         do
         {
+            if (++pageCount > maxPages)
+            {
+                _logger.LogWarning("Hit max page limit ({MaxPages}) fetching playlist items for user {UserId}, playlist {PlaylistId}", maxPages, userId, playlistId);
+                break;
+            }
+
             var request = youtubeService.PlaylistItems.List("snippet,contentDetails");
             request.PlaylistId = playlistId;
             request.MaxResults = 50;
