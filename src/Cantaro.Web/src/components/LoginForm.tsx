@@ -41,11 +41,16 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
   };
 
   return (
-    <div style={{ maxWidth: '400px', margin: '0 auto', padding: '2rem' }}>
-      <h2>Login</h2>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label htmlFor="email" style={{ display: 'block', marginBottom: '0.5rem' }}>
+    <div className="space-y-6 text-left text-white">
+      <div className="space-y-2">
+        <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Sign in</p>
+        <h2 className="text-3xl font-semibold">Welcome back</h2>
+        <p className="text-sm text-slate-400">Authenticate to open your Cantaro workspace.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="space-y-2">
+          <label htmlFor="email" className="text-sm font-medium text-slate-200">
             Email
           </label>
           <input
@@ -54,18 +59,14 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            autoComplete='email'
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              fontSize: '1rem',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-            }}
+            autoComplete="email"
+            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            placeholder="you@example.com"
           />
         </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label htmlFor="password" style={{ display: 'block', marginBottom: '0.5rem' }}>
+
+        <div className="space-y-2">
+          <label htmlFor="password" className="text-sm font-medium text-slate-200">
             Password
           </label>
           <input
@@ -75,51 +76,35 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            autoComplete='current-password'
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              fontSize: '1rem',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-            }}
+            autoComplete="current-password"
+            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            placeholder="••••••••"
           />
         </div>
+
         {error && (
-          <div style={{ color: 'red', marginBottom: '1rem' }}>
+          <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {error}
           </div>
         )}
+
         <button
           type="submit"
           disabled={isLoading}
-          style={{
-            width: '100%',
-            padding: '0.75rem',
-            fontSize: '1rem',
-            backgroundColor: '#646cff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-          }}
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-brand-400 to-rose-500 px-4 py-3 text-base font-semibold text-white shadow-[0_20px_60px_rgba(236,72,153,0.35)] transition hover:translate-y-0.5 hover:shadow-[0_30px_80px_rgba(236,72,153,0.45)] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isLoading ? 'Logging in...' : 'Login'}
+          {isLoading ? 'Signing you in…' : 'Sign in securely'}
         </button>
       </form>
-      <p style={{ marginTop: '1rem', textAlign: 'center' }}>
+
+      <p className="text-center text-sm text-slate-400">
         Don't have an account?{' '}
         <button
+          type="button"
           onClick={onSwitchToRegister}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#646cff',
-            textDecoration: 'underline',
-            cursor: 'pointer',
-          }}
+          className="font-semibold text-white underline-offset-4 transition hover:text-brand-200"
         >
-          Register
+          Register instead
         </button>
       </p>
     </div>

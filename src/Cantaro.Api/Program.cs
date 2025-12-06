@@ -1,10 +1,8 @@
-using System.Text;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
+using Cantaro.Api.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +11,13 @@ builder.AddServiceDefaults();
 
 // Add PostgreSQL database context
 builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
+
+// Add Data Protection for token encryption
+builder.Services.AddDataProtection();
+
+// Register custom services
+builder.Services.AddScoped<TokenEncryptionService>();
+builder.Services.AddScoped<YouTubeService>();
 
 builder.Services.AddAuthorization();
 
