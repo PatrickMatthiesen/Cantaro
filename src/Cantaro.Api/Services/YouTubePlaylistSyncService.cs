@@ -6,6 +6,26 @@ using System.Text.Json;
 namespace Cantaro.Api.Services;
 
 /// <summary>
+/// DTO for track canonical metadata
+/// </summary>
+public class TrackMetadata
+{
+    public string? Title { get; set; }
+    public string? Artist { get; set; }
+    public string? Description { get; set; }
+    public string? ThumbnailUrl { get; set; }
+}
+
+/// <summary>
+/// DTO for track origin metadata
+/// </summary>
+public class TrackOriginMetadata
+{
+    public string? ChannelTitle { get; set; }
+    public DateTimeOffset? PublishedAt { get; set; }
+}
+
+/// <summary>
 /// Service for syncing YouTube playlists to Cantaro's canonical playlist system
 /// </summary>
 public class YouTubePlaylistSyncService
@@ -41,7 +61,7 @@ public class YouTubePlaylistSyncService
         _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId}", youtubePlaylistId, userId);
 
         // Use a transaction to ensure consistency
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         
         try
         {
@@ -76,11 +96,10 @@ public class YouTubePlaylistSyncService
                 _logger.LogInformation("Updating existing Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
                     playlist.Id, youtubePlaylistId);
 
-                // Remove existing playlist entries to rebuild them
-                var existingEntries = await _dbContext.PlaylistEntries
+                // Remove existing playlist entries using bulk delete
+                await _dbContext.PlaylistEntries
                     .Where(e => e.PlaylistId == playlist.Id)
-                    .ToListAsync(cancellationToken);
-                _dbContext.PlaylistEntries.RemoveRange(existingEntries);
+                    .ExecuteDeleteAsync(cancellationToken);
             }
             else
             {
@@ -200,12 +219,12 @@ public class YouTubePlaylistSyncService
         var track = new Track
         {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = JsonSerializer.Serialize(new
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackMetadata
             {
-                title = video.Title,
-                artist = video.ChannelTitle,
-                description = video.Description,
-                thumbnailUrl = video.ThumbnailUrl
+                Title = video.Title,
+                Artist = video.ChannelTitle,
+                Description = video.Description,
+                ThumbnailUrl = video.ThumbnailUrl
             }),
             // MBID and ISRC are not available from YouTube API, leave nullable
             MbidRecording = null,
@@ -225,10 +244,10 @@ public class YouTubePlaylistSyncService
             SourceType = ServiceName,
             ExternalId = video.VideoId,
             Confidence = null, // Could be enhanced with metadata matching confidence
-            OriginMetadata = JsonSerializer.Serialize(new
+            OriginMetadata = JsonSerializer.Serialize(new TrackOriginMetadata
             {
-                channelTitle = video.ChannelTitle,
-                publishedAt = video.PublishedAt
+                ChannelTitle = video.ChannelTitle,
+                PublishedAt = video.PublishedAt
             }),
             LastVerifiedAt = DateTimeOffset.UtcNow
         };
