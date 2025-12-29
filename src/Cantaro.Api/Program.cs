@@ -18,6 +18,7 @@ builder.Services.AddDataProtection();
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();
 builder.Services.AddScoped<YouTubeService>();
+builder.Services.AddScoped<YouTubePlaylistSyncService>();
 
 builder.Services.AddAuthorization();
 
