@@ -9,8 +9,13 @@ var builder = WebApplication.CreateBuilder(args);
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
 
-// Add PostgreSQL database context
-builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
+// Add PostgreSQL database context with custom configuration
+builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db", configureDbContextOptions: options =>
+{
+    // Disable retry execution strategy because we use manual transactions with raw SQL
+    // The retry strategy is incompatible with user-initiated transactions
+    options.EnableRetryOnFailure(0);
+});
 
 // Add Data Protection for token encryption
 builder.Services.AddDataProtection();
