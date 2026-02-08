@@ -196,66 +196,81 @@ public class YouTubePlaylistSyncService
     }
 
     /// <summary>
-    /// Gets or creates a Track entity for a YouTube video
+    /// Gets or creates a Track entity for a YouTube video using atomic UPSERT pattern
+    /// to handle concurrent requests safely
     /// </summary>
     private async Task<Guid> GetOrCreateTrackForVideoAsync(
         YouTubePlaylistItemDto video,
         CancellationToken cancellationToken)
     {
-        // Check if a TrackSourceId already exists for this YouTube video
+        // Create Track and TrackSourceId entities
+        var trackId = Guid.NewGuid();
+        var sourceIdGuid = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        
+        var canonicalMetadata = JsonSerializer.Serialize(new TrackMetadata
+        {
+            Title = video.Title,
+            Artist = video.ChannelTitle,
+            Description = video.Description,
+            ThumbnailUrl = video.ThumbnailUrl
+        });
+        
+        var originMetadata = JsonSerializer.Serialize(new TrackOriginMetadata
+        {
+            ChannelTitle = video.ChannelTitle,
+            PublishedAt = video.PublishedAt
+        });
+
+        // Attempt atomic insert using PostgreSQL's ON CONFLICT DO NOTHING
+        // This handles race conditions where multiple transactions try to insert the same (SourceType, ExternalId)
+        var insertedRows = await _dbContext.Database.ExecuteSqlRawAsync(
+            @"WITH inserted_track AS (
+                INSERT INTO ""Tracks"" (""Id"", ""CanonicalMetadata"", ""MbidRecording"", ""Isrc"", ""CreatedAt"", ""UpdatedAt"")
+                VALUES ({0}, {1}, NULL, NULL, {2}, {3})
+                ON CONFLICT DO NOTHING
+                RETURNING ""Id""
+            )
+            INSERT INTO ""TrackSourceIds"" (""Id"", ""TrackId"", ""SourceType"", ""ExternalId"", ""Confidence"", ""OriginMetadata"", ""LastVerifiedAt"")
+            SELECT {4}, {0}, {5}, {6}, NULL, {7}, {8}
+            FROM inserted_track
+            ON CONFLICT (""SourceType"", ""ExternalId"") DO NOTHING",
+            trackId,
+            canonicalMetadata,
+            now,
+            now,
+            sourceIdGuid,
+            ServiceName,
+            video.VideoId,
+            originMetadata,
+            now);
+
+        if (insertedRows > 0)
+        {
+            // Successfully inserted new Track and TrackSourceId
+            _logger.LogDebug("Created new Track {TrackId} for YouTube video {VideoId}", trackId, video.VideoId);
+            return trackId;
+        }
+
+        // Conflict occurred - another transaction already created this mapping
+        // Query for the existing TrackSourceId and update LastVerifiedAt
         var existingSourceId = await _dbContext.TrackSourceIds
             .FirstOrDefaultAsync(
                 s => s.SourceType == ServiceName && s.ExternalId == video.VideoId,
                 cancellationToken);
 
-        if (existingSourceId != null)
+        if (existingSourceId == null)
         {
-            // Update last verified timestamp
-            existingSourceId.LastVerifiedAt = DateTimeOffset.UtcNow;
-            return existingSourceId.TrackId;
+            // This should never happen, but handle defensively
+            _logger.LogError("Failed to find existing TrackSourceId after conflict for YouTube video {VideoId}", video.VideoId);
+            throw new InvalidOperationException($"Failed to resolve TrackSourceId for YouTube video {video.VideoId}");
         }
 
-        // Create a new Track with metadata from the YouTube video
-        var track = new Track
-        {
-            Id = Guid.NewGuid(),
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackMetadata
-            {
-                Title = video.Title,
-                Artist = video.ChannelTitle,
-                Description = video.Description,
-                ThumbnailUrl = video.ThumbnailUrl
-            }),
-            // MBID and ISRC are not available from YouTube API, leave nullable
-            MbidRecording = null,
-            Isrc = null,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+        // Update last verified timestamp
+        existingSourceId.LastVerifiedAt = now;
+        _logger.LogDebug("Found existing Track {TrackId} for YouTube video {VideoId} (concurrent insert)", 
+            existingSourceId.TrackId, video.VideoId);
 
-        _dbContext.Tracks.Add(track);
-        _logger.LogDebug("Created new Track {TrackId} for YouTube video {VideoId}", track.Id, video.VideoId);
-
-        // Create TrackSourceId linking the Track to the YouTube video
-        var sourceId = new TrackSourceId
-        {
-            Id = Guid.NewGuid(),
-            TrackId = track.Id,
-            SourceType = ServiceName,
-            ExternalId = video.VideoId,
-            Confidence = null, // Could be enhanced with metadata matching confidence
-            OriginMetadata = JsonSerializer.Serialize(new TrackOriginMetadata
-            {
-                ChannelTitle = video.ChannelTitle,
-                PublishedAt = video.PublishedAt
-            }),
-            LastVerifiedAt = DateTimeOffset.UtcNow
-        };
-
-        _dbContext.TrackSourceIds.Add(sourceId);
-        _logger.LogDebug("Created TrackSourceId for Track {TrackId} and YouTube video {VideoId}", 
-            track.Id, video.VideoId);
-
-        return track.Id;
+        return existingSourceId.TrackId;
     }
 }
