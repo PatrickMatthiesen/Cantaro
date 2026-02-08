@@ -21,7 +21,11 @@ export function SyncButton() {
       return status;
     } catch (err) {
       console.error('Failed to load sync status:', err);
-      setError('Failed to load sync status');
+      // Don't treat auth errors as failures - just means no playlists synced yet
+      if (err instanceof Error && err.message.includes('Not authenticated')) {
+        return null;
+      }
+      setError(err instanceof Error ? err.message : 'Failed to load sync status');
       return null;
     }
   }, []);
@@ -124,6 +128,23 @@ export function SyncButton() {
         <div className="flex items-center gap-3">
           <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
           <p className="text-sm text-slate-300">Loading sync status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If no sync status and no error, user hasn't synced anything yet
+  if (!syncStatus && !error) {
+    return (
+      <div className="glass-panel p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Playlist sync</p>
+            <p className="mt-2 text-lg font-semibold text-white">No playlists synced yet</p>
+            <p className="mt-1 text-sm text-slate-400">
+              Connect YouTube and sync your first playlist to get started
+            </p>
+          </div>
         </div>
       </div>
     );

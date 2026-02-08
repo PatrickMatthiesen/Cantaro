@@ -45,7 +45,10 @@ export const syncApi = {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch sync status');
+      if (response.status === 401) {
+        throw new Error('Not authenticated');
+      }
+      throw new Error(`Failed to fetch sync status: ${response.statusText}`);
     }
 
     return response.json();
