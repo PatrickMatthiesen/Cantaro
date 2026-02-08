@@ -8,6 +8,7 @@ var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: tr
 
 // Add PostgreSQL database
 var postgres = builder.AddPostgres("postgres")
+    .WithLifetime(ContainerLifetime.Persistent)
     .WithHostPort(5432)
     .WithPgAdmin();
 var db = postgres.AddDatabase("cantaro-db");
@@ -24,6 +25,9 @@ var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithReference(api)
     .WaitFor(api)
     .WithEndpoint("http", c => { c.IsExternal = true; c.Port = 8080; c.TargetPort = 5173; c.UriScheme = "http"; });
+
+// Add frontend reference to API for OAuth redirects
+api.WithReference(frontend);
 
 builder.AddBunApp("browser-extension", "../Cantaro.BrowserExtension", entryPoint: "dev")
     .WithReference(api)

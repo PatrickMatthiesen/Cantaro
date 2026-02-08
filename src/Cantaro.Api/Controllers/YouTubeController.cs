@@ -28,19 +28,22 @@ public class YouTubeController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ILogger<YouTubeController> _logger;
     private readonly IDataProtector _stateProtector;
+    private readonly IHostEnvironment _environment;
 
     public YouTubeController(
         YouTubeService youtubeService,
         UserManager<User> userManager,
         IConfiguration configuration,
         ILogger<YouTubeController> logger,
-        IDataProtectionProvider dataProtectionProvider)
+        IDataProtectionProvider dataProtectionProvider,
+        IHostEnvironment environment)
     {
         _youtubeService = youtubeService;
         _userManager = userManager;
         _configuration = configuration;
         _logger = logger;
         _stateProtector = dataProtectionProvider.CreateProtector("YouTube.OAuth.State");
+        _environment = environment;
     }
 
     /// <summary>
@@ -89,15 +92,17 @@ public class YouTubeController : ControllerBase
     [AllowAnonymous] // Callback is from Google, user session is validated via encrypted state
     public async Task<ActionResult> Callback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error)
     {
+        var frontendUrl = GetFrontendUrl();
+        
         if (!string.IsNullOrEmpty(error))
         {
             _logger.LogWarning("YouTube OAuth error: {Error}", error);
-            return Redirect("/youtube?error=oauth_denied");
+            return Redirect($"{frontendUrl}/youtube?error=oauth_denied");
         }
 
         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
         {
-            return Redirect("/youtube?error=invalid_callback");
+            return Redirect($"{frontendUrl}/youtube?error=invalid_callback");
         }
 
         try
@@ -108,7 +113,7 @@ public class YouTubeController : ControllerBase
             
             if (stateParts.Length < 2 || !int.TryParse(stateParts[0], out var userId))
             {
-                return Redirect("/youtube?error=invalid_state");
+                return Redirect($"{frontendUrl}/youtube?error=invalid_state");
             }
 
             // Validate state is not too old (max 10 minutes)
@@ -118,7 +123,7 @@ public class YouTubeController : ControllerBase
                 if (DateTime.UtcNow - stateTime > TimeSpan.FromMinutes(10))
                 {
                     _logger.LogWarning("YouTube OAuth state expired for user {UserId}", userId);
-                    return Redirect("/youtube?error=state_expired");
+                    return Redirect($"{frontendUrl}/youtube?error=state_expired");
                 }
             }
 
@@ -127,10 +132,22 @@ public class YouTubeController : ControllerBase
             if (currentUser != null && currentUser.Id != userId)
             {
                 _logger.LogWarning("State userId {StateUserId} doesn't match authenticated user {ActualUserId}", userId, currentUser.Id);
-                return Redirect("/youtube?error=user_mismatch");
+                return Redirect($"{frontendUrl}/youtube?error=user_mismatch");
             }
 
             var returnUrl = stateParts.Length > 2 ? stateParts[2] : "/youtube";
+
+            // Validate returnUrl to prevent open redirect attacks
+            if (!string.IsNullOrEmpty(returnUrl))
+            {
+                // Ensure returnUrl is a safe relative path
+                if (!returnUrl.StartsWith('/') || returnUrl.StartsWith("//") || 
+                    returnUrl.Contains("://") || returnUrl.Contains('\\'))
+                {
+                    _logger.LogWarning("Invalid returnUrl in OAuth state for user {UserId}: {ReturnUrl}", userId, returnUrl);
+                    returnUrl = "/youtube";
+                }
+            }
 
             var baseUrl = GetBaseUrl();
             var redirectUri = $"{baseUrl}/api/youtube/callback";
@@ -139,17 +156,17 @@ public class YouTubeController : ControllerBase
 
             _logger.LogInformation("Successfully connected YouTube account for user {UserId}", userId);
 
-            return Redirect($"{returnUrl}?connected=true");
+            return Redirect($"{frontendUrl}{returnUrl}?connected=true");
         }
         catch (System.Security.Cryptography.CryptographicException ex)
         {
             _logger.LogWarning(ex, "Invalid or tampered YouTube OAuth state");
-            return Redirect("/youtube?error=invalid_state");
+            return Redirect($"{frontendUrl}/youtube?error=invalid_state");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to exchange YouTube authorization code");
-            return Redirect("/youtube?error=exchange_failed");
+            return Redirect($"{frontendUrl}/youtube?error=exchange_failed");
         }
     }
 
@@ -229,14 +246,33 @@ public class YouTubeController : ControllerBase
 
     private string GetBaseUrl()
     {
-        // In development, use the configured API URL or construct from request
-        // var apiUrls = _configuration["ASPNETCORE_URLS"];
-        // if (!string.IsNullOrEmpty(apiUrls))
-        // {   
-        //     var url = apiUrls.Split(';').First();
-        //     return url.TrimEnd('/');
-        // }
+        var request = HttpContext.Request;
+        return $"{request.Scheme}://{request.Host}";
+    }
 
+    private string GetFrontendUrl()
+    {
+        // In Aspire, the frontend reference is injected as services__web__http__0
+        // or services__web__0 depending on the endpoint name
+        var frontendUrl = _configuration["services:web:http:0"] 
+            ?? _configuration["services:web:0"];
+        
+        if (!string.IsNullOrEmpty(frontendUrl))
+        {
+            return frontendUrl.TrimEnd('/');
+        }
+
+        // Fallback for non-Aspire environments or when not configured
+        // In development without Aspire, assume frontend is on localhost:8080 (matches AppHost port)
+        if (_environment.IsDevelopment())
+        {
+            _logger.LogWarning("Frontend URL not configured via Aspire, using development fallback: http://localhost:8080");
+            return "http://localhost:8080";
+        }
+
+        _logger.LogError("Frontend URL not configured in production environment");
+
+        // In production, frontend should be served from the same origin as the API
         var request = HttpContext.Request;
         return $"{request.Scheme}://{request.Host}";
     }
