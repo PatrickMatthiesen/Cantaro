@@ -60,139 +60,144 @@ public class YouTubePlaylistSyncService
     {
         _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId}", youtubePlaylistId, userId);
 
-        // Use a transaction to ensure consistency
-        using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        // Use execution strategy to handle retries with transactions
+        var strategy = _dbContext.Database.CreateExecutionStrategy();
         
-        try
+        return await strategy.ExecuteAsync(async () =>
         {
-            // Step 1: Fetch YouTube playlist metadata
-            var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(userId);
-            var youtubePlaylist = youtubePlaylists.FirstOrDefault(p => p.Id == youtubePlaylistId)
-                ?? throw new InvalidOperationException($"YouTube playlist {youtubePlaylistId} not found or not accessible");
-
-            // Step 2: Fetch all playlist items (videos)
-            var playlistItems = await _youtubeService.GetPlaylistItemsAsync(userId, youtubePlaylistId);
-            _logger.LogInformation("Fetched {ItemCount} items from YouTube playlist {PlaylistId}", playlistItems.Count, youtubePlaylistId);
-
-            // Step 3: Check if this playlist is already mapped to a Cantaro playlist
-            var existingMapping = await _dbContext.ServicePlaylistMappings
-                .Include(m => m.Playlist)
-                .FirstOrDefaultAsync(
-                    m => m.Service == ServiceName && m.ServicePlaylistId == youtubePlaylistId,
-                    cancellationToken);
-
-            Playlist playlist;
-
-            if (existingMapping != null)
+            using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            
+            try
             {
-                // Update existing playlist
-                playlist = existingMapping.Playlist 
-                    ?? throw new InvalidOperationException("ServicePlaylistMapping has no associated Playlist");
-                
-                playlist.Name = youtubePlaylist.Title;
-                playlist.Description = youtubePlaylist.Description;
-                playlist.UpdatedAt = DateTimeOffset.UtcNow;
+                // Step 1: Fetch YouTube playlist metadata
+                var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(userId);
+                var youtubePlaylist = youtubePlaylists.FirstOrDefault(p => p.Id == youtubePlaylistId)
+                    ?? throw new InvalidOperationException($"YouTube playlist {youtubePlaylistId} not found or not accessible");
 
-                _logger.LogInformation("Updating existing Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
-                    playlist.Id, youtubePlaylistId);
+                // Step 2: Fetch all playlist items (videos)
+                var playlistItems = await _youtubeService.GetPlaylistItemsAsync(userId, youtubePlaylistId);
+                _logger.LogInformation("Fetched {ItemCount} items from YouTube playlist {PlaylistId}", playlistItems.Count, youtubePlaylistId);
 
-                // Remove existing playlist entries using bulk delete
-                await _dbContext.PlaylistEntries
-                    .Where(e => e.PlaylistId == playlist.Id)
-                    .ExecuteDeleteAsync(cancellationToken);
-            }
-            else
-            {
-                // Create new playlist
-                playlist = new Playlist
+                // Step 3: Check if this playlist is already mapped to a Cantaro playlist
+                var existingMapping = await _dbContext.ServicePlaylistMappings
+                    .Include(m => m.Playlist)
+                    .FirstOrDefaultAsync(
+                        m => m.Service == ServiceName && m.ServicePlaylistId == youtubePlaylistId,
+                        cancellationToken);
+
+                Playlist playlist;
+
+                if (existingMapping != null)
                 {
-                    Id = Guid.NewGuid(),
-                    UserId = userId,
-                    Name = youtubePlaylist.Title,
-                    Description = youtubePlaylist.Description,
-                    CreatedAt = DateTimeOffset.UtcNow,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                };
-                _dbContext.Playlists.Add(playlist);
-
-                _logger.LogInformation("Creating new Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
-                    playlist.Id, youtubePlaylistId);
-            }
-
-            // Step 4: Process each video and create PlaylistEntry records
-            int failedTracks = 0;
-            var playlistEntries = new List<PlaylistEntry>();
-
-            for (int i = 0; i < playlistItems.Count; i++)
-            {
-                var item = playlistItems[i];
-                
-                try
-                {
-                    var trackId = await GetOrCreateTrackForVideoAsync(item, cancellationToken);
+                    // Update existing playlist
+                    playlist = existingMapping.Playlist 
+                        ?? throw new InvalidOperationException("ServicePlaylistMapping has no associated Playlist");
                     
-                    var entry = new PlaylistEntry
+                    playlist.Name = youtubePlaylist.Title;
+                    playlist.Description = youtubePlaylist.Description;
+                    playlist.UpdatedAt = DateTimeOffset.UtcNow;
+
+                    _logger.LogInformation("Updating existing Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
+                        playlist.Id, youtubePlaylistId);
+
+                    // Remove existing playlist entries using bulk delete
+                    await _dbContext.PlaylistEntries
+                        .Where(e => e.PlaylistId == playlist.Id)
+                        .ExecuteDeleteAsync(cancellationToken);
+                }
+                else
+                {
+                    // Create new playlist
+                    playlist = new Playlist
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = userId,
+                        Name = youtubePlaylist.Title,
+                        Description = youtubePlaylist.Description,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    };
+                    _dbContext.Playlists.Add(playlist);
+
+                    _logger.LogInformation("Creating new Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
+                        playlist.Id, youtubePlaylistId);
+                }
+
+                // Step 4: Process each video and create PlaylistEntry records
+                int failedTracks = 0;
+                var playlistEntries = new List<PlaylistEntry>();
+
+                for (int i = 0; i < playlistItems.Count; i++)
+                {
+                    var item = playlistItems[i];
+                    
+                    try
+                    {
+                        var trackId = await GetOrCreateTrackForVideoAsync(item, cancellationToken);
+                        
+                        var entry = new PlaylistEntry
+                        {
+                            Id = Guid.NewGuid(),
+                            PlaylistId = playlist.Id,
+                            TrackId = trackId,
+                            Position = i,
+                            AddedAt = item.PublishedAt ?? DateTimeOffset.UtcNow,
+                            SourceService = ServiceName
+                        };
+                        playlistEntries.Add(entry);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to process video {VideoId} in playlist {PlaylistId}", 
+                            item.VideoId, youtubePlaylistId);
+                        failedTracks++;
+                    }
+                }
+
+                _dbContext.PlaylistEntries.AddRange(playlistEntries);
+                _logger.LogInformation("Created {EntryCount} playlist entries for playlist {PlaylistId}", 
+                    playlistEntries.Count, playlist.Id);
+
+                // Step 5: Create or update ServicePlaylistMapping
+                if (existingMapping != null)
+                {
+                    existingMapping.LastSyncedAt = DateTimeOffset.UtcNow;
+                    existingMapping.LastSyncStatus = failedTracks > 0 ? "partial_failure" : "success";
+                }
+                else
+                {
+                    var mapping = new ServicePlaylistMapping
                     {
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
-                        TrackId = trackId,
-                        Position = i,
-                        AddedAt = item.PublishedAt ?? DateTimeOffset.UtcNow,
-                        SourceService = ServiceName
+                        Service = ServiceName,
+                        ServicePlaylistId = youtubePlaylistId,
+                        SyncMode = "import_only",
+                        LastSyncedAt = DateTimeOffset.UtcNow,
+                        LastSyncStatus = failedTracks > 0 ? "partial_failure" : "success"
                     };
-                    playlistEntries.Add(entry);
+                    _dbContext.ServicePlaylistMappings.Add(mapping);
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to process video {VideoId} in playlist {PlaylistId}", 
-                        item.VideoId, youtubePlaylistId);
-                    failedTracks++;
-                }
+
+                // Save all changes
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Successfully synced YouTube playlist {YouTubePlaylistId} to Cantaro playlist {PlaylistId}. " +
+                    "Total items: {TotalItems}, Failed: {FailedItems}",
+                    youtubePlaylistId, playlist.Id, playlistItems.Count, failedTracks);
+
+                return playlist.Id;
             }
-
-            _dbContext.PlaylistEntries.AddRange(playlistEntries);
-            _logger.LogInformation("Created {EntryCount} playlist entries for playlist {PlaylistId}", 
-                playlistEntries.Count, playlist.Id);
-
-            // Step 5: Create or update ServicePlaylistMapping
-            if (existingMapping != null)
+            catch (Exception ex)
             {
-                existingMapping.LastSyncedAt = DateTimeOffset.UtcNow;
-                existingMapping.LastSyncStatus = failedTracks > 0 ? "partial_failure" : "success";
+                await transaction.RollbackAsync(cancellationToken);
+                _logger.LogError(ex, "Failed to sync YouTube playlist {PlaylistId} for user {UserId}", 
+                    youtubePlaylistId, userId);
+                throw;
             }
-            else
-            {
-                var mapping = new ServicePlaylistMapping
-                {
-                    Id = Guid.NewGuid(),
-                    PlaylistId = playlist.Id,
-                    Service = ServiceName,
-                    ServicePlaylistId = youtubePlaylistId,
-                    SyncMode = "import_only",
-                    LastSyncedAt = DateTimeOffset.UtcNow,
-                    LastSyncStatus = failedTracks > 0 ? "partial_failure" : "success"
-                };
-                _dbContext.ServicePlaylistMappings.Add(mapping);
-            }
-
-            // Save all changes
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-
-            _logger.LogInformation(
-                "Successfully synced YouTube playlist {YouTubePlaylistId} to Cantaro playlist {PlaylistId}. " +
-                "Total items: {TotalItems}, Failed: {FailedItems}",
-                youtubePlaylistId, playlist.Id, playlistItems.Count, failedTracks);
-
-            return playlist.Id;
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            _logger.LogError(ex, "Failed to sync YouTube playlist {PlaylistId} for user {UserId}", 
-                youtubePlaylistId, userId);
-            throw;
-        }
+        });
     }
 
     /// <summary>
