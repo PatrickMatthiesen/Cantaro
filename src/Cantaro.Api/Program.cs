@@ -68,7 +68,40 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "https://localhost:5173")
+        // In Aspire, frontend URL is provided via service reference
+        var frontendUrl = builder.Configuration["services:web:http:0"] 
+            ?? builder.Configuration["services:web:0"];
+        
+        var allowedOrigins = new List<string>();
+        
+        if (!string.IsNullOrEmpty(frontendUrl))
+        {
+            allowedOrigins.Add(frontendUrl.TrimEnd('/'));
+        }
+        
+        // Fallback origins for development without Aspire
+        if (builder.Environment.IsDevelopment())
+        {
+            allowedOrigins.Add("http://localhost:5173");
+            allowedOrigins.Add("https://localhost:5173");
+            allowedOrigins.Add("http://localhost:8080");
+            allowedOrigins.Add("https://localhost:8080");
+        }
+
+        if (allowedOrigins.Count == 0)
+        {
+            // In production without configured origins, log warning but allow same-origin
+            // (same-origin requests don't need CORS headers)
+            if (!builder.Environment.IsDevelopment())
+            {
+                Console.WriteLine("WARNING: No CORS origins configured in production. " +
+                    "Ensure frontend is served from same origin as API, or configure Aspire service reference.");
+            }
+            // Add a safe fallback - same origin shouldn't need CORS anyway
+            allowedOrigins.Add("http://localhost:8080");
+        }
+
+        policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();

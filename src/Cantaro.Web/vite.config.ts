@@ -9,8 +9,9 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.API_HTTPS || process.env.API_HTTP,
-        changeOrigin: true
+        target: process.env.services__api__https__0 || process.env.services__api__http__0 || process.env.API_HTTPS || process.env.API_HTTP || 'https://localhost:7203',
+        changeOrigin: true,
+        secure: false
       },
     },
   },
