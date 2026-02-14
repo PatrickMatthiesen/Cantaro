@@ -9,8 +9,10 @@ var builder = WebApplication.CreateBuilder(args);
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
 
-// Add PostgreSQL database context
-builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
+// Add PostgreSQL database context with custom configuration
+// Disable retry execution strategy because we use manual transactions with raw SQL
+// Pass null settings to prevent Aspire from automatically enabling NpgsqlRetryingExecutionStrategy
+builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db", configureSettings: null);
 
 // Add Data Protection for token encryption
 builder.Services.AddDataProtection();
@@ -18,6 +20,7 @@ builder.Services.AddDataProtection();
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();
 builder.Services.AddScoped<YouTubeService>();
+builder.Services.AddScoped<YouTubePlaylistSyncService>();
 
 builder.Services.AddAuthorization();
 

@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginForm } from './components/LoginForm';
 import { RegisterForm } from './components/RegisterForm';
 import { UserProfile } from './components/UserProfile';
+import { SyncButton } from './components/SyncButton';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
+import { youtubeApi } from './services/youtubeApi';
 
 type Page = 'home' | 'youtube';
 
@@ -11,6 +13,34 @@ function AuthenticatedApp() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const [showRegister, setShowRegister] = useState(false);
   const [currentPage, setCurrentPage] = useState<Page>('home');
+  const [hasConnectedAccounts, setHasConnectedAccounts] = useState(false);
+  const [isCheckingConnectedAccounts, setIsCheckingConnectedAccounts] = useState(true);
+
+  const loadConnectedAccountStatus = useCallback(async () => {
+    setIsCheckingConnectedAccounts(true);
+    try {
+      const status = await youtubeApi.getStatus();
+      setHasConnectedAccounts(status.isConnected);
+    } catch {
+      setHasConnectedAccounts(false);
+    } finally {
+      setIsCheckingConnectedAccounts(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setHasConnectedAccounts(false);
+      setIsCheckingConnectedAccounts(false);
+      return;
+    }
+
+    if (currentPage !== 'home') {
+      return;
+    }
+
+    loadConnectedAccountStatus();
+  }, [currentPage, isAuthenticated, loadConnectedAccountStatus]);
 
   if (isLoading) {
     return (
@@ -167,6 +197,8 @@ function AuthenticatedApp() {
             </article>
             <UserProfile />
           </section>
+
+          {!isCheckingConnectedAccounts && hasConnectedAccounts && <SyncButton />}
 
           <section className="grid gap-6 md:grid-cols-2">
             <article className="glass-panel flex flex-col justify-between bg-gradient-to-br from-red-500/30 via-rose-500/20 to-orange-400/10 p-8 text-left shadow-[0_30px_80px_rgba(244,63,94,0.25)]">
