@@ -5,16 +5,49 @@ import { RegisterForm } from './components/RegisterForm';
 import { UserProfile } from './components/UserProfile';
 import { SyncButton } from './components/SyncButton';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
+import { ComponentsPage } from './pages/ComponentsPage';
 import { youtubeApi } from './services/youtubeApi';
+import { Design1 } from './designs/Design1';
+import { Design2 } from './designs/Design2';
+import { Design3 } from './designs/Design3';
+import { Design4 } from './designs/Design4';
+import { Design5 } from './designs/Design5';
+import { Design6 } from './designs/Design6';
+import { Design7 } from './designs/Design7';
+import { Design8 } from './designs/Design8';
+import { Design9 } from './designs/Design9';
 
-type Page = 'home' | 'youtube';
+type DesignPage = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+type Page = 'home' | 'youtube' | 'components' | DesignPage;
+
+function resolvePageFromPath(path: string): Page {
+  if (path === '/components') {
+    return 'components';
+  }
+
+  const match = path.match(/^\/([1-9])$/);
+  if (match) {
+    return match[1] as DesignPage;
+  }
+
+  return 'home';
+}
 
 function AuthenticatedApp() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const [showRegister, setShowRegister] = useState(false);
-  const [currentPage, setCurrentPage] = useState<Page>('home');
+  const [currentPage, setCurrentPage] = useState<Page>(() => resolvePageFromPath(window.location.pathname));
   const [hasConnectedAccounts, setHasConnectedAccounts] = useState(false);
   const [isCheckingConnectedAccounts, setIsCheckingConnectedAccounts] = useState(true);
+
+  // Handle route changes
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPage(resolvePageFromPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const loadConnectedAccountStatus = useCallback(async () => {
     setIsCheckingConnectedAccounts(true);
@@ -136,6 +169,21 @@ function AuthenticatedApp() {
   if (currentPage === 'youtube') {
     return <YouTubePlaylistsPage onNavigateHome={() => setCurrentPage('home')} />;
   }
+
+  if (currentPage === 'components') {
+    return <ComponentsPage />;
+  }
+
+  // Design routes
+  if (currentPage === '1') return <Design1 />;
+  if (currentPage === '2') return <Design2 />;
+  if (currentPage === '3') return <Design3 />;
+  if (currentPage === '4') return <Design4 />;
+  if (currentPage === '5') return <Design5 />;
+  if (currentPage === '6') return <Design6 />;
+  if (currentPage === '7') return <Design7 />;
+  if (currentPage === '8') return <Design8 />;
+  if (currentPage === '9') return <Design9 />;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
