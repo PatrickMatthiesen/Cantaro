@@ -1,18 +1,14 @@
-import { useState } from 'react';
+import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { DesignNav } from '../components/DesignNav';
+import { platformCatalog } from './constants';
 
 // Design 5: "Masonry Feed" with Design 2 aesthetics
 // Layout: Pinterest-style masonry grid with varied card heights
 
 export function Design5() {
   const { user } = useAuth();
-  const [platforms] = useState([
-    { id: 'youtube', name: 'YouTube Music', status: 'connected', tracks: 1247, icon: '▶', gradient: 'from-red-500 to-pink-500' },
-    { id: 'spotify', name: 'Spotify', status: 'available', tracks: 0, icon: '♫', gradient: 'from-green-400 to-emerald-600' },
-    { id: 'apple', name: 'Apple Music', status: 'available', tracks: 0, icon: '◉', gradient: 'from-pink-400 to-rose-500' },
-    { id: 'tidal', name: 'Tidal', status: 'available', tracks: 0, icon: '◈', gradient: 'from-gray-700 to-gray-900' },
-  ]);
+  const platforms = useMemo(() => platformCatalog, []);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
