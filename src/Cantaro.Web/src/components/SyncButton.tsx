@@ -216,7 +216,7 @@ export function SyncButton() {
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-gray-200">
           <div
-            className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+            className="h-full bg-linear-to-r from-indigo-500 to-purple-500"
             style={{ width: `${windowUsagePercent}%` }}
           />
         </div>
@@ -230,7 +230,7 @@ export function SyncButton() {
         <button
           onClick={() => handleSync(null)}
           disabled={!canSync}
-          className="rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-xl bg-linear-to-r from-blue-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isSyncing ? `Syncing… ${syncProgress}%` : 'Sync everything'}
         </button>
@@ -257,7 +257,7 @@ export function SyncButton() {
           </div>
           <div className="h-3 overflow-hidden rounded-full bg-gray-200">
             <div
-              className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 transition-all duration-300"
+              className="h-full bg-linear-to-r from-blue-500 via-indigo-500 to-purple-500 transition-all duration-300"
               style={{ width: `${syncProgress}%` }}
             />
           </div>
@@ -326,7 +326,7 @@ export function SyncButton() {
             <button
               onClick={() => handleSync(Array.from(selectedPlaylists))}
               disabled={selectedPlaylists.size === 0 || isSyncing}
-              className="flex-1 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-1 rounded-xl bg-linear-to-r from-indigo-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Sync selected
             </button>

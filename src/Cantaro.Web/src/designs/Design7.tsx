@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutShell, platformCatalog } from './LayoutShell';
+import { LayoutShell } from './LayoutShell';
+import { platformCatalog } from './constants';
 
 // Design 7: "Kanban Studio"
 // Layout: Sidebar + three operational lanes with sticky lane headers and different card weights.
@@ -55,7 +56,7 @@ export function Design7() {
           ].map((lane) => (
             <article key={lane.title} className="glass-card p-4">
               <div className="sticky top-0 z-10 mb-4 rounded-2xl bg-white/90 px-4 py-3 backdrop-blur">
-                <div className={`mb-2 h-2 rounded-full bg-gradient-to-r ${lane.tint}`} />
+                <div className={`mb-2 h-2 rounded-full bg-linear-to-r ${lane.tint}`} />
                 <h3 className="text-lg font-bold text-gray-800">{lane.title}</h3>
               </div>
               <div className="space-y-3">
@@ -84,9 +85,9 @@ export function Design7() {
         <section className="grid gap-4 lg:grid-cols-4">
           {platforms.map((platform) => (
             <article key={platform.id} className="glass-card group relative overflow-hidden p-4">
-              <div className={`absolute inset-0 bg-gradient-to-r ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
+              <div className={`absolute inset-0 bg-linear-to-r ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
               <div className="relative flex items-center gap-3">
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${platform.gradient} text-white`}>
+                <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
                   {platform.icon}
                 </div>
                 <div>

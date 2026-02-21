@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutShell, platformCatalog } from './LayoutShell';
+import { LayoutShell } from './LayoutShell';
+import { platformCatalog } from './constants';
 
 // Design 6: "Panorama Command Deck"
 // Layout: Sidebar + center spotlight panel, narrow left widgets, dense right telemetry strip.
@@ -24,7 +25,7 @@ export function Design6() {
                   <p className="text-xs uppercase tracking-[0.24em] text-gray-500">{metric.label}</p>
                   <p className="mt-2 text-4xl font-bold text-gray-800">{metric.value}</p>
                 </div>
-                <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${metric.color} text-xl text-white`}>
+                <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br ${metric.color} text-xl text-white`}>
                   {metric.icon}
                 </div>
               </div>
@@ -34,7 +35,7 @@ export function Design6() {
 
         <section className="space-y-4">
           <article className="glass-card relative overflow-hidden p-8">
-            <div className="absolute -right-20 top-10 h-56 w-56 rounded-full bg-gradient-to-br from-indigo-400 to-fuchsia-400 opacity-30 blur-3xl" />
+            <div className="absolute -right-20 top-10 h-56 w-56 rounded-full bg-linear-to-br from-indigo-400 to-fuchsia-400 opacity-30 blur-3xl" />
             <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Central command</p>
             <h2 className="mt-3 text-5xl font-bold text-gray-800">Sync director</h2>
             <p className="mt-3 max-w-xl text-gray-600">
@@ -42,14 +43,14 @@ export function Design6() {
             </p>
             <div className="mt-7 grid gap-3 sm:grid-cols-2">
               <button className="group relative overflow-hidden rounded-2xl p-5 text-left">
-                <span className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 opacity-90" />
+                <span className="absolute inset-0 bg-linear-to-r from-blue-500 to-cyan-500 opacity-90" />
                 <span className="relative text-white">
                   <p className="text-xs uppercase tracking-[0.2em]">Run now</p>
                   <p className="mt-1 text-xl font-bold">Execute full sync</p>
                 </span>
               </button>
               <button className="group relative overflow-hidden rounded-2xl p-5 text-left">
-                <span className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 opacity-90" />
+                <span className="absolute inset-0 bg-linear-to-r from-purple-500 to-pink-500 opacity-90" />
                 <span className="relative text-white">
                   <p className="text-xs uppercase tracking-[0.2em]">Plan</p>
                   <p className="mt-1 text-xl font-bold">Open scheduler</p>
@@ -61,10 +62,10 @@ export function Design6() {
           <div className="grid gap-4 md:grid-cols-2">
             {platforms.map((platform) => (
               <article key={platform.id} className="glass-card group relative overflow-hidden p-5 transition-transform hover:scale-[1.02]">
-                <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
+                <div className={`absolute inset-0 bg-linear-to-br ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
                 <div className="relative">
                   <div className="flex items-center justify-between">
-                    <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${platform.gradient} text-white`}>
+                    <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
                       {platform.icon}
                     </div>
                     <span className="text-xs font-semibold uppercase text-gray-500">{platform.status}</span>
@@ -93,7 +94,7 @@ export function Design6() {
                     <span>{row.rate}</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-gray-200">
-                    <div className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500" style={{ width: `${row.health}%` }} />
+                    <div className="h-full bg-linear-to-r from-indigo-500 to-cyan-500" style={{ width: `${row.health}%` }} />
                   </div>
                 </div>
               ))}

@@ -12,13 +12,6 @@ export interface PlatformCard {
   gradient: string;
 }
 
-export const platformCatalog: PlatformCard[] = [
-  { id: 'youtube', name: 'YouTube Music', status: 'connected', tracks: 1247, icon: '▶', gradient: 'from-red-500 to-pink-500' },
-  { id: 'spotify', name: 'Spotify', status: 'available', tracks: 0, icon: '♫', gradient: 'from-green-400 to-emerald-600' },
-  { id: 'apple', name: 'Apple Music', status: 'available', tracks: 0, icon: '◉', gradient: 'from-pink-400 to-rose-500' },
-  { id: 'tidal', name: 'Tidal', status: 'available', tracks: 0, icon: '◈', gradient: 'from-gray-700 to-gray-900' },
-];
-
 interface LayoutShellProps {
   currentDesign: string;
   userEmail?: string;
@@ -35,18 +28,18 @@ export function LayoutShell({
   sidebarSubtitle = 'Welcome',
 }: LayoutShellProps) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
       <DesignNav currentDesign={currentDesign} style="light" />
       <div
-        className="absolute -left-20 -top-20 h-80 w-80 animate-pulse rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl"
+        className="absolute -left-20 -top-20 h-80 w-80 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl"
         style={{ animationDuration: '8s' }}
       />
       <div
-        className="absolute -bottom-40 -right-20 h-96 w-96 animate-pulse rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl"
+        className="absolute -bottom-40 -right-20 h-96 w-96 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl"
         style={{ animationDuration: '10s', animationDelay: '2s' }}
       />
       <div
-        className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-gradient-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl"
+        className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-linear-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl"
         style={{ animationDuration: '12s', animationDelay: '4s' }}
       />
 
@@ -54,7 +47,7 @@ export function LayoutShell({
         <aside className="w-80 p-6">
           <div className="glass-card sticky top-6 p-6">
             <div className="mb-8">
-              <h1 className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-3xl font-bold text-transparent">
+              <h1 className="bg-linear-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-3xl font-bold text-transparent">
                 {sidebarTitle}
               </h1>
               <p className="mt-1 text-xs text-gray-600">{userEmail || sidebarSubtitle}</p>
@@ -72,7 +65,7 @@ export function LayoutShell({
                   key={item.label}
                   className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold transition-all ${
                     item.active
-                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
+                      ? 'bg-linear-to-r from-indigo-500 to-purple-500 text-white shadow-lg'
                       : 'text-gray-600 hover:bg-white/50'
                   }`}
                 >

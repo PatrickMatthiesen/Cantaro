@@ -22,15 +22,15 @@ export function ComponentsPage() {
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
       <DesignNav currentDesign="components" style="light" />
-      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
       <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pb-28 pt-8">
         <GlassCard className="p-7">
           <p className="text-xs uppercase tracking-[0.3em] text-gray-500">Cantaro UI gallery</p>
-          <h1 className="mt-2 bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
+          <h1 className="mt-2 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
             Core components
           </h1>
           <p className="mt-2 text-gray-600">

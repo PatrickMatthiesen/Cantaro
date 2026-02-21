@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutShell, platformCatalog } from './LayoutShell';
+import { LayoutShell } from './LayoutShell';
+import { platformCatalog } from './constants';
 
 // Design 9: "Magazine Rails"
 // Layout: Sidebar + horizontal feature rail, asymmetric bento floor, and compact action footer.
@@ -23,8 +24,8 @@ export function Design9() {
               { title: 'Conflict workshop', copy: 'Inspect ambiguous tracks and finalize canonical mapping.', gradient: 'from-purple-500 to-pink-500' },
               { title: 'Adapter diagnostics', copy: 'Check quotas, latencies, and retry pressure in one panel.', gradient: 'from-emerald-500 to-lime-500' },
             ].map((feature) => (
-              <article key={feature.title} className="group relative min-w-[360px] overflow-hidden rounded-3xl p-6">
-                <div className={`absolute inset-0 bg-gradient-to-br ${feature.gradient}`} />
+              <article key={feature.title} className="group relative min-w-90 overflow-hidden rounded-3xl p-6">
+                <div className={`absolute inset-0 bg-linear-to-br ${feature.gradient}`} />
                 <div className="relative text-white">
                   <p className="text-xs uppercase tracking-[0.24em] text-white/80">Feature</p>
                   <h3 className="mt-2 text-3xl font-bold">{feature.title}</h3>
@@ -41,10 +42,10 @@ export function Design9() {
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {platforms.map((platform, index) => (
                 <div key={platform.id} className={`group relative overflow-hidden rounded-2xl bg-white/70 p-4 ${index === 0 ? 'md:col-span-2' : ''}`}>
-                  <div className={`absolute inset-0 bg-gradient-to-r ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
+                  <div className={`absolute inset-0 bg-linear-to-r ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
                   <div className="relative flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${platform.gradient} text-white`}>
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
                         {platform.icon}
                       </div>
                       <div>
@@ -73,7 +74,7 @@ export function Design9() {
                     <p className="text-xl font-bold text-gray-800">{signal.value}</p>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-gray-200">
-                    <div className={`h-full bg-gradient-to-r ${signal.gradient}`} style={{ width: signal.value === '5' ? '22%' : signal.value === '17' ? '64%' : '98%' }} />
+                    <div className={`h-full bg-linear-to-r ${signal.gradient}`} style={{ width: signal.value === '5' ? '22%' : signal.value === '17' ? '64%' : '98%' }} />
                   </div>
                 </div>
               ))}
@@ -90,7 +91,7 @@ export function Design9() {
                 'Queued rollback for failed write batch',
                 'Completed verification on 4 playlists',
               ].map((item) => (
-                <div key={item} className="min-w-[220px] rounded-2xl bg-white/75 px-4 py-3 text-sm text-gray-700">
+                <div key={item} className="min-w-55 rounded-2xl bg-white/75 px-4 py-3 text-sm text-gray-700">
                   {item}
                 </div>
               ))}
@@ -105,7 +106,7 @@ export function Design9() {
                 { label: 'Open conflict queue', gradient: 'from-purple-500 to-pink-500' },
                 { label: 'Export telemetry', gradient: 'from-emerald-500 to-lime-500' },
               ].map((action) => (
-                <button key={action.label} className={`w-full rounded-xl bg-gradient-to-r ${action.gradient} px-4 py-3 text-left text-sm font-semibold text-white`}>
+                <button key={action.label} className={`w-full rounded-xl bg-linear-to-r ${action.gradient} px-4 py-3 text-left text-sm font-semibold text-white`}>
                   {action.label}
                 </button>
               ))}

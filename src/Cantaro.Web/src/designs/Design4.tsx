@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutShell, platformCatalog } from './LayoutShell';
+import { LayoutShell } from './LayoutShell';
+import { platformCatalog } from './constants';
 
 // Design 4: "Ribbon Control Deck"
 // Layout: Sidebar + top command ribbon with stacked command and timeline modules.
@@ -20,7 +21,7 @@ export function Design4() {
             { label: 'Resolved today', value: '87', color: 'from-emerald-500 to-lime-500' },
           ].map((stat) => (
             <article key={stat.label} className="rounded-2xl bg-white/75 p-4">
-              <div className={`mb-3 h-2 rounded-full bg-gradient-to-r ${stat.color}`} />
+              <div className={`mb-3 h-2 rounded-full bg-linear-to-r ${stat.color}`} />
               <p className="text-xs uppercase tracking-[0.25em] text-gray-500">{stat.label}</p>
               <p className="mt-2 text-3xl font-bold text-gray-800">{stat.value}</p>
             </article>
@@ -41,7 +42,7 @@ export function Design4() {
                 { step: 'Verification', detail: 'Validated final list parity and marked job completed.' },
               ].map((entry, index) => (
                 <li key={entry.step} className="flex items-start gap-3 rounded-2xl bg-white/70 p-4">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-bold text-white">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-purple-500 text-xs font-bold text-white">
                     {index + 1}
                   </div>
                   <div>
@@ -58,7 +59,7 @@ export function Design4() {
             <div className="mt-4 space-y-3">
               {platforms.map((platform) => (
                 <div key={platform.id} className="flex items-center gap-3 rounded-2xl bg-white/70 p-3">
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${platform.gradient} text-white`}>
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
                     {platform.icon}
                   </div>
                   <div className="flex-1">
@@ -82,7 +83,7 @@ export function Design4() {
                 { label: 'Schedule job', icon: '🕒', gradient: 'from-orange-500 to-rose-500' },
               ].map((action) => (
                 <button key={action.label} className="group relative w-full overflow-hidden rounded-2xl p-4 text-left transition-transform hover:scale-[1.02]">
-                  <span className={`absolute inset-0 bg-gradient-to-r ${action.gradient} opacity-90`} />
+                  <span className={`absolute inset-0 bg-linear-to-r ${action.gradient} opacity-90`} />
                   <span className="relative flex items-center justify-between text-sm font-semibold text-white">
                     <span>{action.label}</span>
                     <span>{action.icon}</span>
@@ -104,7 +105,7 @@ export function Design4() {
                 { title: 'Waiting', items: ['Apple backoff window', 'Retry playlist reorder'], tint: 'from-amber-500 to-orange-500' },
               ].map((lane) => (
                 <div key={lane.title} className="rounded-2xl bg-white/70 p-4">
-                  <div className={`mb-3 h-2 rounded-full bg-gradient-to-r ${lane.tint}`} />
+                  <div className={`mb-3 h-2 rounded-full bg-linear-to-r ${lane.tint}`} />
                   <p className="text-sm font-semibold text-gray-800">{lane.title}</p>
                   <ul className="mt-2 space-y-2 text-sm text-gray-600">
                     {lane.items.map((item) => (

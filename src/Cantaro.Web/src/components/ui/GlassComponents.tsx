@@ -24,7 +24,7 @@ export function GlassCard({
     >
       {hoverGradient ? (
         <span
-          className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${hoverGradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`}
+          className={`pointer-events-none absolute inset-0 bg-linear-to-br ${hoverGradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`}
           aria-hidden
         />
       ) : null}
@@ -50,7 +50,7 @@ export function GradientButton({
       ? 'bg-gray-900 text-white hover:bg-gray-700'
       : tone === 'soft'
         ? 'bg-white/70 text-gray-800 hover:bg-mist-100'
-        : `bg-gradient-to-r ${gradient} text-white hover:brightness-105`;
+        : `bg-linear-to-r ${gradient} text-white hover:brightness-105`;
 
   return (
     <button
@@ -100,7 +100,7 @@ export function MetricTile({
           <p className="text-xs uppercase tracking-[0.22em] text-gray-500">{label}</p>
           <p className="mt-2 text-3xl font-bold text-gray-800">{value}</p>
         </div>
-        <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${gradient} text-lg text-white`}>
+        <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-linear-to-br ${gradient} text-lg text-white`}>
           {icon}
         </div>
       </div>

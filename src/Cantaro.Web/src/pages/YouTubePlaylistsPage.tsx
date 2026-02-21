@@ -124,7 +124,7 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
+      <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
         <GlassCard className="px-6 py-4">
           <p className="text-sm text-gray-700">Loading YouTube playlists…</p>
         </GlassCard>
@@ -133,9 +133,9 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
       <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pb-16 pt-8">
         <header className="flex flex-wrap items-center justify-between gap-3">

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutShell, platformCatalog } from './LayoutShell';
+import { LayoutShell } from './LayoutShell';
+import { platformCatalog } from './constants';
 
 // Design 8: "Orbit Studio"
 // Layout: Sidebar + radial hub canvas with orbiting service nodes and right-side inspector.
@@ -12,13 +13,13 @@ export function Design8() {
   return (
     <LayoutShell currentDesign="8" userEmail={user?.email} sidebarSubtitle="Orbit Studio">
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="glass-card relative min-h-[760px] overflow-hidden p-6">
+        <section className="glass-card relative min-h-190 overflow-hidden p-6">
           <p className="text-xs uppercase tracking-[0.28em] text-gray-500">Service topology</p>
           <h2 className="mt-2 text-3xl font-bold text-gray-800">Orbit map</h2>
 
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="relative h-[560px] w-[560px] rounded-full border border-white/60 bg-white/30">
-              <div className="absolute left-1/2 top-1/2 flex h-44 w-44 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-xl">
+            <div className="relative h-140 w-140 rounded-full border border-white/60 bg-white/30">
+              <div className="absolute left-1/2 top-1/2 flex h-44 w-44 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-purple-500 text-white shadow-xl">
                 <span className="text-xs uppercase tracking-[0.2em]">Core</span>
                 <span className="mt-2 text-3xl font-bold">TrackID</span>
               </div>
@@ -37,7 +38,7 @@ export function Design8() {
                     className={`absolute ${positions[index]} group w-44 rounded-2xl bg-white/80 p-3 text-left shadow-lg transition-transform hover:scale-105`}
                   >
                     <div className="flex items-center gap-2">
-                      <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br ${platform.gradient} text-sm text-white`}>
+                      <div className={`flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br ${platform.gradient} text-sm text-white`}>
                         {platform.icon}
                       </div>
                       <div>
@@ -46,7 +47,7 @@ export function Design8() {
                       </div>
                     </div>
                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200">
-                      <div className={`h-full bg-gradient-to-r ${platform.gradient}`} style={{ width: platform.status === 'connected' ? '96%' : '28%' }} />
+                      <div className={`h-full bg-linear-to-r ${platform.gradient}`} style={{ width: platform.status === 'connected' ? '96%' : '28%' }} />
                     </div>
                   </button>
                 );
@@ -84,7 +85,7 @@ export function Design8() {
           </article>
 
           <button className="glass-card group relative w-full overflow-hidden p-6 text-left">
-            <span className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+            <span className="absolute inset-0 bg-linear-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
             <span className="relative block">
               <p className="text-xs uppercase tracking-[0.24em] text-gray-500 group-hover:text-white/80">Action</p>
               <p className="mt-1 text-2xl font-bold text-gray-800 group-hover:text-white">Run topology sync</p>

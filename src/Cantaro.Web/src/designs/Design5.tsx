@@ -15,23 +15,23 @@ export function Design5() {
   ]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
       <DesignNav currentDesign="5" style="light" />
       {/* Animated background orbs */}
-      <div className="absolute left-1/3 top-0 h-[600px] w-[600px] animate-pulse rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
-      <div className="absolute bottom-0 right-1/3 h-[600px] w-[600px] animate-pulse rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
+      <div className="absolute left-1/3 top-0 h-150 w-150 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
+      <div className="absolute bottom-0 right-1/3 h-150 w-150 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
 
       <div className="relative z-10 mx-auto max-w-7xl p-6">
         {/* Compact header */}
         <header className="glass-card mb-8 mt-8 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
+              <h1 className="bg-linear-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
                 Cantaro
               </h1>
               <p className="mt-1 text-sm text-gray-600">{user?.email || 'Welcome back'}</p>
             </div>
-            <button className="rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105">
+            <button className="rounded-2xl bg-linear-to-r from-indigo-500 to-purple-500 px-6 py-3 text-sm font-semibold text-white transition-all hover:scale-105">
               + Add Platform
             </button>
           </div>
@@ -55,7 +55,7 @@ export function Design5() {
                 { icon: '⚡', label: 'Last Sync', value: '2m ago', color: 'from-orange-400 to-red-400' },
               ].map((stat) => (
                 <div key={stat.label} className="flex items-center gap-4">
-                  <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${stat.color} text-xl`}>
+                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br ${stat.color} text-xl`}>
                     {stat.icon}
                   </div>
                   <div className="flex-1">
@@ -72,7 +72,7 @@ export function Design5() {
             className="glass-card group relative overflow-hidden p-6 text-left transition-all hover:scale-[1.02]"
             style={{ animation: 'zoomIn 0.6s ease-out 0.1s both' }}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="absolute inset-0 bg-linear-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
             <div className="relative">
               <div className="mb-3 text-3xl">⚡</div>
               <h3 className="mb-1 text-xl font-bold text-gray-800 transition-colors group-hover:text-white">
@@ -88,7 +88,7 @@ export function Design5() {
             className="glass-card group relative overflow-hidden p-6 text-left transition-all hover:scale-[1.02]"
             style={{ animation: 'zoomIn 0.6s ease-out 0.15s both' }}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="absolute inset-0 bg-linear-to-r from-purple-500 to-pink-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
             <div className="relative">
               <div className="mb-3 text-3xl">📊</div>
               <h3 className="mb-1 text-xl font-bold text-gray-800 transition-colors group-hover:text-white">
@@ -109,11 +109,11 @@ export function Design5() {
               } p-6 transition-all duration-500 hover:scale-[1.02]`}
               style={{ animation: `zoomIn 0.6s ease-out ${0.2 + i * 0.1}s both` }}
             >
-              <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
+              <div className={`absolute inset-0 bg-linear-to-br ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
               
               <div className="relative">
                 <div className="mb-4 flex items-center justify-between">
-                  <div className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br ${platform.gradient} text-3xl text-white shadow-lg`}>
+                  <div className={`flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br ${platform.gradient} text-3xl text-white shadow-lg`}>
                     {platform.icon}
                   </div>
                   {platform.status === 'connected' && (
@@ -132,7 +132,7 @@ export function Design5() {
                       <span className="text-sm text-gray-600">tracks synced</span>
                     </div>
                     <div className="mb-3 h-2 overflow-hidden rounded-full bg-gray-200">
-                      <div className={`h-full bg-gradient-to-r ${platform.gradient}`} style={{ width: '98%' }} />
+                      <div className={`h-full bg-linear-to-r ${platform.gradient}`} style={{ width: '98%' }} />
                     </div>
                   </>
                 ) : (
@@ -143,7 +143,7 @@ export function Design5() {
                   className={`w-full rounded-xl py-3 text-sm font-semibold transition-all hover:scale-105 ${
                     platform.status === 'connected'
                       ? 'bg-gray-800 text-white hover:bg-gray-700'
-                      : `bg-gradient-to-r ${platform.gradient} text-white shadow-lg`
+                      : `bg-linear-to-r ${platform.gradient} text-white shadow-lg`
                   }`}
                 >
                   {platform.status === 'connected' ? 'Manage' : 'Connect Now'}
@@ -167,7 +167,7 @@ export function Design5() {
                 { action: 'Resolved 2 conflicts', platform: 'System', time: '3 hours ago', icon: '✓' },
               ].map((activity, i) => (
                 <div key={i} className="flex items-center gap-3 rounded-xl bg-white/50 p-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 text-sm text-white">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-indigo-500 to-purple-500 text-sm text-white">
                     {activity.icon}
                   </div>
                   <div className="flex-1">

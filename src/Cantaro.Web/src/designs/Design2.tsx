@@ -1,6 +1,7 @@
-import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { DesignNav } from '../components/DesignNav';
+import { useMemo } from 'react';
+import { platformCatalog } from './constants';
 
 // Design 2: "Liquid Glass Morphism"
 // Aesthetic: Soft, ethereal, floating glass cards with flowing gradients and gentle animations
@@ -8,20 +9,15 @@ import { DesignNav } from '../components/DesignNav';
 
 export function Design2() {
   const { user } = useAuth();
-  const [platforms] = useState([
-    { id: 'youtube', name: 'YouTube Music', status: 'connected', tracks: 1247, icon: '▶', gradient: 'from-red-500 to-pink-500' },
-    { id: 'spotify', name: 'Spotify', status: 'available', tracks: 0, icon: '♫', gradient: 'from-green-400 to-emerald-600' },
-    { id: 'apple', name: 'Apple Music', status: 'available', tracks: 0, icon: '◉', gradient: 'from-pink-400 to-rose-500' },
-    { id: 'tidal', name: 'Tidal', status: 'available', tracks: 0, icon: '◈', gradient: 'from-gray-700 to-gray-900' },
-  ]);
+  const platforms = useMemo(() => platformCatalog, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
       <DesignNav currentDesign="2" style="light" />
       {/* Animated background orbs */}
-      <div className="absolute -left-20 -top-20 h-80 w-80 animate-pulse rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 animate-pulse rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
-      <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-gradient-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl" style={{ animationDuration: '12s', animationDelay: '4s' }} />
+      <div className="absolute -left-20 -top-20 h-80 w-80 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
+      <div className="absolute -bottom-40 -right-20 h-96 w-96 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
+      <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-linear-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl" style={{ animationDuration: '12s', animationDelay: '4s' }} />
 
       <div className="relative z-10 mx-auto max-w-7xl p-6">
         {/* Header */}
@@ -29,12 +25,12 @@ export function Design2() {
           <div className="glass-card p-8">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-5xl font-bold tracking-tight text-transparent">
+                <h1 className="bg-linear-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-5xl font-bold tracking-tight text-transparent">
                   Cantaro
                 </h1>
                 <p className="mt-2 text-sm font-medium text-gray-600">{user?.email || 'Welcome back'}</p>
               </div>
-              <div className="glass-card bg-gradient-to-br from-blue-50 to-purple-50 px-6 py-4">
+              <div className="glass-card bg-linear-to-br from-blue-50 to-purple-50 px-6 py-4">
                 <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">Library</div>
                 <div className="mt-1 text-3xl font-bold text-gray-800">1,247</div>
                 <div className="text-xs text-gray-500">tracks synced</div>
@@ -55,7 +51,7 @@ export function Design2() {
               className="glass-card p-6 text-center"
               style={{ animation: `floatIn 0.6s ease-out ${i * 0.15}s both` }}
             >
-              <div className={`mx-auto mb-3 h-12 w-12 rounded-2xl bg-gradient-to-br ${stat.color}`} />
+              <div className={`mx-auto mb-3 h-12 w-12 rounded-2xl bg-linear-to-br ${stat.color}`} />
               <div className="text-2xl font-bold text-gray-800">{stat.value}</div>
               <div className="text-xs font-medium text-gray-500">{stat.label}</div>
             </div>
@@ -75,11 +71,11 @@ export function Design2() {
                 style={{ animation: `floatIn 0.6s ease-out ${0.5 + i * 0.1}s both` }}
               >
                 {/* Gradient background on hover */}
-                <div className={`absolute inset-0 bg-gradient-to-br ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
+                <div className={`absolute inset-0 bg-linear-to-br ${platform.gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-10`} />
                 
                 <div className="relative flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <div className={`flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br ${platform.gradient} text-3xl text-white shadow-lg`}>
+                    <div className={`flex h-16 w-16 items-center justify-center rounded-3xl bg-linear-to-br ${platform.gradient} text-3xl text-white shadow-lg`}>
                       {platform.icon}
                     </div>
                     <div>
@@ -93,7 +89,7 @@ export function Design2() {
                     className={`rounded-2xl px-6 py-3 text-sm font-semibold transition-all ${
                       platform.status === 'connected'
                         ? 'bg-gray-800 text-white hover:bg-gray-700'
-                        : 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white hover:from-indigo-600 hover:to-purple-600'
+                        : 'bg-linear-to-r from-indigo-500 to-purple-500 text-white hover:from-indigo-600 hover:to-purple-600'
                     }`}
                   >
                     {platform.status === 'connected' ? 'Manage' : 'Connect'}
@@ -107,7 +103,7 @@ export function Design2() {
         {/* Action buttons */}
         <section className="grid gap-4 md:grid-cols-2">
           <button className="glass-card group relative overflow-hidden p-8 text-left transition-all hover:scale-[1.02]">
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="absolute inset-0 bg-linear-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
             <div className="relative">
               <div className="mb-2 text-4xl">⚡</div>
               <h3 className="text-2xl font-bold text-gray-800 transition-colors group-hover:text-white">
@@ -119,7 +115,7 @@ export function Design2() {
             </div>
           </button>
           <button className="glass-card group relative overflow-hidden p-8 text-left transition-all hover:scale-[1.02]">
-            <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="absolute inset-0 bg-linear-to-r from-purple-500 to-pink-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
             <div className="relative">
               <div className="mb-2 text-4xl">📊</div>
               <h3 className="text-2xl font-bold text-gray-800 transition-colors group-hover:text-white">
