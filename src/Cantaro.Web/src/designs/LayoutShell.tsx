@@ -31,15 +31,15 @@ export function LayoutShell({
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
       <DesignNav currentDesign={currentDesign} style="light" />
       <div
-        className="absolute -left-20 -top-20 h-80 w-80 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl"
+        className="absolute -top-20 -left-20 h-80 w-80 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl"
         style={{ animationDuration: '8s' }}
       />
       <div
-        className="absolute -bottom-40 -right-20 h-96 w-96 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl"
+        className="absolute -right-20 -bottom-40 h-96 w-96 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl"
         style={{ animationDuration: '10s', animationDelay: '2s' }}
       />
       <div
-        className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-linear-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl"
+        className="absolute top-1/2 left-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-linear-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl"
         style={{ animationDuration: '12s', animationDelay: '4s' }}
       />
 

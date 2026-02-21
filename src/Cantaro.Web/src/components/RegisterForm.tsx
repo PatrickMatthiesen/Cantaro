@@ -45,7 +45,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
   return (
     <div className="space-y-6 text-left text-gray-900">
       <div className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.4em] text-gray-500">Create account</p>
+        <p className="text-xs tracking-[0.4em] text-gray-500 uppercase">Create account</p>
         <h2 className="text-3xl font-semibold">Create your workspace</h2>
         <p className="text-sm text-gray-600">Set up an account to connect services and sync playlists.</p>
       </div>
@@ -62,7 +62,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
             placeholder="you@example.com"
           />
         </div>
@@ -79,7 +79,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             required
             minLength={PASSWORD_MIN_LENGTH}
             autoComplete="new-password"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
             placeholder="••••••••"
           />
         </div>
@@ -96,7 +96,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
             required
             minLength={PASSWORD_MIN_LENGTH}
             autoComplete="new-password"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
             placeholder="Repeat password"
           />
         </div>

@@ -134,13 +134,13 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pb-16 pt-8">
+      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pt-8 pb-16">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs uppercase tracking-[0.32em] text-gray-500">YouTube</p>
+            <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">YouTube</p>
             <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
           </div>
           <div className="flex gap-2">
@@ -163,7 +163,7 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
 
         {!status?.isConnected ? (
           <GlassCard className="p-8">
-            <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase text-red-700">
+            <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 uppercase">
               <YouTubeIcon /> Not connected
             </div>
             <h2 className="mt-4 text-2xl font-semibold">Connect YouTube to begin</h2>

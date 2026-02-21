@@ -24,12 +24,12 @@ export function ComponentsPage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
       <DesignNav currentDesign="components" style="light" />
-      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pb-28 pt-8">
+      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pt-8 pb-28">
         <GlassCard className="p-7">
-          <p className="text-xs uppercase tracking-[0.3em] text-gray-500">Cantaro UI gallery</p>
+          <p className="text-xs tracking-[0.3em] text-gray-500 uppercase">Cantaro UI gallery</p>
           <h1 className="mt-2 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
             Core components
           </h1>
@@ -41,7 +41,7 @@ export function ComponentsPage() {
 
         <section className="grid gap-4 xl:grid-cols-2">
           <GlassCard className="p-6">
-            <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Buttons</h2>
+            <h2 className="text-sm tracking-[0.24em] text-gray-500 uppercase">Buttons</h2>
             <div className="mt-4 flex flex-wrap gap-3">
               <GradientButton>Primary action</GradientButton>
               <GradientButton gradient="from-blue-500 to-cyan-500">Info action</GradientButton>
@@ -51,7 +51,7 @@ export function ComponentsPage() {
           </GlassCard>
 
           <GlassCard className="p-6">
-            <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Status badges</h2>
+            <h2 className="text-sm tracking-[0.24em] text-gray-500 uppercase">Status badges</h2>
             <div className="mt-4 flex flex-wrap gap-3">
               <StatusBadge status="connected" />
               <StatusBadge status="available" />
@@ -61,7 +61,7 @@ export function ComponentsPage() {
         </section>
 
         <GlassCard className="p-6">
-          <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Action cards</h2>
+          <h2 className="text-sm tracking-[0.24em] text-gray-500 uppercase">Action cards</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <ActionFeatureCard
               icon="⚡"
@@ -79,7 +79,7 @@ export function ComponentsPage() {
         </GlassCard>
 
         <GlassCard className="p-6">
-          <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Platform tiles</h2>
+          <h2 className="text-sm tracking-[0.24em] text-gray-500 uppercase">Platform tiles</h2>
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             {samplePlatforms.map((platform) => (
               <PlatformTile key={platform.name} platform={platform} />

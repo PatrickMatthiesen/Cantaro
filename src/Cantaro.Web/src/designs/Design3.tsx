@@ -26,8 +26,8 @@ export function Design3() {
       <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
         <section className="space-y-4">
           <article className="glass-card relative overflow-hidden p-8">
-            <div className="absolute -right-16 -top-16 h-52 w-52 rounded-full bg-linear-to-br from-indigo-300 to-fuchsia-300 opacity-40 blur-3xl" />
-            <p className="text-xs uppercase tracking-[0.3em] text-gray-500">Design 3 · Pulse Mosaic</p>
+            <div className="absolute -top-16 -right-16 h-52 w-52 rounded-full bg-linear-to-br from-indigo-300 to-fuchsia-300 opacity-40 blur-3xl" />
+            <p className="text-xs tracking-[0.3em] text-gray-500 uppercase">Design 3 · Pulse Mosaic</p>
             <h2 className="mt-3 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-5xl font-bold text-transparent">
               Build your sync canvas
             </h2>
@@ -41,7 +41,7 @@ export function Design3() {
                 { label: 'Conflict rate', value: '0.4%' },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-2xl bg-white/70 p-4">
-                  <p className="text-xs uppercase tracking-wide text-gray-500">{stat.label}</p>
+                  <p className="text-xs tracking-wide text-gray-500 uppercase">{stat.label}</p>
                   <p className="mt-1 text-2xl font-bold text-gray-800">{stat.value}</p>
                 </div>
               ))}
@@ -62,7 +62,7 @@ export function Design3() {
                     <div className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br ${platform.gradient} text-2xl text-white`}>
                       {platform.icon}
                     </div>
-                    <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase text-gray-600">
+                    <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-gray-600 uppercase">
                       {platform.status}
                     </span>
                   </div>
@@ -86,14 +86,14 @@ export function Design3() {
           <button className="glass-card group relative w-full overflow-hidden p-6 text-left transition-transform hover:scale-[1.02]">
             <div className="absolute inset-0 bg-linear-to-r from-blue-500 to-cyan-500 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
             <div className="relative">
-              <p className="text-xs uppercase tracking-[0.25em] text-gray-500 group-hover:text-white/80">Primary Action</p>
+              <p className="text-xs tracking-[0.25em] text-gray-500 uppercase group-hover:text-white/80">Primary Action</p>
               <h3 className="mt-2 text-2xl font-bold text-gray-800 group-hover:text-white">Sync all now</h3>
               <p className="mt-1 text-sm text-gray-600 group-hover:text-white/90">Push pending changes across connected platforms.</p>
             </div>
           </button>
 
           <div className="glass-card p-6">
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-500">Live timeline</p>
+            <p className="text-xs tracking-[0.25em] text-gray-500 uppercase">Live timeline</p>
             <ul className="mt-4 space-y-3">
               {[
                 'Resolved Spotify duplicate mapping',
@@ -108,7 +108,7 @@ export function Design3() {
           </div>
 
           <div className="glass-card p-6">
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-500">Health bands</p>
+            <p className="text-xs tracking-[0.25em] text-gray-500 uppercase">Health bands</p>
             <div className="mt-4 space-y-3">
               {[
                 { label: 'Adapter latency', value: 72, color: 'from-blue-500 to-cyan-500' },

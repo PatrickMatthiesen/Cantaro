@@ -182,7 +182,7 @@ export function SyncButton() {
   if (!syncStatus && !error) {
     return (
       <section className="rounded-3xl border border-white/80 bg-white/70 p-6 text-gray-900 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]">
-        <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Playlist sync</p>
+        <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Playlist sync</p>
         <h3 className="mt-2 text-xl font-semibold">Ready when you are</h3>
         <p className="mt-1 text-sm text-gray-600">Connect a service workspace to start your first sync run.</p>
       </section>
@@ -201,7 +201,7 @@ export function SyncButton() {
 
   return (
     <section className="rounded-3xl border border-white/80 bg-white/70 p-6 text-gray-900 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]">
-      <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Playlist sync</p>
+      <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Playlist sync</p>
       <h3 className="mt-2 text-xl font-semibold">Keep your playlists aligned</h3>
       <p className="mt-1 text-sm text-gray-600">
         Limit: {songSyncLimit.toLocaleString()} songs per {windowMinutes} minutes.
@@ -266,7 +266,7 @@ export function SyncButton() {
 
       {showStatusDrawer && statusUpdates.length > 0 ? (
         <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
-          <p className="text-xs uppercase tracking-[0.22em] text-gray-500">Sync status updates</p>
+          <p className="text-xs tracking-[0.22em] text-gray-500 uppercase">Sync status updates</p>
           <ul className="mt-3 max-h-44 space-y-2 overflow-y-auto text-sm text-gray-700">
             {statusUpdates.map((update, index) => (
               <li key={`${update}-${index}`} className="rounded-xl bg-white px-3 py-2">

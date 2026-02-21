@@ -22,7 +22,7 @@ export function Design6() {
             <article key={metric.label} className="glass-card p-5">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-gray-500">{metric.label}</p>
+                  <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">{metric.label}</p>
                   <p className="mt-2 text-4xl font-bold text-gray-800">{metric.value}</p>
                 </div>
                 <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br ${metric.color} text-xl text-white`}>
@@ -35,8 +35,8 @@ export function Design6() {
 
         <section className="space-y-4">
           <article className="glass-card relative overflow-hidden p-8">
-            <div className="absolute -right-20 top-10 h-56 w-56 rounded-full bg-linear-to-br from-indigo-400 to-fuchsia-400 opacity-30 blur-3xl" />
-            <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Central command</p>
+            <div className="absolute top-10 -right-20 h-56 w-56 rounded-full bg-linear-to-br from-indigo-400 to-fuchsia-400 opacity-30 blur-3xl" />
+            <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Central command</p>
             <h2 className="mt-3 text-5xl font-bold text-gray-800">Sync director</h2>
             <p className="mt-3 max-w-xl text-gray-600">
               Prioritize jobs, route retries, and monitor adapter health from one high-focus command surface.
@@ -45,14 +45,14 @@ export function Design6() {
               <button className="group relative overflow-hidden rounded-2xl p-5 text-left">
                 <span className="absolute inset-0 bg-linear-to-r from-blue-500 to-cyan-500 opacity-90" />
                 <span className="relative text-white">
-                  <p className="text-xs uppercase tracking-[0.2em]">Run now</p>
+                  <p className="text-xs tracking-[0.2em] uppercase">Run now</p>
                   <p className="mt-1 text-xl font-bold">Execute full sync</p>
                 </span>
               </button>
               <button className="group relative overflow-hidden rounded-2xl p-5 text-left">
                 <span className="absolute inset-0 bg-linear-to-r from-purple-500 to-pink-500 opacity-90" />
                 <span className="relative text-white">
-                  <p className="text-xs uppercase tracking-[0.2em]">Plan</p>
+                  <p className="text-xs tracking-[0.2em] uppercase">Plan</p>
                   <p className="mt-1 text-xl font-bold">Open scheduler</p>
                 </span>
               </button>
@@ -68,7 +68,7 @@ export function Design6() {
                     <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
                       {platform.icon}
                     </div>
-                    <span className="text-xs font-semibold uppercase text-gray-500">{platform.status}</span>
+                    <span className="text-xs font-semibold text-gray-500 uppercase">{platform.status}</span>
                   </div>
                   <h3 className="mt-3 text-xl font-bold text-gray-800">{platform.name}</h3>
                   <p className="text-sm text-gray-600">{platform.tracks.toLocaleString()} tracks</p>
@@ -80,7 +80,7 @@ export function Design6() {
 
         <section className="space-y-4">
           <article className="glass-card p-6">
-            <h3 className="text-sm uppercase tracking-[0.26em] text-gray-500">Adapter telemetry</h3>
+            <h3 className="text-sm tracking-[0.26em] text-gray-500 uppercase">Adapter telemetry</h3>
             <div className="mt-4 space-y-3">
               {[
                 { name: 'YouTube', rate: '12 req/min', health: 96 },
@@ -102,7 +102,7 @@ export function Design6() {
           </article>
 
           <article className="glass-card p-6">
-            <h3 className="text-sm uppercase tracking-[0.26em] text-gray-500">Recent decisions</h3>
+            <h3 className="text-sm tracking-[0.26em] text-gray-500 uppercase">Recent decisions</h3>
             <ul className="mt-4 space-y-2 text-sm text-gray-700">
               {[
                 'Fallback to heuristic title match for 2 tracks',

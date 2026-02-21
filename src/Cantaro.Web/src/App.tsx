@@ -122,13 +122,13 @@ function AuthenticatedApp() {
   if (!isAuthenticated) {
     return (
       <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-        <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-        <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+        <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+        <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-        <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pb-16 pt-8">
+        <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pt-8 pb-16">
           <header className="mb-8 flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-gray-500">Cantaro</p>
+              <p className="text-xs tracking-[0.35em] text-gray-500 uppercase">Cantaro</p>
               <h1 className="mt-1 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-3xl font-bold text-transparent">
                 Playlist workspace
               </h1>
@@ -193,13 +193,13 @@ function AuthenticatedApp() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pb-16 pt-8">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pt-8 pb-16">
         <header className="mb-6 flex items-center justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-gray-500">Cantaro</p>
+            <p className="text-xs tracking-[0.35em] text-gray-500 uppercase">Cantaro</p>
             <h1 className="mt-1 text-3xl font-bold text-gray-900">Workspace</h1>
           </div>
           <GradientButton tone="soft" onClick={() => navigateTo('components')}>
@@ -211,7 +211,7 @@ function AuthenticatedApp() {
           <section className="space-y-6">
             <GlassCard className="overflow-visible p-7">
               <div>
-                <div className="flex items-center justify-between gap-3 w-full sm:w-auto">
+                <div className="flex w-full items-center justify-between gap-3 sm:w-auto">
                   <h2 className="text-2xl font-semibold">Platforms</h2>
                   <div ref={addPlatformMenuRef} className="relative ml-auto self-start">
                     <GradientButton
@@ -300,7 +300,7 @@ function AuthenticatedApp() {
               <SyncButton />
             ) : (
               <GlassCard className="p-7">
-                <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Service setup</p>
+                <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Service setup</p>
                 <h3 className="mt-2 text-xl font-semibold">Connect your first service</h3>
                 <p className="mt-1 text-sm text-gray-600">
                   Start with YouTube, then add more services as they become available.
@@ -317,7 +317,7 @@ function AuthenticatedApp() {
           <section className="space-y-6">
             <UserProfile />
             <GlassCard className="p-6">
-              <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Workflow notes</p>
+              <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Workflow notes</p>
               <ul className="mt-4 space-y-3 text-sm text-gray-700">
                 <li className="rounded-xl bg-white/70 px-3 py-2">Connect your platforms and sync to a single collection.</li>
                 <li className="rounded-xl bg-white/70 px-3 py-2">Sync runs happen on demand and support all or selected playlists.</li>

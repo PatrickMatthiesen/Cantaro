@@ -16,7 +16,7 @@ export function Design9() {
         <section className="glass-card p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-800">Feature rail</h2>
-            <span className="text-xs uppercase tracking-[0.24em] text-gray-500">Swipe horizontally</span>
+            <span className="text-xs tracking-[0.24em] text-gray-500 uppercase">Swipe horizontally</span>
           </div>
           <div className="flex gap-4 overflow-x-auto pb-2">
             {[
@@ -27,7 +27,7 @@ export function Design9() {
               <article key={feature.title} className="group relative min-w-90 overflow-hidden rounded-3xl p-6">
                 <div className={`absolute inset-0 bg-linear-to-br ${feature.gradient}`} />
                 <div className="relative text-white">
-                  <p className="text-xs uppercase tracking-[0.24em] text-white/80">Feature</p>
+                  <p className="text-xs tracking-[0.24em] text-white/80 uppercase">Feature</p>
                   <h3 className="mt-2 text-3xl font-bold">{feature.title}</h3>
                   <p className="mt-2 text-sm text-white/90">{feature.copy}</p>
                 </div>
@@ -37,8 +37,8 @@ export function Design9() {
         </section>
 
         <section className="grid gap-4 xl:grid-cols-12">
-          <article className="glass-card xl:col-span-7 p-6">
-            <h3 className="text-sm uppercase tracking-[0.25em] text-gray-500">Platform stories</h3>
+          <article className="glass-card p-6 xl:col-span-7">
+            <h3 className="text-sm tracking-[0.25em] text-gray-500 uppercase">Platform stories</h3>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               {platforms.map((platform, index) => (
                 <div key={platform.id} className={`group relative overflow-hidden rounded-2xl bg-white/70 p-4 ${index === 0 ? 'md:col-span-2' : ''}`}>
@@ -50,7 +50,7 @@ export function Design9() {
                       </div>
                       <div>
                         <p className="font-semibold text-gray-800">{platform.name}</p>
-                        <p className="text-xs uppercase text-gray-500">{platform.status}</p>
+                        <p className="text-xs text-gray-500 uppercase">{platform.status}</p>
                       </div>
                     </div>
                     <p className="text-sm font-semibold text-gray-700">{platform.tracks.toLocaleString()}</p>
@@ -60,8 +60,8 @@ export function Design9() {
             </div>
           </article>
 
-          <article className="glass-card xl:col-span-5 p-6">
-            <h3 className="text-sm uppercase tracking-[0.25em] text-gray-500">Signal snapshot</h3>
+          <article className="glass-card p-6 xl:col-span-5">
+            <h3 className="text-sm tracking-[0.25em] text-gray-500 uppercase">Signal snapshot</h3>
             <div className="mt-4 grid gap-3">
               {[
                 { label: 'Sync certainty', value: '98.1%', gradient: 'from-indigo-500 to-cyan-500' },
@@ -70,7 +70,7 @@ export function Design9() {
               ].map((signal) => (
                 <div key={signal.label} className="rounded-2xl bg-white/70 p-4">
                   <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-[0.2em] text-gray-500">{signal.label}</p>
+                    <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">{signal.label}</p>
                     <p className="text-xl font-bold text-gray-800">{signal.value}</p>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-gray-200">
@@ -81,8 +81,8 @@ export function Design9() {
             </div>
           </article>
 
-          <article className="glass-card xl:col-span-8 p-6">
-            <h3 className="text-sm uppercase tracking-[0.25em] text-gray-500">Activity strip</h3>
+          <article className="glass-card p-6 xl:col-span-8">
+            <h3 className="text-sm tracking-[0.25em] text-gray-500 uppercase">Activity strip</h3>
             <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
               {[
                 'Scheduled nightly sync for 04:00',
@@ -98,8 +98,8 @@ export function Design9() {
             </div>
           </article>
 
-          <article className="glass-card xl:col-span-4 p-6">
-            <h3 className="text-sm uppercase tracking-[0.25em] text-gray-500">Fast actions</h3>
+          <article className="glass-card p-6 xl:col-span-4">
+            <h3 className="text-sm tracking-[0.25em] text-gray-500 uppercase">Fast actions</h3>
             <div className="mt-4 space-y-3">
               {[
                 { label: 'Sync now', gradient: 'from-blue-500 to-cyan-500' },

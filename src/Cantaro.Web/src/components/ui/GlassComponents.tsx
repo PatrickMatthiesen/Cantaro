@@ -74,7 +74,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   } as const;
 
   return (
-    <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${map[status]}`}>
+    <span className={`rounded-full px-3 py-1 text-xs font-semibold tracking-wide uppercase ${map[status]}`}>
       {status}
     </span>
   );
@@ -97,7 +97,7 @@ export function MetricTile({
     <GlassCard className="p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-gray-500">{label}</p>
+          <p className="text-xs tracking-[0.22em] text-gray-500 uppercase">{label}</p>
           <p className="mt-2 text-3xl font-bold text-gray-800">{value}</p>
         </div>
         <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-linear-to-br ${gradient} text-lg text-white`}>

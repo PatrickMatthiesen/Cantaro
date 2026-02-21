@@ -15,13 +15,13 @@ export function Design2() {
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
       <DesignNav currentDesign="2" style="light" />
       {/* Animated background orbs */}
-      <div className="absolute -left-20 -top-20 h-80 w-80 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
-      <div className="absolute -bottom-40 -right-20 h-96 w-96 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
-      <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-linear-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl" style={{ animationDuration: '12s', animationDelay: '4s' }} />
+      <div className="absolute -top-20 -left-20 h-80 w-80 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
+      <div className="absolute top-1/2 left-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 animate-pulse rounded-full bg-linear-to-br from-violet-300 to-fuchsia-300 opacity-20 blur-3xl" style={{ animationDuration: '12s', animationDelay: '4s' }} />
 
       <div className="relative z-10 mx-auto max-w-7xl p-6">
         {/* Header */}
-        <header className="mb-12 mt-8">
+        <header className="mt-8 mb-12">
           <div className="glass-card p-8">
             <div className="flex items-center justify-between">
               <div>
@@ -31,7 +31,7 @@ export function Design2() {
                 <p className="mt-2 text-sm font-medium text-gray-600">{user?.email || 'Welcome back'}</p>
               </div>
               <div className="glass-card bg-linear-to-br from-blue-50 to-purple-50 px-6 py-4">
-                <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">Library</div>
+                <div className="text-xs font-semibold tracking-wider text-gray-500 uppercase">Library</div>
                 <div className="mt-1 text-3xl font-bold text-gray-800">1,247</div>
                 <div className="text-xs text-gray-500">tracks synced</div>
               </div>
@@ -60,7 +60,7 @@ export function Design2() {
 
         {/* Platform cards */}
         <section className="mb-8">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-600">
+          <h2 className="mb-4 text-sm font-semibold tracking-wider text-gray-600 uppercase">
             Your Platforms
           </h2>
           <div className="grid gap-4 md:grid-cols-2">

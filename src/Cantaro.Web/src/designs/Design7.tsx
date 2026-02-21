@@ -15,7 +15,7 @@ export function Design7() {
       <div className="space-y-4">
         <article className="glass-card flex items-center justify-between p-6">
           <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-gray-500">Design 7</p>
+            <p className="text-xs tracking-[0.3em] text-gray-500 uppercase">Design 7</p>
             <h2 className="mt-2 text-4xl font-bold text-gray-800">Pipeline board</h2>
           </div>
           <div className="flex gap-3">

@@ -43,7 +43,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
   return (
     <div className="space-y-6 text-left text-gray-900">
       <div className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.4em] text-gray-500">Sign in</p>
+        <p className="text-xs tracking-[0.4em] text-gray-500 uppercase">Sign in</p>
         <h2 className="text-3xl font-semibold">Welcome back</h2>
         <p className="text-sm text-gray-600">Open your workspace and continue syncing playlists.</p>
       </div>
@@ -60,7 +60,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
             placeholder="you@example.com"
           />
         </div>
@@ -77,7 +77,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             required
             minLength={PASSWORD_MIN_LENGTH}
             autoComplete="current-password"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
             placeholder="••••••••"
           />
         </div>

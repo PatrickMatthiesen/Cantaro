@@ -18,12 +18,12 @@ export function Design5() {
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
       <DesignNav currentDesign="5" style="light" />
       {/* Animated background orbs */}
-      <div className="absolute left-1/3 top-0 h-150 w-150 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
-      <div className="absolute bottom-0 right-1/3 h-150 w-150 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
+      <div className="absolute top-0 left-1/3 h-150 w-150 animate-pulse rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" style={{ animationDuration: '8s' }} />
+      <div className="absolute right-1/3 bottom-0 h-150 w-150 animate-pulse rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" style={{ animationDuration: '10s', animationDelay: '2s' }} />
 
       <div className="relative z-10 mx-auto max-w-7xl p-6">
         {/* Compact header */}
-        <header className="glass-card mb-8 mt-8 p-6">
+        <header className="glass-card mt-8 mb-8 p-6">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="bg-linear-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
@@ -44,7 +44,7 @@ export function Design5() {
             className="glass-card row-span-2 p-6"
             style={{ animation: 'zoomIn 0.6s ease-out 0s both' }}
           >
-            <h2 className="mb-6 text-sm font-semibold uppercase tracking-wider text-gray-600">
+            <h2 className="mb-6 text-sm font-semibold tracking-wider text-gray-600 uppercase">
               Library Stats
             </h2>
             <div className="space-y-6">
@@ -157,7 +157,7 @@ export function Design5() {
             className="glass-card p-6 md:col-span-2"
             style={{ animation: 'zoomIn 0.6s ease-out 0.6s both' }}
           >
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-600">
+            <h3 className="mb-4 text-sm font-semibold tracking-wider text-gray-600 uppercase">
               Recent Activity
             </h3>
             <div className="space-y-3">

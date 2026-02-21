@@ -30,7 +30,7 @@ export const UserProfile = ({ className = '' }: UserProfileProps) => {
     <section
       className={`rounded-3xl border border-white/80 bg-white/70 p-6 text-gray-900 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px] ${className}`}
     >
-      <p className="text-xs uppercase tracking-[0.28em] text-gray-500">Account</p>
+      <p className="text-xs tracking-[0.28em] text-gray-500 uppercase">Account</p>
       <h2 className="mt-2 text-2xl font-semibold">{user.email}</h2>
       <p className="mt-1 text-sm text-gray-500">Member since {memberSince}</p>
 

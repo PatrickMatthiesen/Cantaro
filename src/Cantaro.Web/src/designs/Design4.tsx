@@ -22,14 +22,14 @@ export function Design4() {
           ].map((stat) => (
             <article key={stat.label} className="rounded-2xl bg-white/75 p-4">
               <div className={`mb-3 h-2 rounded-full bg-linear-to-r ${stat.color}`} />
-              <p className="text-xs uppercase tracking-[0.25em] text-gray-500">{stat.label}</p>
+              <p className="text-xs tracking-[0.25em] text-gray-500 uppercase">{stat.label}</p>
               <p className="mt-2 text-3xl font-bold text-gray-800">{stat.value}</p>
             </article>
           ))}
         </section>
 
         <section className="grid gap-4 xl:grid-cols-12">
-          <article className="glass-card xl:col-span-7 xl:row-span-2 p-7">
+          <article className="glass-card p-7 xl:col-span-7 xl:row-span-2">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-800">Sync storyline</h2>
               <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">Live</span>
@@ -46,7 +46,7 @@ export function Design4() {
                     {index + 1}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.22em] text-gray-500">{entry.step}</p>
+                    <p className="text-sm font-semibold tracking-[0.22em] text-gray-500 uppercase">{entry.step}</p>
                     <p className="mt-1 text-gray-700">{entry.detail}</p>
                   </div>
                 </li>
@@ -54,8 +54,8 @@ export function Design4() {
             </ol>
           </article>
 
-          <article className="glass-card xl:col-span-5 p-6">
-            <h3 className="text-sm uppercase tracking-[0.28em] text-gray-500">Platform deck</h3>
+          <article className="glass-card p-6 xl:col-span-5">
+            <h3 className="text-sm tracking-[0.28em] text-gray-500 uppercase">Platform deck</h3>
             <div className="mt-4 space-y-3">
               {platforms.map((platform) => (
                 <div key={platform.id} className="flex items-center gap-3 rounded-2xl bg-white/70 p-3">
@@ -74,8 +74,8 @@ export function Design4() {
             </div>
           </article>
 
-          <article className="glass-card xl:col-span-3 p-6">
-            <h3 className="text-sm uppercase tracking-[0.28em] text-gray-500">Action stack</h3>
+          <article className="glass-card p-6 xl:col-span-3">
+            <h3 className="text-sm tracking-[0.28em] text-gray-500 uppercase">Action stack</h3>
             <div className="mt-4 space-y-3">
               {[
                 { label: 'Run sync', icon: '⚡', gradient: 'from-blue-500 to-cyan-500' },
@@ -93,9 +93,9 @@ export function Design4() {
             </div>
           </article>
 
-          <article className="glass-card xl:col-span-9 p-6">
+          <article className="glass-card p-6 xl:col-span-9">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm uppercase tracking-[0.28em] text-gray-500">Queue lanes</h3>
+              <h3 className="text-sm tracking-[0.28em] text-gray-500 uppercase">Queue lanes</h3>
               <span className="text-xs text-gray-500">Updated 2m ago</span>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
