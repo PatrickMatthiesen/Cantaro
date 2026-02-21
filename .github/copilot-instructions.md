@@ -82,3 +82,7 @@ References
 
 - docs/infrastructure.md — canonical architecture, domain entities, and sync model.
 - docs/agent-extra.md — supplemental context only; may be removed in favor of this file.
+
+Notes
+
+- We are currently removing all annotations of the old "Workspace" concept and just streamlining to a pages that manage connected platforms and playlists.

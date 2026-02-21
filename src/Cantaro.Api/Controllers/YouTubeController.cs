@@ -12,6 +12,7 @@ namespace Cantaro.Api.Controllers;
 /// </summary>
 public class ConnectedAccountDto
 {
+    public string PlatformId { get; set; } = "youtube";
     public bool IsConnected { get; set; }
     public string? DisplayName { get; set; }
     public string? ExternalAccountId { get; set; }
@@ -72,7 +73,7 @@ public class YouTubeController : ControllerBase
     public async Task<ActionResult> Connect([FromQuery] string? returnUrl = null)
     {
         var userId = await GetCurrentUserIdAsync();
-        
+
         // Generate a cryptographically protected state parameter
         var stateData = $"{userId}:{DateTime.UtcNow.Ticks}:{returnUrl ?? "/youtube"}";
         var state = _stateProtector.Protect(stateData);
@@ -93,7 +94,7 @@ public class YouTubeController : ControllerBase
     public async Task<ActionResult> Callback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error)
     {
         var frontendUrl = GetFrontendUrl();
-        
+
         if (!string.IsNullOrEmpty(error))
         {
             _logger.LogWarning("YouTube OAuth error: {Error}", error);
@@ -110,7 +111,7 @@ public class YouTubeController : ControllerBase
             // Decrypt and parse state to get user ID and return URL
             var stateData = _stateProtector.Unprotect(state);
             var stateParts = stateData.Split(':', 3);
-            
+
             if (stateParts.Length < 2 || !int.TryParse(stateParts[0], out var userId))
             {
                 return Redirect($"{frontendUrl}/youtube?error=invalid_state");
@@ -141,7 +142,7 @@ public class YouTubeController : ControllerBase
             if (!string.IsNullOrEmpty(returnUrl))
             {
                 // Ensure returnUrl is a safe relative path
-                if (!returnUrl.StartsWith('/') || returnUrl.StartsWith("//") || 
+                if (!returnUrl.StartsWith('/') || returnUrl.StartsWith("//") ||
                     returnUrl.Contains("://") || returnUrl.Contains('\\'))
                 {
                     _logger.LogWarning("Invalid returnUrl in OAuth state for user {UserId}: {ReturnUrl}", userId, returnUrl);
@@ -254,9 +255,9 @@ public class YouTubeController : ControllerBase
     {
         // In Aspire, the frontend reference is injected as services__web__http__0
         // or services__web__0 depending on the endpoint name
-        var frontendUrl = _configuration["services:web:http:0"] 
+        var frontendUrl = _configuration["services:web:http:0"]
             ?? _configuration["services:web:0"];
-        
+
         if (!string.IsNullOrEmpty(frontendUrl))
         {
             return frontendUrl.TrimEnd('/');

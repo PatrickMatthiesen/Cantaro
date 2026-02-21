@@ -2,6 +2,10 @@ export interface SyncStatusInfo {
   lastSyncedAt: string | null;
   needsAutoSync: boolean;
   canSyncNow: boolean;
+  songsSyncedInWindow: number;
+  remainingSongsInWindow: number;
+  songSyncLimit: number;
+  windowMinutes: number;
   message?: string;
 }
 
@@ -36,6 +40,8 @@ export interface BatchSyncResponse {
   results: BatchSyncResult[];
   successCount: number;
   failureCount: number;
+  songsRequested: number;
+  songsSynced: number;
 }
 
 export const syncApi = {

@@ -1,4 +1,7 @@
+import { platformManager } from '../platforms';
+
 export interface ConnectedAccountStatus {
+  platformId?: string;
   isConnected: boolean;
   displayName?: string;
   externalAccountId?: string;
@@ -25,90 +28,53 @@ export interface YouTubePlaylistItem {
 }
 
 class YouTubeApiClient {
-  private getHeaders(): HeadersInit {
-    return {
-      'Content-Type': 'application/json',
-    };
-  }
+  private readonly youtubeClient = platformManager.getClient('youtube');
 
   async getStatus(): Promise<ConnectedAccountStatus> {
-    const response = await fetch('/api/youtube/status', {
-      method: 'GET',
-      headers: this.getHeaders(),
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to get YouTube connection status');
-    }
-
-    return response.json();
+    return this.youtubeClient.status();
   }
 
   getConnectUrl(returnUrl?: string): string {
     const params = new URLSearchParams();
     if (returnUrl) {
-      params.set('returnUrl', returnUrl);
+      try {
+        const parsed = new URL(returnUrl);
+        params.set('route', parsed.pathname || '/youtube');
+      } catch {
+        params.set('route', returnUrl);
+      }
     }
-    return `/api/youtube/connect${params.toString() ? '?' + params.toString() : ''}`;
+    params.set('trigger', 'legacy-youtube-api');
+    return `/api/platforms/youtube/connect${params.toString() ? '?' + params.toString() : ''}`;
   }
 
   async disconnect(): Promise<void> {
-    const response = await fetch('/api/youtube/disconnect', {
-      method: 'POST',
-      headers: this.getHeaders(),
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to disconnect YouTube account');
-    }
+    await this.youtubeClient.disconnect();
   }
 
   async getPlaylists(): Promise<YouTubePlaylist[]> {
-    const response = await fetch('/api/youtube/playlists', {
-      method: 'GET',
-      headers: this.getHeaders(),
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Not authenticated. Please log in again.');
-      }
-      if (response.status === 403) {
-        throw new Error('YouTube account not connected or access denied.');
-      }
-      const error = await response.json().catch(() => ({ 
-        error: `Failed to fetch playlists (HTTP ${response.status})` 
-      }));
-      throw new Error(error.error || 'Failed to fetch playlists');
-    }
-
-    return response.json();
+    const playlists = await this.youtubeClient.playlists(false);
+    return playlists.map((playlist) => ({
+      id: playlist.id,
+      title: playlist.title,
+      description: playlist.description,
+      thumbnailUrl: playlist.thumbnailUrl,
+      itemCount: playlist.itemCount,
+      publishedAt: playlist.publishedAt,
+    }));
   }
 
   async getPlaylistItems(playlistId: string): Promise<YouTubePlaylistItem[]> {
-    const response = await fetch(`/api/youtube/playlists/${encodeURIComponent(playlistId)}/items`, {
-      method: 'GET',
-      headers: this.getHeaders(),
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error('Not authenticated. Please log in again.');
-      }
-      if (response.status === 403) {
-        throw new Error('YouTube account not connected or access denied.');
-      }
-      const error = await response.json().catch(() => ({ 
-        error: `Failed to fetch playlist items (HTTP ${response.status})` 
-      }));
-      throw new Error(error.error || 'Failed to fetch playlist items');
-    }
-
-    return response.json();
+    const songs = await this.youtubeClient.songs(playlistId);
+    return songs.map((song) => ({
+      videoId: song.id,
+      title: song.title,
+      description: song.description,
+      thumbnailUrl: song.thumbnailUrl,
+      channelTitle: song.artistName,
+      position: song.index,
+      publishedAt: song.publishedAt,
+    }));
   }
 }
 

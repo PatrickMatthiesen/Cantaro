@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 
 namespace Cantaro.Api.Controllers;
 
@@ -22,6 +23,10 @@ public class SyncStatusInfo
     public DateTimeOffset? LastSyncedAt { get; set; }
     public bool NeedsAutoSync { get; set; }
     public bool CanSyncNow { get; set; }
+    public int SongsSyncedInWindow { get; set; }
+    public int RemainingSongsInWindow { get; set; }
+    public int SongSyncLimit { get; set; }
+    public int WindowMinutes { get; set; }
     public string? Message { get; set; }
 }
 
@@ -52,6 +57,8 @@ public class BatchSyncResponse
     public required List<BatchSyncResult> Results { get; set; }
     public int SuccessCount { get; set; }
     public int FailureCount { get; set; }
+    public int SongsRequested { get; set; }
+    public int SongsSynced { get; set; }
 }
 
 public class BatchSyncResult
@@ -68,6 +75,36 @@ public class BatchSyncResult
 [Authorize]
 public class SyncController : ControllerBase
 {
+    private sealed class SyncUsageBucket
+    {
+        public object SyncRoot { get; } = new();
+        public List<SyncUsageEvent> Events { get; } = [];
+    }
+
+    private sealed class SyncUsageEvent
+    {
+        public DateTimeOffset OccurredAt { get; init; }
+        public int SongsSynced { get; init; }
+    }
+
+    private sealed class SyncThrottleStatus
+    {
+        public int Usage { get; init; }
+        public int Remaining { get; init; }
+        public bool CanSyncNow { get; init; }
+        public string? Message { get; init; }
+    }
+
+    private const int SongSyncLimitPerWindow = 2000;
+    private const int SyncWindowMinutes = 10;
+    // Cap how many songs from a single sync run are counted towards usage to avoid one very large run
+    // overwhelming the rolling window accounting. This is set to 2x SongSyncLimitPerWindow (2 * 2000)
+    // so that, even in edge cases (e.g. large initial sync or retries), a single run cannot contribute
+    // more than twice the allowed per-window usage.
+    private const int MaxSongsCountedPerSyncRun = SongSyncLimitPerWindow * 2;
+    private const string DefaultService = "youtube";
+    private static readonly ConcurrentDictionary<string, SyncUsageBucket> _syncUsageByUserAndService = new();
+
     private readonly ApplicationDbContext _dbContext;
     private readonly UserManager<User> _userManager;
     private readonly YouTubePlaylistSyncService _youtubeSyncService;
@@ -118,16 +155,8 @@ public class SyncController : ControllerBase
             // Calculate overall status
             var lastSync = mappings.MaxBy(m => m.LastSyncedAt)?.LastSyncedAt;
             var now = DateTimeOffset.UtcNow;
-            
+            var throttleStatus = BuildSyncThrottleStatus(userId, DefaultService, now);
             bool needsAutoSync = lastSync == null || (now - lastSync.Value).TotalHours >= 24;
-            bool canSyncNow = lastSync == null || (now - lastSync.Value).TotalMinutes >= 5;
-
-            string? message = null;
-            if (!canSyncNow)
-            {
-                var timeUntilNext = TimeSpan.FromMinutes(5) - (now - lastSync!.Value);
-                message = $"Please wait {Math.Ceiling(timeUntilNext.TotalMinutes)} minute(s) before syncing again";
-            }
 
             return Ok(new SyncStatusResponse
             {
@@ -135,8 +164,12 @@ public class SyncController : ControllerBase
                 {
                     LastSyncedAt = lastSync,
                     NeedsAutoSync = needsAutoSync,
-                    CanSyncNow = canSyncNow,
-                    Message = message
+                    CanSyncNow = throttleStatus.CanSyncNow,
+                    SongsSyncedInWindow = throttleStatus.Usage,
+                    RemainingSongsInWindow = throttleStatus.Remaining,
+                    SongSyncLimit = SongSyncLimitPerWindow,
+                    WindowMinutes = SyncWindowMinutes,
+                    Message = throttleStatus.Message
                 },
                 Playlists = playlistInfos
             });
@@ -166,27 +199,15 @@ public class SyncController : ControllerBase
                 return BadRequest(new { error = $"Service '{request.Service}' not supported yet" });
             }
 
-            // Check rate limiting
-            var lastSync = await _dbContext.ServicePlaylistMappings
-                .Include(m => m.Playlist)
-                .Where(m => m.Playlist!.UserId == userId && m.Service == request.Service)
-                .OrderByDescending(m => m.LastSyncedAt)
-                .Select(m => m.LastSyncedAt)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (lastSync.HasValue && (DateTimeOffset.UtcNow - lastSync.Value).TotalMinutes < 5)
-            {
-                return BadRequest(new { error = "Please wait at least 5 minutes between syncs" });
-            }
-
+            var now = DateTimeOffset.UtcNow;
             // Get playlists to sync
             List<string> playlistIdsToSync;
-            
+            var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(userId);
+             
             if (request.ServicePlaylistIds == null || request.ServicePlaylistIds.Count == 0)
             {
                 // Sync all playlists
-                var allPlaylists = await _youtubeService.GetPlaylistsAsync(userId);
-                playlistIdsToSync = allPlaylists.Select(p => p.Id).ToList();
+                playlistIdsToSync = youtubePlaylists.Select(p => p.Id).ToList();
                 _logger.LogInformation("Syncing all {Count} YouTube playlists for user {UserId}", 
                     playlistIdsToSync.Count, userId);
             }
@@ -197,7 +218,57 @@ public class SyncController : ControllerBase
                     playlistIdsToSync.Count, userId);
             }
 
+            var selectedPlaylists = youtubePlaylists
+                .Where(p => playlistIdsToSync.Contains(p.Id))
+                .ToList();
+            var selectedPlaylistIds = selectedPlaylists
+                .Select(p => p.Id)
+                .ToHashSet();
+
+            var existingMappings = await _dbContext.ServicePlaylistMappings
+                .Where(m => m.Service == request.Service
+                    && m.Playlist!.UserId == userId
+                    && selectedPlaylistIds.Contains(m.ServicePlaylistId))
+                .Select(m => new { m.ServicePlaylistId, m.PlaylistId })
+                .ToListAsync(cancellationToken);
+
+            var mappedPlaylistIds = existingMappings
+                .Select(m => m.PlaylistId)
+                .Distinct()
+                .ToList();
+            var existingEntryCountsByPlaylistId = mappedPlaylistIds.Count == 0
+                ? new Dictionary<Guid, int>()
+                : await _dbContext.PlaylistEntries
+                    .Where(e => mappedPlaylistIds.Contains(e.PlaylistId))
+                    .GroupBy(e => e.PlaylistId)
+                    .Select(g => new { PlaylistId = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(g => g.PlaylistId, g => g.Count, cancellationToken);
+
+            var existingEntryCountsByServicePlaylistId = existingMappings.ToDictionary(
+                m => m.ServicePlaylistId,
+                m => existingEntryCountsByPlaylistId.TryGetValue(m.PlaylistId, out var count) ? count : 0);
+
+            var estimatedNewSongsToSync = selectedPlaylists.Sum(playlist =>
+            {
+                var remoteSongCount = Math.Max(0, playlist.ItemCount);
+                var existingSongCount = existingEntryCountsByServicePlaylistId.TryGetValue(playlist.Id, out var count)
+                    ? count
+                    : 0;
+                return Math.Max(0, remoteSongCount - existingSongCount);
+            });
+
+            var throttleStatus = BuildSyncThrottleStatus(userId, request.Service, now);
+            if (throttleStatus.Usage > 0 && estimatedNewSongsToSync > throttleStatus.Remaining)
+            {
+                return BadRequest(new
+                {
+                    error = $"This sync would process approximately {estimatedNewSongsToSync} new songs, but only {throttleStatus.Remaining} songs remain in the current {SyncWindowMinutes}-minute window."
+                });
+            }
+
+            var playlistLookup = youtubePlaylists.ToDictionary(p => p.Id, p => p);
             var results = new List<BatchSyncResult>();
+            var songsSynced = 0;
 
             // Sync each playlist sequentially
             foreach (var playlistId in playlistIdsToSync)
@@ -205,8 +276,7 @@ public class SyncController : ControllerBase
                 try
                 {
                     // Get playlist name
-                    var playlists = await _youtubeService.GetPlaylistsAsync(userId);
-                    var playlist = playlists.FirstOrDefault(p => p.Id == playlistId);
+                    playlistLookup.TryGetValue(playlistId, out var playlist);
                     var playlistName = playlist?.Title ?? playlistId;
 
                     var cantaroPlaylistId = await _youtubeSyncService.SyncYouTubePlaylistAsync(
@@ -221,6 +291,10 @@ public class SyncController : ControllerBase
                         Success = true,
                         CantaroPlaylistId = cantaroPlaylistId.ToString()
                     });
+                    var existingSongCount = existingEntryCountsByServicePlaylistId.TryGetValue(playlistId, out var count)
+                        ? count
+                        : 0;
+                    songsSynced += Math.Max(0, Math.Max(0, playlist?.ItemCount ?? 0) - existingSongCount);
 
                     _logger.LogInformation("Successfully synced playlist {PlaylistId} ({Name})", 
                         playlistId, playlistName);
@@ -243,8 +317,12 @@ public class SyncController : ControllerBase
             {
                 Results = results,
                 SuccessCount = results.Count(r => r.Success),
-                FailureCount = results.Count(r => !r.Success)
+                FailureCount = results.Count(r => !r.Success),
+                SongsRequested = estimatedNewSongsToSync,
+                SongsSynced = songsSynced
             };
+
+            AddSyncUsage(userId, request.Service, Math.Min(songsSynced, MaxSongsCountedPerSyncRun), now);
 
             _logger.LogInformation(
                 "Batch sync completed: {Success} succeeded, {Failed} failed",
@@ -270,5 +348,67 @@ public class SyncController : ControllerBase
             throw new UnauthorizedAccessException("User not found");
 
         return user.Id;
+    }
+
+    private static string BuildUsageKey(int userId, string service) => $"{userId}:{service}";
+
+    private static SyncThrottleStatus BuildSyncThrottleStatus(int userId, string service, DateTimeOffset now)
+    {
+        var usage = GetSongsSyncedInWindow(userId, service, now);
+        var remaining = Math.Max(0, SongSyncLimitPerWindow - usage);
+        var canSyncNow = usage <= 0 || remaining > 0;
+
+        string? message = null;
+        if (usage > 0 && remaining <= 0)
+        {
+            message = $"Song sync limit reached ({SongSyncLimitPerWindow} songs per {SyncWindowMinutes} minutes).";
+        }
+        else if (usage > 0)
+        {
+            message = $"You can sync up to {remaining} more songs in the current {SyncWindowMinutes}-minute window.";
+        }
+
+        return new SyncThrottleStatus
+        {
+            Usage = usage,
+            Remaining = remaining,
+            CanSyncNow = canSyncNow,
+            Message = message
+        };
+    }
+
+    private static int GetSongsSyncedInWindow(int userId, string service, DateTimeOffset now)
+    {
+        var key = BuildUsageKey(userId, service);
+        var bucket = _syncUsageByUserAndService.GetOrAdd(key, _ => new SyncUsageBucket());
+        var cutoff = now.AddMinutes(-SyncWindowMinutes);
+
+        lock (bucket.SyncRoot)
+        {
+            bucket.Events.RemoveAll(e => e.OccurredAt < cutoff);
+            return bucket.Events.Sum(e => e.SongsSynced);
+        }
+    }
+
+    private static void AddSyncUsage(int userId, string service, int songsSynced, DateTimeOffset now)
+    {
+        if (songsSynced <= 0)
+        {
+            return;
+        }
+
+        var key = BuildUsageKey(userId, service);
+        var bucket = _syncUsageByUserAndService.GetOrAdd(key, _ => new SyncUsageBucket());
+        var cutoff = now.AddMinutes(-SyncWindowMinutes);
+
+        lock (bucket.SyncRoot)
+        {
+            bucket.Events.RemoveAll(e => e.OccurredAt < cutoff);
+            bucket.Events.Add(new SyncUsageEvent
+            {
+                OccurredAt = now,
+                SongsSynced = songsSynced
+            });
+        }
     }
 }

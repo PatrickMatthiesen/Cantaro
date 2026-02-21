@@ -1,12 +1,11 @@
 import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutShell } from '../designs/LayoutShell';
+import { DesignNav } from '../components/DesignNav';
 import {
+  ActionFeatureCard,
   GlassCard,
   GradientButton,
-  MetricTile,
   PlatformTile,
-  ProgressMeter,
   StatusBadge,
 } from '../components/ui/GlassComponents';
 
@@ -23,21 +22,26 @@ export function ComponentsPage() {
   );
 
   return (
-    <LayoutShell currentDesign="components" userEmail={user?.email} sidebarSubtitle="Component Library">
-      <div className="space-y-5">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <DesignNav currentDesign="components" style="light" />
+      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+
+      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pb-28 pt-8">
         <GlassCard className="p-7">
-          <p className="text-xs uppercase tracking-[0.3em] text-gray-500">UI Kit</p>
-          <h2 className="mt-2 bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
+          <p className="text-xs uppercase tracking-[0.3em] text-gray-500">Cantaro UI gallery</p>
+          <h1 className="mt-2 bg-gradient-to-r from-indigo-600 to-pink-600 bg-clip-text text-4xl font-bold text-transparent">
             Core components
-          </h2>
+          </h1>
           <p className="mt-2 text-gray-600">
-            Shared building blocks using Cantaro colors, glass surfaces, and hover interactions.
+            Reusable building blocks with our color palette, glass surfaces, and hover interactions.
           </p>
+          <p className="mt-1 text-sm text-gray-500">Signed in as {user?.email ?? 'Unknown user'}</p>
         </GlassCard>
 
         <section className="grid gap-4 xl:grid-cols-2">
           <GlassCard className="p-6">
-            <h3 className="text-sm uppercase tracking-[0.24em] text-gray-500">Buttons</h3>
+            <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Buttons</h2>
             <div className="mt-4 flex flex-wrap gap-3">
               <GradientButton>Primary action</GradientButton>
               <GradientButton gradient="from-blue-500 to-cyan-500">Info action</GradientButton>
@@ -47,7 +51,7 @@ export function ComponentsPage() {
           </GlassCard>
 
           <GlassCard className="p-6">
-            <h3 className="text-sm uppercase tracking-[0.24em] text-gray-500">Status badges</h3>
+            <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Status badges</h2>
             <div className="mt-4 flex flex-wrap gap-3">
               <StatusBadge status="connected" />
               <StatusBadge status="available" />
@@ -56,38 +60,33 @@ export function ComponentsPage() {
           </GlassCard>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-4">
-          <MetricTile label="Total tracks" value="1,247" icon="🎵" />
-          <MetricTile label="Sync health" value="98%" icon="⚡" gradient="from-emerald-500 to-lime-500" />
-          <MetricTile label="Retry queue" value="9" icon="↻" gradient="from-amber-500 to-orange-500" />
-          <MetricTile label="Ambiguous" value="5" icon="🧩" gradient="from-purple-500 to-pink-500" />
-        </section>
+        <GlassCard className="p-6">
+          <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Action cards</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <ActionFeatureCard
+              icon="⚡"
+              title="Sync everything"
+              description="Run a full sync across all connected services."
+              gradient="from-blue-500 to-cyan-500"
+            />
+            <ActionFeatureCard
+              icon="📊"
+              title="View analytics"
+              description="Open sync history and operational insights."
+              gradient="from-purple-500 to-pink-500"
+            />
+          </div>
+        </GlassCard>
 
-        <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <GlassCard className="p-6">
-            <h3 className="text-sm uppercase tracking-[0.24em] text-gray-500">Progress meters</h3>
-            <div className="mt-4 space-y-4">
-              <ProgressMeter label="Mapping confidence" value={94} />
-              <ProgressMeter label="Sync completion" value={81} gradient="from-blue-500 to-cyan-500" />
-              <ProgressMeter label="Queue pressure" value={37} gradient="from-amber-500 to-orange-500" />
-            </div>
-          </GlassCard>
-
-          <GlassCard className="p-6">
-            <h3 className="text-sm uppercase tracking-[0.24em] text-gray-500">Interactive card sample</h3>
-            <GlassCard interactive hoverGradient="from-indigo-500 to-purple-500" className="group mt-4 p-5">
-              <p className="text-sm text-gray-600">Hover this card to preview the gradient overlay behavior.</p>
-              <p className="mt-2 text-lg font-semibold text-gray-800">Reusable hover surface</p>
-            </GlassCard>
-          </GlassCard>
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-3">
-          {samplePlatforms.map((platform) => (
-            <PlatformTile key={platform.name} platform={platform} />
-          ))}
-        </section>
+        <GlassCard className="p-6">
+          <h2 className="text-sm uppercase tracking-[0.24em] text-gray-500">Platform tiles</h2>
+          <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            {samplePlatforms.map((platform) => (
+              <PlatformTile key={platform.name} platform={platform} />
+            ))}
+          </div>
+        </GlassCard>
       </div>
-    </LayoutShell>
+    </div>
   );
 }

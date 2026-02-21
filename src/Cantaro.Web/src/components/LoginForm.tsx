@@ -41,16 +41,16 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
   };
 
   return (
-    <div className="space-y-6 text-left text-white">
+    <div className="space-y-6 text-left text-gray-900">
       <div className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Sign in</p>
+        <p className="text-xs uppercase tracking-[0.4em] text-gray-500">Sign in</p>
         <h2 className="text-3xl font-semibold">Welcome back</h2>
-        <p className="text-sm text-slate-400">Authenticate to open your Cantaro workspace.</p>
+        <p className="text-sm text-gray-600">Open your workspace and continue syncing playlists.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium text-slate-200">
+          <label htmlFor="email" className="text-sm font-medium text-gray-700">
             Email
           </label>
           <input
@@ -60,13 +60,13 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             placeholder="you@example.com"
           />
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="password" className="text-sm font-medium text-slate-200">
+          <label htmlFor="password" className="text-sm font-medium text-gray-700">
             Password
           </label>
           <input
@@ -77,13 +77,13 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
             required
             minLength={PASSWORD_MIN_LENGTH}
             autoComplete="current-password"
-            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white placeholder:text-slate-500 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             placeholder="••••••••"
           />
         </div>
 
         {error && (
-          <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
           </div>
         )}
@@ -91,18 +91,18 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
         <button
           type="submit"
           disabled={isLoading}
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-brand-400 to-rose-500 px-4 py-3 text-base font-semibold text-white shadow-[0_20px_60px_rgba(236,72,153,0.35)] transition hover:translate-y-0.5 hover:shadow-[0_30px_80px_rgba(236,72,153,0.45)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-3 text-base font-semibold text-white shadow-[0_18px_40px_rgba(99,102,241,0.35)] transition hover:translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isLoading ? 'Signing you in…' : 'Sign in securely'}
+          {isLoading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
 
-      <p className="text-center text-sm text-slate-400">
+      <p className="text-center text-sm text-gray-600">
         Don't have an account?{' '}
         <button
           type="button"
           onClick={onSwitchToRegister}
-          className="font-semibold text-white underline-offset-4 transition hover:text-brand-200"
+          className="font-semibold text-indigo-700 underline-offset-4 transition hover:text-indigo-500"
         >
           Register instead
         </button>

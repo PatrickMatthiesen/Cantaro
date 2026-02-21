@@ -1,17 +1,71 @@
-import { useState, useEffect, useCallback } from 'react';
-import { syncApi, youtubeApi } from '../services';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { syncApi } from '../services';
 import type { SyncStatusResponse, BatchSyncResponse } from '../services/syncApi';
-import type { YouTubePlaylist } from '../services/youtubeApi';
+import { platformManager } from '../platforms';
+import type { PlatformPlaylist } from '../platforms';
 
 export function SyncButton() {
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
-  const [availablePlaylists, setAvailablePlaylists] = useState<YouTubePlaylist[]>([]);
+  const [availablePlaylists, setAvailablePlaylists] = useState<PlatformPlaylist[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [selectedPlaylists, setSelectedPlaylists] = useState<Set<string>>(new Set());
   const [syncResult, setSyncResult] = useState<BatchSyncResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [statusUpdates, setStatusUpdates] = useState<string[]>([]);
+  const [showStatusDrawer, setShowStatusDrawer] = useState(false);
+
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const milestoneRef = useRef(0);
+
+  const appendStatus = useCallback((message: string) => {
+    setStatusUpdates((previous) => [...previous, message]);
+  }, []);
+
+  const stopProgressSimulation = useCallback(() => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+  }, []);
+
+  const startProgressSimulation = useCallback(
+    (playlistCount: number) => {
+      stopProgressSimulation();
+      milestoneRef.current = 0;
+      setSyncProgress(5);
+      setStatusUpdates([
+        `Preparing sync for ${playlistCount === 0 ? 'all available' : playlistCount.toString()} playlist(s).`,
+      ]);
+      setShowStatusDrawer(true);
+
+      const milestones = [
+        { progress: 15, message: 'Checking sync permissions and current rate limit window.' },
+        { progress: 35, message: 'Fetching latest playlist metadata from YouTube.' },
+        { progress: 55, message: 'Matching tracks to canonical TrackIDs.' },
+        { progress: 75, message: 'Writing playlist updates and finalizing results.' },
+      ];
+
+      progressIntervalRef.current = setInterval(() => {
+        setSyncProgress((previous) => {
+          const next = Math.min(previous + 4, 90);
+
+          while (
+            milestoneRef.current < milestones.length &&
+            next >= milestones[milestoneRef.current].progress
+          ) {
+            appendStatus(milestones[milestoneRef.current].message);
+            milestoneRef.current += 1;
+          }
+
+          return next;
+        });
+      }, 500);
+    },
+    [appendStatus, stopProgressSimulation],
+  );
 
   const loadSyncStatus = useCallback(async () => {
     try {
@@ -21,7 +75,6 @@ export function SyncButton() {
       return status;
     } catch (err) {
       console.error('Failed to load sync status:', err);
-      // Don't treat auth errors as failures - just means no playlists synced yet
       if (err instanceof Error && err.message.includes('Not authenticated')) {
         return null;
       }
@@ -32,7 +85,7 @@ export function SyncButton() {
 
   const loadAvailablePlaylists = useCallback(async () => {
     try {
-      const playlists = await youtubeApi.getPlaylists();
+      const playlists = await platformManager.playlists('youtube', false);
       setAvailablePlaylists(playlists);
     } catch (err) {
       console.error('Failed to load playlists:', err);
@@ -42,27 +95,41 @@ export function SyncButton() {
   useEffect(() => {
     const init = async () => {
       setIsLoading(true);
-      const status = await loadSyncStatus();
+      await loadSyncStatus();
       await loadAvailablePlaylists();
       setIsLoading(false);
-
-      // Auto-sync if needed and allowed
-      if (status?.overall.needsAutoSync && status?.overall.canSyncNow) {
-        console.log('Auto-triggering sync (>24h since last sync)');
-        handleSync(null); // null = sync all
-      }
     };
     init();
-  }, [loadSyncStatus, loadAvailablePlaylists]);
+
+    return () => stopProgressSimulation();
+  }, [loadAvailablePlaylists, loadSyncStatus, stopProgressSimulation]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (!isSyncing) {
+        void loadSyncStatus();
+      }
+    }, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [isSyncing, loadSyncStatus]);
 
   const handleSync = async (playlistIds: string[] | null) => {
-    if (!syncStatus?.overall.canSyncNow) {
+    const latestStatus = await loadSyncStatus();
+    if (!latestStatus?.overall.canSyncNow) {
+      const message =
+        latestStatus?.overall.message ??
+        `Song sync limit reached. Please wait for the ${latestStatus?.overall.windowMinutes ?? 10}-minute window to reset.`;
+      setError(message);
+      appendStatus(`Sync blocked: ${message}`);
+      setShowStatusDrawer(true);
       return;
     }
 
     setIsSyncing(true);
     setSyncResult(null);
     setError(null);
+    startProgressSimulation(playlistIds?.length ?? 0);
 
     try {
       const result = await syncApi.batchSync({
@@ -70,27 +137,28 @@ export function SyncButton() {
         servicePlaylistIds: playlistIds,
       });
 
+      stopProgressSimulation();
+      setSyncProgress(100);
+      appendStatus(
+        `Sync completed. ${result.successCount} playlist(s) succeeded, ${result.failureCount} failed.`,
+      );
+      appendStatus(
+        `Processed ${result.songsSynced}/${result.songsRequested} requested songs in this run.`,
+      );
+
       setSyncResult(result);
-      await loadSyncStatus(); // Refresh status after sync
+      await loadSyncStatus();
       setShowPlaylistSelector(false);
     } catch (err) {
-      console.error('Sync failed:', err);
-      setError(err instanceof Error ? err.message : 'Sync failed');
+      stopProgressSimulation();
+      setSyncProgress(0);
+      const message = err instanceof Error ? err.message : 'Sync failed';
+      setError(message);
+      appendStatus(`Sync failed: ${message}`);
+      await loadSyncStatus();
     } finally {
       setIsSyncing(false);
     }
-  };
-
-  const handleSyncAllClick = () => {
-    handleSync(null);
-  };
-
-  const handleSyncSelectedClick = () => {
-    if (selectedPlaylists.size === 0) {
-      setError('Please select at least one playlist');
-      return;
-    }
-    handleSync(Array.from(selectedPlaylists));
   };
 
   const togglePlaylistSelection = (playlistId: string) => {
@@ -103,166 +171,174 @@ export function SyncButton() {
     setSelectedPlaylists(newSet);
   };
 
-  const formatLastSync = (lastSyncedAt: string | null) => {
-    if (!lastSyncedAt) return 'Never';
-    
-    const date = new Date(lastSyncedAt);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
-    
-    return date.toLocaleDateString();
-  };
-
   if (isLoading) {
     return (
-      <div className="glass-panel p-6">
-        <div className="flex items-center gap-3">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-          <p className="text-sm text-slate-300">Loading sync status...</p>
-        </div>
-      </div>
+      <section className="rounded-3xl border border-white/80 bg-white/70 p-6 text-gray-700 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]">
+        <p className="text-sm">Loading sync controls…</p>
+      </section>
     );
   }
 
-  // If no sync status and no error, user hasn't synced anything yet
   if (!syncStatus && !error) {
     return (
-      <div className="glass-panel p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Playlist sync</p>
-            <p className="mt-2 text-lg font-semibold text-white">No playlists synced yet</p>
-            <p className="mt-1 text-sm text-slate-400">
-              Connect YouTube and sync your first playlist to get started
-            </p>
-          </div>
-        </div>
-      </div>
+      <section className="rounded-3xl border border-white/80 bg-white/70 p-6 text-gray-900 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]">
+        <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Playlist sync</p>
+        <h3 className="mt-2 text-xl font-semibold">Ready when you are</h3>
+        <p className="mt-1 text-sm text-gray-600">Connect a service workspace to start your first sync run.</p>
+      </section>
     );
   }
 
-  const canSync = syncStatus?.overall.canSyncNow && !isSyncing;
+  const songsSyncedInWindow = syncStatus?.overall.songsSyncedInWindow ?? 0;
+  const songSyncLimit = syncStatus?.overall.songSyncLimit ?? 2000;
+  const windowMinutes = syncStatus?.overall.windowMinutes ?? 10;
+  const remainingSongs = syncStatus?.overall.remainingSongsInWindow ?? 0;
+  const windowUsagePercent = Math.min(
+    100,
+    Math.round((songsSyncedInWindow / Math.max(1, songSyncLimit)) * 100),
+  );
+  const canSync = Boolean(syncStatus?.overall.canSyncNow) && !isSyncing;
 
   return (
-    <div className="glass-panel p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Playlist sync</p>
-          <p className="mt-2 text-lg font-semibold text-white">
-            Last sync: {formatLastSync(syncStatus?.overall.lastSyncedAt || null)}
-          </p>
-          {syncStatus?.overall.message && (
-            <p className="mt-1 text-sm text-slate-400">{syncStatus.overall.message}</p>
-          )}
-          {syncStatus?.playlists && syncStatus.playlists.length > 0 && (
-            <p className="mt-1 text-sm text-slate-400">
-              {syncStatus.playlists.length} playlist{syncStatus.playlists.length !== 1 ? 's' : ''} tracked
-            </p>
-          )}
-        </div>
+    <section className="rounded-3xl border border-white/80 bg-white/70 p-6 text-gray-900 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]">
+      <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Playlist sync</p>
+      <h3 className="mt-2 text-xl font-semibold">Keep your playlists aligned</h3>
+      <p className="mt-1 text-sm text-gray-600">
+        Limit: {songSyncLimit.toLocaleString()} songs per {windowMinutes} minutes.
+      </p>
 
-        <div className="flex gap-2">
-          <button
-            onClick={handleSyncAllClick}
-            disabled={!canSync}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {isSyncing ? (
-              <>
-                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-                Syncing...
-              </>
-            ) : (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                </svg>
-                Sync All
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={() => setShowPlaylistSelector(!showPlaylistSelector)}
-            disabled={!canSync}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Select Playlists
-          </button>
+      <div className="mt-4 rounded-2xl bg-white/75 p-4">
+        <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+          <span>Current window usage</span>
+          <span>
+            {songsSyncedInWindow.toLocaleString()} / {songSyncLimit.toLocaleString()} songs
+          </span>
         </div>
+        <div className="h-2 overflow-hidden rounded-full bg-gray-200">
+          <div
+            className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+            style={{ width: `${windowUsagePercent}%` }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-gray-500">{remainingSongs.toLocaleString()} songs remaining in current window.</p>
+        {syncStatus?.overall.message ? (
+          <p className="mt-2 text-xs font-medium text-amber-700">{syncStatus.overall.message}</p>
+        ) : null}
       </div>
 
-      {error && (
-        <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          onClick={() => handleSync(null)}
+          disabled={!canSync}
+          className="rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isSyncing ? `Syncing… ${syncProgress}%` : 'Sync everything'}
+        </button>
+        <button
+          onClick={() => setShowPlaylistSelector(!showPlaylistSelector)}
+          disabled={!canSync}
+          className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Choose playlists
+        </button>
+        <button
+          onClick={() => setShowStatusDrawer((previous) => !previous)}
+          className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+        >
+          {showStatusDrawer ? 'Hide status' : 'Show status'}
+        </button>
+      </div>
+
+      {isSyncing || syncProgress > 0 ? (
+        <div className="mt-4">
+          <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
+            <span>Sync progress</span>
+            <span>{syncProgress}%</span>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 transition-all duration-300"
+              style={{ width: `${syncProgress}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {showStatusDrawer && statusUpdates.length > 0 ? (
+        <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
+          <p className="text-xs uppercase tracking-[0.22em] text-gray-500">Sync status updates</p>
+          <ul className="mt-3 max-h-44 space-y-2 overflow-y-auto text-sm text-gray-700">
+            {statusUpdates.map((update, index) => (
+              <li key={`${update}-${index}`} className="rounded-xl bg-white px-3 py-2">
+                {update}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mt-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
         </div>
-      )}
+      ) : null}
 
-      {syncResult && (
-        <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-          <p className="text-sm font-semibold text-emerald-300">
-            Sync completed: {syncResult.successCount} succeeded, {syncResult.failureCount} failed
-          </p>
-          {syncResult.results.filter(r => !r.success).length > 0 && (
-            <ul className="mt-2 space-y-1 text-xs text-slate-300">
-              {syncResult.results.filter(r => !r.success).map(r => (
-                <li key={r.servicePlaylistId}>
-                  ✗ {r.playlistName}: {r.error}
-                </li>
-              ))}
+      {syncResult ? (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          Processed {syncResult.songsSynced}/{syncResult.songsRequested} requested songs.
+          {syncResult.results.some((result) => !result.success) ? (
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              {syncResult.results
+                .filter((result) => !result.success)
+                .map((result) => (
+                  <li key={result.servicePlaylistId}>
+                    {result.playlistName}: {result.error}
+                  </li>
+                ))}
             </ul>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {showPlaylistSelector && availablePlaylists.length > 0 && (
-        <div className="mt-4 rounded-xl border border-white/10 bg-slate-900/50 p-4">
-          <p className="mb-3 text-sm font-semibold text-white">Select playlists to sync:</p>
-          <div className="max-h-64 space-y-2 overflow-y-auto">
-            {availablePlaylists.map(playlist => (
+      {showPlaylistSelector && availablePlaylists.length > 0 ? (
+        <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
+          <p className="text-sm font-semibold text-gray-800">Choose playlists</p>
+          <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+            {availablePlaylists.map((playlist) => (
               <label
                 key={playlist.id}
-                className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-950/50 p-3 transition hover:border-white/20 hover:bg-slate-950/70"
+                className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 transition hover:border-gray-300"
               >
                 <input
                   type="checkbox"
                   checked={selectedPlaylists.has(playlist.id)}
                   onChange={() => togglePlaylistSelection(playlist.id)}
-                  className="h-4 w-4 rounded border-white/20 bg-white/10 text-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
                 />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-white">{playlist.title}</p>
-                  <p className="text-xs text-slate-400">{playlist.itemCount} tracks</p>
+                  <p className="text-sm font-medium text-gray-800">{playlist.title}</p>
+                  <p className="text-xs text-gray-500">{playlist.itemCount} songs</p>
                 </div>
               </label>
             ))}
           </div>
           <div className="mt-4 flex gap-2">
             <button
-              onClick={handleSyncSelectedClick}
+              onClick={() => handleSync(Array.from(selectedPlaylists))}
               disabled={selectedPlaylists.size === 0 || isSyncing}
-              className="flex-1 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-1 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Sync {selectedPlaylists.size} selected
+              Sync selected
             </button>
             <button
               onClick={() => setShowPlaylistSelector(false)}
-              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10"
+              className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200"
             >
               Cancel
             </button>
           </div>
         </div>
-      )}
-    </div>
+      ) : null}
+    </section>
   );
 }

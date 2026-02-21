@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginForm } from './components/LoginForm';
 import { RegisterForm } from './components/RegisterForm';
@@ -6,7 +6,7 @@ import { UserProfile } from './components/UserProfile';
 import { SyncButton } from './components/SyncButton';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
 import { ComponentsPage } from './pages/ComponentsPage';
-import { youtubeApi } from './services/youtubeApi';
+import { platformManager, type PlatformId } from './platforms';
 import { Design1 } from './designs/Design1';
 import { Design2 } from './designs/Design2';
 import { Design3 } from './designs/Design3';
@@ -16,43 +16,58 @@ import { Design6 } from './designs/Design6';
 import { Design7 } from './designs/Design7';
 import { Design8 } from './designs/Design8';
 import { Design9 } from './designs/Design9';
+import { GlassCard, GradientButton, PlatformTile } from './components/ui/GlassComponents';
 
 type DesignPage = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
 type Page = 'home' | 'youtube' | 'components' | DesignPage;
 
 function resolvePageFromPath(path: string): Page {
-  if (path === '/components') {
-    return 'components';
-  }
+  if (path === '/youtube') return 'youtube';
+  if (path === '/components') return 'components';
 
   const match = path.match(/^\/([1-9])$/);
-  if (match) {
-    return match[1] as DesignPage;
-  }
+  if (match) return match[1] as DesignPage;
 
   return 'home';
 }
 
 function AuthenticatedApp() {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [showRegister, setShowRegister] = useState(false);
   const [currentPage, setCurrentPage] = useState<Page>(() => resolvePageFromPath(window.location.pathname));
   const [hasConnectedAccounts, setHasConnectedAccounts] = useState(false);
   const [isCheckingConnectedAccounts, setIsCheckingConnectedAccounts] = useState(true);
+  const [showAddPlatformMenu, setShowAddPlatformMenu] = useState(false);
+  const addPlatformMenuRef = useRef<HTMLDivElement | null>(null);
 
-  // Handle route changes
+  const navigateTo = useCallback((page: Page) => {
+    setShowAddPlatformMenu(false);
+    setCurrentPage(page);
+    const targetPath = page === 'home' ? '/' : `/${page}`;
+    window.history.pushState({}, '', targetPath);
+  }, []);
+
   useEffect(() => {
-    const handlePopState = () => {
-      setCurrentPage(resolvePageFromPath(window.location.pathname));
-    };
+    const handlePopState = () => setCurrentPage(resolvePageFromPath(window.location.pathname));
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      if (addPlatformMenuRef.current && !addPlatformMenuRef.current.contains(event.target as Node)) {
+        setShowAddPlatformMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
   }, []);
 
   const loadConnectedAccountStatus = useCallback(async () => {
     setIsCheckingConnectedAccounts(true);
     try {
-      const status = await youtubeApi.getStatus();
+      const status = await platformManager.status('youtube');
       setHasConnectedAccounts(status.isConnected);
     } catch {
       setHasConnectedAccounts(false);
@@ -68,98 +83,90 @@ function AuthenticatedApp() {
       return;
     }
 
-    if (currentPage !== 'home') {
-      return;
-    }
-
+    if (currentPage !== 'home') return;
     loadConnectedAccountStatus();
   }, [currentPage, isAuthenticated, loadConnectedAccountStatus]);
 
+  const platformCatalog: Array<{
+    id: PlatformId;
+    name: string;
+    icon: string;
+    gradient: string;
+    implemented: boolean;
+  }> = [
+    { id: 'youtube', name: 'YouTube Music', icon: '▶', gradient: 'from-red-500 to-pink-500', implemented: true },
+    { id: 'spotify', name: 'Spotify', icon: '♫', gradient: 'from-green-400 to-emerald-600', implemented: false },
+    { id: 'apple', name: 'Apple Music', icon: '◉', gradient: 'from-pink-400 to-rose-500', implemented: false },
+    { id: 'tidal', name: 'Tidal', icon: '◈', gradient: 'from-gray-700 to-gray-900', implemented: false },
+  ];
+
+  const connectedPlatformIds = new Set<PlatformId>();
+  if (hasConnectedAccounts) {
+    connectedPlatformIds.add('youtube');
+  }
+
+  const connectedPlatforms = platformCatalog.filter((platform) => connectedPlatformIds.has(platform.id));
+  const platformsToAdd = platformCatalog.filter((platform) => !connectedPlatformIds.has(platform.id));
+
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">
-        <div className="flex items-center gap-4 rounded-3xl border border-white/10 bg-slate-900/60 px-8 py-6 backdrop-blur-xl">
-          <span className="h-3 w-3 animate-pulse rounded-full bg-emerald-400" aria-hidden />
-          <p className="text-lg font-medium tracking-tight">Preparing your Cantaro workspace…</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-800">
+        <GlassCard className="flex items-center gap-3 px-6 py-4">
+          <span className="h-3 w-3 animate-pulse rounded-full bg-indigo-500" aria-hidden />
+          <p className="text-sm font-medium">Loading…</p>
+        </GlassCard>
       </div>
     );
   }
 
   if (!isAuthenticated) {
     return (
-      <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.25),_transparent_45%),_radial-gradient(circle_at_80%_10%,_rgba(236,72,153,0.25),_transparent_45%),_#020617]" aria-hidden />
-        <div className="absolute -left-32 top-10 h-80 w-80 rounded-full bg-brand-500/20 blur-[140px]" aria-hidden />
-        <div className="absolute -right-10 bottom-0 h-[420px] w-[420px] rounded-full bg-rose-500/10 blur-[180px]" aria-hidden />
+      <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+        <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+        <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-        <div className="relative z-10 flex min-h-screen flex-col">
-          <header className="px-6 py-6">
-            <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-lg font-semibold tracking-tight text-white">
-                  CT
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Cantaro</p>
-                  <p className="text-base font-semibold text-white">Unified playlist intelligence</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 text-xs uppercase tracking-[0.4em] text-slate-400">
-                <span>OAuth · PKCE</span>
-                <span className="hidden sm:inline">Encrypted refresh tokens</span>
-              </div>
+        <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pb-16 pt-8">
+          <header className="mb-8 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.35em] text-gray-500">Cantaro</p>
+              <h1 className="mt-1 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-3xl font-bold text-transparent">
+                Playlist workspace
+              </h1>
             </div>
+            <GradientButton tone="soft" onClick={() => navigateTo('components')}>
+              Components
+            </GradientButton>
           </header>
 
-          <main className="mx-auto grid w-full max-w-6xl flex-1 gap-10 px-6 pb-16 pt-6 lg:grid-cols-[1.1fr_0.9fr]">
-            <section className="glass-panel p-10 text-left">
-              <p className="text-xs uppercase tracking-[0.6em] text-slate-400">Cross-platform orchestration</p>
-              <h1 className="mt-5 text-4xl font-semibold leading-tight text-white sm:text-5xl">
-                Stay in sync across YouTube, Spotify, and beyond.
-              </h1>
-              <p className="mt-6 max-w-xl text-lg text-slate-300">
-                Cantaro keeps every playlist tied to a canonical TrackID so mappings, propagation, and conflict handling stay predictable—even when services disagree on metadata.
+          <main className="grid flex-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <GlassCard className="p-8">
+              <h2 className="text-2xl font-semibold text-gray-900">Get started</h2>
+              <p className="mt-2 text-sm text-gray-600">
+                Connect services, sync playlists, and review conflicts when a match needs confirmation.
               </p>
-              <div className="mt-10 grid gap-6 sm:grid-cols-2">
-                {[{
-                  title: 'Track identity graph',
-                  copy: 'Resolve MBID/ISRC collisions, surface ambiguities, and see confidence at a glance.'
-                }, {
-                  title: 'Background workers',
-                  copy: 'Adapters poll, back off, and retry outside the request path while you keep browsing.'
-                }, {
-                  title: 'Secure tokens',
-                  copy: 'Refresh tokens live server-side only, encrypted at rest with rotating keys.'
-                }, {
-                  title: 'Self-host friendly',
-                  copy: 'Run everything through Aspire locally with PostgreSQL plus the React frontend.'
-                }].map((item) => (
-                  <article key={item.title} className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
-                    <h3 className="text-base font-semibold text-white">{item.title}</h3>
-                    <p className="mt-3 text-sm text-slate-300">{item.copy}</p>
-                  </article>
+              <ol className="mt-6 space-y-3">
+                {[
+                  'Create an account and sign in.',
+                  'Connect your first service workspace (Only YouTube is currently being supported, but more are comming soon).',
+                  'Run sync and manage playlist updates from Cantaro.',
+                ].map((item, index) => (
+                  <li key={item} className="flex items-start gap-3 rounded-2xl bg-white/70 p-4">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                      {index + 1}
+                    </span>
+                    <span className="text-sm text-gray-700">{item}</span>
+                  </li>
                 ))}
-              </div>
-              <div className="mt-10 flex flex-wrap gap-4 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                {['Secure OAuth', 'Aspire-powered dev stack', 'No DRM or scraping'].map((badge) => (
-                  <span key={badge} className="rounded-full border border-white/15 px-4 py-2">
-                    {badge}
-                  </span>
-                ))}
-              </div>
-            </section>
+              </ol>
+            </GlassCard>
 
-            <section className="glass-panel p-8 shadow-[0_40px_140px_rgba(2,6,23,0.65)]">
+            <GlassCard className="p-8">
               {showRegister ? (
                 <RegisterForm onSwitchToLogin={() => setShowRegister(false)} />
               ) : (
                 <LoginForm onSwitchToRegister={() => setShowRegister(true)} />
               )}
-              <div className="mt-6 rounded-2xl border border-white/5 bg-white/5 px-4 py-3 text-center text-xs leading-5 text-slate-400">
-                By continuing you agree to Cantaro storing encrypted refresh tokens server-side only.
-              </div>
-            </section>
+            </GlassCard>
           </main>
         </div>
       </div>
@@ -167,14 +174,13 @@ function AuthenticatedApp() {
   }
 
   if (currentPage === 'youtube') {
-    return <YouTubePlaylistsPage onNavigateHome={() => setCurrentPage('home')} />;
+    return <YouTubePlaylistsPage onNavigateHome={() => navigateTo('home')} />;
   }
 
   if (currentPage === 'components') {
     return <ComponentsPage />;
   }
 
-  // Design routes
   if (currentPage === '1') return <Design1 />;
   if (currentPage === '2') return <Design2 />;
   if (currentPage === '3') return <Design3 />;
@@ -186,101 +192,138 @@ function AuthenticatedApp() {
   if (currentPage === '9') return <Design9 />;
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.2),_transparent_55%),_radial-gradient(circle_at_80%_10%,_rgba(236,72,153,0.18),_transparent_55%),_#010b1f]" aria-hidden />
-      <div className="absolute -right-10 top-10 h-72 w-72 rounded-full bg-brand-400/30 blur-[160px]" aria-hidden />
-      <div className="relative z-10 flex min-h-screen flex-col">
-        <header className="px-6 py-6">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-lg font-semibold tracking-tight text-white">
-                CT
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Cantaro</p>
-                <p className="text-base font-semibold text-white">Playlist control center</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setCurrentPage('youtube')}
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 px-5 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 transition hover:border-white/40"
-            >
-              <span className="text-lg">⟶</span>
-              <span>YouTube view</span>
-            </button>
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pb-16 pt-8">
+        <header className="mb-6 flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.35em] text-gray-500">Cantaro</p>
+            <h1 className="mt-1 text-3xl font-bold text-gray-900">Workspace</h1>
           </div>
+          <GradientButton tone="soft" onClick={() => navigateTo('components')}>
+            Components
+          </GradientButton>
         </header>
 
-        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-10 px-6 pb-16 pt-6">
-          <section className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-            <article className="glass-panel p-10">
-              <p className="text-xs uppercase tracking-[0.6em] text-slate-400">Overview</p>
-              <h1 className="mt-4 text-4xl font-semibold text-white sm:text-5xl">
-                Welcome back{user?.email ? `, ${user.email.split('@')[0]}` : ''}.
-              </h1>
-              <p className="mt-4 max-w-2xl text-lg text-slate-300">
-                Every TrackID, playlist entry, and adapter handshake flows through Cantaro so propagation stays deterministic—even across aggressive rate limits.
-              </p>
-              <dl className="mt-8 grid gap-6 sm:grid-cols-3">
-                {[{
-                  label: 'Active playlists',
-                  value: 'Smart syncing',
-                  helper: 'Workers poll quietly in the background.'
-                }, {
-                  label: 'Track identity coverage',
-                  value: 'MBID + ISRC',
-                  helper: 'Heuristics handle tricky edge cases.'
-                }, {
-                  label: 'Local-first tooling',
-                  value: 'Aspire stack',
-                  helper: 'API + DB + frontend with one command.'
-                }].map((item) => (
-                  <div key={item.label} className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                    <dt className="text-xs uppercase tracking-[0.5em] text-slate-400">{item.label}</dt>
-                    <dd className="mt-3 text-lg font-semibold text-white">{item.value}</dd>
-                    <p className="mt-2 text-sm text-slate-400">{item.helper}</p>
+        <main className="grid flex-1 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <section className="space-y-6">
+            <GlassCard className="overflow-visible p-7">
+              <div>
+                <div className="flex items-center justify-between gap-3 w-full sm:w-auto">
+                  <h2 className="text-2xl font-semibold">Platforms</h2>
+                  <div ref={addPlatformMenuRef} className="relative ml-auto self-start">
+                    <GradientButton
+                      type="button"
+                      gradient="from-indigo-500 to-purple-500"
+                      aria-expanded={showAddPlatformMenu}
+                      aria-haspopup="menu"
+                      onClick={() => setShowAddPlatformMenu((previous) => !previous)}
+                    >
+                      + Add Platform
+                    </GradientButton>
+                    {showAddPlatformMenu ? (
+                      <div className="absolute right-0 z-20 mt-2 w-56 rounded-2xl border border-white/80 bg-white/95 p-2 shadow-lg backdrop-blur">
+                        {platformsToAdd.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-gray-500">All platforms are already added.</p>
+                        ) : (
+                          platformsToAdd.map((platform) => (
+                            <button
+                              key={platform.id}
+                              type="button"
+                              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              disabled={!platform.implemented}
+                              onClick={async () => {
+                                if (platform.implemented) {
+                                  setShowAddPlatformMenu(false);
+                                  try {
+                                    await platformManager.connect(platform.id, {
+                                      route: window.location.pathname,
+                                      trigger: 'add-platform-menu',
+                                    });
+                                  } catch {
+                                    setShowAddPlatformMenu(false);
+                                  }
+                                } else {
+                                  setShowAddPlatformMenu(false);
+                                }
+                              }}
+                            >
+                              <span>{platform.name}</span>
+                              <span className="text-xs text-gray-500">
+                                {platform.implemented ? 'Available' : 'Coming soon'}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
                   </div>
-                ))}
-              </dl>
-            </article>
-            <UserProfile />
+                </div>
+                {!hasConnectedAccounts ? (
+                  <div className="mt-5 rounded-2xl bg-white/70 p-4 text-sm text-gray-600">
+                    No platforms connected yet. Click "Add Platform" to connect your first service and start syncing playlists.
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-gray-600">
+                    Connect your music service accounts to sync playlists across platforms.
+                  </p>
+                )}
+              </div>
+
+              {connectedPlatforms.length > 0 ? (
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  {connectedPlatforms.map((platform) => (
+                    <PlatformTile
+                      key={platform.id}
+                      onClick={() => {
+                        if (platform.implemented) {
+                          navigateTo('youtube');
+                        }
+                      }}
+                      platform={{
+                        name: platform.name,
+                        status: 'connected',
+                        tracks: 0,
+                        icon: platform.icon,
+                        gradient: platform.gradient,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : null}
+
+            </GlassCard>
+
+            {!isCheckingConnectedAccounts && hasConnectedAccounts ? (
+              <SyncButton />
+            ) : (
+              <GlassCard className="p-7">
+                <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Service setup</p>
+                <h3 className="mt-2 text-xl font-semibold">Connect your first service</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  Start with YouTube, then add more services as they become available.
+                </p>
+                <div className="mt-4">
+                  <GradientButton gradient="from-red-500 to-rose-500" onClick={() => navigateTo('youtube')}>
+                    Go to YouTube
+                  </GradientButton>
+                </div>
+              </GlassCard>
+            )}
           </section>
 
-          {!isCheckingConnectedAccounts && hasConnectedAccounts && <SyncButton />}
-
-          <section className="grid gap-6 md:grid-cols-2">
-            <article className="glass-panel flex flex-col justify-between bg-gradient-to-br from-red-500/30 via-rose-500/20 to-orange-400/10 p-8 text-left shadow-[0_30px_80px_rgba(244,63,94,0.25)]">
-              <div>
-                <p className="text-xs uppercase tracking-[0.5em] text-white/70">Connected services</p>
-                <h2 className="mt-3 text-2xl font-semibold text-white">Bring YouTube playlists into Cantaro</h2>
-                <p className="mt-4 text-sm text-white/80">
-                  OAuth with PKCE, encrypted refresh tokens, and adapter-level mapping into TrackIDs keep your catalog consistent.
-                </p>
-              </div>
-              <button
-                onClick={() => setCurrentPage('youtube')}
-                className="mt-8 inline-flex items-center justify-center gap-3 rounded-2xl bg-white/15 px-4 py-3 text-sm font-semibold text-white backdrop-blur">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                </svg>
-                Launch YouTube workspace
-              </button>
-            </article>
-            <article className="glass-panel p-8">
-              <p className="text-xs uppercase tracking-[0.5em] text-slate-400">Sync telemetry</p>
-              <h2 className="mt-3 text-2xl font-semibold text-white">Rate limit aware scheduling</h2>
-              <p className="mt-4 text-sm text-slate-300">
-                Background workers track retries, back-pressure, and conflict resolutions. When ambiguity exists, Cantaro keeps the entry flagged until you confirm the mapping.
-              </p>
-              <ul className="mt-6 space-y-4 text-sm text-slate-300">
-                {['Deterministic TrackID-first propagation', 'Explicit "no match" + "ambiguous" states', 'Adapter isolation keeps third-party specifics contained'].map((item) => (
-                  <li key={item} className="flex items-center gap-3">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
-                    {item}
-                  </li>
-                ))}
+          <section className="space-y-6">
+            <UserProfile />
+            <GlassCard className="p-6">
+              <p className="text-xs uppercase tracking-[0.24em] text-gray-500">Workflow notes</p>
+              <ul className="mt-4 space-y-3 text-sm text-gray-700">
+                <li className="rounded-xl bg-white/70 px-3 py-2">Connect your platforms and sync to a single collection.</li>
+                <li className="rounded-xl bg-white/70 px-3 py-2">Sync runs happen on demand and support all or selected playlists.</li>
+                <li className="rounded-xl bg-white/70 px-3 py-2">When a song match is unclear, Cantaro keeps it visible for manual review.</li>
               </ul>
-            </article>
+            </GlassCard>
           </section>
         </main>
       </div>

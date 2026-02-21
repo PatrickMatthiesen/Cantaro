@@ -72,7 +72,7 @@ export function Design3() {
                     </p>
                   </div>
                   <button className="w-full rounded-xl bg-gray-900 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-700">
-                    {platform.status === 'connected' ? 'Open workspace' : 'Connect'}
+                    {platform.status === 'connected' ? `Manage ${platform.name}` : 'Connect Account'}
                   </button>
                 </div>
               </article>

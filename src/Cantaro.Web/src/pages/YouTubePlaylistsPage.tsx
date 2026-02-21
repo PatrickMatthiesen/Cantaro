@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SVGProps } from 'react';
-import { youtubeApi } from '../services/youtubeApi';
-import type { ConnectedAccountStatus, YouTubePlaylist, YouTubePlaylistItem } from '../services/youtubeApi';
+import { platformManager } from '../platforms';
+import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '../platforms';
+import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
 
 function YouTubeIcon({ ariaLabel, ...props }: { ariaLabel?: string } & SVGProps<SVGSVGElement>) {
-  // By default the icon is decorative (aria-hidden=true). If ariaLabel is provided,
-  // expose it to assistive tech by setting role="img" and aria-label.
   return (
     <svg
       width="24"
@@ -27,17 +26,18 @@ interface YouTubePlaylistsPageProps {
 }
 
 export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPageProps) {
-  const [status, setStatus] = useState<ConnectedAccountStatus | null>(null);
-  const [playlists, setPlaylists] = useState<YouTubePlaylist[]>([]);
-  const [selectedPlaylist, setSelectedPlaylist] = useState<YouTubePlaylist | null>(null);
-  const [playlistItems, setPlaylistItems] = useState<YouTubePlaylistItem[]>([]);
+  const [status, setStatus] = useState<PlatformAccountStatus | null>(null);
+  const [playlists, setPlaylists] = useState<PlatformPlaylist[]>([]);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<PlatformPlaylist | null>(null);
+  const [playlistItems, setPlaylistItems] = useState<PlatformSong[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const youtubePlatform = platformManager.getClient('youtube');
 
   const loadStatus = useCallback(async () => {
     try {
-      const statusData = await youtubeApi.getStatus();
+      const statusData = await youtubePlatform.status();
       setStatus(statusData);
       return statusData;
     } catch (err) {
@@ -45,18 +45,18 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
       setError('Failed to check YouTube connection status');
       return null;
     }
-  }, []);
+  }, [youtubePlatform]);
 
   const loadPlaylists = useCallback(async () => {
     try {
-      const playlistsData = await youtubeApi.getPlaylists();
+      const playlistsData = await youtubePlatform.playlists(false);
       setPlaylists(playlistsData);
       setError(null);
     } catch (err) {
       console.error('Failed to load playlists:', err);
       setError(err instanceof Error ? err.message : 'Failed to load playlists');
     }
-  }, []);
+  }, [youtubePlatform]);
 
   useEffect(() => {
     const init = async () => {
@@ -71,24 +71,33 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
   }, [loadStatus, loadPlaylists]);
 
   const handleConnect = () => {
-    window.location.href = youtubeApi.getConnectUrl(window.location.href);
+    void platformManager.connect('youtube', {
+      route: window.location.pathname,
+      trigger: 'youtube-page-connect',
+    });
   };
 
   const handleDisconnect = async () => {
     try {
-      await youtubeApi.disconnect();
-      setStatus({ isConnected: false });
-      setPlaylists([]);
+      await platformManager.disconnect('youtube', {
+        onSuccess: () => {
+          setStatus({ platformId: 'youtube', isConnected: false });
+          setPlaylists([]);
+          setSelectedPlaylist(null);
+          setPlaylistItems([]);
+        },
+      });
+      await loadStatus();
     } catch {
       setError('Failed to disconnect YouTube account');
     }
   };
 
-  const handlePlaylistClick = async (playlist: YouTubePlaylist) => {
+  const handlePlaylistClick = async (playlist: PlatformPlaylist) => {
     setSelectedPlaylist(playlist);
     setIsLoadingItems(true);
     try {
-      const items = await youtubeApi.getPlaylistItems(playlist.id);
+      const items = await playlist.songs();
       setPlaylistItems(items);
       setError(null);
     } catch (err) {
@@ -98,242 +107,176 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
     setIsLoadingItems(false);
   };
 
-  const handleBackToPlaylists = () => {
-    setSelectedPlaylist(null);
-    setPlaylistItems([]);
+  const handleRefreshPlaylists = async () => {
+    try {
+      setIsLoading(true);
+      const refreshedPlaylists = await platformManager.refreshPlaylists('youtube', false);
+      setPlaylists(refreshedPlaylists);
+      setSelectedPlaylist(null);
+      setPlaylistItems([]);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh playlists');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">
-        <div className="flex items-center gap-4 rounded-3xl border border-white/10 bg-slate-900/60 px-8 py-6 backdrop-blur-xl">
-          <span className="h-3 w-3 animate-pulse rounded-full bg-rose-400" aria-hidden />
-          <p className="text-lg font-medium tracking-tight">Fetching your YouTube data…</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
+        <GlassCard className="px-6 py-4">
+          <p className="text-sm text-gray-700">Loading YouTube playlists…</p>
+        </GlassCard>
       </div>
     );
   }
 
-  const EmptyState = ({ message }: { message: string }) => (
-    <div className="rounded-[28px] border border-white/10 bg-white/5 p-10 text-center text-slate-300">
-      <p>{message}</p>
-    </div>
-  );
-
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-50">
-      <div
-        className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(248,113,113,0.18),_transparent_55%),_radial-gradient(circle_at_80%_0,_rgba(59,130,246,0.2),_transparent_50%),_#050714]"
-        aria-hidden
-      />
-      <div className="absolute inset-y-0 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-rose-500/10 blur-[220px]" aria-hidden />
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-gradient-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -bottom-40 -right-20 h-96 w-96 rounded-full bg-gradient-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-      <div className="relative z-10 px-6 pb-16 pt-6">
-        <div className="mx-auto max-w-6xl space-y-8">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <button
-              type="button"
-              onClick={onNavigateHome}
-              className="inline-flex items-center gap-3 rounded-full border border-white/15 px-5 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 transition hover:border-white/40"
-            >
-              <span className="text-lg">←</span>
-              Back to Cantaro
-            </button>
-            <span className="rounded-full border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-rose-100">
-              YouTube workspace
-            </span>
+      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pb-16 pt-8">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.32em] text-gray-500">YouTube</p>
+            <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
           </div>
+          <div className="flex gap-2">
+            <GradientButton tone="soft" onClick={onNavigateHome}>
+              Back to home
+            </GradientButton>
+            {status?.isConnected ? (
+              <GradientButton gradient="from-rose-500 to-red-500" onClick={handleDisconnect}>
+                Disconnect
+              </GradientButton>
+            ) : null}
+          </div>
+        </header>
 
-          <header className="space-y-3 text-left">
-            <p className="text-xs uppercase tracking-[0.5em] text-rose-100/80">Adapter view</p>
-            <h1 className="text-4xl font-semibold text-white">YouTube playlists</h1>
-            <p className="max-w-3xl text-sm text-slate-300">
-              Inspect OAuth status, browse playlists, and drill into entries as Cantaro maps each video back to a canonical TrackID.
-            </p>
-          </header>
+        {error ? (
+          <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
+            {error}
+          </GlassCard>
+        ) : null}
 
-          {error && (
-            <div className="rounded-3xl border border-rose-500/40 bg-rose-500/10 px-6 py-4 text-sm text-rose-200">
-              {error}
+        {!status?.isConnected ? (
+          <GlassCard className="p-8">
+            <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold uppercase text-red-700">
+              <YouTubeIcon /> Not connected
             </div>
-          )}
-
-          {!status?.isConnected ? (
-            <section className="rounded-[32px] border border-white/10 bg-slate-900/80 p-10 text-left">
-              <div 
-                className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200"
-                aria-label="YouTube not connected" 
-              >
-                <YouTubeIcon /> Not connected
-              </div>
-              <h2 className="mt-6 text-3xl font-semibold text-white">Connect your YouTube account</h2>
-              <p className="mt-4 max-w-2xl text-sm text-slate-300">
-                We use Authorization Code flow and store refresh tokens encrypted at rest inside Cantaro—never in the browser or extension.
-              </p>
-              <div className="mt-8 grid gap-4 md:grid-cols-3">
-                {['Secure OAuth redirect', 'Encrypted refresh token', 'Adapter-level rate limiting'].map((item) => (
-                  <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm text-slate-200">
-                    {item}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-10 flex flex-wrap items-center gap-4">
-                <button
-                  onClick={handleConnect}
-                  className="inline-flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-red-500 to-rose-500 px-6 py-3 text-base font-semibold text-white shadow-[0_20px_60px_rgba(244,63,94,0.45)] transition hover:translate-y-0.5"
-                >
-                  <YouTubeIcon />
-                  Connect with YouTube
-                </button>
-                <p className="text-xs text-slate-400">You will be redirected to accounts.google.com</p>
-              </div>
-            </section>
-          ) : selectedPlaylist ? (
-            <section className="space-y-6">
+            <h2 className="mt-4 text-2xl font-semibold">Connect YouTube to begin</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Once connected, you can browse playlists and sync them through Cantaro.
+            </p>
+            <div className="mt-5">
+              <GradientButton gradient="from-red-500 to-rose-500" onClick={handleConnect}>
+                Connect with YouTube
+              </GradientButton>
+            </div>
+          </GlassCard>
+        ) : selectedPlaylist ? (
+          <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+            <GlassCard className="p-5">
               <button
                 type="button"
-                onClick={handleBackToPlaylists}
-                className="inline-flex items-center gap-3 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 transition hover:border-white/40"
+                onClick={() => {
+                  setSelectedPlaylist(null);
+                  setPlaylistItems([]);
+                }}
+                className="mb-4 text-sm font-semibold text-indigo-700 hover:text-indigo-500"
               >
                 ← All playlists
               </button>
-
-              <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-                <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 text-left">
-                  {selectedPlaylist.thumbnailUrl ? (
-                    <img
-                      src={selectedPlaylist.thumbnailUrl}
-                      alt={selectedPlaylist.title}
-                      className="h-56 w-full rounded-2xl object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="flex h-56 w-full items-center justify-center rounded-2xl bg-white/5"
-                      role="img"
-                      aria-label="No playlist thumbnail available"
-                    >
-                      <YouTubeIcon />
-                    </div>
-                  )}
-                  <h2 className="mt-6 text-2xl font-semibold text-white">{selectedPlaylist.title}</h2>
-                  <p className="mt-2 text-sm text-slate-300">
-                    {selectedPlaylist.itemCount} videos ·{' '}
-                    {selectedPlaylist.publishedAt
-                      ? new Date(selectedPlaylist.publishedAt).toLocaleDateString()
-                      : 'Unknown publish date'}
-                  </p>
-                  {selectedPlaylist.description && (
-                    <p className="mt-3 text-sm text-slate-400">
-                      {selectedPlaylist.description}
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-[28px] border border-white/10 bg-slate-900/70 p-4 backdrop-blur">
-                  {isLoadingItems ? (
-                    <div className="flex h-64 items-center justify-center text-slate-300">
-                      Loading playlist items…
-                    </div>
-                  ) : playlistItems.length === 0 ? (
-                    <EmptyState message="No videos in this playlist" />
-                  ) : (
-                    <ol className="space-y-2 text-left">
-                      {playlistItems.map((item, index) => (
-                        <li
-                          key={item.videoId}
-                          className="flex items-center gap-4 rounded-2xl border border-white/5 bg-white/5 p-3"
-                        >
-                          <span className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">
-                            {String(index + 1).padStart(2, '0')}
-                          </span>
-                          {item.thumbnailUrl ? (
-                            <img
-                              src={item.thumbnailUrl}
-                              alt=""
-                              className="h-16 w-28 rounded-xl object-cover"
-                            />
-                          ) : (
-                            <div className="h-16 w-28 rounded-xl bg-white/10" aria-hidden />
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-white line-clamp-2">{item.title}</p>
-                            {item.channelTitle && (
-                              <p className="text-xs text-slate-400">{item.channelTitle}</p>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                </div>
-              </div>
-            </section>
-          ) : (
-            <section className="space-y-6">
-              <div className="rounded-[32px] border border-white/10 bg-white/5 p-6 text-left">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.5em] text-emerald-300/80">Connected</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-white">
-                      {status.displayName ?? 'YouTube account'}
-                    </h2>
-                    <p className="text-sm text-slate-400">
-                      External ID: {status.externalAccountId ?? 'Unavailable'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleDisconnect}
-                    className="rounded-full border border-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-200 transition hover:border-white/40"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-                {status.connectedAt && (
-                  <p className="mt-4 text-xs uppercase tracking-[0.4em] text-slate-400">
-                    Connected · {new Date(status.connectedAt).toLocaleString()}
-                  </p>
-                )}
-              </div>
-
-              {playlists.length === 0 ? (
-                <EmptyState message="No playlists found on your YouTube account." />
+              {selectedPlaylist.thumbnailUrl ? (
+                <img
+                  src={selectedPlaylist.thumbnailUrl}
+                  alt={selectedPlaylist.title}
+                  className="h-52 w-full rounded-2xl object-cover"
+                />
               ) : (
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                  {playlists.map((playlist) => (
-                    <button
-                      key={playlist.id}
-                      onClick={() => handlePlaylistClick(playlist)}
-                      className="group overflow-hidden rounded-[28px] border border-white/10 bg-slate-900/60 text-left transition hover:-translate-y-1 hover:border-white/30"
-                    >
-                      {playlist.thumbnailUrl ? (
-                        <img
-                          src={playlist.thumbnailUrl}
-                          alt={playlist.title}
-                          className="h-48 w-full object-cover"
-                        />
-                      ) : (
-                        <div
-                          className="flex h-48 w-full items-center justify-center bg-white/5"
-                          role="img"
-                          aria-label="No playlist thumbnail available"
-                        >
-                          <YouTubeIcon />
-                        </div>
-                      )}
-                      <div className="space-y-3 px-6 py-5">
-                        <h3 className="text-lg font-semibold text-white line-clamp-1">{playlist.title}</h3>
-                        <p className="text-sm text-slate-400">{playlist.itemCount} videos</p>
-                        {playlist.description && (
-                          <p className="text-xs text-slate-500 line-clamp-2">{playlist.description}</p>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                <div className="flex h-52 w-full items-center justify-center rounded-2xl bg-white/70 text-gray-500">
+                  <YouTubeIcon ariaLabel="Playlist thumbnail not available" />
                 </div>
               )}
-            </section>
-          )}
-        </div>
+              <h2 className="mt-4 text-xl font-semibold">{selectedPlaylist.title}</h2>
+              {selectedPlaylist.description ? (
+                <p className="mt-2 text-sm text-gray-600">{selectedPlaylist.description}</p>
+              ) : null}
+            </GlassCard>
+
+            <GlassCard className="p-4">
+              {isLoadingItems ? (
+                <p className="p-6 text-sm text-gray-600">Loading playlist items…</p>
+              ) : playlistItems.length === 0 ? (
+                <p className="p-6 text-sm text-gray-600">This playlist has no items yet.</p>
+              ) : (
+                <ol className="space-y-2">
+                  {playlistItems.map((item, index) => (
+                    <li key={item.id} className="flex items-center gap-3 rounded-xl bg-white/70 p-3">
+                      <span className="w-6 text-xs font-semibold text-gray-500">{index + 1}</span>
+                      {item.thumbnailUrl ? (
+                        <img src={item.thumbnailUrl} alt="" className="h-14 w-24 rounded-lg object-cover" />
+                      ) : (
+                        <div className="h-14 w-24 rounded-lg bg-white" aria-hidden />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 text-sm font-medium text-gray-800">{item.title}</p>
+                        {item.artistName ? (
+                          <p className="text-xs text-gray-500">{item.artistName}</p>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </GlassCard>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <GlassCard className="p-5">
+              <p className="text-sm text-gray-600">
+                Connected as <span className="font-semibold text-gray-900">{status.displayName ?? 'YouTube account'}</span>
+              </p>
+              <div className="mt-4">
+                <GradientButton tone="soft" onClick={() => void handleRefreshPlaylists()}>
+                  Refresh playlists
+                </GradientButton>
+              </div>
+            </GlassCard>
+
+            {playlists.length === 0 ? (
+              <GlassCard className="p-6">
+                <p className="text-sm text-gray-600">No playlists found in this account.</p>
+              </GlassCard>
+            ) : (
+              <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {playlists.map((playlist) => (
+                  <button
+                    key={playlist.id}
+                    onClick={() => handlePlaylistClick(playlist)}
+                    className="group overflow-hidden rounded-3xl border border-white/80 bg-white/70 text-left shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px] transition-transform hover:scale-[1.01]"
+                  >
+                    {playlist.thumbnailUrl ? (
+                      <img src={playlist.thumbnailUrl} alt={playlist.title} className="h-44 w-full object-cover" />
+                    ) : (
+                      <div className="flex h-44 w-full items-center justify-center bg-white text-gray-500" aria-hidden>
+                        <YouTubeIcon />
+                      </div>
+                    )}
+                    <div className="p-4">
+                      <h3 className="line-clamp-1 text-lg font-semibold text-gray-900">{playlist.title}</h3>
+                      {playlist.description ? (
+                        <p className="mt-2 line-clamp-2 text-sm text-gray-600">{playlist.description}</p>
+                      ) : null}
+                    </div>
+                  </button>
+                ))}
+              </section>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
