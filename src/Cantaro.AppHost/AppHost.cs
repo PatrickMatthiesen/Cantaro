@@ -9,6 +9,7 @@ var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: tr
 // Add PostgreSQL database
 var postgres = builder.AddPostgres("postgres")
     .WithLifetime(ContainerLifetime.Persistent)
+    .WithContainerName("cantaro-postgres")
     .WithHostPort(5432)
     .WithPgAdmin();
 var db = postgres.AddDatabase("cantaro-db");
