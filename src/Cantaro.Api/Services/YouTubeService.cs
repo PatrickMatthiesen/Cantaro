@@ -8,6 +8,7 @@ using Google.Apis.YouTube.v3;
 using Google.Apis.YouTube.v3.Data;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
+using System.Xml;
 
 namespace Cantaro.Api.Services;
 
@@ -36,6 +37,7 @@ public class YouTubePlaylistItemDto
     public string? ChannelTitle { get; set; }
     public int Position { get; set; }
     public DateTimeOffset? PublishedAt { get; set; }
+    public int? DurationSeconds { get; set; }
 }
 
 /// <summary>
@@ -344,6 +346,15 @@ public class YouTubeService
 
             if (response.Items != null)
             {
+                var videoIds = response.Items
+                    .Select(item => item?.ContentDetails?.VideoId)
+                    .Where(videoId => !string.IsNullOrWhiteSpace(videoId))
+                    .Cast<string>()
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                var durationsByVideoId = await GetDurationsByVideoIdAsync(youtubeService, videoIds);
+
                 foreach (var item in response.Items)
                 {
                     if (item == null)
@@ -358,6 +369,12 @@ public class YouTubeService
                         continue;
                     }
 
+                    if (string.IsNullOrWhiteSpace(item.ContentDetails?.VideoId))
+                    {
+                        _logger.LogWarning("Encountered playlist item without a video ID for user {UserId}, playlist ID {PlaylistId}", userId, playlistId);
+                        continue;
+                    }
+
                     items.Add(new YouTubePlaylistItemDto
                     {
                         VideoId = item.ContentDetails.VideoId,
@@ -367,7 +384,11 @@ public class YouTubeService
                             ?? item.Snippet.Thumbnails?.Default__?.Url,
                         ChannelTitle = item.Snippet.VideoOwnerChannelTitle,
                         Position = (int)(item.Snippet.Position ?? 0),
-                        PublishedAt = ParsePublishedAtRaw(item.Snippet?.PublishedAtRaw)
+                        PublishedAt = ParsePublishedAtRaw(item.Snippet?.PublishedAtRaw),
+                        DurationSeconds = item.ContentDetails?.VideoId != null &&
+                            durationsByVideoId.TryGetValue(item.ContentDetails.VideoId, out var durationSeconds)
+                            ? durationSeconds
+                            : null
                     });
                 }
             }
@@ -376,6 +397,48 @@ public class YouTubeService
         } while (!string.IsNullOrEmpty(nextPageToken));
 
         return items;
+    }
+
+    private async Task<Dictionary<string, int>> GetDurationsByVideoIdAsync(
+        Google.Apis.YouTube.v3.YouTubeService youtubeService,
+        IReadOnlyCollection<string> videoIds)
+    {
+        if (videoIds.Count == 0)
+        {
+            return [];
+        }
+
+        var request = youtubeService.Videos.List("contentDetails");
+        request.Id = string.Join(",", videoIds);
+        request.MaxResults = videoIds.Count;
+
+        var response = await request.ExecuteAsync();
+        var durations = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        if (response.Items == null)
+        {
+            return durations;
+        }
+
+        foreach (var video in response.Items)
+        {
+            if (string.IsNullOrWhiteSpace(video.Id) || string.IsNullOrWhiteSpace(video.ContentDetails?.Duration))
+            {
+                continue;
+            }
+
+            try
+            {
+                var duration = XmlConvert.ToTimeSpan(video.ContentDetails.Duration);
+                durations[video.Id] = (int)Math.Round(duration.TotalSeconds, MidpointRounding.AwayFromZero);
+            }
+            catch (FormatException ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse YouTube duration '{Duration}' for video {VideoId}", video.ContentDetails.Duration, video.Id);
+            }
+        }
+
+        return durations;
     }
 
     private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(ConnectedServiceAccount account)

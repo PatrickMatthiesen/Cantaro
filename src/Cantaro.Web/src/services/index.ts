@@ -1,3 +1,3 @@
 export * from './authApi';
-export * from './youtubeApi';
 export * from './syncApi';
+export * from './matchingApi';

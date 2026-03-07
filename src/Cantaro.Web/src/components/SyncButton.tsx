@@ -2,9 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { syncApi } from '../services';
 import type { SyncStatusResponse, BatchSyncResponse } from '../services/syncApi';
 import { platformManager } from '../platforms';
-import type { PlatformPlaylist } from '../platforms';
+import type { PlatformId, PlatformPlaylist } from '../platforms';
 
-export function SyncButton() {
+interface SyncButtonProps {
+  platformId: PlatformId;
+  platformName: string;
+}
+
+export function SyncButton({ platformId, platformName }: SyncButtonProps) {
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
   const [availablePlaylists, setAvailablePlaylists] = useState<PlatformPlaylist[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,7 +48,7 @@ export function SyncButton() {
 
       const milestones = [
         { progress: 15, message: 'Checking sync permissions and current rate limit window.' },
-        { progress: 35, message: 'Fetching latest playlist metadata from YouTube.' },
+        { progress: 35, message: `Fetching latest playlist metadata from ${platformName}.` },
         { progress: 55, message: 'Matching tracks to canonical TrackIDs.' },
         { progress: 75, message: 'Writing playlist updates and finalizing results.' },
       ];
@@ -64,12 +69,12 @@ export function SyncButton() {
         });
       }, 500);
     },
-    [appendStatus, stopProgressSimulation],
+    [appendStatus, platformName, stopProgressSimulation],
   );
 
   const loadSyncStatus = useCallback(async () => {
     try {
-      const status = await syncApi.getSyncStatus();
+      const status = await syncApi.getSyncStatus(platformId);
       setSyncStatus(status);
       setError(null);
       return status;
@@ -81,16 +86,16 @@ export function SyncButton() {
       setError(err instanceof Error ? err.message : 'Failed to load sync status');
       return null;
     }
-  }, []);
+  }, [platformId]);
 
   const loadAvailablePlaylists = useCallback(async () => {
     try {
-      const playlists = await platformManager.playlists('youtube', false);
+      const playlists = await platformManager.playlists(platformId, false);
       setAvailablePlaylists(playlists);
     } catch (err) {
       console.error('Failed to load playlists:', err);
     }
-  }, []);
+  }, [platformId]);
 
   useEffect(() => {
     const init = async () => {
@@ -133,7 +138,7 @@ export function SyncButton() {
 
     try {
       const result = await syncApi.batchSync({
-        service: 'youtube',
+        service: platformId,
         servicePlaylistIds: playlistIds,
       });
 
@@ -204,7 +209,7 @@ export function SyncButton() {
       <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Playlist sync</p>
       <h3 className="mt-2 text-xl font-semibold">Keep your playlists aligned</h3>
       <p className="mt-1 text-sm text-gray-600">
-        Limit: {songSyncLimit.toLocaleString()} songs per {windowMinutes} minutes.
+        {platformName} limit: {songSyncLimit.toLocaleString()} songs per {windowMinutes} minutes.
       </p>
 
       <div className="mt-4 rounded-2xl bg-white/75 p-4">

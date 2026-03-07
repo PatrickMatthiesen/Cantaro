@@ -15,6 +15,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<ConnectedServiceAccount> ConnectedServiceAccounts => Set<ConnectedServiceAccount>();
     public DbSet<Track> Tracks => Set<Track>();
     public DbSet<TrackSourceId> TrackSourceIds => Set<TrackSourceId>();
+    public DbSet<TrackObservation> TrackObservations => Set<TrackObservation>();
+    public DbSet<TrackResolutionCandidate> TrackResolutionCandidates => Set<TrackResolutionCandidate>();
     public DbSet<Playlist> Playlists => Set<Playlist>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
@@ -72,6 +74,38 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<TrackObservation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new { e.SourceType, e.ExternalId })
+                .IsUnique();
+
+            entity.HasIndex(e => e.MatchStatus);
+
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Track)
+                .WithMany()
+                .HasForeignKey(e => e.TrackId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasMany(e => e.Candidates)
+                .WithOne(c => c.TrackObservation)
+                .HasForeignKey(c => c.TrackObservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TrackResolutionCandidate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => new { e.TrackObservationId, e.Score });
+        });
+
         modelBuilder.Entity<Playlist>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -102,6 +136,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(t => t.PlaylistEntries)
                 .HasForeignKey(e => e.TrackId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.TrackObservation)
+                .WithMany(o => o.PlaylistEntries)
+                .HasForeignKey(e => e.TrackObservationId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ServicePlaylistMapping>(entity =>

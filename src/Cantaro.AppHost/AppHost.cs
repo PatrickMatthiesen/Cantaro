@@ -22,10 +22,14 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WaitFor(db);
 
 // Add frontend
+#pragma warning disable ASPIRECERTIFICATES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithReference(api)
     .WaitFor(api)
-    .WithEndpoint("http", c => { c.IsExternal = true; c.Port = 8080; c.TargetPort = 5173; c.UriScheme = "http"; });
+    // .WithEndpoint("http", c => { c.IsExternal = true; c.Port = 8080; c.TargetPort = 5173; c.UriScheme = "http"; })
+    // .WithHttpsEndpoint(port: 8443, targetPort: 5173, name: "https")
+    .WithHttpsDeveloperCertificate();
+#pragma warning restore ASPIRECERTIFICATES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 // Add frontend reference to API for OAuth redirects
 api.WithReference(frontend);

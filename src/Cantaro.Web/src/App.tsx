@@ -6,7 +6,9 @@ import { UserProfile } from './components/UserProfile';
 import { SyncButton } from './components/SyncButton';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
 import { ComponentsPage } from './pages/ComponentsPage';
+import { MatchingReviewPage } from './pages/MatchingReviewPage';
 import { platformManager, type PlatformId } from './platforms';
+import { platformCatalog } from './platforms/catalog';
 import { Design1 } from './designs/Design1';
 import { Design2 } from './designs/Design2';
 import { Design3 } from './designs/Design3';
@@ -19,10 +21,12 @@ import { Design9 } from './designs/Design9';
 import { GlassCard, GradientButton, PlatformTile } from './components/ui/GlassComponents';
 
 type DesignPage = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-type Page = 'home' | 'youtube' | 'components' | DesignPage;
+type Page = 'home' | 'matching' | 'components' | DesignPage | PlatformId;
 
 function resolvePageFromPath(path: string): Page {
-  if (path === '/youtube') return 'youtube';
+  const platformPath = path.slice(1) as PlatformId;
+  if (platformCatalog.some((platform) => platform.id === platformPath)) return platformPath;
+  if (path === '/matching') return 'matching';
   if (path === '/components') return 'components';
 
   const match = path.match(/^\/([1-9])$/);
@@ -35,7 +39,7 @@ function AuthenticatedApp() {
   const { isAuthenticated, isLoading } = useAuth();
   const [showRegister, setShowRegister] = useState(false);
   const [currentPage, setCurrentPage] = useState<Page>(() => resolvePageFromPath(window.location.pathname));
-  const [hasConnectedAccounts, setHasConnectedAccounts] = useState(false);
+  const [connectedPlatformIds, setConnectedPlatformIds] = useState<PlatformId[]>([]);
   const [isCheckingConnectedAccounts, setIsCheckingConnectedAccounts] = useState(true);
   const [showAddPlatformMenu, setShowAddPlatformMenu] = useState(false);
   const addPlatformMenuRef = useRef<HTMLDivElement | null>(null);
@@ -67,10 +71,21 @@ function AuthenticatedApp() {
   const loadConnectedAccountStatus = useCallback(async () => {
     setIsCheckingConnectedAccounts(true);
     try {
-      const status = await platformManager.status('youtube');
-      setHasConnectedAccounts(status.isConnected);
+      const implementedPlatforms = platformCatalog.filter((platform) => platform.implemented);
+      const statuses = await Promise.all(
+        implementedPlatforms.map(async (platform) => {
+          try {
+            const status = await platformManager.status(platform.id);
+            return status.isConnected ? platform.id : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      setConnectedPlatformIds(statuses.filter((platformId): platformId is PlatformId => platformId !== null));
     } catch {
-      setHasConnectedAccounts(false);
+      setConnectedPlatformIds([]);
     } finally {
       setIsCheckingConnectedAccounts(false);
     }
@@ -78,7 +93,7 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setHasConnectedAccounts(false);
+      setConnectedPlatformIds([]);
       setIsCheckingConnectedAccounts(false);
       return;
     }
@@ -87,26 +102,13 @@ function AuthenticatedApp() {
     loadConnectedAccountStatus();
   }, [currentPage, isAuthenticated, loadConnectedAccountStatus]);
 
-  const platformCatalog: Array<{
-    id: PlatformId;
-    name: string;
-    icon: string;
-    gradient: string;
-    implemented: boolean;
-  }> = [
-    { id: 'youtube', name: 'YouTube Music', icon: '▶', gradient: 'from-red-500 to-pink-500', implemented: true },
-    { id: 'spotify', name: 'Spotify', icon: '♫', gradient: 'from-green-400 to-emerald-600', implemented: false },
-    { id: 'apple', name: 'Apple Music', icon: '◉', gradient: 'from-pink-400 to-rose-500', implemented: false },
-    { id: 'tidal', name: 'Tidal', icon: '◈', gradient: 'from-gray-700 to-gray-900', implemented: false },
-  ];
-
-  const connectedPlatformIds = new Set<PlatformId>();
-  if (hasConnectedAccounts) {
-    connectedPlatformIds.add('youtube');
-  }
-
-  const connectedPlatforms = platformCatalog.filter((platform) => connectedPlatformIds.has(platform.id));
-  const platformsToAdd = platformCatalog.filter((platform) => !connectedPlatformIds.has(platform.id));
+  const connectedPlatformIdSet = new Set(connectedPlatformIds);
+  const hasConnectedAccounts = connectedPlatformIds.length > 0;
+  const primaryConnectedPlatform = connectedPlatformIds[0] ?? 'youtube';
+  const primaryConnectedPlatformDetails =
+    platformCatalog.find((platform) => platform.id === primaryConnectedPlatform) ?? platformCatalog[0];
+  const connectedPlatforms = platformCatalog.filter((platform) => connectedPlatformIdSet.has(platform.id));
+  const platformsToAdd = platformCatalog.filter((platform) => !connectedPlatformIdSet.has(platform.id));
 
   if (isLoading) {
     return (
@@ -174,7 +176,11 @@ function AuthenticatedApp() {
   }
 
   if (currentPage === 'youtube') {
-    return <YouTubePlaylistsPage onNavigateHome={() => navigateTo('home')} />;
+    return <YouTubePlaylistsPage onNavigateHome={() => navigateTo('home')} onNavigateMatching={() => navigateTo('matching')} />;
+  }
+
+  if (currentPage === 'matching') {
+    return <MatchingReviewPage onNavigateHome={() => navigateTo('home')} />;
   }
 
   if (currentPage === 'components') {
@@ -279,7 +285,7 @@ function AuthenticatedApp() {
                       key={platform.id}
                       onClick={() => {
                         if (platform.implemented) {
-                          navigateTo('youtube');
+                          navigateTo(platform.id);
                         }
                       }}
                       platform={{
@@ -297,7 +303,10 @@ function AuthenticatedApp() {
             </GlassCard>
 
             {!isCheckingConnectedAccounts && hasConnectedAccounts ? (
-              <SyncButton />
+              <SyncButton
+                platformId={primaryConnectedPlatform}
+                platformName={primaryConnectedPlatformDetails.name}
+              />
             ) : (
               <GlassCard className="p-7">
                 <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Service setup</p>
@@ -316,16 +325,21 @@ function AuthenticatedApp() {
 
           <section className="space-y-6">
             <UserProfile />
-            <GlassCard className="p-6">
-              <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Workflow notes</p>
-              <ul className="mt-4 space-y-3 text-sm text-gray-700">
-                <li className="rounded-xl bg-white/70 px-3 py-2">Connect your platforms and sync to a single collection.</li>
-                <li className="rounded-xl bg-white/70 px-3 py-2">Sync runs happen on demand and support all or selected playlists.</li>
-                <li className="rounded-xl bg-white/70 px-3 py-2">When a song match is unclear, Cantaro keeps it visible for manual review.</li>
-              </ul>
-            </GlassCard>
-          </section>
-        </main>
+              <GlassCard className="p-6">
+                <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Workflow notes</p>
+                <ul className="mt-4 space-y-3 text-sm text-gray-700">
+                  <li className="rounded-xl bg-white/70 px-3 py-2">Connect your platforms and sync to a single collection.</li>
+                  <li className="rounded-xl bg-white/70 px-3 py-2">Sync runs happen on demand and support all or selected playlists.</li>
+                  <li className="rounded-xl bg-white/70 px-3 py-2">When a song match is unclear, Cantaro keeps it visible for manual review.</li>
+                </ul>
+                <div className="mt-4">
+                  <GradientButton tone="soft" onClick={() => navigateTo('matching')}>
+                    Review matching queue
+                  </GradientButton>
+                </div>
+              </GlassCard>
+            </section>
+          </main>
       </div>
     </div>
   );
