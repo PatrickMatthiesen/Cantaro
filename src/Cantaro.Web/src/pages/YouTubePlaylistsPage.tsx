@@ -23,9 +23,10 @@ function YouTubeIcon({ ariaLabel, ...props }: { ariaLabel?: string } & SVGProps<
 
 interface YouTubePlaylistsPageProps {
   onNavigateHome: () => void;
+  onNavigateMatching: () => void;
 }
 
-export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPageProps) {
+export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: YouTubePlaylistsPageProps) {
   const [status, setStatus] = useState<PlatformAccountStatus | null>(null);
   const [playlists, setPlaylists] = useState<PlatformPlaylist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<PlatformPlaylist | null>(null);
@@ -146,6 +147,9 @@ export function YouTubePlaylistsPage({ onNavigateHome }: YouTubePlaylistsPagePro
           <div className="flex gap-2">
             <GradientButton tone="soft" onClick={onNavigateHome}>
               Back to home
+            </GradientButton>
+            <GradientButton tone="soft" onClick={onNavigateMatching}>
+              Review matches
             </GradientButton>
             {status?.isConnected ? (
               <GradientButton gradient="from-rose-500 to-red-500" onClick={handleDisconnect}>

@@ -45,8 +45,9 @@ export interface BatchSyncResponse {
 }
 
 export const syncApi = {
-  async getSyncStatus(): Promise<SyncStatusResponse> {
-    const response = await fetch('/api/sync/status', {
+  async getSyncStatus(service?: string): Promise<SyncStatusResponse> {
+    const query = service ? `?service=${encodeURIComponent(service)}` : '';
+    const response = await fetch(`/api/sync/status${query}`, {
       credentials: 'include',
     });
 

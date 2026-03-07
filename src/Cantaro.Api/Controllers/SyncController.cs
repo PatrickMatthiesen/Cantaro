@@ -102,26 +102,22 @@ public class SyncController : ControllerBase
     // so that, even in edge cases (e.g. large initial sync or retries), a single run cannot contribute
     // more than twice the allowed per-window usage.
     private const int MaxSongsCountedPerSyncRun = SongSyncLimitPerWindow * 2;
-    private const string DefaultService = "youtube";
     private static readonly ConcurrentDictionary<string, SyncUsageBucket> _syncUsageByUserAndService = new();
 
     private readonly ApplicationDbContext _dbContext;
     private readonly UserManager<User> _userManager;
-    private readonly YouTubePlaylistSyncService _youtubeSyncService;
-    private readonly YouTubeService _youtubeService;
+    private readonly IPlatformRegistry _platformRegistry;
     private readonly ILogger<SyncController> _logger;
 
     public SyncController(
         ApplicationDbContext dbContext,
         UserManager<User> userManager,
-        YouTubePlaylistSyncService youtubeSyncService,
-        YouTubeService youtubeService,
+        IPlatformRegistry platformRegistry,
         ILogger<SyncController> logger)
     {
         _dbContext = dbContext;
         _userManager = userManager;
-        _youtubeSyncService = youtubeSyncService;
-        _youtubeService = youtubeService;
+        _platformRegistry = platformRegistry;
         _logger = logger;
     }
 
@@ -129,7 +125,7 @@ public class SyncController : ControllerBase
     /// Get sync status for all playlists
     /// </summary>
     [HttpGet("status")]
-    public async Task<ActionResult<SyncStatusResponse>> GetSyncStatus(CancellationToken cancellationToken)
+    public async Task<ActionResult<SyncStatusResponse>> GetSyncStatus([FromQuery] string? service, CancellationToken cancellationToken)
     {
         try
         {
@@ -155,7 +151,16 @@ public class SyncController : ControllerBase
             // Calculate overall status
             var lastSync = mappings.MaxBy(m => m.LastSyncedAt)?.LastSyncedAt;
             var now = DateTimeOffset.UtcNow;
-            var throttleStatus = BuildSyncThrottleStatus(userId, DefaultService, now);
+            var resolvedService = ResolveServiceForStatus(service, mappings.Select(m => m.Service));
+            var throttleStatus = resolvedService is null
+                ? new SyncThrottleStatus
+                {
+                    Usage = 0,
+                    Remaining = SongSyncLimitPerWindow,
+                    CanSyncNow = false,
+                    Message = "No supported platform is available for sync."
+                }
+                : BuildSyncThrottleStatus(userId, resolvedService, now);
             bool needsAutoSync = lastSync == null || (now - lastSync.Value).TotalHours >= 24;
 
             return Ok(new SyncStatusResponse
@@ -193,32 +198,39 @@ public class SyncController : ControllerBase
         {
             var userId = await GetCurrentUserIdAsync();
 
-            // Validate service
-            if (request.Service != "youtube")
+            if (string.IsNullOrWhiteSpace(request.Service))
+            {
+                return BadRequest(new { error = "Service is required" });
+            }
+
+            var normalizedService = request.Service.ToLowerInvariant();
+            if (!_platformRegistry.IsSupported(normalizedService))
             {
                 return BadRequest(new { error = $"Service '{request.Service}' not supported yet" });
             }
 
+            var platform = _platformRegistry.GetRequired(normalizedService);
+
             var now = DateTimeOffset.UtcNow;
             // Get playlists to sync
             List<string> playlistIdsToSync;
-            var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(userId);
-             
+            var playlists = await platform.GetPlaylistsAsync(userId);
+
             if (request.ServicePlaylistIds == null || request.ServicePlaylistIds.Count == 0)
             {
                 // Sync all playlists
-                playlistIdsToSync = youtubePlaylists.Select(p => p.Id).ToList();
-                _logger.LogInformation("Syncing all {Count} YouTube playlists for user {UserId}", 
-                    playlistIdsToSync.Count, userId);
+                playlistIdsToSync = playlists.Select(p => p.Id).ToList();
+                _logger.LogInformation("Syncing all {Count} {Platform} playlists for user {UserId}",
+                    playlistIdsToSync.Count, platform.PlatformId, userId);
             }
             else
             {
                 playlistIdsToSync = request.ServicePlaylistIds;
-                _logger.LogInformation("Syncing {Count} selected YouTube playlists for user {UserId}", 
-                    playlistIdsToSync.Count, userId);
+                _logger.LogInformation("Syncing {Count} selected {Platform} playlists for user {UserId}",
+                    playlistIdsToSync.Count, platform.PlatformId, userId);
             }
 
-            var selectedPlaylists = youtubePlaylists
+            var selectedPlaylists = playlists
                 .Where(p => playlistIdsToSync.Contains(p.Id))
                 .ToList();
             var selectedPlaylistIds = selectedPlaylists
@@ -226,7 +238,7 @@ public class SyncController : ControllerBase
                 .ToHashSet();
 
             var existingMappings = await _dbContext.ServicePlaylistMappings
-                .Where(m => m.Service == request.Service
+                .Where(m => m.Service == normalizedService
                     && m.Playlist!.UserId == userId
                     && selectedPlaylistIds.Contains(m.ServicePlaylistId))
                 .Select(m => new { m.ServicePlaylistId, m.PlaylistId })
@@ -257,7 +269,7 @@ public class SyncController : ControllerBase
                 return Math.Max(0, remoteSongCount - existingSongCount);
             });
 
-            var throttleStatus = BuildSyncThrottleStatus(userId, request.Service, now);
+            var throttleStatus = BuildSyncThrottleStatus(userId, normalizedService, now);
             if (throttleStatus.Usage > 0 && estimatedNewSongsToSync > throttleStatus.Remaining)
             {
                 return BadRequest(new
@@ -266,7 +278,7 @@ public class SyncController : ControllerBase
                 });
             }
 
-            var playlistLookup = youtubePlaylists.ToDictionary(p => p.Id, p => p);
+            var playlistLookup = playlists.ToDictionary(p => p.Id, p => p);
             var results = new List<BatchSyncResult>();
             var songsSynced = 0;
 
@@ -279,9 +291,9 @@ public class SyncController : ControllerBase
                     playlistLookup.TryGetValue(playlistId, out var playlist);
                     var playlistName = playlist?.Title ?? playlistId;
 
-                    var cantaroPlaylistId = await _youtubeSyncService.SyncYouTubePlaylistAsync(
-                        userId, 
-                        playlistId, 
+                    var cantaroPlaylistId = await platform.SyncPlaylistAsync(
+                        userId,
+                        playlistId,
                         cancellationToken);
 
                     results.Add(new BatchSyncResult
@@ -296,13 +308,13 @@ public class SyncController : ControllerBase
                         : 0;
                     songsSynced += Math.Max(0, Math.Max(0, playlist?.ItemCount ?? 0) - existingSongCount);
 
-                    _logger.LogInformation("Successfully synced playlist {PlaylistId} ({Name})", 
+                    _logger.LogInformation("Successfully synced playlist {PlaylistId} ({Name})",
                         playlistId, playlistName);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to sync playlist {PlaylistId}", playlistId);
-                    
+
                     results.Add(new BatchSyncResult
                     {
                         ServicePlaylistId = playlistId,
@@ -322,7 +334,7 @@ public class SyncController : ControllerBase
                 SongsSynced = songsSynced
             };
 
-            AddSyncUsage(userId, request.Service, Math.Min(songsSynced, MaxSongsCountedPerSyncRun), now);
+            AddSyncUsage(userId, normalizedService, Math.Min(songsSynced, MaxSongsCountedPerSyncRun), now);
 
             _logger.LogInformation(
                 "Batch sync completed: {Success} succeeded, {Failed} failed",
@@ -348,6 +360,25 @@ public class SyncController : ControllerBase
             throw new UnauthorizedAccessException("User not found");
 
         return user.Id;
+    }
+
+    private string? ResolveServiceForStatus(string? requestedService, IEnumerable<string> mappedServices)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedService))
+        {
+            var normalizedRequestedService = requestedService.ToLowerInvariant();
+            return _platformRegistry.IsSupported(normalizedRequestedService)
+                ? normalizedRequestedService
+                : null;
+        }
+
+        var mappedService = mappedServices.FirstOrDefault(_platformRegistry.IsSupported);
+        if (!string.IsNullOrWhiteSpace(mappedService))
+        {
+            return mappedService;
+        }
+
+        return _platformRegistry.GetSupportedPlatformIds().FirstOrDefault();
     }
 
     private static string BuildUsageKey(int userId, string service) => $"{userId}:{service}";

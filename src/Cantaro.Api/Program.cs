@@ -1,3 +1,4 @@
+using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -16,11 +17,18 @@ builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db", configureSettings
 
 // Add Data Protection for token encryption
 builder.Services.AddDataProtection();
+builder.Services.AddHttpContextAccessor();
+builder.Services.Configure<FrontendUrlOptions>(builder.Configuration.GetSection(FrontendUrlOptions.SectionName));
 
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();
 builder.Services.AddScoped<YouTubeService>();
 builder.Services.AddScoped<YouTubePlaylistSyncService>();
+builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
+builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
+builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
+builder.Services.AddHttpClient<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
+builder.Services.AddScoped<TrackMatchingService>();
 
 builder.Services.AddAuthorization();
 
@@ -71,43 +79,33 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        // In Aspire, frontend URL is provided via service reference
-        var frontendUrl = builder.Configuration["services:web:http:0"] 
-            ?? builder.Configuration["services:web:0"];
-        
-        var allowedOrigins = new List<string>();
-        
-        if (!string.IsNullOrEmpty(frontendUrl))
+        var allowedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var frontendUrl = builder.Configuration["services:web:http:0"]
+            ?? builder.Configuration["services:web:https:0"]
+            ?? builder.Configuration["services:web:0"]
+            ?? builder.Configuration[$"{FrontendUrlOptions.SectionName}:BaseUrl"];
+
+        if (!string.IsNullOrWhiteSpace(frontendUrl))
         {
             allowedOrigins.Add(frontendUrl.TrimEnd('/'));
         }
-        
-        // Fallback origins for development without Aspire
-        if (builder.Environment.IsDevelopment())
+
+        if (allowedOrigins.Count > 0)
         {
-            allowedOrigins.Add("http://localhost:5173");
-            allowedOrigins.Add("https://localhost:5173");
-            allowedOrigins.Add("http://localhost:8080");
-            allowedOrigins.Add("https://localhost:8080");
+            policy.WithOrigins(allowedOrigins.ToArray())
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials();
+            return;
         }
 
-        if (allowedOrigins.Count == 0)
+        if (!builder.Environment.IsDevelopment())
         {
-            // In production without configured origins, log warning but allow same-origin
-            // (same-origin requests don't need CORS headers)
-            if (!builder.Environment.IsDevelopment())
-            {
-                Console.WriteLine("WARNING: No CORS origins configured in production. " +
-                    "Ensure frontend is served from same origin as API, or configure Aspire service reference.");
-            }
-            // Add a safe fallback - same origin shouldn't need CORS anyway
-            allowedOrigins.Add("http://localhost:8080");
+            Console.WriteLine("WARNING: No explicit frontend origin configured. Same-origin requests will still work, but cross-origin frontend access requires Aspire service references or Frontend:BaseUrl.");
         }
 
-        policy.WithOrigins(allowedOrigins.ToArray())
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
+        policy.AllowAnyMethod()
+            .AllowAnyHeader();
     });
 });
 
@@ -138,7 +136,7 @@ var summaries = new[]
 
 app.MapGet("/weatherforecast", () =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
+    var forecast = Enumerable.Range(1, 5).Select(index =>
         new WeatherForecast
         (
             DateOnly.FromDateTime(DateTime.Now.AddDays(index)),

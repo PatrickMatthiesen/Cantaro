@@ -13,9 +13,14 @@ public class PlaylistEntry
     public Guid PlaylistId { get; set; }
     
     /// <summary>
-    /// Foreign key to Track
+    /// Foreign key to Track when this entry has been resolved to a canonical identity.
     /// </summary>
-    public Guid TrackId { get; set; }
+    public Guid? TrackId { get; set; }
+
+    /// <summary>
+    /// Foreign key to the imported observation that still needs to be resolved or was used to resolve the track.
+    /// </summary>
+    public Guid? TrackObservationId { get; set; }
     
     /// <summary>
     /// Position/order in the playlist (0-indexed)
@@ -41,4 +46,9 @@ public class PlaylistEntry
     /// Navigation property to Track
     /// </summary>
     public Track? Track { get; set; }
+
+    /// <summary>
+    /// Navigation property to the imported observation associated with this playlist entry.
+    /// </summary>
+    public TrackObservation? TrackObservation { get; set; }
 }
