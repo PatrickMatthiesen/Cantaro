@@ -4,4 +4,7 @@
     <Project Path="src/Cantaro.AppHost/Cantaro.AppHost.csproj" />
     <Project Path="src/Cantaro.ServiceDefaults/Cantaro.ServiceDefaults.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cantaro.Api.Tests/Cantaro.Api.Tests.csproj" />
+  </Folder>
 </Solution>

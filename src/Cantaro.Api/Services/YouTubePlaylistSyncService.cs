@@ -46,11 +46,11 @@ public class YouTubePlaylistSyncService
 
         // Use execution strategy to handle retries with transactions
         var strategy = _dbContext.Database.CreateExecutionStrategy();
-        
+
         return await strategy.ExecuteAsync(async () =>
         {
             using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-            
+
             try
             {
                 // Step 1: Fetch YouTube playlist metadata
@@ -74,14 +74,14 @@ public class YouTubePlaylistSyncService
                 if (existingMapping != null)
                 {
                     // Update existing playlist
-                    playlist = existingMapping.Playlist 
+                    playlist = existingMapping.Playlist
                         ?? throw new InvalidOperationException("ServicePlaylistMapping has no associated Playlist");
-                    
+
                     playlist.Name = youtubePlaylist.Title;
                     playlist.Description = youtubePlaylist.Description;
                     playlist.UpdatedAt = DateTimeOffset.UtcNow;
 
-                    _logger.LogInformation("Updating existing Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
+                    _logger.LogInformation("Updating existing Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}",
                         playlist.Id, youtubePlaylistId);
 
                     // Remove existing playlist entries using bulk delete
@@ -103,7 +103,7 @@ public class YouTubePlaylistSyncService
                     };
                     _dbContext.Playlists.Add(playlist);
 
-                    _logger.LogInformation("Creating new Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}", 
+                    _logger.LogInformation("Creating new Cantaro playlist {PlaylistId} for YouTube playlist {YouTubePlaylistId}",
                         playlist.Id, youtubePlaylistId);
                 }
 
@@ -115,12 +115,12 @@ public class YouTubePlaylistSyncService
                 for (int i = 0; i < playlistItems.Count; i++)
                 {
                     var item = playlistItems[i];
-                    
+
                     try
                     {
                         var observation = await GetOrCreateObservationForVideoAsync(item, cancellationToken);
                         observationIdsToProcess.Add(observation.Id);
-                        
+
                         var entry = new PlaylistEntry
                         {
                             Id = Guid.NewGuid(),
@@ -135,14 +135,14 @@ public class YouTubePlaylistSyncService
                     }
                     catch (Exception ex) when (!IsDatabaseException(ex))
                     {
-                        _logger.LogWarning(ex, "Failed to process video {VideoId} in playlist {PlaylistId}", 
+                        _logger.LogWarning(ex, "Failed to process video {VideoId} in playlist {PlaylistId}",
                             item.VideoId, youtubePlaylistId);
                         failedTracks++;
                     }
                 }
 
                 _dbContext.PlaylistEntries.AddRange(playlistEntries);
-                _logger.LogInformation("Created {EntryCount} playlist entries for playlist {PlaylistId}", 
+                _logger.LogInformation("Created {EntryCount} playlist entries for playlist {PlaylistId}",
                     playlistEntries.Count, playlist.Id);
 
                 await _dbContext.SaveChangesAsync(cancellationToken);
@@ -187,7 +187,7 @@ public class YouTubePlaylistSyncService
             catch (Exception ex)
             {
                 await transaction.RollbackAsync(cancellationToken);
-                _logger.LogError(ex, "Failed to sync YouTube playlist {PlaylistId} for user {UserId}", 
+                _logger.LogError(ex, "Failed to sync YouTube playlist {PlaylistId} for user {UserId}",
                     youtubePlaylistId, userId);
                 throw;
             }
@@ -202,12 +202,19 @@ public class YouTubePlaylistSyncService
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var parsedMetadata = TrackMetadataParser.Parse(video.Title, video.ChannelTitle);
+        var effectiveArtist = parsedMetadata.DisplayArtist ?? video.ChannelTitle;
         var rawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
         {
             SourceType = ServiceName,
             ExternalId = video.VideoId,
-            Title = video.Title,
-            Artist = video.ChannelTitle,
+            Title = parsedMetadata.DisplayTitle,
+            Artist = effectiveArtist,
+            OriginalTitle = video.Title,
+            OriginalArtist = video.ChannelTitle,
+            ChannelTitle = video.ChannelTitle,
+            SearchTitle = parsedMetadata.SearchTitle,
+            SearchArtist = parsedMetadata.SearchArtist,
             Description = video.Description,
             ThumbnailUrl = video.ThumbnailUrl,
             DurationSeconds = video.DurationSeconds,
@@ -239,12 +246,12 @@ public class YouTubePlaylistSyncService
             Id = Guid.NewGuid(),
             SourceType = ServiceName,
             ExternalId = video.VideoId,
-            Title = video.Title,
-            Artist = video.ChannelTitle,
+            Title = parsedMetadata.DisplayTitle,
+            Artist = effectiveArtist,
             ThumbnailUrl = video.ThumbnailUrl,
             RawMetadata = rawMetadata,
-            NormalizedTitle = TrackTextNormalizer.Normalize(video.Title),
-            NormalizedArtist = TrackTextNormalizer.Normalize(video.ChannelTitle),
+            NormalizedTitle = TrackTextNormalizer.Normalize(parsedMetadata.DisplayTitle),
+            NormalizedArtist = TrackTextNormalizer.Normalize(effectiveArtist),
             DurationSeconds = video.DurationSeconds,
             MatchStatus = TrackMatchingStatuses.Pending,
             CreatedAt = now,
@@ -261,12 +268,15 @@ public class YouTubePlaylistSyncService
         string rawMetadata,
         DateTimeOffset now)
     {
-        observation.Title = video.Title;
-        observation.Artist = video.ChannelTitle;
+        var parsedMetadata = TrackMetadataParser.Parse(video.Title, video.ChannelTitle);
+        var effectiveArtist = parsedMetadata.DisplayArtist ?? video.ChannelTitle;
+
+        observation.Title = parsedMetadata.DisplayTitle;
+        observation.Artist = effectiveArtist;
         observation.ThumbnailUrl = video.ThumbnailUrl;
         observation.RawMetadata = rawMetadata;
-        observation.NormalizedTitle = TrackTextNormalizer.Normalize(video.Title);
-        observation.NormalizedArtist = TrackTextNormalizer.Normalize(video.ChannelTitle);
+        observation.NormalizedTitle = TrackTextNormalizer.Normalize(parsedMetadata.DisplayTitle);
+        observation.NormalizedArtist = TrackTextNormalizer.Normalize(effectiveArtist);
         observation.DurationSeconds = video.DurationSeconds;
         observation.UpdatedAt = now;
 

@@ -143,9 +143,10 @@ public class TrackMatchingService
                 .Take(5)
                 .ToList();
 
+            var persistedCandidates = new List<TrackResolutionCandidate>(rankedCandidates.Count);
             foreach (var result in rankedCandidates)
             {
-                observation.Candidates.Add(new TrackResolutionCandidate
+                var persistedCandidate = new TrackResolutionCandidate
                 {
                     Id = Guid.NewGuid(),
                     TrackObservationId = observation.Id,
@@ -160,7 +161,10 @@ public class TrackMatchingService
                     Explanation = BuildCandidateExplanation(observation, result.Candidate, result.Score),
                     RawMetadata = result.Candidate.RawMetadata,
                     CreatedAt = now
-                });
+                };
+
+                _dbContext.TrackResolutionCandidates.Add(persistedCandidate);
+                persistedCandidates.Add(persistedCandidate);
             }
 
             if (rankedCandidates.Count == 0)
@@ -179,7 +183,7 @@ public class TrackMatchingService
 
             if (topCandidate.Score >= AutoMatchThreshold && topCandidate.Score - secondCandidateScore >= AutoMatchMargin)
             {
-                var persistedCandidate = observation.Candidates
+                var persistedCandidate = persistedCandidates
                     .OrderByDescending(candidate => candidate.Score)
                     .First();
 
@@ -306,7 +310,6 @@ public class TrackMatchingService
         };
 
         _dbContext.Tracks.Add(track);
-        await _dbContext.SaveChangesAsync(cancellationToken);
         return track;
     }
 
@@ -334,8 +337,6 @@ public class TrackMatchingService
             ExternalId = externalId,
             LastVerifiedAt = DateTimeOffset.UtcNow
         });
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task UpdatePlaylistEntriesForObservationAsync(Guid observationId, Guid? trackId, CancellationToken cancellationToken)
@@ -352,8 +353,9 @@ public class TrackMatchingService
 
     private static decimal ScoreCandidate(TrackObservation observation, TrackMatchSearchCandidate candidate)
     {
-        var titleScore = TrackTextNormalizer.CalculateSimilarity(observation.Title, candidate.Title);
-        var artistScore = TrackTextNormalizer.CalculateSimilarity(observation.Artist, candidate.Artist);
+        var parsedMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var titleScore = BestSimilarity(candidate.Title, observation.Title, parsedMetadata.DisplayTitle, parsedMetadata.SearchTitle);
+        var artistScore = BestSimilarity(candidate.Artist, observation.Artist, parsedMetadata.DisplayArtist, parsedMetadata.SearchArtist);
 
         decimal durationScore = 0m;
         if (observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue)
@@ -374,8 +376,44 @@ public class TrackMatchingService
 
     private static string BuildCandidateExplanation(TrackObservation observation, TrackMatchSearchCandidate candidate, decimal score)
     {
-        var titleSimilarity = TrackTextNormalizer.CalculateSimilarity(observation.Title, candidate.Title);
-        var artistSimilarity = TrackTextNormalizer.CalculateSimilarity(observation.Artist, candidate.Artist);
-        return $"{candidate.Explanation} Title similarity: {titleSimilarity:P0}; artist similarity: {artistSimilarity:P0}; total confidence: {score:P0}.";
+        var parsedMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedMetadata.DisplayTitle, parsedMetadata.SearchTitle);
+        var artistSimilarity = BestSimilarity(candidate.Artist, observation.Artist, parsedMetadata.DisplayArtist, parsedMetadata.SearchArtist);
+
+        var interpretation = string.Empty;
+        if (!string.Equals(parsedMetadata.SearchTitle, observation.Title, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(parsedMetadata.SearchArtist, observation.Artist, StringComparison.OrdinalIgnoreCase))
+        {
+            interpretation = $" Interpreted as title '{parsedMetadata.SearchTitle}'";
+            if (!string.IsNullOrWhiteSpace(parsedMetadata.SearchArtist))
+            {
+                interpretation += $" and artist '{parsedMetadata.SearchArtist}'";
+            }
+
+            interpretation += ".";
+        }
+
+        return $"{candidate.Explanation}{interpretation} Title similarity: {titleSimilarity:P0}; artist similarity: {artistSimilarity:P0}; total confidence: {score:P0}.";
+    }
+
+    private static decimal BestSimilarity(string? candidateValue, params string?[] values)
+    {
+        if (string.IsNullOrWhiteSpace(candidateValue))
+        {
+            return 0m;
+        }
+
+        var best = 0m;
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            best = Math.Max(best, TrackTextNormalizer.CalculateSimilarity(value, candidateValue));
+        }
+
+        return best;
     }
 }

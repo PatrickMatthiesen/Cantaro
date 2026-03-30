@@ -27,7 +27,8 @@ builder.Services.AddScoped<YouTubePlaylistSyncService>();
 builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
 builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
-builder.Services.AddHttpClient<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
+builder.Services.AddHttpClient<IMusicBrainzQueryClient, MusicBrainzQueryClient>();
+builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
 
 builder.Services.AddAuthorization();
