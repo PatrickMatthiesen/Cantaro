@@ -433,6 +433,8 @@ public class TrackMatchingService
 
     private static bool AreDurationsClose(int? a, int? b)
     {
+        // When either duration is unknown, treat candidates as potentially the same
+        // recording rather than splitting them into separate clusters.
         if (!a.HasValue || !b.HasValue)
         {
             return true;
