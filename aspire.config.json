@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "src/Cantaro.AppHost/Cantaro.AppHost.csproj"
+  }
+}
