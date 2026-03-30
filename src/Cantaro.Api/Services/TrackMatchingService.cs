@@ -10,6 +10,7 @@ public class TrackMatchingService
     private const decimal AutoMatchThreshold = 0.85m;
     private const decimal AmbiguousThreshold = 0.65m;
     private const decimal AutoMatchMargin = 0.10m;
+    private const int ClusterDurationToleranceSeconds = 30;
 
     private readonly ApplicationDbContext _dbContext;
     private readonly IEnumerable<ITrackMetadataSearchProvider> _metadataProviders;
@@ -179,9 +180,10 @@ public class TrackMatchingService
             }
 
             var topCandidate = rankedCandidates[0];
-            var secondCandidateScore = rankedCandidates.Count > 1 ? rankedCandidates[1].Score : 0m;
+            var distinctClusters = CollapseDuplicateClusters(rankedCandidates);
+            var secondDistinctScore = distinctClusters.Count > 1 ? distinctClusters[1].Score : 0m;
 
-            if (topCandidate.Score >= AutoMatchThreshold && topCandidate.Score - secondCandidateScore >= AutoMatchMargin)
+            if (topCandidate.Score >= AutoMatchThreshold && topCandidate.Score - secondDistinctScore >= AutoMatchMargin)
             {
                 var persistedCandidate = persistedCandidates
                     .OrderByDescending(candidate => candidate.Score)
@@ -394,6 +396,49 @@ public class TrackMatchingService
         }
 
         return $"{candidate.Explanation}{interpretation} Title similarity: {titleSimilarity:P0}; artist similarity: {artistSimilarity:P0}; total confidence: {score:P0}.";
+    }
+
+    private static List<(TrackMatchSearchCandidate Candidate, decimal Score)> CollapseDuplicateClusters(
+        List<(TrackMatchSearchCandidate Candidate, decimal Score)> rankedCandidates)
+    {
+        if (rankedCandidates.Count <= 1)
+        {
+            return rankedCandidates;
+        }
+
+        var representatives = new List<(TrackMatchSearchCandidate Candidate, decimal Score)>();
+
+        foreach (var candidate in rankedCandidates)
+        {
+            var normalizedTitle = TrackTextNormalizer.Normalize(candidate.Candidate.Title);
+            var normalizedArtist = TrackTextNormalizer.Normalize(candidate.Candidate.Artist);
+
+            var isDuplicate = representatives.Any(rep =>
+            {
+                var repTitle = TrackTextNormalizer.Normalize(rep.Candidate.Title);
+                var repArtist = TrackTextNormalizer.Normalize(rep.Candidate.Artist);
+                return normalizedTitle == repTitle
+                    && normalizedArtist == repArtist
+                    && AreDurationsClose(candidate.Candidate.DurationSeconds, rep.Candidate.DurationSeconds);
+            });
+
+            if (!isDuplicate)
+            {
+                representatives.Add(candidate);
+            }
+        }
+
+        return representatives;
+    }
+
+    private static bool AreDurationsClose(int? a, int? b)
+    {
+        if (!a.HasValue || !b.HasValue)
+        {
+            return true;
+        }
+
+        return Math.Abs(a.Value - b.Value) <= ClusterDurationToleranceSeconds;
     }
 
     private static decimal BestSimilarity(string? candidateValue, params string?[] values)
