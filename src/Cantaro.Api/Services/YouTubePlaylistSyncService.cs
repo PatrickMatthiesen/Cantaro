@@ -1,6 +1,7 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Data.Common;
 using System.Text.Json;
 
 namespace Cantaro.Api.Services;
@@ -132,7 +133,7 @@ public class YouTubePlaylistSyncService
                         };
                         playlistEntries.Add(entry);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (!IsDatabaseException(ex))
                     {
                         _logger.LogWarning(ex, "Failed to process video {VideoId} in playlist {PlaylistId}", 
                             item.VideoId, youtubePlaylistId);
@@ -213,6 +214,15 @@ public class YouTubePlaylistSyncService
             PublishedAt = video.PublishedAt
         });
 
+        var trackedObservation = _dbContext.TrackObservations.Local
+            .FirstOrDefault(observation => observation.SourceType == ServiceName && observation.ExternalId == video.VideoId);
+
+        if (trackedObservation != null)
+        {
+            UpdateObservation(trackedObservation, video, rawMetadata, now);
+            return trackedObservation;
+        }
+
         var existingObservation = await _dbContext.TrackObservations
             .FirstOrDefaultAsync(
                 observation => observation.SourceType == ServiceName && observation.ExternalId == video.VideoId,
@@ -220,22 +230,7 @@ public class YouTubePlaylistSyncService
 
         if (existingObservation != null)
         {
-            existingObservation.Title = video.Title;
-            existingObservation.Artist = video.ChannelTitle;
-            existingObservation.ThumbnailUrl = video.ThumbnailUrl;
-            existingObservation.RawMetadata = rawMetadata;
-            existingObservation.NormalizedTitle = TrackTextNormalizer.Normalize(video.Title);
-            existingObservation.NormalizedArtist = TrackTextNormalizer.Normalize(video.ChannelTitle);
-            existingObservation.DurationSeconds = video.DurationSeconds;
-            existingObservation.UpdatedAt = now;
-
-            if (existingObservation.MatchStatus != TrackMatchingStatuses.Matched)
-            {
-                existingObservation.MatchStatus = TrackMatchingStatuses.Pending;
-                existingObservation.ResolutionNotes = null;
-                existingObservation.AcceptedCandidateId = null;
-            }
-
+            UpdateObservation(existingObservation, video, rawMetadata, now);
             return existingObservation;
         }
 
@@ -258,5 +253,38 @@ public class YouTubePlaylistSyncService
 
         _dbContext.TrackObservations.Add(observation);
         return observation;
+    }
+
+    private static void UpdateObservation(
+        TrackObservation observation,
+        YouTubePlaylistItemDto video,
+        string rawMetadata,
+        DateTimeOffset now)
+    {
+        observation.Title = video.Title;
+        observation.Artist = video.ChannelTitle;
+        observation.ThumbnailUrl = video.ThumbnailUrl;
+        observation.RawMetadata = rawMetadata;
+        observation.NormalizedTitle = TrackTextNormalizer.Normalize(video.Title);
+        observation.NormalizedArtist = TrackTextNormalizer.Normalize(video.ChannelTitle);
+        observation.DurationSeconds = video.DurationSeconds;
+        observation.UpdatedAt = now;
+
+        if (observation.MatchStatus != TrackMatchingStatuses.Matched)
+        {
+            observation.MatchStatus = TrackMatchingStatuses.Pending;
+            observation.ResolutionNotes = null;
+            observation.AcceptedCandidateId = null;
+        }
+    }
+
+    private static bool IsDatabaseException(Exception ex)
+    {
+        if (ex is DbUpdateException)
+        {
+            return true;
+        }
+
+        return ex.GetBaseException() is DbException;
     }
 }

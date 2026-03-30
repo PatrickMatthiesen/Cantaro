@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -83,7 +83,7 @@ namespace Cantaro.Api.Migrations
                 {
                     table.PrimaryKey("PK_TrackResolutionCandidates", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_TrackResolutionCandidates_TrackObservations_TrackObservationId",
+                        name: "FK_TrackResolutionCandidates_TrackObservations_TrackObservatio~",
                         column: x => x.TrackObservationId,
                         principalTable: "TrackObservations",
                         principalColumn: "Id",
@@ -123,14 +123,6 @@ namespace Cantaro.Api.Migrations
                 principalTable: "TrackObservations",
                 principalColumn: "Id",
                 onDelete: ReferentialAction.SetNull);
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_PlaylistEntries_Tracks_TrackId",
-                table: "PlaylistEntries",
-                column: "TrackId",
-                principalTable: "Tracks",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />
@@ -138,10 +130,6 @@ namespace Cantaro.Api.Migrations
         {
             migrationBuilder.DropForeignKey(
                 name: "FK_PlaylistEntries_TrackObservations_TrackObservationId",
-                table: "PlaylistEntries");
-
-            migrationBuilder.DropForeignKey(
-                name: "FK_PlaylistEntries_Tracks_TrackId",
                 table: "PlaylistEntries");
 
             migrationBuilder.DropTable(
@@ -163,17 +151,10 @@ namespace Cantaro.Api.Migrations
                 table: "PlaylistEntries",
                 type: "uuid",
                 nullable: false,
+                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"),
                 oldClrType: typeof(Guid),
                 oldType: "uuid",
                 oldNullable: true);
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_PlaylistEntries_Tracks_TrackId",
-                table: "PlaylistEntries",
-                column: "TrackId",
-                principalTable: "Tracks",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
         }
     }
 }
