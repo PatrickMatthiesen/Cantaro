@@ -19,6 +19,10 @@ builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db", configureSettings
 builder.Services.AddDataProtection();
 builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<FrontendUrlOptions>(builder.Configuration.GetSection(FrontendUrlOptions.SectionName));
+builder.Services
+    .AddOptions<TrackMatchingOptions>()
+    .Bind(builder.Configuration.GetSection(TrackMatchingOptions.SectionName))
+    .ValidateDataAnnotations();
 
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();

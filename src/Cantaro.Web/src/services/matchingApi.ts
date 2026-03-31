@@ -23,6 +23,25 @@ export interface MatchingQueueCandidateResponse {
   score: number;
   explanation?: string;
   isAccepted: boolean;
+  versionMarkers: string[];
+  playbackModifiers: string[];
+  titleSimilarity?: number;
+  artistSimilarity?: number;
+  durationScore?: number;
+  semanticAdjustment?: number;
+  semanticExplanation?: string;
+  clusterId?: string;
+  clusterSize: number;
+  clusterReason?: string;
+}
+
+export interface TrackMatchObservationDiagnostics {
+  versionMarkers: string[];
+  playbackModifiers: string[];
+  decisionReason?: string;
+  topScore?: number;
+  secondDistinctScore?: number;
+  distinctClusterCount: number;
 }
 
 export interface MatchingQueueItemResponse {
@@ -38,6 +57,7 @@ export interface MatchingQueueItemResponse {
   lastMatchAttemptedAt?: string;
   lastMatchError?: string;
   resolutionNotes?: string;
+  diagnostics: TrackMatchObservationDiagnostics;
   playlists: MatchingQueuePlaylistResponse[];
   candidates: MatchingQueueCandidateResponse[];
 }

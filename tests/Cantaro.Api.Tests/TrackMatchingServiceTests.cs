@@ -1,9 +1,12 @@
+using System.Text.Json;
+using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -211,6 +214,412 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
+    public async Task ProcessObservationAsync_GoodThingsFallApartPrefersExactRecordingOverVsSadSongsVariants()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "J9Zjgb03FMQ",
+            Title = "Good Things Fall Apart",
+            Artist = "ILLENIUM, Jon Bellion",
+            DurationSeconds = 218,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "wrong-1",
+                Title = "Good Things Fall Apart vs. Sad Songs",
+                Artist = "Illenium, Jon Bellion, Said the Sky, Annika Wells",
+                MbidRecording = "4e72975f-2f1c-43c7-a72d-4c6711a6bb40",
+                DurationSeconds = 366,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "wrong-2",
+                Title = "Good Things Fall Apart vs. Sad Songs (mixed)",
+                Artist = "ILLENIUM, Jon Bellion, Said the Sky, Annika Wells",
+                MbidRecording = "b5fec021-7b4f-4fd1-8e78-cda370672d13",
+                DurationSeconds = 358,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "right-1",
+                Title = "Good Things Fall Apart",
+                Artist = "ILLENIUM & Jon Bellion",
+                MbidRecording = "f1fae705-115e-4515-a241-fef12775ac2e",
+                Isrc = "USUG11901088",
+                DurationSeconds = 217,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "wrong-3",
+                Title = "Good Things Fall Apart",
+                Artist = "Chance Milic",
+                MbidRecording = "8d61c9b4-ae1a-4376-ad1d-6026a6cb2cbf",
+                DurationSeconds = 225,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+        var acceptedCandidate = await dbContext.TrackResolutionCandidates.SingleAsync(candidate => candidate.IsAccepted);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Equal("f1fae705-115e-4515-a241-fef12775ac2e", acceptedCandidate.MbidRecording);
+        Assert.Equal(acceptedCandidate.Id, result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_ExactPlainCandidateBeatsDirtyVariant()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "crop-circles-148",
+            Title = "Crop Circles",
+            Artist = "Jon Bellion",
+            DurationSeconds = 148,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "crop-circles-plain",
+                Title = "Crop Circles",
+                Artist = "Jon Bellion",
+                MbidRecording = "crop-circles-plain",
+                DurationSeconds = 148,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "crop-circles-dirty",
+                Title = "Crop Circles (Dirty)",
+                Artist = "Jon Bellion",
+                MbidRecording = "crop-circles-dirty",
+                DurationSeconds = 148,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var acceptedCandidate = await dbContext.TrackResolutionCandidates.SingleAsync(candidate => candidate.IsAccepted);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Equal("Crop Circles", acceptedCandidate.Title);
+        Assert.Equal(acceptedCandidate.Id, result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_CandidatesOutsideClusterToleranceRemainAmbiguous()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "video-boundary",
+            Title = "STAR WALKIN' (League of Legends Worlds Anthem)",
+            Artist = "Lil Nas X",
+            DurationSeconds = 211,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "candidate-boundary-1",
+                Title = "STAR WALKIN' (League of Legends Worlds Anthem)",
+                Artist = "Lil Nas X",
+                MbidRecording = "candidate-boundary-1",
+                Isrc = "USSM12208809",
+                DurationSeconds = 211,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "candidate-boundary-2",
+                Title = "STAR WALKIN' (League of Legends Worlds Anthem)",
+                Artist = "Lil Nas X",
+                MbidRecording = "candidate-boundary-2",
+                Isrc = "USSM12208810",
+                DurationSeconds = 217,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
+        Assert.Null(result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_UnknownDurationCompetitorsRemainAmbiguous()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "unknown-duration",
+            Title = "Crop Circles",
+            Artist = "Jon Bellion",
+            DurationSeconds = null,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "unknown-duration-1",
+                Title = "Crop Circles",
+                Artist = "Jon Bellion",
+                MbidRecording = "unknown-duration-1",
+                DurationSeconds = 148,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "unknown-duration-2",
+                Title = "Crop Circles",
+                Artist = "Jon Bellion",
+                MbidRecording = "unknown-duration-2",
+                DurationSeconds = 161,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
+        Assert.Null(result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_AcousticCandidateBeatsPlainVariant()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "all-time-low-acoustic",
+            Title = "All Time Low (Acoustic)",
+            Artist = "Jon Bellion",
+            DurationSeconds = 230,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "all-time-low-acoustic-candidate",
+                Title = "All Time Low (Acoustic)",
+                Artist = "Jon Bellion",
+                MbidRecording = "all-time-low-acoustic-candidate",
+                DurationSeconds = 224,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "all-time-low-plain-candidate",
+                Title = "All Time Low",
+                Artist = "Jon Bellion",
+                MbidRecording = "all-time-low-plain-candidate",
+                DurationSeconds = 230,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var acceptedCandidate = await dbContext.TrackResolutionCandidates.SingleAsync(candidate => candidate.IsAccepted);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Equal("All Time Low (Acoustic)", acceptedCandidate.Title);
+        Assert.Equal(acceptedCandidate.Id, result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_NoiseOnlyMarkersDoNotBlockPlainSongMatch()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "crop-circles-official-video",
+            Title = "Crop Circles (Official Video)",
+            Artist = "Jon Bellion",
+            DurationSeconds = 148,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "crop-circles-plain-noise-test",
+                Title = "Crop Circles",
+                Artist = "Jon Bellion",
+                MbidRecording = "crop-circles-plain-noise-test",
+                DurationSeconds = 148,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
+    }
+
+    [Fact]
     public async Task ProcessObservationAsync_DistinctCompetingCandidatesRemainAmbiguous()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -272,6 +681,147 @@ public class TrackMatchingServiceTests
 
         Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
         Assert.Null(result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_UsesCustomPolicyOverridesWhenProvided()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "custom-policy-threshold",
+            Title = "All Time Low (Acoustic)",
+            Artist = "Jon Bellion",
+            DurationSeconds = 230,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "custom-policy-candidate",
+                Title = "All Time Low (Acoustic)",
+                Artist = "Jon Bellion",
+                MbidRecording = "custom-policy-candidate",
+                DurationSeconds = 224,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance,
+            Options.Create(new TrackMatchingOptions
+            {
+                AutoMatchThreshold = 0.99m,
+                AmbiguousThreshold = 0.60m,
+                AutoMatchMargin = 0.10m,
+                MinimumCandidateScore = 0.35m,
+                ClusterDurationToleranceSeconds = 5,
+                PlaybackModifierMismatchPenalty = -0.20m,
+                VersionMismatchPenalty = -0.15m,
+                VersionMarkerMatchBonus = 0.05m
+            }));
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
+        Assert.Null(result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_PersistsObservationDiagnosticsIntoRawMetadata()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "observation-diagnostics",
+            Title = "All Time Low (Acoustic)",
+            Artist = "Jon Bellion",
+            DurationSeconds = 230,
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            {
+                SourceType = "youtube",
+                ExternalId = "observation-diagnostics",
+                Title = "All Time Low (Acoustic)",
+                Artist = "Jon Bellion"
+            }),
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "observation-diagnostics-candidate",
+                Title = "All Time Low (Acoustic)",
+                Artist = "Jon Bellion",
+                MbidRecording = "observation-diagnostics-candidate",
+                DurationSeconds = 224,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "observation-diagnostics-plain",
+                Title = "All Time Low",
+                Artist = "Jon Bellion",
+                MbidRecording = "observation-diagnostics-plain",
+                DurationSeconds = 230,
+                Explanation = "Suggested by test fixture.",
+                RawMetadata = "{}"
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var storedObservation = await dbContext.TrackObservations.SingleAsync(item => item.Id == observation.Id);
+        var storedMetadata = JsonSerializer.Deserialize<TrackObservationMetadata>(storedObservation.RawMetadata!);
+
+        Assert.NotNull(storedMetadata);
+        Assert.NotNull(storedMetadata!.Matching);
+        Assert.Contains("acoustic", storedMetadata.Matching!.VersionMarkers);
+        Assert.NotNull(storedMetadata.Matching.TopScore);
+        Assert.Equal(2, storedMetadata.Matching.DistinctClusterCount);
     }
 
     private sealed class FakeTrackMetadataSearchProvider : ITrackMetadataSearchProvider

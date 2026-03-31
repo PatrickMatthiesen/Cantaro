@@ -1,29 +1,37 @@
 using System.Text.Json;
+using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Cantaro.Api.Services;
 
 public class TrackMatchingService
 {
-    private const decimal AutoMatchThreshold = 0.85m;
-    private const decimal AmbiguousThreshold = 0.65m;
-    private const decimal AutoMatchMargin = 0.10m;
-    private const int ClusterDurationToleranceSeconds = 30;
-
     private readonly ApplicationDbContext _dbContext;
     private readonly IEnumerable<ITrackMetadataSearchProvider> _metadataProviders;
     private readonly ILogger<TrackMatchingService> _logger;
+    private readonly TrackMatchingOptions _options;
 
     public TrackMatchingService(
         ApplicationDbContext dbContext,
         IEnumerable<ITrackMetadataSearchProvider> metadataProviders,
         ILogger<TrackMatchingService> logger)
+        : this(dbContext, metadataProviders, logger, Options.Create(new TrackMatchingOptions()))
+    {
+    }
+
+    public TrackMatchingService(
+        ApplicationDbContext dbContext,
+        IEnumerable<ITrackMetadataSearchProvider> metadataProviders,
+        ILogger<TrackMatchingService> logger,
+        IOptions<TrackMatchingOptions> options)
     {
         _dbContext = dbContext;
         _metadataProviders = metadataProviders;
         _logger = logger;
+        _options = options.Value;
     }
 
     public async Task<TrackObservation> ProcessObservationAsync(Guid observationId, CancellationToken cancellationToken)
@@ -118,6 +126,14 @@ public class TrackMatchingService
             observation.MatchStatus = TrackMatchingStatuses.Matched;
             observation.ResolutionNotes = "Matched existing source mapping.";
             observation.AcceptedCandidateId = null;
+            PersistObservationDiagnostics(
+                observation,
+                CreateObservationDiagnostics(
+                    TrackMetadataParser.Parse(observation.Title, observation.Artist),
+                    decisionReason: "Matched existing source mapping.",
+                    topScore: null,
+                    secondDistinctScore: null,
+                    distinctClusterCount: 0));
             await UpdatePlaylistEntriesForObservationAsync(observation.Id, exactSourceMatch.TrackId, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
@@ -131,22 +147,31 @@ public class TrackMatchingService
                 observation.Candidates.Clear();
             }
 
-            var searchCandidates = new List<(TrackMatchSearchCandidate Candidate, decimal Score)>();
+            var scoredCandidates = new List<TrackMatchScoredCandidate>();
             foreach (var provider in _metadataProviders)
             {
                 var providerCandidates = await provider.SearchAsync(observation, cancellationToken);
-                searchCandidates.AddRange(providerCandidates.Select(candidate => (candidate, ScoreCandidate(observation, candidate))));
+                scoredCandidates.AddRange(providerCandidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, _options)));
             }
 
-            var rankedCandidates = searchCandidates
-                .Where(result => result.Score >= 0.35m)
+            var rankedCandidates = scoredCandidates
+                .Where(result => result.Score >= _options.MinimumCandidateScore)
                 .OrderByDescending(result => result.Score)
                 .Take(5)
                 .ToList();
 
+            var clusters = TrackMatchClusterer.BuildClusters(rankedCandidates, _options.ClusterDurationToleranceSeconds);
+            var decision = TrackMatchDecisionEngine.Decide(
+                rankedCandidates,
+                clusters,
+                _options.AutoMatchThreshold,
+                _options.AmbiguousThreshold,
+                _options.AutoMatchMargin);
+
             var persistedCandidates = new List<TrackResolutionCandidate>(rankedCandidates.Count);
             foreach (var result in rankedCandidates)
             {
+                var cluster = clusters.FirstOrDefault(existingCluster => existingCluster.Members.Any(member => member.Candidate.ExternalId == result.Candidate.ExternalId));
                 var persistedCandidate = new TrackResolutionCandidate
                 {
                     Id = Guid.NewGuid(),
@@ -159,8 +184,8 @@ public class TrackMatchingService
                     Isrc = result.Candidate.Isrc,
                     DurationSeconds = result.Candidate.DurationSeconds,
                     Score = result.Score,
-                    Explanation = BuildCandidateExplanation(observation, result.Candidate, result.Score),
-                    RawMetadata = result.Candidate.RawMetadata,
+                    Explanation = BuildCandidateExplanation(result),
+                    RawMetadata = SerializeCandidateMetadata(result, cluster),
                     CreatedAt = now
                 };
 
@@ -171,37 +196,53 @@ public class TrackMatchingService
             if (rankedCandidates.Count == 0)
             {
                 observation.TrackId = null;
-                observation.MatchStatus = TrackMatchingStatuses.NoMatch;
-                observation.ResolutionNotes = "No credible candidate was found.";
+                observation.MatchStatus = decision.MatchStatus;
+                observation.ResolutionNotes = decision.ResolutionNotes;
                 observation.AcceptedCandidateId = null;
+                PersistObservationDiagnostics(observation, CreateObservationDiagnostics(
+                    rankedCandidates.FirstOrDefault()?.ObservationMetadata ?? TrackMetadataParser.Parse(observation.Title, observation.Artist),
+                    decision.DecisionReason,
+                    decision.TopScore,
+                    decision.SecondDistinctScore,
+                    clusters.Count));
                 await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 return observation;
             }
 
-            var topCandidate = rankedCandidates[0];
-            var distinctClusters = CollapseDuplicateClusters(rankedCandidates);
-            var secondDistinctScore = distinctClusters.Count > 1 ? distinctClusters[1].Score : 0m;
-
-            if (topCandidate.Score >= AutoMatchThreshold && topCandidate.Score - secondDistinctScore >= AutoMatchMargin)
+            if (decision.AcceptedCandidate != null)
             {
                 var persistedCandidate = persistedCandidates
                     .OrderByDescending(candidate => candidate.Score)
-                    .First();
+                    .ThenBy(candidate => candidate.Title, StringComparer.Ordinal)
+                    .First(candidate => candidate.ExternalId == decision.AcceptedCandidate.Candidate.ExternalId);
 
-                await ResolveObservationToTrackAsync(observation, persistedCandidate, "Automatically resolved by the matcher.", cancellationToken);
+                PersistObservationDiagnostics(
+                    observation,
+                    CreateObservationDiagnostics(
+                        decision.AcceptedCandidate.ObservationMetadata,
+                        decision.DecisionReason,
+                        decision.TopScore,
+                        decision.SecondDistinctScore,
+                        clusters.Count));
+
+                await ResolveObservationToTrackAsync(observation, persistedCandidate, decision.ResolutionNotes, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 return observation;
             }
 
             observation.TrackId = null;
             observation.AcceptedCandidateId = null;
-            observation.MatchStatus = topCandidate.Score >= AmbiguousThreshold
-                ? TrackMatchingStatuses.Ambiguous
-                : TrackMatchingStatuses.NoMatch;
-            observation.ResolutionNotes = observation.MatchStatus == TrackMatchingStatuses.Ambiguous
-                ? "Multiple plausible candidates require review."
-                : "Candidates were found, but confidence stayed below the auto-match threshold.";
+            observation.MatchStatus = decision.MatchStatus;
+            observation.ResolutionNotes = decision.ResolutionNotes;
+            PersistObservationDiagnostics(
+                observation,
+                CreateObservationDiagnostics(
+                    rankedCandidates[0].ObservationMetadata,
+                    decision.DecisionReason,
+                    decision.TopScore,
+                    decision.SecondDistinctScore,
+                    clusters.Count));
 
             await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -214,6 +255,14 @@ public class TrackMatchingService
             observation.MatchStatus = TrackMatchingStatuses.Pending;
             observation.LastMatchError = ex.Message;
             observation.ResolutionNotes = "Matching attempt failed. Retry is required.";
+            PersistObservationDiagnostics(
+                observation,
+                CreateObservationDiagnostics(
+                    TrackMetadataParser.Parse(observation.Title, observation.Artist),
+                    $"Matching failed: {ex.Message}",
+                    topScore: null,
+                    secondDistinctScore: null,
+                    distinctClusterCount: 0));
             await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
@@ -353,114 +402,103 @@ public class TrackMatchingService
         }
     }
 
-    private static decimal ScoreCandidate(TrackObservation observation, TrackMatchSearchCandidate candidate)
+    private static string BuildCandidateExplanation(TrackMatchScoredCandidate result)
     {
-        var parsedMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
-        var titleScore = BestSimilarity(candidate.Title, observation.Title, parsedMetadata.DisplayTitle, parsedMetadata.SearchTitle);
-        var artistScore = BestSimilarity(candidate.Artist, observation.Artist, parsedMetadata.DisplayArtist, parsedMetadata.SearchArtist);
-
-        decimal durationScore = 0m;
-        if (observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue)
-        {
-            var difference = Math.Abs(observation.DurationSeconds.Value - candidate.DurationSeconds.Value);
-            durationScore = difference switch
-            {
-                <= 2 => 1m,
-                <= 5 => 0.7m,
-                <= 10 => 0.4m,
-                _ => 0m
-            };
-        }
-
-        var score = (titleScore * 0.55m) + (artistScore * 0.30m) + (durationScore * 0.15m);
-        return Math.Round(score, 3, MidpointRounding.AwayFromZero);
-    }
-
-    private static string BuildCandidateExplanation(TrackObservation observation, TrackMatchSearchCandidate candidate, decimal score)
-    {
-        var parsedMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
-        var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedMetadata.DisplayTitle, parsedMetadata.SearchTitle);
-        var artistSimilarity = BestSimilarity(candidate.Artist, observation.Artist, parsedMetadata.DisplayArtist, parsedMetadata.SearchArtist);
+        var parsedObservation = result.ObservationMetadata;
 
         var interpretation = string.Empty;
-        if (!string.Equals(parsedMetadata.SearchTitle, observation.Title, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(parsedMetadata.SearchArtist, observation.Artist, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(parsedObservation.SearchTitle, result.ObservationTitle, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(parsedObservation.SearchArtist, result.ObservationArtist, StringComparison.OrdinalIgnoreCase))
         {
-            interpretation = $" Interpreted as title '{parsedMetadata.SearchTitle}'";
-            if (!string.IsNullOrWhiteSpace(parsedMetadata.SearchArtist))
+            interpretation = $" Interpreted as title '{parsedObservation.SearchTitle}'";
+            if (!string.IsNullOrWhiteSpace(parsedObservation.SearchArtist))
             {
-                interpretation += $" and artist '{parsedMetadata.SearchArtist}'";
+                interpretation += $" and artist '{parsedObservation.SearchArtist}'";
             }
 
             interpretation += ".";
         }
 
-        return $"{candidate.Explanation}{interpretation} Title similarity: {titleSimilarity:P0}; artist similarity: {artistSimilarity:P0}; total confidence: {score:P0}.";
+        var semanticExplanation = string.IsNullOrWhiteSpace(result.SemanticExplanation)
+            ? string.Empty
+            : $" {result.SemanticExplanation}";
+
+        return $"{result.Candidate.Explanation}{interpretation}{semanticExplanation} Title similarity: {result.TitleSimilarity:P0}; artist similarity: {result.ArtistSimilarity:P0}; total confidence: {result.Score:P0}.";
     }
 
-    private static List<(TrackMatchSearchCandidate Candidate, decimal Score)> CollapseDuplicateClusters(
-        List<(TrackMatchSearchCandidate Candidate, decimal Score)> rankedCandidates)
+    private static string SerializeCandidateMetadata(TrackMatchScoredCandidate result, TrackMatchCluster? cluster)
     {
-        if (rankedCandidates.Count <= 1)
+        var metadata = new TrackMatchCandidateStoredMetadata
         {
-            return rankedCandidates;
+            ProviderRawMetadata = result.Candidate.RawMetadata,
+            Matching = new TrackMatchCandidateDiagnostics
+            {
+                ObservationVersionMarkers = [.. result.ObservationMetadata.VersionMarkers],
+                ObservationPlaybackModifiers = [.. result.ObservationMetadata.PlaybackModifiers],
+                CandidateVersionMarkers = [.. result.CandidateMetadata.VersionMarkers],
+                CandidatePlaybackModifiers = [.. result.CandidateMetadata.PlaybackModifiers],
+                TitleSimilarity = result.TitleSimilarity,
+                ArtistSimilarity = result.ArtistSimilarity,
+                DurationScore = result.DurationScore,
+                SemanticAdjustment = result.SemanticAdjustment,
+                TotalScore = result.Score,
+                SemanticExplanation = string.IsNullOrWhiteSpace(result.SemanticExplanation) ? null : result.SemanticExplanation,
+                ClusterId = cluster?.ClusterId,
+                ClusterSize = cluster?.Members.Count ?? 1,
+                ClusterReason = cluster?.ClusterReason
+            }
+        };
+
+        return JsonSerializer.Serialize(metadata);
+    }
+
+    private static TrackMatchObservationDiagnostics CreateObservationDiagnostics(
+        ParsedTrackMetadata parsedObservation,
+        string decisionReason,
+        decimal? topScore,
+        decimal? secondDistinctScore,
+        int distinctClusterCount)
+    {
+        return new TrackMatchObservationDiagnostics
+        {
+            VersionMarkers = [.. parsedObservation.VersionMarkers],
+            PlaybackModifiers = [.. parsedObservation.PlaybackModifiers],
+            DecisionReason = decisionReason,
+            TopScore = topScore,
+            SecondDistinctScore = secondDistinctScore,
+            DistinctClusterCount = distinctClusterCount
+        };
+    }
+
+    private static void PersistObservationDiagnostics(TrackObservation observation, TrackMatchObservationDiagnostics diagnostics)
+    {
+        TrackObservationMetadata observationMetadata;
+        if (string.IsNullOrWhiteSpace(observation.RawMetadata))
+        {
+            observationMetadata = new TrackObservationMetadata();
         }
-
-        var representatives = new List<(TrackMatchSearchCandidate Candidate, decimal Score)>();
-
-        foreach (var candidate in rankedCandidates)
+        else
         {
-            var normalizedTitle = TrackTextNormalizer.Normalize(candidate.Candidate.Title);
-            var normalizedArtist = TrackTextNormalizer.Normalize(candidate.Candidate.Artist);
-
-            var isDuplicate = representatives.Any(rep =>
+            try
             {
-                var repTitle = TrackTextNormalizer.Normalize(rep.Candidate.Title);
-                var repArtist = TrackTextNormalizer.Normalize(rep.Candidate.Artist);
-                return normalizedTitle == repTitle
-                    && normalizedArtist == repArtist
-                    && AreDurationsClose(candidate.Candidate.DurationSeconds, rep.Candidate.DurationSeconds);
-            });
-
-            if (!isDuplicate)
+                observationMetadata = JsonSerializer.Deserialize<TrackObservationMetadata>(observation.RawMetadata) ?? new TrackObservationMetadata();
+            }
+            catch (JsonException)
             {
-                representatives.Add(candidate);
+                observationMetadata = new TrackObservationMetadata();
             }
         }
 
-        return representatives;
-    }
+        observationMetadata.SourceType = observation.SourceType;
+        observationMetadata.ExternalId = observation.ExternalId;
+        observationMetadata.Title = observation.Title;
+        observationMetadata.Artist = observation.Artist;
+        observationMetadata.SearchTitle ??= TrackMetadataParser.Parse(observation.Title, observation.Artist).SearchTitle;
+        observationMetadata.SearchArtist ??= TrackMetadataParser.Parse(observation.Title, observation.Artist).SearchArtist;
+        observationMetadata.ThumbnailUrl = observation.ThumbnailUrl;
+        observationMetadata.DurationSeconds = observation.DurationSeconds;
+        observationMetadata.Matching = diagnostics;
 
-    private static bool AreDurationsClose(int? a, int? b)
-    {
-        // When either duration is unknown, treat candidates as potentially the same
-        // recording rather than splitting them into separate clusters.
-        if (!a.HasValue || !b.HasValue)
-        {
-            return true;
-        }
-
-        return Math.Abs(a.Value - b.Value) <= ClusterDurationToleranceSeconds;
-    }
-
-    private static decimal BestSimilarity(string? candidateValue, params string?[] values)
-    {
-        if (string.IsNullOrWhiteSpace(candidateValue))
-        {
-            return 0m;
-        }
-
-        var best = 0m;
-        foreach (var value in values)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                continue;
-            }
-
-            best = Math.Max(best, TrackTextNormalizer.CalculateSimilarity(value, candidateValue));
-        }
-
-        return best;
+        observation.RawMetadata = JsonSerializer.Serialize(observationMetadata);
     }
 }
