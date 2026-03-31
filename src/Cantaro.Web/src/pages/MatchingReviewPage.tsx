@@ -49,6 +49,31 @@ function statusClasses(status: string): string {
   }
 }
 
+function formatSource(sourceType: string, externalId: string): string | React.ReactNode {
+  switch (sourceType) {
+    case 'spotify':
+      return (
+        <a href={`https://open.spotify.com/track/${externalId}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+          Spotify
+        </a>
+      );
+    case 'apple_music':
+      return (
+        <a href={`https://music.apple.com/track/${externalId}`} target="_blank" rel="noopener noreferrer" className="text-red-500 hover:underline">
+          Apple Music
+        </a>
+      );
+    case 'youtube':
+      return (
+        <a href={`https://youtu.be/${externalId}`} target="_blank" rel="noopener noreferrer" className="text-red-600 hover:underline">
+          YouTube - {externalId}
+        </a>
+      );
+    default:
+      return `${sourceType} / ${externalId}`;
+  }
+}
+
 export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) {
   const [summary, setSummary] = useState<MatchingSummaryResponse | null>(null);
   const [queue, setQueue] = useState<MatchingQueueItemResponse[]>([]);
@@ -186,7 +211,7 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
                           {item.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''}
                         </p>
                         <p className="mt-2 text-xs text-gray-500">
-                          Source: {item.sourceType} / {item.externalId}
+                          Source: {formatSource(item.sourceType, item.externalId)}
                         </p>
                         <p className="mt-2 text-sm text-gray-700">
                           {item.resolutionNotes ?? 'Waiting for a matching decision.'}
