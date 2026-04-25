@@ -76,24 +76,16 @@ public class SelectMatchingCandidateRequest
 [ApiController]
 [Route("api/matching")]
 [Authorize]
-public class MatchingController : ControllerBase
+public class MatchingController(
+    ApplicationDbContext dbContext,
+    UserManager<User> userManager,
+    TrackMatchingService trackMatchingService,
+    ILogger<MatchingController> logger) : ControllerBase
 {
-    private readonly ApplicationDbContext _dbContext;
-    private readonly UserManager<User> _userManager;
-    private readonly TrackMatchingService _trackMatchingService;
-    private readonly ILogger<MatchingController> _logger;
-
-    public MatchingController(
-        ApplicationDbContext dbContext,
-        UserManager<User> userManager,
-        TrackMatchingService trackMatchingService,
-        ILogger<MatchingController> logger)
-    {
-        _dbContext = dbContext;
-        _userManager = userManager;
-        _trackMatchingService = trackMatchingService;
-        _logger = logger;
-    }
+    private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly UserManager<User> _userManager = userManager;
+    private readonly TrackMatchingService _trackMatchingService = trackMatchingService;
+    private readonly ILogger<MatchingController> _logger = logger;
 
     [HttpGet("summary")]
     public async Task<ActionResult<MatchingSummaryResponse>> GetSummary(CancellationToken cancellationToken)

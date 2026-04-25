@@ -1,23 +1,33 @@
+using Cantaro.Api.Configuration;
 using Cantaro.Api.Models;
+using Microsoft.Extensions.Options;
 
 namespace Cantaro.Api.Services;
 
 public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
 {
-    private const int PerQueryResultLimit = 10;
-    private const int MaxReturnedCandidates = 15;
     private static readonly SemaphoreSlim RequestGate = new(1, 1);
     private static DateTimeOffset _lastRequestAt = DateTimeOffset.MinValue;
 
     private readonly IMusicBrainzQueryClient _musicBrainzQueryClient;
     private readonly ILogger<MusicBrainzSearchProvider> _logger;
+    private readonly TrackMatchingOptions _options;
 
     public MusicBrainzSearchProvider(
         IMusicBrainzQueryClient musicBrainzQueryClient,
         ILogger<MusicBrainzSearchProvider> logger)
+        : this(musicBrainzQueryClient, logger, Options.Create(new TrackMatchingOptions()))
+    {
+    }
+
+    public MusicBrainzSearchProvider(
+        IMusicBrainzQueryClient musicBrainzQueryClient,
+        ILogger<MusicBrainzSearchProvider> logger,
+        IOptions<TrackMatchingOptions> options)
     {
         _musicBrainzQueryClient = musicBrainzQueryClient;
         _logger = logger;
+        _options = options.Value;
     }
 
     public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(TrackObservation observation, CancellationToken cancellationToken)
@@ -36,7 +46,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             var queryPlan = queryPlans[queryIndex];
             await RespectRateLimitAsync(cancellationToken);
 
-            var matches = await _musicBrainzQueryClient.FindRecordingsAsync(queryPlan.Query, limit: PerQueryResultLimit, cancellationToken);
+            var matches = await _musicBrainzQueryClient.FindRecordingsAsync(queryPlan.Query, limit: _options.MusicBrainzPerQueryResultLimit, cancellationToken);
             for (var matchIndex = 0; matchIndex < matches.Count; matchIndex++)
             {
                 var match = matches[matchIndex];
@@ -78,7 +88,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             .ThenBy(candidate => candidate.Candidate.Title, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Candidate.Artist, StringComparer.Ordinal)
             .Select(candidate => candidate.Candidate)
-            .Take(MaxReturnedCandidates)
+            .Take(_options.MusicBrainzMaxReturnedCandidates)
             .ToList();
 
         _logger.LogDebug("MusicBrainz returned {Count} candidate(s) for observation {ObservationId}", orderedCandidates.Count, observation.Id);

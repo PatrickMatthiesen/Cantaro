@@ -6,6 +6,12 @@ public sealed class TrackMatchingOptions
 {
     public const string SectionName = "TrackMatching";
 
+    [Range(1, 100)]
+    public int MusicBrainzPerQueryResultLimit { get; set; } = 10;
+
+    [Range(1, 100)]
+    public int MusicBrainzMaxReturnedCandidates { get; set; } = 15;
+
     [Range(typeof(decimal), "0", "1")]
     public decimal AutoMatchThreshold { get; set; } = 0.85m;
 

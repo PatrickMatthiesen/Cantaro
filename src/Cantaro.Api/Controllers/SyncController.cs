@@ -249,7 +249,7 @@ public class SyncController : ControllerBase
                 .Distinct()
                 .ToList();
             var existingEntryCountsByPlaylistId = mappedPlaylistIds.Count == 0
-                ? new Dictionary<Guid, int>()
+                ? []
                 : await _dbContext.PlaylistEntries
                     .Where(e => mappedPlaylistIds.Contains(e.PlaylistId))
                     .GroupBy(e => e.PlaylistId)
