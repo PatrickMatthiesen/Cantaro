@@ -9,6 +9,14 @@ public sealed class ParsedTrackMetadata
     public required string SearchTitle { get; init; }
     public string? SearchArtist { get; init; }
     public bool ParsedArtistFromTitle { get; init; }
+    public IReadOnlyList<string> VersionMarkers { get; init; } = [];
+    public IReadOnlyList<string> PlaybackModifiers { get; init; } = [];
+}
+
+internal sealed class ParsedTitleSemantics
+{
+    public IReadOnlyList<string> VersionMarkers { get; init; } = [];
+    public IReadOnlyList<string> PlaybackModifiers { get; init; } = [];
 }
 
 public static partial class TrackMetadataParser
@@ -17,6 +25,7 @@ public static partial class TrackMetadataParser
 
     public static ParsedTrackMetadata Parse(string? rawTitle, string? rawArtist)
     {
+        var titleSemantics = ExtractTitleSemantics(rawTitle);
         var cleanedTitle = CleanupTitle(rawTitle);
         var isTopicChannel = IsTopicChannel(rawArtist);
         var cleanedArtist = CleanupArtist(rawArtist);
@@ -71,7 +80,24 @@ public static partial class TrackMetadataParser
             DisplayArtist = displayArtist,
             SearchTitle = searchTitle,
             SearchArtist = searchArtist,
-            ParsedArtistFromTitle = parsedArtist != null
+            ParsedArtistFromTitle = parsedArtist != null,
+            VersionMarkers = titleSemantics.VersionMarkers,
+            PlaybackModifiers = titleSemantics.PlaybackModifiers
+        };
+    }
+
+    internal static ParsedTitleSemantics ExtractTitleSemantics(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return new ParsedTitleSemantics();
+        }
+
+        var normalizedValue = NormalizeDashes(value);
+        return new ParsedTitleSemantics
+        {
+            VersionMarkers = ExtractMarkers(normalizedValue, VersionMarkerRegex()),
+            PlaybackModifiers = ExtractMarkers(normalizedValue, PlaybackModifierRegex())
         };
     }
 
@@ -186,6 +212,21 @@ public static partial class TrackMetadataParser
 
     private static string CleanupWhitespace(string value) => WhitespaceRegex().Replace(value, " ").Trim();
 
+    private static IReadOnlyList<string> ExtractMarkers(string value, Regex regex)
+    {
+        return regex.Matches(value)
+            .Select(match => NormalizeMarker(match.Value))
+            .Where(match => !string.IsNullOrWhiteSpace(match))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(match => match, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string NormalizeMarker(string value)
+    {
+        return CleanupWhitespace(value.ToLowerInvariant());
+    }
+
     [GeneratedRegex(@"[\[(](?<text>.*?)[\])]")]
     private static partial Regex BracketedSegmentRegex();
 
@@ -194,6 +235,9 @@ public static partial class TrackMetadataParser
 
     [GeneratedRegex(@"\b(speed\s*up|sped\s*up|nightcore|slowed(?:\s*\+\s*reverb)?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PlaybackModifierRegex();
+
+    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|live|remix|remixed|instrumental|karaoke|demo|dirty|clean|intro|outro|radio\s+edit|edit)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex VersionMarkerRegex();
 
     [GeneratedRegex(@"[\[(]\s*(feat|ft|featuring)\.?\s+[^\])]*[\])]", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedParentheticalRegex();

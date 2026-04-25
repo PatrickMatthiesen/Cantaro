@@ -26,4 +26,34 @@ public class TrackMetadataParserTests
         Assert.Equal(expectedSearchTitle, parsed.SearchTitle);
         Assert.Equal(expectedSearchArtist, parsed.SearchArtist);
     }
+
+    [Fact]
+    public void Parse_ExtractsVersionMarkersFromBracketedTitleContext()
+    {
+        var parsed = TrackMetadataParser.Parse("Crop Circles (Acoustic Vertical Video)", "Jon Bellion");
+
+        Assert.Equal("Crop Circles", parsed.DisplayTitle);
+        Assert.Contains("acoustic", parsed.VersionMarkers);
+        Assert.Empty(parsed.PlaybackModifiers);
+    }
+
+    [Fact]
+    public void Parse_ExtractsPlaybackModifiersEvenWhenTheyAreRemovedFromSearchTitle()
+    {
+        var parsed = TrackMetadataParser.Parse("Nightcore | Crop Circles", "Jon Bellion");
+
+        Assert.Equal("Crop Circles", parsed.DisplayTitle);
+        Assert.Equal("Crop Circles", parsed.SearchTitle);
+        Assert.Contains("nightcore", parsed.PlaybackModifiers);
+    }
+
+    [Fact]
+    public void Parse_RemovesNoiseMarkersWithoutInventingVersionMarkers()
+    {
+        var parsed = TrackMetadataParser.Parse("Crop Circles (Official Video)", "Jon Bellion");
+
+        Assert.Equal("Crop Circles", parsed.DisplayTitle);
+        Assert.Empty(parsed.VersionMarkers);
+        Assert.Empty(parsed.PlaybackModifiers);
+    }
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -36,6 +37,16 @@ public class MatchingQueueCandidateResponse
     public decimal Score { get; set; }
     public string? Explanation { get; set; }
     public bool IsAccepted { get; set; }
+    public List<string> VersionMarkers { get; set; } = [];
+    public List<string> PlaybackModifiers { get; set; } = [];
+    public decimal? TitleSimilarity { get; set; }
+    public decimal? ArtistSimilarity { get; set; }
+    public decimal? DurationScore { get; set; }
+    public decimal? SemanticAdjustment { get; set; }
+    public string? SemanticExplanation { get; set; }
+    public string? ClusterId { get; set; }
+    public int ClusterSize { get; set; }
+    public string? ClusterReason { get; set; }
 }
 
 public class MatchingQueueItemResponse
@@ -52,6 +63,7 @@ public class MatchingQueueItemResponse
     public DateTimeOffset? LastMatchAttemptedAt { get; set; }
     public string? LastMatchError { get; set; }
     public string? ResolutionNotes { get; set; }
+    public TrackMatchObservationDiagnostics Diagnostics { get; set; } = new();
     public List<MatchingQueuePlaylistResponse> Playlists { get; set; } = [];
     public List<MatchingQueueCandidateResponse> Candidates { get; set; } = [];
 }
@@ -64,24 +76,16 @@ public class SelectMatchingCandidateRequest
 [ApiController]
 [Route("api/matching")]
 [Authorize]
-public class MatchingController : ControllerBase
+public class MatchingController(
+    ApplicationDbContext dbContext,
+    UserManager<User> userManager,
+    TrackMatchingService trackMatchingService,
+    ILogger<MatchingController> logger) : ControllerBase
 {
-    private readonly ApplicationDbContext _dbContext;
-    private readonly UserManager<User> _userManager;
-    private readonly TrackMatchingService _trackMatchingService;
-    private readonly ILogger<MatchingController> _logger;
-
-    public MatchingController(
-        ApplicationDbContext dbContext,
-        UserManager<User> userManager,
-        TrackMatchingService trackMatchingService,
-        ILogger<MatchingController> logger)
-    {
-        _dbContext = dbContext;
-        _userManager = userManager;
-        _trackMatchingService = trackMatchingService;
-        _logger = logger;
-    }
+    private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly UserManager<User> _userManager = userManager;
+    private readonly TrackMatchingService _trackMatchingService = trackMatchingService;
+    private readonly ILogger<MatchingController> _logger = logger;
 
     [HttpGet("summary")]
     public async Task<ActionResult<MatchingSummaryResponse>> GetSummary(CancellationToken cancellationToken)
@@ -191,13 +195,36 @@ public class MatchingController : ControllerBase
 
     private static MatchingQueueItemResponse MapQueueItem(TrackObservation observation, int userId)
     {
+        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var storedObservationMetadata = ExtractObservationMetadata(observation);
+        var displayTitle = TrackObservationDisplayFormatter.GetQueueTitle(observation, storedObservationMetadata);
+        var displayArtist = TrackObservationDisplayFormatter.GetQueueArtist(observation, storedObservationMetadata);
+        var candidateProjections = observation.Candidates
+            .OrderByDescending(candidate => candidate.Score)
+            .Select(candidate => new
+            {
+                Candidate = candidate,
+                Diagnostics = ExtractCandidateDiagnostics(candidate)
+            })
+            .ToList();
+
+        var distinctClusterScores = candidateProjections
+            .GroupBy(
+                projection => string.IsNullOrWhiteSpace(projection.Diagnostics.ClusterId)
+                    ? projection.Candidate.Id.ToString()
+                    : projection.Diagnostics.ClusterId,
+                StringComparer.Ordinal)
+            .Select(group => group.Max(projection => projection.Candidate.Score))
+            .OrderByDescending(score => score)
+            .ToList();
+
         return new MatchingQueueItemResponse
         {
             ObservationId = observation.Id.ToString(),
             SourceType = observation.SourceType,
             ExternalId = observation.ExternalId,
-            Title = observation.Title,
-            Artist = observation.Artist,
+            Title = displayTitle,
+            Artist = displayArtist,
             ThumbnailUrl = observation.ThumbnailUrl,
             DurationSeconds = observation.DurationSeconds,
             MatchStatus = observation.MatchStatus,
@@ -205,6 +232,15 @@ public class MatchingController : ControllerBase
             LastMatchAttemptedAt = observation.LastMatchAttemptedAt,
             LastMatchError = observation.LastMatchError,
             ResolutionNotes = observation.ResolutionNotes,
+            Diagnostics = storedObservationMetadata?.Matching ?? new TrackMatchObservationDiagnostics
+            {
+                VersionMarkers = [.. parsedObservation.VersionMarkers],
+                PlaybackModifiers = [.. parsedObservation.PlaybackModifiers],
+                DecisionReason = observation.ResolutionNotes,
+                TopScore = distinctClusterScores.Count > 0 ? distinctClusterScores[0] : null,
+                SecondDistinctScore = distinctClusterScores.Count > 1 ? distinctClusterScores[1] : null,
+                DistinctClusterCount = distinctClusterScores.Count
+            },
             Playlists = observation.PlaylistEntries
                 .Where(entry => entry.Playlist?.UserId == userId)
                 .OrderBy(entry => entry.Playlist!.Name)
@@ -216,24 +252,68 @@ public class MatchingController : ControllerBase
                     Position = entry.Position
                 })
                 .ToList(),
-            Candidates = observation.Candidates
-                .OrderByDescending(candidate => candidate.Score)
-                .Select(candidate => new MatchingQueueCandidateResponse
+            Candidates = candidateProjections
+                .Select(projection => new MatchingQueueCandidateResponse
                 {
-                    CandidateId = candidate.Id.ToString(),
-                    CandidateSource = candidate.CandidateSource,
-                    ExternalId = candidate.ExternalId,
-                    Title = candidate.Title,
-                    Artist = candidate.Artist,
-                    MbidRecording = candidate.MbidRecording,
-                    Isrc = candidate.Isrc,
-                    DurationSeconds = candidate.DurationSeconds,
-                    Score = candidate.Score,
-                    Explanation = candidate.Explanation,
-                    IsAccepted = candidate.IsAccepted
+                    CandidateId = projection.Candidate.Id.ToString(),
+                    CandidateSource = projection.Candidate.CandidateSource,
+                    ExternalId = projection.Candidate.ExternalId,
+                    Title = projection.Candidate.Title,
+                    Artist = projection.Candidate.Artist,
+                    MbidRecording = projection.Candidate.MbidRecording,
+                    Isrc = projection.Candidate.Isrc,
+                    DurationSeconds = projection.Candidate.DurationSeconds,
+                    Score = projection.Candidate.Score,
+                    Explanation = projection.Candidate.Explanation,
+                    IsAccepted = projection.Candidate.IsAccepted,
+                    VersionMarkers = projection.Diagnostics.CandidateVersionMarkers,
+                    PlaybackModifiers = projection.Diagnostics.CandidatePlaybackModifiers,
+                    TitleSimilarity = projection.Diagnostics.TitleSimilarity,
+                    ArtistSimilarity = projection.Diagnostics.ArtistSimilarity,
+                    DurationScore = projection.Diagnostics.DurationScore,
+                    SemanticAdjustment = projection.Diagnostics.SemanticAdjustment,
+                    SemanticExplanation = projection.Diagnostics.SemanticExplanation,
+                    ClusterId = projection.Diagnostics.ClusterId,
+                    ClusterSize = projection.Diagnostics.ClusterSize,
+                    ClusterReason = projection.Diagnostics.ClusterReason
                 })
                 .ToList()
         };
+    }
+
+    private static TrackMatchCandidateDiagnostics ExtractCandidateDiagnostics(TrackResolutionCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.RawMetadata))
+        {
+            return new TrackMatchCandidateDiagnostics();
+        }
+
+        try
+        {
+            var storedMetadata = JsonSerializer.Deserialize<TrackMatchCandidateStoredMetadata>(candidate.RawMetadata);
+            return storedMetadata?.Matching ?? new TrackMatchCandidateDiagnostics();
+        }
+        catch (JsonException)
+        {
+            return new TrackMatchCandidateDiagnostics();
+        }
+    }
+
+    private static TrackObservationMetadata? ExtractObservationMetadata(TrackObservation observation)
+    {
+        if (string.IsNullOrWhiteSpace(observation.RawMetadata))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<TrackObservationMetadata>(observation.RawMetadata);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private async Task<bool> ObservationAccessibleAsync(Guid observationId, int userId, CancellationToken cancellationToken)

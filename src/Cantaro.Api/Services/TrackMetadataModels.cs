@@ -30,4 +30,5 @@ public class TrackObservationMetadata
     public string? ThumbnailUrl { get; set; }
     public int? DurationSeconds { get; set; }
     public DateTimeOffset? PublishedAt { get; set; }
+    public TrackMatchObservationDiagnostics? Matching { get; set; }
 }

@@ -1,0 +1,38 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace Cantaro.Api.Configuration;
+
+public sealed class TrackMatchingOptions
+{
+    public const string SectionName = "TrackMatching";
+
+    [Range(1, 100)]
+    public int MusicBrainzPerQueryResultLimit { get; set; } = 10;
+
+    [Range(1, 100)]
+    public int MusicBrainzMaxReturnedCandidates { get; set; } = 15;
+
+    [Range(typeof(decimal), "0", "1")]
+    public decimal AutoMatchThreshold { get; set; } = 0.85m;
+
+    [Range(typeof(decimal), "0", "1")]
+    public decimal AmbiguousThreshold { get; set; } = 0.65m;
+
+    [Range(typeof(decimal), "0", "1")]
+    public decimal AutoMatchMargin { get; set; } = 0.10m;
+
+    [Range(typeof(decimal), "0", "1")]
+    public decimal MinimumCandidateScore { get; set; } = 0.35m;
+
+    [Range(0, 60)]
+    public int ClusterDurationToleranceSeconds { get; set; } = 5;
+
+    [Range(typeof(decimal), "-1", "1")]
+    public decimal PlaybackModifierMismatchPenalty { get; set; } = -0.20m;
+
+    [Range(typeof(decimal), "-1", "1")]
+    public decimal VersionMismatchPenalty { get; set; } = -0.15m;
+
+    [Range(typeof(decimal), "-1", "1")]
+    public decimal VersionMarkerMatchBonus { get; set; } = 0.05m;
+}

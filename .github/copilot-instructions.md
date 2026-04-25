@@ -4,13 +4,8 @@
 
 Precedence
 
-- This file is the authoritative instruction set for AI agents and coding assistants.
 - Other docs (for example, docs/infrastructure.md) are supplemental context and must not override this file.
-- When in doubt or when contradictions appear, follow this file.
-
-Purpose
-
-- Concise, actionable rules so agents can implement and review Cantaro features correctly and safely.
+- When in doubt or when contradictions appear, follow this file or use the askQuestions tool.
 
 Core context (short)
 
@@ -41,7 +36,7 @@ Non-negotiable rules (follow exactly)
 
 - Canonicalize around internal TrackID. Playlists/PlaylistEntry reference TrackIDs; mappings live in TrackSourceId.
 - Prefer MBID/ISRC for mapping; fallback to structured heuristics (artist/title/duration).
-- Represent “no match” and “ambiguous/multiple matches” explicitly.
+- Represent "no match" and "ambiguous/multiple matches" explicitly.
 
 4. Open-source & self-hosting
 
@@ -55,7 +50,7 @@ Non-negotiable rules (follow exactly)
 Key patterns & conventions
 
 - Domain names: Track, TrackSourceId, ConnectedServiceAccount, Playlist, PlaylistEntry, ServicePlaylistMapping.
-- Mapping resolution: prefer MBID/ISRC, then heuristics (artist/title/duration). Track and surface “no match”/“ambiguous”.
+- Mapping resolution: prefer MBID/ISRC, then heuristics (artist/title/duration). Track and surface "no match"/"ambiguous".
 - Adapters: keep third-party specifics out of core domain; expose TrackID <-> service ID mapping functions.
 - Background jobs: do sync work off the request path; store retry and rate-limit metadata and back off accordingly.
 
@@ -70,7 +65,7 @@ Code & output conventions
 - Backend: idiomatic ASP.NET Core (target .NET/ASP.NET Core 10+ when practical), DI, layered services/controllers, EF Core for data access; add unit/integration tests for public behavior changes.
 - Frontend: React + TypeScript + Vite, minimal state, Prettier-style formatting.
 - Extension: separate content scripts and background/service worker; never store long-lived third-party refresh tokens; not a source of truth.
-- Communication: be direct; call out conflicts with these rules; don’t overpromise (no “perfect realtime sync”).
+- Communication: be direct; call out conflicts with these rules; don’t overpromise (no "perfect realtime sync").
 
 PR guidance
 
@@ -82,7 +77,3 @@ References
 
 - docs/infrastructure.md — canonical architecture, domain entities, and sync model.
 - docs/agent-extra.md — supplemental context only; may be removed in favor of this file.
-
-Notes
-
-- We are currently removing all annotations of the old "Workspace" concept and just streamlining to a pages that manage connected platforms and playlists.

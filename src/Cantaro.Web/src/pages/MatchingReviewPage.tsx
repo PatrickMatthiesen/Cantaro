@@ -36,6 +36,57 @@ function formatStatus(status: string): string {
   }
 }
 
+function formatPercent(value?: number): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatClusterReason(clusterReason?: string): string | null {
+  if (!clusterReason) {
+    return null;
+  }
+
+  switch (clusterReason) {
+    case 'shared-strong-identifier':
+      return 'Shared strong identifier';
+    case 'normalized-title-artist-duration':
+      return 'Merged by normalized title, artist, and duration';
+    case 'representative':
+      return 'Standalone cluster';
+    default:
+      return clusterReason;
+  }
+}
+
+function MarkerList({
+  markers,
+  tone,
+}: {
+  markers: string[];
+  tone: 'version' | 'playback';
+}) {
+  if (markers.length === 0) {
+    return null;
+  }
+
+  const classes = tone === 'version'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : 'border-rose-200 bg-rose-50 text-rose-700';
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {markers.map((marker) => (
+        <span key={`${tone}-${marker}`} className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${classes}`}>
+          {marker}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function statusClasses(status: string): string {
   switch (status) {
     case 'ambiguous':
@@ -46,6 +97,31 @@ function statusClasses(status: string): string {
       return 'bg-indigo-100 text-indigo-800';
     default:
       return 'bg-emerald-100 text-emerald-800';
+  }
+}
+
+function formatSource(sourceType: string, externalId: string): string | React.ReactNode {
+  switch (sourceType) {
+    case 'spotify':
+      return (
+        <a href={`https://open.spotify.com/track/${externalId}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+          Spotify - {externalId}
+        </a>
+      );
+    case 'apple_music':
+      return (
+        <a href={`https://music.apple.com/track/${externalId}`} target="_blank" rel="noopener noreferrer" className="text-red-500 hover:underline">
+          Apple Music - {externalId}
+        </a>
+      );
+    case 'youtube':
+      return (
+        <a href={`https://youtu.be/${externalId}`} target="_blank" rel="noopener noreferrer" className="text-red-600 hover:underline">
+          YouTube - {externalId}
+        </a>
+      );
+    default:
+      return `${sourceType} / ${externalId}`;
   }
 }
 
@@ -186,11 +262,13 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
                           {item.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''}
                         </p>
                         <p className="mt-2 text-xs text-gray-500">
-                          Source: {item.sourceType} / {item.externalId}
+                          Source: {formatSource(item.sourceType, item.externalId)}
                         </p>
                         <p className="mt-2 text-sm text-gray-700">
                           {item.resolutionNotes ?? 'Waiting for a matching decision.'}
                         </p>
+                        <MarkerList markers={item.diagnostics.versionMarkers} tone="version" />
+                        <MarkerList markers={item.diagnostics.playbackModifiers} tone="playback" />
                         {item.lastMatchError ? (
                           <p className="mt-2 text-sm text-rose-700">Last error: {item.lastMatchError}</p>
                         ) : null}
@@ -200,6 +278,20 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
                             ? ` • Last tried ${new Date(item.lastMatchAttemptedAt).toLocaleString()}`
                             : ''}
                         </p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
+                            <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Top cluster</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-900">{formatPercent(item.diagnostics.topScore) ?? '—'}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
+                            <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Runner-up</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-900">{formatPercent(item.diagnostics.secondDistinctScore) ?? '—'}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
+                            <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Distinct clusters</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-900">{item.diagnostics.distinctClusterCount}</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -300,8 +392,43 @@ function CandidateCard({
           <p className="mt-1 text-xs text-gray-500">
             {candidate.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''} • {candidate.candidateSource}
           </p>
+          <MarkerList markers={candidate.versionMarkers} tone="version" />
+          <MarkerList markers={candidate.playbackModifiers} tone="playback" />
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600">
+            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+              Title {formatPercent(candidate.titleSimilarity) ?? '—'}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+              Artist {formatPercent(candidate.artistSimilarity) ?? '—'}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+              Duration {formatPercent(candidate.durationScore) ?? '—'}
+            </span>
+            <span className={`rounded-full px-2 py-1 font-semibold ${candidate.semanticAdjustment && candidate.semanticAdjustment < 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              Semantic {candidate.semanticAdjustment !== undefined ? `${candidate.semanticAdjustment > 0 ? '+' : ''}${Math.round(candidate.semanticAdjustment * 100)} pts` : '—'}
+            </span>
+            <span className="rounded-full bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
+              Cluster size {candidate.clusterSize}
+            </span>
+          </div>
+          {formatClusterReason(candidate.clusterReason) ? (
+            <p className="mt-2 text-xs font-medium text-gray-600">{formatClusterReason(candidate.clusterReason)}</p>
+          ) : null}
+          {candidate.semanticExplanation ? (
+            <p className="mt-2 text-xs text-gray-600">{candidate.semanticExplanation}</p>
+          ) : null}
           {candidate.mbidRecording ? (
-            <p className="mt-1 text-xs text-gray-500">MBID: {candidate.mbidRecording}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              MBID:{' '}
+              <a
+                href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800"
+              >
+                {candidate.mbidRecording}
+              </a>
+            </p>
           ) : null}
           {candidate.explanation ? (
             <p className="mt-2 text-sm text-gray-700">{candidate.explanation}</p>

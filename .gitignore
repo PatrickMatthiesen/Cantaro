@@ -13,6 +13,7 @@ obj/
 *.log
 .vs/
 .vscode/settings.json
+*.lscache
 
 # ASP.NET
 project.lock.json
