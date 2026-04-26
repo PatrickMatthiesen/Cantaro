@@ -7,6 +7,7 @@ import { SyncButton } from './components/SyncButton';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
 import { ComponentsPage } from './pages/ComponentsPage';
 import { MatchingReviewPage } from './pages/MatchingReviewPage';
+import { MediaPage } from './pages/MediaPage';
 import { platformManager, type PlatformId } from './platforms';
 import { platformCatalog } from './platforms/catalog';
 import { Design1 } from './designs/Design1';
@@ -21,13 +22,14 @@ import { Design9 } from './designs/Design9';
 import { GlassCard, GradientButton, PlatformTile } from './components/ui/GlassComponents';
 
 type DesignPage = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-type Page = 'home' | 'matching' | 'components' | DesignPage | PlatformId;
+type Page = 'home' | 'matching' | 'components' | 'media' | DesignPage | PlatformId;
 
 function resolvePageFromPath(path: string): Page {
   const platformPath = path.slice(1) as PlatformId;
   if (platformCatalog.some((platform) => platform.id === platformPath)) return platformPath;
   if (path === '/matching') return 'matching';
   if (path === '/components') return 'components';
+  if (path === '/media' || path.startsWith('/media/')) return 'media';
 
   const match = path.match(/^\/([1-9])$/);
   if (match) return match[1] as DesignPage;
@@ -183,6 +185,10 @@ function AuthenticatedApp() {
     return <MatchingReviewPage onNavigateHome={() => navigateTo('home')} />;
   }
 
+  if (currentPage === 'media') {
+    return <MediaPage onNavigateHome={() => navigateTo('home')} />;
+  }
+
   if (currentPage === 'components') {
     return <ComponentsPage />;
   }
@@ -335,6 +341,29 @@ function AuthenticatedApp() {
                 <div className="mt-4">
                   <GradientButton tone="soft" onClick={() => navigateTo('matching')}>
                     Review matching queue
+                  </GradientButton>
+                </div>
+              </GlassCard>
+              <GlassCard className="p-6">
+                <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Media tracking</p>
+                <p className="mt-2 text-sm text-gray-700">
+                  Connect AniList to import your anime and manga library into Cantaro.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <GradientButton
+                    gradient="from-blue-500 to-cyan-500"
+                    onClick={() => navigateTo('media')}
+                  >
+                    Manage providers
+                  </GradientButton>
+                  <GradientButton
+                    tone="soft"
+                    onClick={() => {
+                      navigateTo('media');
+                      window.history.replaceState({}, '', '/media/library');
+                    }}
+                  >
+                    Browse library
                   </GradientButton>
                 </div>
               </GlassCard>
