@@ -3,6 +3,7 @@ using System;
 using Cantaro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cantaro.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260425212414_AddMediaDomainFoundation")]
+    partial class AddMediaDomainFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -217,72 +220,6 @@ namespace Cantaro.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("MediaProviderLinks");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderOperation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("ConnectedServiceAccountId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<DateTimeOffset?>("LastAttemptAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LastError")
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("MediaLibraryEntryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("NextAttemptAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OperationType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PayloadJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectedServiceAccountId");
-
-                    b.HasIndex("MediaLibraryEntryId");
-
-                    b.HasIndex("Status", "NextAttemptAt");
-
-                    b.HasIndex("UserId", "Provider", "CreatedAt");
-
-                    b.ToTable("MediaProviderOperations");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaTitle", b =>
@@ -938,32 +875,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("MediaTitle");
                 });
 
-            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderOperation", b =>
-                {
-                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
-                        .WithMany("MediaProviderOperations")
-                        .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", "MediaLibraryEntry")
-                        .WithMany("ProviderOperations")
-                        .HasForeignKey("MediaLibraryEntryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Cantaro.Api.Models.User", "User")
-                        .WithMany("MediaProviderOperations")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ConnectedServiceAccount");
-
-                    b.Navigation("MediaLibraryEntry");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("Cantaro.Api.Models.Playlist", b =>
                 {
                     b.HasOne("Cantaro.Api.Models.User", "User")
@@ -1097,13 +1008,6 @@ namespace Cantaro.Api.Migrations
             modelBuilder.Entity("Cantaro.Api.Models.ConnectedServiceAccount", b =>
                 {
                     b.Navigation("MediaLibraryEntries");
-
-                    b.Navigation("MediaProviderOperations");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
-                {
-                    b.Navigation("ProviderOperations");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaTitle", b =>
@@ -1139,8 +1043,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("ConnectedServiceAccounts");
 
                     b.Navigation("MediaLibraryEntries");
-
-                    b.Navigation("MediaProviderOperations");
                 });
 #pragma warning restore 612, 618
         }

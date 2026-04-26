@@ -23,6 +23,10 @@ builder.Services
     .AddOptions<TrackMatchingOptions>()
     .Bind(builder.Configuration.GetSection(TrackMatchingOptions.SectionName))
     .ValidateDataAnnotations();
+builder.Services
+    .AddOptions<AniListOptions>()
+    .Bind(builder.Configuration.GetSection(AniListOptions.SectionName))
+    .ValidateDataAnnotations();
 
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();
@@ -30,10 +34,16 @@ builder.Services.AddScoped<YouTubeService>();
 builder.Services.AddScoped<YouTubePlaylistSyncService>();
 builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
 builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
+builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
 builder.Services.AddHttpClient<IMusicBrainzQueryClient, MusicBrainzQueryClient>();
+builder.Services.AddHttpClient<AniListApiClient>();
+builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
+builder.Services.AddScoped<MediaLibraryImportService>();
+builder.Services.AddScoped<MediaProviderOperationProcessor>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
+builder.Services.AddHostedService<MediaProviderOperationWorker>();
 
 builder.Services.AddAuthorization();
 
