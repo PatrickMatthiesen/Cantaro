@@ -26,6 +26,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
     public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
     public DbSet<MediaObservationCandidate> MediaObservationCandidates => Set<MediaObservationCandidate>();
+    public DbSet<ExtensionAuthorizationCode> ExtensionAuthorizationCodes => Set<ExtensionAuthorizationCode>();
+    public DbSet<ExtensionRefreshToken> ExtensionRefreshTokens => Set<ExtensionRefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,17 +42,72 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<ConnectedServiceAccount>(entity =>
         {
             entity.HasKey(e => e.Id);
-            
+
             entity.HasIndex(e => new { e.UserId, e.Service })
                 .IsUnique();
-            
+
             entity.HasIndex(e => e.ExternalAccountId);
-            
+
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
+
             entity.HasOne(e => e.User)
                 .WithMany(u => u.ConnectedServiceAccounts)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ExtensionRefreshToken>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => e.TokenHash)
+                .IsUnique();
+
+            entity.HasIndex(e => new { e.UserId, e.ClientId });
+            entity.HasIndex(e => e.ExpiresAt);
+
+            entity.Property(e => e.ClientId)
+                .HasMaxLength(200);
+
+            entity.Property(e => e.TokenHash)
+                .HasMaxLength(256);
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ExtensionAuthorizationCode>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => e.CodeHash)
+                .IsUnique();
+
+            entity.HasIndex(e => e.ExpiresAt);
+
+            entity.Property(e => e.ClientId)
+                .HasMaxLength(200);
+
+            entity.Property(e => e.RedirectUri)
+                .HasMaxLength(2048);
+
+            entity.Property(e => e.CodeChallenge)
+                .HasMaxLength(256);
+
+            entity.Property(e => e.CodeHash)
+                .HasMaxLength(256);
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
@@ -58,10 +115,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<Track>(entity =>
         {
             entity.HasKey(e => e.Id);
-            
+
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
+
             entity.HasIndex(e => e.MbidRecording);
             entity.HasIndex(e => e.Isrc);
         });
@@ -69,11 +126,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<TrackSourceId>(entity =>
         {
             entity.HasKey(e => e.Id);
-            
+
             // Unique index on (SourceType, ExternalId)
             entity.HasIndex(e => new { e.SourceType, e.ExternalId })
                 .IsUnique();
-            
+
             entity.HasOne(e => e.Track)
                 .WithMany(t => t.SourceIds)
                 .HasForeignKey(e => e.TrackId)
@@ -115,10 +172,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<Playlist>(entity =>
         {
             entity.HasKey(e => e.Id);
-            
+
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            
+
             entity.HasOne(e => e.User)
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
@@ -128,16 +185,16 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<PlaylistEntry>(entity =>
         {
             entity.HasKey(e => e.Id);
-            
+
             // Unique index on (PlaylistId, Position)
             entity.HasIndex(e => new { e.PlaylistId, e.Position })
                 .IsUnique();
-            
+
             entity.HasOne(e => e.Playlist)
                 .WithMany(p => p.Entries)
                 .HasForeignKey(e => e.PlaylistId)
                 .OnDelete(DeleteBehavior.Cascade);
-            
+
             entity.HasOne(e => e.Track)
                 .WithMany(t => t.PlaylistEntries)
                 .HasForeignKey(e => e.TrackId)
@@ -152,11 +209,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<ServicePlaylistMapping>(entity =>
         {
             entity.HasKey(e => e.Id);
-            
+
             // Unique index on (PlaylistId, Service)
             entity.HasIndex(e => new { e.PlaylistId, e.Service })
                 .IsUnique();
-            
+
             entity.HasOne(e => e.Playlist)
                 .WithMany(p => p.ServiceMappings)
                 .HasForeignKey(e => e.PlaylistId)

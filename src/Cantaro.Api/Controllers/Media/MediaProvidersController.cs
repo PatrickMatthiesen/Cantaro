@@ -427,16 +427,10 @@ public class MediaProvidersController(
 
     private async Task<int> GetCurrentUserIdAsync()
     {
-        var email = User.Identity?.Name;
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            throw new UnauthorizedAccessException("User not authenticated");
-        }
-
-        var user = await _userManager.FindByEmailAsync(email);
+        var user = await _userManager.GetUserAsync(User);
         if (user is null)
         {
-            throw new UnauthorizedAccessException("User not found");
+            throw new UnauthorizedAccessException("User not authenticated");
         }
 
         return user.Id;

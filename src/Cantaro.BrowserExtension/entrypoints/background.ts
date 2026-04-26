@@ -1,4 +1,6 @@
 import { createBrowserStorageQueue } from '../lib/observationQueue';
+import { DEFAULT_API_BASE_URL, readExtensionConfig } from '../lib/extensionRuntimeConfig';
+import { ensureExtensionAccessToken } from '../lib/cantaroAuthSession';
 import type { MediaObservation } from '../lib/mediaObservation';
 
 /** Media observation route expected by the Cantaro backend. */
@@ -33,8 +35,8 @@ async function initialize() {
 
   const config = await browser.storage.local.get('apiBaseUrl');
   if (!config.apiBaseUrl) {
-    console.log('API base URL not configured. Setting default for local development.');
-    await browser.storage.local.set({ apiBaseUrl: 'http://localhost:5000' });
+    console.log('API base URL not configured. Setting build default.');
+    await browser.storage.local.set({ apiBaseUrl: DEFAULT_API_BASE_URL });
   }
 
   // Replay any observations that were queued while the extension was offline
@@ -47,9 +49,10 @@ async function initialize() {
 // ---------------------------------------------------------------------------
 
 async function handleMediaObservation(observation: MediaObservation): Promise<void> {
-  const config = await browser.storage.local.get(['apiBaseUrl', 'accessToken']);
+  const config = await readExtensionConfig();
+  const accessToken = await ensureExtensionAccessToken(config.apiBaseUrl);
 
-  if (!config.accessToken) {
+  if (!accessToken) {
     // Not authenticated yet — queue for later replay
     await observationQueue.enqueue(observation);
     console.log('Cantaro: queued media observation (no auth token)');
@@ -57,8 +60,8 @@ async function handleMediaObservation(observation: MediaObservation): Promise<vo
   }
 
   const sent = await sendObservation(
-    config.apiBaseUrl as string,
-    config.accessToken as string,
+    config.apiBaseUrl,
+    accessToken,
     observation,
   );
 
@@ -74,8 +77,9 @@ async function handleMediaObservation(observation: MediaObservation): Promise<vo
  * Items that fail are left in the queue with an incremented attempt count.
  */
 async function drainObservationQueue(): Promise<void> {
-  const config = await browser.storage.local.get(['apiBaseUrl', 'accessToken']);
-  if (!config.accessToken) return;
+  const config = await readExtensionConfig();
+  const accessToken = await ensureExtensionAccessToken(config.apiBaseUrl);
+  if (!accessToken) return;
 
   const queued = await observationQueue.drain();
   const batch = queued.slice(0, DRAIN_BATCH_SIZE);
@@ -89,8 +93,8 @@ async function drainObservationQueue(): Promise<void> {
   await Promise.all(
     batch.map(async (item) => {
       const ok = await sendObservation(
-        config.apiBaseUrl as string,
-        config.accessToken as string,
+        config.apiBaseUrl,
+        accessToken,
         item.observation,
       );
       (ok ? succeeded : failed).push(item.id);
@@ -144,9 +148,10 @@ async function handlePlaylistEvent(payload: unknown) {
   console.log('Handling playlist event:', payload);
 
   try {
-    const config = await browser.storage.local.get(['apiBaseUrl', 'accessToken']);
+    const config = await readExtensionConfig();
+    const accessToken = await ensureExtensionAccessToken(config.apiBaseUrl);
 
-    if (!config.accessToken) {
+    if (!accessToken) {
       console.warn('No auth token found. User needs to authenticate.');
       return;
     }
@@ -155,7 +160,7 @@ async function handlePlaylistEvent(payload: unknown) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(payload),
     });

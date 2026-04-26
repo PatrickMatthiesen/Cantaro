@@ -2,10 +2,17 @@ using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+var extensionAuthOptions = builder.Configuration
+    .GetSection(ExtensionAuthOptions.SectionName)
+    .Get<ExtensionAuthOptions>() ?? new ExtensionAuthOptions();
+var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(extensionAuthOptions, builder.Environment);
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
@@ -19,6 +26,10 @@ builder.AddNpgsqlDbContext<ApplicationDbContext>(connectionName: "cantaro-db");
 builder.Services.AddDataProtection();
 builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<FrontendUrlOptions>(builder.Configuration.GetSection(FrontendUrlOptions.SectionName));
+builder.Services
+    .AddOptions<ExtensionAuthOptions>()
+    .Bind(builder.Configuration.GetSection(ExtensionAuthOptions.SectionName))
+    .ValidateDataAnnotations();
 builder.Services
     .AddOptions<TrackMatchingOptions>()
     .Bind(builder.Configuration.GetSection(TrackMatchingOptions.SectionName))
@@ -47,8 +58,8 @@ builder.Services.AddScoped<MediaObservationProgressService>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
 builder.Services.AddHostedService<MediaProviderOperationWorker>();
-
-builder.Services.AddAuthorization();
+builder.Services.AddScoped<ExtensionAuthorizationCodeStore>();
+builder.Services.AddScoped<ExtensionAuthService>();
 
 builder.Services.AddIdentityApiEndpoints<User>(c =>
 {
@@ -68,6 +79,42 @@ builder.Services.AddIdentityApiEndpoints<User>(c =>
     c.SignIn.RequireConfirmedAccount = false;
 }).AddEntityFrameworkStores<ApplicationDbContext>();
 
+builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultScheme = "CantaroApi";
+        options.DefaultAuthenticateScheme = "CantaroApi";
+        options.DefaultChallengeScheme = "CantaroApi";
+    })
+    .AddPolicyScheme("CantaroApi", "Cantaro API authentication", options =>
+    {
+        options.ForwardDefaultSelector = context =>
+        {
+            var authorization = context.Request.Headers.Authorization.ToString();
+            return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? JwtBearerDefaults.AuthenticationScheme
+                : IdentityConstants.ApplicationScheme;
+        };
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = extensionAuthOptions.JwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = extensionAuthOptions.JwtAudience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(extensionJwtSigningKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1),
+            NameClaimType = System.Security.Claims.ClaimTypes.Name,
+            RoleClaimType = System.Security.Claims.ClaimTypes.Role
+        };
+    });
+
+builder.Services.AddAuthorization();
+
 builder.Services.ConfigureApplicationCookie(options =>
 {
     // Makes the cookie last 14 days
@@ -83,6 +130,30 @@ builder.Services.ConfigureApplicationCookie(options =>
     {
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     }
+
+    options.Events.OnRedirectToLogin = context =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
+
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
 });
 
 // Add controllers

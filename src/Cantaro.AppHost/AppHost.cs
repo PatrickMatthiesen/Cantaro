@@ -12,9 +12,11 @@ var aniListClientSecret = builder.AddParameter("AniListClientSecret", secret: tr
 var postgres = builder.AddPostgres("postgres")
     .WithLifetime(ContainerLifetime.Persistent)
     .WithContainerName("cantaro-postgres")
-    .WithHostPort(5432)
-    .WithPgAdmin();
+    .WithHostPort(5432);
 var db = postgres.AddDatabase("cantaro-db");
+
+var pgAdmin = postgres.WithPgAdmin()
+    .WithExplicitStart();
 
 var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("migration-service")
     .WithReference(db)

@@ -8,6 +8,7 @@ import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
 import { ComponentsPage } from './pages/ComponentsPage';
 import { MatchingReviewPage } from './pages/MatchingReviewPage';
 import { MediaPage } from './pages/MediaPage';
+import { ExtensionAuthPage } from './pages/ExtensionAuthPage';
 import { platformManager, type PlatformId } from './platforms';
 import { platformCatalog } from './platforms/catalog';
 import { Design1 } from './designs/Design1';
@@ -22,7 +23,7 @@ import { Design9 } from './designs/Design9';
 import { GlassCard, GradientButton, PlatformTile } from './components/ui/GlassComponents';
 
 type DesignPage = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
-type Page = 'home' | 'matching' | 'components' | 'media' | DesignPage | PlatformId;
+type Page = 'home' | 'matching' | 'components' | 'media' | 'extension-auth' | DesignPage | PlatformId;
 
 function resolvePageFromPath(path: string): Page {
   const platformPath = path.slice(1) as PlatformId;
@@ -30,6 +31,7 @@ function resolvePageFromPath(path: string): Page {
   if (path === '/matching') return 'matching';
   if (path === '/components') return 'components';
   if (path === '/media' || path.startsWith('/media/')) return 'media';
+  if (path === '/extension-auth') return 'extension-auth';
 
   const match = path.match(/^\/([1-9])$/);
   if (match) return match[1] as DesignPage;
@@ -111,6 +113,10 @@ function AuthenticatedApp() {
     platformCatalog.find((platform) => platform.id === primaryConnectedPlatform) ?? platformCatalog[0];
   const connectedPlatforms = platformCatalog.filter((platform) => connectedPlatformIdSet.has(platform.id));
   const platformsToAdd = platformCatalog.filter((platform) => !connectedPlatformIdSet.has(platform.id));
+
+  if (currentPage === 'extension-auth') {
+    return <ExtensionAuthPage />;
+  }
 
   if (isLoading) {
     return (
