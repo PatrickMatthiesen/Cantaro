@@ -12,8 +12,8 @@ builder.AddServiceDefaults();
 
 // Add PostgreSQL database context with custom configuration
 // Disable retry execution strategy because we use manual transactions with raw SQL
-// Pass null settings to prevent Aspire from automatically enabling NpgsqlRetryingExecutionStrategy
-builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db", configureSettings: null);
+// Pass null settings to prevent Aspire from automatically enabling NpgsqlRetryingExecutionStrategy : TODO Remove?
+builder.AddNpgsqlDbContext<ApplicationDbContext>(connectionName: "cantaro-db");
 
 // Add Data Protection for token encryption
 builder.Services.AddDataProtection();
@@ -25,8 +25,7 @@ builder.Services
     .ValidateDataAnnotations();
 builder.Services
     .AddOptions<AniListOptions>()
-    .Bind(builder.Configuration.GetSection(AniListOptions.SectionName))
-    .ValidateDataAnnotations();
+    .Bind(builder.Configuration.GetSection(AniListOptions.SectionName));
 
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();
@@ -148,41 +147,17 @@ app.MapControllers();
 // Prefix all Identity API endpoints with /api to hit the vite proxy
 app.MapGroup("/api").MapIdentityApi<User>();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
-
-// Apply migrations on startup in development
-if (app.Environment.IsDevelopment())
-{
-    using var scope = app.Services.CreateScope();
-    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
-    logger.LogWarning("Applying EF Core migrations automatically on startup (development mode). " +
-        "This is intended for local development only. " +
-        "If multiple instances start simultaneously or if migrations fail, the database may become inconsistent. " +
-        "See the developer setup guide for details.");
-    await dbContext.Database.MigrateAsync();
-}
+//     // Apply migrations on startup in development
+// if (app.Environment.IsDevelopment())
+// {
+//     using var scope = app.Services.CreateScope();
+//     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+//     var logger = scope.ServiceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
+//     logger.LogWarning("Applying EF Core migrations automatically on startup (development mode). " +
+//         "This is intended for local development only. " +
+//         "If multiple instances start simultaneously or if migrations fail, the database may become inconsistent. " +
+//         "See the developer setup guide for details.");
+//     await dbContext.Database.MigrateAsync();
+// }
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

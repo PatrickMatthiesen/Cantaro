@@ -5,6 +5,8 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 var youtubeClientId = builder.AddParameter("YouTubeClientId", secret: true);
 var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: true);
+var aniListClientId = builder.AddParameter("AniListClientId", secret: true);
+var aniListClientSecret = builder.AddParameter("AniListClientSecret", secret: true);
 
 // Add PostgreSQL database
 var postgres = builder.AddPostgres("postgres")
@@ -14,12 +16,19 @@ var postgres = builder.AddPostgres("postgres")
     .WithPgAdmin();
 var db = postgres.AddDatabase("cantaro-db");
 
+var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("migration-service")
+    .WithReference(db)
+    .WaitFor(db);
+
 // Add API service
 var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("YouTube:ClientId", youtubeClientId)
     .WithEnvironment("YouTube:ClientSecret", youtubeClientSecret)
-    .WithReference(db)
-    .WaitFor(db);
+    .WithEnvironment("AniList:ClientId", aniListClientId)
+    .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
+    .WithReference(migrationService)
+    .WaitForCompletion(migrationService)
+    .WithReference(db);
 
 // Add frontend
 #pragma warning disable ASPIRECERTIFICATES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.

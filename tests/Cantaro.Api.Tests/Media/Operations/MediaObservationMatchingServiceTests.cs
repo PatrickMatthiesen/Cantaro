@@ -66,7 +66,7 @@ public class MediaObservationMatchingServiceTests
 
         // Exact word overlap should match or be ambiguous (not no_match).
         Assert.NotEqual(MediaObservationStatuses.NoMatch, persisted.MatchStatus);
-        Assert.True(persisted.Candidates.Count > 0);
+        Assert.NotEmpty(persisted.Candidates);
 
         var topCandidate = persisted.Candidates.OrderByDescending(c => c.Score).First();
         Assert.Equal(title.Id, topCandidate.MediaTitleId);
@@ -122,7 +122,7 @@ public class MediaObservationMatchingServiceTests
             .SingleAsync(o => o.Id == observation.Id);
 
         // Should have found candidates.
-        Assert.True(persisted.Candidates.Count >= 1);
+        Assert.NotEmpty(persisted.Candidates);
         // Should not be auto-matched to a single title without confidence.
         Assert.NotEqual(MediaObservationStatuses.NoMatch, persisted.MatchStatus);
     }
@@ -147,7 +147,7 @@ public class MediaObservationMatchingServiceTests
         var firstAttempt = await fixture.DbContext.MediaObservations
             .Include(o => o.Candidates)
             .SingleAsync(o => o.Id == observation.Id);
-        Assert.Equal(0, firstAttempt.Candidates.Count);
+        Assert.Empty(firstAttempt.Candidates);
         Assert.Equal(1, firstAttempt.MatchAttemptCount);
 
         // Add a title and retry.

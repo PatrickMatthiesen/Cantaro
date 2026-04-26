@@ -17,7 +17,7 @@ namespace Cantaro.Api.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.5")
+                .HasAnnotation("ProductVersion", "10.0.7")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -71,140 +71,6 @@ namespace Cantaro.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("ConnectedServiceAccounts");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MediaObservation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("AcceptedCandidateId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("ExtensionVersion")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("LastMatchAttemptedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LastMatchError")
-                        .HasColumnType("text");
-
-                    b.Property<int>("MatchAttemptCount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("MatchStatus")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid?>("MediaTitleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("ObservedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ObservedTitle")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ObservedUrl")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ProgressHint")
-                        .HasColumnType("text");
-
-                    b.Property<string>("RawPayload")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ResolutionNotes")
-                        .HasColumnType("text");
-
-                    b.Property<string>("SiteIdentifier")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("SiteMediaId")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "CreatedAt");
-
-                    b.HasIndex("UserId", "MatchStatus");
-
-                    b.HasIndex("UserId", "SiteIdentifier", "SiteMediaId")
-                        .IsUnique()
-                        .HasFilter("\"SiteMediaId\" IS NOT NULL");
-
-                    b.ToTable("MediaObservations");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MediaObservationCandidate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("CandidateSource")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("Explanation")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("IsAccepted")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("MediaKind")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("MediaObservationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("MediaTitleId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Provider")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ProviderMediaId")
-                        .HasColumnType("text");
-
-                    b.Property<decimal>("Score")
-                        .HasColumnType("numeric");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MediaTitleId");
-
-                    b.HasIndex("MediaObservationId", "Score");
-
-                    b.ToTable("MediaObservationCandidates");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
@@ -296,6 +162,142 @@ namespace Cantaro.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("MediaLibraryEntries");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaObservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AcceptedCandidateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("ExtensionVersion")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("LastMatchAttemptedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastMatchError")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MatchAttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MatchStatus")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("MediaTitleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ObservedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ObservedTitle")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ObservedUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProgressHint")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RawPayload")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ResolutionNotes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SiteIdentifier")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SiteMediaId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaTitleId");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.HasIndex("UserId", "MatchStatus");
+
+                    b.HasIndex("UserId", "SiteIdentifier", "SiteMediaId")
+                        .IsUnique()
+                        .HasFilter("\"SiteMediaId\" IS NOT NULL");
+
+                    b.ToTable("MediaObservations");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaObservationCandidate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CandidateSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Explanation")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsAccepted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MediaKind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("MediaObservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MediaTitleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProviderMediaId")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Score")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaTitleId");
+
+                    b.HasIndex("MediaObservationId", "Score");
+
+                    b.ToTable("MediaObservationCandidates");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaProviderLink", b =>
@@ -1280,16 +1282,16 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("ProviderOperations");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.MediaObservation", b =>
+                {
+                    b.Navigation("Candidates");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.MediaTitle", b =>
                 {
                     b.Navigation("LibraryEntries");
 
                     b.Navigation("ProviderLinks");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MediaObservation", b =>
-                {
-                    b.Navigation("Candidates");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.Playlist", b =>
