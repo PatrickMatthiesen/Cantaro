@@ -20,6 +20,8 @@ public class AniListApiClient(
 
     public string BuildAuthorizationUrl(string redirectUri, string state, string codeChallenge)
     {
+        EnsureClientIdConfigured();
+
         var query = new Dictionary<string, string?>
         {
             ["client_id"] = _options.ClientId,
@@ -43,6 +45,8 @@ public class AniListApiClient(
         string codeVerifier,
         CancellationToken cancellationToken)
     {
+        EnsureClientIdConfigured();
+
         var payload = new Dictionary<string, string?>
         {
             ["grant_type"] = "authorization_code",
@@ -60,6 +64,8 @@ public class AniListApiClient(
         string refreshToken,
         CancellationToken cancellationToken)
     {
+        EnsureClientIdConfigured();
+
         var payload = new Dictionary<string, string?>
         {
             ["grant_type"] = "refresh_token",
@@ -142,6 +148,14 @@ public class AniListApiClient(
 
         return JsonSerializer.Deserialize<AniListTokenResponse>(responseBody, SerializerOptions)
             ?? throw new InvalidOperationException("AniList returned an unreadable token response.");
+    }
+
+    private void EnsureClientIdConfigured()
+    {
+        if (string.IsNullOrWhiteSpace(_options.ClientId))
+        {
+            throw new InvalidOperationException("AniList OAuth is not configured. Set AniList:ClientId before connecting a provider.");
+        }
     }
 }
 

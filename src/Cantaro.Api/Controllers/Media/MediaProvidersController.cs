@@ -90,10 +90,20 @@ public class MediaProvidersController(
 
         var redirectUri = _urlResolver.GetCallbackUrl($"api/media/providers/{normalizedProviderId}/callback");
         var protectedState = _stateProtector.Protect(JsonSerializer.Serialize(state));
-        var provider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
-        var authorizationUrl = provider.GetAuthorizationUrl(redirectUri, protectedState, codeChallenge);
 
-        return Redirect(authorizationUrl);
+        try
+        {
+            var provider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
+            var authorizationUrl = provider.GetAuthorizationUrl(redirectUri, protectedState, codeChallenge);
+            return Redirect(authorizationUrl);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Media provider {ProviderId} is not configured for OAuth connect.", normalizedProviderId);
+            var frontendUrl = _urlResolver.GetFrontendUrl();
+            var separator = safeReturnRoute.Contains('?') ? '&' : '?';
+            return Redirect($"{frontendUrl}{safeReturnRoute}{separator}error=provider_not_configured&provider={normalizedProviderId}");
+        }
     }
 
     [HttpGet("providers/{providerId}/callback")]

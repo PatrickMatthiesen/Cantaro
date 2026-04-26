@@ -1,8 +1,41 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { GlassCard, GradientButton, StatusBadge } from '../components/ui/GlassComponents';
 import { mediaApi } from '../services/mediaApi';
 import { mediaProviderCatalog } from '../services/mediaProviders';
 import type { MediaProviderAccountStatusDto, MediaImportDto } from '../services/mediaApi';
+
+function providerLastRemoteCheckStorageKey(providerId: string): string {
+  return `cantaro.media.provider.${providerId}.lastRemoteCheckAt`;
+}
+
+function persistRemoteCheckTimestamp(providerId: string, importedAt: string): void {
+  try {
+    window.localStorage.setItem(providerLastRemoteCheckStorageKey(providerId), importedAt);
+  } catch {
+    // Local storage is best-effort only.
+  }
+}
+
+function clearRemoteCheckTimestamp(providerId: string): void {
+  try {
+    window.localStorage.removeItem(providerLastRemoteCheckStorageKey(providerId));
+  } catch {
+    // Local storage is best-effort only.
+  }
+}
+
+function shouldAutoImportAfterConnect(providerId: string): boolean {
+  const search = new URLSearchParams(window.location.search);
+  return search.get('connected') === 'true' && search.get('provider') === providerId;
+}
+
+function clearConnectSearchParams(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('connected');
+  url.searchParams.delete('provider');
+  url.searchParams.delete('trigger');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 interface MediaProvidersPageProps {
   onNavigateHome: () => void;
@@ -24,6 +57,7 @@ function ProviderPanel({ providerId, name, icon, gradient, description }: Provid
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [lastImport, setLastImport] = useState<MediaImportDto | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const hasTriggeredConnectedImport = useRef(false);
 
   const loadStatus = useCallback(async () => {
     setIsLoadingStatus(true);
@@ -56,6 +90,7 @@ function ProviderPanel({ providerId, name, icon, gradient, description }: Provid
       await mediaApi.disconnectProvider(providerId);
       setStatus((prev) => (prev ? { ...prev, isConnected: false, displayName: undefined } : null));
       setLastImport(null);
+      clearRemoteCheckTimestamp(providerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect');
     } finally {
@@ -63,18 +98,32 @@ function ProviderPanel({ providerId, name, icon, gradient, description }: Provid
     }
   };
 
-  const handleImport = async () => {
+  const handleImport = useCallback(async () => {
     setIsImporting(true);
     setError(null);
     try {
       const result = await mediaApi.importLibrary(providerId);
       setLastImport(result);
+      persistRemoteCheckTimestamp(providerId, result.importedAt);
+      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
+      return null;
     } finally {
       setIsImporting(false);
     }
-  };
+  }, [providerId]);
+
+  useEffect(() => {
+    if (!status?.isConnected || hasTriggeredConnectedImport.current || !shouldAutoImportAfterConnect(providerId)) {
+      return;
+    }
+
+    hasTriggeredConnectedImport.current = true;
+    void handleImport().finally(() => {
+      clearConnectSearchParams();
+    });
+  }, [handleImport, providerId, status?.isConnected]);
 
   return (
     <GlassCard className="p-6">
@@ -132,7 +181,7 @@ function ProviderPanel({ providerId, name, icon, gradient, description }: Provid
               disabled={isImporting}
               aria-busy={isImporting}
             >
-              {isImporting ? 'Importing…' : 'Import library'}
+              {isImporting ? 'Refreshing…' : 'Refresh library'}
             </GradientButton>
             <GradientButton
               tone="soft"

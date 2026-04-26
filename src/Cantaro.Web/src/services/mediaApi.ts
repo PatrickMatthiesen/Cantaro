@@ -2,6 +2,7 @@
 
 export interface MediaLibraryPageDto {
   items: MediaLibraryListItemDto[];
+  availableListNames: string[];
   totalCount: number;
   page: number;
   pageSize: number;
@@ -13,6 +14,7 @@ export interface MediaLibraryListItemDto {
   mediaTitleId: string;
   canonicalTitle: string;
   originalTitle?: string;
+  posterUrl?: string;
   mediaKind: string;
   normalizedStatus: string;
   progressEpisodes?: number;
@@ -24,6 +26,7 @@ export interface MediaLibraryListItemDto {
   primaryProgressDimension: string;
   provider: string;
   providerMediaId: string;
+  rawListName?: string;
   isConnected: boolean;
   lastSyncedAt?: string;
   updatedAt: string;
@@ -55,6 +58,7 @@ export interface MediaLibraryTitleDto {
   originalTitle?: string;
   mediaKind: string;
   synopsis?: string;
+  posterUrl?: string;
   startYear?: number;
   episodeCount?: number;
   chapterCount?: number;
@@ -163,6 +167,7 @@ export interface MediaLibraryQueryParams {
   status?: string;
   mediaKind?: string;
   provider?: string;
+  listName?: string;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
   page?: number;
@@ -195,6 +200,7 @@ class MediaApiClient {
     if (params.status) query.set('status', params.status);
     if (params.mediaKind) query.set('mediaKind', params.mediaKind);
     if (params.provider) query.set('provider', params.provider);
+    if (params.listName) query.set('listName', params.listName);
     if (params.sortBy) query.set('sortBy', params.sortBy);
     if (params.sortDir) query.set('sortDir', params.sortDir);
     if (params.page !== undefined) query.set('page', String(params.page));

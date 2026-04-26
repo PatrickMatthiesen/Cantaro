@@ -19,3 +19,5 @@ export const mediaProviderCatalog: MediaProviderCatalogEntry[] = [
     description: 'Anime and manga tracking — import your list and keep progress in sync.',
   },
 ];
+
+export const mainMediaProviderId = mediaProviderCatalog[0]?.id ?? 'anilist';

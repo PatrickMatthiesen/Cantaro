@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import DOMPurify from 'dompurify';
 import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
 import { mediaApi } from '../services/mediaApi';
-import { mediaProviderCatalog } from '../services/mediaProviders';
+import { mainMediaProviderId, mediaProviderCatalog } from '../services/mediaProviders';
+import {
+  isRemoteCheckStale,
+  readStoredValue,
+  remoteCheckTimestampKey,
+  writeStoredValue,
+} from '../services/mediaRefreshCache';
 import type {
   MediaLibraryEntryDetailDto,
   MediaProviderLinkSummaryDto,
@@ -61,6 +68,20 @@ const NORMALIZED_STATUSES = [
 interface ArtworkProps {
   posterUrl?: string;
   title: string;
+}
+
+interface SanitizedSynopsisProps {
+  html: string;
+  className?: string;
+}
+
+function SanitizedSynopsis({ html, className }: SanitizedSynopsisProps) {
+  const sanitizedHtml = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['br', 'i', 'em', 'b', 'strong'],
+    ALLOWED_ATTR: [],
+  });
+
+  return <div className={className} dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />;
 }
 
 function Artwork({ posterUrl, title }: ArtworkProps) {
@@ -389,7 +410,10 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
                       ) : null}
                     </div>
                     {result.synopsis ? (
-                      <p className="mt-1 text-xs text-gray-500 line-clamp-2">{result.synopsis}</p>
+                      <SanitizedSynopsis
+                        html={result.synopsis}
+                        className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500"
+                      />
                     ) : null}
                   </div>
                   <div className="shrink-0">
@@ -430,6 +454,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
   const [entry, setEntry] = useState<MediaLibraryEntryDetailDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
   const [isSavingProgress, setIsSavingProgress] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -462,6 +487,46 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
   useEffect(() => {
     void loadEntry();
   }, [loadEntry]);
+
+  useEffect(() => {
+    if (!entry || !entry.isConnected || isRefreshingRemote) {
+      return;
+    }
+
+    const refreshProviderId = entry.provider || mainMediaProviderId;
+    if (!isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(refreshProviderId)))) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const refreshFromRemote = async () => {
+      setIsRefreshingRemote(true);
+      try {
+        const result = await mediaApi.importLibrary(refreshProviderId);
+        if (isCancelled) {
+          return;
+        }
+
+        writeStoredValue(remoteCheckTimestampKey(refreshProviderId), result.importedAt);
+        await loadEntry();
+      } catch (err) {
+        if (!isCancelled) {
+          setSaveMessage(err instanceof Error ? `Error: ${err.message}` : 'Error: Failed to refresh entry');
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsRefreshingRemote(false);
+        }
+      }
+    };
+
+    void refreshFromRemote();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [entry, isRefreshingRemote, loadEntry]);
 
   const showSaveConfirmation = (message: string) => {
     setSaveMessage(message);
@@ -558,9 +623,9 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
 
   const { title } = entry;
   const dim = title.primaryProgressDimension;
-  const supportsEpisodes = dim === 'episodes';
-  const supportsChapters = dim === 'chapters';
-  const supportsVolumes = dim === 'volumes' || dim === 'chapters'; // manga often tracks both
+  const supportsEpisodes = dim === 'episode';
+  const supportsChapters = dim === 'chapter';
+  const supportsVolumes = dim === 'volume' || dim === 'chapter'; // manga often tracks both
 
   const hasProgressChanged =
     progressEpisodes !== entry.progressEpisodes ||
@@ -601,12 +666,18 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
             </div>
           ) : null}
 
+          {isRefreshingRemote ? (
+            <div className="rounded-2xl bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700">
+              Refreshing provider data…
+            </div>
+          ) : null}
+
           {/* Main content: artwork + core metadata */}
           <GlassCard className="overflow-visible">
             <div className="flex flex-col gap-6 p-6 sm:flex-row">
               {/* Artwork */}
               <div className="h-48 w-32 shrink-0 overflow-hidden rounded-2xl sm:h-56 sm:w-40">
-                <Artwork title={title.canonicalTitle} />
+                <Artwork posterUrl={title.posterUrl} title={title.canonicalTitle} />
               </div>
 
               {/* Core metadata */}
@@ -646,7 +717,10 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                 </div>
 
                 {title.synopsis ? (
-                  <p className="text-sm text-gray-600 leading-relaxed line-clamp-4">{title.synopsis}</p>
+                  <SanitizedSynopsis
+                    html={title.synopsis}
+                    className="text-sm leading-relaxed text-gray-600"
+                  />
                 ) : null}
 
                 {/* Raw provider status */}

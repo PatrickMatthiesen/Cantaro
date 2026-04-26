@@ -355,7 +355,7 @@ public class AniListMediaProvider(
             NativeTitle = media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = media.Description,
-            PosterUrl = media.CoverImage?.Large,
+            PosterUrl = media.CoverImage?.Medium ?? media.CoverImage?.Large,
             BackgroundUrl = media.BannerImage,
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
@@ -381,7 +381,7 @@ public class AniListMediaProvider(
             NativeTitle = media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = media.Description,
-            PosterUrl = media.CoverImage?.Large,
+            PosterUrl = media.CoverImage?.Large ?? media.CoverImage?.Medium,
             BackgroundUrl = media.BannerImage,
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
@@ -542,7 +542,7 @@ public class AniListMediaProvider(
                   format
                   status
                   siteUrl
-                  description(asHtml: false)
+                  description(asHtml: true)
                   episodes
                   chapters
                   volumes
@@ -556,6 +556,7 @@ public class AniListMediaProvider(
                     native
                   }
                   coverImage {
+                                        medium
                     large
                   }
                   nextAiringEpisode {
@@ -578,7 +579,7 @@ public class AniListMediaProvider(
               format
               status
               siteUrl
-              description(asHtml: false)
+              description(asHtml: true)
               episodes
               chapters
               volumes
@@ -592,6 +593,7 @@ public class AniListMediaProvider(
                 native
               }
               coverImage {
+                                medium
                 large
               }
               nextAiringEpisode {
@@ -611,7 +613,7 @@ public class AniListMediaProvider(
             format
             status
             siteUrl
-            description(asHtml: false)
+            description(asHtml: true)
             episodes
             chapters
             volumes
@@ -625,6 +627,7 @@ public class AniListMediaProvider(
               native
             }
             coverImage {
+                            medium
               large
             }
             nextAiringEpisode {
@@ -818,6 +821,9 @@ public class AniListTitle
 
 public class AniListCoverImage
 {
+    [JsonPropertyName("medium")]
+    public string? Medium { get; set; }
+
     [JsonPropertyName("large")]
     public string? Large { get; set; }
 }

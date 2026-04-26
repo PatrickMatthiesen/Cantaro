@@ -1,6 +1,7 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Cantaro.Api.Services;
 
@@ -9,6 +10,7 @@ public class MediaLibraryQueryOptions
     public string? Status { get; set; }
     public string? MediaKind { get; set; }
     public string? Provider { get; set; }
+    public string? ListName { get; set; }
 
     /// <summary>
     /// Valid values: title, updatedAt, status, progress. Defaults to updatedAt.
@@ -52,6 +54,18 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             query = query.Where(e => e.Provider == options.Provider);
         }
 
+        var availableListNames = await query
+            .Where(e => !string.IsNullOrWhiteSpace(e.RawListName))
+            .Select(e => e.RawListName!)
+            .Distinct()
+            .OrderBy(name => name)
+            .ToListAsync(cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(options.ListName))
+        {
+            query = query.Where(e => e.RawListName == options.ListName);
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         var page = Math.Max(1, options.Page);
@@ -72,6 +86,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         return new MediaLibraryPageDto
         {
             Items = items,
+            AvailableListNames = availableListNames,
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize,
@@ -118,12 +133,15 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
 
     private static MediaLibraryListItemDto MapListItem(MediaLibraryEntry entry)
     {
+        var artwork = MediaArtworkMetadata.FromCanonicalMetadata(entry.MediaTitle?.CanonicalMetadata);
+
         return new MediaLibraryListItemDto
         {
             Id = entry.Id,
             MediaTitleId = entry.MediaTitleId,
             CanonicalTitle = entry.MediaTitle?.CanonicalTitle ?? string.Empty,
             OriginalTitle = entry.MediaTitle?.OriginalTitle,
+            PosterUrl = artwork.MediumPosterUrl,
             MediaKind = entry.MediaTitle?.MediaKind ?? string.Empty,
             NormalizedStatus = entry.NormalizedStatus,
             ProgressEpisodes = entry.ProgressEpisodes,
@@ -135,6 +153,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             PrimaryProgressDimension = entry.MediaTitle?.PrimaryProgressDimension ?? string.Empty,
             Provider = entry.Provider,
             ProviderMediaId = entry.ProviderMediaId,
+            RawListName = entry.RawListName,
             IsConnected = entry.ConnectedServiceAccountId is not null,
             LastSyncedAt = entry.LastSyncedAt,
             UpdatedAt = entry.UpdatedAt
@@ -144,6 +163,8 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
     private static MediaLibraryEntryDetailDto MapDetail(MediaLibraryEntry entry)
     {
         var title = entry.MediaTitle!;
+        var artwork = MediaArtworkMetadata.FromCanonicalMetadata(title.CanonicalMetadata);
+
         return new MediaLibraryEntryDetailDto
         {
             Id = entry.Id,
@@ -154,6 +175,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 OriginalTitle = title.OriginalTitle,
                 MediaKind = title.MediaKind,
                 Synopsis = title.Synopsis,
+                PosterUrl = artwork.LargePosterUrl,
                 StartYear = title.StartYear,
                 EpisodeCount = title.EpisodeCount,
                 ChapterCount = title.ChapterCount,
@@ -187,5 +209,54 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 })
                 .ToList()
         };
+    }
+}
+
+file sealed class MediaArtworkMetadata
+{
+    public string? MediumPosterUrl { get; private init; }
+
+    public string? LargePosterUrl { get; private init; }
+
+    public static MediaArtworkMetadata FromCanonicalMetadata(string? canonicalMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalMetadata))
+        {
+            return new MediaArtworkMetadata();
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(canonicalMetadata);
+            if (!document.RootElement.TryGetProperty("coverImage", out var coverImage)
+                || coverImage.ValueKind != JsonValueKind.Object)
+            {
+                return new MediaArtworkMetadata();
+            }
+
+            var mediumPosterUrl = TryGetString(coverImage, "medium");
+            var largePosterUrl = TryGetString(coverImage, "large");
+
+            return new MediaArtworkMetadata
+            {
+                MediumPosterUrl = mediumPosterUrl ?? largePosterUrl,
+                LargePosterUrl = largePosterUrl ?? mediumPosterUrl
+            };
+        }
+        catch (JsonException)
+        {
+            return new MediaArtworkMetadata();
+        }
+    }
+
+    private static string? TryGetString(JsonElement parent, string propertyName)
+    {
+        if (!parent.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return property.GetString();
     }
 }

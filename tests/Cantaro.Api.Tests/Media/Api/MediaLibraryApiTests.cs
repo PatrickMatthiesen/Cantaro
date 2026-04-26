@@ -36,9 +36,9 @@ public class MediaLibraryApiTests
 
         // No filter — returns both entries
         var allResult = await fixture.Controller.GetLibrary(
-            status: null, mediaKind: null, provider: null,
+            status: null, mediaKind: null, provider: null, listName: null,
             sortBy: "title", sortDir: "asc",
-            page: 1, pageSize: 10, CancellationToken.None);
+            page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(allResult.Result);
         var page = Assert.IsType<MediaLibraryPageDto>(ok.Value);
@@ -47,9 +47,9 @@ public class MediaLibraryApiTests
 
         // Filter by status=completed
         var completedResult = await fixture.Controller.GetLibrary(
-            status: MediaLibraryStatuses.Completed, mediaKind: null, provider: null,
+            status: MediaLibraryStatuses.Completed, mediaKind: null, provider: null, listName: null,
             sortBy: null, sortDir: null,
-            page: 1, pageSize: 10, CancellationToken.None);
+            page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
 
         var completedOk = Assert.IsType<OkObjectResult>(completedResult.Result);
         var completedPage = Assert.IsType<MediaLibraryPageDto>(completedOk.Value);

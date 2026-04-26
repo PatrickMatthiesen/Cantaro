@@ -2,6 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+const apiProxyTarget =
+  process.env.services__api__https__0 ||
+  process.env.services__api__http__0 ||
+  process.env.API_HTTPS ||
+  process.env.API_HTTP ||
+  'https://localhost:7203'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -9,7 +16,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.services__api__https__0 || process.env.services__api__http__0 || process.env.API_HTTPS || process.env.API_HTTP || 'https://localhost:7203',
+        target: apiProxyTarget,
         changeOrigin: true,
         secure: false
       },

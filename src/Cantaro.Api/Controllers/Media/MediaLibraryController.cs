@@ -30,6 +30,7 @@ public class MediaLibraryController(
     /// <param name="status">Filter by normalized status (current, planned, paused, completed, dropped).</param>
     /// <param name="mediaKind">Filter by media kind (anime, manga, movie, series).</param>
     /// <param name="provider">Filter by provider ID (e.g. anilist).</param>
+    /// <param name="listName">Filter by the provider's raw list name (for example an AniList custom list).</param>
     /// <param name="sortBy">Sort field: title, updatedAt, status, progress. Defaults to updatedAt.</param>
     /// <param name="sortDir">Sort direction: asc or desc. Defaults to desc.</param>
     /// <param name="page">1-based page number. Defaults to 1.</param>
@@ -39,6 +40,7 @@ public class MediaLibraryController(
         [FromQuery] string? status,
         [FromQuery] string? mediaKind,
         [FromQuery] string? provider,
+        [FromQuery] string? listName,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -52,6 +54,7 @@ public class MediaLibraryController(
             Status = status,
             MediaKind = mediaKind,
             Provider = provider,
+            ListName = listName,
             SortBy = string.IsNullOrWhiteSpace(sortBy) ? "updatedAt" : sortBy,
             SortDir = string.IsNullOrWhiteSpace(sortDir) ? "desc" : sortDir,
             Page = page,

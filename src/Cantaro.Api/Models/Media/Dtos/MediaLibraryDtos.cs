@@ -3,6 +3,7 @@ namespace Cantaro.Api.Models;
 public class MediaLibraryPageDto
 {
     public required IReadOnlyList<MediaLibraryListItemDto> Items { get; set; }
+    public required IReadOnlyList<string> AvailableListNames { get; set; }
     public int TotalCount { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }
@@ -15,6 +16,7 @@ public class MediaLibraryListItemDto
     public Guid MediaTitleId { get; set; }
     public required string CanonicalTitle { get; set; }
     public string? OriginalTitle { get; set; }
+    public string? PosterUrl { get; set; }
     public required string MediaKind { get; set; }
     public required string NormalizedStatus { get; set; }
     public int? ProgressEpisodes { get; set; }
@@ -26,6 +28,7 @@ public class MediaLibraryListItemDto
     public required string PrimaryProgressDimension { get; set; }
     public required string Provider { get; set; }
     public required string ProviderMediaId { get; set; }
+    public string? RawListName { get; set; }
     public bool IsConnected { get; set; }
     public DateTimeOffset? LastSyncedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -59,6 +62,7 @@ public class MediaLibraryTitleDto
     public string? OriginalTitle { get; set; }
     public required string MediaKind { get; set; }
     public string? Synopsis { get; set; }
+    public string? PosterUrl { get; set; }
     public int? StartYear { get; set; }
     public int? EpisodeCount { get; set; }
     public int? ChapterCount { get; set; }
