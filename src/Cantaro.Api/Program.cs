@@ -40,7 +40,11 @@ builder.Services.AddHttpClient<IMusicBrainzQueryClient, MusicBrainzQueryClient>(
 builder.Services.AddHttpClient<AniListApiClient>();
 builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
+builder.Services.AddScoped<MediaLibraryQueryService>();
+builder.Services.AddScoped<MediaLibraryLinkService>();
 builder.Services.AddScoped<MediaProviderOperationProcessor>();
+builder.Services.AddScoped<MediaObservationMatchingService>();
+builder.Services.AddScoped<MediaObservationProgressService>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
 builder.Services.AddHostedService<MediaProviderOperationWorker>();

@@ -500,6 +500,18 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
     }
   };
 
+  const handleToggleAutoProgress = async () => {
+    if (!entry) return;
+    const newValue = !entry.autoProgressFromObservations;
+    try {
+      await mediaApi.updateAutoProgress(libraryEntryId, { enabled: newValue });
+      setEntry((prev) => prev ? { ...prev, autoProgressFromObservations: newValue } : prev);
+      showSaveConfirmation(newValue ? 'Auto-progress enabled' : 'Auto-progress disabled');
+    } catch (err) {
+      setSaveMessage(`Error: ${err instanceof Error ? err.message : 'Failed to update'}`);
+    }
+  };
+
   const handleUnlink = async (providerId: string) => {
     setUnlinkingId(providerId);
     try {
@@ -717,6 +729,39 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
             <p className="mt-3 text-xs text-gray-400">
               Editing progress here updates Cantaro only. Changes are not automatically pushed to your connected provider.
             </p>
+          </GlassCard>
+
+          {/* Auto-progress */}
+          <GlassCard className="p-6">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Auto-progress</h2>
+            <div className="mt-3 flex items-start gap-4">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={entry.autoProgressFromObservations}
+                onClick={() => void handleToggleAutoProgress()}
+                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 ${
+                  entry.autoProgressFromObservations ? 'bg-indigo-500' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                    entry.autoProgressFromObservations ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+              <div>
+                <p className="text-sm font-medium text-gray-800">
+                  {entry.autoProgressFromObservations ? 'Enabled' : 'Disabled'}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  When enabled, Cantaro may advance your progress counter when the browser extension
+                  detects you watching an episode. Progress only moves forward and is subject to
+                  backend matching confidence — it will not overwrite remote changes.
+                </p>
+              </div>
+            </div>
           </GlassCard>
 
           {/* Provider links */}

@@ -43,6 +43,20 @@ public class MediaProviderOperationProcessor(
             cancellationToken);
     }
 
+    public async Task<MediaProviderOperation> EnqueueAutoProgressAsync(
+        int userId,
+        MediaLibraryEntry entry,
+        AutoProgressUpdatePayload payload,
+        CancellationToken cancellationToken)
+    {
+        return await EnqueueAsync(
+            userId,
+            entry,
+            MediaProviderOperationTypes.AutoProgressUpdate,
+            payload,
+            cancellationToken);
+    }
+
     public async Task<MediaProviderOperation> EnqueueStatusUpdateAsync(
         int userId,
         MediaLibraryEntry entry,
@@ -234,6 +248,10 @@ public class MediaProviderOperationProcessor(
                 operation.UserId,
                 DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
+            MediaProviderOperationTypes.AutoProgressUpdate => await ExecuteAutoProgressAsync(
+                provider,
+                operation,
+                cancellationToken),
             _ => throw new InvalidOperationException($"Provider operation type '{operation.OperationType}' is not supported.")
         };
     }
@@ -242,6 +260,62 @@ public class MediaProviderOperationProcessor(
     {
         return JsonSerializer.Deserialize<TRequest>(payloadJson, SerializerOptions)
             ?? throw new InvalidOperationException("Provider operation payload could not be deserialized.");
+    }
+
+    private async Task<MediaProviderMutationResult> ExecuteAutoProgressAsync(
+        IMediaProvider provider,
+        MediaProviderOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var payload = DeserializePayload<AutoProgressUpdatePayload>(operation.PayloadJson);
+
+        // Sync-metadata guard: re-read the current LastRemoteUpdateAt from the DB.
+        // If the provider has written a newer timestamp since we enqueued this
+        // operation, the entry may already be ahead and we should skip the write.
+        if (operation.MediaLibraryEntry is not null
+            && payload.LastKnownRemoteUpdateAt.HasValue)
+        {
+            var currentRemoteUpdateAt = await _dbContext.MediaLibraryEntries
+                .AsNoTracking()
+                .Where(e => e.Id == operation.MediaLibraryEntryId)
+                .Select(e => e.LastRemoteUpdateAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (currentRemoteUpdateAt.HasValue
+                && currentRemoteUpdateAt.Value > payload.LastKnownRemoteUpdateAt.Value)
+            {
+                _logger.LogInformation(
+                    "Auto-progress skipped for operation {OperationId}: " +
+                    "provider has newer remote state ({RemoteAt} > {KnownAt}). " +
+                    "Observation: {ObservationId}.",
+                    operation.Id,
+                    currentRemoteUpdateAt.Value,
+                    payload.LastKnownRemoteUpdateAt.Value,
+                    payload.TriggeredByObservationId);
+
+                // Return a synthetic "already up-to-date" result so the operation
+                // is treated as successful and removed from the queue.
+                return new MediaProviderMutationResult
+                {
+                    ProviderId = operation.Provider,
+                    ProviderMediaId = payload.ProviderMediaId,
+                    AppliedAt = DateTimeOffset.UtcNow,
+                    LastRemoteUpdateAt = currentRemoteUpdateAt
+                };
+            }
+        }
+
+        return await provider.UpdateProgressAsync(
+            operation.UserId,
+            new MediaProgressUpdateRequest
+            {
+                ProviderMediaId = payload.ProviderMediaId,
+                ProgressEpisodes = payload.ProgressEpisodes,
+                ProgressChapters = payload.ProgressChapters,
+                ProgressVolumes = payload.ProgressVolumes,
+                LastKnownRemoteUpdateAt = payload.LastKnownRemoteUpdateAt
+            },
+            cancellationToken);
     }
 
     private void ApplyMutationSuccess(MediaProviderOperation operation, MediaProviderMutationResult result)
@@ -265,6 +339,29 @@ public class MediaProviderOperationProcessor(
                 var request = DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson);
                 entry.NormalizedStatus = request.Status;
                 entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
+                break;
+            }
+            case MediaProviderOperationTypes.AutoProgressUpdate:
+            {
+                var payload = DeserializePayload<AutoProgressUpdatePayload>(operation.PayloadJson);
+                entry.ProgressEpisodes = payload.ProgressEpisodes ?? entry.ProgressEpisodes;
+                entry.ProgressChapters = payload.ProgressChapters ?? entry.ProgressChapters;
+                entry.ProgressVolumes = payload.ProgressVolumes ?? entry.ProgressVolumes;
+                entry.LastMutationSource = MediaMutationSources.ObservationAutoProgress;
+
+                _logger.LogInformation(
+                    "Auto-progress applied for user {UserId}, entry {EntryId}: " +
+                    "ep={Ep}/ch={Ch}/vol={Vol}. " +
+                    "Provenance: observation={ObsId}, site={Site}, hint=\"{Hint}\", score={Score}.",
+                    operation.UserId,
+                    entry.Id,
+                    payload.ProgressEpisodes,
+                    payload.ProgressChapters,
+                    payload.ProgressVolumes,
+                    payload.TriggeredByObservationId,
+                    payload.ObservedSiteIdentifier,
+                    payload.ObservedProgressHint,
+                    payload.ObservationMatchScore);
                 break;
             }
         }

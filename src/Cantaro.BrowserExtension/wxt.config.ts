@@ -14,6 +14,7 @@ export default defineConfig({
       'https://open.spotify.com/*',
       'https://music.youtube.com/*',
       'https://www.youtube.com/*',
+      'https://www.crunchyroll.com/*',
     ],
   },
   webExt: {

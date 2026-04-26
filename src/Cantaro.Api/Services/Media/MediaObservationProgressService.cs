@@ -1,0 +1,231 @@
+using Cantaro.Api.Data;
+using Cantaro.Api.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace Cantaro.Api.Services;
+
+/// <summary>
+/// Applies conservative automatic progress updates when a matched observation
+/// carries a numeric progress hint and the user has opted in.
+///
+/// Rules (per issue #32):
+/// 1. Entry must be opted in (<c>AutoProgressFromObservations = true</c>).
+/// 2. Observation must be matched to a canonical MediaTitle.
+/// 3. Progress hint must be parseable as a positive integer.
+/// 4. Update is monotonic: only applied when the new value strictly exceeds
+///    the current tracked progress.
+/// 5. Sync-metadata guard: the entry's <c>LastRemoteUpdateAt</c> is embedded in
+///    the operation payload so the processor can skip the write if the provider
+///    has since reported newer state.
+/// 6. All writes are routed through the existing
+///    <see cref="MediaProviderOperationProcessor"/> pipeline, never sent
+///    directly from the extension.
+/// </summary>
+public class MediaObservationProgressService(
+    ApplicationDbContext dbContext,
+    MediaProviderOperationProcessor operationProcessor,
+    ILogger<MediaObservationProgressService> logger)
+{
+    private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly MediaProviderOperationProcessor _operationProcessor = operationProcessor;
+    private readonly ILogger<MediaObservationProgressService> _logger = logger;
+
+    /// <summary>
+    /// Evaluates whether the matched observation should trigger an automatic
+    /// progress update for any of the user's opted-in library entries.
+    /// Returns the number of operations enqueued (0 when no update applies).
+    /// </summary>
+    public async Task<int> TryEnqueueAutoProgressAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.MatchStatus != MediaObservationStatuses.Matched
+            || observation.MediaTitleId is null)
+        {
+            return 0;
+        }
+
+        if (!TryParseProgressHint(observation.ProgressHint, out var parsedProgress))
+        {
+            _logger.LogDebug(
+                "Skipping auto-progress for observation {ObservationId}: progress hint " +
+                "\"{ProgressHint}\" could not be parsed as a positive integer.",
+                observation.Id,
+                observation.ProgressHint);
+            return 0;
+        }
+
+        // Load the matched title so we know which progress dimension to update.
+        var mediaTitle = await _dbContext.MediaTitles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == observation.MediaTitleId, cancellationToken);
+
+        if (mediaTitle is null)
+        {
+            return 0;
+        }
+
+        // Resolve the accepted candidate to get the match score for provenance.
+        var matchScore = await GetAcceptedCandidateScoreAsync(observation, cancellationToken);
+
+        // Find all opted-in, connected library entries for this user and title.
+        var entries = await _dbContext.MediaLibraryEntries
+            .Where(e => e.UserId == observation.UserId
+                        && e.MediaTitleId == observation.MediaTitleId
+                        && e.AutoProgressFromObservations
+                        && e.ConnectedServiceAccountId != null)
+            .ToListAsync(cancellationToken);
+
+        if (entries.Count == 0)
+        {
+            _logger.LogDebug(
+                "No opted-in connected entries for user {UserId} / title {MediaTitleId}. " +
+                "Auto-progress skipped.",
+                observation.UserId,
+                observation.MediaTitleId);
+            return 0;
+        }
+
+        var enqueuedCount = 0;
+
+        foreach (var entry in entries)
+        {
+            var (progressEpisodes, progressChapters, progressVolumes) =
+                DetermineProgressValues(mediaTitle, parsedProgress);
+
+            if (!IsProgressAdvancing(entry, progressEpisodes, progressChapters, progressVolumes))
+            {
+                _logger.LogDebug(
+                    "Auto-progress suppressed for entry {EntryId} (user {UserId}): " +
+                    "new value ep={Ep}/ch={Ch}/vol={Vol} does not exceed current " +
+                    "ep={CurEp}/ch={CurCh}/vol={CurVol}.",
+                    entry.Id,
+                    entry.UserId,
+                    progressEpisodes, progressChapters, progressVolumes,
+                    entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes);
+                continue;
+            }
+
+            var payload = new AutoProgressUpdatePayload
+            {
+                ProviderMediaId = entry.ProviderMediaId,
+                ProgressEpisodes = progressEpisodes,
+                ProgressChapters = progressChapters,
+                ProgressVolumes = progressVolumes,
+                LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt,
+                TriggeredByObservationId = observation.Id.ToString(),
+                ObservedSiteIdentifier = observation.SiteIdentifier,
+                ObservedProgressHint = observation.ProgressHint,
+                ObservationMatchScore = matchScore,
+                TriggeredAt = DateTimeOffset.UtcNow
+            };
+
+            await _operationProcessor.EnqueueAutoProgressAsync(
+                entry.UserId, entry, payload, cancellationToken);
+
+            _logger.LogInformation(
+                "Queued auto-progress for user {UserId}, entry {EntryId} " +
+                "(provider={Provider}, providerMediaId={ProviderMediaId}): " +
+                "episodes={Ep} from observation {ObservationId} " +
+                "(site={Site}, hint=\"{Hint}\", score={Score:P0}).",
+                entry.UserId,
+                entry.Id,
+                entry.Provider,
+                entry.ProviderMediaId,
+                progressEpisodes,
+                observation.Id,
+                observation.SiteIdentifier,
+                observation.ProgressHint,
+                matchScore ?? 0);
+
+            enqueuedCount++;
+        }
+
+        return enqueuedCount;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Attempt to parse a numeric episode/chapter count from the raw progress hint.
+    /// Accepts plain integers ("5"), strings like "5", and falls back gracefully.
+    /// Returns false when the hint is null, empty, or not parseable.
+    /// </summary>
+    public static bool TryParseProgressHint(string? hint, out int value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(hint))
+        {
+            return false;
+        }
+
+        // Handle plain integer strings ("5") produced by Crunchyroll adapter.
+        if (int.TryParse(hint.Trim(), out var parsed) && parsed > 0)
+        {
+            value = parsed;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Maps a parsed integer progress value to the correct dimension based on
+    /// the title's <see cref="MediaTitle.PrimaryProgressDimension"/>.
+    /// </summary>
+    private static (int? episodes, int? chapters, int? volumes) DetermineProgressValues(
+        MediaTitle title,
+        int parsedValue)
+    {
+        return title.PrimaryProgressDimension switch
+        {
+            MediaProgressDimensions.Chapter => (null, parsedValue, null),
+            MediaProgressDimensions.Volume => (null, null, parsedValue),
+            _ => (parsedValue, null, null)
+        };
+    }
+
+    /// <summary>
+    /// Returns true only when at least one progress dimension would strictly
+    /// increase.  Prevents regressive or no-op writes.
+    /// </summary>
+    private static bool IsProgressAdvancing(
+        MediaLibraryEntry entry,
+        int? newEpisodes,
+        int? newChapters,
+        int? newVolumes)
+    {
+        if (newEpisodes.HasValue && newEpisodes.Value > (entry.ProgressEpisodes ?? 0))
+        {
+            return true;
+        }
+
+        if (newChapters.HasValue && newChapters.Value > (entry.ProgressChapters ?? 0))
+        {
+            return true;
+        }
+
+        if (newVolumes.HasValue && newVolumes.Value > (entry.ProgressVolumes ?? 0))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<decimal?> GetAcceptedCandidateScoreAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.AcceptedCandidateId is null)
+        {
+            return null;
+        }
+
+        var candidate = await _dbContext.MediaObservationCandidates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == observation.AcceptedCandidateId, cancellationToken);
+
+        return candidate?.Score;
+    }
+}

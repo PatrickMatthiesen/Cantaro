@@ -24,6 +24,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderLink> MediaProviderLinks => Set<MediaProviderLink>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
+    public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
+    public DbSet<MediaObservationCandidate> MediaObservationCandidates => Set<MediaObservationCandidate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -246,6 +248,51 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(account => account.MediaProviderOperations)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MediaObservation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // Deduplicate stable-ID observations per user per site.
+            entity.HasIndex(e => new { e.UserId, e.SiteIdentifier, e.SiteMediaId })
+                .IsUnique()
+                .HasFilter("\"SiteMediaId\" IS NOT NULL");
+
+            entity.HasIndex(e => new { e.UserId, e.MatchStatus });
+            entity.HasIndex(e => new { e.UserId, e.CreatedAt });
+
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.MediaTitle)
+                .WithMany()
+                .HasForeignKey(e => e.MediaTitleId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasMany(e => e.Candidates)
+                .WithOne(c => c.MediaObservation)
+                .HasForeignKey(c => c.MediaObservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaObservationCandidate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new { e.MediaObservationId, e.Score });
+
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.MediaTitle)
+                .WithMany()
+                .HasForeignKey(e => e.MediaTitleId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

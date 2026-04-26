@@ -182,6 +182,98 @@ public class MediaProviderOperationProcessorTests
         Assert.NotNull(queuedOperation.LastAttemptAt);
     }
 
+    [Fact]
+    public async Task ProcessOperationAsync_AutoProgressUpdate_UpdatesEntryAndSetsObservationMutationSource()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var entry = await SeedMediaEntryAsync(dbContext, 411, "auto-progress@example.com");
+        var provider = new FakeMediaProvider("anilist");
+        var registry = new MediaProviderRegistry([provider]);
+        var processor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
+
+        var payload = new AutoProgressUpdatePayload
+        {
+            ProviderMediaId = entry.ProviderMediaId,
+            ProgressEpisodes = 15,
+            LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt,
+            TriggeredByObservationId = Guid.NewGuid().ToString(),
+            ObservedSiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedProgressHint = "15",
+            ObservationMatchScore = 0.97m,
+            TriggeredAt = DateTimeOffset.UtcNow
+        };
+
+        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, entry, payload, CancellationToken.None);
+
+        var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+        var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(15, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
+        Assert.Equal(1, provider.ProgressUpdateCallCount);
+        Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_AutoProgressUpdate_SkipsWrite_WhenRemoteStateIsNewer()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var entry = await SeedMediaEntryAsync(dbContext, 412, "sync-guard@example.com");
+
+        // Payload carries an old LastKnownRemoteUpdateAt
+        var oldKnownAt = entry.LastRemoteUpdateAt!.Value.AddMinutes(-5);
+
+        // Simulate that the DB entry has since been updated to a newer timestamp
+        // (i.e., a provider sync ran after we enqueued the operation).
+        var newerRemoteAt = entry.LastRemoteUpdateAt.Value.AddMinutes(2);
+        await dbContext.MediaLibraryEntries
+            .Where(e => e.Id == entry.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.LastRemoteUpdateAt, newerRemoteAt));
+
+        var provider = new FakeMediaProvider("anilist");
+        var registry = new MediaProviderRegistry([provider]);
+        var processor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
+
+        var payload = new AutoProgressUpdatePayload
+        {
+            ProviderMediaId = entry.ProviderMediaId,
+            ProgressEpisodes = 18,
+            LastKnownRemoteUpdateAt = oldKnownAt,  // stale snapshot
+            TriggeredAt = DateTimeOffset.UtcNow
+        };
+
+        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, entry, payload, CancellationToken.None);
+
+        var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        // Operation should still succeed (skipped cleanly, not retried/failed)
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        // Provider write was NOT invoked
+        Assert.Equal(0, provider.ProgressUpdateCallCount);
+        // Operation was removed from queue after clean skip
+        Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+    }
+
     private static async Task<MediaLibraryEntry> SeedMediaEntryAsync(ApplicationDbContext dbContext, int userId, string email)
     {
         var now = DateTimeOffset.UtcNow;

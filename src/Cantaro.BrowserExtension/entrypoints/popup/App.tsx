@@ -1,5 +1,4 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import browser from 'webextension-polyfill';
 import './App.css';
 
 type StatusType = 'success' | 'error';
