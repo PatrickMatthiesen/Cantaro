@@ -113,7 +113,7 @@ function progressPercent(entry: MediaLibraryListItemDto): number | null {
   }
 }
 
-function relativeUpdatedAt(timestamp: string): string | null {
+function relativeReleaseTime(timestamp: string): string | null {
   const parsed = Date.parse(timestamp);
   if (Number.isNaN(parsed)) {
     return null;
@@ -123,8 +123,7 @@ function relativeUpdatedAt(timestamp: string): string | null {
   const minute = 60 * 1000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  const month = 30 * day;
-  const year = 365 * day;
+  const week = 7 * day;
   const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
   if (Math.abs(diffMs) < hour) {
@@ -135,15 +134,16 @@ function relativeUpdatedAt(timestamp: string): string | null {
     return formatter.format(Math.round(diffMs / hour), 'hour');
   }
 
-  if (Math.abs(diffMs) < month) {
+  if (Math.abs(diffMs) < week) {
     return formatter.format(Math.round(diffMs / day), 'day');
   }
 
-  if (Math.abs(diffMs) < year) {
-    return formatter.format(Math.round(diffMs / month), 'month');
-  }
-
-  return formatter.format(Math.round(diffMs / year), 'year');
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
 }
 
 interface LibraryEntryCardProps {
@@ -175,8 +175,15 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
 
 function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
   const progress = progressText(entry);
-  const updatedAt = relativeUpdatedAt(entry.updatedAt);
   const completion = progressPercent(entry);
+  const nextReleaseRelative = entry.nextReleaseAt ? relativeReleaseTime(entry.nextReleaseAt) : null;
+  const releaseBadgeLabel = entry.nextReleaseLabel ?? 'Next release';
+  const topLeftBadge = nextReleaseRelative
+    ? {
+      label: releaseBadgeLabel,
+      detail: nextReleaseRelative,
+    }
+    : null;
 
   return (
     <button type="button" onClick={onClick} className="h-full w-full text-left">
@@ -186,9 +193,16 @@ function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
           <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-slate-900/10" aria-hidden />
 
           <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
-            {updatedAt ? (
-              <span className="rounded-full bg-slate-900/72 px-3 py-1 text-xs font-medium text-white shadow-lg backdrop-blur-md">
-                {updatedAt}
+            {topLeftBadge ? (
+              <span
+                className="inline-flex max-w-40 flex-col rounded-2xl bg-cyan-50/92 px-3 py-2 text-left text-[11px] text-slate-900 shadow-lg backdrop-blur-md"
+              >
+                <span className="truncate font-semibold">{topLeftBadge.label}</span>
+                {topLeftBadge.detail ? (
+                  <span className="mt-0.5 truncate text-slate-700">
+                    {topLeftBadge.detail}
+                  </span>
+                ) : null}
               </span>
             ) : <span />}
 
@@ -264,363 +278,363 @@ function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
   );
 }
 
-        interface MediaLibraryPageProps {
-          onNavigateHome?: () => void;
-          onNavigateProviders?: () => void;
-          onNavigateEntry: (id: string) => void;
-          embedded?: boolean;
+interface MediaLibraryPageProps {
+  onNavigateHome?: () => void;
+  onNavigateProviders?: () => void;
+  onNavigateEntry: (id: string) => void;
+  embedded?: boolean;
+}
+
+export function MediaLibraryPage({
+  onNavigateHome,
+  onNavigateProviders,
+  onNavigateEntry,
+  embedded = false,
+}: MediaLibraryPageProps) {
+  const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => ({
+    provider: FIRST_PROVIDER_ID,
+    listName: readStoredValue(storedListNameKey(FIRST_PROVIDER_ID))
+      || (availableListNames.includes("Watching") ? "Watching" : undefined),
+    sortBy: 'updatedAt',
+    sortDir: 'desc',
+    page: 1,
+    pageSize: 24,
+  }));
+  const [items, setItems] = useState<MediaLibraryListItemDto[]>([]);
+  const [availableListNames, setAvailableListNames] = useState<string[]>([]);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [providerStatus, setProviderStatus] = useState<MediaProviderAccountStatusDto | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [lastRemoteCheckAt, setLastRemoteCheckAt] = useState<string | null>(() => readStoredValue(remoteCheckTimestampKey(FIRST_PROVIDER_ID)));
+  const filtersRef = useRef(filters);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
+  const loadLibrary = useCallback(async (params: MediaLibraryQueryParams) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await mediaApi.getLibrary(params);
+      setItems(result.items);
+      setAvailableListNames(result.availableListNames);
+      setTotalPages(result.totalPages);
+      setTotalCount(result.totalCount);
+    } catch (err) {
+      setAvailableListNames([]);
+      setError(err instanceof Error ? err.message : 'Failed to load library');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLibrary(filters);
+  }, [filters, loadLibrary]);
+
+  useEffect(() => {
+    if (filters.provider !== FIRST_PROVIDER_ID) {
+      return;
+    }
+
+    const storageKey = storedListNameKey(FIRST_PROVIDER_ID);
+    if (filters.listName) {
+      writeStoredValue(storageKey, filters.listName);
+      return;
+    }
+
+    clearStoredValue(storageKey);
+  }, [filters.listName, filters.provider]);
+
+  useEffect(() => {
+    if (!filters.listName || availableListNames.length === 0 || availableListNames.includes(filters.listName)) {
+      return;
+    }
+
+    setFilters((prev) => ({ ...prev, listName: undefined, page: 1 }));
+  }, [availableListNames, filters.listName]);
+
+  const refreshFromRemote = useCallback(async () => {
+    setIsRefreshing(true);
+    setRefreshError(null);
+
+    try {
+      const result = await mediaApi.importLibrary(FIRST_PROVIDER_ID);
+      writeStoredValue(remoteCheckTimestampKey(FIRST_PROVIDER_ID), result.importedAt);
+      setLastRemoteCheckAt(result.importedAt);
+      await loadLibrary(filtersRef.current);
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : 'Failed to refresh from AniList');
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadLibrary]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadProviderState = async () => {
+      try {
+        const status = await mediaApi.getProviderStatus(FIRST_PROVIDER_ID);
+        if (isCancelled) {
+          return;
         }
 
-        export function MediaLibraryPage({
-          onNavigateHome,
-          onNavigateProviders,
-          onNavigateEntry,
-          embedded = false,
-        }: MediaLibraryPageProps) {
-          const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => ({
-            provider: FIRST_PROVIDER_ID,
-            listName: readStoredValue(storedListNameKey(FIRST_PROVIDER_ID))
-              || (availableListNames.includes("Watching") ? "Watching" : undefined),
-            sortBy: 'updatedAt',
-            sortDir: 'desc',
-            page: 1,
-            pageSize: 24,
-          }));
-          const [items, setItems] = useState<MediaLibraryListItemDto[]>([]);
-          const [availableListNames, setAvailableListNames] = useState<string[]>([]);
-          const [totalPages, setTotalPages] = useState(1);
-          const [totalCount, setTotalCount] = useState(0);
-          const [isLoading, setIsLoading] = useState(true);
-          const [error, setError] = useState<string | null>(null);
-          const [providerStatus, setProviderStatus] = useState<MediaProviderAccountStatusDto | null>(null);
-          const [isRefreshing, setIsRefreshing] = useState(false);
-          const [refreshError, setRefreshError] = useState<string | null>(null);
-          const [lastRemoteCheckAt, setLastRemoteCheckAt] = useState<string | null>(() => readStoredValue(remoteCheckTimestampKey(FIRST_PROVIDER_ID)));
-          const filtersRef = useRef(filters);
+        setProviderStatus(status);
+        if (status.isConnected && isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(FIRST_PROVIDER_ID)))) {
+          await refreshFromRemote();
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setRefreshError(err instanceof Error ? err.message : 'Failed to check AniList status');
+        }
+      }
+    };
 
-          useEffect(() => {
-            filtersRef.current = filters;
-          }, [filters]);
+    void loadProviderState();
 
-          const loadLibrary = useCallback(async (params: MediaLibraryQueryParams) => {
-            setIsLoading(true);
-            setError(null);
-            try {
-              const result = await mediaApi.getLibrary(params);
-              setItems(result.items);
-              setAvailableListNames(result.availableListNames);
-              setTotalPages(result.totalPages);
-              setTotalCount(result.totalCount);
-            } catch (err) {
-              setAvailableListNames([]);
-              setError(err instanceof Error ? err.message : 'Failed to load library');
-            } finally {
-              setIsLoading(false);
-            }
-          }, []);
+    return () => {
+      isCancelled = true;
+    };
+  }, [refreshFromRemote]);
 
-          useEffect(() => {
-            void loadLibrary(filters);
-          }, [filters, loadLibrary]);
+  const updateFilter = <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
+  };
 
-          useEffect(() => {
-            if (filters.provider !== FIRST_PROVIDER_ID) {
-              return;
-            }
+  const updateProviderFilter = (provider: string | undefined) => {
+    setFilters((prev) => ({
+      ...prev,
+      provider,
+      listName: provider === FIRST_PROVIDER_ID
+        ? readStoredValue(storedListNameKey(FIRST_PROVIDER_ID)) || undefined
+        : undefined,
+      page: 1,
+    }));
+  };
 
-            const storageKey = storedListNameKey(FIRST_PROVIDER_ID);
-            if (filters.listName) {
-              writeStoredValue(storageKey, filters.listName);
-              return;
-            }
+  const formattedLastRemoteCheckAt = formatTimestamp(lastRemoteCheckAt);
+  const hasActiveFilters = Boolean(
+    filters.status
+    || filters.mediaKind
+    || filters.listName
+    || (filters.provider && filters.provider !== FIRST_PROVIDER_ID),
+  );
+  const headerActions = [
+    onNavigateProviders
+      ? (
+        <GradientButton key="providers" tone="soft" onClick={onNavigateProviders}>
+          Providers
+        </GradientButton>
+      )
+      : null,
+    onNavigateHome
+      ? (
+        <GradientButton key="home" tone="soft" onClick={onNavigateHome}>
+          ← Home
+        </GradientButton>
+      )
+      : null,
+  ].filter(Boolean);
 
-            clearStoredValue(storageKey);
-          }, [filters.listName, filters.provider]);
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
-          useEffect(() => {
-            if (!filters.listName || availableListNames.length === 0 || availableListNames.includes(filters.listName)) {
-              return;
-            }
+      <div className={`relative z-10 mx-auto space-y-6 ${embedded ? 'max-w-440 px-4 pt-4 pb-6' : 'max-w-384 px-6 pt-8 pb-16'}`}>
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
+            <h1 className="mt-1 text-3xl font-bold">My Library</h1>
+            {!isLoading && totalCount > 0 ? (
+              <p className="mt-1 text-sm text-gray-500">{totalCount.toLocaleString()} entries</p>
+            ) : null}
+            {providerStatus?.isConnected && formattedLastRemoteCheckAt ? (
+              <p className="mt-1 text-xs text-gray-500">Last checked AniList: {formattedLastRemoteCheckAt}</p>
+            ) : null}
+          </div>
+          {headerActions.length > 0 ? (
+            <div className="flex gap-2">{headerActions}</div>
+          ) : null}
+        </header>
 
-            setFilters((prev) => ({ ...prev, listName: undefined, page: 1 }));
-          }, [availableListNames, filters.listName]);
+        {refreshError ? (
+          <GlassCard className="p-4">
+            <p className="text-sm text-rose-700">{refreshError}</p>
+          </GlassCard>
+        ) : null}
 
-          const refreshFromRemote = useCallback(async () => {
-            setIsRefreshing(true);
-            setRefreshError(null);
+        {/* Filters */}
+        <GlassCard className="p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</label>
+              <select
+                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                value={filters.status ?? ''}
+                onChange={(e) => updateFilter('status', e.target.value || undefined)}
+              >
+                {NORMALIZED_STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
 
-            try {
-              const result = await mediaApi.importLibrary(FIRST_PROVIDER_ID);
-              writeStoredValue(remoteCheckTimestampKey(FIRST_PROVIDER_ID), result.importedAt);
-              setLastRemoteCheckAt(result.importedAt);
-              await loadLibrary(filtersRef.current);
-            } catch (err) {
-              setRefreshError(err instanceof Error ? err.message : 'Failed to refresh from AniList');
-            } finally {
-              setIsRefreshing(false);
-            }
-          }, [loadLibrary]);
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Type</label>
+              <select
+                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                value={filters.mediaKind ?? ''}
+                onChange={(e) => updateFilter('mediaKind', e.target.value || undefined)}
+              >
+                {MEDIA_KIND_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
 
-          useEffect(() => {
-            let isCancelled = false;
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Provider</label>
+              <select
+                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                value={filters.provider ?? ''}
+                onChange={(e) => updateProviderFilter(e.target.value || undefined)}
+              >
+                <option value="">All providers</option>
+                {mediaProviderCatalog.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
 
-            const loadProviderState = async () => {
-              try {
-                const status = await mediaApi.getProviderStatus(FIRST_PROVIDER_ID);
-                if (isCancelled) {
-                  return;
-                }
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">List</label>
+              <select
+                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+                value={filters.listName ?? ''}
+                onChange={(e) => updateFilter('listName', e.target.value || undefined)}
+                disabled={availableListNames.length === 0 || filters.provider !== FIRST_PROVIDER_ID}
+              >
+                <option value="">All lists</option>
+                {availableListNames.map((listName) => (
+                  <option key={listName} value={listName}>{listName}</option>
+                ))}
+              </select>
+            </div>
 
-                setProviderStatus(status);
-                if (status.isConnected && isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(FIRST_PROVIDER_ID)))) {
-                  await refreshFromRemote();
-                }
-              } catch (err) {
-                if (!isCancelled) {
-                  setRefreshError(err instanceof Error ? err.message : 'Failed to check AniList status');
-                }
-              }
-            };
-
-            void loadProviderState();
-
-            return () => {
-              isCancelled = true;
-            };
-          }, [refreshFromRemote]);
-
-          const updateFilter = <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => {
-            setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
-          };
-
-          const updateProviderFilter = (provider: string | undefined) => {
-            setFilters((prev) => ({
-              ...prev,
-              provider,
-              listName: provider === FIRST_PROVIDER_ID
-                ? readStoredValue(storedListNameKey(FIRST_PROVIDER_ID)) || undefined
-                : undefined,
-              page: 1,
-            }));
-          };
-
-          const formattedLastRemoteCheckAt = formatTimestamp(lastRemoteCheckAt);
-          const hasActiveFilters = Boolean(
-            filters.status
-            || filters.mediaKind
-            || filters.listName
-            || (filters.provider && filters.provider !== FIRST_PROVIDER_ID),
-          );
-          const headerActions = [
-            onNavigateProviders
-              ? (
-                <GradientButton key="providers" tone="soft" onClick={onNavigateProviders}>
-                  Providers
-                </GradientButton>
-              )
-              : null,
-            onNavigateHome
-              ? (
-                <GradientButton key="home" tone="soft" onClick={onNavigateHome}>
-                  ← Home
-                </GradientButton>
-              )
-              : null,
-          ].filter(Boolean);
-
-          return (
-            <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-              <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-              <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
-
-              <div className={`relative z-10 mx-auto space-y-6 ${embedded ? 'max-w-440 px-4 pt-4 pb-6' : 'max-w-384 px-6 pt-8 pb-16'}`}>
-                <header className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
-                    <h1 className="mt-1 text-3xl font-bold">My Library</h1>
-                    {!isLoading && totalCount > 0 ? (
-                      <p className="mt-1 text-sm text-gray-500">{totalCount.toLocaleString()} entries</p>
-                    ) : null}
-                    {providerStatus?.isConnected && formattedLastRemoteCheckAt ? (
-                      <p className="mt-1 text-xs text-gray-500">Last checked AniList: {formattedLastRemoteCheckAt}</p>
-                    ) : null}
-                  </div>
-                  {headerActions.length > 0 ? (
-                    <div className="flex gap-2">{headerActions}</div>
-                  ) : null}
-                </header>
-
-                {refreshError ? (
-                  <GlassCard className="p-4">
-                    <p className="text-sm text-rose-700">{refreshError}</p>
-                  </GlassCard>
-                ) : null}
-
-                {/* Filters */}
-                <GlassCard className="p-4">
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</label>
-                      <select
-                        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                        value={filters.status ?? ''}
-                        onChange={(e) => updateFilter('status', e.target.value || undefined)}
-                      >
-                        {NORMALIZED_STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Type</label>
-                      <select
-                        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                        value={filters.mediaKind ?? ''}
-                        onChange={(e) => updateFilter('mediaKind', e.target.value || undefined)}
-                      >
-                        {MEDIA_KIND_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Provider</label>
-                      <select
-                        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                        value={filters.provider ?? ''}
-                        onChange={(e) => updateProviderFilter(e.target.value || undefined)}
-                      >
-                        <option value="">All providers</option>
-                        {mediaProviderCatalog.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">List</label>
-                      <select
-                        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
-                        value={filters.listName ?? ''}
-                        onChange={(e) => updateFilter('listName', e.target.value || undefined)}
-                        disabled={availableListNames.length === 0 || filters.provider !== FIRST_PROVIDER_ID}
-                      >
-                        <option value="">All lists</option>
-                        {availableListNames.map((listName) => (
-                          <option key={listName} value={listName}>{listName}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sort by</label>
-                      <div className="flex gap-1">
-                        <select
-                          className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                          value={filters.sortBy ?? 'updatedAt'}
-                          onChange={(e) => updateFilter('sortBy', e.target.value)}
-                        >
-                          {SORT_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 hover:bg-white transition"
-                          onClick={() => setFilters((prev) => ({ ...prev, sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc', page: 1 }))}
-                          title={filters.sortDir === 'asc' ? 'Ascending — click to switch' : 'Descending — click to switch'}
-                        >
-                          {filters.sortDir === 'asc' ? '↑' : '↓'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {providerStatus?.isConnected ? (
-                      <div className="ml-auto flex flex-col gap-1">
-                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Reload</span>
-                        <button
-                          type="button"
-                          className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                          onClick={() => void refreshFromRemote()}
-                          disabled={isRefreshing}
-                          aria-busy={isRefreshing}
-                          title="Reload the primary provider library"
-                        >
-                          {isRefreshing ? 'Reloading…' : '↻ Reload'}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </GlassCard>
-
-                {/* Content */}
-                {error ? (
-                  <GlassCard className="p-6">
-                    <p className="text-sm text-rose-700">{error}</p>
-                    <div className="mt-3">
-                      <GradientButton tone="soft" onClick={() => void loadLibrary(filters)}>Retry</GradientButton>
-                    </div>
-                  </GlassCard>
-                ) : isLoading ? (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                    {Array.from({ length: 10 }).map((_, i) => (
-                      <GlassCard key={i} className="aspect-[0.72] animate-pulse bg-white/50" />
-                    ))}
-                  </div>
-                ) : items.length === 0 ? (
-                  <GlassCard className="p-8 text-center">
-                    <p className="text-gray-500">No library entries found.</p>
-                    <p className="mt-1 text-sm text-gray-400">
-                      {hasActiveFilters
-                        ? 'Try removing some filters.'
-                        : 'Import your library from a provider to get started.'}
-                    </p>
-                    {!hasActiveFilters && onNavigateProviders ? (
-                      <div className="mt-4">
-                        <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onNavigateProviders}>
-                          Go to Providers
-                        </GradientButton>
-                      </div>
-                    ) : null}
-                  </GlassCard>
-                ) : (
-                  <>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                      {items.map((entry) => (
-                        <LibraryEntryCard
-                          key={entry.id}
-                          entry={entry}
-                          onClick={() => onNavigateEntry(entry.id)}
-                        />
-                      ))}
-                    </div>
-
-                    {totalPages > 1 ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <GradientButton
-                          tone="soft"
-                          disabled={filters.page === 1}
-                          onClick={() => setFilters((prev) => ({ ...prev, page: Math.max(1, (prev.page ?? 1) - 1) }))}
-                        >
-                          ← Previous
-                        </GradientButton>
-                        <span className="text-sm text-gray-600">
-                          Page {filters.page ?? 1} of {totalPages}
-                        </span>
-                        <GradientButton
-                          tone="soft"
-                          disabled={(filters.page ?? 1) >= totalPages}
-                          onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) + 1 }))}
-                        >
-                          Next →
-                        </GradientButton>
-                      </div>
-                    ) : null}
-                  </>
-                )}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sort by</label>
+              <div className="flex gap-1">
+                <select
+                  className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  value={filters.sortBy ?? 'updatedAt'}
+                  onChange={(e) => updateFilter('sortBy', e.target.value)}
+                >
+                  {SORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 hover:bg-white transition"
+                  onClick={() => setFilters((prev) => ({ ...prev, sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc', page: 1 }))}
+                  title={filters.sortDir === 'asc' ? 'Ascending — click to switch' : 'Descending — click to switch'}
+                >
+                  {filters.sortDir === 'asc' ? '↑' : '↓'}
+                </button>
               </div>
             </div>
-          );
-        }
+
+            {providerStatus?.isConnected ? (
+              <div className="ml-auto flex flex-col gap-1">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Reload</span>
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => void refreshFromRemote()}
+                  disabled={isRefreshing}
+                  aria-busy={isRefreshing}
+                  title="Reload the primary provider library"
+                >
+                  {isRefreshing ? 'Reloading…' : '↻ Reload'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </GlassCard>
+
+        {/* Content */}
+        {error ? (
+          <GlassCard className="p-6">
+            <p className="text-sm text-rose-700">{error}</p>
+            <div className="mt-3">
+              <GradientButton tone="soft" onClick={() => void loadLibrary(filters)}>Retry</GradientButton>
+            </div>
+          </GlassCard>
+        ) : isLoading ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <GlassCard key={i} className="aspect-[0.72] animate-pulse bg-white/50" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <GlassCard className="p-8 text-center">
+            <p className="text-gray-500">No library entries found.</p>
+            <p className="mt-1 text-sm text-gray-400">
+              {hasActiveFilters
+                ? 'Try removing some filters.'
+                : 'Import your library from a provider to get started.'}
+            </p>
+            {!hasActiveFilters && onNavigateProviders ? (
+              <div className="mt-4">
+                <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onNavigateProviders}>
+                  Go to Providers
+                </GradientButton>
+              </div>
+            ) : null}
+          </GlassCard>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {items.map((entry) => (
+                <LibraryEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  onClick={() => onNavigateEntry(entry.id)}
+                />
+              ))}
+            </div>
+
+            {totalPages > 1 ? (
+              <div className="flex items-center justify-center gap-2">
+                <GradientButton
+                  tone="soft"
+                  disabled={filters.page === 1}
+                  onClick={() => setFilters((prev) => ({ ...prev, page: Math.max(1, (prev.page ?? 1) - 1) }))}
+                >
+                  ← Previous
+                </GradientButton>
+                <span className="text-sm text-gray-600">
+                  Page {filters.page ?? 1} of {totalPages}
+                </span>
+                <GradientButton
+                  tone="soft"
+                  disabled={(filters.page ?? 1) >= totalPages}
+                  onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) + 1 }))}
+                >
+                  Next →
+                </GradientButton>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

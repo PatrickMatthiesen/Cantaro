@@ -1,6 +1,7 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Cantaro.Api.Services;
@@ -171,6 +172,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
     private static MediaLibraryListItemDto MapListItem(MediaLibraryEntry entry)
     {
         var artwork = MediaArtworkMetadata.FromCanonicalMetadata(entry.MediaTitle?.CanonicalMetadata);
+        var releaseMetadata = ReadNextReleaseMetadata(entry.RawMetadata);
 
         return new MediaLibraryListItemDto
         {
@@ -192,6 +194,8 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             ProviderMediaId = entry.ProviderMediaId,
             RawListName = entry.RawListName,
             IsConnected = entry.ConnectedServiceAccountId is not null,
+            NextReleaseAt = releaseMetadata.NextReleaseAt,
+            NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             LastSyncedAt = entry.LastSyncedAt,
             UpdatedAt = entry.UpdatedAt
         };
@@ -201,6 +205,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
     {
         var title = entry.MediaTitle!;
         var artwork = MediaArtworkMetadata.FromCanonicalMetadata(title.CanonicalMetadata);
+        var releaseMetadata = ReadNextReleaseMetadata(entry.RawMetadata);
 
         return new MediaLibraryEntryDetailDto
         {
@@ -230,6 +235,8 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             ProgressChapters = entry.ProgressChapters,
             ProgressVolumes = entry.ProgressVolumes,
             IsConnected = entry.ConnectedServiceAccountId is not null,
+            NextReleaseAt = releaseMetadata.NextReleaseAt,
+            NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             LastSyncedAt = entry.LastSyncedAt,
             LastRemoteUpdateAt = entry.LastRemoteUpdateAt,
             UpdatedAt = entry.UpdatedAt,
@@ -246,6 +253,95 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 })
                 .ToList()
         };
+    }
+
+    private static (DateTimeOffset? NextReleaseAt, string? NextReleaseLabel) ReadNextReleaseMetadata(string? rawMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(rawMetadata))
+        {
+            return default;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawMetadata);
+            var root = document.RootElement;
+
+            if (TryReadDateTimeOffset(root, "nextReleaseAt", out var nextReleaseAt))
+            {
+                return (nextReleaseAt, TryReadString(root, "nextReleaseLabel"));
+            }
+
+            if (root.TryGetProperty("nextAiringEpisode", out var nextAiringEpisode)
+                && nextAiringEpisode.ValueKind == JsonValueKind.Object)
+            {
+                DateTimeOffset? airingAt = null;
+                if (nextAiringEpisode.TryGetProperty("airingAt", out var airingAtElement)
+                    && TryReadUnixTimeSeconds(airingAtElement, out var parsedAiringAt))
+                {
+                    airingAt = parsedAiringAt;
+                }
+
+                string? label = null;
+                if (nextAiringEpisode.TryGetProperty("episode", out var episodeElement)
+                    && episodeElement.TryGetInt32(out var episode))
+                {
+                    label = $"Ep {episode}";
+                }
+
+                return (airingAt, label);
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return default;
+    }
+
+    private static bool TryReadDateTimeOffset(JsonElement root, string propertyName, out DateTimeOffset? value)
+    {
+        value = null;
+
+        if (!root.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(property.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            value = parsed;
+            return true;
+        }
+
+        if (TryReadUnixTimeSeconds(property, out var unixParsed))
+        {
+            value = unixParsed;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadUnixTimeSeconds(JsonElement element, out DateTimeOffset value)
+    {
+        value = default;
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out var unixSeconds))
+        {
+            value = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? TryReadString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
     }
 }
 

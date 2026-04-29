@@ -30,6 +30,8 @@ public class MediaLibraryListItemDto
     public required string ProviderMediaId { get; set; }
     public string? RawListName { get; set; }
     public bool IsConnected { get; set; }
+    public DateTimeOffset? NextReleaseAt { get; set; }
+    public string? NextReleaseLabel { get; set; }
     public DateTimeOffset? LastSyncedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -48,6 +50,8 @@ public class MediaLibraryEntryDetailDto
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }
     public bool IsConnected { get; set; }
+    public DateTimeOffset? NextReleaseAt { get; set; }
+    public string? NextReleaseLabel { get; set; }
     public DateTimeOffset? LastSyncedAt { get; set; }
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

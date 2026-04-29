@@ -28,6 +28,8 @@ export interface MediaLibraryListItemDto {
     providerMediaId: string;
     rawListName?: string;
     isConnected: boolean;
+    nextReleaseAt?: string;
+    nextReleaseLabel?: string;
     lastSyncedAt?: string;
     updatedAt: string;
 }
@@ -45,6 +47,8 @@ export interface MediaLibraryEntryDetailDto {
     progressChapters?: number;
     progressVolumes?: number;
     isConnected: boolean;
+    nextReleaseAt?: string;
+    nextReleaseLabel?: string;
     lastSyncedAt?: string;
     lastRemoteUpdateAt?: string;
     updatedAt: string;

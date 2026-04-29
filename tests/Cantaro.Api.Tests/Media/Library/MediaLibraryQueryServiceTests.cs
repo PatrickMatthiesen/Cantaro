@@ -226,6 +226,40 @@ public class MediaLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task LibraryQueries_SurfaceNextReleaseMetadataFromStoredProviderPayload()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var nextReleaseAt = now.AddDays(2).ToUnixTimeSeconds();
+        var user = TestUserFactory.Create(309, "release@example.com");
+        db.Users.Add(user);
+
+        var title = MakeTitle("The Apothecary Diaries", MediaKinds.Anime, now);
+        db.MediaTitles.Add(title);
+        await db.SaveChangesAsync();
+
+        var entry = MakeEntry(user.Id, title, MediaLibraryStatuses.Current, now);
+        entry.RawMetadata = $"{{\"nextAiringEpisode\":{{\"episode\":18,\"airingAt\":{nextReleaseAt}}}}}";
+        db.MediaLibraryEntries.Add(entry);
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+
+        var page = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions(), CancellationToken.None);
+        var detail = await service.GetLibraryEntryDetailAsync(user.Id, entry.Id, CancellationToken.None);
+
+        Assert.Single(page.Items);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(nextReleaseAt), page.Items[0].NextReleaseAt);
+        Assert.Equal("Ep 18", page.Items[0].NextReleaseLabel);
+        Assert.NotNull(detail);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(nextReleaseAt), detail!.NextReleaseAt);
+        Assert.Equal("Ep 18", detail.NextReleaseLabel);
+    }
+
+    [Fact]
     public async Task GetLibraryEntryDetailAsync_ReturnsNullForWrongUser()
     {
         var (db, connection) = await CreateDbAsync();

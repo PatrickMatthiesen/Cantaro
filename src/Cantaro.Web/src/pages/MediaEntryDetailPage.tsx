@@ -61,6 +61,50 @@ function releaseStatusColor(dimension: string): string {
   }
 }
 
+function nextReleaseDisplay(timestamp?: string): { relative: string; absolute: string } | null {
+  if (!timestamp) {
+    return null;
+  }
+
+  const parsed = Date.parse(timestamp);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+
+  const diffMs = parsed - Date.now();
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+  let relative: string;
+  if (Math.abs(diffMs) < hour) {
+    relative = formatter.format(Math.round(diffMs / minute), 'minute');
+  } else if (Math.abs(diffMs) < day) {
+    relative = formatter.format(Math.round(diffMs / hour), 'hour');
+  } else if (Math.abs(diffMs) < week) {
+    relative = formatter.format(Math.round(diffMs / day), 'day');
+  } else {
+    relative = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(parsed);
+  }
+
+  const absolute = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
+
+  return { relative, absolute };
+}
+
 function providerAvailabilityKey(provider: string, externalId: string): string {
   return `${provider}:${externalId}`;
 }
@@ -316,8 +360,8 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
                   type="button"
                   onClick={() => { setProviderId(p.id); setResults([]); setSearchError(null); }}
                   className={`rounded-xl px-4 py-2 text-sm font-medium transition ${providerId === p.id
-                      ? 'bg-indigo-500 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                 >
                   {p.icon} {p.name}
@@ -562,7 +606,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
     return () => {
       isCancelled = true;
     };
-  }, [entry?.providerLinks]);
+  }, [entry]);
 
   useEffect(() => {
     if (!entry || !entry.isConnected || isRefreshingRemote) {
@@ -708,6 +752,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
     progressChapters !== entry.progressChapters ||
     progressVolumes !== entry.progressVolumes;
   const hasStatusChanged = selectedStatus !== entry.normalizedStatus;
+  const nextRelease = nextReleaseDisplay(entry.nextReleaseAt);
 
   return (
     <>
@@ -756,10 +801,22 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
 
               {/* Core metadata */}
               <div className="min-w-0 flex-1 space-y-3">
-                <div>
-                  <h1 className="text-2xl font-bold leading-tight text-gray-900">{title.canonicalTitle}</h1>
-                  {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
-                    <p className="mt-1 text-sm text-gray-500">{title.originalTitle}</p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <h1 className="text-2xl font-bold leading-tight text-gray-900">{title.canonicalTitle}</h1>
+                    {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
+                      <p className="mt-1 text-sm text-gray-500">{title.originalTitle}</p>
+                    ) : null}
+                  </div>
+
+                  {nextRelease ? (
+                    <div className="shrink-0 self-start rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-right shadow-sm">
+                      <p className="text-[11px] font-semibold tracking-[0.18em] text-cyan-700 uppercase">
+                        {entry.nextReleaseLabel ?? 'Next release'}
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">{nextRelease.relative}</p>
+                      <p className="mt-1 text-xs text-slate-500">{nextRelease.absolute}</p>
+                    </div>
                   ) : null}
                 </div>
 
