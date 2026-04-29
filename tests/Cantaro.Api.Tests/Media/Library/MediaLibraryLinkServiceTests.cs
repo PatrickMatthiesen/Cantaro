@@ -166,6 +166,60 @@ public class MediaLibraryLinkServiceTests
     }
 
     [Fact]
+    public async Task LinkProviderAsync_ForceRelinkReplacesExistingProviderLinkForTitle()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(408, "replace@example.com");
+        db.Users.Add(user);
+
+        var titleA = MakeTitle("Title A", now);
+        var titleB = MakeTitle("Title B", now);
+        db.MediaTitles.AddRange(titleA, titleB);
+        await db.SaveChangesAsync();
+
+        var entryA = MakeEntry(user.Id, titleA, now);
+        db.MediaLibraryEntries.Add(entryA);
+        db.MediaProviderLinks.AddRange(
+            new MediaProviderLink
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = titleA.Id,
+                Provider = "anilist",
+                ExternalId = "11111",
+                LinkSource = MediaMappingSources.Imported,
+                CreatedAt = now,
+                UpdatedAt = now
+            },
+            new MediaProviderLink
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = titleB.Id,
+                Provider = "anilist",
+                ExternalId = "55555",
+                LinkSource = MediaMappingSources.Imported,
+                MediaTitle = titleB,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        await db.SaveChangesAsync();
+
+        var service = MakeService(db);
+        var result = await service.LinkProviderAsync(
+            user.Id, entryA.Id, "anilist", "55555", forceRelink: true, CancellationToken.None);
+
+        Assert.Equal(MediaLinkResultKind.Success, result.Kind);
+
+        var links = await db.MediaProviderLinks.OrderBy(l => l.ExternalId).ToListAsync();
+        Assert.Single(links);
+        Assert.Equal(titleA.Id, links[0].MediaTitleId);
+        Assert.Equal("55555", links[0].ExternalId);
+    }
+
+    [Fact]
     public async Task LinkProviderAsync_ReturnsEntryNotFoundForWrongUser()
     {
         var (db, connection) = await CreateDbAsync();

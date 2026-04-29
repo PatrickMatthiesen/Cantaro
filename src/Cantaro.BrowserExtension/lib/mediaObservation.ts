@@ -30,6 +30,34 @@ export interface MediaObservation {
   extensionVersion: string;
 }
 
+/** Backend DTO posted to Cantaro's media observations API. */
+export interface SubmitMediaObservationRequest {
+  siteIdentifier: SiteId;
+  observedUrl: string;
+  siteMediaId?: string;
+  observedTitle: string;
+  progressHint?: string;
+  observedAt: string;
+  extensionVersion: string;
+}
+
+export function toSubmitMediaObservationRequest(
+  observation: MediaObservation,
+): SubmitMediaObservationRequest {
+  return {
+    siteIdentifier: observation.siteId,
+    observedUrl: observation.observedUrl,
+    siteMediaId: observation.siteMediaId,
+    observedTitle: observation.titleText,
+    progressHint:
+      observation.progressHint === null || observation.progressHint === undefined
+        ? undefined
+        : String(observation.progressHint),
+    observedAt: observation.observedAt,
+    extensionVersion: observation.extensionVersion,
+  };
+}
+
 /** Internal message envelope sent from content scripts to the background worker. */
 export interface MediaObservationMessage {
   type: 'MEDIA_OBSERVATION';

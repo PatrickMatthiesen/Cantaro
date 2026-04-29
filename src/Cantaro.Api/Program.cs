@@ -17,9 +17,7 @@ var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(e
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
 
-// Add PostgreSQL database context with custom configuration
-// Disable retry execution strategy because we use manual transactions with raw SQL
-// Pass null settings to prevent Aspire from automatically enabling NpgsqlRetryingExecutionStrategy : TODO Remove?
+// Add PostgreSQL database context via Aspire defaults.
 builder.AddNpgsqlDbContext<ApplicationDbContext>(connectionName: "cantaro-db");
 
 // Add Data Protection for token encryption

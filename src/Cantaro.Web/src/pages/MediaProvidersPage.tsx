@@ -1,28 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { GlassCard, GradientButton, StatusBadge } from '../components/ui/GlassComponents';
 import { mediaApi } from '../services/mediaApi';
+import { clearStoredValue, remoteCheckTimestampKey, writeStoredValue } from '../services/mediaRefreshCache';
 import { mediaProviderCatalog } from '../services/mediaProviders';
 import type { MediaProviderAccountStatusDto, MediaImportDto } from '../services/mediaApi';
-
-function providerLastRemoteCheckStorageKey(providerId: string): string {
-  return `cantaro.media.provider.${providerId}.lastRemoteCheckAt`;
-}
-
-function persistRemoteCheckTimestamp(providerId: string, importedAt: string): void {
-  try {
-    window.localStorage.setItem(providerLastRemoteCheckStorageKey(providerId), importedAt);
-  } catch {
-    // Local storage is best-effort only.
-  }
-}
-
-function clearRemoteCheckTimestamp(providerId: string): void {
-  try {
-    window.localStorage.removeItem(providerLastRemoteCheckStorageKey(providerId));
-  } catch {
-    // Local storage is best-effort only.
-  }
-}
 
 function shouldAutoImportAfterConnect(providerId: string): boolean {
   const search = new URLSearchParams(window.location.search);
@@ -90,7 +71,7 @@ function ProviderPanel({ providerId, name, icon, gradient, description }: Provid
       await mediaApi.disconnectProvider(providerId);
       setStatus((prev) => (prev ? { ...prev, isConnected: false, displayName: undefined } : null));
       setLastImport(null);
-      clearRemoteCheckTimestamp(providerId);
+      clearStoredValue(remoteCheckTimestampKey(providerId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect');
     } finally {
@@ -104,7 +85,7 @@ function ProviderPanel({ providerId, name, icon, gradient, description }: Provid
     try {
       const result = await mediaApi.importLibrary(providerId);
       setLastImport(result);
-      persistRemoteCheckTimestamp(providerId, result.importedAt);
+      writeStoredValue(remoteCheckTimestampKey(providerId), result.importedAt);
       return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');

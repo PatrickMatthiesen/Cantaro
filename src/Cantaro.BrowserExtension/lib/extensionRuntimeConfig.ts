@@ -13,7 +13,43 @@ export function normalizeApiBaseUrl(value: string | null | undefined): string {
     return trimmed ? trimmed.replace(/\/+$/, '') : '';
 }
 
+export function apiBaseUrlOriginMatchPattern(value: string | null | undefined): string | null {
+    const normalized = normalizeApiBaseUrl(value);
+    if (!normalized) {
+        return null;
+    }
+
+    try {
+        const url = new URL(normalized);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            return null;
+        }
+
+        return `${url.origin}/*`;
+    } catch {
+        return null;
+    }
+}
+
 export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(__CANTARO_DEFAULT_API_BASE_URL__) || 'http://localhost:5000';
+
+export async function ensureApiBaseUrlPermission(apiBaseUrl: string): Promise<void> {
+    const originMatchPattern = apiBaseUrlOriginMatchPattern(apiBaseUrl);
+    if (!originMatchPattern || !browser.permissions?.contains || !browser.permissions?.request) {
+        return;
+    }
+
+    const permissionRequest = { origins: [originMatchPattern] };
+    const alreadyGranted = await browser.permissions.contains(permissionRequest);
+    if (alreadyGranted) {
+        return;
+    }
+
+    const granted = await browser.permissions.request(permissionRequest);
+    if (!granted) {
+        throw new Error(`Access to ${new URL(apiBaseUrl).origin} was not granted.`);
+    }
+}
 
 export const emptyExtensionConfig: ExtensionConfig = {
     apiBaseUrl: DEFAULT_API_BASE_URL,

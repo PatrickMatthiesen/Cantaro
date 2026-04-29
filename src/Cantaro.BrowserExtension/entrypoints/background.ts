@@ -1,7 +1,7 @@
 import { createBrowserStorageQueue } from '../lib/observationQueue';
 import { DEFAULT_API_BASE_URL, readExtensionConfig } from '../lib/extensionRuntimeConfig';
 import { ensureExtensionAccessToken } from '../lib/cantaroAuthSession';
-import type { MediaObservation } from '../lib/mediaObservation';
+import { toSubmitMediaObservationRequest, type MediaObservation } from '../lib/mediaObservation';
 
 /** Media observation route expected by the Cantaro backend. */
 const MEDIA_OBSERVATIONS_PATH = '/api/media/observations';
@@ -117,13 +117,14 @@ async function sendObservation(
   observation: MediaObservation,
 ): Promise<boolean> {
   try {
+    const request = toSubmitMediaObservationRequest(observation);
     const response = await fetch(`${apiBaseUrl}${MEDIA_OBSERVATIONS_PATH}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(observation),
+      body: JSON.stringify(request),
     });
 
     if (!response.ok) {

@@ -15,8 +15,8 @@ var postgres = builder.AddPostgres("postgres")
     .WithHostPort(5432);
 var db = postgres.AddDatabase("cantaro-db");
 
-var pgAdmin = postgres.WithPgAdmin()
-    .WithExplicitStart();
+// Optionally, add pgAdmin for database management (runs in a separate container)
+// var pgAdmin = postgres.WithPgAdmin();
 
 var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("migration-service")
     .WithReference(db)

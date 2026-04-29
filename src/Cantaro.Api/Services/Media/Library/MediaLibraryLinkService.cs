@@ -78,19 +78,19 @@ public class MediaLibraryLinkService(
         var now = DateTimeOffset.UtcNow;
 
         // Check whether a link for (provider, externalId) already exists globally.
-        var existingLink = await _dbContext.MediaProviderLinks
+        var existingLinkForExternalId = await _dbContext.MediaProviderLinks
             .Include(l => l.MediaTitle)
             .FirstOrDefaultAsync(
                 l => l.Provider == normalizedProvider && l.ExternalId == providerMediaId,
                 cancellationToken);
 
-        if (existingLink is not null)
+        if (existingLinkForExternalId is not null)
         {
-            if (existingLink.MediaTitleId == entry.MediaTitleId)
+            if (existingLinkForExternalId.MediaTitleId == entry.MediaTitleId)
             {
                 // Idempotent: the correct link already exists. Refresh the verification timestamp.
-                existingLink.LastVerifiedAt = now;
-                existingLink.UpdatedAt = now;
+                existingLinkForExternalId.LastVerifiedAt = now;
+                existingLinkForExternalId.UpdatedAt = now;
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 return MediaLinkResult.AlreadyLinked();
             }
@@ -99,22 +99,50 @@ public class MediaLibraryLinkService(
             if (!forceRelink)
             {
                 return MediaLinkResult.Conflict(
-                    existingLink.MediaTitleId,
-                    existingLink.MediaTitle?.CanonicalTitle ?? existingLink.MediaTitleId.ToString());
+                    existingLinkForExternalId.MediaTitleId,
+                    existingLinkForExternalId.MediaTitle?.CanonicalTitle ?? existingLinkForExternalId.MediaTitleId.ToString());
             }
 
             // ForceRelink: move the existing link to the entry's title.
             _logger.LogWarning(
                 "Force-relinking provider {Provider}/{ExternalId} from MediaTitle {OldTitleId} to {NewTitleId} by user {UserId}.",
-                normalizedProvider, providerMediaId, existingLink.MediaTitleId, entry.MediaTitleId, userId);
+                normalizedProvider, providerMediaId, existingLinkForExternalId.MediaTitleId, entry.MediaTitleId, userId);
 
-            existingLink.MediaTitleId = entry.MediaTitleId;
-            existingLink.LinkSource = MediaMappingSources.UserConfirmed;
-            existingLink.LinkedByUserId = userId;
-            existingLink.LastVerifiedAt = now;
-            existingLink.UpdatedAt = now;
+            existingLinkForExternalId.MediaTitleId = entry.MediaTitleId;
+            existingLinkForExternalId.LinkSource = MediaMappingSources.UserConfirmed;
+            existingLinkForExternalId.LinkedByUserId = userId;
+            existingLinkForExternalId.LastVerifiedAt = now;
+            existingLinkForExternalId.UpdatedAt = now;
         }
-        else
+
+        // Check whether this title already has a link for this provider (replace it).
+        var existingLinkForTitleProvider = await _dbContext.MediaProviderLinks
+            .FirstOrDefaultAsync(
+                l => l.MediaTitleId == entry.MediaTitleId && l.Provider == normalizedProvider,
+                cancellationToken);
+
+        if (existingLinkForExternalId is not null
+            && existingLinkForTitleProvider is not null
+            && existingLinkForTitleProvider.Id != existingLinkForExternalId.Id)
+        {
+            _dbContext.MediaProviderLinks.Remove(existingLinkForTitleProvider);
+            existingLinkForTitleProvider = null;
+        }
+
+        if (existingLinkForTitleProvider is not null && existingLinkForTitleProvider.ExternalId != providerMediaId)
+        {
+            // Replace the existing link for this title+provider with the new external ID.
+            _logger.LogInformation(
+                "Updating provider link for MediaTitle {TitleId} on {Provider} from ExternalId {OldExternalId} to {NewExternalId} by user {UserId}.",
+                entry.MediaTitleId, normalizedProvider, existingLinkForTitleProvider.ExternalId, providerMediaId, userId);
+
+            existingLinkForTitleProvider.ExternalId = providerMediaId;
+            existingLinkForTitleProvider.LinkSource = MediaMappingSources.UserConfirmed;
+            existingLinkForTitleProvider.LinkedByUserId = userId;
+            existingLinkForTitleProvider.LastVerifiedAt = now;
+            existingLinkForTitleProvider.UpdatedAt = now;
+        }
+        else if (existingLinkForExternalId is null && existingLinkForTitleProvider is null)
         {
             // No link exists yet — create one.
             var link = new MediaProviderLink

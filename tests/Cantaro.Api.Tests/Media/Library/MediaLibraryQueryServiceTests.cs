@@ -10,6 +10,14 @@ namespace Cantaro.Api.Tests;
 
 public class MediaLibraryQueryServiceTests
 {
+    private static ApplicationDbContext CreateInMemoryDb(string databaseName)
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(databaseName)
+            .Options;
+        return new ApplicationDbContext(options);
+    }
+
     private static async Task<(ApplicationDbContext, SqliteConnection)> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -64,6 +72,45 @@ public class MediaLibraryQueryServiceTests
         // Sorted alphabetically ascending: Berserk, Frieren, Spy x Family → page 1: Berserk, Frieren
         Assert.Equal("Berserk", page.Items[0].CanonicalTitle);
         Assert.Equal("Frieren", page.Items[1].CanonicalTitle);
+    }
+
+    [Fact]
+    public async Task GetLibraryAsync_UsesQueryablePagingOutsideSqlite()
+    {
+        await using var db = CreateInMemoryDb(nameof(GetLibraryAsync_UsesQueryablePagingOutsideSqlite));
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(308, "server-sort@example.com");
+        db.Users.Add(user);
+
+        var titles = new[]
+        {
+            MakeTitle("Zeta", MediaKinds.Anime, now),
+            MakeTitle("Alpha", MediaKinds.Anime, now.AddMinutes(1)),
+            MakeTitle("Delta", MediaKinds.Anime, now.AddMinutes(2)),
+        };
+        db.MediaTitles.AddRange(titles);
+        await db.SaveChangesAsync();
+
+        db.MediaLibraryEntries.AddRange(
+            MakeEntry(user.Id, titles[0], MediaLibraryStatuses.Current, now),
+            MakeEntry(user.Id, titles[1], MediaLibraryStatuses.Current, now.AddMinutes(1)),
+            MakeEntry(user.Id, titles[2], MediaLibraryStatuses.Current, now.AddMinutes(2)));
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+
+        var page = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions
+        {
+            Page = 2,
+            PageSize = 1,
+            SortBy = "title",
+            SortDir = "asc"
+        }, CancellationToken.None);
+
+        Assert.Equal(3, page.TotalCount);
+        Assert.Single(page.Items);
+        Assert.Equal("Delta", page.Items[0].CanonicalTitle);
     }
 
     [Fact]

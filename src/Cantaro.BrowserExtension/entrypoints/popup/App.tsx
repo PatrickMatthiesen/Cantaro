@@ -14,6 +14,7 @@ import { MusicPlaceholder } from './components/MusicPlaceholder';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SetupCard } from './components/SetupCard';
 import {
+  ensureApiBaseUrlPermission,
   DEFAULT_API_BASE_URL,
   emptyExtensionConfig,
   normalizeApiBaseUrl,
@@ -152,6 +153,7 @@ function App() {
 
     try {
       const nextApiBaseUrl = normalizeApiBaseUrl(draftApiBaseUrl) || DEFAULT_API_BASE_URL;
+      await ensureApiBaseUrlPermission(nextApiBaseUrl);
       const apiBaseUrlChanged = nextApiBaseUrl !== normalizeApiBaseUrl(savedConfig.apiBaseUrl);
       const nextConfig = {
         ...savedConfig,
@@ -180,6 +182,7 @@ function App() {
     setIsSigningIn(true);
 
     try {
+        await ensureApiBaseUrlPermission(apiBaseUrl);
       const nextConfig = await beginInteractiveSignIn(apiBaseUrl);
       await persistConfig(nextConfig, 'Signed in to Cantaro');
       setSessionEmail(nextConfig.sessionEmail || null);

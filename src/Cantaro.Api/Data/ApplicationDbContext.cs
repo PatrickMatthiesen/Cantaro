@@ -234,6 +234,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
+            entity.HasIndex(e => new { e.MediaTitleId, e.Provider })
+                .IsUnique();
+
             entity.HasIndex(e => new { e.Provider, e.ExternalId })
                 .IsUnique();
 

@@ -20,6 +20,21 @@ const defaultApiBaseUrl = readEnvValue('services__api__https__0')
   ?? readEnvValue('WXT_API_BASE_URL')
   ?? 'http://localhost:5000';
 
+function toOriginMatchPattern(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+
+    return `${url.origin}/*`;
+  } catch {
+    return null;
+  }
+}
+
+const defaultApiHostPermission = toOriginMatchPattern(defaultApiBaseUrl);
+
 // https://wxt.dev/api/config.html
 export default defineConfig({
   manifest: {
@@ -30,14 +45,18 @@ export default defineConfig({
       'storage',
       'tabs',
       'identity',
+      'permissions',
     ],
     host_permissions: [
-      'http://*/*',
-      'https://*/*',
+      ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),
       'https://open.spotify.com/*',
       'https://music.youtube.com/*',
       'https://www.youtube.com/*',
       'https://www.crunchyroll.com/*',
+    ],
+    optional_host_permissions: [
+      'http://*/*',
+      'https://*/*',
     ],
   },
   webExt: {

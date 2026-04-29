@@ -72,14 +72,25 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         var pageSize = Math.Clamp(options.PageSize, 1, 100);
         var skip = (page - 1) * pageSize;
 
-        // EF Core's SQLite provider cannot translate DateTimeOffset expressions in ORDER BY.
-        // Sorting is applied in memory after the filtered set is fetched from the DB.
-        // This is acceptable because the query is already scoped to a single user's library.
-        var allFiltered = await query.ToListAsync(cancellationToken);
-        var entries = ApplySort(allFiltered, options.SortBy, options.SortDir)
-            .Skip(skip)
-            .Take(pageSize)
-            .ToList();
+        List<MediaLibraryEntry> entries;
+
+        if (string.Equals(_dbContext.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        {
+            // SQLite still struggles with some of this query's DateTimeOffset ordering, so keep the
+            // fallback local to test/dev storage while PostgreSQL handles paging server-side.
+            var allFiltered = await query.ToListAsync(cancellationToken);
+            entries = ApplyEnumerableSort(allFiltered, options.SortBy, options.SortDir)
+                .Skip(skip)
+                .Take(pageSize)
+                .ToList();
+        }
+        else
+        {
+            entries = await ApplyQueryableSort(query, options.SortBy, options.SortDir)
+                .Skip(skip)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+        }
 
         var items = entries.Select(MapListItem).ToList();
 
@@ -107,7 +118,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         return entry is null ? null : MapDetail(entry);
     }
 
-    private static IEnumerable<MediaLibraryEntry> ApplySort(
+    private static IEnumerable<MediaLibraryEntry> ApplyEnumerableSort(
         IEnumerable<MediaLibraryEntry> entries,
         string sortBy,
         string sortDir)
@@ -128,6 +139,32 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             _ => descending
                 ? entries.OrderByDescending(e => e.UpdatedAt)
                 : entries.OrderBy(e => e.UpdatedAt)
+        };
+    }
+
+    private static IQueryable<MediaLibraryEntry> ApplyQueryableSort(
+        IQueryable<MediaLibraryEntry> entries,
+        string sortBy,
+        string sortDir)
+    {
+        var descending = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+
+        return sortBy.ToLowerInvariant() switch
+        {
+            "title" => descending
+                ? entries.OrderByDescending(e => e.MediaTitle!.CanonicalTitle).ThenByDescending(e => e.Id)
+                : entries.OrderBy(e => e.MediaTitle!.CanonicalTitle).ThenBy(e => e.Id),
+            "status" => descending
+                ? entries.OrderByDescending(e => e.NormalizedStatus).ThenByDescending(e => e.UpdatedAt)
+                : entries.OrderBy(e => e.NormalizedStatus).ThenByDescending(e => e.UpdatedAt),
+            "progress" => descending
+                ? entries.OrderByDescending(e => e.ProgressEpisodes ?? e.ProgressChapters ?? e.ProgressVolumes ?? -1)
+                    .ThenByDescending(e => e.UpdatedAt)
+                : entries.OrderBy(e => e.ProgressEpisodes ?? e.ProgressChapters ?? e.ProgressVolumes ?? -1)
+                    .ThenByDescending(e => e.UpdatedAt),
+            _ => descending
+                ? entries.OrderByDescending(e => e.UpdatedAt).ThenByDescending(e => e.Id)
+                : entries.OrderBy(e => e.UpdatedAt).ThenBy(e => e.Id)
         };
     }
 

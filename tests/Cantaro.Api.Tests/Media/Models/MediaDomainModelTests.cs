@@ -92,11 +92,12 @@ public class MediaDomainModelTests
 
         await dbContext.SaveChangesAsync();
 
+        var persistedTitle = await dbContext.MediaTitles.SingleAsync();
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
         var persistedProviderLink = await dbContext.MediaProviderLinks.SingleAsync();
 
         Assert.Equal(MediaLibraryStatuses.Current, persistedEntry.NormalizedStatus);
-        Assert.Equal(MediaProgressDimensions.Episode, title.PrimaryProgressDimension);
+        Assert.Equal(MediaProgressDimensions.Episode, persistedTitle.PrimaryProgressDimension);
         Assert.Equal(account.Id, persistedEntry.ConnectedServiceAccountId);
         Assert.Equal(timestamp.AddMinutes(-5), persistedEntry.LastRemoteUpdateAt);
         Assert.Equal(providerLink.ExternalId, persistedProviderLink.ExternalId);
@@ -225,6 +226,65 @@ public class MediaDomainModelTests
             MediaTitleId = secondTitle.Id,
             Provider = "anilist",
             ExternalId = "153518",
+            LinkSource = MediaMappingSources.UserConfirmed,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task MediaProviderLinks_EnforceTitleProviderUniqueness()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Sousou no Frieren",
+            MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
+            SupportsChapterProgress = false,
+            SupportsVolumeProgress = false,
+            IsCompletionOnly = false,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp
+        };
+
+        dbContext.MediaTitles.Add(title);
+        await dbContext.SaveChangesAsync();
+
+        dbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "154587",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp
+        });
+
+        await dbContext.SaveChangesAsync();
+
+        dbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "200001",
             LinkSource = MediaMappingSources.UserConfirmed,
             CreatedAt = timestamp,
             UpdatedAt = timestamp
