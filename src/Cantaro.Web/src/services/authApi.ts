@@ -14,6 +14,11 @@ export interface LoginRequest {
   password: string;
 }
 
+async function readApiError(response: Response, fallbackMessage: string): Promise<string> {
+  const error = await response.json().catch(() => ({ message: fallbackMessage }));
+  return error.message || fallbackMessage;
+}
+
 class AuthApiClient {
   private getHeaders(): HeadersInit {
     return {
@@ -30,8 +35,7 @@ class AuthApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Registration failed' }));
-      throw new Error(error.message || 'Registration failed');
+      throw new Error(await readApiError(response, 'Registration failed'));
     }
   }
 
@@ -44,8 +48,7 @@ class AuthApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Login failed' }));
-      throw new Error(error.message || 'Login failed');
+      throw new Error(await readApiError(response, 'Login failed'));
     }
   }
 
@@ -57,8 +60,7 @@ class AuthApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Logout failed' }));
-      throw new Error(error.message || 'Logout failed');
+      throw new Error(await readApiError(response, 'Logout failed'));
     }
   }
 
@@ -70,8 +72,7 @@ class AuthApiClient {
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Failed to fetch user' }));
-      throw new Error(error.message || 'Failed to fetch user');
+      throw new Error(await readApiError(response, 'Failed to fetch user'));
     }
 
     return response.json();

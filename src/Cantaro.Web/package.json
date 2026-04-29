@@ -8,6 +8,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "check": "bun run lint && bun run build",
+    "check:fallow": "bunx fallow",
     "preview": "vite preview"
   },
   "dependencies": {

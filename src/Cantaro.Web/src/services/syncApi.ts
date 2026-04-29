@@ -23,7 +23,7 @@ export interface SyncStatusResponse {
   playlists: PlaylistSyncInfo[];
 }
 
-export interface BatchSyncRequest {
+interface BatchSyncRequest {
   service: string;
   servicePlaylistIds?: string[] | null; // null or empty = sync all
 }

@@ -38,6 +38,7 @@ const SORT_OPTIONS = [
 ];
 
 const FIRST_PROVIDER_ID = mainMediaProviderId;
+const DEFAULT_PRIMARY_LIST_NAME = 'Watching';
 
 function storedListNameKey(providerId: string): string {
   return `cantaro.media.provider.${providerId}.lastListName`;
@@ -285,16 +286,171 @@ interface MediaLibraryPageProps {
   embedded?: boolean;
 }
 
+interface FilterOption {
+  value: string;
+  label: string;
+}
+
+interface FilterSelectProps {
+  label: string;
+  value: string;
+  options: FilterOption[];
+  onChange: (value: string | undefined) => void;
+  disabled?: boolean;
+}
+
+function FilterSelect({ label, value, options, onChange, disabled = false }: FilterSelectProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</label>
+      <select
+        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+        value={value}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        disabled={disabled}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+interface SortControlsProps {
+  sortBy: string;
+  sortDir: 'asc' | 'desc';
+  onSortByChange: (value: string) => void;
+  onToggleSortDir: () => void;
+}
+
+function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: SortControlsProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sort by</label>
+      <div className="flex gap-1">
+        <select
+          className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          value={sortBy}
+          onChange={(e) => onSortByChange(e.target.value)}
+        >
+          {SORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 transition hover:bg-white"
+          onClick={onToggleSortDir}
+          title={sortDir === 'asc' ? 'Ascending - click to switch' : 'Descending - click to switch'}
+        >
+          {sortDir === 'asc' ? '↑' : '↓'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface LibraryFiltersProps {
+  filters: MediaLibraryQueryParams;
+  availableListNames: string[];
+  providerStatus: MediaProviderAccountStatusDto | null;
+  isRefreshing: boolean;
+  onUpdateFilter: <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => void;
+  onUpdateProviderFilter: (provider: string | undefined) => void;
+  onToggleSortDir: () => void;
+  onRefreshFromRemote: () => Promise<void>;
+}
+
+function LibraryFilters({
+  filters,
+  availableListNames,
+  providerStatus,
+  isRefreshing,
+  onUpdateFilter,
+  onUpdateProviderFilter,
+  onToggleSortDir,
+  onRefreshFromRemote,
+}: LibraryFiltersProps) {
+  const providerOptions: FilterOption[] = [
+    { value: '', label: 'All providers' },
+    ...mediaProviderCatalog.map((provider) => ({ value: provider.id, label: provider.name })),
+  ];
+  const listOptions: FilterOption[] = [
+    { value: '', label: 'All lists' },
+    ...availableListNames.map((listName) => ({ value: listName, label: listName })),
+  ];
+
+  return (
+    <GlassCard className="p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <FilterSelect
+          label="Status"
+          value={filters.status ?? ''}
+          options={NORMALIZED_STATUS_OPTIONS}
+          onChange={(value) => onUpdateFilter('status', value)}
+        />
+
+        <FilterSelect
+          label="Type"
+          value={filters.mediaKind ?? ''}
+          options={MEDIA_KIND_OPTIONS}
+          onChange={(value) => onUpdateFilter('mediaKind', value)}
+        />
+
+        <FilterSelect
+          label="Provider"
+          value={filters.provider ?? ''}
+          options={providerOptions}
+          onChange={onUpdateProviderFilter}
+        />
+
+        <FilterSelect
+          label="List"
+          value={filters.listName ?? ''}
+          options={listOptions}
+          onChange={(value) => onUpdateFilter('listName', value)}
+          disabled={availableListNames.length === 0 || filters.provider !== FIRST_PROVIDER_ID}
+        />
+
+        <SortControls
+          sortBy={filters.sortBy ?? 'updatedAt'}
+          sortDir={filters.sortDir ?? 'desc'}
+          onSortByChange={(value) => onUpdateFilter('sortBy', value)}
+          onToggleSortDir={onToggleSortDir}
+        />
+
+        {providerStatus?.isConnected ? (
+          <div className="ml-auto flex flex-col gap-1">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Reload</span>
+            <button
+              type="button"
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void onRefreshFromRemote()}
+              disabled={isRefreshing}
+              aria-busy={isRefreshing}
+              title="Reload the primary provider library"
+            >
+              {isRefreshing ? 'Reloading…' : '↻ Reload'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </GlassCard>
+  );
+}
+
 export function MediaLibraryPage({
   onNavigateHome,
   onNavigateProviders,
   onNavigateEntry,
   embedded = false,
 }: MediaLibraryPageProps) {
+  const initialStoredListNameRef = useRef(readStoredValue(storedListNameKey(FIRST_PROVIDER_ID)));
+  const hasAppliedInitialListFallbackRef = useRef(Boolean(initialStoredListNameRef.current));
   const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => ({
     provider: FIRST_PROVIDER_ID,
-    listName: readStoredValue(storedListNameKey(FIRST_PROVIDER_ID))
-      || (availableListNames.includes("Watching") ? "Watching" : undefined),
+    listName: initialStoredListNameRef.current || undefined,
     sortBy: 'updatedAt',
     sortDir: 'desc',
     page: 1,
@@ -359,6 +515,19 @@ export function MediaLibraryPage({
     setFilters((prev) => ({ ...prev, listName: undefined, page: 1 }));
   }, [availableListNames, filters.listName]);
 
+  useEffect(() => {
+    if (hasAppliedInitialListFallbackRef.current || filters.provider !== FIRST_PROVIDER_ID || availableListNames.length === 0) {
+      return;
+    }
+
+    hasAppliedInitialListFallbackRef.current = true;
+    if (filters.listName || !availableListNames.includes(DEFAULT_PRIMARY_LIST_NAME)) {
+      return;
+    }
+
+    setFilters((prev) => ({ ...prev, listName: DEFAULT_PRIMARY_LIST_NAME, page: 1 }));
+  }, [availableListNames, filters.listName, filters.provider]);
+
   const refreshFromRemote = useCallback(async () => {
     setIsRefreshing(true);
     setRefreshError(null);
@@ -405,6 +574,14 @@ export function MediaLibraryPage({
 
   const updateFilter = <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
+  };
+
+  const toggleSortDir = () => {
+    setFilters((prev) => ({
+      ...prev,
+      sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc',
+      page: 1,
+    }));
   };
 
   const updateProviderFilter = (provider: string | undefined) => {
@@ -470,104 +647,16 @@ export function MediaLibraryPage({
           </GlassCard>
         ) : null}
 
-        {/* Filters */}
-        <GlassCard className="p-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</label>
-              <select
-                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={filters.status ?? ''}
-                onChange={(e) => updateFilter('status', e.target.value || undefined)}
-              >
-                {NORMALIZED_STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Type</label>
-              <select
-                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={filters.mediaKind ?? ''}
-                onChange={(e) => updateFilter('mediaKind', e.target.value || undefined)}
-              >
-                {MEDIA_KIND_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Provider</label>
-              <select
-                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                value={filters.provider ?? ''}
-                onChange={(e) => updateProviderFilter(e.target.value || undefined)}
-              >
-                <option value="">All providers</option>
-                {mediaProviderCatalog.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">List</label>
-              <select
-                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
-                value={filters.listName ?? ''}
-                onChange={(e) => updateFilter('listName', e.target.value || undefined)}
-                disabled={availableListNames.length === 0 || filters.provider !== FIRST_PROVIDER_ID}
-              >
-                <option value="">All lists</option>
-                {availableListNames.map((listName) => (
-                  <option key={listName} value={listName}>{listName}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sort by</label>
-              <div className="flex gap-1">
-                <select
-                  className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  value={filters.sortBy ?? 'updatedAt'}
-                  onChange={(e) => updateFilter('sortBy', e.target.value)}
-                >
-                  {SORT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 hover:bg-white transition"
-                  onClick={() => setFilters((prev) => ({ ...prev, sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc', page: 1 }))}
-                  title={filters.sortDir === 'asc' ? 'Ascending — click to switch' : 'Descending — click to switch'}
-                >
-                  {filters.sortDir === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
-            </div>
-
-            {providerStatus?.isConnected ? (
-              <div className="ml-auto flex flex-col gap-1">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Reload</span>
-                <button
-                  type="button"
-                  className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={() => void refreshFromRemote()}
-                  disabled={isRefreshing}
-                  aria-busy={isRefreshing}
-                  title="Reload the primary provider library"
-                >
-                  {isRefreshing ? 'Reloading…' : '↻ Reload'}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </GlassCard>
+        <LibraryFilters
+          filters={filters}
+          availableListNames={availableListNames}
+          providerStatus={providerStatus}
+          isRefreshing={isRefreshing}
+          onUpdateFilter={updateFilter}
+          onUpdateProviderFilter={updateProviderFilter}
+            onToggleSortDir={toggleSortDir}
+          onRefreshFromRemote={refreshFromRemote}
+        />
 
         {/* Content */}
         {error ? (

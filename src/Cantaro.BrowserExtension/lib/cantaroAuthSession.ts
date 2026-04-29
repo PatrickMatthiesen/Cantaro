@@ -145,7 +145,7 @@ async function persistTokenExchange(apiBaseUrl: string, tokenResponse: TokenExch
     });
 }
 
-export async function fetchCurrentUser(apiBaseUrl: string, accessToken: string): Promise<ExtensionUser> {
+async function fetchCurrentUser(apiBaseUrl: string, accessToken: string): Promise<ExtensionUser> {
     const response = await fetch(`${normalizeApiBaseUrl(apiBaseUrl)}/api/auth/me`, {
         method: 'GET',
         headers: {

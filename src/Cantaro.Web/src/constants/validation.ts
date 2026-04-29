@@ -6,14 +6,14 @@ import { z } from 'zod';
  */
 
 export const PASSWORD_MIN_LENGTH = 6;
-export const PASSWORD_MIN_UNIQUE_CHARS = 1;
+const PASSWORD_MIN_UNIQUE_CHARS = 1;
 
 /**
  * Email regex that requires a valid TLD (at least 2 characters).
  * This matches the backend EmailWithTldAttribute validation.
  * Examples: user@example.com ✓, user@domain.dk ✓, user@local ✗
  */
-export const EMAIL_WITH_TLD_REGEX = /^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/i;
+const EMAIL_WITH_TLD_REGEX = /^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/i;
 
 /**
  * Zod validation schemas for authentication forms

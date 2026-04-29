@@ -1,5 +1,11 @@
 declare const __CANTARO_DEFAULT_API_BASE_URL__: string;
 
+function readInjectedDefaultApiBaseUrl(): string {
+    return typeof __CANTARO_DEFAULT_API_BASE_URL__ === 'string'
+        ? __CANTARO_DEFAULT_API_BASE_URL__
+        : '';
+}
+
 export interface ExtensionConfig {
     apiBaseUrl: string;
     accessToken: string;
@@ -31,7 +37,7 @@ export function apiBaseUrlOriginMatchPattern(value: string | null | undefined): 
     }
 }
 
-export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(__CANTARO_DEFAULT_API_BASE_URL__) || 'http://localhost:5000';
+export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(readInjectedDefaultApiBaseUrl()) || 'http://localhost:5000';
 
 export async function ensureApiBaseUrlPermission(apiBaseUrl: string): Promise<void> {
     const originMatchPattern = apiBaseUrlOriginMatchPattern(apiBaseUrl);

@@ -35,10 +35,6 @@ export class PlatformPlaylistModel implements PlatformPlaylist {
         this.songsCache = initialSongs ?? null;
     }
 
-    public get hasLoadedSongs(): boolean {
-        return this.songsCache !== null;
-    }
-
     public async songs(forceRefresh = false): Promise<PlatformSong[]> {
         if (this.songsCache !== null && !forceRefresh) {
             return this.songsCache;

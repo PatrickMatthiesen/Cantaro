@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, HTMLAttributes } from 'react';
 
-export const glassSurfaceClass =
+const glassSurfaceClass =
   'rounded-3xl border border-white/80 bg-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]';
 
 interface GlassCardProps extends HTMLAttributes<HTMLDivElement> {
@@ -77,58 +77,6 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     <span className={`rounded-full px-3 py-1 text-xs font-semibold tracking-wide uppercase ${map[status]}`}>
       {status}
     </span>
-  );
-}
-
-interface MetricTileProps {
-  label: string;
-  value: string;
-  icon?: string;
-  gradient?: string;
-}
-
-export function MetricTile({
-  label,
-  value,
-  icon = '✦',
-  gradient = 'from-indigo-500 to-cyan-500',
-}: MetricTileProps) {
-  return (
-    <GlassCard className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs tracking-[0.22em] text-gray-500 uppercase">{label}</p>
-          <p className="mt-2 text-3xl font-bold text-gray-800">{value}</p>
-        </div>
-        <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-linear-to-br ${gradient} text-lg text-white`}>
-          {icon}
-        </div>
-      </div>
-    </GlassCard>
-  );
-}
-
-interface ProgressMeterProps {
-  label: string;
-  value: number;
-  gradient?: string;
-}
-
-export function ProgressMeter({
-  label,
-  value,
-  gradient = 'from-indigo-500 to-purple-500',
-}: ProgressMeterProps) {
-  return (
-    <div>
-      <div className="mb-1 flex justify-between text-xs text-gray-600">
-        <span>{label}</span>
-        <span>{value}%</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-gray-200">
-        <div className={`h-full bg-linear-to-r ${gradient}`} style={{ width: `${value}%` }} />
-      </div>
-    </div>
   );
 }
 

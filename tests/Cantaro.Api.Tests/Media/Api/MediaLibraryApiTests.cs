@@ -370,7 +370,11 @@ public class MediaLibraryApiTests
                 {
                     User = new ClaimsPrincipal(
                         new ClaimsIdentity(
-                            [new Claim(ClaimTypes.Name, email)],
+                            [
+                                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                                new Claim(ClaimTypes.Name, email),
+                                new Claim(ClaimTypes.Email, email)
+                            ],
                             authenticationType: "Test"))
                 }
             };

@@ -2,6 +2,13 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PASSWORD_MIN_LENGTH, loginSchema, type LoginFormData } from '../constants/validation';
+import {
+  AuthErrorBanner,
+  AuthFormHeader,
+  AuthInputField,
+  AuthSubmitButton,
+  AuthSwitchPrompt,
+} from './AuthFormShared';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -42,71 +49,52 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
 
   return (
     <div className="space-y-6 text-left text-gray-900">
-      <div className="space-y-2">
-        <p className="text-xs tracking-[0.4em] text-gray-500 uppercase">Sign in</p>
-        <h2 className="text-3xl font-semibold">Welcome back</h2>
-        <p className="text-sm text-gray-600">Open your workspace and continue syncing playlists.</p>
-      </div>
+      <AuthFormHeader
+        eyebrow="Sign in"
+        title="Welcome back"
+        description="Open your workspace and continue syncing playlists."
+      />
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium text-gray-700">
-            Email
-          </label>
-          <input
-            type="email"
-            id="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
-            placeholder="you@example.com"
-          />
-        </div>
+        <AuthInputField
+          type="email"
+          id="email"
+          label="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          autoComplete="email"
+          placeholder="you@example.com"
+        />
 
-        <div className="space-y-2">
-          <label htmlFor="password" className="text-sm font-medium text-gray-700">
-            Password
-          </label>
-          <input
-            type="password"
-            id="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={PASSWORD_MIN_LENGTH}
-            autoComplete="current-password"
-            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
-            placeholder="••••••••"
-          />
-        </div>
+        <AuthInputField
+          type="password"
+          id="password"
+          label="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={PASSWORD_MIN_LENGTH}
+          autoComplete="current-password"
+          placeholder="••••••••"
+        />
 
         {error && (
-          <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {error}
-          </div>
+          <AuthErrorBanner message={error} />
         )}
 
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-linear-to-r from-indigo-500 to-purple-500 px-4 py-3 text-base font-semibold text-white shadow-[0_18px_40px_rgba(99,102,241,0.35)] transition hover:translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isLoading ? 'Signing in…' : 'Sign in'}
-        </button>
+        <AuthSubmitButton
+          isLoading={isLoading}
+          idleLabel="Sign in"
+          loadingLabel="Signing in…"
+        />
       </form>
 
-      <p className="text-center text-sm text-gray-600">
-        Don't have an account?{' '}
-        <button
-          type="button"
-          onClick={onSwitchToRegister}
-          className="font-semibold text-indigo-700 underline-offset-4 transition hover:text-indigo-500"
-        >
-          Register instead
-        </button>
-      </p>
+      <AuthSwitchPrompt
+        prompt="Don't have an account?"
+        actionLabel="Register instead"
+        onAction={onSwitchToRegister}
+      />
     </div>
   );
 };

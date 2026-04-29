@@ -15,7 +15,6 @@ import type {
     MediaProviderSearchParams,
     MediaProviderSearchResultDto,
     MediaProviderTitleDetailsDto,
-    MediaReleaseMetadataDto,
     MediaStatusUpdateDto,
 } from './mediaApi.types';
 
@@ -156,17 +155,6 @@ export class MediaApiClient {
         );
         await this.ensureOk(response, 'Failed to get title details');
         return response.json() as Promise<MediaProviderTitleDetailsDto>;
-    }
-
-    async getReleaseMetadata(
-        providerId: string,
-        providerMediaId: string,
-    ): Promise<MediaReleaseMetadataDto> {
-        const response = await this.request(
-            `/api/media/providers/${encodeURIComponent(providerId)}/titles/${encodeURIComponent(providerMediaId)}/release`,
-        );
-        await this.ensureOk(response, 'Failed to get release metadata');
-        return response.json() as Promise<MediaReleaseMetadataDto>;
     }
 
     async updateProgress(libraryEntryId: string, request: MediaProgressUpdateDto): Promise<void> {

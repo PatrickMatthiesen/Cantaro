@@ -1,0 +1,18 @@
+{
+    "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+    "ignorePatterns": [
+        "web-ext.config.ts",
+        "wxt.config.ts"
+    ],
+    "entry": [
+        "entrypoints/background.ts",
+        "entrypoints/crunchyroll.content.ts",
+        "entrypoints/spotify.content.ts",
+        "entrypoints/popup/index.html",
+        "entrypoints/popup/main.tsx"
+    ],
+    "ignoreDependencies": [
+        "@wxt-dev/module-react",
+        "@tailwindcss/vite"
+    ]
+}

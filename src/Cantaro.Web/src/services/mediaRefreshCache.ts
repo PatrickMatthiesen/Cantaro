@@ -1,4 +1,4 @@
-export const REMOTE_REFRESH_TTL_MS = 60 * 60 * 1000;
+const REMOTE_REFRESH_TTL_MS = 60 * 60 * 1000;
 
 export function remoteCheckTimestampKey(providerId: string): string {
     return `cantaro.media.provider.${providerId}.lastRemoteCheckAt`;
@@ -6,7 +6,6 @@ export function remoteCheckTimestampKey(providerId: string): string {
 
 export function readStoredValue(key: string): string | null {
     try {
-        console.log(`Reading stored value for key: ${key}, with value ${window.localStorage.getItem(key)}`);
         return window.localStorage.getItem(key);
     } catch {
         return null;
@@ -15,7 +14,6 @@ export function readStoredValue(key: string): string | null {
 
 export function writeStoredValue(key: string, value: string): void {
     try {
-        console.log(`Writing stored value for key: ${key}, with value ${value}`);
         window.localStorage.setItem(key, value);
     } catch {
         // Local storage is best-effort only.

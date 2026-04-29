@@ -41,7 +41,6 @@ export interface PlatformPlaylist {
     thumbnailUrl?: string;
     itemCount: number;
     publishedAt?: string;
-    hasLoadedSongs: boolean;
     songs: (forceRefresh?: boolean) => Promise<PlatformSong[]>;
 }
 

@@ -167,16 +167,6 @@ export interface MediaProviderAvailabilityLinkDto {
     iconUrl?: string;
 }
 
-export interface MediaReleaseMetadataDto {
-    providerId: string;
-    providerMediaId: string;
-    releaseStatusDimension: string;
-    releasedCount?: number;
-    totalKnownCount?: number;
-    nextReleaseAt?: string;
-    nextReleaseLabel?: string;
-}
-
 export interface MediaLibraryQueryParams {
     status?: string;
     mediaKind?: string;

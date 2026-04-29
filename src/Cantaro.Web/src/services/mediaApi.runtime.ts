@@ -1,5 +1,6 @@
 import type { MediaApiRuntimeConfig } from './mediaApi.types';
 
+/** @internal */
 export type MediaApiConfigResolver = () => MediaApiRuntimeConfig | Promise<MediaApiRuntimeConfig>;
 
 const defaultMediaApiConfigResolver: MediaApiConfigResolver = () => ({
@@ -9,6 +10,7 @@ const defaultMediaApiConfigResolver: MediaApiConfigResolver = () => ({
 
 let mediaApiConfigResolver: MediaApiConfigResolver = defaultMediaApiConfigResolver;
 
+/** @internal */
 export function configureMediaApi(resolver: MediaApiConfigResolver): void {
     mediaApiConfigResolver = resolver;
 }

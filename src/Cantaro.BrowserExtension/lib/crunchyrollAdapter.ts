@@ -7,12 +7,6 @@ export interface DocumentLike {
   querySelector(selector: string): { textContent: string | null } | null;
 }
 
-export interface CrunchyrollObservation {
-  siteMediaId?: string;
-  titleText: string;
-  progressHint?: number | null;
-}
-
 /**
  * Regex for extracting the episode/media ID from a Crunchyroll watch URL.
  * Example: https://www.crunchyroll.com/watch/GYVNM7N6Y/episode-slug

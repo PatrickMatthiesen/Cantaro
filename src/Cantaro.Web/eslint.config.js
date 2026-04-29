@@ -26,5 +26,8 @@ export default defineConfig([
         config: {},
       },
     },
+    rules: {
+      'tailwindcss/no-custom-classname': 'off',
+    },
   },
 ])
