@@ -382,8 +382,96 @@ public class AniListMediaProvider(
             VolumeCount = media.Volumes,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
+            AvailabilityLinks = BuildAvailabilityLinks(media),
             RawMetadata = JsonSerializer.Serialize(releaseMetadata)
         };
+    }
+
+    private static IReadOnlyList<MediaProviderAvailabilityLink> BuildAvailabilityLinks(AniListMedia media)
+    {
+        var results = new List<MediaProviderAvailabilityLink>();
+        var seenServiceIds = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var link in media.ExternalLinks ?? [])
+        {
+            if (!string.Equals(link.Type, "STREAMING", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(link.Site)
+                || string.IsNullOrWhiteSpace(link.Url))
+            {
+                continue;
+            }
+
+            var serviceId = NormalizeServiceId(link.Site);
+            if (!seenServiceIds.Add(serviceId))
+            {
+                continue;
+            }
+
+            results.Add(new MediaProviderAvailabilityLink
+            {
+                ServiceId = serviceId,
+                DisplayName = link.Site.Trim(),
+                Url = link.Url,
+                AvailabilityKind = "streaming",
+                Notes = link.Language,
+                IconUrl = link.Icon
+            });
+        }
+
+        foreach (var episode in media.StreamingEpisodes ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(episode.Site) || string.IsNullOrWhiteSpace(episode.Url))
+            {
+                continue;
+            }
+
+            var serviceId = NormalizeServiceId(episode.Site);
+            if (!seenServiceIds.Add(serviceId))
+            {
+                continue;
+            }
+
+            results.Add(new MediaProviderAvailabilityLink
+            {
+                ServiceId = serviceId,
+                DisplayName = episode.Site.Trim(),
+                Url = episode.Url,
+                AvailabilityKind = "streaming",
+                Notes = episode.Title
+            });
+        }
+
+        return results;
+    }
+
+    private static string NormalizeServiceId(string siteName)
+    {
+        Span<char> buffer = stackalloc char[siteName.Length];
+        var length = 0;
+        var previousWasSeparator = false;
+
+        foreach (var character in siteName.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                buffer[length++] = char.ToLowerInvariant(character);
+                previousWasSeparator = false;
+                continue;
+            }
+
+            if (length > 0 && !previousWasSeparator)
+            {
+                buffer[length++] = '-';
+                previousWasSeparator = true;
+            }
+        }
+
+        if (length > 0 && buffer[length - 1] == '-')
+        {
+            length--;
+        }
+
+        return length == 0 ? "unknown" : new string(buffer[..length]);
     }
 
     private static MediaProviderMutationResult MapMutationResult(AniListSavedMediaListEntry savedEntry)
@@ -627,6 +715,18 @@ public class AniListMediaProvider(
               episode
               airingAt
             }
+                        externalLinks {
+                            url
+                            site
+                            type
+                            language
+                            icon
+                        }
+                        streamingEpisodes {
+                            title
+                            url
+                            site
+                        }
           }
         }
         """;
@@ -792,6 +892,42 @@ public class AniListMedia
 
     [JsonPropertyName("nextAiringEpisode")]
     public AniListNextAiringEpisode? NextAiringEpisode { get; set; }
+
+    [JsonPropertyName("externalLinks")]
+    public List<AniListExternalLink>? ExternalLinks { get; set; }
+
+    [JsonPropertyName("streamingEpisodes")]
+    public List<AniListStreamingEpisode>? StreamingEpisodes { get; set; }
+}
+
+public class AniListExternalLink
+{
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("site")]
+    public string? Site { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("language")]
+    public string? Language { get; set; }
+
+    [JsonPropertyName("icon")]
+    public string? Icon { get; set; }
+}
+
+public class AniListStreamingEpisode
+{
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("site")]
+    public string? Site { get; set; }
 }
 
 public class AniListStartDate

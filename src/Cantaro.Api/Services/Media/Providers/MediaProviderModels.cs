@@ -128,7 +128,24 @@ public class MediaProviderTitleDetails
 
     public required string ReleaseStatusDimension { get; set; }
 
+    public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
+
     public string? RawMetadata { get; set; }
+}
+
+public class MediaProviderAvailabilityLink
+{
+    public required string ServiceId { get; set; }
+
+    public required string DisplayName { get; set; }
+
+    public string? Url { get; set; }
+
+    public required string AvailabilityKind { get; set; }
+
+    public string? Notes { get; set; }
+
+    public string? IconUrl { get; set; }
 }
 
 public class MediaProgressUpdateRequest

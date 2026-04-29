@@ -78,6 +78,18 @@ public class MediaProviderDtoContractTests
                 EpisodeCount = 25,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                AvailabilityLinks =
+                [
+                    new MediaProviderAvailabilityLink
+                    {
+                        ServiceId = "crunchyroll",
+                        DisplayName = "Crunchyroll",
+                        Url = "https://www.crunchyroll.com/series/GEXH3W8XG",
+                        AvailabilityKind = "streaming",
+                        Notes = "Legal streaming",
+                        IconUrl = "https://example.test/crunchyroll.png"
+                    }
+                ],
                 RawMetadata = "{\"release\":\"internal\"}"
             }
         };
@@ -91,6 +103,11 @@ public class MediaProviderDtoContractTests
 
         Assert.Equal("Spy x Family", payload.Title);
         Assert.Equal("SPY x FAMILY", payload.NativeTitle);
+        var availability = Assert.Single(payload.AvailabilityLinks);
+        Assert.Equal("crunchyroll", availability.ServiceId);
+        Assert.Equal("Crunchyroll", availability.DisplayName);
+        Assert.Equal("streaming", availability.AvailabilityKind);
+        Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", availability.Url);
         Assert.Null(typeof(MediaProviderTitleDetailsDto).GetProperty(nameof(MediaProviderTitleDetails.RawMetadata)));
     }
 
@@ -233,7 +250,10 @@ public class MediaProviderDtoContractTests
                 {
                     User = new ClaimsPrincipal(
                         new ClaimsIdentity(
-                            [new Claim(ClaimTypes.Name, email)],
+                            [
+                                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                                new Claim(ClaimTypes.Name, email)
+                            ],
                             authenticationType: "Test"))
                 }
             };

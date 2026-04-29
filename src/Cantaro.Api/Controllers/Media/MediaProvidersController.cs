@@ -400,7 +400,16 @@ public class MediaProvidersController(
             ChapterCount = details.ChapterCount,
             VolumeCount = details.VolumeCount,
             PrimaryProgressDimension = details.PrimaryProgressDimension,
-            ReleaseStatusDimension = details.ReleaseStatusDimension
+            ReleaseStatusDimension = details.ReleaseStatusDimension,
+            AvailabilityLinks = details.AvailabilityLinks.Select(link => new MediaProviderAvailabilityLinkDto
+            {
+                ServiceId = link.ServiceId,
+                DisplayName = link.DisplayName,
+                Url = link.Url,
+                AvailabilityKind = link.AvailabilityKind,
+                Notes = link.Notes,
+                IconUrl = link.IconUrl
+            }).ToList()
         };
     }
 

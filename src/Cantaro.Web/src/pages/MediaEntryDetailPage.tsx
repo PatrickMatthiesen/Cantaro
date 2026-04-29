@@ -11,10 +11,17 @@ import {
 } from '../services/mediaRefreshCache';
 import type {
   MediaLibraryEntryDetailDto,
+  MediaProviderAvailabilityLinkDto,
   MediaProviderLinkSummaryDto,
   MediaProviderSearchResultDto,
   MediaLinkConflictDto,
 } from '../services/mediaApi';
+
+interface ProviderAvailabilityState {
+  status: 'loading' | 'loaded' | 'error';
+  links: MediaProviderAvailabilityLinkDto[];
+  error?: string;
+}
 
 // ── Label helpers ──────────────────────────────────────────────────────────────
 
@@ -52,6 +59,10 @@ function releaseStatusColor(dimension: string): string {
     case 'hiatus': return 'bg-amber-100 text-amber-800';
     default: return 'bg-gray-100 text-gray-600';
   }
+}
+
+function providerAvailabilityKey(provider: string, externalId: string): string {
+  return `${provider}:${externalId}`;
 }
 
 const NORMALIZED_STATUSES = [
@@ -304,11 +315,10 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
                   key={p.id}
                   type="button"
                   onClick={() => { setProviderId(p.id); setResults([]); setSearchError(null); }}
-                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-                    providerId === p.id
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${providerId === p.id
                       ? 'bg-indigo-500 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   {p.icon} {p.name}
                 </button>
@@ -452,6 +462,7 @@ interface MediaEntryDetailPageProps {
 
 export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEntryDetailPageProps) {
   const [entry, setEntry] = useState<MediaLibraryEntryDetailDto | null>(null);
+  const [availabilityByProviderLink, setAvailabilityByProviderLink] = useState<Record<string, ProviderAvailabilityState>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
@@ -487,6 +498,71 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
   useEffect(() => {
     void loadEntry();
   }, [loadEntry]);
+
+  useEffect(() => {
+    if (!entry || entry.providerLinks.length === 0) {
+      setAvailabilityByProviderLink({});
+      return;
+    }
+
+    const providerLinks = entry.providerLinks;
+    let isCancelled = false;
+
+    setAvailabilityByProviderLink((current) => {
+      const next: Record<string, ProviderAvailabilityState> = {};
+      for (const link of providerLinks) {
+        const key = providerAvailabilityKey(link.provider, link.externalId);
+        next[key] = current[key] ?? { status: 'loading', links: [] };
+      }
+
+      return next;
+    });
+
+    const loadAvailability = async () => {
+      const results = await Promise.all(providerLinks.map(async (link) => {
+        const key = providerAvailabilityKey(link.provider, link.externalId);
+
+        try {
+          const details = await mediaApi.getTitleDetails(link.provider, link.externalId);
+          return {
+            key,
+            state: {
+              status: 'loaded' as const,
+              links: details.availabilityLinks ?? [],
+            },
+          };
+        } catch (err) {
+          return {
+            key,
+            state: {
+              status: 'error' as const,
+              links: [],
+              error: err instanceof Error ? err.message : 'Failed to load availability',
+            },
+          };
+        }
+      }));
+
+      if (isCancelled) {
+        return;
+      }
+
+      setAvailabilityByProviderLink((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          next[result.key] = result.state;
+        }
+
+        return next;
+      });
+    };
+
+    void loadAvailability();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [entry?.providerLinks]);
 
   useEffect(() => {
     if (!entry || !entry.isConnected || isRefreshingRemote) {
@@ -649,9 +725,8 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
               <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
                 {mediaKindLabel(title.mediaKind)}
               </span>
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                entry.isConnected ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
-              }`}>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${entry.isConnected ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                }`}>
                 {entry.isConnected ? 'Synced' : 'Not synced'}
               </span>
             </div>
@@ -659,9 +734,8 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
 
           {/* Save confirmation */}
           {saveMessage ? (
-            <div className={`rounded-2xl px-4 py-3 text-sm font-medium ${
-              saveMessage.startsWith('Error:') ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-800'
-            }`}>
+            <div className={`rounded-2xl px-4 py-3 text-sm font-medium ${saveMessage.startsWith('Error:') ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-800'
+              }`}>
               {saveMessage}
             </div>
           ) : null}
@@ -814,15 +888,13 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                 role="switch"
                 aria-checked={entry.autoProgressFromObservations}
                 onClick={() => void handleToggleAutoProgress()}
-                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 ${
-                  entry.autoProgressFromObservations ? 'bg-indigo-500' : 'bg-gray-200'
-                }`}
+                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 ${entry.autoProgressFromObservations ? 'bg-indigo-500' : 'bg-gray-200'
+                  }`}
               >
                 <span
                   aria-hidden
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                    entry.autoProgressFromObservations ? 'translate-x-5' : 'translate-x-0'
-                  }`}
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${entry.autoProgressFromObservations ? 'translate-x-5' : 'translate-x-0'
+                    }`}
                 />
               </button>
               <div>
@@ -858,6 +930,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
               <ul className="mt-4 space-y-2">
                 {entry.providerLinks.map((link) => {
                   const catalog = mediaProviderCatalog.find((p) => p.id === link.provider);
+                  const availability = availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)];
                   return (
                     <li key={link.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3">
                       <div className="flex items-center gap-3 min-w-0">
@@ -872,6 +945,42 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                             ID: {link.externalId}
                             {link.linkSource !== 'manual' ? null : ' · manual'}
                           </p>
+                          {availability?.status === 'loading' ? (
+                            <p className="mt-1 text-xs text-gray-400">Loading availability…</p>
+                          ) : null}
+                          {availability?.status === 'error' ? (
+                            <p className="mt-1 text-xs text-gray-400" title={availability.error}>
+                              Availability unavailable
+                            </p>
+                          ) : null}
+                          {availability?.status === 'loaded' && availability.links.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {availability.links.map((availabilityLink) => {
+                                const chipClasses = 'inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100';
+
+                                return availabilityLink.url ? (
+                                  <a
+                                    key={`${link.id}:${availabilityLink.serviceId}`}
+                                    href={availabilityLink.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={chipClasses}
+                                    title={availabilityLink.notes ?? availabilityLink.availabilityKind}
+                                  >
+                                    {availabilityLink.displayName} ↗
+                                  </a>
+                                ) : (
+                                  <span
+                                    key={`${link.id}:${availabilityLink.serviceId}`}
+                                    className={chipClasses}
+                                    title={availabilityLink.notes ?? availabilityLink.availabilityKind}
+                                  >
+                                    {availabilityLink.displayName}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">

@@ -151,6 +151,16 @@ export interface MediaProviderTitleDetailsDto {
     volumeCount?: number;
     primaryProgressDimension: string;
     releaseStatusDimension: string;
+    availabilityLinks: MediaProviderAvailabilityLinkDto[];
+}
+
+export interface MediaProviderAvailabilityLinkDto {
+    serviceId: string;
+    displayName: string;
+    url?: string;
+    availabilityKind: string;
+    notes?: string;
+    iconUrl?: string;
 }
 
 export interface MediaReleaseMetadataDto {

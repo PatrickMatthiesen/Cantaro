@@ -65,6 +65,17 @@ public class MediaProviderTitleDetailsDto
     public int? VolumeCount { get; set; }
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
+    public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
+}
+
+public class MediaProviderAvailabilityLinkDto
+{
+    public required string ServiceId { get; set; }
+    public required string DisplayName { get; set; }
+    public string? Url { get; set; }
+    public required string AvailabilityKind { get; set; }
+    public string? Notes { get; set; }
+    public string? IconUrl { get; set; }
 }
 
 public class MediaReleaseMetadataDto
