@@ -178,7 +178,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             MediaTitleId = entry.MediaTitleId,
             CanonicalTitle = entry.MediaTitle?.CanonicalTitle ?? string.Empty,
             OriginalTitle = entry.MediaTitle?.OriginalTitle,
-            PosterUrl = artwork.MediumPosterUrl,
+            PosterUrl = artwork.LargePosterUrl,
             MediaKind = entry.MediaTitle?.MediaKind ?? string.Empty,
             NormalizedStatus = entry.NormalizedStatus,
             ProgressEpisodes = entry.ProgressEpisodes,

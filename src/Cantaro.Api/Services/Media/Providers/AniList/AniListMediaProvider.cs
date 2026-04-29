@@ -40,9 +40,9 @@ public class AniListMediaProvider(
         CancellationToken cancellationToken)
     {
         var tokenResponse = await _apiClient.ExchangeCodeAsync(authorizationCode, redirectUri, codeVerifier, cancellationToken);
-        if (string.IsNullOrWhiteSpace(tokenResponse.RefreshToken))
+        if (string.IsNullOrWhiteSpace(tokenResponse.AccessToken))
         {
-            throw new InvalidOperationException("AniList did not return a refresh token.");
+            throw new InvalidOperationException("AniList did not return an access token.");
         }
 
         var viewerData = await _apiClient.SendGraphQlAsync<AniListViewerData>(
@@ -63,7 +63,7 @@ public class AniListMediaProvider(
                 Service = ProviderName,
                 ExternalAccountId = viewer.Id.ToString(CultureInfo.InvariantCulture),
                 DisplayName = viewer.Name,
-                EncryptedRefreshToken = _tokenEncryptionService.Encrypt(tokenResponse.RefreshToken),
+                EncryptedRefreshToken = _tokenEncryptionService.Encrypt(tokenResponse.AccessToken),
                 Scopes = "media_list",
                 TokenExpiresAt = now.AddSeconds(tokenResponse.ExpiresIn),
                 CreatedAt = now,
@@ -76,7 +76,7 @@ public class AniListMediaProvider(
         {
             account.ExternalAccountId = viewer.Id.ToString(CultureInfo.InvariantCulture);
             account.DisplayName = viewer.Name;
-            account.EncryptedRefreshToken = _tokenEncryptionService.Encrypt(tokenResponse.RefreshToken);
+            account.EncryptedRefreshToken = _tokenEncryptionService.Encrypt(tokenResponse.AccessToken);
             account.Scopes = "media_list";
             account.TokenExpiresAt = now.AddSeconds(tokenResponse.ExpiresIn);
             account.UpdatedAt = now;
@@ -271,22 +271,15 @@ public class AniListMediaProvider(
     {
         if (string.IsNullOrWhiteSpace(account.EncryptedRefreshToken))
         {
-            throw new InvalidOperationException("AniList account is missing a refresh token.");
+            throw new InvalidOperationException("AniList account is missing an access token.");
         }
 
-        var refreshToken = _tokenEncryptionService.Decrypt(account.EncryptedRefreshToken);
-        var tokenResponse = await _apiClient.RefreshAccessTokenAsync(refreshToken, cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(tokenResponse.RefreshToken))
+        if (account.TokenExpiresAt is { } expiresAt && expiresAt <= DateTime.UtcNow)
         {
-            account.EncryptedRefreshToken = _tokenEncryptionService.Encrypt(tokenResponse.RefreshToken);
+            throw new InvalidOperationException("AniList access token expired. Reconnect your AniList account.");
         }
 
-        account.TokenExpiresAt = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn);
-        account.UpdatedAt = DateTime.UtcNow;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        return tokenResponse.AccessToken;
+        return _tokenEncryptionService.Decrypt(account.EncryptedRefreshToken);
     }
 
     private static int ParseProviderMediaId(string providerMediaId)

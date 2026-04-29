@@ -279,7 +279,8 @@ function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
         }: MediaLibraryPageProps) {
           const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => ({
             provider: FIRST_PROVIDER_ID,
-            listName: readStoredValue(storedListNameKey(FIRST_PROVIDER_ID)) || undefined,
+            listName: readStoredValue(storedListNameKey(FIRST_PROVIDER_ID))
+              || (availableListNames.includes("Watching") ? "Watching" : undefined),
             sortBy: 'updatedAt',
             sortDir: 'desc',
             page: 1,
