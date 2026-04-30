@@ -223,7 +223,7 @@ function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
 
           <div className="absolute inset-x-0 bottom-0 p-4">
             <div className="rounded-3xl border border-white/16 bg-white/14 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.38)] backdrop-blur-xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/78">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold tracking-[0.22em] text-white/78 uppercase">
                 <span>{mediaKindLabel(entry.mediaKind)}</span>
                 <span className="text-white/38">•</span>
                 <span>{entry.provider}</span>
@@ -302,9 +302,9 @@ interface FilterSelectProps {
 function FilterSelect({ label, value, options, onChange, disabled = false }: FilterSelectProps) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</label>
+      <label className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</label>
       <select
-        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         value={value}
         onChange={(e) => onChange(e.target.value || undefined)}
         disabled={disabled}
@@ -327,10 +327,10 @@ interface SortControlsProps {
 function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: SortControlsProps) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sort by</label>
+      <label className="text-xs font-medium tracking-wide text-gray-500 uppercase">Sort by</label>
       <div className="flex gap-1">
         <select
-          className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
           value={sortBy}
           onChange={(e) => onSortByChange(e.target.value)}
         >
@@ -422,7 +422,7 @@ function LibraryFilters({
 
         {providerStatus?.isConnected ? (
           <div className="ml-auto flex flex-col gap-1">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Reload</span>
+            <span className="text-xs font-medium tracking-wide text-gray-500 uppercase">Reload</span>
             <button
               type="button"
               className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"

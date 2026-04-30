@@ -183,7 +183,7 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
   if (!supported) {
     return (
       <div className="rounded-xl bg-gray-50 px-4 py-3">
-        <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</p>
+        <p className="text-xs font-medium tracking-wide text-gray-400 uppercase">{label}</p>
         <p className="mt-1 text-sm text-gray-400 italic">Not tracked for this type</p>
       </div>
     );
@@ -191,7 +191,7 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
 
   return (
     <div className="rounded-xl bg-white/70 px-4 py-3">
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
+      <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</p>
       <div className="mt-1 flex items-center gap-2">
         {editing ? (
           <>
@@ -202,7 +202,7 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
               max={max}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="w-20 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="w-20 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   const num = parseInt(draft, 10);
@@ -335,15 +335,15 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-3xl border border-white/80 bg-white/90 shadow-2xl backdrop-blur">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-3xl border border-white/80 bg-white/90 shadow-2xl backdrop-blur">
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Search &amp; link a provider entry</h2>
           <button
             type="button"
-            className="rounded-xl px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 transition"
+            className="rounded-xl px-3 py-1.5 text-sm text-gray-500 transition hover:bg-gray-100"
             onClick={onClose}
             aria-label="Close dialog"
           >
@@ -351,7 +351,7 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
           </button>
         </div>
 
-        <div className="px-6 pt-4 pb-3 space-y-3">
+        <div className="space-y-3 px-6 pt-4 pb-3">
           {mediaProviderCatalog.length > 1 ? (
             <div className="flex gap-2">
               {mediaProviderCatalog.map((p) => (
@@ -378,7 +378,7 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void handleSearch(); }}
               placeholder="Search by title…"
-              className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
             />
             <GradientButton
               gradient="from-indigo-500 to-purple-500"
@@ -418,9 +418,9 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
           ) : null}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-2">
+        <div className="flex-1 space-y-2 overflow-y-auto px-6 pb-6">
           {results.length === 0 && !isSearching ? (
-            <p className="text-center text-sm text-gray-400 py-8">
+            <p className="py-8 text-center text-sm text-gray-400">
               {query.trim() ? 'No results found.' : 'Enter a title to search.'}
             </p>
           ) : (
@@ -430,9 +430,9 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
               return (
                 <div
                   key={result.providerMediaId}
-                  className="flex gap-3 rounded-2xl border border-gray-100 bg-white/70 p-3 items-start"
+                  className="flex items-start gap-3 rounded-2xl border border-gray-100 bg-white/70 p-3"
                 >
-                  <div className="shrink-0 h-16 w-12 overflow-hidden rounded-lg bg-gray-100">
+                  <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-gray-100">
                     {result.posterUrl ? (
                       <img
                         src={result.posterUrl}
@@ -441,13 +441,13 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                       />
                     ) : (
-                      <div className="h-full w-full flex items-center justify-center text-xl">🎌</div>
+                      <div className="flex h-full w-full items-center justify-center text-xl">🎌</div>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium text-gray-900 leading-tight">{result.title}</p>
+                    <p className="leading-tight font-medium text-gray-900">{result.title}</p>
                     {result.nativeTitle ? (
-                      <p className="text-xs text-gray-500 truncate">{result.nativeTitle}</p>
+                      <p className="truncate text-xs text-gray-500">{result.nativeTitle}</p>
                     ) : null}
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
@@ -478,7 +478,7 @@ function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, o
                     ) : (
                       <GradientButton
                         gradient="from-indigo-500 to-purple-500"
-                        className="text-xs px-3 py-2"
+                        className="px-3 py-2 text-xs"
                         disabled={!!linkingId}
                         aria-busy={isLinking}
                         onClick={() => void handleLink(result.providerMediaId)}
@@ -728,7 +728,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
   if (error || !entry) {
     return (
       <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
-        <div className="relative z-10 mx-auto max-w-4xl px-6 pt-8 pb-16 space-y-4">
+        <div className="relative z-10 mx-auto max-w-4xl space-y-4 px-6 pt-8 pb-16">
           <GradientButton tone="soft" onClick={onNavigateBack}>← Back to library</GradientButton>
           <GlassCard className="p-6">
             <p className="text-rose-700">{error ?? 'Entry not found'}</p>
@@ -766,7 +766,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
             <GradientButton tone="soft" onClick={onNavigateBack}>
               ← Library
             </GradientButton>
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
                 {mediaKindLabel(title.mediaKind)}
               </span>
@@ -803,7 +803,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
               <div className="min-w-0 flex-1 space-y-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <h1 className="text-2xl font-bold leading-tight text-gray-900">{title.canonicalTitle}</h1>
+                    <h1 className="text-2xl leading-tight font-bold text-gray-900">{title.canonicalTitle}</h1>
                     {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
                       <p className="mt-1 text-sm text-gray-500">{title.originalTitle}</p>
                     ) : null}
@@ -820,7 +820,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                   ) : null}
                 </div>
 
-                <div className="flex flex-wrap gap-2 items-center">
+                <div className="flex flex-wrap items-center gap-2">
                   {title.startYear ? (
                     <span className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600">
                       {title.startYear}
@@ -866,10 +866,10 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
 
           {/* Status editor */}
           <GlassCard className="p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Status</h2>
+            <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Status</h2>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <select
-                className="rounded-xl border border-gray-200 bg-white/80 px-4 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="rounded-xl border border-gray-200 bg-white/80 px-4 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
               >
@@ -895,7 +895,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
 
           {/* Progress editor */}
           <GlassCard className="p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Progress</h2>
+            <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Progress</h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <ProgressField
                 label="Episodes"
@@ -938,14 +938,14 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
 
           {/* Auto-progress */}
           <GlassCard className="p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Auto-progress</h2>
+            <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Auto-progress</h2>
             <div className="mt-3 flex items-start gap-4">
               <button
                 type="button"
                 role="switch"
                 aria-checked={entry.autoProgressFromObservations}
                 onClick={() => void handleToggleAutoProgress()}
-                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 ${entry.autoProgressFromObservations ? 'bg-indigo-500' : 'bg-gray-200'
+                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 focus:outline-none ${entry.autoProgressFromObservations ? 'bg-indigo-500' : 'bg-gray-200'
                   }`}
               >
                 <span
@@ -970,7 +970,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
           {/* Provider links */}
           <GlassCard className="p-6">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Provider links</h2>
+              <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Provider links</h2>
               <GradientButton
                 gradient="from-blue-500 to-cyan-500"
                 onClick={() => setShowLinkDialog(true)}
@@ -990,7 +990,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                   const availability = availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)];
                   return (
                     <li key={link.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3">
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex min-w-0 items-center gap-3">
                         {catalog ? (
                           <span className="text-lg" aria-hidden>{catalog.icon}</span>
                         ) : null}
@@ -1040,7 +1040,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                           ) : null}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex shrink-0 items-center gap-2">
                         {link.externalUrl ? (
                           <a
                             href={link.externalUrl}
@@ -1053,7 +1053,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
                         ) : null}
                         <button
                           type="button"
-                          className="rounded-lg px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 transition disabled:opacity-50"
+                          className="rounded-lg px-3 py-1.5 text-xs text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
                           disabled={unlinkingId === link.provider}
                           onClick={() => void handleUnlink(link.provider)}
                         >

@@ -184,7 +184,7 @@ export function ExtensionAuthPage() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   disabled={phase === 'submitting' || !authTarget}
-                  className="mt-2 w-full rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-sm text-gray-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-300/70"
+                  className="mt-2 w-full rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-sm text-gray-900 transition outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-300/70"
                   placeholder="you@example.com"
                 />
               </div>
@@ -200,7 +200,7 @@ export function ExtensionAuthPage() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   disabled={phase === 'submitting' || !authTarget}
-                  className="mt-2 w-full rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-sm text-gray-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-300/70"
+                  className="mt-2 w-full rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-sm text-gray-900 transition outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-300/70"
                   placeholder="Your Cantaro password"
                 />
               </div>
