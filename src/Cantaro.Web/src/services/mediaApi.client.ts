@@ -65,14 +65,11 @@ export class MediaApiClient {
 
     async getLibrary(params: MediaLibraryQueryParams = {}): Promise<MediaLibraryPageDto> {
         const query = new URLSearchParams();
-        if (params.status) query.set('status', params.status);
-        if (params.mediaKind) query.set('mediaKind', params.mediaKind);
-        if (params.provider) query.set('provider', params.provider);
-        if (params.listName) query.set('listName', params.listName);
-        if (params.sortBy) query.set('sortBy', params.sortBy);
-        if (params.sortDir) query.set('sortDir', params.sortDir);
-        if (params.page !== undefined) query.set('page', String(params.page));
-        if (params.pageSize !== undefined) query.set('pageSize', String(params.pageSize));
+        for (const [key, value] of Object.entries(params)) {
+            if (value !== undefined) {
+                query.set(key, String(value));
+            }
+        }
 
         const response = await this.request(`/api/media/library?${query.toString()}`);
         await this.ensureOk(response, 'Failed to load media library');

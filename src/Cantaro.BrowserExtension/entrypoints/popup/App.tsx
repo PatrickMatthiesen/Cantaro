@@ -31,6 +31,7 @@ function isMediaConfigured(config: ExtensionConfig): boolean {
   return Boolean(config.apiBaseUrl.trim() && (config.accessToken.trim() || config.refreshToken.trim()));
 }
 
+// fallow-ignore-next-line complexity
 function App() {
   const [activeTab, setActiveTab] = useState<PopupTab>('media');
   const [mediaRoute, setMediaRoute] = useState<MediaRoute>({ kind: 'library' });
@@ -148,6 +149,7 @@ function App() {
     showStatus(successMessage, 'success');
   };
 
+  // fallow-ignore-next-line complexity
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 

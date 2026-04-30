@@ -19,6 +19,12 @@ async function readApiError(response: Response, fallbackMessage: string): Promis
   return error.message || fallbackMessage;
 }
 
+interface AuthRequestOptions {
+  method: 'GET' | 'POST';
+  fallbackMessage: string;
+  body?: unknown;
+}
+
 class AuthApiClient {
   private getHeaders(): HeadersInit {
     return {
@@ -26,54 +32,49 @@ class AuthApiClient {
     };
   }
 
-  async register(request: RegisterRequest): Promise<void> {
-    const response = await fetch(`/api/register`, {
-      method: 'POST',
+  private async request(path: string, { method, fallbackMessage, body }: AuthRequestOptions): Promise<Response> {
+    const response = await fetch(path, {
+      method,
       headers: this.getHeaders(),
       credentials: 'include',
-      body: JSON.stringify(request),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
 
     if (!response.ok) {
-      throw new Error(await readApiError(response, 'Registration failed'));
+      throw new Error(await readApiError(response, fallbackMessage));
     }
+
+    return response;
+  }
+
+  async register(request: RegisterRequest): Promise<void> {
+    await this.request('/api/register', {
+      method: 'POST',
+      fallbackMessage: 'Registration failed',
+      body: request,
+    });
   }
 
   async login(request: LoginRequest): Promise<void> {
-    const response = await fetch(`/api/login?useCookies=true`, {
+    await this.request('/api/login?useCookies=true', {
       method: 'POST',
-      headers: this.getHeaders(),
-      credentials: 'include',
-      body: JSON.stringify(request),
+      fallbackMessage: 'Login failed',
+      body: request,
     });
-
-    if (!response.ok) {
-      throw new Error(await readApiError(response, 'Login failed'));
-    }
   }
 
   async logout(): Promise<void> {
-    const response = await fetch(`/api/logout`, {
+    await this.request('/api/logout', {
       method: 'POST',
-      headers: this.getHeaders(),
-      credentials: 'include',
+      fallbackMessage: 'Logout failed',
     });
-
-    if (!response.ok) {
-      throw new Error(await readApiError(response, 'Logout failed'));
-    }
   }
 
   async getCurrentUser(): Promise<User> {
-    const response = await fetch(`/api/auth/me`, {
+    const response = await this.request('/api/auth/me', {
       method: 'GET',
-      headers: this.getHeaders(),
-      credentials: 'include',
+      fallbackMessage: 'Failed to fetch user',
     });
-
-    if (!response.ok) {
-      throw new Error(await readApiError(response, 'Failed to fetch user'));
-    }
 
     return response.json();
   }

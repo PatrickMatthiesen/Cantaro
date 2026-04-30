@@ -34,6 +34,27 @@ function makeObservation(overrides: Partial<MediaObservation> = {}): MediaObserv
   };
 }
 
+async function expectQueueLengthAfterRemove(removeIds: string[]): Promise<void> {
+  const storage = makeMemoryStorage();
+  const queue = createObservationQueue(storage);
+  await queue.enqueue(makeObservation());
+
+  await queue.remove(removeIds);
+
+  expect(await queue.drain()).toHaveLength(1);
+}
+
+async function createQueueWithTitles(...titles: string[]) {
+  const storage = makeMemoryStorage();
+  const queue = createObservationQueue(storage);
+
+  for (const title of titles) {
+    await queue.enqueue(makeObservation({ titleText: title }));
+  }
+
+  return queue;
+}
+
 // ---------------------------------------------------------------------------
 // enqueue / drain
 // ---------------------------------------------------------------------------
@@ -114,12 +135,7 @@ describe('observationQueue — bounded growth', () => {
 
 describe('observationQueue — remove', () => {
   it('removes items by id', async () => {
-    const storage = makeMemoryStorage();
-    const queue = createObservationQueue(storage);
-
-    await queue.enqueue(makeObservation({ titleText: 'A' }));
-    await queue.enqueue(makeObservation({ titleText: 'B' }));
-    await queue.enqueue(makeObservation({ titleText: 'C' }));
+    const queue = await createQueueWithTitles('A', 'B', 'C');
 
     const [a, b] = await queue.drain();
     await queue.remove([a.id, b.id]);
@@ -130,23 +146,11 @@ describe('observationQueue — remove', () => {
   });
 
   it('is a no-op when given an empty id list', async () => {
-    const storage = makeMemoryStorage();
-    const queue = createObservationQueue(storage);
-    await queue.enqueue(makeObservation());
-
-    await queue.remove([]);
-
-    expect(await queue.drain()).toHaveLength(1);
+    await expectQueueLengthAfterRemove([]);
   });
 
   it('ignores unknown ids', async () => {
-    const storage = makeMemoryStorage();
-    const queue = createObservationQueue(storage);
-    await queue.enqueue(makeObservation());
-
-    await queue.remove(['nonexistent-id']);
-
-    expect(await queue.drain()).toHaveLength(1);
+    await expectQueueLengthAfterRemove(['nonexistent-id']);
   });
 });
 
@@ -156,10 +160,7 @@ describe('observationQueue — remove', () => {
 
 describe('observationQueue — incrementAttempts', () => {
   it('increments attempt count on specified items', async () => {
-    const storage = makeMemoryStorage();
-    const queue = createObservationQueue(storage);
-    await queue.enqueue(makeObservation({ titleText: 'A' }));
-    await queue.enqueue(makeObservation({ titleText: 'B' }));
+    const queue = await createQueueWithTitles('A', 'B');
 
     const [a] = await queue.drain();
     await queue.incrementAttempts([a.id]);

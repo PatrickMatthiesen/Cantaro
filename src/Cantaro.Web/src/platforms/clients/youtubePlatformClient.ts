@@ -33,11 +33,28 @@ class YouTubePlatformClient implements PlatformManagement {
 
     private playlistCache: PlatformPlaylist[] | null = null;
     private readonly playlistSongsCache = new Map<string, PlatformSong[]>();
+    private static readonly disconnectErrorMessage = 'Failed to disconnect YouTube account';
 
     private getHeaders(): HeadersInit {
         return {
             'Content-Type': 'application/json',
         };
+    }
+
+    private async readFetchError(response: Response, fallbackMessage: string): Promise<string> {
+        if (response.status === 401) {
+            return 'Not authenticated. Please log in again.';
+        }
+
+        if (response.status === 403) {
+            return 'YouTube account not connected or access denied.';
+        }
+
+        const error = await response.json().catch(() => ({
+            error: `${fallbackMessage} (HTTP ${response.status})`,
+        }));
+
+        return error.error || fallbackMessage;
     }
 
     private sanitizeRoute(route: string): string {
@@ -50,6 +67,24 @@ class YouTubePlatformClient implements PlatformManagement {
         }
 
         return route;
+    }
+
+    private toDisconnectError(error: unknown): Error {
+        return error instanceof Error ? error : new Error(YouTubePlatformClient.disconnectErrorMessage);
+    }
+
+    private async disconnectAccount(): Promise<void> {
+        const response = await fetch('/api/platforms/youtube/disconnect', {
+            method: 'POST',
+            headers: this.getHeaders(),
+            credentials: 'include',
+        }).catch((error) => {
+            throw this.toDisconnectError(error);
+        });
+
+        if (!response.ok) {
+            throw new Error(YouTubePlatformClient.disconnectErrorMessage);
+        }
     }
 
     public async status(): Promise<PlatformAccountStatus> {
@@ -86,21 +121,13 @@ class YouTubePlatformClient implements PlatformManagement {
         callbacks?.onStart?.();
 
         try {
-            const response = await fetch('/api/platforms/youtube/disconnect', {
-                method: 'POST',
-                headers: this.getHeaders(),
-                credentials: 'include',
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to disconnect YouTube account');
-            }
-
+            await this.disconnectAccount();
             this.clearCache();
             callbacks?.onSuccess?.();
         } catch (error) {
-            callbacks?.onError?.(error instanceof Error ? error : new Error('Failed to disconnect YouTube account'));
-            throw error;
+            const disconnectError = this.toDisconnectError(error);
+            callbacks?.onError?.(disconnectError);
+            throw disconnectError;
         }
     }
 
@@ -126,16 +153,7 @@ class YouTubePlatformClient implements PlatformManagement {
         });
 
         if (!response.ok) {
-            if (response.status === 401) {
-                throw new Error('Not authenticated. Please log in again.');
-            }
-            if (response.status === 403) {
-                throw new Error('YouTube account not connected or access denied.');
-            }
-            const error = await response.json().catch(() => ({
-                error: `Failed to fetch playlists (HTTP ${response.status})`,
-            }));
-            throw new Error(error.error || 'Failed to fetch playlists');
+            throw new Error(await this.readFetchError(response, 'Failed to fetch playlists'));
         }
 
         const playlistDtos = (await response.json()) as PlatformPlaylistDto[];
@@ -167,16 +185,7 @@ class YouTubePlatformClient implements PlatformManagement {
         });
 
         if (!response.ok) {
-            if (response.status === 401) {
-                throw new Error('Not authenticated. Please log in again.');
-            }
-            if (response.status === 403) {
-                throw new Error('YouTube account not connected or access denied.');
-            }
-            const error = await response.json().catch(() => ({
-                error: `Failed to fetch playlist songs (HTTP ${response.status})`,
-            }));
-            throw new Error(error.error || 'Failed to fetch playlist songs');
+            throw new Error(await this.readFetchError(response, 'Failed to fetch playlist songs'));
         }
 
         const songDtos = (await response.json()) as PlatformSongDto[];

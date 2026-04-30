@@ -1,5 +1,7 @@
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
+import { loginSchema, type LoginFormData } from '../constants/validation';
+import { AuthInputField, submitAuthForm } from '../components/AuthFormShared';
 import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
 
 declare const __CANTARO_TRUSTED_API_BASE_URL__: string;
@@ -64,12 +66,14 @@ function readAuthTarget(): AuthTarget | null {
   }
 }
 
+// fallow-ignore-next-line complexity
 export function ExtensionAuthPage() {
   const [phase, setPhase] = useState<AuthPhase>('checking');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const authTarget = readAuthTarget();
+  const isSubmitting = phase === 'submitting';
 
   useEffect(() => {
     if (!authTarget) {
@@ -108,44 +112,40 @@ export function ExtensionAuthPage() {
   }, [authTarget]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
     if (!authTarget) {
+      event.preventDefault();
       setError('The extension sign-in request could not be resumed.');
       return;
     }
+    const formData: LoginFormData = { email, password };
 
-    if (!email.trim() || !password) {
-      setError('Enter your Cantaro email and password to continue.');
-      return;
-    }
+    await submitAuthForm({
+      event,
+      formData,
+      schema: loginSchema,
+      submit: async () => {
+        const response = await fetch(`${authTarget.apiBaseUrl}/api/login?useCookies=true`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+          }),
+        });
 
-    setPhase('submitting');
-    setError(null);
-
-    try {
-      const response = await fetch(`${authTarget.apiBaseUrl}/api/login?useCookies=true`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-        }),
-      });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(readErrorMessage(payload, 'Sign-in failed.'));
-      }
-
-      window.location.assign(authTarget.returnTo);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed.');
-      setPhase('ready');
-    }
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(readErrorMessage(payload, 'Sign-in failed.'));
+        }
+      },
+      setError,
+      setIsLoading: (isLoading) => setPhase(isLoading ? 'submitting' : 'ready'),
+      fallbackMessage: 'Sign-in failed.',
+      onSuccess: () => window.location.assign(authTarget.returnTo),
+    });
   };
 
   return (
@@ -173,37 +173,27 @@ export function ExtensionAuthPage() {
             </div>
           ) : (
             <form className="mt-8 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-              <div>
-                <label htmlFor="extension-auth-email" className="text-xs font-medium tracking-[0.24em] text-gray-500 uppercase">
-                  Email
-                </label>
-                <input
-                  id="extension-auth-email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  disabled={phase === 'submitting' || !authTarget}
-                  className="mt-2 w-full rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-sm text-gray-900 transition outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-300/70"
-                  placeholder="you@example.com"
-                />
-              </div>
+              <AuthInputField
+                id="extension-auth-email"
+                type="email"
+                label="Email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                disabled={isSubmitting || !authTarget}
+                placeholder="you@example.com"
+              />
 
-              <div>
-                <label htmlFor="extension-auth-password" className="text-xs font-medium tracking-[0.24em] text-gray-500 uppercase">
-                  Password
-                </label>
-                <input
-                  id="extension-auth-password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  disabled={phase === 'submitting' || !authTarget}
-                  className="mt-2 w-full rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-sm text-gray-900 transition outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-300/70"
-                  placeholder="Your Cantaro password"
-                />
-              </div>
+              <AuthInputField
+                id="extension-auth-password"
+                type="password"
+                label="Password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                disabled={isSubmitting || !authTarget}
+                placeholder="Your Cantaro password"
+              />
 
               {error ? (
                 <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -215,8 +205,8 @@ export function ExtensionAuthPage() {
                 <p className="text-xs text-gray-500">
                   The API cookie stays on the Cantaro API origin. The extension only receives the final authorization code and tokens.
                 </p>
-                <GradientButton type="submit" disabled={phase === 'submitting' || !authTarget}>
-                  {phase === 'submitting' ? 'Signing in…' : 'Continue to extension'}
+                <GradientButton type="submit" disabled={isSubmitting || !authTarget}>
+                  {isSubmitting ? 'Signing in…' : 'Continue to extension'}
                 </GradientButton>
               </div>
             </form>

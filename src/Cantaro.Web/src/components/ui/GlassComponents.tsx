@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, HTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
 
 const glassSurfaceClass =
   'rounded-3xl border border-white/80 bg-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]';
@@ -17,9 +17,8 @@ export function GlassCard({
 }: GlassCardProps) {
   return (
     <div
-      className={`relative overflow-hidden ${glassSurfaceClass} ${
-        interactive ? 'transition-transform duration-300 hover:scale-[1.01]' : ''
-      } ${className}`}
+      className={`relative overflow-hidden ${glassSurfaceClass} ${interactive ? 'transition-transform duration-300 hover:scale-[1.01]' : ''
+        } ${className}`}
       {...rest}
     >
       {hoverGradient ? (
@@ -119,35 +118,35 @@ export function PlatformTile({ platform, selected = false, onClick }: PlatformTi
   );
 }
 
-interface ActionFeatureCardProps {
-  title: string;
-  description: string;
-  icon?: string;
-  gradient?: string;
-  onClick?: () => void;
+
+interface GradientPageShellProps {
+  children: ReactNode;
+  contentClassName?: string;
+  className?: string;
 }
 
-export function ActionFeatureCard({
-  title,
-  description,
-  icon = '⚡',
-  gradient = 'from-indigo-500 to-purple-500',
-  onClick,
-}: ActionFeatureCardProps) {
+export function GradientPageShell({ children, contentClassName = '', className = '' }: GradientPageShellProps) {
   return (
-    <button
-      onClick={onClick}
-      className="group relative w-full overflow-hidden rounded-3xl border border-white/80 bg-white/70 p-6 text-left shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px] transition-transform hover:scale-[1.01]"
-    >
-      <span
-        className={`pointer-events-none absolute inset-0 bg-linear-to-r ${gradient} opacity-0 transition-opacity duration-500 group-hover:opacity-100`}
-        aria-hidden
-      />
-      <div className="relative">
-        <div className="mb-2 text-3xl">{icon}</div>
-        <h4 className="text-xl font-bold text-gray-800 transition-colors group-hover:text-white">{title}</h4>
-        <p className="mt-2 text-sm text-gray-600 transition-colors group-hover:text-white/90">{description}</p>
+    <div className={`relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 ${className}`}>
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+      <div className={`relative z-10 mx-auto max-w-6xl space-y-5 px-6 pt-8 pb-16 ${contentClassName}`}>
+        {children}
       </div>
-    </button>
+    </div>
+  );
+}
+
+interface PageLoadingStateProps {
+  message: string;
+}
+
+export function PageLoadingState({ message }: PageLoadingStateProps) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
+      <GlassCard className="px-6 py-4">
+        <p className="text-sm text-gray-700">{message}</p>
+      </GlassCard>
+    </div>
   );
 }

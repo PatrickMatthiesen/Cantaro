@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ChangeEventHandler, FormEvent, InputHTMLAttributes, ReactNode } from 'react';
+import type { ZodType } from 'zod';
 
 interface AuthFormHeaderProps {
   eyebrow: string;
@@ -6,7 +7,7 @@ interface AuthFormHeaderProps {
   description: string;
 }
 
-export function AuthFormHeader({ eyebrow, title, description }: AuthFormHeaderProps) {
+function AuthFormHeader({ eyebrow, title, description }: AuthFormHeaderProps) {
   return (
     <div className="space-y-2">
       <p className="text-xs tracking-[0.4em] text-gray-500 uppercase">{eyebrow}</p>
@@ -35,11 +36,31 @@ export function AuthInputField({ id, label, className = '', ...rest }: AuthInput
   );
 }
 
+interface AuthEmailFieldProps {
+  value: string;
+  onChange: ChangeEventHandler<HTMLInputElement>;
+}
+
+export function AuthEmailField({ value, onChange }: AuthEmailFieldProps) {
+  return (
+    <AuthInputField
+      type="email"
+      id="email"
+      label="Email"
+      value={value}
+      onChange={onChange}
+      required
+      autoComplete="email"
+      placeholder="you@example.com"
+    />
+  );
+}
+
 interface AuthErrorBannerProps {
   message: string;
 }
 
-export function AuthErrorBanner({ message }: AuthErrorBannerProps) {
+function AuthErrorBanner({ message }: AuthErrorBannerProps) {
   return (
     <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
       {message}
@@ -53,7 +74,7 @@ interface AuthSubmitButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> 
   isLoading: boolean;
 }
 
-export function AuthSubmitButton({
+function AuthSubmitButton({
   idleLabel,
   loadingLabel,
   isLoading,
@@ -78,7 +99,7 @@ interface AuthSwitchPromptProps {
   onAction: () => void;
 }
 
-export function AuthSwitchPrompt({ prompt, actionLabel, onAction }: AuthSwitchPromptProps) {
+function AuthSwitchPrompt({ prompt, actionLabel, onAction }: AuthSwitchPromptProps) {
   return (
     <p className="text-center text-sm text-gray-600">
       {prompt}{' '}
@@ -91,4 +112,135 @@ export function AuthSwitchPrompt({ prompt, actionLabel, onAction }: AuthSwitchPr
       </button>
     </p>
   );
+}
+
+interface AuthFormLayoutProps {
+  eyebrow: string;
+  title: string;
+  description: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  children: ReactNode;
+  error?: string;
+  submitLabel: string;
+  submittingLabel: string;
+  isLoading: boolean;
+  switchPrompt: ReactNode;
+  switchActionLabel: string;
+  onSwitchAction: () => void;
+}
+
+export function AuthFormLayout({
+  eyebrow,
+  title,
+  description,
+  onSubmit,
+  children,
+  error,
+  submitLabel,
+  submittingLabel,
+  isLoading,
+  switchPrompt,
+  switchActionLabel,
+  onSwitchAction,
+}: AuthFormLayoutProps) {
+  return (
+    <div className="space-y-6 text-left text-gray-900">
+      <AuthFormHeader eyebrow={eyebrow} title={title} description={description} />
+
+      <form onSubmit={onSubmit} className="space-y-5">
+        {children}
+
+        {error ? <AuthErrorBanner message={error} /> : null}
+
+        <AuthSubmitButton
+          isLoading={isLoading}
+          idleLabel={submitLabel}
+          loadingLabel={submittingLabel}
+        />
+      </form>
+
+      <AuthSwitchPrompt
+        prompt={switchPrompt}
+        actionLabel={switchActionLabel}
+        onAction={onSwitchAction}
+      />
+    </div>
+  );
+}
+
+interface AuthPasswordFieldProps {
+  value: string;
+  onChange: ChangeEventHandler<HTMLInputElement>;
+  autoComplete: 'current-password' | 'new-password';
+}
+
+export function AuthPasswordField({ value, onChange, autoComplete }: AuthPasswordFieldProps) {
+  return (
+    <AuthInputField
+      type="password"
+      id="password"
+      label="Password"
+      value={value}
+      onChange={onChange}
+      required
+      minLength={6}
+      autoComplete={autoComplete}
+      placeholder="••••••••"
+    />
+  );
+}
+
+interface SubmitAuthFormOptions<TFormData> {
+  event: FormEvent<HTMLFormElement>;
+  formData: TFormData;
+  schema: ZodType<TFormData>;
+  submit: () => Promise<void>;
+  setError: (message: string) => void;
+  setIsLoading: (isLoading: boolean) => void;
+  fallbackMessage: string;
+  onSuccess?: () => void | Promise<void>;
+}
+
+function getValidationError<TFormData>(schema: ZodType<TFormData>, formData: TFormData): string | null {
+  const result = schema.safeParse(formData);
+  if (result.success) {
+    return null;
+  }
+
+  return result.error.issues[0]?.message ?? 'Invalid form data';
+}
+
+function getSubmissionErrorMessage(error: unknown, fallbackMessage: string): string {
+  return error instanceof Error ? error.message : fallbackMessage;
+}
+
+export async function submitAuthForm<TFormData>({
+  event,
+  formData,
+  schema,
+  submit,
+  setError,
+  setIsLoading,
+  fallbackMessage,
+  onSuccess,
+}: SubmitAuthFormOptions<TFormData>) {
+  event.preventDefault();
+  setError('');
+
+  const validationError = getValidationError(schema, formData);
+  if (validationError) {
+    setError(validationError);
+    return;
+  }
+
+  setIsLoading(true);
+
+  try {
+    await submit();
+    await onSuccess?.();
+  } catch (error) {
+    setError(getSubmissionErrorMessage(error, fallbackMessage));
+  } finally {
+    setIsLoading(false);
+  }
 }

@@ -17,6 +17,7 @@ interface SettingsPanelProps {
   onApiBaseUrlChange: (value: string) => void;
 }
 
+// fallow-ignore-next-line complexity
 export function SettingsPanel({
   apiBaseUrl,
   loading,

@@ -11,6 +11,11 @@
         "entrypoints/popup/index.html",
         "entrypoints/popup/main.tsx"
     ],
+    "health": {
+        "maxCyclomatic": 12,
+        "maxCognitive": 13,
+        "maxCrap": 50
+    },
     "ignoreDependencies": [
         "@wxt-dev/module-react",
         "@tailwindcss/vite"

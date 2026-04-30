@@ -123,9 +123,7 @@ export interface MediaAutoProgressUpdateDto {
     enabled: boolean;
 }
 
-export interface MediaProviderSearchResultDto {
-    providerId: string;
-    providerMediaId: string;
+interface MediaProviderMetadataDto {
     title: string;
     nativeTitle?: string;
     mediaKind: string;
@@ -140,21 +138,14 @@ export interface MediaProviderSearchResultDto {
     releaseStatusDimension: string;
 }
 
-export interface MediaProviderTitleDetailsDto {
+export interface MediaProviderSearchResultDto extends MediaProviderMetadataDto {
     providerId: string;
     providerMediaId: string;
-    title: string;
-    nativeTitle?: string;
-    mediaKind: string;
-    synopsis?: string;
-    posterUrl?: string;
-    backgroundUrl?: string;
-    startYear?: number;
-    episodeCount?: number;
-    chapterCount?: number;
-    volumeCount?: number;
-    primaryProgressDimension: string;
-    releaseStatusDimension: string;
+}
+
+export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
+    providerId: string;
+    providerMediaId: string;
     availabilityLinks: MediaProviderAvailabilityLinkDto[];
 }
 

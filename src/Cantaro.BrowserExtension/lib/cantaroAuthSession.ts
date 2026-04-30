@@ -48,6 +48,7 @@ function readStringValue(record: Record<string, unknown>, keys: string[]): strin
     return '';
 }
 
+// fallow-ignore-next-line complexity
 function parseTokenExchangeResponse(payload: unknown): TokenExchangeResponse {
     if (!payload || typeof payload !== 'object') {
         throw new Error('Cantaro API did not return an extension token response.');
@@ -170,6 +171,7 @@ async function fetchCurrentUser(apiBaseUrl: string, accessToken: string): Promis
     return { email };
 }
 
+// fallow-ignore-next-line complexity
 export async function beginInteractiveSignIn(apiBaseUrl: string): Promise<ExtensionConfig> {
     const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl) || DEFAULT_API_BASE_URL;
     const redirectUri = browser.identity.getRedirectURL('cantaro-auth');
@@ -220,6 +222,7 @@ export async function beginInteractiveSignIn(apiBaseUrl: string): Promise<Extens
     return persistTokenExchange(normalizedApiBaseUrl, tokenResponse);
 }
 
+// fallow-ignore-next-line complexity
 export async function ensureExtensionAccessToken(apiBaseUrl?: string, forceRefresh = false): Promise<string | null> {
     const config = await readExtensionConfig();
     const normalizedApiBaseUrl = normalizeApiBaseUrl(apiBaseUrl || config.apiBaseUrl) || DEFAULT_API_BASE_URL;
