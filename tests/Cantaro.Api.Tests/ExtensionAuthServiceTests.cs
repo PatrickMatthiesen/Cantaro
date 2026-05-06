@@ -5,12 +5,9 @@ using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -172,8 +169,7 @@ public class ExtensionAuthServiceTests
                 AccessTokenLifetimeMinutes = 15,
                 RefreshTokenLifetimeDays = 30,
                 AuthorizationCodeLifetimeMinutes = 5
-            }),
-            new TestWebHostEnvironment());
+            }));
     }
 
     private static async Task<DatabaseFixture> CreateDatabaseAsync()
@@ -207,20 +203,5 @@ public class ExtensionAuthServiceTests
         {
             await Connection.DisposeAsync();
         }
-    }
-
-    private sealed class TestWebHostEnvironment : IWebHostEnvironment
-    {
-        public string EnvironmentName { get; set; } = Environments.Development;
-
-        public string ApplicationName { get; set; } = "Cantaro.Api.Tests";
-
-        public string WebRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
-
-        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

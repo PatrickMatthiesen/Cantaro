@@ -17,18 +17,15 @@ public sealed class ExtensionAuthService
     private readonly ApplicationDbContext _dbContext;
     private readonly ExtensionAuthorizationCodeStore _authorizationCodeStore;
     private readonly ExtensionAuthOptions _options;
-    private readonly IWebHostEnvironment _environment;
 
     public ExtensionAuthService(
         ApplicationDbContext dbContext,
         ExtensionAuthorizationCodeStore authorizationCodeStore,
-        IOptions<ExtensionAuthOptions> options,
-        IWebHostEnvironment environment)
+        IOptions<ExtensionAuthOptions> options)
     {
         _dbContext = dbContext;
         _authorizationCodeStore = authorizationCodeStore;
         _options = options.Value;
-        _environment = environment;
     }
 
     public async Task<string> CreateAuthorizationCodeAsync(
@@ -198,7 +195,7 @@ public sealed class ExtensionAuthService
 
     private string CreateAccessToken(User user, string clientId, DateTime expiresAtUtc)
     {
-        var signingKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(_options, _environment);
+        var signingKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(_options);
         var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey));
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 

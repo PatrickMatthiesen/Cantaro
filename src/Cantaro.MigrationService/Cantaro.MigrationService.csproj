@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-Cantaro.MigrationService-cc06337f-fbd6-49ab-997b-a84e32b7fd78</UserSecretsId>
+    <CantaroApiAppSettingsPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\Cantaro.Api\appsettings.json'))</CantaroApiAppSettingsPath>
+    <CantaroApiDevelopmentAppSettingsPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\Cantaro.Api\appsettings.Development.json'))</CantaroApiDevelopmentAppSettingsPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,11 +15,21 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
-    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.3.0-preview.1.26229.4" />
+    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.4.0-preview.1.26256.2" />
   </ItemGroup>
 
   <ItemGroup>
+    <Content Remove="artifacts\**" />
+    <None Remove="artifacts\**" />
     <ProjectReference Include="..\Cantaro.ServiceDefaults\Cantaro.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Cantaro.Api\Cantaro.Api.csproj" />
   </ItemGroup>
+
+  <Target Name="RemoveReferencedApiPublishContent"
+          BeforeTargets="_HandleFileConflictsForPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.FullPath)' == '$(CantaroApiAppSettingsPath)' Or '%(ResolvedFileToPublish.FullPath)' == '$(CantaroApiDevelopmentAppSettingsPath)'" />
+    </ItemGroup>
+  </Target>
 </Project>

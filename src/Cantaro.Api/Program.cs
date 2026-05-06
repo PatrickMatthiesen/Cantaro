@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 var extensionAuthOptions = builder.Configuration
     .GetSection(ExtensionAuthOptions.SectionName)
     .Get<ExtensionAuthOptions>() ?? new ExtensionAuthOptions();
-var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(extensionAuthOptions, builder.Environment);
+var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(extensionAuthOptions);
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
@@ -207,6 +207,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -215,6 +217,12 @@ app.MapControllers();
 
 // Prefix all Identity API endpoints with /api to hit the vite proxy
 app.MapGroup("/api").MapIdentityApi<User>();
+app.MapFallbackToFile("index.html");
+
+if (app.Environment.IsDevelopment())
+{
+    await SeedDevUserAsync(app.Services, app.Environment, app.Configuration, app.Logger);
+}
 
 //     // Apply migrations on startup in development
 // if (app.Environment.IsDevelopment())
@@ -230,3 +238,109 @@ app.MapGroup("/api").MapIdentityApi<User>();
 // }
 
 app.Run();
+
+static async Task SeedDevUserAsync(
+    IServiceProvider serviceProvider,
+    IHostEnvironment hostEnvironment,
+    IConfiguration configuration,
+    ILogger logger)
+{
+    if (!hostEnvironment.IsDevelopment())
+    {
+        return;
+    }
+
+    var enabled = configuration.GetValue("SeedUser:Enabled", false);
+    if (!enabled)
+    {
+        return;
+    }
+
+    var email = configuration["SeedUser:Email"]?.Trim();
+    var password = configuration["SeedUser:Password"];
+
+    if (string.IsNullOrWhiteSpace(email))
+    {
+        throw new InvalidOperationException("SeedUser:Email must be configured when SeedUser:Enabled is true.");
+    }
+
+    if (string.IsNullOrWhiteSpace(password))
+    {
+        throw new InvalidOperationException("SeedUser:Password must be configured when SeedUser:Enabled is true.");
+    }
+
+    using var scope = serviceProvider.CreateScope();
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+
+    var user = await userManager.FindByEmailAsync(email);
+    if (user is null)
+    {
+        user = new User
+        {
+            UserName = email,
+            Email = email,
+            EmailConfirmed = true
+        };
+
+        var createResult = await userManager.CreateAsync(user, password);
+        EnsureIdentitySuccess(createResult, $"Creating seeded test user '{email}'");
+        logger.LogInformation("Seeded test user {Email}.", email);
+        return;
+    }
+
+    var needsUserUpdate = false;
+    if (!string.Equals(user.UserName, email, StringComparison.OrdinalIgnoreCase))
+    {
+        user.UserName = email;
+        needsUserUpdate = true;
+    }
+
+    if (!string.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase))
+    {
+        user.Email = email;
+        needsUserUpdate = true;
+    }
+
+    if (!user.EmailConfirmed)
+    {
+        user.EmailConfirmed = true;
+        needsUserUpdate = true;
+    }
+
+    if (needsUserUpdate)
+    {
+        var updateResult = await userManager.UpdateAsync(user);
+        EnsureIdentitySuccess(updateResult, $"Updating seeded test user '{email}'");
+    }
+
+    if (await userManager.CheckPasswordAsync(user, password))
+    {
+        logger.LogInformation("Seeded test user {Email} already exists.", email);
+        return;
+    }
+
+    IdentityResult passwordResult;
+    if (await userManager.HasPasswordAsync(user))
+    {
+        var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+        passwordResult = await userManager.ResetPasswordAsync(user, resetToken, password);
+    }
+    else
+    {
+        passwordResult = await userManager.AddPasswordAsync(user, password);
+    }
+
+    EnsureIdentitySuccess(passwordResult, $"Setting password for seeded test user '{email}'");
+    logger.LogInformation("Reset seeded test user password for {Email}.", email);
+}
+
+static void EnsureIdentitySuccess(IdentityResult result, string operation)
+{
+    if (result.Succeeded)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException(
+        $"{operation} failed: {string.Join("; ", result.Errors.Select(error => error.Description))}");
+}

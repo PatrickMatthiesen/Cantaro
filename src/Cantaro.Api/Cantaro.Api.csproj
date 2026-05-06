@@ -21,10 +21,12 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.3.0-preview.1.26229.4" />
+    <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.4.0-preview.1.26256.2" />
   </ItemGroup>
 
   <ItemGroup>
+    <Content Remove="artifacts\**" />
+    <None Remove="artifacts\**" />
     <ProjectReference Include="..\Cantaro.ServiceDefaults\Cantaro.ServiceDefaults.csproj" />
   </ItemGroup>
 

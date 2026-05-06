@@ -4,23 +4,16 @@ namespace Cantaro.Api.Services;
 
 public static class ExtensionAuthSigningKeyResolver
 {
-    private const string DevelopmentSigningKey = "Cantaro.ExtensionAuth.Development.Signing.Key.2026.04.26";
-
-    public static string ResolveSigningKey(ExtensionAuthOptions options, IHostEnvironment environment)
+    public static string ResolveSigningKey(ExtensionAuthOptions options)
     {
         var configuredKey = options.JwtSigningKey?.Trim();
-        if (!string.IsNullOrWhiteSpace(configuredKey))
+        if (string.IsNullOrWhiteSpace(configuredKey))
         {
-            return ValidateSigningKey(configuredKey);
+            throw new InvalidOperationException(
+                $"{ExtensionAuthOptions.SectionName}:JwtSigningKey must be configured. Are you missing a configuration value or environment variable?");
         }
 
-        if (environment.IsDevelopment() || environment.IsEnvironment("Testing"))
-        {
-            return ValidateSigningKey(DevelopmentSigningKey);
-        }
-
-        throw new InvalidOperationException(
-            $"{ExtensionAuthOptions.SectionName}:JwtSigningKey must be configured outside development and testing.");
+        return ValidateSigningKey(configuredKey);
     }
 
     private static string ValidateSigningKey(string signingKey)

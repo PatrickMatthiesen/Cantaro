@@ -8,6 +8,7 @@
         "check": "bun run check:web && bun run check:extension",
         "check:fallow:web": "cd src/Cantaro.Web && bun run check:fallow",
         "check:fallow:extension": "cd src/Cantaro.BrowserExtension && bun run check:fallow",
-        "check:fallow": "bun run check:fallow:web && bun run check:fallow:extension"
+        "check:fallow": "bun run check:fallow:web && bun run check:fallow:extension",
+        "compose:up": "docker compose -p cantaro up"
     }
 }
