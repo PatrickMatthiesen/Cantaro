@@ -26,6 +26,8 @@ public class ExtensionAuthSigningKeyResolverTests
 
         var error = Assert.Throws<InvalidOperationException>(() => ExtensionAuthSigningKeyResolver.ResolveSigningKey(options));
 
-        Assert.Equal("ExtensionAuth:JwtSigningKey must be configured.", error.Message);
+        Assert.Equal(
+            "ExtensionAuth:JwtSigningKey must be configured. Are you missing a configuration value or environment variable?",
+            error.Message);
     }
 }
