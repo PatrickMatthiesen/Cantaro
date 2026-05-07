@@ -1,7 +1,7 @@
 import { createBrowserStorageQueue } from '../lib/observationQueue';
 import { DEFAULT_API_BASE_URL, readExtensionConfig } from '../lib/extensionRuntimeConfig';
 import { ensureExtensionAccessToken } from '../lib/cantaroAuthSession';
-import { toSubmitMediaObservationRequest, type MediaObservation } from '../lib/mediaObservation';
+import { toSubmitMediaObservationRequest, type MediaObservation, type MediaObservationMessage } from '../lib/mediaObservation';
 
 /** Media observation route expected by the Cantaro backend. */
 const MEDIA_OBSERVATIONS_PATH = '/api/media/observations';
@@ -15,13 +15,15 @@ export default defineBackground(() => {
   console.log('Cantaro extension background script loaded');
 
   // Listen for messages from content scripts
-  browser.runtime.onMessage.addListener(async (message, sender) => {
+  browser.runtime.onMessage.addListener(async (message: MediaObservationMessage | { type: 'PLAYLIST_EVENT'; payload: unknown }, sender) => {
     console.log('Received message:', message.type, 'from:', sender.tab?.url);
 
     if (message.type === 'PLAYLIST_EVENT') {
       await handlePlaylistEvent(message.payload);
     } else if (message.type === 'MEDIA_OBSERVATION') {
-      await handleMediaObservation(message.payload as MediaObservation);
+      await handleMediaObservation(message.payload);
+    } else if (message.type === 'DRAIN_MEDIA_OBSERVATION_QUEUE') {
+      await drainObservationQueue();
     }
 
     return { success: true };

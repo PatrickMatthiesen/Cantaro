@@ -28,6 +28,7 @@ public class MediaObservationsController(
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaObservationProgressService _progressService = progressService;
     private readonly ILogger<MediaObservationsController> _logger = logger;
+    private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
 
     // -----------------------------------------------------------------------
     // Ingestion
@@ -72,7 +73,10 @@ public class MediaObservationsController(
             }
         }
 
-        var rawPayload = JsonSerializer.Serialize(request);
+        var progressHint = string.IsNullOrWhiteSpace(request.ProgressHint)
+            ? request.EpisodeNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : request.ProgressHint.Trim();
+        var rawPayload = JsonSerializer.Serialize(request, RawPayloadJsonOptions);
         var now = DateTimeOffset.UtcNow;
 
         var observation = new MediaObservation
@@ -83,9 +87,7 @@ public class MediaObservationsController(
             ObservedUrl = request.ObservedUrl,
             SiteMediaId = normalizedSiteMediaId,
             ObservedTitle = request.ObservedTitle.Trim(),
-            ProgressHint = string.IsNullOrWhiteSpace(request.ProgressHint)
-                ? null
-                : request.ProgressHint.Trim(),
+            ProgressHint = progressHint,
             ObservedAt = request.ObservedAt ?? now,
             ExtensionVersion = request.ExtensionVersion?.Trim(),
             RawPayload = rawPayload,

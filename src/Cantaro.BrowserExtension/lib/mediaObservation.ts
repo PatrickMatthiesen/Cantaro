@@ -22,8 +22,24 @@ export interface MediaObservation {
   siteMediaId?: string;
   /** Human-readable title text of the observed content (series + episode if available). */
   titleText: string;
+  /** Series title extracted from the media page when available. */
+  seriesTitle?: string;
+  /** Episode title extracted from the media page when available. */
+  episodeTitle?: string;
+  /** Episode number extracted from the media page when available. */
+  episodeNumber?: number;
+  /** Season title or label extracted from the media page when available. */
+  seasonTitle?: string;
+  /** Season number extracted from the media page when available. */
+  seasonNumber?: number;
   /** Progress hint extracted from the page, e.g. episode number. null when not determinable. */
   progressHint?: number | null;
+  /** Watched percentage in the range 0-100 at the time the observation was emitted. */
+  watchProgressPercent?: number;
+  /** Total video duration in seconds at the time the observation was emitted. */
+  durationSeconds?: number;
+  /** Current playback position in seconds at the time the observation was emitted. */
+  positionSeconds?: number;
   /** ISO 8601 timestamp when the observation was captured. */
   observedAt: string;
   /** Extension version string that produced this observation. */
@@ -36,7 +52,15 @@ export interface SubmitMediaObservationRequest {
   observedUrl: string;
   siteMediaId?: string;
   observedTitle: string;
+  seriesTitle?: string;
+  episodeTitle?: string;
+  episodeNumber?: number;
+  seasonTitle?: string;
+  seasonNumber?: number;
   progressHint?: string;
+  watchProgressPercent?: number;
+  durationSeconds?: number;
+  positionSeconds?: number;
   observedAt: string;
   extensionVersion: string;
 }
@@ -49,17 +73,29 @@ export function toSubmitMediaObservationRequest(
     observedUrl: observation.observedUrl,
     siteMediaId: observation.siteMediaId,
     observedTitle: observation.titleText,
+    seriesTitle: observation.seriesTitle,
+    episodeTitle: observation.episodeTitle,
+    episodeNumber: observation.episodeNumber,
+    seasonTitle: observation.seasonTitle,
+    seasonNumber: observation.seasonNumber,
     progressHint:
       observation.progressHint === null || observation.progressHint === undefined
         ? undefined
         : String(observation.progressHint),
+    watchProgressPercent: observation.watchProgressPercent,
+    durationSeconds: observation.durationSeconds,
+    positionSeconds: observation.positionSeconds,
     observedAt: observation.observedAt,
     extensionVersion: observation.extensionVersion,
   };
 }
 
 /** Internal message envelope sent from content scripts to the background worker. */
-export interface MediaObservationMessage {
-  type: 'MEDIA_OBSERVATION';
-  payload: MediaObservation;
-}
+export type MediaObservationMessage =
+  | {
+    type: 'MEDIA_OBSERVATION';
+    payload: MediaObservation;
+  }
+  | {
+    type: 'DRAIN_MEDIA_OBSERVATION_QUEUE';
+  };

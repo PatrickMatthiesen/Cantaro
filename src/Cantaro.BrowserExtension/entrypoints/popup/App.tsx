@@ -188,6 +188,7 @@ function App() {
       const nextConfig = await beginInteractiveSignIn(apiBaseUrl);
       await persistConfig(nextConfig, 'Signed in to Cantaro');
       setSessionEmail(nextConfig.sessionEmail || null);
+      await browser.runtime.sendMessage({ type: 'DRAIN_MEDIA_OBSERVATION_QUEUE' }).catch(() => null);
     } catch (error) {
       console.error('Extension sign-in failed:', error);
       showStatus(error instanceof Error ? error.message : 'Sign-in failed.', 'error');

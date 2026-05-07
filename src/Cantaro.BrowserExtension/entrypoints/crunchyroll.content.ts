@@ -1,63 +1,84 @@
-import { buildCrunchyrollObservation } from '../lib/crunchyrollAdapter';
+import {
+  extractCrunchyrollEpisodeMetadata,
+  trackVideoProgress,
+  type VideoProgressTracker,
+} from '../lib/crunchyrollAdapter';
 import type { MediaObservationMessage } from '../lib/mediaObservation';
 
 export default defineContentScript({
   matches: ['https://www.crunchyroll.com/watch/*'],
 
   main() {
-    console.log('Cantaro: Crunchyroll media observer loaded');
-
-    // Observe the initial page load
-    observeCurrentPage();
-
-    // Re-observe after Crunchyroll's SPA navigation updates the URL/DOM
-    observeNavigation();
+    console.log('Cantaro: Crunchyroll watch-state tracker loaded');
+    startCrunchyrollWatchTracker();
   },
 });
 
-/**
- * Extract an observation from the current page state and send it to the
- * background worker.  No-ops when the page cannot produce a valid observation
- * (e.g. the URL is not a watch page).
- */
-function observeCurrentPage(): void {
-  const observation = buildCrunchyrollObservation(location.href, document);
-  if (!observation) return;
+function startCrunchyrollWatchTracker(): void {
+  let tracker: VideoProgressTracker | null = null;
+  let currentWatchId: string | undefined;
+  const submittedWatchIds = new Set<string>();
 
-  const message: MediaObservationMessage = {
-    type: 'MEDIA_OBSERVATION',
-    payload: observation,
+  const restartTracking = () => {
+    const metadata = extractCrunchyrollEpisodeMetadata(document, location);
+    const nextWatchId = metadata?.siteMediaId ?? location.href;
+
+    if (nextWatchId === currentWatchId && tracker) {
+      return;
+    }
+
+    tracker?.dispose();
+    tracker = null;
+    currentWatchId = nextWatchId;
+
+    if (!metadata || submittedWatchIds.has(nextWatchId)) {
+      return;
+    }
+
+    tracker = trackVideoProgress(document, metadata, (observation) => {
+      submittedWatchIds.add(nextWatchId);
+
+      const message: MediaObservationMessage = {
+        type: 'MEDIA_OBSERVATION',
+        payload: observation,
+      };
+
+      browser.runtime.sendMessage(message).catch((error: unknown) => {
+        console.warn('Cantaro: failed to send media observation', error);
+      });
+    });
   };
 
-  browser.runtime.sendMessage(message).catch((err: unknown) => {
-    console.warn('Cantaro: failed to send media observation', err);
-  });
+  restartTracking();
+  observePageChanges(restartTracking);
 }
 
-/**
- * Watch for Crunchyroll's SPA navigation so that moving between episodes
- * within the same tab triggers fresh observations.
- *
- * Crunchyroll updates `document.title` on navigation; we detect that change
- * via a MutationObserver on <title> as a lightweight signal.  A debounce
- * prevents duplicate sends when the SPA updates the title in multiple steps.
- */
-function observeNavigation(): void {
+function observePageChanges(onChange: () => void): void {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastHref = location.href;
 
-  const titleEl = document.querySelector('title');
-  if (!titleEl) return;
-
-  const observer = new MutationObserver(() => {
+  const scheduleChange = () => {
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      // Only emit when we are still on a watch page
+
+      if (location.href !== lastHref) {
+        lastHref = location.href;
+      }
+
       if (location.pathname.startsWith('/watch/')) {
-        observeCurrentPage();
+        onChange();
       }
     }, 500);
-  });
+  };
 
-  observer.observe(titleEl, { childList: true });
+  const titleEl = document.querySelector('title');
+  if (titleEl) {
+    new MutationObserver(scheduleChange).observe(titleEl, { childList: true });
+  }
+
+  new MutationObserver(scheduleChange).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
 }

@@ -40,11 +40,30 @@ public class SubmitMediaObservationRequest
     [MaxLength(512)]
     public required string ObservedTitle { get; set; }
 
+    [MaxLength(512)]
+    public string? SeriesTitle { get; set; }
+
+    [MaxLength(512)]
+    public string? EpisodeTitle { get; set; }
+
+    public int? EpisodeNumber { get; set; }
+
+    [MaxLength(256)]
+    public string? SeasonTitle { get; set; }
+
+    public int? SeasonNumber { get; set; }
+
     /// <summary>
     /// Opaque progress hint extracted from the page (e.g., "Episode 5").
     /// </summary>
     [MaxLength(256)]
     public string? ProgressHint { get; set; }
+
+    public decimal? WatchProgressPercent { get; set; }
+
+    public decimal? DurationSeconds { get; set; }
+
+    public decimal? PositionSeconds { get; set; }
 
     /// <summary>
     /// When the user was on the page (extension-supplied, not server time).

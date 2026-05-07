@@ -1,59 +1,101 @@
 import { SiteIds, EXTENSION_VERSION } from './mediaObservation';
 import type { MediaObservation } from './mediaObservation';
 
-/** Minimal document interface so the adapter can be unit-tested without a real DOM. */
-export interface DocumentLike {
-  title: string;
-  querySelector(selector: string): { textContent: string | null } | null;
+export const WATCH_PROGRESS_THRESHOLD = 0.85;
+
+export interface TextElementLike {
+  textContent: string | null;
 }
 
-/**
- * Regex for extracting the episode/media ID from a Crunchyroll watch URL.
- * Example: https://www.crunchyroll.com/watch/GYVNM7N6Y/episode-slug
- *   → "GYVNM7N6Y"
- */
-const WATCH_ID_RE = /\/watch\/([A-Z0-9]+)\//i;
+export interface VideoElementLike {
+  currentTime: number;
+  duration: number;
+  paused?: boolean;
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
+}
 
-/** Regex for pulling an episode number out of a URL slug, e.g. "episode-1", "ep-12". */
+export interface DocumentLike {
+  title: string;
+  querySelector(selector: string): TextElementLike | VideoElementLike | null;
+  querySelectorAll?(selector: string): Array<TextElementLike | VideoElementLike>;
+}
+
+export interface LocationLike {
+  href: string;
+  hostname: string;
+  pathname: string;
+}
+
+export interface CrunchyrollEpisodeMetadata {
+  siteId: typeof SiteIds.Crunchyroll;
+  observedUrl: string;
+  siteMediaId?: string;
+  titleText: string;
+  seriesTitle?: string;
+  episodeTitle?: string;
+  episodeNumber?: number;
+  seasonTitle?: string;
+  seasonNumber?: number;
+  progressHint?: number | null;
+  extensionVersion: string;
+}
+
+export interface WatchProgressSnapshot {
+  watchProgressPercent: number;
+  durationSeconds: number;
+  positionSeconds: number;
+}
+
+export interface VideoProgressTracker {
+  dispose(): void;
+}
+
+const WATCH_ID_RE = /\/watch\/([A-Z0-9]+)(?:\/|$)/i;
 const EPISODE_NUMBER_RE = /(?:episode|ep)[- _]?(\d+)/i;
+const SEASON_NUMBER_RE = /season\s*(\d+)/i;
 
-/**
- * Extract the Crunchyroll episode/media ID from a URL pathname.
- * Returns undefined when the URL is not a watch page or the ID is absent.
- */
+const SERIES_SELECTORS = [
+  '[data-t="series-title"]',
+  '[data-t="show-title"]',
+  '[data-testid="series-title"]',
+  'a[href*="/series/"]',
+];
+
+const EPISODE_SELECTORS = [
+  '[data-t="episode-title"]',
+  '[data-t="title"]',
+  '[data-testid="episode-title"]',
+  'h1[class*="title"]',
+  'h1',
+];
+
+const SEASON_SELECTORS = [
+  '[data-t="season-title"]',
+  '[data-testid="season-title"]',
+  '[class*="season"]',
+];
+
 export function extractEpisodeId(pathname: string): string | undefined {
   return WATCH_ID_RE.exec(pathname)?.[1];
 }
 
-/**
- * Extract an episode number hint from a URL slug.
- * Returns null when not determinable.
- */
-export function extractEpisodeNumber(pathname: string): number | null {
-  const slug = pathname.split('/').pop() ?? '';
-  const match = EPISODE_NUMBER_RE.exec(slug);
+export function extractEpisodeNumber(text: string): number | null {
+  const match = EPISODE_NUMBER_RE.exec(text);
   return match ? parseInt(match[1], 10) : null;
 }
 
-/**
- * Parse a human-readable title from the page <title> element.
- *
- * Crunchyroll uses several formats depending on the view:
- *   "Episode Title - Series Name - Crunchyroll"  (watch page, dash-separated)
- *   "Series Name - Crunchyroll"                  (series page)
- * Newer versions sometimes use " | " as the separator instead.
- *
- * We strip the trailing " - Crunchyroll" / " | Crunchyroll" suffix and return
- * the meaningful portion.
- */
+export function extractSeasonNumber(text: string): number | undefined {
+  const match = SEASON_NUMBER_RE.exec(text);
+  return match ? parseInt(match[1], 10) : undefined;
+}
+
 export function parseTitleFromPageTitle(pageTitle: string): string {
   if (!pageTitle) return '';
 
-  // Detect separator (prefer " | " over " - " when both are present)
   const separator = pageTitle.includes(' | ') ? ' | ' : ' - ';
   const parts = pageTitle.split(separator);
 
-  // Remove the "Crunchyroll" brand suffix from the end
   if (parts.length > 1 && parts[parts.length - 1].trim().toLowerCase() === 'crunchyroll') {
     parts.pop();
   }
@@ -61,62 +103,193 @@ export function parseTitleFromPageTitle(pageTitle: string): string {
   return parts.join(separator).trim();
 }
 
-/**
- * Attempt to extract a richer series title from known DOM selectors.
- * Returns null when no matching element is found so the caller can fall back
- * to the page title.
- */
-export function extractTitleFromDom(doc: DocumentLike): string | null {
-  // Crunchyroll's watch page renders series/episode headings in these elements.
-  // Selectors are tried in preference order; the first non-empty result wins.
-  const candidates = [
-    '[data-t="title"]',
-    '.title',
-    'h1[class*="title"]',
-    'h1',
-  ];
-
-  for (const selector of candidates) {
-    const el = doc.querySelector(selector);
-    const text = el?.textContent?.trim();
+export function extractTextFromDom(doc: DocumentLike, selectors: string[]): string | null {
+  for (const selector of selectors) {
+    const element = doc.querySelector(selector);
+    const text = 'textContent' in (element ?? {}) ? element?.textContent?.trim() : '';
     if (text) return text;
   }
 
   return null;
 }
 
-/**
- * Build a complete MediaObservation for a Crunchyroll watch page.
- * Returns null when the URL is not a supported Crunchyroll watch URL.
- */
-export function buildCrunchyrollObservation(
-  url: string,
-  doc: DocumentLike,
-): MediaObservation | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
+export function extractTitleFromDom(doc: DocumentLike): string | null {
+  return extractTextFromDom(doc, EPISODE_SELECTORS);
+}
 
+export function extractCrunchyrollEpisodeMetadata(
+  doc: DocumentLike,
+  locationLike: LocationLike | string,
+): CrunchyrollEpisodeMetadata | null {
+  const parsed = parseLocation(locationLike);
+  if (!parsed) return null;
   if (!parsed.hostname.endsWith('crunchyroll.com')) return null;
   if (!parsed.pathname.startsWith('/watch/')) return null;
 
   const siteMediaId = extractEpisodeId(parsed.pathname);
-  const progressHint = extractEpisodeNumber(parsed.pathname);
-
-  // Prefer DOM title, fall back to <title> parsing
-  const domTitle = extractTitleFromDom(doc);
-  const titleText = domTitle ?? parseTitleFromPageTitle(doc.title);
+  const titleFallback = parseTitleFromPageTitle(doc.title);
+  const episodeTitle = extractTextFromDom(doc, EPISODE_SELECTORS) ?? parseEpisodeTitleFromPageTitle(titleFallback);
+  const seriesTitle = extractTextFromDom(doc, SERIES_SELECTORS) ?? parseSeriesTitleFromPageTitle(titleFallback);
+  const seasonTitle = extractTextFromDom(doc, SEASON_SELECTORS) ?? undefined;
+  const episodeNumber = extractEpisodeNumber(`${episodeTitle ?? ''} ${parsed.pathname}`);
+  const seasonNumber = seasonTitle ? extractSeasonNumber(seasonTitle) : undefined;
+  const titleText = buildTitleText(seriesTitle, episodeTitle, titleFallback, parsed.href);
 
   return {
     siteId: SiteIds.Crunchyroll,
-    observedUrl: url,
+    observedUrl: parsed.href,
     siteMediaId,
-    titleText: titleText || url,
-    progressHint,
-    observedAt: new Date().toISOString(),
+    titleText,
+    seriesTitle,
+    episodeTitle,
+    episodeNumber: episodeNumber ?? undefined,
+    seasonTitle,
+    seasonNumber,
+    progressHint: episodeNumber,
     extensionVersion: EXTENSION_VERSION,
+  };
+}
+
+export function buildCrunchyrollObservation(
+  url: string,
+  doc: DocumentLike,
+): MediaObservation | null {
+  const metadata = extractCrunchyrollEpisodeMetadata(doc, url);
+  if (!metadata) return null;
+
+  return {
+    ...metadata,
+    observedAt: new Date().toISOString(),
+  };
+}
+
+export function createMediaObservationFromMetadata(
+  metadata: CrunchyrollEpisodeMetadata,
+  snapshot: WatchProgressSnapshot,
+): MediaObservation {
+  return {
+    ...metadata,
+    watchProgressPercent: snapshot.watchProgressPercent,
+    durationSeconds: snapshot.durationSeconds,
+    positionSeconds: snapshot.positionSeconds,
+    observedAt: new Date().toISOString(),
+  };
+}
+
+export function trackVideoProgress(
+  doc: DocumentLike,
+  metadata: CrunchyrollEpisodeMetadata,
+  onThresholdReached: (observation: MediaObservation) => void,
+  threshold = WATCH_PROGRESS_THRESHOLD,
+): VideoProgressTracker | null {
+  const video = findActiveVideo(doc);
+  if (!video) return null;
+
+  let fired = false;
+
+  const evaluate = () => {
+    if (fired) return;
+
+    const snapshot = readWatchProgress(video);
+    if (!snapshot) return;
+
+    if (snapshot.watchProgressPercent / 100 >= threshold) {
+      fired = true;
+      onThresholdReached(createMediaObservationFromMetadata(metadata, snapshot));
+    }
+  };
+
+  video.addEventListener('timeupdate', evaluate);
+  video.addEventListener('ended', evaluate);
+  video.addEventListener('seeked', evaluate);
+  evaluate();
+
+  return {
+    dispose() {
+      video.removeEventListener('timeupdate', evaluate);
+      video.removeEventListener('ended', evaluate);
+      video.removeEventListener('seeked', evaluate);
+    },
+  };
+}
+
+function parseLocation(locationLike: LocationLike | string): LocationLike | null {
+  if (typeof locationLike !== 'string') return locationLike;
+
+  try {
+    const url = new URL(locationLike);
+    return {
+      href: url.href,
+      hostname: url.hostname,
+      pathname: url.pathname,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseEpisodeTitleFromPageTitle(title: string): string | undefined {
+  const parts = splitTitleParts(title);
+  return parts.length > 1 ? parts.slice(0, -1).join(' - ') : title || undefined;
+}
+
+function parseSeriesTitleFromPageTitle(title: string): string | undefined {
+  const parts = splitTitleParts(title);
+  return parts.length > 1 ? parts[parts.length - 1] : undefined;
+}
+
+function splitTitleParts(title: string): string[] {
+  const separator = title.includes(' | ') ? ' | ' : ' - ';
+  return title
+    .split(separator)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function buildTitleText(
+  seriesTitle: string | undefined,
+  episodeTitle: string | undefined,
+  fallback: string,
+  url: string,
+): string {
+  if (seriesTitle && episodeTitle && episodeTitle !== seriesTitle) {
+    return `${seriesTitle} - ${episodeTitle}`;
+  }
+
+  return episodeTitle || seriesTitle || fallback || url;
+}
+
+function findActiveVideo(doc: DocumentLike): VideoElementLike | null {
+  const videos = doc.querySelectorAll?.('video')
+    .filter((candidate): candidate is VideoElementLike => isVideoElementLike(candidate)) ?? [];
+
+  if (videos.length > 0) {
+    return videos.find((video) => !video.paused) ?? videos[0];
+  }
+
+  const video = doc.querySelector('video');
+  return isVideoElementLike(video) ? video : null;
+}
+
+function isVideoElementLike(value: unknown): value is VideoElementLike {
+  return Boolean(value)
+    && typeof value === 'object'
+    && typeof (value as VideoElementLike).currentTime === 'number'
+    && typeof (value as VideoElementLike).duration === 'number'
+    && typeof (value as VideoElementLike).addEventListener === 'function'
+    && typeof (value as VideoElementLike).removeEventListener === 'function';
+}
+
+function readWatchProgress(video: VideoElementLike): WatchProgressSnapshot | null {
+  if (!Number.isFinite(video.duration) || video.duration <= 0) return null;
+  if (!Number.isFinite(video.currentTime) || video.currentTime < 0) return null;
+
+  const positionSeconds = Math.min(video.currentTime, video.duration);
+  const watchProgressPercent = Math.min(100, Math.round((positionSeconds / video.duration) * 10000) / 100);
+
+  return {
+    watchProgressPercent,
+    durationSeconds: Math.round(video.duration * 100) / 100,
+    positionSeconds: Math.round(positionSeconds * 100) / 100,
   };
 }
