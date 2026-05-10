@@ -1,9 +1,12 @@
 import type { FormEvent } from 'react';
 import { startTransition, useEffect, useRef, useState } from 'react';
-import { GlassCard, GradientButton } from '../../../Cantaro.Web/src/components/ui/GlassComponents';
-import { MediaEntryDetailPage } from '../../../Cantaro.Web/src/pages/MediaEntryDetailPage';
-import { MediaLibraryPage } from '../../../Cantaro.Web/src/pages/MediaLibraryPage';
-import { configureMediaApi } from '../../../Cantaro.Web/src/services/mediaApi';
+import {
+  GlassCard,
+  GradientButton,
+  MediaEntryDetailPage,
+  MediaLibraryPage,
+  configureMediaApi,
+} from './cantaroWebUi';
 import {
   beginInteractiveSignIn,
   getVerifiedExtensionUser,

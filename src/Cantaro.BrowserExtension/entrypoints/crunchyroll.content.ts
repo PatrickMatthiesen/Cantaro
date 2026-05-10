@@ -1,9 +1,10 @@
 import {
   extractCrunchyrollEpisodeMetadata,
   trackVideoProgress,
+  type CrunchyrollEpisodeMetadata,
   type VideoProgressTracker,
 } from '../lib/crunchyrollAdapter';
-import type { MediaObservationMessage } from '../lib/mediaObservation';
+import type { MediaObservation, MediaObservationMessage } from '../lib/mediaObservation';
 
 export default defineContentScript({
   matches: ['https://www.crunchyroll.com/watch/*'],
@@ -23,34 +24,68 @@ function startCrunchyrollWatchTracker(): void {
     const metadata = extractCrunchyrollEpisodeMetadata(document, location);
     const nextWatchId = metadata?.siteMediaId ?? location.href;
 
-    if (nextWatchId === currentWatchId && tracker) {
+    if (isTrackingCurrentWatch(nextWatchId, currentWatchId, tracker)) {
       return;
     }
 
-    tracker?.dispose();
-    tracker = null;
+    tracker = disposeTracker(tracker);
     currentWatchId = nextWatchId;
 
-    if (!metadata || submittedWatchIds.has(nextWatchId)) {
+    if (shouldSkipTracking(metadata, nextWatchId, submittedWatchIds)) {
       return;
     }
 
-    tracker = trackVideoProgress(document, metadata, (observation) => {
-      submittedWatchIds.add(nextWatchId);
-
-      const message: MediaObservationMessage = {
-        type: 'MEDIA_OBSERVATION',
-        payload: observation,
-      };
-
-      browser.runtime.sendMessage(message).catch((error: unknown) => {
-        console.warn('Cantaro: failed to send media observation', error);
-      });
-    });
+    tracker = trackVideoProgress(
+      document,
+      metadata,
+      createObservationSubmitter(nextWatchId, submittedWatchIds),
+    );
   };
 
   restartTracking();
   observePageChanges(restartTracking);
+}
+
+function isTrackingCurrentWatch(
+  nextWatchId: string,
+  currentWatchId: string | undefined,
+  tracker: VideoProgressTracker | null,
+): boolean {
+  return nextWatchId === currentWatchId && tracker !== null;
+}
+
+function disposeTracker(tracker: VideoProgressTracker | null): null {
+  tracker?.dispose();
+  return null;
+}
+
+function shouldSkipTracking(
+  metadata: CrunchyrollEpisodeMetadata | null,
+  watchId: string,
+  submittedWatchIds: Set<string>,
+): metadata is null {
+  return !metadata || submittedWatchIds.has(watchId);
+}
+
+function createObservationSubmitter(
+  watchId: string,
+  submittedWatchIds: Set<string>,
+): (observation: MediaObservation) => void {
+  return (observation) => {
+    submittedWatchIds.add(watchId);
+    submitObservation(observation);
+  };
+}
+
+function submitObservation(observation: MediaObservation): void {
+  const message: MediaObservationMessage = {
+    type: 'MEDIA_OBSERVATION',
+    payload: observation,
+  };
+
+  browser.runtime.sendMessage(message).catch((error: unknown) => {
+    console.warn('Cantaro: failed to send media observation', error);
+  });
 }
 
 function observePageChanges(onChange: () => void): void {

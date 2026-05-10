@@ -6,8 +6,8 @@ import {
   AuthEmailField,
   AuthFormLayout,
   AuthPasswordField,
-  submitAuthForm,
 } from './AuthFormShared';
+import { submitAuthForm } from './authFormSubmit';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;

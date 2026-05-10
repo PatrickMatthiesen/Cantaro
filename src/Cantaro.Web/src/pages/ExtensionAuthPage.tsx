@@ -1,7 +1,8 @@
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { loginSchema, type LoginFormData } from '../constants/validation';
-import { AuthInputField, submitAuthForm } from '../components/AuthFormShared';
+import { AuthInputField } from '../components/AuthFormShared';
+import { submitAuthForm } from '../components/authFormSubmit';
 import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
 
 declare const __CANTARO_TRUSTED_API_BASE_URL__: string;

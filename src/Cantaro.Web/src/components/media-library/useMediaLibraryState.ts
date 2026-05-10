@@ -234,7 +234,8 @@ function useProviderRefresh(
 
 export function useMediaLibraryState() {
   const libraryData = useLibraryDataState();
-  const filterState = useLibraryFilters(libraryData.availableListNames);
+  const { availableListNames, loadLibrary } = libraryData;
+  const filterState = useLibraryFilters(availableListNames);
   const filtersRef = useRef(filterState.filters);
 
   useEffect(() => {
@@ -242,10 +243,10 @@ export function useMediaLibraryState() {
   }, [filterState.filters]);
 
   useEffect(() => {
-    void libraryData.loadLibrary(filterState.filters);
-  }, [filterState.filters, libraryData.loadLibrary]);
+    void loadLibrary(filterState.filters);
+  }, [filterState.filters, loadLibrary]);
 
-  const providerState = useProviderRefresh(libraryData.loadLibrary, filtersRef);
+  const providerState = useProviderRefresh(loadLibrary, filtersRef);
 
   return {
     ...libraryData,

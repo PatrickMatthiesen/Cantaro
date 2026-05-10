@@ -1,4 +1,4 @@
-import { GlassCard, GradientButton } from '../../../../Cantaro.Web/src/components/ui/GlassComponents';
+import { GlassCard, GradientButton } from '../cantaroWebUi';
 import { DEFAULT_API_BASE_URL } from '../../../lib/extensionRuntimeConfig';
 
 interface SetupCardProps {

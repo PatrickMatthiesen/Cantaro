@@ -1,7 +1,7 @@
 import { SiteIds, EXTENSION_VERSION } from './mediaObservation';
 import type { MediaObservation } from './mediaObservation';
 
-export const WATCH_PROGRESS_THRESHOLD = 0.85;
+const WATCH_PROGRESS_THRESHOLD = 0.85;
 
 export interface TextElementLike {
   textContent: string | null;
@@ -41,7 +41,7 @@ export interface CrunchyrollEpisodeMetadata {
   extensionVersion: string;
 }
 
-export interface WatchProgressSnapshot {
+interface WatchProgressSnapshot {
   watchProgressPercent: number;
   durationSeconds: number;
   positionSeconds: number;
@@ -103,7 +103,7 @@ export function parseTitleFromPageTitle(pageTitle: string): string {
   return parts.join(separator).trim();
 }
 
-export function extractTextFromDom(doc: DocumentLike, selectors: string[]): string | null {
+function extractTextFromDom(doc: DocumentLike, selectors: string[]): string | null {
   for (const selector of selectors) {
     const element = doc.querySelector(selector);
     const text = 'textContent' in (element ?? {}) ? element?.textContent?.trim() : '';
@@ -163,7 +163,7 @@ export function buildCrunchyrollObservation(
   };
 }
 
-export function createMediaObservationFromMetadata(
+function createMediaObservationFromMetadata(
   metadata: CrunchyrollEpisodeMetadata,
   snapshot: WatchProgressSnapshot,
 ): MediaObservation {

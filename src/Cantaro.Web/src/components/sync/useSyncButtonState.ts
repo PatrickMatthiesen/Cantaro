@@ -253,7 +253,7 @@ function useSyncActions(
     } finally {
       setIsSyncing(false);
     }
-  }, [appendStatus, loadSyncStatus, platformId, setError, setShowStatusDrawer, setSyncProgress, startProgressSimulation, stopProgressSimulation]);
+  }, [appendStatus, loadSyncStatus, platformId, setError, setIsSyncing, setShowStatusDrawer, setSyncProgress, startProgressSimulation, stopProgressSimulation]);
 
   const togglePlaylistSelection = useCallback((playlistId: string) => {
     setSelectedPlaylists((previous) => toggleSelectedPlaylist(previous, playlistId));

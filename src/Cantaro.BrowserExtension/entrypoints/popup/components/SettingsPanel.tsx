@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react';
-import { GlassCard, GradientButton } from '../../../../Cantaro.Web/src/components/ui/GlassComponents';
+import { GlassCard, GradientButton } from '../cantaroWebUi';
 
 interface SettingsPanelProps {
   apiBaseUrl: string;
