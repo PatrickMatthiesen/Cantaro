@@ -1,4 +1,4 @@
-import { GlassCard, GradientButton } from '../ui/GlassComponents';
+import { GlassCard, GradientButton } from '../../../ui';
 
 export interface MediaLibraryHeaderProps {
     totalCount: number;

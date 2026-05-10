@@ -17,6 +17,7 @@
         "maxCrap": 50
     },
     "ignoreDependencies": [
+        "@cantaro/client-shared",
         "@wxt-dev/module-react",
         "@tailwindcss/vite"
     ]

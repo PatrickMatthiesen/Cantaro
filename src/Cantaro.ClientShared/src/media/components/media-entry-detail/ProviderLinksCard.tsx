@@ -1,4 +1,4 @@
-import { GradientButton, GlassCard } from '../ui/GlassComponents';
+import { GradientButton, GlassCard } from '../../../ui';
 import { mediaProviderCatalog } from '../../services/mediaProviders';
 import type { MediaProviderLinkSummaryDto } from '../../services/mediaApi';
 import type { ProviderAvailabilityMap, ProviderAvailabilityState } from './providerAvailability';

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src/auth/index.ts",
+    "src/core/index.ts",
+    "src/media/index.ts",
+    "src/music/index.ts",
+    "src/ui/index.ts"
+  ],
+  "health": {
+    "maxCyclomatic": 12,
+    "maxCognitive": 13,
+    "maxCrap": 50
+  }
+}

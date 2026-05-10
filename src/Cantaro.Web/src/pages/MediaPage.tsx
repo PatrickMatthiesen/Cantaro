@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MediaProvidersPage } from './MediaProvidersPage';
-import { MediaLibraryPage } from './MediaLibraryPage';
-import { MediaEntryDetailPage } from './MediaEntryDetailPage';
+import { MediaEntryDetailPage, MediaLibraryPage } from '@cantaro/client-shared/media';
 
 type MediaView =
   | { kind: 'providers' }

@@ -1,4 +1,4 @@
-import { GradientButton, StatusBadge } from '../ui/GlassComponents';
+import { GradientButton, StatusBadge } from '../../../ui';
 import type { MediaImportDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
 
 interface ProviderPanelHeaderProps {

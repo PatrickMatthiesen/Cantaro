@@ -1,11 +1,11 @@
-import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '../components/ui/GlassComponents';
+import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
 import {
   YouTubeDisconnectedState,
   YouTubePlaylistBrowser,
   YouTubePlaylistDetailView,
-} from '../components/youtube/YouTubePlaylistViews';
-import { useYouTubePlaylistsState } from '../components/youtube/useYouTubePlaylistsState';
-import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '../platforms';
+} from '@cantaro/client-shared/music';
+import { useYouTubePlaylistsState } from '@cantaro/client-shared/music';
+import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '@cantaro/client-shared/music';
 
 interface YouTubePlaylistsPageProps {
   onNavigateHome: () => void;

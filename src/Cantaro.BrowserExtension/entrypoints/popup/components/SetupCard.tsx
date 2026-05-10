@@ -1,4 +1,4 @@
-import { GlassCard, GradientButton } from '../cantaroWebUi';
+import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
 import { DEFAULT_API_BASE_URL } from '../../../lib/extensionRuntimeConfig';
 
 interface SetupCardProps {
@@ -13,7 +13,7 @@ export function SetupCard({ onOpenSettings, onSignIn, isSigningIn }: SetupCardPr
       <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro extension</p>
       <h2 className="mt-3 text-3xl font-bold text-gray-900">Connect the popup to your Cantaro instance</h2>
       <p className="mt-3 max-w-2xl text-sm text-gray-600">
-        The media tab reuses the shared library UI from the web app, so it needs the Cantaro API URL and an extension session.
+        The media tab reuses the shared client library UI, so it needs the Cantaro API URL and an extension session.
         The build currently defaults the API endpoint to <span className="font-semibold text-gray-800">{DEFAULT_API_BASE_URL}</span>, and
         extension pages cannot rely on your browser session cookie, so Cantaro signs the extension in with Authorization Code + PKCE.
       </p>

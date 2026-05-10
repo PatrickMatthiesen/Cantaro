@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '../components/ui/GlassComponents';
-import { matchingApi } from '../services';
+import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
+import { matchingApi } from '@cantaro/client-shared/music';
 import type {
   MatchingQueueCandidateResponse,
   MatchingQueueItemResponse,
   MatchingSummaryResponse,
-} from '../services';
+} from '@cantaro/client-shared/music';
 
 interface MatchingReviewPageProps {
   onNavigateHome: () => void;

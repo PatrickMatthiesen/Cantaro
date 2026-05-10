@@ -1,4 +1,4 @@
-import { GlassCard } from '../ui/GlassComponents';
+import { GlassCard } from '../../../ui';
 import {
     LibraryFilterFields,
     LibraryRefreshAction,

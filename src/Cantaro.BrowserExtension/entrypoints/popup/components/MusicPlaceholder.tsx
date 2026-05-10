@@ -1,4 +1,4 @@
-import { GlassCard } from '../cantaroWebUi';
+import { GlassCard } from '@cantaro/client-shared/ui';
 
 export function MusicPlaceholder() {
   return (

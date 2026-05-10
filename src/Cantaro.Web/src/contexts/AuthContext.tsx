@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { authApi } from '../services/authApi';
-import type { User, RegisterRequest, LoginRequest } from '../services/authApi';
+import { authApi } from '@cantaro/client-shared/auth';
+import type { User, RegisterRequest, LoginRequest } from '@cantaro/client-shared/auth';
 
 interface AuthContextType {
   user: User | null;

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GlassCard } from './ui/GlassComponents';
+import { GlassCard } from '../../ui';
 import {
     LibraryEntryCardBadges,
     LibraryEntryCardDetails,

@@ -1,5 +1,5 @@
 import type { SVGProps } from 'react';
-import { GlassCard, GradientButton } from '../ui/GlassComponents';
+import { GlassCard, GradientButton } from '../../../ui';
 import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '../../platforms';
 
 function YouTubeIcon({ ariaLabel, ...props }: { ariaLabel?: string } & SVGProps<SVGSVGElement>) {

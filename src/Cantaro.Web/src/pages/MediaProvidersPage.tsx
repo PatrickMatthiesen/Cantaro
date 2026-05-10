@@ -1,6 +1,6 @@
-import { ProviderPanel } from '../components/ProviderPanel';
-import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
-import { mediaProviderCatalog } from '../services/mediaProviders';
+import { ProviderPanel } from '@cantaro/client-shared/media';
+import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
+import { mediaProviderCatalog } from '@cantaro/client-shared/media';
 
 interface MediaProvidersPageProps {
   onNavigateHome: () => void;

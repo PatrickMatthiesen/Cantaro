@@ -3,14 +3,14 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginForm } from './components/LoginForm';
 import { RegisterForm } from './components/RegisterForm';
 import { UserProfile } from './components/UserProfile';
-import { SyncButton } from './components/SyncButton';
+import { SyncButton } from '@cantaro/client-shared/music';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
 import { MatchingReviewPage } from './pages/MatchingReviewPage';
 import { MediaPage } from './pages/MediaPage';
 import { ExtensionAuthPage } from './pages/ExtensionAuthPage';
-import { platformManager, type PlatformId } from './platforms';
-import { platformCatalog } from './platforms/catalog';
-import { GlassCard, GradientButton, PlatformTile } from './components/ui/GlassComponents';
+import { platformManager, type PlatformId } from '@cantaro/client-shared/music';
+import { platformCatalog } from '@cantaro/client-shared/music';
+import { GlassCard, GradientButton, StatusBadge } from '@cantaro/client-shared/ui';
 
 type Page = 'home' | 'matching' | 'media' | 'extension-auth' | PlatformId;
 
@@ -56,6 +56,18 @@ interface WorkspaceHomeProps {
 
 interface AuthenticatedPageContentProps extends WorkspaceHomeProps {
   currentPage: Page;
+}
+
+interface PlatformTileProps {
+  platform: {
+    name: string;
+    status: 'connected' | 'available' | 'warning';
+    tracks: number;
+    icon: string;
+    gradient: string;
+  };
+  selected?: boolean;
+  onClick?: () => void;
 }
 
 function resolvePageFromPath(path: string): Page {
@@ -244,6 +256,33 @@ function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPl
         </div>
       ) : null}
     </div>
+  );
+}
+
+function PlatformTile({ platform, selected = false, onClick }: PlatformTileProps) {
+  return (
+    <button type="button" onClick={onClick} className="w-full text-left">
+      <GlassCard
+        interactive
+        hoverGradient={platform.gradient}
+        className={`group p-4 transition ${selected ? 'ring-2 ring-indigo-400/70' : ''}`}
+      >
+        <div className="flex items-start gap-3">
+          <div className={`flex aspect-3/2 h-12 w-16 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
+            {platform.icon}
+          </div>
+          <div className="w-full">
+            <div>
+              <p className="font-semibold text-gray-800">{platform.name}</p>
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-500">{platform.tracks.toLocaleString()} tracks</p>
+                <StatusBadge status={platform.status} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </GlassCard>
+    </button>
   );
 }
 

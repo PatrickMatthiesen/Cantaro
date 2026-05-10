@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, type Dispatch, type ReactNode
 import { EntryOverviewCard } from '../components/media-entry-detail/EntryOverviewCard';
 import { ProviderLinksCard } from '../components/media-entry-detail/ProviderLinksCard';
 import { providerAvailabilityKey, type ProviderAvailabilityMap } from '../components/media-entry-detail/providerAvailability';
-import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
+import { GlassCard, GradientButton } from '../../ui';
 import { SearchLinkDialog } from '../components/SearchLinkDialog';
 import { mediaApi } from '../services/mediaApi';
 import { formatNextReleaseDisplay, mediaKindLabel } from '../services/mediaFormatting';

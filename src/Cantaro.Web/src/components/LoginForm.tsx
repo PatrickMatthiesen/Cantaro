@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { loginSchema, type LoginFormData } from '../constants/validation';
+import { loginSchema, type LoginFormData } from '@cantaro/client-shared/auth';
 import {
   AuthEmailField,
   AuthFormLayout,
   AuthPasswordField,
-} from './AuthFormShared';
-import { submitAuthForm } from './authFormSubmit';
+} from '@cantaro/client-shared/auth';
+import { submitAuthForm } from '@cantaro/client-shared/auth';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;

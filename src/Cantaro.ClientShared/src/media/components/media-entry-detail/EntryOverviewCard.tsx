@@ -1,4 +1,4 @@
-import { GlassCard } from '../ui/GlassComponents';
+import { GlassCard } from '../../../ui';
 import { DetailArtwork, SanitizedSynopsis } from './EntryDisplayPrimitives';
 import { formatNextReleaseDisplay } from '../../services/mediaFormatting';
 import type { MediaLibraryEntryDetailDto } from '../../services/mediaApi';

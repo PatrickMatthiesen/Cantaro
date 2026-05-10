@@ -1,12 +1,11 @@
 import type { FormEvent } from 'react';
 import { startTransition, useEffect, useRef, useState } from 'react';
 import {
-  GlassCard,
-  GradientButton,
   MediaEntryDetailPage,
   MediaLibraryPage,
   configureMediaApi,
-} from './cantaroWebUi';
+} from '@cantaro/client-shared/media';
+import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
 import {
   beginInteractiveSignIn,
   getVerifiedExtensionUser,

@@ -79,46 +79,6 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   );
 }
 
-interface PlatformTileProps {
-  platform: {
-    name: string;
-    status: 'connected' | 'available' | 'warning';
-    tracks: number;
-    icon: string;
-    gradient: string;
-  };
-  selected?: boolean;
-  onClick?: () => void;
-}
-
-export function PlatformTile({ platform, selected = false, onClick }: PlatformTileProps) {
-  return (
-    <button type="button" onClick={onClick} className="w-full text-left">
-      <GlassCard
-        interactive
-        hoverGradient={platform.gradient}
-        className={`group p-4 transition ${selected ? 'ring-2 ring-indigo-400/70' : ''}`}
-      >
-        <div className="flex items-start gap-3">
-          <div className={`flex aspect-3/2 h-12 w-16 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
-            {platform.icon}
-          </div>
-          <div className="w-full">
-            <div>
-              <p className="font-semibold text-gray-800">{platform.name}</p>
-              <div className="mt-1 flex items-center justify-between gap-2">
-                <p className="text-xs text-gray-500">{platform.tracks.toLocaleString()} tracks</p>
-                <StatusBadge status={platform.status} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </GlassCard>
-    </button>
-  );
-}
-
-
 interface GradientPageShellProps {
   children: ReactNode;
   contentClassName?: string;

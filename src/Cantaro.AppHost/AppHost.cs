@@ -53,6 +53,7 @@ if (builder.ExecutionContext.IsPublishMode)
 #pragma warning disable ASPIRECERTIFICATES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithBun()
+    .WithHttpEndpoint(port: 5173)
     .WithReference(api)
     .WaitFor(api)
     .WithHttpsDeveloperCertificate();

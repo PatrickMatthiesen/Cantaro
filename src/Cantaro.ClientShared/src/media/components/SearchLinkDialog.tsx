@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SanitizedSynopsis } from './media-entry-detail/EntryDisplayPrimitives';
-import { GradientButton } from './ui/GlassComponents';
+import { GradientButton } from '../../ui';
 import { mediaApi } from '../services/mediaApi';
 import { mediaKindLabel } from '../services/mediaFormatting';
 import { mediaProviderCatalog } from '../services/mediaProviders';

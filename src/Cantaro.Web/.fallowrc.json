@@ -4,5 +4,8 @@
         "maxCyclomatic": 12,
         "maxCognitive": 13,
         "maxCrap": 50
-    }
+    },
+    "ignoreDependencies": [
+        "@cantaro/client-shared"
+    ]
 }

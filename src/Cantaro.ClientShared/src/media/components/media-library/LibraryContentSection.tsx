@@ -1,5 +1,5 @@
 import { LibraryEntryCard } from '../LibraryEntryCard';
-import { GlassCard, GradientButton } from '../ui/GlassComponents';
+import { GlassCard, GradientButton } from '../../../ui';
 import type { MediaLibraryListItemDto, MediaLibraryQueryParams } from '../../services/mediaApi';
 
 export interface LibraryContentSectionProps {
