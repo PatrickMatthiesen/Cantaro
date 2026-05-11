@@ -1,4 +1,39 @@
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
+
+function readEnvValue(name: string): string | undefined {
+  const exactMatch = process.env[name];
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const caseInsensitiveKey = Object.keys(process.env).find(
+    (key) => key.toLowerCase() === name.toLowerCase(),
+  );
+
+  return caseInsensitiveKey ? process.env[caseInsensitiveKey] : undefined;
+}
+
+const defaultApiBaseUrl = readEnvValue('services__api__https__0')
+  ?? readEnvValue('services__api__http__0')
+  ?? readEnvValue('CANTARO_API_BASE_URL')
+  ?? readEnvValue('WXT_API_BASE_URL')
+  ?? 'http://localhost:5000';
+
+function toOriginMatchPattern(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+
+    return `${url.origin}/*`;
+  } catch {
+    return null;
+  }
+}
+
+const defaultApiHostPermission = toOriginMatchPattern(defaultApiBaseUrl);
 
 // https://wxt.dev/api/config.html
 export default defineConfig({
@@ -9,11 +44,19 @@ export default defineConfig({
     permissions: [
       'storage',
       'tabs',
+      'identity',
+      'permissions',
     ],
     host_permissions: [
+      ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),
       'https://open.spotify.com/*',
       'https://music.youtube.com/*',
       'https://www.youtube.com/*',
+      'https://www.crunchyroll.com/*',
+    ],
+    optional_host_permissions: [
+      'http://*/*',
+      'https://*/*',
     ],
   },
   webExt: {
@@ -26,7 +69,10 @@ export default defineConfig({
   },
   modules: ['@wxt-dev/module-react'],
   vite: () => ({
-    // plugins: [tailwindcss()],
+    plugins: [tailwindcss()],
+    define: {
+      __CANTARO_DEFAULT_API_BASE_URL__: JSON.stringify(defaultApiBaseUrl),
+    },
     build: {
       sourcemap: false,
     },

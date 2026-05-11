@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GlassCard, GradientButton } from '../components/ui/GlassComponents';
-import { matchingApi } from '../services';
+import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
+import { matchingApi } from '@cantaro/client-shared/music';
 import type {
   MatchingQueueCandidateResponse,
   MatchingQueueItemResponse,
   MatchingSummaryResponse,
-} from '../services';
+} from '@cantaro/client-shared/music';
 
 interface MatchingReviewPageProps {
   onNavigateHome: () => void;
@@ -169,202 +169,261 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
   );
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
-        <GlassCard className="px-6 py-4">
-          <p className="text-sm text-gray-700">Loading matching review queue…</p>
-        </GlassCard>
-      </div>
-    );
+    return <PageLoadingState message="Loading matching review queue…" />;
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+    <GradientPageShell className="text-gray-900">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Matching review</p>
+          <h1 className="mt-1 text-3xl font-bold">Resolve track identity</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Review ambiguous and unmatched imports before they become canonical Cantaro tracks.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <GradientButton tone="soft" onClick={onNavigateHome}>
+            Back to home
+          </GradientButton>
+          <GradientButton tone="soft" onClick={() => void loadQueue()}>
+            Refresh queue
+          </GradientButton>
+        </div>
+      </header>
 
-      <div className="relative z-10 mx-auto max-w-6xl space-y-5 px-6 pt-8 pb-16">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Matching review</p>
-            <h1 className="mt-1 text-3xl font-bold">Resolve track identity</h1>
+      {summary ? (
+        <section className="grid gap-4 md:grid-cols-4">
+          {[
+            { label: 'Unresolved', value: summary.totalUnresolved, tint: 'from-indigo-500 to-purple-500' },
+            { label: 'Pending', value: summary.pending, tint: 'from-sky-500 to-indigo-500' },
+            { label: 'Ambiguous', value: summary.ambiguous, tint: 'from-amber-500 to-orange-500' },
+            { label: 'No match', value: summary.noMatch, tint: 'from-rose-500 to-pink-500' },
+          ].map((stat) => (
+            <GlassCard key={stat.label} className="p-5">
+              <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">{stat.label}</p>
+              <p className={`mt-3 bg-linear-to-r ${stat.tint} bg-clip-text text-3xl font-bold text-transparent`}>
+                {stat.value}
+              </p>
+            </GlassCard>
+          ))}
+        </section>
+      ) : null}
+
+      {error ? (
+        <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
+          {error}
+        </GlassCard>
+      ) : null}
+
+      {queue.length === 0 ? (
+        <GlassCard className="p-8">
+          <h2 className="text-2xl font-semibold">Queue is clear</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Imported songs are either matched already or there are no playlists waiting for review.
+          </p>
+        </GlassCard>
+      ) : (
+        <section className="space-y-4">
+          {queue.map((item) => (
+            <QueueObservationItem
+              key={item.observationId}
+              item={item}
+              activeObservationId={activeObservationId}
+              onAction={handleObservationAction}
+            />
+          ))}
+        </section>
+      )}
+    </GradientPageShell>
+  );
+}
+
+interface QueueObservationItemProps {
+  item: MatchingQueueItemResponse;
+  activeObservationId: string | null;
+  onAction: (observationId: string, action: () => Promise<void>) => Promise<void>;
+}
+
+// fallow-ignore-next-line complexity
+function QueueObservationItem({ item, activeObservationId, onAction }: QueueObservationItemProps) {
+  const duration = formatDuration(item.durationSeconds);
+  const isBusy = activeObservationId === item.observationId;
+
+  return (
+    <GlassCard className="p-5">
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="flex min-w-0 flex-1 gap-4">
+          {item.thumbnailUrl ? (
+            <img src={item.thumbnailUrl} alt="" className="h-28 w-28 rounded-2xl object-cover" />
+          ) : (
+            <div className="flex h-28 w-28 items-center justify-center rounded-2xl bg-white/80 text-sm text-gray-500">
+              No art
+            </div>
+          )}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-semibold text-gray-900">{item.title}</h2>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(item.matchStatus)}`}>
+                {formatStatus(item.matchStatus)}
+              </span>
+            </div>
             <p className="mt-2 text-sm text-gray-600">
-              Review ambiguous and unmatched imports before they become canonical Cantaro tracks.
+              {item.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''}
             </p>
-          </div>
-          <div className="flex gap-2">
-            <GradientButton tone="soft" onClick={onNavigateHome}>
-              Back to home
-            </GradientButton>
-            <GradientButton tone="soft" onClick={() => void loadQueue()}>
-              Refresh queue
-            </GradientButton>
-          </div>
-        </header>
-
-        {summary ? (
-          <section className="grid gap-4 md:grid-cols-4">
-            {[
-              { label: 'Unresolved', value: summary.totalUnresolved, tint: 'from-indigo-500 to-purple-500' },
-              { label: 'Pending', value: summary.pending, tint: 'from-sky-500 to-indigo-500' },
-              { label: 'Ambiguous', value: summary.ambiguous, tint: 'from-amber-500 to-orange-500' },
-              { label: 'No match', value: summary.noMatch, tint: 'from-rose-500 to-pink-500' },
-            ].map((stat) => (
-              <GlassCard key={stat.label} className="p-5">
-                <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">{stat.label}</p>
-                <p className={`mt-3 bg-linear-to-r ${stat.tint} bg-clip-text text-3xl font-bold text-transparent`}>
-                  {stat.value}
-                </p>
-              </GlassCard>
-            ))}
-          </section>
-        ) : null}
-
-        {error ? (
-          <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
-            {error}
-          </GlassCard>
-        ) : null}
-
-        {queue.length === 0 ? (
-          <GlassCard className="p-8">
-            <h2 className="text-2xl font-semibold">Queue is clear</h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Imported songs are either matched already or there are no playlists waiting for review.
+            <p className="mt-2 text-xs text-gray-500">
+              Source: {formatSource(item.sourceType, item.externalId)}
             </p>
-          </GlassCard>
-        ) : (
-          <section className="space-y-4">
-            {queue.map((item) => {
-              const duration = formatDuration(item.durationSeconds);
-              const isBusy = activeObservationId === item.observationId;
+            <p className="mt-2 text-sm text-gray-700">
+              {item.resolutionNotes ?? 'Waiting for a matching decision.'}
+            </p>
+            <MarkerList markers={item.diagnostics.versionMarkers} tone="version" />
+            <MarkerList markers={item.diagnostics.playbackModifiers} tone="playback" />
+            {item.lastMatchError ? (
+              <p className="mt-2 text-sm text-rose-700">Last error: {item.lastMatchError}</p>
+            ) : null}
+            <p className="mt-2 text-xs text-gray-500">
+              Attempts: {item.matchAttemptCount}
+              {item.lastMatchAttemptedAt
+                ? ` • Last tried ${new Date(item.lastMatchAttemptedAt).toLocaleString()}`
+                : ''}
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
+                <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Top cluster</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900">{formatPercent(item.diagnostics.topScore) ?? '—'}</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
+                <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Runner-up</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900">{formatPercent(item.diagnostics.secondDistinctScore) ?? '—'}</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
+                <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Distinct clusters</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900">{item.diagnostics.distinctClusterCount}</p>
+              </div>
+            </div>
+          </div>
+        </div>
 
-              return (
-                <GlassCard key={item.observationId} className="p-5">
-                  <div className="flex flex-col gap-4 lg:flex-row">
-                    <div className="flex min-w-0 flex-1 gap-4">
-                      {item.thumbnailUrl ? (
-                        <img src={item.thumbnailUrl} alt="" className="h-28 w-28 rounded-2xl object-cover" />
-                      ) : (
-                        <div className="flex h-28 w-28 items-center justify-center rounded-2xl bg-white/80 text-sm text-gray-500">
-                          No art
-                        </div>
-                      )}
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="text-xl font-semibold text-gray-900">{item.title}</h2>
-                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(item.matchStatus)}`}>
-                            {formatStatus(item.matchStatus)}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm text-gray-600">
-                          {item.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''}
-                        </p>
-                        <p className="mt-2 text-xs text-gray-500">
-                          Source: {formatSource(item.sourceType, item.externalId)}
-                        </p>
-                        <p className="mt-2 text-sm text-gray-700">
-                          {item.resolutionNotes ?? 'Waiting for a matching decision.'}
-                        </p>
-                        <MarkerList markers={item.diagnostics.versionMarkers} tone="version" />
-                        <MarkerList markers={item.diagnostics.playbackModifiers} tone="playback" />
-                        {item.lastMatchError ? (
-                          <p className="mt-2 text-sm text-rose-700">Last error: {item.lastMatchError}</p>
-                        ) : null}
-                        <p className="mt-2 text-xs text-gray-500">
-                          Attempts: {item.matchAttemptCount}
-                          {item.lastMatchAttemptedAt
-                            ? ` • Last tried ${new Date(item.lastMatchAttemptedAt).toLocaleString()}`
-                            : ''}
-                        </p>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
-                            <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Top cluster</p>
-                            <p className="mt-1 text-lg font-semibold text-gray-900">{formatPercent(item.diagnostics.topScore) ?? '—'}</p>
-                          </div>
-                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
-                            <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Runner-up</p>
-                            <p className="mt-1 text-lg font-semibold text-gray-900">{formatPercent(item.diagnostics.secondDistinctScore) ?? '—'}</p>
-                          </div>
-                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
-                            <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">Distinct clusters</p>
-                            <p className="mt-1 text-lg font-semibold text-gray-900">{item.diagnostics.distinctClusterCount}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 lg:w-64 lg:flex-col">
-                      <GradientButton
-                        onClick={() => void handleObservationAction(item.observationId, () => matchingApi.retry(item.observationId))}
-                        disabled={isBusy}
-                      >
-                        {isBusy ? 'Working…' : 'Retry matching'}
-                      </GradientButton>
-                      <GradientButton
-                        tone="soft"
-                        onClick={() =>
-                          void handleObservationAction(item.observationId, () => matchingApi.createTrack(item.observationId))
-                        }
-                        disabled={isBusy}
-                      >
-                        Create canonical track
-                      </GradientButton>
-                      <button
-                        type="button"
-                        className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        onClick={() =>
-                          void handleObservationAction(item.observationId, () => matchingApi.markNoMatch(item.observationId))
-                        }
-                        disabled={isBusy}
-                      >
-                        Mark no match
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-                    <div className="rounded-2xl bg-white/70 p-4">
-                      <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">Appears in playlists</p>
-                      <ul className="mt-3 space-y-2 text-sm text-gray-700">
-                        {item.playlists.map((playlist) => (
-                          <li key={`${playlist.playlistId}-${playlist.position}`} className="rounded-xl bg-white px-3 py-2">
-                            {playlist.playlistName} <span className="text-gray-500">• position {playlist.position + 1}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="rounded-2xl bg-white/70 p-4">
-                      <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">Suggested candidates</p>
-                      {item.candidates.length === 0 ? (
-                        <p className="mt-3 text-sm text-gray-600">No candidates were stored for this observation yet.</p>
-                      ) : (
-                        <div className="mt-3 space-y-3">
-                          {item.candidates.map((candidate) => (
-                            <CandidateCard
-                              key={candidate.candidateId}
-                              candidate={candidate}
-                              disabled={isBusy}
-                              onUse={() =>
-                                void handleObservationAction(item.observationId, () =>
-                                  matchingApi.selectCandidate(item.observationId, candidate.candidateId),
-                                )
-                              }
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </GlassCard>
-              );
-            })}
-          </section>
-        )}
+        <div className="flex flex-wrap gap-2 lg:w-64 lg:flex-col">
+          <GradientButton
+            onClick={() => void onAction(item.observationId, () => matchingApi.retry(item.observationId))}
+            disabled={isBusy}
+          >
+            {isBusy ? 'Working…' : 'Retry matching'}
+          </GradientButton>
+          <GradientButton
+            tone="soft"
+            onClick={() => void onAction(item.observationId, () => matchingApi.createTrack(item.observationId))}
+            disabled={isBusy}
+          >
+            Create canonical track
+          </GradientButton>
+          <button
+            type="button"
+            className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void onAction(item.observationId, () => matchingApi.markNoMatch(item.observationId))}
+            disabled={isBusy}
+          >
+            Mark no match
+          </button>
+        </div>
       </div>
-    </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="rounded-2xl bg-white/70 p-4">
+          <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">Appears in playlists</p>
+          <ul className="mt-3 space-y-2 text-sm text-gray-700">
+            {item.playlists.map((playlist) => (
+              <li key={`${playlist.playlistId}-${playlist.position}`} className="rounded-xl bg-white px-3 py-2">
+                {playlist.playlistName} <span className="text-gray-500">• position {playlist.position + 1}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="rounded-2xl bg-white/70 p-4">
+          <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">Suggested candidates</p>
+          {item.candidates.length === 0 ? (
+            <p className="mt-3 text-sm text-gray-600">No candidates were stored for this observation yet.</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {item.candidates.map((candidate) => (
+                <CandidateCard
+                  key={candidate.candidateId}
+                  candidate={candidate}
+                  disabled={isBusy}
+                  onUse={() => void onAction(item.observationId, () => matchingApi.selectCandidate(item.observationId, candidate.candidateId))}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+// fallow-ignore-next-line complexity
+function CandidateScoreBadges({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
+  const duration = formatDuration(candidate.durationSeconds);
+  const semanticClass= candidate.semanticAdjustment && candidate.semanticAdjustment < 0
+    ? 'bg-rose-100 text-rose-700'
+    : 'bg-emerald-100 text-emerald-700';
+  const semanticLabel = candidate.semanticAdjustment !== undefined
+    ? `${candidate.semanticAdjustment > 0 ? '+' : ''}${Math.round(candidate.semanticAdjustment * 100)} pts`
+    : '—';
+
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-500">
+        {candidate.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''} • {candidate.candidateSource}
+      </p>
+      <MarkerList markers={candidate.versionMarkers} tone="version" />
+      <MarkerList markers={candidate.playbackModifiers} tone="playback" />
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600">
+        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+          Title {formatPercent(candidate.titleSimilarity) ?? '—'}
+        </span>
+        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+          Artist {formatPercent(candidate.artistSimilarity) ?? '—'}
+        </span>
+        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+          Duration {formatPercent(candidate.durationScore) ?? '—'}
+        </span>
+        <span className={`rounded-full px-2 py-1 font-semibold ${semanticClass}`}>
+          Semantic {semanticLabel}
+        </span>
+        <span className="rounded-full bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
+          Cluster size {candidate.clusterSize}
+        </span>
+      </div>
+    </>
+  );
+}
+
+function CandidateNotes({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
+  const clusterReason = formatClusterReason(candidate.clusterReason);
+  return (
+    <>
+      {clusterReason ? <p className="mt-2 text-xs font-medium text-gray-600">{clusterReason}</p> : null}
+      {candidate.semanticExplanation ? <p className="mt-2 text-xs text-gray-600">{candidate.semanticExplanation}</p> : null}
+      {candidate.mbidRecording ? (
+        <p className="mt-1 text-xs text-gray-500">
+          MBID:{' '}
+          <a
+            href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800"
+          >
+            {candidate.mbidRecording}
+          </a>
+        </p>
+      ) : null}
+      {candidate.explanation ? <p className="mt-2 text-sm text-gray-700">{candidate.explanation}</p> : null}
+    </>
   );
 }
 
@@ -377,8 +436,6 @@ function CandidateCard({
   disabled: boolean;
   onUse: () => void;
 }) {
-  const duration = formatDuration(candidate.durationSeconds);
-
   return (
     <div className="rounded-2xl bg-white px-4 py-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -389,50 +446,8 @@ function CandidateCard({
               {Math.round(candidate.score * 100)}%
             </span>
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            {candidate.artist ?? 'Unknown artist'} {duration ? `• ${duration}` : ''} • {candidate.candidateSource}
-          </p>
-          <MarkerList markers={candidate.versionMarkers} tone="version" />
-          <MarkerList markers={candidate.playbackModifiers} tone="playback" />
-          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600">
-            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-              Title {formatPercent(candidate.titleSimilarity) ?? '—'}
-            </span>
-            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-              Artist {formatPercent(candidate.artistSimilarity) ?? '—'}
-            </span>
-            <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-              Duration {formatPercent(candidate.durationScore) ?? '—'}
-            </span>
-            <span className={`rounded-full px-2 py-1 font-semibold ${candidate.semanticAdjustment && candidate.semanticAdjustment < 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-              Semantic {candidate.semanticAdjustment !== undefined ? `${candidate.semanticAdjustment > 0 ? '+' : ''}${Math.round(candidate.semanticAdjustment * 100)} pts` : '—'}
-            </span>
-            <span className="rounded-full bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
-              Cluster size {candidate.clusterSize}
-            </span>
-          </div>
-          {formatClusterReason(candidate.clusterReason) ? (
-            <p className="mt-2 text-xs font-medium text-gray-600">{formatClusterReason(candidate.clusterReason)}</p>
-          ) : null}
-          {candidate.semanticExplanation ? (
-            <p className="mt-2 text-xs text-gray-600">{candidate.semanticExplanation}</p>
-          ) : null}
-          {candidate.mbidRecording ? (
-            <p className="mt-1 text-xs text-gray-500">
-              MBID:{' '}
-              <a
-                href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800"
-              >
-                {candidate.mbidRecording}
-              </a>
-            </p>
-          ) : null}
-          {candidate.explanation ? (
-            <p className="mt-2 text-sm text-gray-700">{candidate.explanation}</p>
-          ) : null}
+          <CandidateScoreBadges candidate={candidate} />
+          <CandidateNotes candidate={candidate} />
         </div>
 
         <button

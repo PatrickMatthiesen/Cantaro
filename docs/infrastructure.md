@@ -172,6 +172,134 @@ while keeping your preferences, mappings, and tags under your control.
   - last_synced_at
   - last_sync_status
 
+## Media Bounded Context (MVP foundation)
+
+The media MVP is a separate bounded context from the existing music model.
+Media titles, provider mappings, user library state, and site observations
+should not be squeezed into track or playlist tables.
+
+### Canonical media identity
+
+- MediaTitle
+  - id (internal MediaTitleID, canonical within Cantaro)
+  - canonical_title / sort_title / original_title
+  - media_kind (anime, manga, movie, series, other)
+  - optional synopsis and canonical metadata snapshot
+  - optional known totals such as episode_count, chapter_count, volume_count
+  - capability fields:
+    - supports_episode_progress
+    - supports_chapter_progress
+    - supports_volume_progress
+    - is_completion_only
+  - primary_progress_dimension and release_status_dimension
+    - one of: episode, chapter, volume, completion_only, unavailable
+  - created_at / updated_at
+
+- MediaProviderLink
+  - shared mapping from a canonical MediaTitle to a provider catalog record
+  - media_title_id
+  - provider (anilist, future providers later)
+  - external_id / external_url
+  - link_source (imported, automatic, user_confirmed)
+  - linked_by_user_id (nullable audit field)
+  - confidence / raw metadata / last_verified_at
+  - created_at / updated_at
+  - identity rule:
+    - provider + external_id is the shared upstream identity boundary
+    - this mapping is canonical/shared, not per-user, even if a user action
+      created the link
+
+- MediaLibraryEntry
+  - user-owned library state imported from or synchronized with a provider
+  - user_id
+  - media_title_id
+  - provider
+  - provider_account_id
+  - connected_service_account_id (nullable so disconnected data can remain)
+  - provider_media_id
+  - provider_library_entry_id (nullable when the provider does not expose a
+    separate library-row identity)
+  - normalized_status
+    - current, planned, paused, completed, dropped, unknown
+  - raw_status / raw_list_name / raw metadata snapshot
+  - progress_episodes / progress_chapters / progress_volumes
+  - sync metadata:
+    - last_synced_at
+    - last_remote_update_at
+    - last_local_edit_at
+    - last_mutation_source
+  - created_at / updated_at
+  - identity rule:
+    - the stable per-user provider identity boundary is
+      user_id + provider + provider_account_id + provider_media_id
+    - later multi-provider precedence can operate on these provider-specific
+      rows without reshaping the canonical MediaTitle model
+
+### Media model rules
+
+- Cantaro owns canonical MediaTitle records.
+- Provider links attach provider catalog identities to MediaTitles explicitly;
+  they are not inferred from the library row alone.
+- Explicit user progress edits apply to the user's MediaLibraryEntry and do not
+  require Cantaro to persist which browser site or tab happened to be active.
+- Unsupported progress dimensions remain null and unavailable in the UI instead
+  of being represented as zero.
+- Completion-only media should not fabricate episode, chapter, or volume data.
+- Sync-safe outbound writes depend on the library-entry metadata:
+  - last_synced_at records when Cantaro last aligned with provider state
+  - last_remote_update_at records the freshest provider-side change Cantaro has
+    observed
+  - last_local_edit_at and last_mutation_source distinguish local user edits
+    from imported remote state
+- Future user-configured provider ordering is intentionally deferred, but the
+  model keeps provider-specific library rows separate so precedence and fallback
+  can be layered on later without changing MediaTitle identity rules.
+- If supported-site automation is added later, its site-origin ingestion should
+  be treated as a separate workflow layered on top of the media model rather
+  than a required foundation entity for explicit user-managed progress.
+
+### Media provider abstraction
+
+Media providers should expose a provider-agnostic contract that supports:
+
+- account connection status
+- library import
+- entry search
+- entry details lookup
+- progress update
+- list/status update
+- release metadata lookup
+
+Concrete provider adapters keep provider-specific payloads and labels inside the
+adapter while translating into Cantaro-owned media statuses, dimensions, and
+sync metadata.
+
+### AniList adapter notes (initial provider slice)
+
+- First-class supported AniList media kinds in the MVP:
+  - anime
+  - manga
+- AniList is not treated as proof that Cantaro now supports general-purpose
+  movie or TV catalog semantics. The adapter stays anime/manga shaped even
+  though the wider domain keeps room for broader media kinds later.
+- AniList account connection uses OAuth Authorization Code + PKCE.
+- Cantaro stores AniList refresh tokens encrypted at rest and refreshes access
+  tokens server-side when API calls are needed.
+- Imported AniList library rows retain provider-specific identifiers and raw
+  status labels for diagnostics while exposing Cantaro-normalized statuses in
+  the product model.
+- AniList `REPEATING` currently normalizes to Cantaro `current` in the MVP; the
+  raw provider value is still preserved.
+- AniList writes are backend-owned:
+  - explicit user progress/status updates are queued and executed by the
+    backend
+  - transient failures are retried with backoff
+  - queued operation state is observable so the client does not have to invent
+    its own retry logic
+- Disconnecting AniList deletes Cantaro-held AniList credentials and leaves
+  imported library rows retained but disconnected by clearing the active
+  account reference.
+
 ## Sync Model (Summary)
 
 - Cantaro is the source of truth for unified playlists.

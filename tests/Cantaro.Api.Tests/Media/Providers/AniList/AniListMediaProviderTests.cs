@@ -1,0 +1,240 @@
+using System.Net;
+using System.Text;
+using Cantaro.Api.Configuration;
+using Cantaro.Api.Data;
+using Cantaro.Api.Models;
+using Cantaro.Api.Services;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+namespace Cantaro.Api.Tests;
+
+public class AniListMediaProviderTests
+{
+    [Fact]
+    public async Task GetTitleDetailsAsync_NormalizesStreamingAvailabilityLinks()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite(connection)
+                .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(302, "availability@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 902,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "302",
+            DisplayName = "Availability Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        const string graphQlResponse = """
+                        {
+                            "data": {
+                                "Media": {
+                                    "id": 140960,
+                                    "type": "ANIME",
+                                    "status": "RELEASING",
+                                    "siteUrl": "https://anilist.co/anime/140960/Spy-x-Family",
+                                    "description": "A spy starts a family.",
+                                    "episodes": 25,
+                                    "bannerImage": "https://example.test/banner.jpg",
+                                    "startDate": { "year": 2022 },
+                                    "title": {
+                                        "romaji": "Spy x Family",
+                                        "english": "Spy x Family",
+                                        "native": "SPY x FAMILY"
+                                    },
+                                    "coverImage": {
+                                        "medium": "https://example.test/poster-medium.jpg",
+                                        "large": "https://example.test/poster-large.jpg"
+                                    },
+                                    "nextAiringEpisode": {
+                                        "episode": 13,
+                                        "airingAt": 1714348800
+                                    },
+                                    "externalLinks": [
+                                        {
+                                            "url": "https://www.crunchyroll.com/series/G4PH0WXVJ",
+                                            "site": "Crunchyroll",
+                                            "type": "STREAMING",
+                                            "language": "en",
+                                            "icon": "https://example.test/crunchyroll.png"
+                                        },
+                                        {
+                                            "url": "https://myanimelist.net/anime/50265",
+                                            "site": "MyAnimeList",
+                                            "type": "INFO",
+                                            "language": "en",
+                                            "icon": null
+                                        }
+                                    ],
+                                    "streamingEpisodes": [
+                                        {
+                                            "title": "Operation Strix",
+                                            "url": "https://www.crunchyroll.com/watch/G50UZK6V7",
+                                            "site": "Crunchyroll"
+                                        },
+                                        {
+                                            "title": "Family Outing",
+                                            "url": "https://www.netflix.com/watch/81511410",
+                                            "site": "Netflix"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                        """;
+
+        var provider = CreateProvider(dbContext, new StubHttpMessageHandler(graphQlResponse), dataProtectionProvider);
+
+        var details = await provider.GetTitleDetailsAsync(user.Id, "140960", CancellationToken.None);
+
+        Assert.NotNull(details);
+        var availabilityLinks = Assert.IsAssignableFrom<IReadOnlyList<MediaProviderAvailabilityLink>>(details.AvailabilityLinks);
+        Assert.Collection(
+                availabilityLinks,
+                crunchyroll =>
+                {
+                    Assert.Equal("crunchyroll", crunchyroll.ServiceId);
+                    Assert.Equal("Crunchyroll", crunchyroll.DisplayName);
+                    Assert.Equal("streaming", crunchyroll.AvailabilityKind);
+                    Assert.Equal("https://www.crunchyroll.com/series/G4PH0WXVJ", crunchyroll.Url);
+                },
+                netflix =>
+                {
+                    Assert.Equal("netflix", netflix.ServiceId);
+                    Assert.Equal("Netflix", netflix.DisplayName);
+                    Assert.Equal("streaming", netflix.AvailabilityKind);
+                    Assert.Equal("https://www.netflix.com/watch/81511410", netflix.Url);
+                });
+    }
+
+    [Fact]
+    public async Task DisconnectAsync_RemovesCredentialsAndLeavesEntriesDisconnected()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(301, "disconnect@example.com");
+        var account = new ConnectedServiceAccount
+        {
+            Id = 901,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "viewer-301",
+            DisplayName = "Disconnect Tester",
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        };
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Apothecary Diaries",
+            MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            MediaTitleId = title.Id,
+            ConnectedServiceAccountId = account.Id,
+            Provider = "anilist",
+            ProviderAccountId = account.ExternalAccountId,
+            ProviderMediaId = "161645",
+            NormalizedStatus = MediaLibraryStatuses.Current,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(account);
+        dbContext.MediaTitles.Add(title);
+        dbContext.MediaLibraryEntries.Add(entry);
+        await dbContext.SaveChangesAsync();
+
+        var provider = CreateProvider(dbContext);
+        await provider.DisconnectAsync(user.Id, CancellationToken.None);
+
+        var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
+
+        Assert.Empty(dbContext.ConnectedServiceAccounts);
+        Assert.Null(persistedEntry.ConnectedServiceAccountId);
+        Assert.Equal(MediaMutationSources.ProviderDisconnect, persistedEntry.LastMutationSource);
+    }
+
+    private static AniListMediaProvider CreateProvider(
+        ApplicationDbContext dbContext,
+        HttpMessageHandler? handler = null,
+        IDataProtectionProvider? dataProtectionProvider = null)
+    {
+        var apiClient = new AniListApiClient(
+            new HttpClient(handler ?? new StubHttpMessageHandler()),
+            Options.Create(new AniListOptions
+            {
+                ClientId = "client-id",
+                ClientSecret = "client-secret"
+            }),
+            NullLogger<AniListApiClient>.Instance);
+        dataProtectionProvider ??= DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        var tokenEncryption = new TokenEncryptionService(dataProtectionProvider);
+
+        return new AniListMediaProvider(dbContext, apiClient, tokenEncryption, NullLogger<AniListMediaProvider>.Instance);
+    }
+
+    private static string CreateEncryptedToken(IDataProtectionProvider dataProtectionProvider, string token)
+    {
+        var tokenEncryption = new TokenEncryptionService(dataProtectionProvider);
+        return tokenEncryption.Encrypt(token);
+    }
+
+    private sealed class StubHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly string _responseBody;
+
+        public StubHttpMessageHandler(string responseBody = "{}")
+        {
+            _responseBody = responseBody;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_responseBody, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+}

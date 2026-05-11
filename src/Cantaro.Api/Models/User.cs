@@ -11,4 +11,8 @@ public class User : IdentityUser<int>
     /// Navigation property for connected service accounts
     /// </summary>
     public ICollection<ConnectedServiceAccount> ConnectedServiceAccounts { get; set; } = [];
+
+    public ICollection<MediaLibraryEntry> MediaLibraryEntries { get; set; } = [];
+
+    public ICollection<MediaProviderOperation> MediaProviderOperations { get; set; } = [];
 }

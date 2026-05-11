@@ -1,0 +1,24 @@
+{
+    "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+    "ignorePatterns": [
+        "web-ext.config.ts",
+        "wxt.config.ts"
+    ],
+    "entry": [
+        "entrypoints/background.ts",
+        "entrypoints/crunchyroll.content.ts",
+        "entrypoints/spotify.content.ts",
+        "entrypoints/popup/index.html",
+        "entrypoints/popup/main.tsx"
+    ],
+    "health": {
+        "maxCyclomatic": 12,
+        "maxCognitive": 13,
+        "maxCrap": 50
+    },
+    "ignoreDependencies": [
+        "@cantaro/client-shared",
+        "@wxt-dev/module-react",
+        "@tailwindcss/vite"
+    ]
+}

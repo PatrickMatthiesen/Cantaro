@@ -49,4 +49,13 @@ public class ConnectedServiceAccount
     /// Navigation property to User
     /// </summary>
     public User? User { get; set; }
+
+    /// <summary>
+    /// Media library entries that are currently attached to this live account.
+    /// Historical rows can outlive the account and will then have a null
+    /// ConnectedServiceAccountId.
+    /// </summary>
+    public ICollection<MediaLibraryEntry> MediaLibraryEntries { get; set; } = [];
+
+    public ICollection<MediaProviderOperation> MediaProviderOperations { get; set; } = [];
 }

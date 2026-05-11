@@ -342,16 +342,10 @@ public class MatchingController(
 
     private async Task<int> GetCurrentUserIdAsync()
     {
-        var email = User.Identity?.Name;
-        if (string.IsNullOrEmpty(email))
+        var user = await _userManager.GetUserAsync(User);
+        if (user is null)
         {
             throw new UnauthorizedAccessException("User not authenticated");
-        }
-
-        var user = await _userManager.FindByEmailAsync(email);
-        if (user == null)
-        {
-            throw new UnauthorizedAccessException("User not found");
         }
 
         return user.Id;
