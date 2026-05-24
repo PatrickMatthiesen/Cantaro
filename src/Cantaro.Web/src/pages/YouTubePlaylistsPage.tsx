@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { GlassCard, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
 import {
   YouTubeDisconnectedState,
@@ -9,12 +10,8 @@ import { useYouTubePlaylistsState } from '@cantaro/client-shared/music';
 import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '@cantaro/client-shared/music';
 
 interface YouTubePlaylistsPageProps {
-  navigation?: ReactNode;
-}
-
-function resolvePlaylistIdFromPath(): string | null {
-  const match = window.location.pathname.match(/^\/youtube\/playlists\/([^/]+)$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  embedded?: boolean;
+  playlistId?: string | null;
 }
 
 interface YouTubePlaylistsContentProps {
@@ -45,6 +42,7 @@ function YouTubePlaylistsContent({
   if (!status?.isConnected) {
     return <YouTubeDisconnectedState onConnect={onConnect} />;
   }
+
   if (selectedPlaylist) {
     return (
       <YouTubePlaylistDetailView
@@ -55,6 +53,7 @@ function YouTubePlaylistsContent({
       />
     );
   }
+
   return (
     <YouTubePlaylistBrowser
       status={status}
@@ -66,7 +65,8 @@ function YouTubePlaylistsContent({
   );
 }
 
-export function YouTubePlaylistsPage({ navigation }: YouTubePlaylistsPageProps) {
+export function YouTubePlaylistsPage({ embedded = false, playlistId = null }: YouTubePlaylistsPageProps) {
+  const navigate = useNavigate();
   const {
     status,
     playlists,
@@ -87,7 +87,6 @@ export function YouTubePlaylistsPage({ navigation }: YouTubePlaylistsPageProps) 
       return;
     }
 
-    const playlistId = resolvePlaylistIdFromPath();
     if (!playlistId) {
       if (selectedPlaylist) {
         clearSelectedPlaylist();
@@ -103,52 +102,23 @@ export function YouTubePlaylistsPage({ navigation }: YouTubePlaylistsPageProps) 
     if (playlist) {
       void selectPlaylist(playlist);
     }
-  }, [clearSelectedPlaylist, isLoading, playlists, selectPlaylist, selectedPlaylist, status?.isConnected]);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      const playlistId = resolvePlaylistIdFromPath();
-      if (!playlistId) {
-        clearSelectedPlaylist();
-        return;
-      }
-
-      const playlist = playlists.find((item) => item.id === playlistId);
-      if (playlist) {
-        void selectPlaylist(playlist);
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [clearSelectedPlaylist, playlists, selectPlaylist]);
+  }, [clearSelectedPlaylist, isLoading, playlistId, playlists, selectPlaylist, selectedPlaylist, status?.isConnected]);
 
   const handleSelectPlaylist = (playlist: PlatformPlaylist) => {
-    window.history.pushState({}, '', `/youtube/playlists/${encodeURIComponent(playlist.id)}`);
+    void navigate({
+      to: '/music/platforms/$platformId/playlists/$playlistId',
+      params: { platformId: 'youtube', playlistId: playlist.id },
+    });
     void selectPlaylist(playlist);
   };
 
   const handleBackToPlaylists = () => {
-    window.history.pushState({}, '', '/youtube');
+    void navigate({ to: '/music/platforms/$platformId', params: { platformId: 'youtube' } });
     clearSelectedPlaylist();
   };
 
-  if (isLoading) {
-    return <PageLoadingState message="Loading YouTube playlists…" />;
-  }
-
-  return (
-    <GradientPageShell className="text-gray-900">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">YouTube</p>
-          <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {navigation}
-        </div>
-      </header>
-
+  const content = (
+    <>
       {error ? (
         <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
           {error}
@@ -167,6 +137,30 @@ export function YouTubePlaylistsPage({ navigation }: YouTubePlaylistsPageProps) 
         onRefresh={() => void refreshPlaylists()}
         onDisconnect={() => void disconnect()}
       />
+    </>
+  );
+
+  if (isLoading) {
+    return embedded ? (
+      <GlassCard className="p-6">
+        <p className="text-sm text-gray-600">Loading YouTube playlists…</p>
+      </GlassCard>
+    ) : (
+      <PageLoadingState message="Loading YouTube playlists…" />
+    );
+  }
+
+  if (embedded) {
+    return <div className="space-y-5">{content}</div>;
+  }
+
+  return (
+    <GradientPageShell className="text-gray-900">
+      <header>
+        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">YouTube</p>
+        <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
+      </header>
+      {content}
     </GradientPageShell>
   );
 }

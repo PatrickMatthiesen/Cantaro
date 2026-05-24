@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
 
 function readEnvValue(name: string): string | undefined {
   const exactMatch = process.env[name]
@@ -29,7 +30,14 @@ export default defineConfig(({ command }) => ({
   define: {
     __CANTARO_TRUSTED_API_BASE_URL__: JSON.stringify(command === 'serve' ? apiProxyTarget : configuredApiBaseUrl),
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    tanstackRouter({
+      target: 'react',
+      autoCodeSplitting: true,
+    }),
+    react(),
+    tailwindcss(),
+  ],
   server: {
     strictPort: true,
     proxy: {

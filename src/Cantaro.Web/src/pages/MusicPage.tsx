@@ -1,23 +1,24 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Link, Outlet } from '@tanstack/react-router';
 import {
   musicLibraryApi,
   platformCatalog,
-  platformManager,
   type MusicLibraryPlaylist,
   type MusicLibraryResponse,
   type MusicLibrarySong,
-  type PlatformId,
 } from '@cantaro/client-shared/music';
-import { GlassCard, GradientPageShell, PageLoadingState, StatusBadge } from '@cantaro/client-shared/ui';
+import { GlassCard, StatusBadge } from '@cantaro/client-shared/ui';
+import { AppPageShell, GlobalHeader, RequireAuth } from '../components/AppShell';
+import { SubjectNav, type SubjectNavItem } from '../components/SubjectNav';
 import { MatchingReviewPage } from './MatchingReviewPage';
+import { YouTubePlaylistsPage } from './YouTubePlaylistsPage';
+import { useConnectedMusicPlatforms } from '../music/useConnectedMusicPlatforms';
 
-type MusicTab = 'songs' | 'playlists' | 'matching';
-
-interface MusicPageProps {
-  navigation?: ReactNode;
-  initialTab?: MusicTab;
-  onNavigatePlatform: (platformId: PlatformId) => void;
-}
+const musicNavItems: SubjectNavItem[] = [
+  { label: 'Songs', to: '/music/songs' },
+  { label: 'Playlists', to: '/music/playlists' },
+  { label: 'Matching', to: '/music/matching' },
+];
 
 function formatDuration(seconds?: number): string | null {
   if (!seconds) return null;
@@ -35,31 +36,6 @@ function formatTimestamp(value?: string): string | null {
 
 function platformName(platformId: string): string {
   return platformCatalog.find((platform) => platform.id === platformId)?.name ?? platformId;
-}
-
-function MusicTabButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-        active
-          ? 'bg-gray-900 text-white shadow-sm'
-          : 'bg-white/70 text-gray-700 hover:bg-white'
-      }`}
-      aria-pressed={active}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
 }
 
 function MusicSummary({ library }: { library: MusicLibraryResponse }) {
@@ -190,36 +166,8 @@ function PlaylistsView({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
   );
 }
 
-function PlatformsSidebar({ onNavigatePlatform }: { onNavigatePlatform: (platformId: PlatformId) => void }) {
-  const [connectedPlatformIds, setConnectedPlatformIds] = useState<PlatformId[]>([]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const loadStatuses = async () => {
-      const statuses = await Promise.all(
-        platformCatalog
-          .filter((platform) => platform.implemented)
-          .map(async (platform) => {
-            try {
-              const status = await platformManager.status(platform.id);
-              return status.isConnected ? platform.id : null;
-            } catch {
-              return null;
-            }
-          }),
-      );
-
-      if (!isCancelled) {
-        setConnectedPlatformIds(statuses.filter((platformId): platformId is PlatformId => platformId !== null));
-      }
-    };
-
-    void loadStatuses();
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
+function MusicPlatformSidebar() {
+  const { connectedPlatformIds } = useConnectedMusicPlatforms();
 
   return (
     <GlassCard className="p-5">
@@ -230,12 +178,12 @@ function PlatformsSidebar({ onNavigatePlatform }: { onNavigatePlatform: (platfor
           const canOpen = platform.implemented;
 
           return (
-            <button
+            <Link
               key={platform.id}
-              type="button"
-              className="group w-full rounded-2xl bg-white/70 p-3 text-left transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              to="/music/platforms/$platformId"
+              params={{ platformId: platform.id }}
               disabled={!canOpen}
-              onClick={() => onNavigatePlatform(platform.id)}
+              className="group block w-full rounded-2xl bg-white/70 p-3 text-left transition hover:bg-white aria-disabled:pointer-events-none aria-disabled:opacity-60"
             >
               <div className="flex items-center gap-3">
                 <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
@@ -248,7 +196,7 @@ function PlatformsSidebar({ onNavigatePlatform }: { onNavigatePlatform: (platfor
                   </p>
                 </div>
               </div>
-            </button>
+            </Link>
           );
         })}
       </div>
@@ -256,20 +204,7 @@ function PlatformsSidebar({ onNavigatePlatform }: { onNavigatePlatform: (platfor
   );
 }
 
-function resolveInitialMusicTab(initialTab?: MusicTab): MusicTab {
-  if (initialTab) return initialTab;
-  const pathTab = window.location.pathname.split('/').filter(Boolean)[1];
-  if (pathTab === 'playlists' || pathTab === 'matching') return pathTab;
-  const tab = new URLSearchParams(window.location.search).get('tab');
-  return tab === 'playlists' || tab === 'matching' ? tab : 'songs';
-}
-
-function pathForMusicTab(tab: MusicTab): string {
-  return `/music/${tab}`;
-}
-
-export function MusicPage({ navigation, initialTab, onNavigatePlatform }: MusicPageProps) {
-  const [activeTab, setActiveTab] = useState<MusicTab>(() => resolveInitialMusicTab(initialTab));
+function useMusicLibrary() {
   const [library, setLibrary] = useState<MusicLibraryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -291,67 +226,94 @@ export function MusicPage({ navigation, initialTab, onNavigatePlatform }: MusicP
     void loadLibrary();
   }, [loadLibrary]);
 
-  useEffect(() => {
-    const handlePopState = () => setActiveTab(resolveInitialMusicTab(initialTab));
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [initialTab]);
+  return { library, error, isLoading, loadLibrary };
+}
 
-  const selectTab = (tab: MusicTab) => {
-    setActiveTab(tab);
-    window.history.pushState({}, '', pathForMusicTab(tab));
-  };
+function MusicLibraryPanel({ children }: { children: (library: MusicLibraryResponse) => ReactNode }) {
+  const { library, error, isLoading, loadLibrary } = useMusicLibrary();
 
   if (isLoading) {
-    return <PageLoadingState message="Loading music library…" />;
+    return (
+      <GlassCard className="p-6">
+        <p className="text-sm text-gray-600">Loading music library…</p>
+      </GlassCard>
+    );
   }
 
   return (
-    <GradientPageShell className="text-gray-900" contentClassName="max-w-7xl">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Music</p>
-          <h1 className="mt-1 text-3xl font-bold">Music library</h1>
-        </div>
-        {navigation}
-      </header>
-
+    <div className="space-y-5">
       {error ? (
         <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
-          {error}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>{error}</span>
+            <button type="button" className="text-sm font-semibold text-rose-800 underline" onClick={() => void loadLibrary()}>
+              Retry
+            </button>
+          </div>
         </GlassCard>
       ) : null}
 
       {library ? (
+        <>
+          <MusicSummary library={library} />
+          {children(library)}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+export function MusicLayout() {
+  return (
+    <RequireAuth>
+      <AppPageShell contentClassName="max-w-7xl">
+        <GlobalHeader eyebrow="Cantaro · Music" title="Music library" />
         <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
           <main className="space-y-5">
-            <MusicSummary library={library} />
-            <GlassCard className="p-2">
-              <div className="flex gap-2">
-                <MusicTabButton active={activeTab === 'songs'} onClick={() => selectTab('songs')}>
-                  Songs
-                </MusicTabButton>
-                <MusicTabButton active={activeTab === 'playlists'} onClick={() => selectTab('playlists')}>
-                  Playlists
-                </MusicTabButton>
-                <MusicTabButton active={activeTab === 'matching'} onClick={() => selectTab('matching')}>
-                  Matching
-                </MusicTabButton>
-              </div>
-            </GlassCard>
-            {activeTab === 'matching' ? (
-              <MatchingReviewPage embedded />
-            ) : activeTab === 'songs' ? (
-              <SongsView songs={library.songs} />
-            ) : (
-              <PlaylistsView playlists={library.playlists} />
-            )}
+            <SubjectNav label="Music sections" items={musicNavItems} />
+            <Outlet />
           </main>
           <aside>
-            <PlatformsSidebar onNavigatePlatform={onNavigatePlatform} />
+            <MusicPlatformSidebar />
           </aside>
         </div>
-      ) : null}
-    </GradientPageShell>
+      </AppPageShell>
+    </RequireAuth>
+  );
+}
+
+export function MusicSongsPage() {
+  return (
+    <MusicLibraryPanel>
+      {(library) => <SongsView songs={library.songs} />}
+    </MusicLibraryPanel>
+  );
+}
+
+export function MusicPlaylistsPage() {
+  return (
+    <MusicLibraryPanel>
+      {(library) => <PlaylistsView playlists={library.playlists} />}
+    </MusicLibraryPanel>
+  );
+}
+
+export function MusicMatchingPage() {
+  return <MatchingReviewPage embedded />;
+}
+
+export function MusicPlatformPage({ platformId, playlistId = null }: { platformId: string; playlistId?: string | null }) {
+  if (platformId === 'youtube') {
+    return <YouTubePlaylistsPage embedded playlistId={playlistId} />;
+  }
+
+  const platform = platformCatalog.find((item) => item.id === platformId);
+
+  return (
+    <GlassCard className="p-6">
+      <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Platform</p>
+      <h2 className="mt-2 text-2xl font-semibold text-gray-900">{platform?.name ?? platformId}</h2>
+      <p className="mt-2 text-sm text-gray-600">This platform is not available yet.</p>
+    </GlassCard>
   );
 }

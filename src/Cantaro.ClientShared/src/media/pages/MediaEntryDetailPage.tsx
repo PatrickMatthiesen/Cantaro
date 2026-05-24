@@ -434,6 +434,7 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
 interface DetailPageLayoutProps {
   children: ReactNode;
   className?: string;
+  embedded?: boolean;
 }
 
 interface DetailBannerProps {
@@ -479,6 +480,7 @@ interface AutoProgressCardProps {
 interface MediaEntryDetailContentProps {
   libraryEntryId: string;
   entry: MediaLibraryEntryDetailDto;
+  embedded: boolean;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingRemote: boolean;
   isSavingProgress: boolean;
@@ -503,7 +505,15 @@ interface MediaEntryDetailContentProps {
   onUnlink: (providerId: string) => void;
 }
 
-function DetailPageLayout({ children, className = 'space-y-6' }: DetailPageLayoutProps) {
+function DetailPageLayout({ children, className = 'space-y-6', embedded = false }: DetailPageLayoutProps) {
+  if (embedded) {
+    return (
+      <div className={`mx-auto max-w-4xl ${className}`}>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
       <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
@@ -516,17 +526,17 @@ function DetailPageLayout({ children, className = 'space-y-6' }: DetailPageLayou
   );
 }
 
-function DetailLoadingState() {
+function DetailLoadingState({ embedded = false }: { embedded?: boolean }) {
   return (
-    <DetailPageLayout className="">
+    <DetailPageLayout className="" embedded={embedded}>
       <GlassCard className="h-96 animate-pulse" />
     </DetailPageLayout>
   );
 }
 
-function DetailErrorState({ error, onNavigateBack, onRetry }: { error: string | null; onNavigateBack: () => void; onRetry: () => Promise<void> }) {
+function DetailErrorState({ error, embedded = false, onNavigateBack, onRetry }: { error: string | null; embedded?: boolean; onNavigateBack: () => void; onRetry: () => Promise<void> }) {
   return (
-    <DetailPageLayout className="space-y-4">
+    <DetailPageLayout className="space-y-4" embedded={embedded}>
       <GradientButton tone="soft" onClick={onNavigateBack}>← Back to library</GradientButton>
       <GlassCard className="p-6">
         <p className="text-rose-700">{error ?? 'Entry not found'}</p>
@@ -830,11 +840,13 @@ function AutoProgressCard({ enabled, onToggle }: AutoProgressCardProps) {
 interface MediaEntryDetailPageProps {
   libraryEntryId: string;
   onNavigateBack: () => void;
+  embedded?: boolean;
 }
 
 function MediaEntryDetailContent({
   libraryEntryId,
   entry,
+  embedded,
   availabilityByProviderLink,
   isRefreshingRemote,
   isSavingProgress,
@@ -862,7 +874,7 @@ function MediaEntryDetailContent({
 
   return (
     <>
-      <DetailPageLayout>
+      <DetailPageLayout embedded={embedded}>
         <DetailHeader mediaKind={mediaKind} isConnected={entry.isConnected} onNavigateBack={onNavigateBack} />
         <EntryDetailAlerts saveMessage={saveMessage} isRefreshingRemote={isRefreshingRemote} />
         <EntryDetailPanels
@@ -902,7 +914,7 @@ function MediaEntryDetailContent({
   );
 }
 
-export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEntryDetailPageProps) {
+export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded = false }: MediaEntryDetailPageProps) {
   const {
     entry,
     setEntry,
@@ -950,17 +962,18 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
   const [showLinkDialog, setShowLinkDialog] = useState(false);
 
   if (isLoading) {
-    return <DetailLoadingState />;
+    return <DetailLoadingState embedded={embedded} />;
   }
 
   if (error || !entry) {
-    return <DetailErrorState error={error} onNavigateBack={onNavigateBack} onRetry={loadEntry} />;
+    return <DetailErrorState error={error} embedded={embedded} onNavigateBack={onNavigateBack} onRetry={loadEntry} />;
   }
 
   return (
     <MediaEntryDetailContent
       libraryEntryId={libraryEntryId}
       entry={entry}
+      embedded={embedded}
       availabilityByProviderLink={availabilityByProviderLink}
       isRefreshingRemote={isRefreshingRemote}
       isSavingProgress={isSavingProgress}
