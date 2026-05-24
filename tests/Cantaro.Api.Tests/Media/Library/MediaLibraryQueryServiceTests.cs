@@ -260,6 +260,83 @@ public class MediaLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task LibraryQueries_PreferAniListExtraLargeArtwork()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(310, "artwork@example.com");
+        db.Users.Add(user);
+
+        var title = MakeTitle("Artwork Regression", MediaKinds.Anime, now);
+        title.CanonicalMetadata = """
+            {
+                "coverImage": {
+                    "medium": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/small/example.png",
+                    "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/example.png",
+                    "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/example.png"
+                }
+            }
+            """;
+        db.MediaTitles.Add(title);
+        await db.SaveChangesAsync();
+
+        var entry = MakeEntry(user.Id, title, MediaLibraryStatuses.Current, now);
+        db.MediaLibraryEntries.Add(entry);
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+
+        var page = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions(), CancellationToken.None);
+        var detail = await service.GetLibraryEntryDetailAsync(user.Id, entry.Id, CancellationToken.None);
+
+        Assert.Single(page.Items);
+        Assert.Equal("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/example.png", page.Items[0].PosterUrl);
+        Assert.NotNull(detail);
+        Assert.Equal("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/example.png", detail!.Title.PosterUrl);
+    }
+
+    [Fact]
+    public async Task LibraryQueries_KeepAniListLargeFieldWhenExtraLargeIsMissing()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(311, "legacy-artwork@example.com");
+        db.Users.Add(user);
+
+        var title = MakeTitle("Chainsaw Days", MediaKinds.Anime, now);
+        title.CanonicalMetadata = """
+            {
+                "coverImage": {
+                    "medium": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/small/bx198726-ys3lfvQfwBTM.png",
+                    "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx198726-ys3lfvQfwBTM.png"
+                }
+            }
+            """;
+        db.MediaTitles.Add(title);
+        await db.SaveChangesAsync();
+
+        var entry = MakeEntry(user.Id, title, MediaLibraryStatuses.Current, now);
+        db.MediaLibraryEntries.Add(entry);
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+
+        var page = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions(), CancellationToken.None);
+        var detail = await service.GetLibraryEntryDetailAsync(user.Id, entry.Id, CancellationToken.None);
+
+        Assert.Single(page.Items);
+        Assert.Equal("https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx198726-ys3lfvQfwBTM.png", page.Items[0].PosterUrl);
+        Assert.NotNull(detail);
+        Assert.Equal("https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx198726-ys3lfvQfwBTM.png", detail!.Title.PosterUrl);
+    }
+
+    [Fact]
     public async Task GetLibraryEntryDetailAsync_ReturnsNullForWrongUser()
     {
         var (db, connection) = await CreateDbAsync();

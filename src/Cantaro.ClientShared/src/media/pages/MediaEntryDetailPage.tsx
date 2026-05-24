@@ -353,7 +353,7 @@ function useProviderUnlinkAction(
 }
 
 
-// ── Number input for progress ──────────────────────────────────────────────────
+// ── Progress controls ─────────────────────────────────────────────────────────
 
 interface ProgressFieldProps {
   label: string;
@@ -363,98 +363,12 @@ interface ProgressFieldProps {
   onChange: (value: number) => void;
 }
 
-interface ProgressEditorProps {
-  draft: string;
-  max?: number;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-  onDraftChange: (value: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}
-
-interface ProgressDisplayProps {
-  value: number | undefined;
-  max?: number;
-  onEdit: () => void;
-}
-
-function parseProgressDraft(draft: string): number | null {
-  const parsedValue = parseInt(draft, 10);
-  if (Number.isNaN(parsedValue) || parsedValue < 0) {
-    return null;
-  }
-
-  return parsedValue;
-}
-
-function ProgressEditor({ draft, max, inputRef, onDraftChange, onSave, onCancel }: ProgressEditorProps) {
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      onSave();
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      onCancel();
-    }
-  };
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="number"
-        min={0}
-        max={max}
-        value={draft}
-        onChange={(event) => onDraftChange(event.target.value)}
-        className="w-20 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-        onKeyDown={handleKeyDown}
-      />
-      {max ? <span className="text-xs text-gray-400">/ {max}</span> : null}
-      <button
-        type="button"
-        className="text-xs text-indigo-600 hover:underline"
-        onClick={onSave}
-      >
-        Save
-      </button>
-      <button
-        type="button"
-        className="text-xs text-gray-400 hover:underline"
-        onClick={onCancel}
-      >
-        Cancel
-      </button>
-    </>
-  );
-}
-
-function ProgressDisplay({ value, max, onEdit }: ProgressDisplayProps) {
-  return (
-    <>
-      <span className="text-xl font-semibold text-gray-800">{value ?? 0}</span>
-      {max ? <span className="text-sm text-gray-400">/ {max}</span> : null}
-      <button
-        type="button"
-        className="ml-1 text-xs text-indigo-500 hover:underline"
-        onClick={onEdit}
-      >
-        Edit
-      </button>
-    </>
-  );
+function clampProgressValue(value: number, max?: number) {
+  const lowerBoundedValue = Math.max(0, Math.round(value));
+  return max ? Math.min(lowerBoundedValue, max) : lowerBoundedValue;
 }
 
 function ProgressField({ label, value, max, supported, onChange }: ProgressFieldProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(value ?? 0));
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
-
   if (!supported) {
     return (
       <div className="rounded-xl bg-gray-50 px-4 py-3">
@@ -464,41 +378,52 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
     );
   }
 
-  const closeEditor = () => {
-    setDraft(String(value ?? 0));
-    setEditing(false);
-  };
-
-  const saveDraft = () => {
-    const parsedValue = parseProgressDraft(draft);
-    if (parsedValue !== null) {
-      onChange(parsedValue);
-    }
-
-    setEditing(false);
-  };
-
-  const startEditing = () => {
-    setDraft(String(value ?? 0));
-    setEditing(true);
+  const currentValue = clampProgressValue(value ?? 0, max);
+  const sliderMax = Math.max(max ?? 100, currentValue, 1);
+  const canDecrease = currentValue > 0;
+  const canIncrease = max ? currentValue < max : true;
+  const setProgressValue = (nextValue: number) => {
+    onChange(clampProgressValue(nextValue, max));
   };
 
   return (
     <div className="rounded-xl bg-white/70 px-4 py-3">
       <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</p>
-      <div className="mt-1 flex items-center gap-2">
-        {editing ? (
-          <ProgressEditor
-            draft={draft}
-            max={max}
-            inputRef={inputRef}
-            onDraftChange={setDraft}
-            onSave={saveDraft}
-            onCancel={closeEditor}
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-lg font-semibold leading-none text-gray-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => setProgressValue(currentValue - 1)}
+          disabled={!canDecrease}
+          aria-label={`Decrease ${label.toLowerCase()}`}
+        >
+          -
+        </button>
+        <div className="min-w-0 flex-1">
+          <input
+            type="range"
+            min={0}
+            max={sliderMax}
+            step={1}
+            value={currentValue}
+            onChange={(event) => setProgressValue(Number(event.target.value))}
+            className="h-2 w-full cursor-pointer accent-indigo-500"
+            aria-label={`${label} progress`}
           />
-        ) : (
-          <ProgressDisplay value={value} max={max} onEdit={startEditing} />
-        )}
+        </div>
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-lg font-semibold leading-none text-gray-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => setProgressValue(currentValue + 1)}
+          disabled={!canIncrease}
+          aria-label={`Increase ${label.toLowerCase()}`}
+        >
+          +
+        </button>
+      </div>
+      <div className="mt-2 flex items-baseline gap-1">
+        <span className="text-xl font-semibold text-gray-800">{currentValue}</span>
+        {max ? <span className="text-sm text-gray-400">/ {max}</span> : null}
       </div>
     </div>
   );
@@ -850,18 +775,16 @@ function ProgressCard({
           onChange={onProgressVolumesChange}
         />
       </div>
-      {hasProgressChanged ? (
-        <div className="mt-4">
-          <GradientButton
-            gradient="from-indigo-500 to-purple-500"
-            onClick={onSaveProgress}
-            disabled={isSavingProgress}
-            aria-busy={isSavingProgress}
-          >
-            {isSavingProgress ? 'Saving…' : 'Save progress'}
-          </GradientButton>
-        </div>
-      ) : null}
+      <div className="mt-4">
+        <GradientButton
+          gradient="from-indigo-500 to-purple-500"
+          onClick={onSaveProgress}
+          disabled={!hasProgressChanged || isSavingProgress}
+          aria-busy={isSavingProgress}
+        >
+          {isSavingProgress ? 'Saving…' : 'Save progress'}
+        </GradientButton>
+      </div>
       <p className="mt-3 text-xs text-gray-400">
         Editing progress here updates Cantaro only. Changes are not automatically pushed to your connected provider.
       </p>

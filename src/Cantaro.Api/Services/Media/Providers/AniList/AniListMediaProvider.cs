@@ -348,7 +348,7 @@ public class AniListMediaProvider(
             NativeTitle = media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = media.Description,
-            PosterUrl = media.CoverImage?.Medium ?? media.CoverImage?.Large,
+            PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
@@ -374,7 +374,7 @@ public class AniListMediaProvider(
             NativeTitle = media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = media.Description,
-            PosterUrl = media.CoverImage?.Large ?? media.CoverImage?.Medium,
+            PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
@@ -590,6 +590,13 @@ public class AniListMediaProvider(
             ?? "Unknown title";
     }
 
+    private static string? SelectPosterUrl(AniListCoverImage? coverImage)
+    {
+        return coverImage?.ExtraLarge
+            ?? coverImage?.Large
+            ?? coverImage?.Medium;
+    }
+
     private static DateTimeOffset? ToDateTimeOffset(long? unixTimestamp)
     {
         return unixTimestamp is null or <= 0
@@ -637,7 +644,8 @@ public class AniListMediaProvider(
                     native
                   }
                   coverImage {
-                                        medium
+                    extraLarge
+                    medium
                     large
                   }
                   nextAiringEpisode {
@@ -674,7 +682,8 @@ public class AniListMediaProvider(
                 native
               }
               coverImage {
-                                medium
+                extraLarge
+                medium
                 large
               }
               nextAiringEpisode {
@@ -700,33 +709,34 @@ public class AniListMediaProvider(
             volumes
             bannerImage
             startDate {
-              year
+                year
             }
             title {
-              romaji
-              english
-              native
+                romaji
+                english
+                native
             }
             coverImage {
-                            medium
-              large
+                extraLarge
+                medium
+                large
             }
             nextAiringEpisode {
-              episode
-              airingAt
+                episode
+                airingAt
             }
-                        externalLinks {
-                            url
-                            site
-                            type
-                            language
-                            icon
-                        }
-                        streamingEpisodes {
-                            title
-                            url
-                            site
-                        }
+            externalLinks {
+                url
+                site
+                type
+                language
+                icon
+            }
+            streamingEpisodes {
+                title
+                url
+                site
+            }
           }
         }
         """;
@@ -950,6 +960,9 @@ public class AniListTitle
 
 public class AniListCoverImage
 {
+    [JsonPropertyName("extraLarge")]
+    public string? ExtraLarge { get; set; }
+
     [JsonPropertyName("medium")]
     public string? Medium { get; set; }
 

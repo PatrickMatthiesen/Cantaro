@@ -1,4 +1,5 @@
-import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
+import { useEffect, type ReactNode } from 'react';
+import { GlassCard, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
 import {
   YouTubeDisconnectedState,
   YouTubePlaylistBrowser,
@@ -8,8 +9,12 @@ import { useYouTubePlaylistsState } from '@cantaro/client-shared/music';
 import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '@cantaro/client-shared/music';
 
 interface YouTubePlaylistsPageProps {
-  onNavigateHome: () => void;
-  onNavigateMatching: () => void;
+  navigation?: ReactNode;
+}
+
+function resolvePlaylistIdFromPath(): string | null {
+  const match = window.location.pathname.match(/^\/youtube\/playlists\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 interface YouTubePlaylistsContentProps {
@@ -22,6 +27,7 @@ interface YouTubePlaylistsContentProps {
   onSelectPlaylist: (playlist: PlatformPlaylist) => void;
   onBack: () => void;
   onRefresh: () => void;
+  onDisconnect: () => void;
 }
 
 function YouTubePlaylistsContent({
@@ -34,6 +40,7 @@ function YouTubePlaylistsContent({
   onSelectPlaylist,
   onBack,
   onRefresh,
+  onDisconnect,
 }: YouTubePlaylistsContentProps) {
   if (!status?.isConnected) {
     return <YouTubeDisconnectedState onConnect={onConnect} />;
@@ -53,12 +60,13 @@ function YouTubePlaylistsContent({
       status={status}
       playlists={playlists}
       onRefresh={onRefresh}
+      onDisconnect={onDisconnect}
       onSelectPlaylist={onSelectPlaylist}
     />
   );
 }
 
-export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: YouTubePlaylistsPageProps) {
+export function YouTubePlaylistsPage({ navigation }: YouTubePlaylistsPageProps) {
   const {
     status,
     playlists,
@@ -74,6 +82,57 @@ export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: You
     refreshPlaylists,
   } = useYouTubePlaylistsState();
 
+  useEffect(() => {
+    if (!status?.isConnected || isLoading) {
+      return;
+    }
+
+    const playlistId = resolvePlaylistIdFromPath();
+    if (!playlistId) {
+      if (selectedPlaylist) {
+        clearSelectedPlaylist();
+      }
+      return;
+    }
+
+    if (selectedPlaylist?.id === playlistId) {
+      return;
+    }
+
+    const playlist = playlists.find((item) => item.id === playlistId);
+    if (playlist) {
+      void selectPlaylist(playlist);
+    }
+  }, [clearSelectedPlaylist, isLoading, playlists, selectPlaylist, selectedPlaylist, status?.isConnected]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const playlistId = resolvePlaylistIdFromPath();
+      if (!playlistId) {
+        clearSelectedPlaylist();
+        return;
+      }
+
+      const playlist = playlists.find((item) => item.id === playlistId);
+      if (playlist) {
+        void selectPlaylist(playlist);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [clearSelectedPlaylist, playlists, selectPlaylist]);
+
+  const handleSelectPlaylist = (playlist: PlatformPlaylist) => {
+    window.history.pushState({}, '', `/youtube/playlists/${encodeURIComponent(playlist.id)}`);
+    void selectPlaylist(playlist);
+  };
+
+  const handleBackToPlaylists = () => {
+    window.history.pushState({}, '', '/youtube');
+    clearSelectedPlaylist();
+  };
+
   if (isLoading) {
     return <PageLoadingState message="Loading YouTube playlists…" />;
   }
@@ -85,18 +144,8 @@ export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: You
           <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">YouTube</p>
           <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
         </div>
-        <div className="flex gap-2">
-          <GradientButton tone="soft" onClick={onNavigateHome}>
-            Back to home
-          </GradientButton>
-          <GradientButton tone="soft" onClick={onNavigateMatching}>
-            Review matches
-          </GradientButton>
-          {status?.isConnected ? (
-            <GradientButton gradient="from-rose-500 to-red-500" onClick={() => void disconnect()}>
-              Disconnect
-            </GradientButton>
-          ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          {navigation}
         </div>
       </header>
 
@@ -113,9 +162,10 @@ export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: You
         playlistItems={playlistItems}
         isLoadingItems={isLoadingItems}
         onConnect={() => void connect()}
-        onSelectPlaylist={(playlist) => void selectPlaylist(playlist)}
-        onBack={clearSelectedPlaylist}
+        onSelectPlaylist={handleSelectPlaylist}
+        onBack={handleBackToPlaylists}
         onRefresh={() => void refreshPlaylists()}
+        onDisconnect={() => void disconnect()}
       />
     </GradientPageShell>
   );

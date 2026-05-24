@@ -39,6 +39,7 @@ export interface LibraryFiltersPanelProps {
     onUpdateProviderFilter: (provider: string | undefined) => void;
     onToggleSortDir: () => void;
     onRefreshFromRemote: () => Promise<void>;
+    onNavigateProviders?: () => void;
 }
 
 // fallow-ignore-next-line complexity
@@ -52,6 +53,7 @@ export function LibraryFiltersPanel({
     onUpdateProviderFilter,
     onToggleSortDir,
     onRefreshFromRemote,
+    onNavigateProviders,
 }: LibraryFiltersPanelProps) {
     const providerOptions: FilterOption[] = [
         { value: '', label: 'All providers' },
@@ -89,6 +91,7 @@ export function LibraryFiltersPanel({
                     isConnected={Boolean(providerStatus?.isConnected)}
                     isRefreshing={isRefreshing}
                     onRefresh={onRefreshFromRemote}
+                    onNavigateProviders={onNavigateProviders}
                 />
             </div>
         </GlassCard>

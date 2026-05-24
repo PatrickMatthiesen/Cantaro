@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { MediaProvidersPage } from './MediaProvidersPage';
 import { MediaEntryDetailPage, MediaLibraryPage } from '@cantaro/client-shared/media';
 
@@ -15,10 +16,10 @@ function resolveViewFromPath(path: string): MediaView {
 }
 
 interface MediaPageProps {
-  onNavigateHome: () => void;
+  navigation?: ReactNode;
 }
 
-export function MediaPage({ onNavigateHome }: MediaPageProps) {
+export function MediaPage({ navigation }: MediaPageProps) {
   const [view, setView] = useState<MediaView>(() => resolveViewFromPath(window.location.pathname));
 
   useEffect(() => {
@@ -35,8 +36,8 @@ export function MediaPage({ onNavigateHome }: MediaPageProps) {
   if (view.kind === 'library') {
     return (
       <MediaLibraryPage
-        onNavigateHome={onNavigateHome}
-        onNavigateProviders={() => navigateMedia('/media', { kind: 'providers' })}
+        navigation={navigation}
+        onNavigateProviders={() => navigateMedia('/media/providers', { kind: 'providers' })}
         onNavigateEntry={(id) => navigateMedia(`/media/library/${encodeURIComponent(id)}`, { kind: 'entry', id })}
       />
     );
@@ -53,9 +54,9 @@ export function MediaPage({ onNavigateHome }: MediaPageProps) {
 
   // Default: providers view
   return (
-    <MediaProvidersPage
-      onNavigateHome={onNavigateHome}
-      onNavigateLibrary={() => navigateMedia('/media/library', { kind: 'library' })}
-    />
+      <MediaProvidersPage
+        navigation={navigation}
+        onNavigateLibrary={() => navigateMedia('/media/library', { kind: 'library' })}
+      />
   );
 }

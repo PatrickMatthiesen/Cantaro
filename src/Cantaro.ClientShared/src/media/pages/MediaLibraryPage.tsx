@@ -1,4 +1,5 @@
 import { LibraryContentSection } from '../components/media-library/LibraryContentSection';
+import type { ReactNode } from 'react';
 import { LibraryFiltersPanel } from '../components/media-library/LibraryFiltersPanel';
 import {
   MediaLibraryHeader,
@@ -7,16 +8,16 @@ import {
 import { useMediaLibraryState } from '../components/media-library/useMediaLibraryState';
 
 interface MediaLibraryPageProps {
-  onNavigateHome?: () => void;
   onNavigateProviders?: () => void;
   onNavigateEntry: (id: string) => void;
+  navigation?: ReactNode;
   embedded?: boolean;
 }
 
 export function MediaLibraryPage({
-  onNavigateHome,
   onNavigateProviders,
   onNavigateEntry,
+  navigation,
   embedded = false,
 }: MediaLibraryPageProps) {
   const {
@@ -53,8 +54,7 @@ export function MediaLibraryPage({
           isLoading={isLoading}
           isProviderConnected={Boolean(providerStatus?.isConnected)}
           formattedLastRemoteCheckAt={formattedLastRemoteCheckAt}
-          onNavigateProviders={onNavigateProviders}
-          onNavigateHome={onNavigateHome}
+          navigation={navigation}
         />
 
         <MediaLibraryRefreshErrorNotice error={refreshError} />
@@ -69,6 +69,7 @@ export function MediaLibraryPage({
           onUpdateProviderFilter={updateProviderFilter}
           onToggleSortDir={toggleSortDir}
           onRefreshFromRemote={refreshFromRemote}
+          onNavigateProviders={onNavigateProviders}
         />
 
         <LibraryContentSection

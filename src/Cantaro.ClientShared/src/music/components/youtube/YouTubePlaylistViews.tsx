@@ -34,6 +34,7 @@ interface YouTubePlaylistBrowserProps {
     status: PlatformAccountStatus;
     playlists: PlatformPlaylist[];
     onRefresh: () => void;
+    onDisconnect: () => void;
     onSelectPlaylist: (playlist: PlatformPlaylist) => void;
 }
 
@@ -141,17 +142,25 @@ export function YouTubePlaylistDetailView({ playlist, playlistItems, isLoadingIt
     );
 }
 
-export function YouTubePlaylistBrowser({ status, playlists, onRefresh, onSelectPlaylist }: YouTubePlaylistBrowserProps) {
+export function YouTubePlaylistBrowser({ status, playlists, onRefresh, onDisconnect, onSelectPlaylist }: YouTubePlaylistBrowserProps) {
     return (
         <div className="space-y-4">
             <GlassCard className="p-5">
-                <p className="text-sm text-gray-600">
-                    Connected as <span className="font-semibold text-gray-900">{status.displayName ?? 'YouTube account'}</span>
-                </p>
-                <div className="mt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">Account</p>
+                        <p className="mt-1 text-sm text-gray-600">
+                            Connected as <span className="font-semibold text-gray-900">{status.displayName ?? 'YouTube account'}</span>
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
                     <GradientButton tone="soft" onClick={onRefresh}>
                         Refresh playlists
                     </GradientButton>
+                        <GradientButton gradient="from-rose-500 to-red-500" onClick={onDisconnect}>
+                            Disconnect
+                        </GradientButton>
+                    </div>
                 </div>
             </GlassCard>
 

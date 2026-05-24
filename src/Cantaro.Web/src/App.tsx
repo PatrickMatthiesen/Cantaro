@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginForm } from './components/LoginForm';
 import { RegisterForm } from './components/RegisterForm';
 import { UserProfile } from './components/UserProfile';
 import { SyncButton } from '@cantaro/client-shared/music';
 import { YouTubePlaylistsPage } from './pages/YouTubePlaylistsPage';
-import { MatchingReviewPage } from './pages/MatchingReviewPage';
+import { MusicPage } from './pages/MusicPage';
 import { MediaPage } from './pages/MediaPage';
 import { ExtensionAuthPage } from './pages/ExtensionAuthPage';
 import { platformManager, type PlatformId } from '@cantaro/client-shared/music';
 import { platformCatalog } from '@cantaro/client-shared/music';
+import { mediaApi, mainMediaProviderId } from '@cantaro/client-shared/media';
 import { GlassCard, GradientButton, StatusBadge } from '@cantaro/client-shared/ui';
+import { AppNavigation, type AppSection } from './components/AppNavigation';
 
-type Page = 'home' | 'matching' | 'media' | 'extension-auth' | PlatformId;
+type Page = 'home' | 'music' | 'matching' | 'media' | 'extension-auth' | PlatformId;
+type NavigationTarget = Page | `/${string}`;
+type NavigationOptions = { replace?: boolean };
 
 const STATIC_PATH_PAGES = {
   '/matching': 'matching',
@@ -41,7 +45,7 @@ interface PlatformsPanelProps {
   platformsToAdd: typeof platformCatalog;
   onToggleAddPlatformMenu: () => void;
   onSelectPlatform: (platform: (typeof platformCatalog)[number]) => void;
-  onNavigateToPage: (page: Page) => void;
+  onNavigateToPage: (target: NavigationTarget) => void | Promise<void>;
 }
 
 interface WorkspaceHomeProps {
@@ -49,13 +53,16 @@ interface WorkspaceHomeProps {
   isCheckingConnectedAccounts: boolean;
   showAddPlatformMenu: boolean;
   addPlatformMenuRef: RefObject<HTMLDivElement | null>;
+  navigation: ReactNode;
   onToggleAddPlatformMenu: () => void;
   onSelectPlatform: (platform: (typeof platformCatalog)[number]) => void;
-  onNavigateToPage: (page: Page) => void;
+  onNavigateToPage: (target: NavigationTarget) => void | Promise<void>;
 }
 
 interface AuthenticatedPageContentProps extends WorkspaceHomeProps {
   currentPage: Page;
+  currentPath: string;
+  navigation: ReactNode;
 }
 
 interface PlatformTileProps {
@@ -71,28 +78,61 @@ interface PlatformTileProps {
 }
 
 function resolvePageFromPath(path: string): Page {
-  const platformPath = path.slice(1) as PlatformId;
-  if (platformCatalog.some((platform) => platform.id === platformPath)) return platformPath;
-  if (path === '/media' || path.startsWith('/media/')) return 'media';
-  if (path in STATIC_PATH_PAGES) return STATIC_PATH_PAGES[path as keyof typeof STATIC_PATH_PAGES];
+  const pathname = path.split(/[?#]/, 1)[0];
+  const firstSegment = pathname.split('/').filter(Boolean)[0] as PlatformId | undefined;
+  if (firstSegment && platformCatalog.some((platform) => platform.id === firstSegment)) return firstSegment;
+  if (pathname === '/music' || pathname.startsWith('/music/')) return 'music';
+  if (pathname === '/media' || pathname.startsWith('/media/')) return 'media';
+  if (pathname in STATIC_PATH_PAGES) return STATIC_PATH_PAGES[pathname as keyof typeof STATIC_PATH_PAGES];
 
   return 'home';
 }
 
+function getBasePathFromNavigationTarget(target: NavigationTarget): string {
+  if (target === 'music') return '/music/songs';
+  if (target === 'matching') return '/music/matching';
+  if (target.startsWith('/')) return target;
+  return target === 'home' ? '/' : `/${target}`;
+}
+
+async function resolvePathFromNavigationTarget(target: NavigationTarget): Promise<string> {
+  const targetPath = getBasePathFromNavigationTarget(target);
+  if (targetPath !== '/media') {
+    return targetPath;
+  }
+
+  try {
+    const status = await mediaApi.getProviderStatus(mainMediaProviderId);
+    return status.isConnected ? '/media/library' : '/media/providers';
+  } catch {
+    return '/media/providers';
+  }
+}
+
 function useWorkspaceNavigation() {
   const [currentPage, setCurrentPage] = useState<Page>(() => resolvePageFromPath(window.location.pathname));
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const [showAddPlatformMenu, setShowAddPlatformMenu] = useState(false);
   const addPlatformMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const navigateTo = useCallback((page: Page) => {
+  const navigateTo = useCallback(async (target: NavigationTarget, options: NavigationOptions = {}) => {
     setShowAddPlatformMenu(false);
-    setCurrentPage(page);
-    const targetPath = page === 'home' ? '/' : `/${page}`;
+    const targetPath = await resolvePathFromNavigationTarget(target);
+    setCurrentPage(resolvePageFromPath(targetPath));
+    setCurrentPath(targetPath);
+    if (options.replace) {
+      window.history.replaceState({}, '', targetPath);
+      return;
+    }
+
     window.history.pushState({}, '', targetPath);
   }, []);
 
   useEffect(() => {
-    const handlePopState = () => setCurrentPage(resolvePageFromPath(window.location.pathname));
+    const handlePopState = () => {
+      setCurrentPage(resolvePageFromPath(window.location.pathname));
+      setCurrentPath(window.location.pathname);
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -110,6 +150,7 @@ function useWorkspaceNavigation() {
 
   return {
     currentPage,
+    currentPath,
     showAddPlatformMenu,
     setShowAddPlatformMenu,
     addPlatformMenuRef,
@@ -159,6 +200,12 @@ function useConnectedPlatforms(isAuthenticated: boolean, currentPage: Page) {
   }, [currentPage, isAuthenticated, loadConnectedAccountStatus]);
 
   return { connectedPlatformIds, isCheckingConnectedAccounts };
+}
+
+function getCurrentAppSection(currentPage: Page): AppSection {
+  if (currentPage === 'media') return 'media';
+  if (currentPage === 'music' || currentPage === 'matching' || platformCatalog.some((platform) => platform.id === currentPage)) return 'music';
+  return 'home';
 }
 
 function LoadingState() {
@@ -345,7 +392,7 @@ function PlatformsPanel({
   );
 }
 
-function SetupCard({ onNavigateToPage }: { onNavigateToPage: (page: Page) => void }) {
+function SetupCard({ onNavigateToPage }: { onNavigateToPage: (target: NavigationTarget) => void | Promise<void> }) {
   return (
     <GlassCard className="p-7">
       <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Service setup</p>
@@ -362,7 +409,7 @@ function SetupCard({ onNavigateToPage }: { onNavigateToPage: (page: Page) => voi
   );
 }
 
-function WorkflowNotesCard({ onNavigateToPage }: { onNavigateToPage: (page: Page) => void }) {
+function WorkflowNotesCard({ onNavigateToPage }: { onNavigateToPage: (target: NavigationTarget) => void | Promise<void> }) {
   return (
     <GlassCard className="p-6">
       <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Workflow notes</p>
@@ -372,7 +419,7 @@ function WorkflowNotesCard({ onNavigateToPage }: { onNavigateToPage: (page: Page
         <li className="rounded-xl bg-white/70 px-3 py-2">When a song match is unclear, Cantaro keeps it visible for manual review.</li>
       </ul>
       <div className="mt-4">
-        <GradientButton tone="soft" onClick={() => onNavigateToPage('matching')}>
+        <GradientButton tone="soft" onClick={() => onNavigateToPage('/music/matching')}>
           Review matching queue
         </GradientButton>
       </div>
@@ -380,7 +427,7 @@ function WorkflowNotesCard({ onNavigateToPage }: { onNavigateToPage: (page: Page
   );
 }
 
-function MediaTrackingCard({ onNavigateToPage }: { onNavigateToPage: (page: Page) => void }) {
+function MediaTrackingCard({ onNavigateToPage }: { onNavigateToPage: (target: NavigationTarget) => void | Promise<void> }) {
   return (
     <GlassCard className="p-6">
       <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Media tracking</p>
@@ -390,16 +437,13 @@ function MediaTrackingCard({ onNavigateToPage }: { onNavigateToPage: (page: Page
       <div className="mt-4 flex flex-wrap gap-2">
         <GradientButton
           gradient="from-blue-500 to-cyan-500"
-          onClick={() => onNavigateToPage('media')}
+          onClick={() => onNavigateToPage('/media/providers')}
         >
           Manage providers
         </GradientButton>
         <GradientButton
           tone="soft"
-          onClick={() => {
-            onNavigateToPage('media');
-            window.history.replaceState({}, '', '/media/library');
-          }}
+          onClick={() => onNavigateToPage('/media/library')}
         >
           Browse library
         </GradientButton>
@@ -413,6 +457,7 @@ function WorkspaceHome({
   isCheckingConnectedAccounts,
   showAddPlatformMenu,
   addPlatformMenuRef,
+  navigation,
   onToggleAddPlatformMenu,
   onSelectPlatform,
   onNavigateToPage,
@@ -431,9 +476,12 @@ function WorkspaceHome({
       <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pt-8 pb-16">
-        <header className="mb-6">
-          <p className="text-xs tracking-[0.35em] text-gray-500 uppercase">Cantaro</p>
-          <h1 className="mt-1 text-3xl font-bold text-gray-900">Workspace</h1>
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs tracking-[0.35em] text-gray-500 uppercase">Cantaro</p>
+            <h1 className="mt-1 text-3xl font-bold text-gray-900">Workspace</h1>
+          </div>
+          {navigation}
         </header>
 
         <main className="grid flex-1 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
@@ -470,31 +518,55 @@ function WorkspaceHome({
   );
 }
 
-function AuthenticatedPageContent({ currentPage, onNavigateToPage, ...homeProps }: AuthenticatedPageContentProps & { onNavigateToPage: (page: Page) => void }) {
+function AuthenticatedPageContent({ currentPage, currentPath, navigation, onNavigateToPage, ...homeProps }: AuthenticatedPageContentProps & { onNavigateToPage: (target: NavigationTarget) => void | Promise<void> }) {
   if (currentPage === 'extension-auth') {
     return <ExtensionAuthPage />;
   }
 
   if (currentPage === 'youtube') {
-    return <YouTubePlaylistsPage onNavigateHome={() => onNavigateToPage('home')} onNavigateMatching={() => onNavigateToPage('matching')} />;
+    return (
+      <YouTubePlaylistsPage
+        navigation={navigation}
+      />
+    );
   }
 
   if (currentPage === 'matching') {
-    return <MatchingReviewPage onNavigateHome={() => onNavigateToPage('home')} />;
+    return <MusicPage navigation={navigation} initialTab="matching" onNavigatePlatform={(platformId) => onNavigateToPage(platformId)} />;
   }
 
   if (currentPage === 'media') {
-    return <MediaPage onNavigateHome={() => onNavigateToPage('home')} />;
+    return <MediaPage key={currentPath} navigation={navigation} />;
   }
 
-  return <WorkspaceHome {...homeProps} onNavigateToPage={onNavigateToPage} />;
+  if (currentPage === 'music') {
+    return <MusicPage navigation={navigation} onNavigatePlatform={(platformId) => onNavigateToPage(platformId)} />;
+  }
+
+  return <WorkspaceHome {...homeProps} navigation={navigation} onNavigateToPage={onNavigateToPage} />;
 }
 
 function AuthenticatedApp() {
   const { isAuthenticated, isLoading } = useAuth();
   const [showRegister, setShowRegister] = useState(false);
-  const { currentPage, showAddPlatformMenu, setShowAddPlatformMenu, addPlatformMenuRef, navigateTo } = useWorkspaceNavigation();
+  const { currentPage, currentPath, showAddPlatformMenu, setShowAddPlatformMenu, addPlatformMenuRef, navigateTo } = useWorkspaceNavigation();
   const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedPlatforms(isAuthenticated, currentPage);
+
+  useEffect(() => {
+    if (!isAuthenticated || window.location.pathname !== '/media') {
+      return;
+    }
+
+    void navigateTo('media', { replace: true });
+  }, [isAuthenticated, navigateTo]);
+
+  useEffect(() => {
+    if (!isAuthenticated || window.location.pathname !== '/matching') {
+      return;
+    }
+
+    void navigateTo('/music/matching', { replace: true });
+  }, [isAuthenticated, navigateTo]);
 
   const handleSelectPlatform = useCallback(async (platform: (typeof platformCatalog)[number]) => {
     setShowAddPlatformMenu(false);
@@ -526,9 +598,20 @@ function AuthenticatedApp() {
     );
   }
 
+  const navigation = (
+    <AppNavigation
+      currentSection={getCurrentAppSection(currentPage)}
+      onNavigate={(section) => {
+        void navigateTo(section);
+      }}
+    />
+  );
+
   return (
     <AuthenticatedPageContent
       currentPage={currentPage}
+      currentPath={currentPath}
+      navigation={navigation}
       connectedPlatformIds={connectedPlatformIds}
       isCheckingConnectedAccounts={isCheckingConnectedAccounts}
       showAddPlatformMenu={showAddPlatformMenu}

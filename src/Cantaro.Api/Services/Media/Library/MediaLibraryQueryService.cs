@@ -369,11 +369,14 @@ file sealed class MediaArtworkMetadata
 
             var mediumPosterUrl = TryGetString(coverImage, "medium");
             var largePosterUrl = TryGetString(coverImage, "large");
+            var extraLargePosterUrl = TryGetString(coverImage, "extraLarge");
 
             return new MediaArtworkMetadata
             {
-                MediumPosterUrl = mediumPosterUrl ?? largePosterUrl,
-                LargePosterUrl = largePosterUrl ?? mediumPosterUrl
+                MediumPosterUrl = largePosterUrl ?? mediumPosterUrl,
+                LargePosterUrl = extraLargePosterUrl
+                    ?? largePosterUrl
+                    ?? mediumPosterUrl
             };
         }
         catch (JsonException)

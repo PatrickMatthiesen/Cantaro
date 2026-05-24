@@ -1,13 +1,14 @@
+import type { ReactNode } from 'react';
 import { ProviderPanel } from '@cantaro/client-shared/media';
 import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
 import { mediaProviderCatalog } from '@cantaro/client-shared/media';
 
 interface MediaProvidersPageProps {
-  onNavigateHome: () => void;
   onNavigateLibrary?: () => void;
+  navigation?: ReactNode;
 }
 
-export function MediaProvidersPage({ onNavigateHome, onNavigateLibrary }: MediaProvidersPageProps) {
+export function MediaProvidersPage({ onNavigateLibrary, navigation }: MediaProvidersPageProps) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
       <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
@@ -19,15 +20,13 @@ export function MediaProvidersPage({ onNavigateHome, onNavigateLibrary }: MediaP
             <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
             <h1 className="mt-1 text-3xl font-bold">Media providers</h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            {navigation}
             {onNavigateLibrary ? (
               <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onNavigateLibrary}>
                 View Library
               </GradientButton>
             ) : null}
-            <GradientButton tone="soft" onClick={onNavigateHome}>
-              ← Back to home
-            </GradientButton>
           </div>
         </header>
 
