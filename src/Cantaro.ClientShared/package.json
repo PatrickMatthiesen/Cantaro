@@ -16,16 +16,16 @@
     "check:fallow": "bunx fallow"
   },
   "dependencies": {
-    "dompurify": "^3.4.1",
-    "zod": "^4.1.12"
+    "dompurify": "^3.4.5",
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
-    "typescript": "~5.9.3"
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "~6.0.3"
   }
 }

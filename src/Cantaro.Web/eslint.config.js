@@ -13,7 +13,7 @@ export default defineConfig([
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs['recommended-latest'],
+      reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
       ...tailwindcss.configs['flat/recommended'],
     ],
@@ -28,6 +28,8 @@ export default defineConfig([
     },
     rules: {
       'tailwindcss/no-custom-classname': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-refresh/only-export-components': ['error', { allowConstantExport: true, extraHOCs: ['createFileRoute'] }],
     },
   },
 ])

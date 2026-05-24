@@ -22,9 +22,9 @@ function LibraryEntryReleaseBadge({ badge }: { badge: TopLeftBadge | null }) {
     }
 
     return (
-        <span className="inline-flex max-w-40 gap-1 rounded-full bg-cyan-50/92 px-3 py-1 text-left text-xs text-slate-900 shadow-lg backdrop-blur-md">
-            <span className="truncate font-semibold">{badge.label}</span>
-            {badge.detail ? <span className="truncate text-slate-700">{badge.detail}</span> : null}
+        <span className="inline-flex min-w-0 max-w-40 gap-x-1 rounded-full bg-cyan-50/92 px-2 py-1 text-left text-xs text-slate-900 shadow-lg backdrop-blur-md">
+            <span className="max-w-fit whitespace-nowrap font-semibold">{badge.label}</span>
+            {badge.detail ? <span className="max-w-fit whitespace-nowrap text-slate-700">{badge.detail}</span> : null}
         </span>
     );
 }
@@ -33,7 +33,7 @@ function LibraryEntryProgressBadges({ progress, isConnected }: { progress: strin
     return (
         <div className="flex flex-col items-end gap-2">
             {progress ? (
-                <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-900 shadow-lg backdrop-blur-md">
+                <span className="max-w-fit whitespace-nowrap rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-slate-900 shadow-lg backdrop-blur-md">
                     {progress}
                 </span>
             ) : null}
@@ -48,7 +48,7 @@ function LibraryEntryProgressBadges({ progress, isConnected }: { progress: strin
 
 export function LibraryEntryCardBadges({ topLeftBadge, progress, isConnected }: LibraryEntryCardBadgesProps) {
     return (
-        <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
+        <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-1 p-4">
             <LibraryEntryReleaseBadge badge={topLeftBadge} />
             <LibraryEntryProgressBadges progress={progress} isConnected={isConnected} />
         </div>
