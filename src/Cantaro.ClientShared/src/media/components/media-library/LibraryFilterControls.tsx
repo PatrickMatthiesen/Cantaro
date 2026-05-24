@@ -42,6 +42,7 @@ export interface LibraryRefreshActionProps {
     isConnected: boolean;
     isRefreshing: boolean;
     onRefresh: () => Promise<void>;
+    onNavigateProviders?: () => void;
 }
 
 function FilterSelect({ label, value, options, onChange, disabled = false }: FilterSelectProps) {
@@ -126,24 +127,33 @@ export function LibraryFilterFields({
     );
 }
 
-export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh }: LibraryRefreshActionProps) {
-    if (!isConnected) {
-        return null;
-    }
-
+export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onNavigateProviders }: LibraryRefreshActionProps) {
     return (
         <div className="ml-auto flex flex-col gap-1">
-            <span className="text-xs font-medium tracking-wide text-gray-500 uppercase">Reload</span>
-            <button
-                type="button"
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => void onRefresh()}
-                disabled={isRefreshing}
-                aria-busy={isRefreshing}
-                title="Reload the primary provider library"
-            >
-                {isRefreshing ? 'Reloading…' : '↻ Reload'}
-            </button>
+            <span className="text-xs font-medium tracking-wide text-gray-500 uppercase">Providers</span>
+            <div className="flex gap-2">
+                {onNavigateProviders ? (
+                    <button
+                        type="button"
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white"
+                        onClick={onNavigateProviders}
+                    >
+                        Manage
+                    </button>
+                ) : null}
+                {isConnected ? (
+                    <button
+                        type="button"
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => void onRefresh()}
+                        disabled={isRefreshing}
+                        aria-busy={isRefreshing}
+                        title="Reload the primary provider library"
+                    >
+                        {isRefreshing ? 'Reloading…' : '↻ Reload'}
+                    </button>
+                ) : null}
+            </div>
         </div>
     );
 }

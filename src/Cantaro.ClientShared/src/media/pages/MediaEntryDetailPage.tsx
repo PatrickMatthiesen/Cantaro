@@ -353,7 +353,7 @@ function useProviderUnlinkAction(
 }
 
 
-// ── Number input for progress ──────────────────────────────────────────────────
+// ── Progress controls ─────────────────────────────────────────────────────────
 
 interface ProgressFieldProps {
   label: string;
@@ -363,98 +363,12 @@ interface ProgressFieldProps {
   onChange: (value: number) => void;
 }
 
-interface ProgressEditorProps {
-  draft: string;
-  max?: number;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-  onDraftChange: (value: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}
-
-interface ProgressDisplayProps {
-  value: number | undefined;
-  max?: number;
-  onEdit: () => void;
-}
-
-function parseProgressDraft(draft: string): number | null {
-  const parsedValue = parseInt(draft, 10);
-  if (Number.isNaN(parsedValue) || parsedValue < 0) {
-    return null;
-  }
-
-  return parsedValue;
-}
-
-function ProgressEditor({ draft, max, inputRef, onDraftChange, onSave, onCancel }: ProgressEditorProps) {
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      onSave();
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      onCancel();
-    }
-  };
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="number"
-        min={0}
-        max={max}
-        value={draft}
-        onChange={(event) => onDraftChange(event.target.value)}
-        className="w-20 rounded-lg border border-indigo-300 bg-white px-2 py-1 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-        onKeyDown={handleKeyDown}
-      />
-      {max ? <span className="text-xs text-gray-400">/ {max}</span> : null}
-      <button
-        type="button"
-        className="text-xs text-indigo-600 hover:underline"
-        onClick={onSave}
-      >
-        Save
-      </button>
-      <button
-        type="button"
-        className="text-xs text-gray-400 hover:underline"
-        onClick={onCancel}
-      >
-        Cancel
-      </button>
-    </>
-  );
-}
-
-function ProgressDisplay({ value, max, onEdit }: ProgressDisplayProps) {
-  return (
-    <>
-      <span className="text-xl font-semibold text-gray-800">{value ?? 0}</span>
-      {max ? <span className="text-sm text-gray-400">/ {max}</span> : null}
-      <button
-        type="button"
-        className="ml-1 text-xs text-indigo-500 hover:underline"
-        onClick={onEdit}
-      >
-        Edit
-      </button>
-    </>
-  );
+function clampProgressValue(value: number, max?: number) {
+  const lowerBoundedValue = Math.max(0, Math.round(value));
+  return max ? Math.min(lowerBoundedValue, max) : lowerBoundedValue;
 }
 
 function ProgressField({ label, value, max, supported, onChange }: ProgressFieldProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(value ?? 0));
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
-
   if (!supported) {
     return (
       <div className="rounded-xl bg-gray-50 px-4 py-3">
@@ -464,41 +378,52 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
     );
   }
 
-  const closeEditor = () => {
-    setDraft(String(value ?? 0));
-    setEditing(false);
-  };
-
-  const saveDraft = () => {
-    const parsedValue = parseProgressDraft(draft);
-    if (parsedValue !== null) {
-      onChange(parsedValue);
-    }
-
-    setEditing(false);
-  };
-
-  const startEditing = () => {
-    setDraft(String(value ?? 0));
-    setEditing(true);
+  const currentValue = clampProgressValue(value ?? 0, max);
+  const sliderMax = Math.max(max ?? 100, currentValue, 1);
+  const canDecrease = currentValue > 0;
+  const canIncrease = max ? currentValue < max : true;
+  const setProgressValue = (nextValue: number) => {
+    onChange(clampProgressValue(nextValue, max));
   };
 
   return (
     <div className="rounded-xl bg-white/70 px-4 py-3">
       <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</p>
-      <div className="mt-1 flex items-center gap-2">
-        {editing ? (
-          <ProgressEditor
-            draft={draft}
-            max={max}
-            inputRef={inputRef}
-            onDraftChange={setDraft}
-            onSave={saveDraft}
-            onCancel={closeEditor}
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-lg font-semibold leading-none text-gray-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => setProgressValue(currentValue - 1)}
+          disabled={!canDecrease}
+          aria-label={`Decrease ${label.toLowerCase()}`}
+        >
+          -
+        </button>
+        <div className="min-w-0 flex-1">
+          <input
+            type="range"
+            min={0}
+            max={sliderMax}
+            step={1}
+            value={currentValue}
+            onChange={(event) => setProgressValue(Number(event.target.value))}
+            className="h-2 w-full cursor-pointer accent-indigo-500"
+            aria-label={`${label} progress`}
           />
-        ) : (
-          <ProgressDisplay value={value} max={max} onEdit={startEditing} />
-        )}
+        </div>
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-lg font-semibold leading-none text-gray-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => setProgressValue(currentValue + 1)}
+          disabled={!canIncrease}
+          aria-label={`Increase ${label.toLowerCase()}`}
+        >
+          +
+        </button>
+      </div>
+      <div className="mt-2 flex items-baseline gap-1">
+        <span className="text-xl font-semibold text-gray-800">{currentValue}</span>
+        {max ? <span className="text-sm text-gray-400">/ {max}</span> : null}
       </div>
     </div>
   );
@@ -509,6 +434,7 @@ function ProgressField({ label, value, max, supported, onChange }: ProgressField
 interface DetailPageLayoutProps {
   children: ReactNode;
   className?: string;
+  embedded?: boolean;
 }
 
 interface DetailBannerProps {
@@ -554,6 +480,7 @@ interface AutoProgressCardProps {
 interface MediaEntryDetailContentProps {
   libraryEntryId: string;
   entry: MediaLibraryEntryDetailDto;
+  embedded: boolean;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingRemote: boolean;
   isSavingProgress: boolean;
@@ -578,7 +505,15 @@ interface MediaEntryDetailContentProps {
   onUnlink: (providerId: string) => void;
 }
 
-function DetailPageLayout({ children, className = 'space-y-6' }: DetailPageLayoutProps) {
+function DetailPageLayout({ children, className = 'space-y-6', embedded = false }: DetailPageLayoutProps) {
+  if (embedded) {
+    return (
+      <div className={`mx-auto max-w-4xl ${className}`}>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
       <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
@@ -591,17 +526,17 @@ function DetailPageLayout({ children, className = 'space-y-6' }: DetailPageLayou
   );
 }
 
-function DetailLoadingState() {
+function DetailLoadingState({ embedded = false }: { embedded?: boolean }) {
   return (
-    <DetailPageLayout className="">
+    <DetailPageLayout className="" embedded={embedded}>
       <GlassCard className="h-96 animate-pulse" />
     </DetailPageLayout>
   );
 }
 
-function DetailErrorState({ error, onNavigateBack, onRetry }: { error: string | null; onNavigateBack: () => void; onRetry: () => Promise<void> }) {
+function DetailErrorState({ error, embedded = false, onNavigateBack, onRetry }: { error: string | null; embedded?: boolean; onNavigateBack: () => void; onRetry: () => Promise<void> }) {
   return (
-    <DetailPageLayout className="space-y-4">
+    <DetailPageLayout className="space-y-4" embedded={embedded}>
       <GradientButton tone="soft" onClick={onNavigateBack}>← Back to library</GradientButton>
       <GlassCard className="p-6">
         <p className="text-rose-700">{error ?? 'Entry not found'}</p>
@@ -850,18 +785,16 @@ function ProgressCard({
           onChange={onProgressVolumesChange}
         />
       </div>
-      {hasProgressChanged ? (
-        <div className="mt-4">
-          <GradientButton
-            gradient="from-indigo-500 to-purple-500"
-            onClick={onSaveProgress}
-            disabled={isSavingProgress}
-            aria-busy={isSavingProgress}
-          >
-            {isSavingProgress ? 'Saving…' : 'Save progress'}
-          </GradientButton>
-        </div>
-      ) : null}
+      <div className="mt-4">
+        <GradientButton
+          gradient="from-indigo-500 to-purple-500"
+          onClick={onSaveProgress}
+          disabled={!hasProgressChanged || isSavingProgress}
+          aria-busy={isSavingProgress}
+        >
+          {isSavingProgress ? 'Saving…' : 'Save progress'}
+        </GradientButton>
+      </div>
       <p className="mt-3 text-xs text-gray-400">
         Editing progress here updates Cantaro only. Changes are not automatically pushed to your connected provider.
       </p>
@@ -907,11 +840,13 @@ function AutoProgressCard({ enabled, onToggle }: AutoProgressCardProps) {
 interface MediaEntryDetailPageProps {
   libraryEntryId: string;
   onNavigateBack: () => void;
+  embedded?: boolean;
 }
 
 function MediaEntryDetailContent({
   libraryEntryId,
   entry,
+  embedded,
   availabilityByProviderLink,
   isRefreshingRemote,
   isSavingProgress,
@@ -939,7 +874,7 @@ function MediaEntryDetailContent({
 
   return (
     <>
-      <DetailPageLayout>
+      <DetailPageLayout embedded={embedded}>
         <DetailHeader mediaKind={mediaKind} isConnected={entry.isConnected} onNavigateBack={onNavigateBack} />
         <EntryDetailAlerts saveMessage={saveMessage} isRefreshingRemote={isRefreshingRemote} />
         <EntryDetailPanels
@@ -979,7 +914,7 @@ function MediaEntryDetailContent({
   );
 }
 
-export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEntryDetailPageProps) {
+export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded = false }: MediaEntryDetailPageProps) {
   const {
     entry,
     setEntry,
@@ -1027,17 +962,18 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack }: MediaEn
   const [showLinkDialog, setShowLinkDialog] = useState(false);
 
   if (isLoading) {
-    return <DetailLoadingState />;
+    return <DetailLoadingState embedded={embedded} />;
   }
 
   if (error || !entry) {
-    return <DetailErrorState error={error} onNavigateBack={onNavigateBack} onRetry={loadEntry} />;
+    return <DetailErrorState error={error} embedded={embedded} onNavigateBack={onNavigateBack} onRetry={loadEntry} />;
   }
 
   return (
     <MediaEntryDetailContent
       libraryEntryId={libraryEntryId}
       entry={entry}
+      embedded={embedded}
       availabilityByProviderLink={availabilityByProviderLink}
       isRefreshingRemote={isRefreshingRemote}
       isSavingProgress={isSavingProgress}

@@ -1,4 +1,6 @@
-import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
+import { useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { GlassCard, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
 import {
   YouTubeDisconnectedState,
   YouTubePlaylistBrowser,
@@ -8,8 +10,8 @@ import { useYouTubePlaylistsState } from '@cantaro/client-shared/music';
 import type { PlatformAccountStatus, PlatformPlaylist, PlatformSong } from '@cantaro/client-shared/music';
 
 interface YouTubePlaylistsPageProps {
-  onNavigateHome: () => void;
-  onNavigateMatching: () => void;
+  embedded?: boolean;
+  playlistId?: string | null;
 }
 
 interface YouTubePlaylistsContentProps {
@@ -22,6 +24,7 @@ interface YouTubePlaylistsContentProps {
   onSelectPlaylist: (playlist: PlatformPlaylist) => void;
   onBack: () => void;
   onRefresh: () => void;
+  onDisconnect: () => void;
 }
 
 function YouTubePlaylistsContent({
@@ -34,10 +37,12 @@ function YouTubePlaylistsContent({
   onSelectPlaylist,
   onBack,
   onRefresh,
+  onDisconnect,
 }: YouTubePlaylistsContentProps) {
   if (!status?.isConnected) {
     return <YouTubeDisconnectedState onConnect={onConnect} />;
   }
+
   if (selectedPlaylist) {
     return (
       <YouTubePlaylistDetailView
@@ -48,17 +53,20 @@ function YouTubePlaylistsContent({
       />
     );
   }
+
   return (
     <YouTubePlaylistBrowser
       status={status}
       playlists={playlists}
       onRefresh={onRefresh}
+      onDisconnect={onDisconnect}
       onSelectPlaylist={onSelectPlaylist}
     />
   );
 }
 
-export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: YouTubePlaylistsPageProps) {
+export function YouTubePlaylistsPage({ embedded = false, playlistId = null }: YouTubePlaylistsPageProps) {
+  const navigate = useNavigate();
   const {
     status,
     playlists,
@@ -74,32 +82,43 @@ export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: You
     refreshPlaylists,
   } = useYouTubePlaylistsState();
 
-  if (isLoading) {
-    return <PageLoadingState message="Loading YouTube playlists…" />;
-  }
+  useEffect(() => {
+    if (!status?.isConnected || isLoading) {
+      return;
+    }
 
-  return (
-    <GradientPageShell className="text-gray-900">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">YouTube</p>
-          <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
-        </div>
-        <div className="flex gap-2">
-          <GradientButton tone="soft" onClick={onNavigateHome}>
-            Back to home
-          </GradientButton>
-          <GradientButton tone="soft" onClick={onNavigateMatching}>
-            Review matches
-          </GradientButton>
-          {status?.isConnected ? (
-            <GradientButton gradient="from-rose-500 to-red-500" onClick={() => void disconnect()}>
-              Disconnect
-            </GradientButton>
-          ) : null}
-        </div>
-      </header>
+    if (!playlistId) {
+      if (selectedPlaylist) {
+        clearSelectedPlaylist();
+      }
+      return;
+    }
 
+    if (selectedPlaylist?.id === playlistId) {
+      return;
+    }
+
+    const playlist = playlists.find((item) => item.id === playlistId);
+    if (playlist) {
+      void selectPlaylist(playlist);
+    }
+  }, [clearSelectedPlaylist, isLoading, playlistId, playlists, selectPlaylist, selectedPlaylist, status?.isConnected]);
+
+  const handleSelectPlaylist = (playlist: PlatformPlaylist) => {
+    void navigate({
+      to: '/music/platforms/$platformId/playlists/$playlistId',
+      params: { platformId: 'youtube', playlistId: playlist.id },
+    });
+    void selectPlaylist(playlist);
+  };
+
+  const handleBackToPlaylists = () => {
+    void navigate({ to: '/music/platforms/$platformId', params: { platformId: 'youtube' } });
+    clearSelectedPlaylist();
+  };
+
+  const content = (
+    <>
       {error ? (
         <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
           {error}
@@ -113,10 +132,35 @@ export function YouTubePlaylistsPage({ onNavigateHome, onNavigateMatching }: You
         playlistItems={playlistItems}
         isLoadingItems={isLoadingItems}
         onConnect={() => void connect()}
-        onSelectPlaylist={(playlist) => void selectPlaylist(playlist)}
-        onBack={clearSelectedPlaylist}
+        onSelectPlaylist={handleSelectPlaylist}
+        onBack={handleBackToPlaylists}
         onRefresh={() => void refreshPlaylists()}
+        onDisconnect={() => void disconnect()}
       />
+    </>
+  );
+
+  if (isLoading) {
+    return embedded ? (
+      <GlassCard className="p-6">
+        <p className="text-sm text-gray-600">Loading YouTube playlists…</p>
+      </GlassCard>
+    ) : (
+      <PageLoadingState message="Loading YouTube playlists…" />
+    );
+  }
+
+  if (embedded) {
+    return <div className="space-y-5">{content}</div>;
+  }
+
+  return (
+    <GradientPageShell className="text-gray-900">
+      <header>
+        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">YouTube</p>
+        <h1 className="mt-1 text-3xl font-bold">Manage playlists</h1>
+      </header>
+      {content}
     </GradientPageShell>
   );
 }

@@ -8,7 +8,7 @@ import type {
 } from '@cantaro/client-shared/music';
 
 interface MatchingReviewPageProps {
-  onNavigateHome: () => void;
+  embedded?: boolean;
 }
 
 function formatDuration(durationSeconds?: number): string | null {
@@ -125,7 +125,7 @@ function formatSource(sourceType: string, externalId: string): string | React.Re
   }
 }
 
-export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) {
+export function MatchingReviewPage({ embedded = false }: MatchingReviewPageProps) {
   const [summary, setSummary] = useState<MatchingSummaryResponse | null>(null);
   const [queue, setQueue] = useState<MatchingQueueItemResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -169,11 +169,17 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
   );
 
   if (isLoading) {
-    return <PageLoadingState message="Loading matching review queue…" />;
+    return embedded ? (
+      <GlassCard className="p-6">
+        <p className="text-sm text-gray-600">Loading matching review queue…</p>
+      </GlassCard>
+    ) : (
+      <PageLoadingState message="Loading matching review queue…" />
+    );
   }
 
-  return (
-    <GradientPageShell className="text-gray-900">
+  const content = (
+    <>
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Matching review</p>
@@ -182,10 +188,7 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
             Review ambiguous and unmatched imports before they become canonical Cantaro tracks.
           </p>
         </div>
-        <div className="flex gap-2">
-          <GradientButton tone="soft" onClick={onNavigateHome}>
-            Back to home
-          </GradientButton>
+        <div className="flex flex-wrap gap-2">
           <GradientButton tone="soft" onClick={() => void loadQueue()}>
             Refresh queue
           </GradientButton>
@@ -235,7 +238,13 @@ export function MatchingReviewPage({ onNavigateHome }: MatchingReviewPageProps) 
           ))}
         </section>
       )}
-    </GradientPageShell>
+    </>
+  );
+
+  return embedded ? (
+    <div className="space-y-5">{content}</div>
+  ) : (
+    <GradientPageShell className="text-gray-900">{content}</GradientPageShell>
   );
 }
 

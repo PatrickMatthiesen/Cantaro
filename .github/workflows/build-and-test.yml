@@ -1,0 +1,130 @@
+name: Build and test
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      extension: ${{ steps.filter.outputs.extension }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            backend:
+              - '.github/workflows/build-and-test.yml'
+              - 'Cantaro.slnx'
+              - 'NuGet.config'
+              - 'dotnet-tools.json'
+              - 'src/**/*.cs'
+              - 'src/**/*.csproj'
+              - 'tests/**/*.cs'
+              - 'tests/**/*.csproj'
+            frontend:
+              - '.github/workflows/build-and-test.yml'
+              - 'package.json'
+              - 'bun.lock'
+              - 'src/Cantaro.ClientShared/**'
+              - 'src/Cantaro.Web/**'
+            extension:
+              - '.github/workflows/build-and-test.yml'
+              - 'package.json'
+              - 'bun.lock'
+              - 'src/Cantaro.ClientShared/**'
+              - 'src/Cantaro.BrowserExtension/**'
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check shared package
+        run: bun run check:shared
+
+      - name: Lint frontend
+        run: cd src/Cantaro.Web && bun run lint
+
+      - name: Build Frontend
+        run: bun run build:web
+
+  extension:
+    name: Browser Extension
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.extension == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check shared package
+        run: bun run check:shared
+
+      - name: Test extension
+        run: cd src/Cantaro.BrowserExtension && bun run test:run
+
+      - name: Build Extension
+        run: bun run build:extension

@@ -1,0 +1,125 @@
+import { useState, type ReactNode } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { GlassCard } from '@cantaro/client-shared/ui';
+import { LoginForm } from './LoginForm';
+import { RegisterForm } from './RegisterForm';
+import { AppNavigation } from './AppNavigation';
+import { useAuth } from '../contexts/AuthContext';
+
+interface AuthenticatedShellProps {
+  children: ReactNode;
+  contentClassName?: string;
+}
+
+function AppLoadingState() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-800">
+      <GlassCard className="flex items-center gap-3 px-6 py-4">
+        <span className="h-3 w-3 animate-pulse rounded-full bg-indigo-500" aria-hidden />
+        <p className="text-sm font-medium">Loading…</p>
+      </GlassCard>
+    </div>
+  );
+}
+
+function LandingPage() {
+  const [showRegister, setShowRegister] = useState(false);
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-6 pt-8 pb-16">
+        <header className="mb-8">
+          <p className="text-xs tracking-[0.35em] text-gray-500 uppercase">Cantaro</p>
+          <h1 className="mt-1 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-3xl font-bold text-transparent">
+            Playlist workspace
+          </h1>
+        </header>
+
+        <main className="grid flex-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <GlassCard className="p-8">
+            <h2 className="text-2xl font-semibold text-gray-900">Get started</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Connect services, sync playlists, and review conflicts when a match needs confirmation.
+            </p>
+            <ol className="mt-6 space-y-3">
+              {[
+                'Create an account and sign in.',
+                'Connect your first service workspace. YouTube is available now, with more platforms coming later.',
+                'Run sync and manage playlist updates from Cantaro.',
+              ].map((item, index) => (
+                <li key={item} className="flex items-start gap-3 rounded-2xl bg-white/70 p-4">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                    {index + 1}
+                  </span>
+                  <span className="text-sm text-gray-700">{item}</span>
+                </li>
+              ))}
+            </ol>
+          </GlassCard>
+
+          <GlassCard className="p-8">
+            {showRegister ? (
+              <RegisterForm onSwitchToLogin={() => setShowRegister(false)} />
+            ) : (
+              <LoginForm onSwitchToRegister={() => setShowRegister(true)} />
+            )}
+          </GlassCard>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+export function RequireAuth({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <AppLoadingState />;
+  }
+
+  if (!isAuthenticated) {
+    return <LandingPage />;
+  }
+
+  return <>{children}</>;
+}
+
+export function AppPageShell({ children, contentClassName = 'max-w-6xl' }: AuthenticatedShellProps) {
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
+      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+      <div className={`relative z-10 mx-auto min-h-screen space-y-6 px-6 pt-8 pb-16 ${contentClassName}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function GlobalHeader({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  children?: ReactNode;
+}) {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">{eyebrow}</p>
+        <h1 className="mt-1 text-3xl font-bold text-gray-900">{title}</h1>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        {children}
+        <AppNavigation pathname={pathname} />
+      </div>
+    </header>
+  );
+}

@@ -1,61 +1,59 @@
-import { useState, useEffect } from 'react';
-import { MediaProvidersPage } from './MediaProvidersPage';
+import { Outlet, useNavigate } from '@tanstack/react-router';
 import { MediaEntryDetailPage, MediaLibraryPage } from '@cantaro/client-shared/media';
+import { AppPageShell, GlobalHeader, RequireAuth } from '../components/AppShell';
+import { SubjectNav, type SubjectNavItem } from '../components/SubjectNav';
+import { MediaProvidersPage } from './MediaProvidersPage';
 
-type MediaView =
-  | { kind: 'providers' }
-  | { kind: 'library' }
-  | { kind: 'entry'; id: string };
+const mediaNavItems: SubjectNavItem[] = [
+  { label: 'Library', to: '/media/library' },
+  { label: 'Providers', to: '/media/providers' },
+];
 
-function resolveViewFromPath(path: string): MediaView {
-  const entryMatch = path.match(/^\/media\/library\/([^/]+)$/);
-  if (entryMatch) return { kind: 'entry', id: decodeURIComponent(entryMatch[1]) };
-  if (path === '/media/library') return { kind: 'library' };
-  return { kind: 'providers' };
+export function MediaLayout() {
+  return (
+    <RequireAuth>
+      <AppPageShell contentClassName="max-w-7xl">
+        <GlobalHeader eyebrow="Cantaro · Media" title="Media tracking" />
+        <main className="space-y-5">
+          <SubjectNav label="Media sections" items={mediaNavItems} />
+          <Outlet />
+        </main>
+      </AppPageShell>
+    </RequireAuth>
+  );
 }
 
-interface MediaPageProps {
-  onNavigateHome: () => void;
+export function MediaLibraryRoutePage() {
+  const navigate = useNavigate();
+
+  return (
+    <MediaLibraryPage
+      embedded
+      onNavigateProviders={() => void navigate({ to: '/media/providers' })}
+      onNavigateEntry={(id) => void navigate({ to: '/media/library/$entryId', params: { entryId: id } })}
+    />
+  );
 }
 
-export function MediaPage({ onNavigateHome }: MediaPageProps) {
-  const [view, setView] = useState<MediaView>(() => resolveViewFromPath(window.location.pathname));
+export function MediaProvidersRoutePage() {
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    const handlePopState = () => setView(resolveViewFromPath(window.location.pathname));
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  const navigateMedia = (path: string, state: MediaView) => {
-    window.history.pushState({}, '', path);
-    setView(state);
-  };
-
-  if (view.kind === 'library') {
-    return (
-      <MediaLibraryPage
-        onNavigateHome={onNavigateHome}
-        onNavigateProviders={() => navigateMedia('/media', { kind: 'providers' })}
-        onNavigateEntry={(id) => navigateMedia(`/media/library/${encodeURIComponent(id)}`, { kind: 'entry', id })}
-      />
-    );
-  }
-
-  if (view.kind === 'entry') {
-    return (
-      <MediaEntryDetailPage
-        libraryEntryId={view.id}
-        onNavigateBack={() => navigateMedia('/media/library', { kind: 'library' })}
-      />
-    );
-  }
-
-  // Default: providers view
   return (
     <MediaProvidersPage
-      onNavigateHome={onNavigateHome}
-      onNavigateLibrary={() => navigateMedia('/media/library', { kind: 'library' })}
+      embedded
+      onNavigateLibrary={() => void navigate({ to: '/media/library' })}
+    />
+  );
+}
+
+export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
+  const navigate = useNavigate();
+
+  return (
+    <MediaEntryDetailPage
+      embedded
+      libraryEntryId={entryId}
+      onNavigateBack={() => void navigate({ to: '/media/library' })}
     />
   );
 }

@@ -4,31 +4,13 @@ import {
     LibraryEntryCardBadges,
     LibraryEntryCardDetails,
 } from './media-library/LibraryEntryCardSections';
-import { formatRelativeReleaseTime, mediaKindLabel } from '../services/mediaFormatting';
+import { formatRelativeReleaseTime } from '../services/mediaFormatting';
 import type { MediaLibraryListItemDto } from '../services/mediaApi';
 
 export interface LibraryEntryCardProps {
     entry: MediaLibraryListItemDto;
     onClick: () => void;
 }
-
-const STATUS_COLOR_MAP: Record<string, string> = {
-    current: 'bg-emerald-100 text-emerald-800',
-    completed: 'bg-blue-100 text-blue-800',
-    planning: 'bg-violet-100 text-violet-800',
-    paused: 'bg-amber-100 text-amber-800',
-    dropped: 'bg-rose-100 text-rose-800',
-    repeating: 'bg-cyan-100 text-cyan-800',
-};
-
-const NORMALIZED_STATUS_LABELS: Record<string, string> = {
-    current: 'Watching / Reading',
-    completed: 'Completed',
-    planning: 'Planning',
-    paused: 'Paused',
-    dropped: 'Dropped',
-    repeating: 'Rewatching / Rereading',
-};
 
 const PROGRESS_DIMENSION_CONFIG = {
     episode: {
@@ -48,14 +30,6 @@ const PROGRESS_DIMENSION_CONFIG = {
     },
 } as const;
 
-function statusLabel(status: string): string {
-    return NORMALIZED_STATUS_LABELS[status] ?? status;
-}
-
-function statusColor(status: string): string {
-    return STATUS_COLOR_MAP[status] ?? 'bg-gray-100 text-gray-700';
-}
-
 function progressConfig(entry: MediaLibraryListItemDto) {
     if (!entry.primaryProgressDimension) {
         return null;
@@ -72,7 +46,7 @@ function progressText(entry: MediaLibraryListItemDto): string {
 
     const current = config.getCurrent(entry);
     const total = config.getTotal(entry);
-    return total ? `${config.label} ${current} / ${total}` : `${config.label} ${current}`;
+    return total ? `${config.label} ${current} / ${total}` : `${config.label} ${current} / ?`;
 }
 
 function progressPercent(entry: MediaLibraryListItemDto): number | null {
@@ -131,9 +105,6 @@ export function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
                     <LibraryEntryCardDetails
                         entry={entry}
                         completion={completion}
-                        statusLabel={statusLabel(entry.normalizedStatus)}
-                        statusClassName={statusColor(entry.normalizedStatus)}
-                        mediaKindLabel={mediaKindLabel(entry.mediaKind)}
                     />
                 </div>
             </GlassCard>

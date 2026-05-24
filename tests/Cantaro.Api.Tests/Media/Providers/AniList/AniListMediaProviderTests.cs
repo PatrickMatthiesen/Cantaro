@@ -65,6 +65,7 @@ public class AniListMediaProviderTests
                                         "native": "SPY x FAMILY"
                                     },
                                     "coverImage": {
+                                        "extraLarge": "https://example.test/poster-extra-large.jpg",
                                         "medium": "https://example.test/poster-medium.jpg",
                                         "large": "https://example.test/poster-large.jpg"
                                     },
@@ -110,6 +111,7 @@ public class AniListMediaProviderTests
         var details = await provider.GetTitleDetailsAsync(user.Id, "140960", CancellationToken.None);
 
         Assert.NotNull(details);
+        Assert.Equal("https://example.test/poster-extra-large.jpg", details.PosterUrl);
         var availabilityLinks = Assert.IsAssignableFrom<IReadOnlyList<MediaProviderAvailabilityLink>>(details.AvailabilityLinks);
         Assert.Collection(
                 availabilityLinks,

@@ -53,7 +53,7 @@ export function GradientButton({
 
   return (
     <button
-      className={`rounded-2xl px-5 py-3 text-sm font-semibold transition-all hover:scale-[1.03] ${toneClass} ${className}`}
+      className={`rounded-2xl px-5 py-3 text-sm font-semibold transition-all hover:scale-[1.03] ${toneClass} disabled:cursor-not-allowed disabled:bg-none disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none disabled:hover:scale-100 disabled:hover:bg-gray-200 disabled:hover:brightness-100 ${className}`}
       {...rest}
     >
       {children}

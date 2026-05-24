@@ -50,6 +50,7 @@ builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
 builder.Services.AddScoped<MediaLibraryQueryService>();
 builder.Services.AddScoped<MediaLibraryLinkService>();
+builder.Services.AddScoped<MusicLibraryQueryService>();
 builder.Services.AddScoped<MediaProviderOperationProcessor>();
 builder.Services.AddScoped<MediaObservationMatchingService>();
 builder.Services.AddScoped<MediaObservationProgressService>();
