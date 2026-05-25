@@ -31,6 +31,29 @@ public class MediaStatusUpdateDto
     public required string Status { get; set; }
 }
 
+public class MediaCatalogAddRequestDto
+{
+    public string Status { get; set; } = MediaLibraryStatuses.Planned;
+}
+
+public class MediaCatalogAddResultDto
+{
+    public required Guid LibraryEntryId { get; set; }
+    public required Guid MediaTitleId { get; set; }
+    public required string Status { get; set; }
+}
+
+public class MediaCatalogLibraryStateDto
+{
+    public bool IsInLibrary { get; set; }
+    public Guid? LibraryEntryId { get; set; }
+    public Guid? MediaTitleId { get; set; }
+    public string? NormalizedStatus { get; set; }
+    public int? ProgressEpisodes { get; set; }
+    public int? ProgressChapters { get; set; }
+    public int? ProgressVolumes { get; set; }
+}
+
 public class MediaProviderSearchResultDto
 {
     public required string ProviderId { get; set; }
@@ -47,6 +70,7 @@ public class MediaProviderSearchResultDto
     public int? VolumeCount { get; set; }
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
+    public MediaCatalogLibraryStateDto? LibraryState { get; set; }
 }
 
 public class MediaProviderTitleDetailsDto
@@ -66,6 +90,7 @@ public class MediaProviderTitleDetailsDto
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
     public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
+    public MediaCatalogLibraryStateDto? LibraryState { get; set; }
 }
 
 public class MediaProviderAvailabilityLinkDto

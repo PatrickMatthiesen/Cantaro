@@ -10,7 +10,7 @@ const NORMALIZED_STATUS_OPTIONS = [
     { value: '', label: 'All statuses' },
     { value: 'current', label: 'Watching / Reading' },
     { value: 'completed', label: 'Completed' },
-    { value: 'planning', label: 'Planning' },
+    { value: 'planned', label: 'Planning' },
     { value: 'paused', label: 'Paused' },
     { value: 'dropped', label: 'Dropped' },
     { value: 'repeating', label: 'Rewatching / Rereading' },

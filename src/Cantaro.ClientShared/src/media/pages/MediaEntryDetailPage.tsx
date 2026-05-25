@@ -21,7 +21,7 @@ import type {
 const NORMALIZED_STATUSES = [
   { value: 'current', label: 'Watching / Reading' },
   { value: 'completed', label: 'Completed' },
-  { value: 'planning', label: 'Planning' },
+  { value: 'planned', label: 'Planning' },
   { value: 'paused', label: 'Paused' },
   { value: 'dropped', label: 'Dropped' },
   { value: 'repeating', label: 'Rewatching / Rereading' },

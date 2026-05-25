@@ -34,6 +34,7 @@ function listNameForProvider(provider: string | undefined): string | undefined {
 function hasActiveMediaLibraryFilters(filters: MediaLibraryQueryParams): boolean {
   return Boolean(
     filters.status
+    || filters.query
     || filters.mediaKind
     || filters.listName
     || (filters.provider && filters.provider !== PRIMARY_PROVIDER_ID)

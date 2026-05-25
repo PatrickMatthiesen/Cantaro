@@ -231,7 +231,9 @@ public class MediaProvidersController(
             },
             cancellationToken);
 
-        return Ok(results.Select(MapSearchResult).ToList());
+        var libraryStates = await GetLibraryStatesAsync(userId, provider.ProviderId, results.Select(result => result.ProviderMediaId), cancellationToken);
+
+        return Ok(results.Select(result => MapSearchResult(result, libraryStates)).ToList());
     }
 
     [HttpGet("providers/{providerId}/titles/{providerMediaId}")]
@@ -245,7 +247,109 @@ public class MediaProvidersController(
         var userId = await GetCurrentUserIdAsync();
         var provider = _mediaProviderRegistry.GetRequired(providerId);
         var details = await provider.GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
-        return details is null ? NotFound() : Ok(MapTitleDetails(details));
+        if (details is null)
+        {
+            return NotFound();
+        }
+
+        var libraryState = await GetLibraryStateAsync(userId, provider.ProviderId, providerMediaId, cancellationToken);
+        return Ok(MapTitleDetails(details, libraryState));
+    }
+
+    [HttpPost("providers/{providerId}/titles/{providerMediaId}/library")]
+    public async Task<ActionResult<MediaCatalogAddResultDto>> AddTitleToLibrary(
+        string providerId,
+        string providerMediaId,
+        [FromBody] MediaCatalogAddRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!_mediaProviderRegistry.IsSupported(providerId))
+        {
+            return NotFound(new { error = $"Media provider '{providerId}' is not implemented" });
+        }
+
+        var allowedStatuses = GetWritableMediaStatuses();
+        if (!allowedStatuses.Contains(request.Status))
+        {
+            return BadRequest(new { error = "Unsupported media status." });
+        }
+
+        var userId = await GetCurrentUserIdAsync();
+        var provider = _mediaProviderRegistry.GetRequired(providerId);
+        var account = await provider.GetConnectedAccountAsync(userId, cancellationToken);
+        if (account is null)
+        {
+            return BadRequest(new { error = $"{provider.ProviderId} is not connected." });
+        }
+
+        var existingEntry = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(entry =>
+                entry.UserId == userId
+                && entry.Provider == provider.ProviderId
+                && entry.ProviderAccountId == account.ExternalAccountId
+                && entry.ProviderMediaId == providerMediaId,
+                cancellationToken);
+
+        if (existingEntry is not null)
+        {
+            return Ok(new MediaCatalogAddResultDto
+            {
+                LibraryEntryId = existingEntry.Id,
+                MediaTitleId = existingEntry.MediaTitleId,
+                Status = existingEntry.NormalizedStatus
+            });
+        }
+
+        var details = await provider.GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
+        if (details is null)
+        {
+            return NotFound(new { error = "Provider title not found." });
+        }
+
+        var mutationResult = await provider.UpdateStatusAsync(
+            userId,
+            new MediaStatusUpdateRequest
+            {
+                ProviderMediaId = providerMediaId,
+                Status = request.Status
+            },
+            cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var title = await FindOrCreateMediaTitleAsync(provider.ProviderId, providerMediaId, details, now, cancellationToken);
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            MediaTitleId = title.Id,
+            ConnectedServiceAccountId = account.Id,
+            Provider = provider.ProviderId,
+            ProviderAccountId = account.ExternalAccountId,
+            ProviderMediaId = providerMediaId,
+            NormalizedStatus = request.Status,
+            RawStatus = mutationResult.RawStatus,
+            ProgressEpisodes = details.PrimaryProgressDimension == MediaProgressDimensions.Episode ? 0 : null,
+            ProgressChapters = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter ? 0 : null,
+            ProgressVolumes = details.PrimaryProgressDimension == MediaProgressDimensions.Volume ? 0 : null,
+            LastSyncedAt = now,
+            LastRemoteUpdateAt = mutationResult.LastRemoteUpdateAt ?? now,
+            LastLocalEditAt = now,
+            LastMutationSource = MediaMutationSources.UserStatusUpdate,
+            RawMetadata = mutationResult.RawMetadata ?? details.RawMetadata,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _dbContext.MediaLibraryEntries.Add(entry);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new MediaCatalogAddResultDto
+        {
+            LibraryEntryId = entry.Id,
+            MediaTitleId = title.Id,
+            Status = entry.NormalizedStatus
+        });
     }
 
     [HttpGet("providers/{providerId}/titles/{providerMediaId}/release")]
@@ -362,7 +466,9 @@ public class MediaProvidersController(
         };
     }
 
-    private static MediaProviderSearchResultDto MapSearchResult(MediaProviderSearchResult result)
+    private static MediaProviderSearchResultDto MapSearchResult(
+        MediaProviderSearchResult result,
+        IReadOnlyDictionary<string, MediaCatalogLibraryStateDto> libraryStates)
     {
         return new MediaProviderSearchResultDto
         {
@@ -379,11 +485,14 @@ public class MediaProvidersController(
             ChapterCount = result.ChapterCount,
             VolumeCount = result.VolumeCount,
             PrimaryProgressDimension = result.PrimaryProgressDimension,
-            ReleaseStatusDimension = result.ReleaseStatusDimension
+            ReleaseStatusDimension = result.ReleaseStatusDimension,
+            LibraryState = libraryStates.TryGetValue(result.ProviderMediaId, out var state)
+                ? state
+                : new MediaCatalogLibraryStateDto()
         };
     }
 
-    private static MediaProviderTitleDetailsDto MapTitleDetails(MediaProviderTitleDetails details)
+    private static MediaProviderTitleDetailsDto MapTitleDetails(MediaProviderTitleDetails details, MediaCatalogLibraryStateDto? libraryState = null)
     {
         return new MediaProviderTitleDetailsDto
         {
@@ -409,7 +518,8 @@ public class MediaProvidersController(
                 AvailabilityKind = link.AvailabilityKind,
                 Notes = link.Notes,
                 IconUrl = link.IconUrl
-            }).ToList()
+            }).ToList(),
+            LibraryState = libraryState ?? new MediaCatalogLibraryStateDto()
         };
     }
 
@@ -432,6 +542,160 @@ public class MediaProvidersController(
         return await _dbContext.MediaLibraryEntries
             .Include(entry => entry.MediaTitle)
             .FirstOrDefaultAsync(entry => entry.Id == libraryEntryId && entry.UserId == userId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyDictionary<string, MediaCatalogLibraryStateDto>> GetLibraryStatesAsync(
+        int userId,
+        string providerId,
+        IEnumerable<string> providerMediaIds,
+        CancellationToken cancellationToken)
+    {
+        var mediaIds = providerMediaIds.Distinct(StringComparer.Ordinal).ToList();
+        if (mediaIds.Count == 0)
+        {
+            return new Dictionary<string, MediaCatalogLibraryStateDto>(StringComparer.Ordinal);
+        }
+
+        var entries = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .Where(entry =>
+                entry.UserId == userId
+                && entry.Provider == providerId
+                && mediaIds.Contains(entry.ProviderMediaId))
+            .ToListAsync(cancellationToken);
+
+        return entries
+            .OrderByDescending(entry => entry.ConnectedServiceAccountId is not null)
+            .ThenByDescending(entry => entry.UpdatedAt)
+            .GroupBy(entry => entry.ProviderMediaId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => MapLibraryState(group.First()),
+                StringComparer.Ordinal);
+    }
+
+    private async Task<MediaCatalogLibraryStateDto> GetLibraryStateAsync(
+        int userId,
+        string providerId,
+        string providerMediaId,
+        CancellationToken cancellationToken)
+    {
+        var entry = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.UserId == userId
+                && item.Provider == providerId
+                && item.ProviderMediaId == providerMediaId,
+                cancellationToken);
+
+        return entry is null ? new MediaCatalogLibraryStateDto() : MapLibraryState(entry);
+    }
+
+    private static MediaCatalogLibraryStateDto MapLibraryState(MediaLibraryEntry entry)
+    {
+        return new MediaCatalogLibraryStateDto
+        {
+            IsInLibrary = true,
+            LibraryEntryId = entry.Id,
+            MediaTitleId = entry.MediaTitleId,
+            NormalizedStatus = entry.NormalizedStatus,
+            ProgressEpisodes = entry.ProgressEpisodes,
+            ProgressChapters = entry.ProgressChapters,
+            ProgressVolumes = entry.ProgressVolumes
+        };
+    }
+
+    private async Task<MediaTitle> FindOrCreateMediaTitleAsync(
+        string providerId,
+        string providerMediaId,
+        MediaProviderTitleDetails details,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var existingLink = await _dbContext.MediaProviderLinks
+            .Include(link => link.MediaTitle)
+            .FirstOrDefaultAsync(link => link.Provider == providerId && link.ExternalId == providerMediaId, cancellationToken);
+
+        if (existingLink?.MediaTitle is { } linkedTitle)
+        {
+            ApplyProviderDetails(linkedTitle, details, now);
+            existingLink.RawMetadata = details.RawMetadata ?? existingLink.RawMetadata;
+            existingLink.LastVerifiedAt = now;
+            existingLink.UpdatedAt = now;
+            return linkedTitle;
+        }
+
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = details.Title,
+            SortTitle = details.Title,
+            OriginalTitle = details.NativeTitle,
+            MediaKind = details.MediaKind,
+            Synopsis = details.Synopsis,
+            StartYear = details.StartYear,
+            EpisodeCount = details.EpisodeCount,
+            ChapterCount = details.ChapterCount,
+            VolumeCount = details.VolumeCount,
+            SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
+            SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter,
+            SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume,
+            IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly,
+            PrimaryProgressDimension = details.PrimaryProgressDimension,
+            ReleaseStatusDimension = details.ReleaseStatusDimension,
+            CanonicalMetadata = details.RawMetadata,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        _dbContext.MediaTitles.Add(title);
+        _dbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = providerId,
+            ExternalId = providerMediaId,
+            LinkSource = MediaMappingSources.UserConfirmed,
+            LastVerifiedAt = now,
+            RawMetadata = details.RawMetadata,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+
+        return title;
+    }
+
+    private static void ApplyProviderDetails(MediaTitle title, MediaProviderTitleDetails details, DateTimeOffset now)
+    {
+        title.CanonicalTitle = details.Title;
+        title.SortTitle = details.Title;
+        title.OriginalTitle = details.NativeTitle ?? title.OriginalTitle;
+        title.MediaKind = details.MediaKind;
+        title.Synopsis = details.Synopsis ?? title.Synopsis;
+        title.StartYear = details.StartYear ?? title.StartYear;
+        title.EpisodeCount = details.EpisodeCount ?? title.EpisodeCount;
+        title.ChapterCount = details.ChapterCount ?? title.ChapterCount;
+        title.VolumeCount = details.VolumeCount ?? title.VolumeCount;
+        title.SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode;
+        title.SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter;
+        title.SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume;
+        title.IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly;
+        title.PrimaryProgressDimension = details.PrimaryProgressDimension;
+        title.ReleaseStatusDimension = details.ReleaseStatusDimension;
+        title.CanonicalMetadata = details.RawMetadata ?? title.CanonicalMetadata;
+        title.UpdatedAt = now;
+    }
+
+    private static HashSet<string> GetWritableMediaStatuses()
+    {
+        return new HashSet<string>(StringComparer.Ordinal)
+        {
+            MediaLibraryStatuses.Current,
+            MediaLibraryStatuses.Planned,
+            MediaLibraryStatuses.Paused,
+            MediaLibraryStatuses.Completed,
+            MediaLibraryStatuses.Dropped
+        };
     }
 
     private async Task<int> GetCurrentUserIdAsync()

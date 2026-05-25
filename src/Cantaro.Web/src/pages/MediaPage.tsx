@@ -1,5 +1,5 @@
 import { Outlet, useNavigate } from '@tanstack/react-router';
-import { MediaEntryDetailPage, MediaLibraryPage } from '@cantaro/client-shared/media';
+import { MediaCatalogDetailPage, MediaEntryDetailPage, MediaLibraryPage } from '@cantaro/client-shared/media';
 import { AppPageShell, GlobalHeader, RequireAuth } from '../components/AppShell';
 import { SubjectNav, type SubjectNavItem } from '../components/SubjectNav';
 import { MediaProvidersPage } from './MediaProvidersPage';
@@ -31,6 +31,10 @@ export function MediaLibraryRoutePage() {
       embedded
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
       onNavigateEntry={(id) => void navigate({ to: '/media/library/$entryId', params: { entryId: id } })}
+      onNavigateCatalogResult={(providerId, providerMediaId) => void navigate({
+        to: '/media/catalog/$providerId/$providerMediaId',
+        params: { providerId, providerMediaId },
+      })}
     />
   );
 }
@@ -54,6 +58,20 @@ export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
       embedded
       libraryEntryId={entryId}
       onNavigateBack={() => void navigate({ to: '/media/library' })}
+    />
+  );
+}
+
+export function MediaCatalogRoutePage({ providerId, providerMediaId }: { providerId: string; providerMediaId: string }) {
+  const navigate = useNavigate();
+
+  return (
+    <MediaCatalogDetailPage
+      embedded
+      providerId={providerId}
+      providerMediaId={providerMediaId}
+      onNavigateBack={() => void navigate({ to: '/media/library' })}
+      onNavigateEntry={(entryId) => void navigate({ to: '/media/library/$entryId', params: { entryId } })}
     />
   );
 }
