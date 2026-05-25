@@ -8,6 +8,7 @@ namespace Cantaro.Api.Services;
 
 public class MediaLibraryQueryOptions
 {
+    public string? Query { get; set; }
     public string? Status { get; set; }
     public string? MediaKind { get; set; }
     public string? Provider { get; set; }
@@ -39,6 +40,17 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         var query = _dbContext.MediaLibraryEntries
             .Include(e => e.MediaTitle)
             .Where(e => e.UserId == userId);
+
+        if (!string.IsNullOrWhiteSpace(options.Query))
+        {
+            var searchTerm = options.Query.Trim().ToLowerInvariant();
+            query = query.Where(e =>
+                (e.MediaTitle != null
+                    && ((e.MediaTitle.CanonicalTitle != null && e.MediaTitle.CanonicalTitle.ToLower().Contains(searchTerm))
+                        || (e.MediaTitle.OriginalTitle != null && e.MediaTitle.OriginalTitle.ToLower().Contains(searchTerm))
+                        || (e.MediaTitle.SortTitle != null && e.MediaTitle.SortTitle.ToLower().Contains(searchTerm))))
+                || e.ProviderMediaId.ToLower().Contains(searchTerm));
+        }
 
         if (!string.IsNullOrWhiteSpace(options.Status))
         {

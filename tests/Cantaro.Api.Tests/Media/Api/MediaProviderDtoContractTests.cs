@@ -141,6 +141,71 @@ public class MediaProviderDtoContractTests
     }
 
     [Fact]
+    public async Task AddTitleToLibrary_CreatesLocalEntryAfterProviderWrite()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var provider = new StubMediaProvider
+        {
+            ConnectedAccount = new ConnectedServiceAccount
+            {
+                Id = 2601,
+                UserId = 901,
+                Service = "anilist",
+                ExternalAccountId = "viewer-901",
+                DisplayName = "Search Tester",
+                CreatedAt = now.UtcDateTime,
+                UpdatedAt = now.UtcDateTime
+            },
+            TitleDetails = new MediaProviderTitleDetails
+            {
+                ProviderId = "anilist",
+                ProviderMediaId = "154587",
+                Title = "Frieren: Beyond Journey's End",
+                NativeTitle = "Sousou no Frieren",
+                MediaKind = MediaKinds.Anime,
+                PosterUrl = "https://example.test/frieren.jpg",
+                EpisodeCount = 28,
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                RawMetadata = "{\"coverImage\":{\"large\":\"https://example.test/frieren.jpg\"}}"
+            },
+            StatusMutationResult = new MediaProviderMutationResult
+            {
+                ProviderId = "anilist",
+                ProviderMediaId = "154587",
+                AppliedAt = now,
+                LastRemoteUpdateAt = now,
+                RawStatus = "PLANNING",
+                RawMetadata = "{\"status\":\"PLANNING\"}"
+            }
+        };
+
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        fixture.DbContext.ConnectedServiceAccounts.Add(provider.ConnectedAccount);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var result = await fixture.Controller.AddTitleToLibrary(
+            "anilist",
+            "154587",
+            new MediaCatalogAddRequestDto { Status = MediaLibraryStatuses.Planned },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<MediaCatalogAddResultDto>(ok.Value);
+
+        var entry = await fixture.DbContext.MediaLibraryEntries.Include(item => item.MediaTitle).SingleAsync();
+        Assert.Equal(entry.Id, payload.LibraryEntryId);
+        Assert.Equal(MediaLibraryStatuses.Planned, entry.NormalizedStatus);
+        Assert.Equal("Frieren: Beyond Journey's End", entry.MediaTitle!.CanonicalTitle);
+        Assert.Equal("154587", entry.ProviderMediaId);
+        Assert.Equal(0, entry.ProgressEpisodes);
+
+        var link = await fixture.DbContext.MediaProviderLinks.SingleAsync();
+        Assert.Equal(entry.MediaTitleId, link.MediaTitleId);
+        Assert.Equal("154587", link.ExternalId);
+    }
+
+    [Fact]
     public async Task UpdateProgress_ReturnsNoContentAndDeletesCompletedQueueRow()
     {
         var provider = new StubMediaProvider
@@ -282,13 +347,15 @@ public class MediaProviderDtoContractTests
 
         public MediaProviderMutationResult? StatusMutationResult { get; init; }
 
+        public ConnectedServiceAccount? ConnectedAccount { get; init; }
+
         public bool ThrowOnProgressUpdate { get; init; }
 
         public bool ThrowOnStatusUpdate { get; init; }
 
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            return Task.FromResult(ConnectedAccount);
         }
 
         public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge)

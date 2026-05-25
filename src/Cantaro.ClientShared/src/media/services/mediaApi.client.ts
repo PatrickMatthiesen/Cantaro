@@ -5,6 +5,8 @@ import {
 import type {
     MediaApiRuntimeConfig,
     MediaAutoProgressUpdateDto,
+    MediaCatalogAddRequestDto,
+    MediaCatalogAddResultDto,
     MediaImportDto,
     MediaLibraryEntryDetailDto,
     MediaLibraryPageDto,
@@ -152,6 +154,22 @@ export class MediaApiClient {
         );
         await this.ensureOk(response, 'Failed to get title details');
         return response.json() as Promise<MediaProviderTitleDetailsDto>;
+    }
+
+    async addProviderTitleToLibrary(
+        providerId: string,
+        providerMediaId: string,
+        request: MediaCatalogAddRequestDto,
+    ): Promise<MediaCatalogAddResultDto> {
+        const response = await this.request(
+            `/api/media/providers/${encodeURIComponent(providerId)}/titles/${encodeURIComponent(providerMediaId)}/library`,
+            {
+                method: 'POST',
+                body: JSON.stringify(request),
+            },
+        );
+        await this.ensureOk(response, 'Failed to add media to library');
+        return response.json() as Promise<MediaCatalogAddResultDto>;
     }
 
     async updateProgress(libraryEntryId: string, request: MediaProgressUpdateDto): Promise<void> {

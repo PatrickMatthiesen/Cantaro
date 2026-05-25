@@ -119,8 +119,28 @@ export interface MediaStatusUpdateDto {
     status: string;
 }
 
+export interface MediaCatalogAddRequestDto {
+    status: string;
+}
+
+export interface MediaCatalogAddResultDto {
+    libraryEntryId: string;
+    mediaTitleId: string;
+    status: string;
+}
+
 export interface MediaAutoProgressUpdateDto {
     enabled: boolean;
+}
+
+export interface MediaCatalogLibraryStateDto {
+    isInLibrary: boolean;
+    libraryEntryId?: string;
+    mediaTitleId?: string;
+    normalizedStatus?: string;
+    progressEpisodes?: number;
+    progressChapters?: number;
+    progressVolumes?: number;
 }
 
 interface MediaProviderMetadataDto {
@@ -141,12 +161,14 @@ interface MediaProviderMetadataDto {
 export interface MediaProviderSearchResultDto extends MediaProviderMetadataDto {
     providerId: string;
     providerMediaId: string;
+    libraryState?: MediaCatalogLibraryStateDto;
 }
 
 export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
     providerId: string;
     providerMediaId: string;
     availabilityLinks: MediaProviderAvailabilityLinkDto[];
+    libraryState?: MediaCatalogLibraryStateDto;
 }
 
 export interface MediaProviderAvailabilityLinkDto {
@@ -159,6 +181,7 @@ export interface MediaProviderAvailabilityLinkDto {
 }
 
 export interface MediaLibraryQueryParams {
+    query?: string;
     status?: string;
     mediaKind?: string;
     provider?: string;

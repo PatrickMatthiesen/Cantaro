@@ -28,6 +28,7 @@ public class MediaLibraryController(
     /// Browse the authenticated user's media library with optional filtering, sorting, and pagination.
     /// </summary>
     /// <param name="status">Filter by normalized status (current, planned, paused, completed, dropped).</param>
+    /// <param name="query">Search by title or provider media ID.</param>
     /// <param name="mediaKind">Filter by media kind (anime, manga, movie, series).</param>
     /// <param name="provider">Filter by provider ID (e.g. anilist).</param>
     /// <param name="listName">Filter by the provider's raw list name (for example an AniList custom list).</param>
@@ -45,12 +46,14 @@ public class MediaLibraryController(
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
+        [FromQuery] string? query = null,
         CancellationToken cancellationToken = default)
     {
         var userId = await GetCurrentUserIdAsync();
 
         var options = new MediaLibraryQueryOptions
         {
+            Query = query,
             Status = status,
             MediaKind = mediaKind,
             Provider = provider,

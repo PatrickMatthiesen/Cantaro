@@ -1,92 +1,182 @@
-import { LibraryContentSection } from '../components/media-library/LibraryContentSection';
 import type { ReactNode } from 'react';
+import { CatalogSearchSection } from '../components/media-library/CatalogSearchSection';
+import { LibraryContentSection } from '../components/media-library/LibraryContentSection';
 import { LibraryFiltersPanel } from '../components/media-library/LibraryFiltersPanel';
+import { LibrarySearchBar } from '../components/media-library/LibrarySearchBar';
 import {
   MediaLibraryHeader,
   MediaLibraryRefreshErrorNotice,
 } from '../components/media-library/MediaLibraryHeader';
+import { useLibrarySearchState } from '../components/media-library/useLibrarySearchState';
 import { useMediaLibraryState } from '../components/media-library/useMediaLibraryState';
 
 interface MediaLibraryPageProps {
   onNavigateProviders?: () => void;
   onNavigateEntry: (id: string) => void;
+  onNavigateCatalogResult?: (providerId: string, providerMediaId: string) => void;
   navigation?: ReactNode;
   embedded?: boolean;
+}
+
+type LibraryState = ReturnType<typeof useMediaLibraryState>;
+type SearchState = ReturnType<typeof useLibrarySearchState>;
+
+function defaultCatalogNavigation(providerId: string, providerMediaId: string) {
+  window.location.assign(`/media/catalog/${encodeURIComponent(providerId)}/${encodeURIComponent(providerMediaId)}`);
+}
+
+function LibraryToolbar({
+  library,
+  search,
+  onNavigateProviders,
+}: {
+  library: LibraryState;
+  search: SearchState;
+  onNavigateProviders?: () => void;
+}) {
+  return (
+    <>
+      <LibrarySearchBar
+        query={search.searchQuery}
+        mode={search.searchMode}
+        connectedProviderIds={search.connectedProviderIds}
+        isSearchingProvider={search.isCatalogSearching}
+        onQueryChange={search.setSearchQuery}
+        onModeChange={search.handleSearchModeChange}
+        onSubmit={search.handleSearchSubmit}
+      />
+
+      {search.searchMode === 'library' ? (
+        <LibraryFiltersPanel
+          filters={library.filters}
+          availableListNames={library.availableListNames}
+          providerStatus={library.providerStatus}
+          isRefreshing={library.isRefreshing}
+          isPrimaryProviderSelected={library.isPrimaryProviderSelected}
+          onUpdateFilter={library.updateFilter}
+          onUpdateProviderFilter={library.updateProviderFilter}
+          onToggleSortDir={library.toggleSortDir}
+          onRefreshFromRemote={library.refreshFromRemote}
+          onNavigateProviders={onNavigateProviders}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function LibrarySearchResults({
+  library,
+  search,
+  onNavigateEntry,
+  onNavigateProviders,
+  onNavigateCatalogResult,
+}: {
+  library: LibraryState;
+  search: SearchState;
+  onNavigateEntry: (id: string) => void;
+  onNavigateProviders?: () => void;
+  onNavigateCatalogResult?: (providerId: string, providerMediaId: string) => void;
+}) {
+  if (search.searchMode !== 'library') {
+    return (
+      <CatalogSearchSection
+        providerName={search.providerName}
+        query={search.searchQuery.trim()}
+        results={search.catalogResults}
+        isLoading={search.isCatalogSearching}
+        error={search.catalogSearchError}
+        hasSearched={search.hasCatalogSearched}
+        onRetry={() => void search.runCatalogSearch(search.searchMode, search.searchQuery)}
+        onNavigateCatalogResult={onNavigateCatalogResult ?? defaultCatalogNavigation}
+        onNavigateEntry={onNavigateEntry}
+      />
+    );
+  }
+
+  return (
+    <LibraryContentSection
+      error={library.error}
+      isLoading={library.isLoading}
+      items={library.items}
+      filters={library.filters}
+      hasActiveFilters={library.hasActiveFilters}
+      totalPages={library.totalPages}
+      onRetry={() => library.loadLibrary(library.filters)}
+      onNavigateEntry={onNavigateEntry}
+      onNavigateProviders={onNavigateProviders}
+      onPreviousPage={library.goToPreviousPage}
+      onNextPage={library.goToNextPage}
+    />
+  );
+}
+
+function MediaLibraryContent({
+  library,
+  search,
+  navigation,
+  onNavigateProviders,
+  onNavigateEntry,
+  onNavigateCatalogResult,
+}: {
+  library: LibraryState;
+  search: SearchState;
+  navigation?: ReactNode;
+  onNavigateProviders?: () => void;
+  onNavigateEntry: (id: string) => void;
+  onNavigateCatalogResult?: (providerId: string, providerMediaId: string) => void;
+}) {
+  return (
+    <>
+      <MediaLibraryHeader
+        totalCount={library.totalCount}
+        isLoading={library.isLoading}
+        isProviderConnected={Boolean(library.providerStatus?.isConnected)}
+        formattedLastRemoteCheckAt={library.formattedLastRemoteCheckAt}
+        navigation={navigation}
+      />
+      <MediaLibraryRefreshErrorNotice error={library.refreshError} />
+      <LibraryToolbar library={library} search={search} onNavigateProviders={onNavigateProviders} />
+      <LibrarySearchResults
+        library={library}
+        search={search}
+        onNavigateEntry={onNavigateEntry}
+        onNavigateProviders={onNavigateProviders}
+        onNavigateCatalogResult={onNavigateCatalogResult}
+      />
+    </>
+  );
 }
 
 export function MediaLibraryPage({
   onNavigateProviders,
   onNavigateEntry,
+  onNavigateCatalogResult,
   navigation,
   embedded = false,
 }: MediaLibraryPageProps) {
-  const {
-    filters,
-    items,
-    availableListNames,
-    totalPages,
-    totalCount,
-    isLoading,
-    error,
-    providerStatus,
-    isRefreshing,
-    refreshError,
-    formattedLastRemoteCheckAt,
-    hasActiveFilters,
-    isPrimaryProviderSelected,
-    updateFilter,
-    updateProviderFilter,
-    toggleSortDir,
-    refreshFromRemote,
-    loadLibrary,
-    goToPreviousPage,
-    goToNextPage,
-  } = useMediaLibraryState();
+  const library = useMediaLibraryState();
+  const search = useLibrarySearchState({
+    filters: library.filters,
+    providerId: library.providerStatus?.providerId,
+    isProviderConnected: Boolean(library.providerStatus?.isConnected),
+    updateFilter: library.updateFilter,
+  });
+  const contentClassName = `space-y-6 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-6 pt-8 pb-16'}`;
 
   const content = (
-    <div className={`space-y-6 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-6 pt-8 pb-16'}`}>
-      <MediaLibraryHeader
-        totalCount={totalCount}
-        isLoading={isLoading}
-        isProviderConnected={Boolean(providerStatus?.isConnected)}
-        formattedLastRemoteCheckAt={formattedLastRemoteCheckAt}
+    <div className={contentClassName}>
+      <MediaLibraryContent
+        library={library}
+        search={search}
         navigation={navigation}
-      />
-
-      <MediaLibraryRefreshErrorNotice error={refreshError} />
-
-      <LibraryFiltersPanel
-        filters={filters}
-        availableListNames={availableListNames}
-        providerStatus={providerStatus}
-        isRefreshing={isRefreshing}
-        isPrimaryProviderSelected={isPrimaryProviderSelected}
-        onUpdateFilter={updateFilter}
-        onUpdateProviderFilter={updateProviderFilter}
-        onToggleSortDir={toggleSortDir}
-        onRefreshFromRemote={refreshFromRemote}
         onNavigateProviders={onNavigateProviders}
-      />
-
-      <LibraryContentSection
-        error={error}
-        isLoading={isLoading}
-        items={items}
-        filters={filters}
-        hasActiveFilters={hasActiveFilters}
-        totalPages={totalPages}
-        onRetry={() => loadLibrary(filters)}
         onNavigateEntry={onNavigateEntry}
-        onNavigateProviders={onNavigateProviders}
-        onPreviousPage={goToPreviousPage}
-        onNextPage={goToNextPage}
+        onNavigateCatalogResult={onNavigateCatalogResult}
       />
     </div>
   );
 
-  if (embedded) {
-    return content;
-  }
+  if (embedded) return content;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">

@@ -1,4 +1,5 @@
 export { MediaEntryDetailPage } from './pages/MediaEntryDetailPage';
+export { MediaCatalogDetailPage } from './pages/MediaCatalogDetailPage';
 export { MediaLibraryPage } from './pages/MediaLibraryPage';
 export { ProviderPanel } from './components/ProviderPanel';
 export * from './services/mediaApi';

@@ -154,6 +154,48 @@ public class MediaLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetLibraryAsync_SearchesTitles()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(312, "search@example.com");
+        db.Users.Add(user);
+
+        var frieren = MakeTitle("Frieren: Beyond Journey's End", MediaKinds.Anime, now);
+        var slime = MakeTitle("That Time I Got Reincarnated as a Slime Season 4", MediaKinds.Anime, now);
+        var monster = MakeTitle("Monster", MediaKinds.Anime, now);
+        db.MediaTitles.AddRange(frieren, slime, monster);
+        await db.SaveChangesAsync();
+
+        db.MediaLibraryEntries.AddRange(
+            MakeEntry(user.Id, frieren, MediaLibraryStatuses.Current, now),
+            MakeEntry(user.Id, slime, MediaLibraryStatuses.Planned, now),
+            MakeEntry(user.Id, monster, MediaLibraryStatuses.Current, now));
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+
+        var page = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions
+        {
+            Query = "journey"
+        }, CancellationToken.None);
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal("Frieren: Beyond Journey's End", page.Items[0].CanonicalTitle);
+
+        var lowerCasePage = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions
+        {
+            Query = "that time i"
+        }, CancellationToken.None);
+
+        Assert.Equal(1, lowerCasePage.TotalCount);
+        Assert.Equal("That Time I Got Reincarnated as a Slime Season 4", lowerCasePage.Items[0].CanonicalTitle);
+    }
+
+    [Fact]
     public async Task GetLibraryAsync_IsolatesAcrossUsers()
     {
         var (db, connection) = await CreateDbAsync();
