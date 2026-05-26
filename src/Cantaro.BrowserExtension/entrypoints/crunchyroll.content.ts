@@ -1,49 +1,177 @@
 import {
+  extractEpisodeId,
   extractCrunchyrollEpisodeMetadata,
   trackVideoProgress,
   type CrunchyrollEpisodeMetadata,
+  type VideoProgressTrackerStatus,
   type VideoProgressTracker,
 } from '../lib/crunchyrollAdapter';
 import type { MediaObservation, MediaObservationMessage } from '../lib/mediaObservation';
+
+const TRACKER_DISPOSE_KEY = '__cantaroCrunchyrollWatchTrackerDispose';
+
+interface TrackingAttempt {
+  metadata: CrunchyrollEpisodeMetadata;
+  watchId: string;
+}
+
+declare global {
+  interface Window {
+    [TRACKER_DISPOSE_KEY]?: () => void;
+  }
+}
 
 export default defineContentScript({
   matches: ['https://www.crunchyroll.com/watch/*'],
 
   main() {
     console.log('Cantaro: Crunchyroll watch-state tracker loaded');
-    startCrunchyrollWatchTracker();
+    window[TRACKER_DISPOSE_KEY]?.();
+    window[TRACKER_DISPOSE_KEY] = startCrunchyrollWatchTracker();
   },
 });
 
-function startCrunchyrollWatchTracker(): void {
+function startCrunchyrollWatchTracker(): () => void {
   let tracker: VideoProgressTracker | null = null;
   let currentWatchId: string | undefined;
   const submittedWatchIds = new Set<string>();
+  const progressLogger = createProgressLogger(() => currentWatchId);
 
   const restartTracking = () => {
-    const metadata = extractCrunchyrollEpisodeMetadata(document, location);
-    const nextWatchId = metadata?.siteMediaId ?? location.href;
+    const attempt = prepareTrackingAttempt(currentWatchId, tracker, submittedWatchIds);
+    if (!attempt) return;
 
-    if (isTrackingCurrentWatch(nextWatchId, currentWatchId, tracker)) {
-      return;
-    }
-
+    progressLogger.reset();
     tracker = disposeTracker(tracker);
-    currentWatchId = nextWatchId;
-
-    if (shouldSkipTracking(metadata, nextWatchId, submittedWatchIds)) {
-      return;
-    }
+    currentWatchId = attempt.watchId;
+    logTrackerArmed(attempt);
 
     tracker = trackVideoProgress(
       document,
-      metadata,
-      createObservationSubmitter(nextWatchId, submittedWatchIds),
+      attempt.metadata,
+      createObservationSubmitter(attempt.watchId, submittedWatchIds),
+      { onStatus: progressLogger.log },
     );
   };
 
   restartTracking();
-  observePageChanges(restartTracking);
+  const stopObserving = observePageChanges(restartTracking);
+
+  return () => {
+    tracker = disposeTracker(tracker);
+    stopObserving();
+  };
+}
+
+function prepareTrackingAttempt(
+  currentWatchId: string | undefined,
+  tracker: VideoProgressTracker | null,
+  submittedWatchIds: Set<string>,
+): TrackingAttempt | null {
+  const watchId = extractEpisodeId(location.pathname) ?? location.href;
+
+  if (isTrackingCurrentWatch(watchId, currentWatchId, tracker)) return null;
+  if (!hasVideoCandidate(document)) {
+    console.log('Cantaro: Crunchyroll tracker waiting for video element', { watchId });
+    return null;
+  }
+
+  const metadata = extractCrunchyrollEpisodeMetadata(document, location);
+  if (isTrackingCurrentWatch(watchId, currentWatchId, tracker)) return null;
+  if (shouldSkipTracking(metadata, watchId, submittedWatchIds)) {
+    logTrackerSkipped(watchId, metadata);
+    return null;
+  }
+
+  return { metadata, watchId };
+}
+
+function logTrackerArmed(attempt: TrackingAttempt): void {
+  console.log('Cantaro: Crunchyroll tracker armed', {
+    watchId: attempt.watchId,
+    titleText: attempt.metadata.titleText,
+    episodeNumber: attempt.metadata.episodeNumber,
+  });
+}
+
+function logTrackerSkipped(watchId: string, metadata: CrunchyrollEpisodeMetadata | null): void {
+  console.log('Cantaro: Crunchyroll tracker skipped', {
+    watchId,
+    reason: metadata ? 'already-submitted' : 'metadata-unavailable',
+  });
+}
+
+function createProgressLogger(getWatchId: () => string | undefined): { log(status: VideoProgressTrackerStatus): void; reset(): void } {
+  let lastLoggedProgressBucket: number | null = null;
+  let loggedUnavailableProgress = false;
+
+  return {
+    log(status) {
+      if (status.type === 'progress-unavailable') {
+        logUnavailableProgress(getWatchId(), status.currentTime, status.duration, loggedUnavailableProgress);
+        loggedUnavailableProgress = true;
+        return;
+      }
+
+      if (status.type === 'progress') {
+        lastLoggedProgressBucket = logProgressBucket(getWatchId(), status, lastLoggedProgressBucket);
+        return;
+      }
+
+      if (status.type === 'threshold-reached') {
+        logThresholdReached(getWatchId(), status);
+      }
+    },
+    reset() {
+      lastLoggedProgressBucket = null;
+      loggedUnavailableProgress = false;
+    },
+  };
+}
+
+function logUnavailableProgress(
+  watchId: string | undefined,
+  currentTime: number,
+  duration: number,
+  alreadyLogged: boolean,
+): void {
+  if (alreadyLogged) return;
+
+  console.log('Cantaro: Crunchyroll video progress unavailable', {
+    watchId,
+    currentTime,
+    duration,
+  });
+}
+
+function logProgressBucket(
+  watchId: string | undefined,
+  status: { watchProgressPercent: number; positionSeconds: number; durationSeconds: number },
+  lastLoggedProgressBucket: number | null,
+): number | null {
+  const bucket = Math.floor(status.watchProgressPercent / 10) * 10;
+  if (bucket === lastLoggedProgressBucket) return lastLoggedProgressBucket;
+
+  console.log('Cantaro: Crunchyroll watch progress', {
+    watchId,
+    watchProgressPercent: status.watchProgressPercent,
+    positionSeconds: status.positionSeconds,
+    durationSeconds: status.durationSeconds,
+  });
+
+  return bucket;
+}
+
+function logThresholdReached(
+  watchId: string | undefined,
+  status: { watchProgressPercent: number; positionSeconds: number; durationSeconds: number },
+): void {
+  console.log('Cantaro: Crunchyroll watch threshold reached', {
+    watchId,
+    watchProgressPercent: status.watchProgressPercent,
+    positionSeconds: status.positionSeconds,
+    durationSeconds: status.durationSeconds,
+  });
 }
 
 function isTrackingCurrentWatch(
@@ -83,14 +211,33 @@ function submitObservation(observation: MediaObservation): void {
     payload: observation,
   };
 
+  console.log('Cantaro: sending media observation to background', summarizeObservation(observation));
+
   browser.runtime.sendMessage(message).catch((error: unknown) => {
     console.warn('Cantaro: failed to send media observation', error);
   });
 }
 
-function observePageChanges(onChange: () => void): void {
+function summarizeObservation(observation: MediaObservation): Record<string, unknown> {
+  return {
+    siteId: observation.siteId,
+    siteMediaId: observation.siteMediaId,
+    titleText: observation.titleText,
+    episodeNumber: observation.episodeNumber,
+    watchProgressPercent: observation.watchProgressPercent,
+    positionSeconds: observation.positionSeconds,
+    durationSeconds: observation.durationSeconds,
+  };
+}
+
+function hasVideoCandidate(doc: Document): boolean {
+  return doc.querySelector('video') !== null;
+}
+
+function observePageChanges(onChange: () => void): () => void {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let lastHref = location.href;
+  const observers: MutationObserver[] = [];
 
   const scheduleChange = () => {
     if (debounceTimer !== null) clearTimeout(debounceTimer);
@@ -109,11 +256,37 @@ function observePageChanges(onChange: () => void): void {
 
   const titleEl = document.querySelector('title');
   if (titleEl) {
-    new MutationObserver(scheduleChange).observe(titleEl, { childList: true });
+    const titleObserver = new MutationObserver(scheduleChange);
+    titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
+    observers.push(titleObserver);
   }
 
-  new MutationObserver(scheduleChange).observe(document.documentElement, {
+  const documentObserver = new MutationObserver((mutations) => {
+    if (location.href !== lastHref || mutations.some(hasRelevantPageChange)) {
+      scheduleChange();
+    }
+  });
+  documentObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
   });
+  observers.push(documentObserver);
+
+  return () => {
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    for (const observer of observers) {
+      observer.disconnect();
+    }
+  };
+}
+
+function hasRelevantPageChange(mutation: MutationRecord): boolean {
+  return Array.from(mutation.addedNodes).some(isRelevantAddedNode);
+}
+
+function isRelevantAddedNode(node: Node): boolean {
+  if (node.nodeName.toLowerCase() === 'video') return true;
+  if (!(node instanceof Element)) return false;
+
+  return Boolean(node.querySelector('video, [data-t="series-title"], [data-t="episode-title"], [data-t="title"], [data-testid="series-title"], [data-testid="episode-title"]'));
 }

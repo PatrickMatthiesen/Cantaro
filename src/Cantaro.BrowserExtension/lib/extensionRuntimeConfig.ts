@@ -37,7 +37,7 @@ export function apiBaseUrlOriginMatchPattern(value: string | null | undefined): 
     }
 }
 
-export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(readInjectedDefaultApiBaseUrl()) || 'http://localhost:5000';
+export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(readInjectedDefaultApiBaseUrl()) || 'https://localhost:7203';
 
 export async function ensureApiBaseUrlPermission(apiBaseUrl: string): Promise<void> {
     const originMatchPattern = apiBaseUrlOriginMatchPattern(apiBaseUrl);

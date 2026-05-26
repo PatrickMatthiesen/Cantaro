@@ -133,6 +133,49 @@ export interface MediaAutoProgressUpdateDto {
     enabled: boolean;
 }
 
+export interface MediaObservationSummaryDto {
+    totalUnresolved: number;
+    pending: number;
+    ambiguous: number;
+    noMatch: number;
+}
+
+export interface MediaObservationCandidateDto {
+    candidateId: string;
+    candidateSource: string;
+    mediaTitleId: string;
+    provider?: string;
+    providerMediaId?: string;
+    title: string;
+    mediaKind: string;
+    score: number;
+    explanation?: string;
+    isAccepted: boolean;
+}
+
+export interface MediaObservationDto {
+    observationId: string;
+    siteIdentifier: string;
+    observedUrl: string;
+    siteMediaId?: string;
+    observedTitle: string;
+    progressHint?: string;
+    observedAt: string;
+    extensionVersion?: string;
+    matchStatus: string;
+    mediaTitleId?: string;
+    resolutionNotes?: string;
+    matchAttemptCount: number;
+    lastMatchAttemptedAt?: string;
+    lastMatchError?: string;
+    createdAt: string;
+    candidates: MediaObservationCandidateDto[];
+}
+
+export interface ResolveMediaObservationDto {
+    candidateId: string;
+}
+
 export interface MediaCatalogLibraryStateDto {
     isInLibrary: boolean;
     libraryEntryId?: string;

@@ -19,6 +19,7 @@
         "build": "bun run build:web && bun run build:extension",
         "build:web": "cd src/Cantaro.Web && bun run build",
         "build:extension": "cd src/Cantaro.BrowserExtension && bun run build",
+        "extension:dev": "cd src/Cantaro.BrowserExtension && bun run dev",
         "compose:up": "docker compose -p cantaro up"
     }
 }
