@@ -12,11 +12,14 @@ import type {
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
     MediaLinkRequestDto,
+    MediaObservationDto,
+    MediaObservationSummaryDto,
     MediaProgressUpdateDto,
     MediaProviderAccountStatusDto,
     MediaProviderSearchParams,
     MediaProviderSearchResultDto,
     MediaProviderTitleDetailsDto,
+    ResolveMediaObservationDto,
     MediaStatusUpdateDto,
 } from './mediaApi.types';
 
@@ -200,5 +203,55 @@ export class MediaApiClient {
             },
         );
         await this.ensureOk(response, 'Failed to update auto-progress setting');
+    }
+
+    async getObservationSummary(): Promise<MediaObservationSummaryDto> {
+        const response = await this.request('/api/media/observations/summary');
+        await this.ensureOk(response, 'Failed to load media observation summary');
+        return response.json() as Promise<MediaObservationSummaryDto>;
+    }
+
+    async getObservations(options: { includeResolved?: boolean; limit?: number } = {}): Promise<MediaObservationDto[]> {
+        const query = new URLSearchParams();
+        if (options.includeResolved !== undefined) query.set('includeResolved', String(options.includeResolved));
+        if (options.limit !== undefined) query.set('limit', String(options.limit));
+
+        const suffix = query.size > 0 ? `?${query.toString()}` : '';
+        const response = await this.request(`/api/media/observations${suffix}`);
+        await this.ensureOk(response, 'Failed to load media observations');
+        return response.json() as Promise<MediaObservationDto[]>;
+    }
+
+    async resolveObservation(
+        observationId: string,
+        request: ResolveMediaObservationDto,
+    ): Promise<MediaObservationDto> {
+        const response = await this.request(
+            `/api/media/observations/${encodeURIComponent(observationId)}/resolve`,
+            {
+                method: 'POST',
+                body: JSON.stringify(request),
+            },
+        );
+        await this.ensureOk(response, 'Failed to resolve media observation');
+        return response.json() as Promise<MediaObservationDto>;
+    }
+
+    async rejectObservation(observationId: string): Promise<MediaObservationDto> {
+        const response = await this.request(
+            `/api/media/observations/${encodeURIComponent(observationId)}/reject`,
+            { method: 'POST' },
+        );
+        await this.ensureOk(response, 'Failed to reject media observation');
+        return response.json() as Promise<MediaObservationDto>;
+    }
+
+    async retryObservation(observationId: string): Promise<MediaObservationDto> {
+        const response = await this.request(
+            `/api/media/observations/${encodeURIComponent(observationId)}/retry`,
+            { method: 'POST' },
+        );
+        await this.ensureOk(response, 'Failed to retry media observation matching');
+        return response.json() as Promise<MediaObservationDto>;
     }
 }

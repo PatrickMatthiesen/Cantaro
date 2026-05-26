@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,7 @@ public class MediaObservationMatchingService(
     private const decimal HighConfidenceThreshold = 0.85m;
     private const decimal LowConfidenceThreshold = 0.40m;
 
+    private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly ILogger<MediaObservationMatchingService> _logger = logger;
 
@@ -162,7 +164,8 @@ public class MediaObservationMatchingService(
         MediaObservation observation,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(observation.ObservedTitle))
+        var queryTitles = GetCandidateQueryTitles(observation);
+        if (queryTitles.Count == 0)
         {
             return [];
         }
@@ -178,6 +181,7 @@ public class MediaObservationMatchingService(
         return ScoreTitleCandidates(
             observation,
             libraryTitles,
+            queryTitles,
             MediaObservationCandidateSources.LibraryTitleSearch);
     }
 
@@ -185,51 +189,56 @@ public class MediaObservationMatchingService(
         MediaObservation observation,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(observation.ObservedTitle))
-        {
-            return [];
-        }
-
-        var normalizedQuery = NormalizeTitle(observation.ObservedTitle);
-        if (string.IsNullOrWhiteSpace(normalizedQuery))
+        var queryTitles = GetCandidateQueryTitles(observation);
+        if (queryTitles.Count == 0)
         {
             return [];
         }
 
         // Simple substring pre-filter at the database level, then score in-memory.
         // For MVP this is acceptable; a full-text index can replace this later.
-        var queryWords = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (queryWords.Length == 0)
-        {
-            return [];
-        }
+        var leadWords = queryTitles
+            .Select(title => NormalizeTitle(title).Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault())
+            .Where(word => !string.IsNullOrWhiteSpace(word))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
-        // Filter by the first meaningful word as a DB-level pre-filter.
-        var leadWord = queryWords[0];
-        var candidates = await _dbContext.MediaTitles
-            .Where(t =>
-                EF.Functions.Like(t.CanonicalTitle.ToLower(), $"%{leadWord}%") ||
-                (t.OriginalTitle != null && EF.Functions.Like(t.OriginalTitle.ToLower(), $"%{leadWord}%")))
-            .Take(50)
-            .ToListAsync(cancellationToken);
+        var candidates = new List<MediaTitle>();
+        foreach (var leadWord in leadWords)
+        {
+            candidates.AddRange(await _dbContext.MediaTitles
+                .Where(t =>
+                    EF.Functions.Like(t.CanonicalTitle.ToLower(), $"%{leadWord}%") ||
+                    (t.OriginalTitle != null && EF.Functions.Like(t.OriginalTitle.ToLower(), $"%{leadWord}%")))
+                .Take(50)
+                .ToListAsync(cancellationToken));
+        }
 
         return ScoreTitleCandidates(
             observation,
-            candidates,
+            candidates.DistinctBy(title => title.Id),
+            queryTitles,
             MediaObservationCandidateSources.CatalogTitleSearch);
     }
 
     private static List<MediaObservationCandidate> ScoreTitleCandidates(
         MediaObservation observation,
         IEnumerable<MediaTitle> titles,
+        IReadOnlyList<string> queryTitles,
         string source)
     {
-        var observedNorm = NormalizeTitle(observation.ObservedTitle);
         var result = new List<MediaObservationCandidate>();
+        var normalizedQueries = queryTitles
+            .Select(NormalizeTitle)
+            .Where(query => !string.IsNullOrWhiteSpace(query))
+            .ToList();
 
         foreach (var title in titles)
         {
-            var score = ComputeTitleScore(observedNorm, title);
+            var score = normalizedQueries
+                .Select(query => ComputeTitleScore(query, title))
+                .DefaultIfEmpty(0m)
+                .Max();
             if (score < 0.01m)
             {
                 continue;
@@ -250,6 +259,46 @@ public class MediaObservationMatchingService(
         }
 
         return result;
+    }
+
+    private static List<string> GetCandidateQueryTitles(MediaObservation observation)
+    {
+        var titles = new List<string>();
+        AddTitle(titles, TryReadRawSeriesTitle(observation.RawPayload));
+        AddTitle(titles, observation.ObservedTitle);
+        return titles;
+    }
+
+    private static string? TryReadRawSeriesTitle(string? rawPayload)
+    {
+        if (string.IsNullOrWhiteSpace(rawPayload))
+        {
+            return null;
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<ObservationRawPayload>(rawPayload, RawPayloadJsonOptions);
+            return payload?.SeriesTitle;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static void AddTitle(List<string> titles, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return;
+        }
+
+        var normalized = title.Trim();
+        if (!titles.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            titles.Add(normalized);
+        }
     }
 
     private static decimal ComputeTitleScore(string observedNorm, MediaTitle title)
@@ -385,5 +434,10 @@ public class MediaObservationMatchingService(
             MediaObservationSiteIdentifiers.MyAnimeList => "myanimelist",
             _ => null
         };
+    }
+
+    private sealed class ObservationRawPayload
+    {
+        public string? SeriesTitle { get; set; }
     }
 }

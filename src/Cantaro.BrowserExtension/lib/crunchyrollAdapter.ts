@@ -5,6 +5,7 @@ const WATCH_PROGRESS_THRESHOLD = 0.85;
 
 export interface TextElementLike {
   textContent: string | null;
+  getBoundingClientRect?(): { height: number; width: number };
 }
 
 export interface VideoElementLike {
@@ -18,7 +19,7 @@ export interface VideoElementLike {
 export interface DocumentLike {
   title: string;
   querySelector(selector: string): TextElementLike | VideoElementLike | null;
-  querySelectorAll?(selector: string): Array<TextElementLike | VideoElementLike>;
+  querySelectorAll?(selector: string): Iterable<TextElementLike | VideoElementLike>;
 }
 
 export interface LocationLike {
@@ -51,9 +52,21 @@ export interface VideoProgressTracker {
   dispose(): void;
 }
 
+export interface VideoProgressTrackerOptions {
+  threshold?: number;
+  onStatus?: (status: VideoProgressTrackerStatus) => void;
+}
+
+export type VideoProgressTrackerStatus =
+  | { type: 'video-missing' }
+  | { type: 'progress-unavailable'; currentTime: number; duration: number }
+  | { type: 'progress'; watchProgressPercent: number; positionSeconds: number; durationSeconds: number }
+  | { type: 'threshold-reached'; watchProgressPercent: number; positionSeconds: number; durationSeconds: number };
+
 const WATCH_ID_RE = /\/watch\/([A-Z0-9]+)(?:\/|$)/i;
-const EPISODE_NUMBER_RE = /(?:episode|ep)[- _]?(\d+)/i;
+const EPISODE_NUMBER_RE = /\b(?:episode|ep|e)[- _]?(\d+)\b/i;
 const SEASON_NUMBER_RE = /season\s*(\d+)/i;
+const BLOCKED_PAGE_TITLE_RE = /(?:please verify your email address|watch popular anime|play games|shop online)/i;
 
 const SERIES_SELECTORS = [
   '[data-t="series-title"]',
@@ -64,10 +77,10 @@ const SERIES_SELECTORS = [
 
 const EPISODE_SELECTORS = [
   '[data-t="episode-title"]',
-  '[data-t="title"]',
   '[data-testid="episode-title"]',
   'h1[class*="title"]',
   'h1',
+  '[data-t="title"]',
 ];
 
 const SEASON_SELECTORS = [
@@ -105,12 +118,31 @@ export function parseTitleFromPageTitle(pageTitle: string): string {
 
 function extractTextFromDom(doc: DocumentLike, selectors: string[]): string | null {
   for (const selector of selectors) {
-    const element = doc.querySelector(selector);
-    const text = 'textContent' in (element ?? {}) ? element?.textContent?.trim() : '';
-    if (text) return text;
+    const elements = Array.from(doc.querySelectorAll?.(selector) ?? [doc.querySelector(selector)].filter(isTextOrVideoElement));
+    for (const element of elements) {
+      if (!isTextElementLike(element)) continue;
+      const text = element.textContent?.trim() ?? '';
+      if (text && isVisibleTextElement(element)) return text;
+    }
   }
 
   return null;
+}
+
+function isVisibleTextElement(element: TextElementLike | VideoElementLike | null): boolean {
+  if (!isTextElementLike(element)) return false;
+  const rect = element.getBoundingClientRect?.();
+  return !rect || (rect.width > 0 && rect.height > 0);
+}
+
+function isTextElementLike(value: unknown): value is TextElementLike {
+  return Boolean(value)
+    && typeof value === 'object'
+    && 'textContent' in value;
+}
+
+function isTextOrVideoElement(value: TextElementLike | VideoElementLike | null): value is TextElementLike | VideoElementLike {
+  return value !== null;
 }
 
 export function extractTitleFromDom(doc: DocumentLike): string | null {
@@ -135,6 +167,20 @@ export function extractCrunchyrollEpisodeMetadata(
   const seasonNumber = seasonTitle ? extractSeasonNumber(seasonTitle) : undefined;
   const titleText = buildTitleText(seriesTitle, episodeTitle, titleFallback, parsed.href);
 
+  if (!siteMediaId || isBlockedPageTitle(titleFallback, titleText, episodeTitle)) {
+    return null;
+  }
+
+  console.debug('Extracted Crunchyroll episode metadata:', {
+    siteMediaId,
+    titleText,
+    seriesTitle,
+    episodeTitle,
+    episodeNumber,
+    seasonTitle,
+    seasonNumber,
+  });
+
   return {
     siteId: SiteIds.Crunchyroll,
     observedUrl: parsed.href,
@@ -148,6 +194,16 @@ export function extractCrunchyrollEpisodeMetadata(
     progressHint: episodeNumber,
     extensionVersion: EXTENSION_VERSION,
   };
+}
+
+function isBlockedPageTitle(
+  titleFallback: string,
+  titleText: string,
+  episodeTitle: string | undefined,
+): boolean {
+  return [titleFallback, titleText, episodeTitle]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => BLOCKED_PAGE_TITLE_RE.test(value));
 }
 
 export function buildCrunchyrollObservation(
@@ -180,10 +236,16 @@ export function trackVideoProgress(
   doc: DocumentLike,
   metadata: CrunchyrollEpisodeMetadata,
   onThresholdReached: (observation: MediaObservation) => void,
-  threshold = WATCH_PROGRESS_THRESHOLD,
+  options: VideoProgressTrackerOptions | number = {},
 ): VideoProgressTracker | null {
   const video = findActiveVideo(doc);
-  if (!video) return null;
+  const threshold = typeof options === 'number' ? options : options.threshold ?? WATCH_PROGRESS_THRESHOLD;
+  const onStatus = typeof options === 'number' ? undefined : options.onStatus;
+
+  if (!video) {
+    onStatus?.({ type: 'video-missing' });
+    return null;
+  }
 
   let fired = false;
 
@@ -191,10 +253,20 @@ export function trackVideoProgress(
     if (fired) return;
 
     const snapshot = readWatchProgress(video);
-    if (!snapshot) return;
+    if (!snapshot) {
+      onStatus?.({
+        type: 'progress-unavailable',
+        currentTime: video.currentTime,
+        duration: video.duration,
+      });
+      return;
+    }
+
+    onStatus?.({ type: 'progress', ...snapshot });
 
     if (snapshot.watchProgressPercent / 100 >= threshold) {
       fired = true;
+      onStatus?.({ type: 'threshold-reached', ...snapshot });
       onThresholdReached(createMediaObservationFromMetadata(metadata, snapshot));
     }
   };
@@ -260,8 +332,9 @@ function buildTitleText(
 }
 
 function findActiveVideo(doc: DocumentLike): VideoElementLike | null {
-  const videos = doc.querySelectorAll?.('video')
-    .filter((candidate): candidate is VideoElementLike => isVideoElementLike(candidate)) ?? [];
+  const videoCandidates = doc.querySelectorAll?.('video') ?? [];
+  const videos = Array.from(videoCandidates)
+    .filter((candidate): candidate is VideoElementLike => isVideoElementLike(candidate));
 
   if (videos.length > 0) {
     return videos.find((video) => !video.paused) ?? videos[0];

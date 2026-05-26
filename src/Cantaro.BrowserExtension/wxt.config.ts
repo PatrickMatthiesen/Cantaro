@@ -18,7 +18,7 @@ const defaultApiBaseUrl = readEnvValue('services__api__https__0')
   ?? readEnvValue('services__api__http__0')
   ?? readEnvValue('CANTARO_API_BASE_URL')
   ?? readEnvValue('WXT_API_BASE_URL')
-  ?? 'http://localhost:5000';
+  ?? 'https://localhost:7203';
 
 function toOriginMatchPattern(value: string): string | null {
   try {
@@ -45,7 +45,6 @@ export default defineConfig({
       'storage',
       'tabs',
       'identity',
-      'permissions',
     ],
     host_permissions: [
       ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),

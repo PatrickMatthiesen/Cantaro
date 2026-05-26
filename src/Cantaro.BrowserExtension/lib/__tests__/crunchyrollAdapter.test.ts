@@ -61,6 +61,7 @@ describe('Crunchyroll metadata extraction', () => {
   it('extracts stable watch IDs and episode numbers from watch URLs', () => {
     expect(extractEpisodeId('/watch/GYVNM7N6Y/my-episode-title')).toBe('GYVNM7N6Y');
     expect(extractEpisodeNumber('/watch/GYVNM7N6Y/episode-5')).toBe(5);
+    expect(extractEpisodeNumber('E13 - That God\'s Name Is')).toBe(13);
     expect(extractEpisodeNumber('/watch/GYVNM7N6Y/prologue')).toBeNull();
   });
 
@@ -87,6 +88,49 @@ describe('Crunchyroll metadata extraction', () => {
   it('prefers DOM title selectors over page title fallback', () => {
     const doc = makeDoc('Fallback - Crunchyroll', { '[data-t="title"]': 'DOM Episode Title' });
     expect(extractTitleFromDom(doc)).toBe('DOM Episode Title');
+  });
+
+  it('ignores hidden modal titles when extracting the episode title', () => {
+    const doc: DocumentLike = {
+      title: 'In/Spectre 2 (English Dub) That God\'s Name Is - Watch on Crunchyroll',
+      querySelector(selector: string) {
+        return this.querySelectorAll?.(selector)?.[0] ?? null;
+      },
+      querySelectorAll(selector: string) {
+        if (selector === 'a[href*="/series/"]') {
+          return [{ textContent: 'In/Spectre' }];
+        }
+
+        if (selector === '[data-t="title"]') {
+          return [
+            {
+              textContent: 'Please Verify Your Email Address to Continue',
+              getBoundingClientRect: () => ({ width: 0, height: 0 }),
+            },
+          ];
+        }
+
+        if (selector === 'h1[class*="title"]') {
+          return [
+            {
+              textContent: 'E13 - That God\'s Name Is',
+              getBoundingClientRect: () => ({ width: 400, height: 28 }),
+            },
+          ];
+        }
+
+        return [];
+      },
+    };
+
+    const metadata = extractCrunchyrollEpisodeMetadata(
+      doc,
+      'https://www.crunchyroll.com/watch/GN7UDVNXV/that-gods-name-is',
+    );
+
+    expect(metadata?.seriesTitle).toBe('In/Spectre');
+    expect(metadata?.episodeTitle).toBe('E13 - That God\'s Name Is');
+    expect(metadata?.episodeNumber).toBe(13);
   });
 
   it('returns structured metadata from DOM selectors', () => {
@@ -133,6 +177,22 @@ describe('Crunchyroll metadata extraction', () => {
     const doc = makeDoc('My Anime - Crunchyroll');
     expect(extractCrunchyrollEpisodeMetadata(doc, 'not-a-url')).toBeNull();
     expect(extractCrunchyrollEpisodeMetadata(doc, 'https://www.crunchyroll.com/series/GY79EN15Y/my-anime')).toBeNull();
+  });
+
+  it('returns null for Crunchyroll non-episode page states on watch URLs', () => {
+    expect(
+      extractCrunchyrollEpisodeMetadata(
+        makeDoc('Crunchyroll: Watch Popular Anime, Play Games & Shop Online'),
+        'https://www.crunchyroll.com/watch/GE00258188ENUS/witch-hat-atelier',
+      ),
+    ).toBeNull();
+
+    expect(
+      extractCrunchyrollEpisodeMetadata(
+        makeDoc('Witch Hat Atelier - Please Verify Your Email Address to Continue'),
+        'https://www.crunchyroll.com/watch/GE00258188ENUS/witch-hat-atelier',
+      ),
+    ).toBeNull();
   });
 
   it('still builds an immediate observation for compatibility callers', () => {

@@ -72,6 +72,37 @@ public class MediaObservationMatchingServiceTests
         Assert.Equal(title.Id, topCandidate.MediaTitleId);
     }
 
+    [Fact]
+    public async Task ProcessObservation_UsesRawSeriesTitle_WhenObservedTitleIncludesEpisodeTitle()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var title = fixture.SeedTitle("Witch Hat Atelier", "anime");
+        fixture.SeedLibraryEntry(title);
+
+        var observation = fixture.SeedObservation(
+            siteIdentifier: "crunchyroll",
+            siteMediaId: "GE00258188ENUS",
+            observedTitle: "Witch Hat Atelier - E9 - A Nightmare Stained in Black",
+            rawPayload: """
+            {
+              "seriesTitle": "Witch Hat Atelier",
+              "episodeTitle": "E9 - A Nightmare Stained in Black",
+              "episodeNumber": 9
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(o => o.Candidates)
+            .SingleAsync(o => o.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(title.Id, persisted.MediaTitleId);
+        Assert.NotEmpty(persisted.Candidates);
+    }
+
     // -----------------------------------------------------------------------
     // No match
     // -----------------------------------------------------------------------
@@ -296,7 +327,8 @@ public class MediaObservationMatchingServiceTests
         public MediaObservation SeedObservation(
             string siteIdentifier,
             string? siteMediaId,
-            string observedTitle)
+            string observedTitle,
+            string? rawPayload = null)
         {
             var observation = new MediaObservation
             {
@@ -306,6 +338,7 @@ public class MediaObservationMatchingServiceTests
                 ObservedUrl = $"https://{siteIdentifier}.co/anime/test",
                 SiteMediaId = siteMediaId,
                 ObservedTitle = observedTitle,
+                RawPayload = rawPayload,
                 ObservedAt = DateTimeOffset.UtcNow,
                 MatchStatus = MediaObservationStatuses.Pending,
                 CreatedAt = DateTimeOffset.UtcNow,

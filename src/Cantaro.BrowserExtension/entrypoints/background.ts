@@ -52,6 +52,7 @@ async function initialize() {
 
 async function handleMediaObservation(observation: MediaObservation): Promise<void> {
   const config = await readExtensionConfig();
+  console.log('Cantaro: preparing media observation for API', summarizeObservation(observation));
   const accessToken = await ensureExtensionAccessToken(config.apiBaseUrl);
 
   if (!accessToken) {
@@ -120,6 +121,12 @@ async function sendObservation(
 ): Promise<boolean> {
   try {
     const request = toSubmitMediaObservationRequest(observation);
+    console.log('Cantaro: posting media observation to API', {
+      apiBaseUrl,
+      path: MEDIA_OBSERVATIONS_PATH,
+      ...summarizeObservation(observation),
+    });
+
     const response = await fetch(`${apiBaseUrl}${MEDIA_OBSERVATIONS_PATH}`, {
       method: 'POST',
       headers: {
@@ -136,11 +143,24 @@ async function sendObservation(
       return false;
     }
 
+    console.log('Cantaro: media observation accepted by API', summarizeObservation(observation));
     return true;
   } catch (error) {
     console.error('Cantaro: error sending media observation', error);
     return false;
   }
+}
+
+function summarizeObservation(observation: MediaObservation): Record<string, unknown> {
+  return {
+    siteId: observation.siteId,
+    siteMediaId: observation.siteMediaId,
+    titleText: observation.titleText,
+    episodeNumber: observation.episodeNumber,
+    watchProgressPercent: observation.watchProgressPercent,
+    positionSeconds: observation.positionSeconds,
+    durationSeconds: observation.durationSeconds,
+  };
 }
 
 // ---------------------------------------------------------------------------

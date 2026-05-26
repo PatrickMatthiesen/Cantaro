@@ -1,11 +1,17 @@
 import { Outlet, useNavigate } from '@tanstack/react-router';
-import { MediaCatalogDetailPage, MediaEntryDetailPage, MediaLibraryPage } from '@cantaro/client-shared/media';
+import {
+  MediaCatalogDetailPage,
+  MediaEntryDetailPage,
+  MediaLibraryPage,
+  MediaObservationReviewPage,
+} from '@cantaro/client-shared/media';
 import { AppPageShell, GlobalHeader, RequireAuth } from '../components/AppShell';
 import { SubjectNav, type SubjectNavItem } from '../components/SubjectNav';
 import { MediaProvidersPage } from './MediaProvidersPage';
 
 const mediaNavItems: SubjectNavItem[] = [
   { label: 'Library', to: '/media/library' },
+  { label: 'Review', to: '/media/review' },
   { label: 'Providers', to: '/media/providers' },
 ];
 
@@ -48,6 +54,10 @@ export function MediaProvidersRoutePage() {
       onNavigateLibrary={() => void navigate({ to: '/media/library' })}
     />
   );
+}
+
+export function MediaReviewRoutePage() {
+  return <MediaObservationReviewPage embedded />;
 }
 
 export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
