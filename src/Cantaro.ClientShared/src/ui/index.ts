@@ -5,3 +5,9 @@ export {
   PageLoadingState,
   StatusBadge,
 } from './GlassComponents';
+
+export {
+  Snackbar,
+  type ShowSnackbar,
+  type SnackbarNotification,
+} from './Snackbar';
