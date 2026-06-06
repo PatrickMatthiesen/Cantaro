@@ -101,6 +101,20 @@ public class SubmitMediaObservationResponse
     public string? MatchedTitle { get; set; }
 
     public int CandidateCount { get; set; }
+
+    public bool RequiresResolution { get; set; }
+
+    public int? ObservedProgress { get; set; }
+
+    public int SuggestedEpisodeOffset { get; set; }
+
+    public int? ResolvedProgress { get; set; }
+
+    public MediaObservationDto? Observation { get; set; }
+
+    public List<MediaObservationProviderChoiceDto> ProviderChoices { get; set; } = [];
+
+    public string? ProviderChoicesUnavailableReason { get; set; }
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +135,25 @@ public class MediaObservationCandidateDto
     public bool IsAccepted { get; set; }
 }
 
+public class MediaObservationProviderChoiceDto
+{
+    public required string ProviderId { get; set; }
+    public required string ProviderMediaId { get; set; }
+    public required string Title { get; set; }
+    public string? NativeTitle { get; set; }
+    public required string MediaKind { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? BackgroundUrl { get; set; }
+    public int? StartYear { get; set; }
+    public int? EpisodeCount { get; set; }
+    public int? ChapterCount { get; set; }
+    public int? VolumeCount { get; set; }
+    public required string PrimaryProgressDimension { get; set; }
+    public bool IsInLibrary { get; set; }
+    public string? LibraryEntryId { get; set; }
+    public string? MediaTitleId { get; set; }
+}
+
 public class MediaObservationDto
 {
     public required string ObservationId { get; set; }
@@ -134,11 +167,16 @@ public class MediaObservationDto
     public required string MatchStatus { get; set; }
     public string? MediaTitleId { get; set; }
     public string? ResolutionNotes { get; set; }
+    public int? ObservedProgress { get; set; }
+    public int? EpisodeOffset { get; set; }
+    public int? ResolvedProgress { get; set; }
+    public string? ResolvedLibraryEntryId { get; set; }
     public int MatchAttemptCount { get; set; }
     public DateTimeOffset? LastMatchAttemptedAt { get; set; }
     public string? LastMatchError { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public List<MediaObservationCandidateDto> Candidates { get; set; } = [];
+    public List<MediaObservationProviderChoiceDto> ProviderChoices { get; set; } = [];
 }
 
 public class MediaObservationSummaryDto
@@ -155,6 +193,15 @@ public class MediaObservationSummaryDto
 
 public class ResolveMediaObservationRequest
 {
-    [Required]
-    public required Guid CandidateId { get; set; }
+    public Guid? CandidateId { get; set; }
+
+    [MaxLength(64)]
+    public string? ProviderId { get; set; }
+
+    [MaxLength(256)]
+    public string? ProviderMediaId { get; set; }
+
+    public int EpisodeOffset { get; set; }
+
+    public bool AddToLibraryConfirmed { get; set; }
 }

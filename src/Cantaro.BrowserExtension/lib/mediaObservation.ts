@@ -65,6 +65,81 @@ export interface SubmitMediaObservationRequest {
   extensionVersion: string;
 }
 
+export interface MediaObservationCandidateDto {
+  candidateId: string;
+  candidateSource: string;
+  mediaTitleId: string;
+  provider?: string;
+  providerMediaId?: string;
+  title: string;
+  mediaKind: string;
+  score: number;
+  explanation?: string;
+  isAccepted: boolean;
+}
+
+export interface MediaObservationProviderChoiceDto {
+  providerId: string;
+  providerMediaId: string;
+  title: string;
+  nativeTitle?: string;
+  mediaKind: string;
+  posterUrl?: string;
+  backgroundUrl?: string;
+  startYear?: number;
+  episodeCount?: number;
+  chapterCount?: number;
+  volumeCount?: number;
+  primaryProgressDimension: string;
+  isInLibrary: boolean;
+  libraryEntryId?: string;
+  mediaTitleId?: string;
+}
+
+export interface MediaObservationDto {
+  observationId: string;
+  siteIdentifier: string;
+  observedUrl: string;
+  siteMediaId?: string;
+  observedTitle: string;
+  progressHint?: string;
+  observedAt: string;
+  extensionVersion?: string;
+  matchStatus: string;
+  mediaTitleId?: string;
+  resolutionNotes?: string;
+  observedProgress?: number;
+  episodeOffset?: number;
+  resolvedProgress?: number;
+  resolvedLibraryEntryId?: string;
+  candidates: MediaObservationCandidateDto[];
+  providerChoices: MediaObservationProviderChoiceDto[];
+}
+
+export interface SubmitMediaObservationResponse {
+  observationId: string;
+  matchStatus: string;
+  wasDeduplicated: boolean;
+  matchedMediaTitleId?: string;
+  matchedTitle?: string;
+  candidateCount: number;
+  requiresResolution: boolean;
+  observedProgress?: number;
+  suggestedEpisodeOffset: number;
+  resolvedProgress?: number;
+  observation?: MediaObservationDto;
+  providerChoices: MediaObservationProviderChoiceDto[];
+  providerChoicesUnavailableReason?: string;
+}
+
+export interface ResolveMediaObservationRequest {
+  candidateId?: string;
+  providerId?: string;
+  providerMediaId?: string;
+  episodeOffset: number;
+  addToLibraryConfirmed?: boolean;
+}
+
 export function toSubmitMediaObservationRequest(
   observation: MediaObservation,
 ): SubmitMediaObservationRequest {
@@ -95,6 +170,20 @@ export type MediaObservationMessage =
   | {
     type: 'MEDIA_OBSERVATION';
     payload: MediaObservation;
+  }
+  | {
+    type: 'SHOW_MEDIA_RESOLUTION';
+    payload: SubmitMediaObservationResponse;
+  }
+  | {
+    type: 'GET_LATEST_MEDIA_RESOLUTION';
+  }
+  | {
+    type: 'RESOLVE_MEDIA_OBSERVATION';
+    payload: {
+      observationId: string;
+      request: ResolveMediaObservationRequest;
+    };
   }
   | {
     type: 'DRAIN_MEDIA_OBSERVATION_QUEUE';

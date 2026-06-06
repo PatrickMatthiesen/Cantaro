@@ -6,7 +6,16 @@ import {
   type VideoProgressTrackerStatus,
   type VideoProgressTracker,
 } from '../lib/crunchyrollAdapter';
-import type { MediaObservation, MediaObservationMessage } from '../lib/mediaObservation';
+import { isEpisodeTrackingTimedOut } from '../lib/episodeTrackingTimeout';
+import { MediaResolutionPicker } from '../lib/MediaResolutionPicker';
+import type {
+  MediaObservation,
+  MediaObservationMessage,
+  ResolveMediaObservationRequest,
+  SubmitMediaObservationResponse,
+} from '../lib/mediaObservation';
+import React from 'react';
+import ReactDOM from 'react-dom/client';
 
 const TRACKER_DISPOSE_KEY = '__cantaroCrunchyrollWatchTrackerDispose';
 
@@ -28,6 +37,7 @@ export default defineContentScript({
     console.log('Cantaro: Crunchyroll watch-state tracker loaded');
     window[TRACKER_DISPOSE_KEY]?.();
     window[TRACKER_DISPOSE_KEY] = startCrunchyrollWatchTracker();
+    registerResolutionOverlayListener();
   },
 });
 
@@ -37,7 +47,12 @@ function startCrunchyrollWatchTracker(): () => void {
   const submittedWatchIds = new Set<string>();
   const progressLogger = createProgressLogger(() => currentWatchId);
 
-  const restartTracking = () => {
+  const restartTracking = async () => {
+    if (await isEpisodeTrackingTimedOut()) {
+      tracker = disposeTracker(tracker);
+      return;
+    }
+
     const attempt = prepareTrackingAttempt(currentWatchId, tracker, submittedWatchIds);
     if (!attempt) return;
 
@@ -54,8 +69,8 @@ function startCrunchyrollWatchTracker(): () => void {
     );
   };
 
-  restartTracking();
-  const stopObserving = observePageChanges(restartTracking);
+  void restartTracking();
+  const stopObserving = observePageChanges(() => void restartTracking());
 
   return () => {
     tracker = disposeTracker(tracker);
@@ -201,11 +216,16 @@ function createObservationSubmitter(
 ): (observation: MediaObservation) => void {
   return (observation) => {
     submittedWatchIds.add(watchId);
-    submitObservation(observation);
+    void submitObservation(observation);
   };
 }
 
-function submitObservation(observation: MediaObservation): void {
+async function submitObservation(observation: MediaObservation): Promise<void> {
+  if (await isEpisodeTrackingTimedOut()) {
+    console.log('Cantaro: episode tracking is temporarily disabled');
+    return;
+  }
+
   const message: MediaObservationMessage = {
     type: 'MEDIA_OBSERVATION',
     payload: observation,
@@ -217,6 +237,95 @@ function submitObservation(observation: MediaObservation): void {
     console.warn('Cantaro: failed to send media observation', error);
   });
 }
+
+function registerResolutionOverlayListener(): void {
+  browser.runtime.onMessage.addListener((message: MediaObservationMessage) => {
+    if (message.type === 'SHOW_MEDIA_RESOLUTION') {
+      showResolutionOverlay(message.payload);
+    }
+  });
+}
+
+function showResolutionOverlay(response: SubmitMediaObservationResponse): void {
+  const container = ensureOverlayContainer();
+  const root = ReactDOM.createRoot(container);
+  const close = () => {
+    root.unmount();
+    container.remove();
+  };
+
+  root.render(
+    <React.StrictMode>
+      <ResolutionOverlay response={response} onClose={close} />
+    </React.StrictMode>,
+  );
+}
+
+function ResolutionOverlay({
+  response,
+  onClose,
+}: {
+  response: SubmitMediaObservationResponse;
+  onClose: () => void;
+}) {
+  const [error, setError] = React.useState<string | null>(null);
+  const [resolving, setResolving] = React.useState(false);
+
+  const resolve = async (observationId: string, request: ResolveMediaObservationRequest) => {
+    setResolving(true);
+    setError(null);
+    try {
+      await browser.runtime.sendMessage({
+        type: 'RESOLVE_MEDIA_OBSERVATION',
+        payload: { observationId, request },
+      } satisfies MediaObservationMessage);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resolve episode.');
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  return (
+    <div style={overlayBackdropStyle}>
+      <MediaResolutionPicker
+        response={response}
+        surface="overlay"
+        resolving={resolving}
+        error={error}
+        onResolve={resolve}
+        onClose={onClose}
+      />
+    </div>
+  );
+}
+
+function ensureOverlayContainer(): HTMLDivElement {
+  document.getElementById('cantaro-resolution-overlay')?.remove();
+  const container = document.createElement('div');
+  container.id = 'cantaro-resolution-overlay';
+  Object.assign(container.style, {
+    position: 'fixed',
+    inset: '0',
+    zIndex: '2147483647',
+    display: 'grid',
+    placeItems: 'center',
+    pointerEvents: 'auto',
+  });
+  document.documentElement.appendChild(container);
+  return container;
+}
+
+const overlayBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  display: 'grid',
+  placeItems: 'center',
+  background: 'rgba(15, 23, 42, 0.36)',
+  backdropFilter: 'blur(3px)',
+  padding: 16,
+} satisfies React.CSSProperties;
 
 function summarizeObservation(observation: MediaObservation): Record<string, unknown> {
   return {

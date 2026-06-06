@@ -52,7 +52,6 @@ export interface MediaLibraryEntryDetailDto {
     lastSyncedAt?: string;
     lastRemoteUpdateAt?: string;
     updatedAt: string;
-    autoProgressFromObservations: boolean;
     providerLinks: MediaProviderLinkSummaryDto[];
 }
 
@@ -127,10 +126,6 @@ export interface MediaCatalogAddResultDto {
     libraryEntryId: string;
     mediaTitleId: string;
     status: string;
-}
-
-export interface MediaAutoProgressUpdateDto {
-    enabled: boolean;
 }
 
 export interface MediaObservationSummaryDto {

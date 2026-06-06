@@ -5,21 +5,20 @@ using Microsoft.EntityFrameworkCore;
 namespace Cantaro.Api.Services;
 
 /// <summary>
-/// Applies conservative automatic progress updates when a matched observation
-/// carries a numeric progress hint and the user has opted in.
+/// Applies conservative local progress updates when a matched observation
+/// carries a numeric progress hint.
 ///
 /// Rules (per issue #32):
-/// 1. Entry must be opted in (<c>AutoProgressFromObservations = true</c>).
-/// 2. Observation must be matched to a canonical MediaTitle.
-/// 3. Progress hint must be parseable as a positive integer.
-/// 4. Update is monotonic: only applied when the new value strictly exceeds
+/// 1. Observation must be matched to a canonical MediaTitle.
+/// 2. Progress hint must be parseable as a positive integer.
+/// 3. Update is monotonic: only applied when the new value strictly exceeds
 ///    the current tracked progress.
-/// 5. Sync-metadata guard: the entry's <c>LastRemoteUpdateAt</c> is embedded in
+/// 4. Local Cantaro progress is updated immediately.
+/// 5. Connected entries also enqueue a provider operation so the next provider
+///    refresh does not overwrite the tracked episode.
+/// 6. Sync-metadata guard: the entry's <c>LastRemoteUpdateAt</c> is embedded in
 ///    the operation payload so the processor can skip the write if the provider
 ///    has since reported newer state.
-/// 6. All writes are routed through the existing
-///    <see cref="MediaProviderOperationProcessor"/> pipeline, never sent
-///    directly from the extension.
 /// </summary>
 public class MediaObservationProgressService(
     ApplicationDbContext dbContext,
@@ -32,7 +31,7 @@ public class MediaObservationProgressService(
 
     /// <summary>
     /// Evaluates whether the matched observation should trigger an automatic
-    /// progress update for any of the user's opted-in library entries.
+    /// progress update for any of the user's library entries.
     /// Returns the number of operations enqueued (0 when no update applies).
     /// </summary>
     public async Task<int> TryEnqueueAutoProgressAsync(
@@ -45,7 +44,7 @@ public class MediaObservationProgressService(
             return 0;
         }
 
-        if (!TryParseProgressHint(observation.ProgressHint, out var parsedProgress))
+        if (!TryResolveObservationProgress(observation, out var parsedProgress))
         {
             _logger.LogDebug(
                 "Skipping auto-progress for observation {ObservationId}: progress hint " +
@@ -68,18 +67,17 @@ public class MediaObservationProgressService(
         // Resolve the accepted candidate to get the match score for provenance.
         var matchScore = await GetAcceptedCandidateScoreAsync(observation, cancellationToken);
 
-        // Find all opted-in, connected library entries for this user and title.
+        // Find all library entries for this user and title. Local Cantaro state
+        // advances immediately; connected entries also sync to the provider.
         var entries = await _dbContext.MediaLibraryEntries
             .Where(e => e.UserId == observation.UserId
-                        && e.MediaTitleId == observation.MediaTitleId
-                        && e.AutoProgressFromObservations
-                        && e.ConnectedServiceAccountId != null)
+                        && e.MediaTitleId == observation.MediaTitleId)
             .ToListAsync(cancellationToken);
 
         if (entries.Count == 0)
         {
             _logger.LogDebug(
-                "No opted-in connected entries for user {UserId} / title {MediaTitleId}. " +
+                "No library entries for user {UserId} / title {MediaTitleId}. " +
                 "Auto-progress skipped.",
                 observation.UserId,
                 observation.MediaTitleId);
@@ -87,6 +85,7 @@ public class MediaObservationProgressService(
         }
 
         var enqueuedCount = 0;
+        var localUpdatesCount = 0;
 
         foreach (var entry in entries)
         {
@@ -103,6 +102,24 @@ public class MediaObservationProgressService(
                     entry.UserId,
                     progressEpisodes, progressChapters, progressVolumes,
                     entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes);
+                continue;
+            }
+
+            ApplyLocalProgressUpdate(entry, progressEpisodes, progressChapters, progressVolumes);
+            localUpdatesCount++;
+
+            if (entry.ConnectedServiceAccountId is null)
+            {
+                _logger.LogInformation(
+                    "Applied local observation progress for user {UserId}, entry {EntryId}: " +
+                    "episodes={Ep}, chapters={Ch}, volumes={Vol} from observation {ObservationId}. " +
+                    "Provider sync was not queued because the entry is disconnected.",
+                    entry.UserId,
+                    entry.Id,
+                    progressEpisodes,
+                    progressChapters,
+                    progressVolumes,
+                    observation.Id);
                 continue;
             }
 
@@ -141,6 +158,11 @@ public class MediaObservationProgressService(
             enqueuedCount++;
         }
 
+        if (localUpdatesCount > 0)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
         return enqueuedCount;
     }
 
@@ -167,6 +189,17 @@ public class MediaObservationProgressService(
         }
 
         return false;
+    }
+
+    private static bool TryResolveObservationProgress(MediaObservation observation, out int value)
+    {
+        if (observation.ResolvedProgress is > 0)
+        {
+            value = observation.ResolvedProgress.Value;
+            return true;
+        }
+
+        return TryParseProgressHint(observation.ProgressHint, out value);
     }
 
     /// <summary>
@@ -211,6 +244,22 @@ public class MediaObservationProgressService(
         }
 
         return false;
+    }
+
+    private static void ApplyLocalProgressUpdate(
+        MediaLibraryEntry entry,
+        int? progressEpisodes,
+        int? progressChapters,
+        int? progressVolumes)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        entry.ProgressEpisodes = progressEpisodes ?? entry.ProgressEpisodes;
+        entry.ProgressChapters = progressChapters ?? entry.ProgressChapters;
+        entry.ProgressVolumes = progressVolumes ?? entry.ProgressVolumes;
+        entry.LastMutationSource = MediaMutationSources.ObservationAutoProgress;
+        entry.LastLocalEditAt = now;
+        entry.UpdatedAt = now;
     }
 
     private async Task<decimal?> GetAcceptedCandidateScoreAsync(

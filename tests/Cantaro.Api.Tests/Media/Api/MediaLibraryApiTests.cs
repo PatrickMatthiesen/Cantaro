@@ -252,76 +252,6 @@ public class MediaLibraryApiTests
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
-    [Fact]
-    public async Task UpdateAutoProgress_EnablesOptInAndReturnsNoContent()
-    {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var title = MakeTitle("Vinland Saga", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.Add(title);
-        await fixture.Db.SaveChangesAsync();
-
-        var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Current, now);
-        Assert.False(entry.AutoProgressFromObservations);
-        fixture.Db.MediaLibraryEntries.Add(entry);
-        await fixture.Db.SaveChangesAsync();
-
-        var enableResult = await fixture.Controller.UpdateAutoProgress(
-            entry.Id,
-            new MediaAutoProgressRequest { Enabled = true },
-            CancellationToken.None);
-
-        Assert.IsType<NoContentResult>(enableResult);
-        var persisted = await fixture.Db.MediaLibraryEntries.SingleAsync(e => e.Id == entry.Id);
-        Assert.True(persisted.AutoProgressFromObservations);
-
-        // Disabling should also work.
-        var disableResult = await fixture.Controller.UpdateAutoProgress(
-            entry.Id,
-            new MediaAutoProgressRequest { Enabled = false },
-            CancellationToken.None);
-
-        Assert.IsType<NoContentResult>(disableResult);
-        await fixture.Db.Entry(persisted).ReloadAsync();
-        Assert.False(persisted.AutoProgressFromObservations);
-    }
-
-    [Fact]
-    public async Task UpdateAutoProgress_ReturnsNotFoundForUnknownEntry()
-    {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-
-        var result = await fixture.Controller.UpdateAutoProgress(
-            Guid.NewGuid(),
-            new MediaAutoProgressRequest { Enabled = true },
-            CancellationToken.None);
-
-        Assert.IsType<NotFoundObjectResult>(result);
-    }
-
-    [Fact]
-    public async Task GetEntry_ExposesAutoProgressFromObservationsField()
-    {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var title = MakeTitle("Mushishi", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.Add(title);
-        await fixture.Db.SaveChangesAsync();
-
-        var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Completed, now);
-        entry.AutoProgressFromObservations = true;
-        fixture.Db.MediaLibraryEntries.Add(entry);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.GetEntry(entry.Id, CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var detail = Assert.IsType<MediaLibraryEntryDetailDto>(ok.Value);
-        Assert.True(detail.AutoProgressFromObservations);
-    }
-
     private sealed class MediaLibraryFixture : IAsyncDisposable
     {
         private MediaLibraryFixture(
@@ -363,7 +293,7 @@ public class MediaLibraryApiTests
             var linkService = new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance);
             var userManager = CreateUserManager(db);
 
-            var controller = new MediaLibraryController(db, queryService, linkService, userManager, NullLogger<MediaLibraryController>.Instance);
+            var controller = new MediaLibraryController(db, queryService, linkService, userManager);
             controller.ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext

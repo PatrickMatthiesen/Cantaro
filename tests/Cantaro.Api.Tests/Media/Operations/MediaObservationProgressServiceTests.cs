@@ -55,7 +55,7 @@ public class MediaObservationProgressServiceTests
     public async Task TryEnqueueAutoProgress_ReturnsZero_WhenProgressHintUnparseable()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
-        var (title, entry) = await fixture.SeedTitleAndEntryAsync(optIn: true, currentEpisodes: 5);
+        var (title, entry) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 5);
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -72,10 +72,10 @@ public class MediaObservationProgressServiceTests
     }
 
     [Fact]
-    public async Task TryEnqueueAutoProgress_ReturnsZero_WhenNoOptedInEntries()
+    public async Task TryEnqueueAutoProgress_EnqueuesProviderSync_WhenEntryIsConnected()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
-        var (title, _) = await fixture.SeedTitleAndEntryAsync(optIn: false, currentEpisodes: 5);
+        var (title, entry) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 5);
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -87,8 +87,13 @@ public class MediaObservationProgressServiceTests
 
         var count = await fixture.Service.TryEnqueueAutoProgressAsync(observation, CancellationToken.None);
 
-        Assert.Equal(0, count);
-        Assert.Equal(0, await fixture.Db.MediaProviderOperations.CountAsync());
+        Assert.Equal(1, count);
+        Assert.Equal(1, await fixture.Db.MediaProviderOperations.CountAsync());
+
+        var persistedEntry = await fixture.Db.MediaLibraryEntries.SingleAsync(e => e.Id == entry.Id);
+        Assert.Equal(7, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
     }
 
     [Fact]
@@ -96,7 +101,7 @@ public class MediaObservationProgressServiceTests
     {
         await using var fixture = await ProgressFixture.CreateAsync();
         // Entry already at episode 10; hint says 10 → not strictly greater
-        var (title, _) = await fixture.SeedTitleAndEntryAsync(optIn: true, currentEpisodes: 10);
+        var (title, entry) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 10);
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -110,13 +115,16 @@ public class MediaObservationProgressServiceTests
 
         Assert.Equal(0, count);
         Assert.Equal(0, await fixture.Db.MediaProviderOperations.CountAsync());
+
+        var persistedEntry = await fixture.Db.MediaLibraryEntries.SingleAsync(e => e.Id == entry.Id);
+        Assert.Equal(10, persistedEntry.ProgressEpisodes);
     }
 
     [Fact]
-    public async Task TryEnqueueAutoProgress_ReturnsZero_WhenEntryHasNoConnectedAccount()
+    public async Task TryEnqueueAutoProgress_UpdatesLocalProgress_WhenEntryHasNoConnectedAccount()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
-        var (title, _) = await fixture.SeedTitleAndEntryAsync(optIn: true, currentEpisodes: 5, connected: false);
+        var (title, entry) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 5, connected: false);
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -130,6 +138,11 @@ public class MediaObservationProgressServiceTests
 
         Assert.Equal(0, count);
         Assert.Equal(0, await fixture.Db.MediaProviderOperations.CountAsync());
+
+        var persistedEntry = await fixture.Db.MediaLibraryEntries.SingleAsync(e => e.Id == entry.Id);
+        Assert.Equal(7, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
     }
 
     // ── TryEnqueueAutoProgressAsync: success path ─────────────────────────
@@ -138,7 +151,7 @@ public class MediaObservationProgressServiceTests
     public async Task TryEnqueueAutoProgress_EnqueuesOperation_WhenAllConditionsMet()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
-        var (title, entry) = await fixture.SeedTitleAndEntryAsync(optIn: true, currentEpisodes: 5);
+        var (title, entry) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 5);
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -151,6 +164,11 @@ public class MediaObservationProgressServiceTests
         var count = await fixture.Service.TryEnqueueAutoProgressAsync(observation, CancellationToken.None);
 
         Assert.Equal(1, count);
+
+        var persistedEntry = await fixture.Db.MediaLibraryEntries.SingleAsync(e => e.Id == entry.Id);
+        Assert.Equal(8, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
 
         var op = await fixture.Db.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationTypes.AutoProgressUpdate, op.OperationType);
@@ -171,11 +189,37 @@ public class MediaObservationProgressServiceTests
     }
 
     [Fact]
+    public async Task TryEnqueueAutoProgress_UsesResolvedProgress_WhenOffsetWasApplied()
+    {
+        await using var fixture = await ProgressFixture.CreateAsync();
+        var (title, _) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 3);
+
+        var observation = fixture.MakeObservation(
+            matchStatus: MediaObservationStatuses.Matched,
+            progressHint: "16",
+            mediaTitleId: title.Id);
+        observation.EpisodeOffset = -12;
+        observation.ResolvedProgress = 4;
+
+        fixture.Db.MediaObservations.Add(observation);
+        await fixture.Db.SaveChangesAsync();
+
+        var count = await fixture.Service.TryEnqueueAutoProgressAsync(observation, CancellationToken.None);
+
+        Assert.Equal(1, count);
+        var op = await fixture.Db.MediaProviderOperations.SingleAsync();
+        var payload = System.Text.Json.JsonSerializer.Deserialize<AutoProgressUpdatePayload>(
+            op.PayloadJson,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+        Assert.Equal(4, payload.ProgressEpisodes);
+        Assert.Equal("16", payload.ObservedProgressHint);
+    }
+
+    [Fact]
     public async Task TryEnqueueAutoProgress_RoutesToChapterDimension_ForManga()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
         var (title, _) = await fixture.SeedTitleAndEntryAsync(
-            optIn: true,
             currentEpisodes: 0,
             primaryDimension: MediaProgressDimensions.Chapter,
             currentChapters: 10);
@@ -203,11 +247,11 @@ public class MediaObservationProgressServiceTests
     }
 
     [Fact]
-    public async Task TryEnqueueAutoProgress_EnqueuesForMultipleOptedInEntries()
+    public async Task TryEnqueueAutoProgress_EnqueuesForMultipleConnectedEntries()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
-        var (title, _) = await fixture.SeedTitleAndEntryAsync(optIn: true, currentEpisodes: 3, providerMediaId: "111");
-        await fixture.SeedAdditionalEntryAsync(title, optIn: true, currentEpisodes: 2, providerMediaId: "222");
+        var (title, _) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 3, providerMediaId: "111");
+        await fixture.SeedAdditionalEntryAsync(title, currentEpisodes: 2, providerMediaId: "222");
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -229,8 +273,8 @@ public class MediaObservationProgressServiceTests
         await using var fixture = await ProgressFixture.CreateAsync();
         // Entry A is at episode 10 (hint=8 would regress — skip)
         // Entry B is at episode 5 (hint=8 would advance — enqueue)
-        var (title, _) = await fixture.SeedTitleAndEntryAsync(optIn: true, currentEpisodes: 10, providerMediaId: "111");
-        await fixture.SeedAdditionalEntryAsync(title, optIn: true, currentEpisodes: 5, providerMediaId: "222");
+        var (title, _) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 10, providerMediaId: "111");
+        await fixture.SeedAdditionalEntryAsync(title, currentEpisodes: 5, providerMediaId: "222");
 
         var observation = fixture.MakeObservation(
             matchStatus: MediaObservationStatuses.Matched,
@@ -290,7 +334,6 @@ public class MediaObservationProgressServiceTests
         }
 
         public async Task<(MediaTitle title, MediaLibraryEntry entry)> SeedTitleAndEntryAsync(
-            bool optIn,
             int currentEpisodes,
             string primaryDimension = MediaProgressDimensions.Episode,
             int currentChapters = 0,
@@ -340,7 +383,6 @@ public class MediaObservationProgressServiceTests
                 NormalizedStatus = MediaLibraryStatuses.Current,
                 ProgressEpisodes = currentEpisodes,
                 ProgressChapters = currentChapters > 0 ? currentChapters : null,
-                AutoProgressFromObservations = optIn,
                 LastRemoteUpdateAt = now.AddMinutes(-10),
                 CreatedAt = now,
                 UpdatedAt = now
@@ -353,7 +395,6 @@ public class MediaObservationProgressServiceTests
 
         public async Task<MediaLibraryEntry> SeedAdditionalEntryAsync(
             MediaTitle title,
-            bool optIn,
             int currentEpisodes,
             string providerMediaId)
         {
@@ -371,7 +412,6 @@ public class MediaObservationProgressServiceTests
                 ProviderMediaId = providerMediaId,
                 NormalizedStatus = MediaLibraryStatuses.Current,
                 ProgressEpisodes = currentEpisodes,
-                AutoProgressFromObservations = optIn,
                 LastRemoteUpdateAt = now.AddMinutes(-10),
                 CreatedAt = now,
                 UpdatedAt = now

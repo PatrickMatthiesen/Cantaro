@@ -58,6 +58,17 @@ public class MediaObservation
     public string? RawPayload { get; set; }
 
     /// <summary>
+    /// Provider search choices shown to the user when automatic matching could
+    /// not safely resolve the observation.
+    /// </summary>
+    public string? ProviderChoicesPayload { get; set; }
+
+    /// <summary>
+    /// JSON audit trail of user resolution decisions and overrides.
+    /// </summary>
+    public string? ResolutionHistoryPayload { get; set; }
+
+    /// <summary>
     /// Matching/resolution lifecycle: pending, matched, ambiguous, no_match, rejected.
     /// </summary>
     public required string MatchStatus { get; set; }
@@ -76,6 +87,21 @@ public class MediaObservation
     /// Human-readable notes about the current resolution state.
     /// </summary>
     public string? ResolutionNotes { get; set; }
+
+    /// <summary>
+    /// User-selected offset applied to the observed progress hint.
+    /// </summary>
+    public int? EpisodeOffset { get; set; }
+
+    /// <summary>
+    /// Effective progress value after applying <see cref="EpisodeOffset"/>.
+    /// </summary>
+    public int? ResolvedProgress { get; set; }
+
+    /// <summary>
+    /// Library entry created or selected while resolving this observation.
+    /// </summary>
+    public Guid? ResolvedLibraryEntryId { get; set; }
 
     public int MatchAttemptCount { get; set; }
 

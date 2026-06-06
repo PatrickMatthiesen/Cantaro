@@ -191,13 +191,17 @@ function useRemoteEntryRefresh(
   setSaveMessage: (message: string) => void,
 ) {
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
+  const refreshInFlightRef = useRef(false);
+  const entryId = entry?.id;
+  const entryProvider = entry?.provider;
+  const entryIsConnected = entry?.isConnected;
 
   useEffect(() => {
-    if (!entry || !entry.isConnected || isRefreshingRemote) {
+    if (!entryId || !entryIsConnected || refreshInFlightRef.current) {
       return;
     }
 
-    const refreshProviderId = entry.provider || mainMediaProviderId;
+    const refreshProviderId = entryProvider || mainMediaProviderId;
     if (!isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(refreshProviderId)))) {
       return;
     }
@@ -205,6 +209,7 @@ function useRemoteEntryRefresh(
     let isCancelled = false;
 
     const refreshFromRemote = async () => {
+      refreshInFlightRef.current = true;
       setIsRefreshingRemote(true);
 
       try {
@@ -220,6 +225,7 @@ function useRemoteEntryRefresh(
           setSaveMessage(getPrefixedErrorMessage(refreshError, 'Failed to refresh entry'));
         }
       } finally {
+        refreshInFlightRef.current = false;
         if (!isCancelled) {
           setIsRefreshingRemote(false);
         }
@@ -231,7 +237,7 @@ function useRemoteEntryRefresh(
     return () => {
       isCancelled = true;
     };
-  }, [entry, isRefreshingRemote, loadEntry, setSaveMessage]);
+  }, [entryId, entryIsConnected, entryProvider, loadEntry, setSaveMessage]);
 
   return isRefreshingRemote;
 }
@@ -300,31 +306,6 @@ function useStatusSaveAction(
   }, [entry, libraryEntryId, selectedStatus, setEntry, setSaveMessage, showSaveMessage]);
 
   return { isSavingStatus, handleSaveStatus };
-}
-
-function useAutoProgressAction(
-  libraryEntryId: string,
-  entry: MediaLibraryEntryDetailDto | null,
-  setEntry: Dispatch<SetStateAction<MediaLibraryEntryDetailDto | null>>,
-  showSaveMessage: (message: string) => void,
-  setSaveMessage: (message: string) => void,
-) {
-  const handleToggleAutoProgress = useCallback(async () => {
-    if (!entry) {
-      return;
-    }
-
-    const newValue = !entry.autoProgressFromObservations;
-    try {
-      await mediaApi.updateAutoProgress(libraryEntryId, { enabled: newValue });
-      setEntry((current) => current ? { ...current, autoProgressFromObservations: newValue } : current);
-      showSaveMessage(newValue ? 'Auto-progress enabled' : 'Auto-progress disabled');
-    } catch (updateError) {
-      setSaveMessage(getPrefixedErrorMessage(updateError, 'Failed to update'));
-    }
-  }, [entry, libraryEntryId, setEntry, setSaveMessage, showSaveMessage]);
-
-  return handleToggleAutoProgress;
 }
 
 function useProviderUnlinkAction(
@@ -472,11 +453,6 @@ interface ProgressCardProps {
   onSaveProgress: () => void;
 }
 
-interface AutoProgressCardProps {
-  enabled: boolean;
-  onToggle: () => void;
-}
-
 interface MediaEntryDetailContentProps {
   libraryEntryId: string;
   entry: MediaLibraryEntryDetailDto;
@@ -501,7 +477,6 @@ interface MediaEntryDetailContentProps {
   onSetSelectedStatus: (value: string) => void;
   onSaveProgress: () => void;
   onSaveStatus: () => void;
-  onToggleAutoProgress: () => void;
   onUnlink: (providerId: string) => void;
 }
 
@@ -608,7 +583,6 @@ function EntryDetailPanels({
   onSetSelectedStatus,
   onSaveProgress,
   onSaveStatus,
-  onToggleAutoProgress,
   onUnlink,
 }: Pick<
   MediaEntryDetailContentProps,
@@ -628,7 +602,6 @@ function EntryDetailPanels({
   | 'onSetSelectedStatus'
   | 'onSaveProgress'
   | 'onSaveStatus'
-  | 'onToggleAutoProgress'
   | 'onUnlink'
 >) {
   const { title } = entry;
@@ -669,7 +642,6 @@ function EntryDetailPanels({
         onProgressVolumesChange={onSetProgressVolumes}
         onSaveProgress={onSaveProgress}
       />
-      <AutoProgressCard enabled={entry.autoProgressFromObservations} onToggle={onToggleAutoProgress} />
       <ProviderLinksCard
         providerLinks={entry.providerLinks}
         availabilityByProviderLink={availabilityByProviderLink}
@@ -802,39 +774,6 @@ function ProgressCard({
   );
 }
 
-function AutoProgressCard({ enabled, onToggle }: AutoProgressCardProps) {
-  return (
-    <GlassCard className="p-6">
-      <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Auto-progress</h2>
-      <div className="mt-3 flex items-start gap-4">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          onClick={onToggle}
-          className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 focus:outline-none ${enabled ? 'bg-indigo-500' : 'bg-gray-200'}`}
-        >
-          <span
-            aria-hidden
-            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0'}`}
-          />
-        </button>
-        <div>
-          <p className="text-sm font-medium text-gray-800">
-            {enabled ? 'Enabled' : 'Disabled'}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            When enabled, Cantaro may advance your progress counter when the browser extension
-            detects you watching an episode. Progress only moves forward and is subject to
-            backend matching confidence — it will not overwrite remote changes.
-          </p>
-        </div>
-      </div>
-    </GlassCard>
-  );
-}
-
-
 // ── Entry detail page ──────────────────────────────────────────────────────────
 
 interface MediaEntryDetailPageProps {
@@ -867,7 +806,6 @@ function MediaEntryDetailContent({
   onSetSelectedStatus,
   onSaveProgress,
   onSaveStatus,
-  onToggleAutoProgress,
   onUnlink,
 }: MediaEntryDetailContentProps) {
   const mediaKind = entry.title.mediaKind;
@@ -894,7 +832,6 @@ function MediaEntryDetailContent({
           onSetSelectedStatus={onSetSelectedStatus}
           onSaveProgress={onSaveProgress}
           onSaveStatus={onSaveStatus}
-          onToggleAutoProgress={onToggleAutoProgress}
           onUnlink={onUnlink}
         />
       </DetailPageLayout>
@@ -951,13 +888,6 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
     showSaveMessage,
     setSaveMessage,
   );
-  const handleToggleAutoProgress = useAutoProgressAction(
-    libraryEntryId,
-    entry,
-    setEntry,
-    showSaveMessage,
-    setSaveMessage,
-  );
   const { unlinkingId, handleUnlink } = useProviderUnlinkAction(libraryEntryId, setEntry, setSaveMessage);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
 
@@ -994,7 +924,6 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
       onSetSelectedStatus={setSelectedStatus}
       onSaveProgress={() => void handleSaveProgress()}
       onSaveStatus={() => void handleSaveStatus()}
-      onToggleAutoProgress={() => void handleToggleAutoProgress()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
     />
   );

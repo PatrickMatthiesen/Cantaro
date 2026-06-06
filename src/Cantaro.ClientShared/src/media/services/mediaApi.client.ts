@@ -4,7 +4,6 @@ import {
 } from './mediaApi.runtime';
 import type {
     MediaApiRuntimeConfig,
-    MediaAutoProgressUpdateDto,
     MediaCatalogAddRequestDto,
     MediaCatalogAddResultDto,
     MediaImportDto,
@@ -189,20 +188,6 @@ export class MediaApiClient {
             body: JSON.stringify(request),
         });
         await this.ensureOk(response, 'Failed to update media status');
-    }
-
-    async updateAutoProgress(
-        libraryEntryId: string,
-        request: MediaAutoProgressUpdateDto,
-    ): Promise<void> {
-        const response = await this.request(
-            `/api/media/library/${encodeURIComponent(libraryEntryId)}/auto-progress`,
-            {
-                method: 'PATCH',
-                body: JSON.stringify(request),
-            },
-        );
-        await this.ensureOk(response, 'Failed to update auto-progress setting');
     }
 
     async getObservationSummary(): Promise<MediaObservationSummaryDto> {

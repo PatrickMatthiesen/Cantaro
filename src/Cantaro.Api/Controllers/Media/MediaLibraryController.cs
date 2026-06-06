@@ -15,14 +15,12 @@ public class MediaLibraryController(
     ApplicationDbContext dbContext,
     MediaLibraryQueryService queryService,
     MediaLibraryLinkService linkService,
-    UserManager<User> userManager,
-    ILogger<MediaLibraryController> logger) : ControllerBase
+    UserManager<User> userManager) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaLibraryQueryService _queryService = queryService;
     private readonly MediaLibraryLinkService _linkService = linkService;
     private readonly UserManager<User> _userManager = userManager;
-    private readonly ILogger<MediaLibraryController> _logger = logger;
 
     /// <summary>
     /// Browse the authenticated user's media library with optional filtering, sorting, and pagination.
@@ -156,39 +154,6 @@ public class MediaLibraryController(
             MediaLinkResultKind.ProviderLinkNotFound => NotFound(new { error = "No link found for this provider." }),
             _ => StatusCode(StatusCodes.Status500InternalServerError, new { error = "Unexpected unlink result." })
         };
-    }
-
-    /// <summary>
-    /// Update the automatic-progress opt-in flag for a library entry.
-    /// When enabled the backend will automatically advance progress counters
-    /// from matched observations (subject to monotonic and sync-metadata guards).
-    /// PATCH /api/media/library/{id}/auto-progress
-    /// </summary>
-    [HttpPatch("{libraryEntryId:guid}/auto-progress")]
-    public async Task<ActionResult> UpdateAutoProgress(
-        Guid libraryEntryId,
-        [FromBody] MediaAutoProgressRequest request,
-        CancellationToken cancellationToken)
-    {
-        var userId = await GetCurrentUserIdAsync();
-
-        var entry = await _dbContext.MediaLibraryEntries
-            .FirstOrDefaultAsync(e => e.Id == libraryEntryId && e.UserId == userId, cancellationToken);
-
-        if (entry is null)
-        {
-            return NotFound(new { error = "Media library entry not found." });
-        }
-
-        entry.AutoProgressFromObservations = request.Enabled;
-        entry.UpdatedAt = DateTimeOffset.UtcNow;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation(
-            "User {UserId} set AutoProgressFromObservations={Enabled} for entry {EntryId}.",
-            userId, request.Enabled, libraryEntryId);
-
-        return NoContent();
     }
 
     private async Task<int> GetCurrentUserIdAsync()
