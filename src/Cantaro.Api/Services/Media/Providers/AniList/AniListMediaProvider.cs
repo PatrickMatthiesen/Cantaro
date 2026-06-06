@@ -199,17 +199,16 @@ public class AniListMediaProvider(
         var account = await RequireConnectedAccountAsync(userId, cancellationToken);
         var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
         var mediaId = ParseProviderMediaId(request.ProviderMediaId);
+        var mutation = BuildSaveMediaListEntryMutation(
+            mediaId,
+            progress: request.ProgressEpisodes ?? request.ProgressChapters,
+            progressVolumes: request.ProgressVolumes,
+            status: null);
 
         var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
             accessToken,
-            SaveMediaListEntryQuery,
-            new
-            {
-                mediaId,
-                progress = request.ProgressEpisodes ?? request.ProgressChapters,
-                progressVolumes = request.ProgressVolumes,
-                status = (string?)null
-            },
+            mutation.Query,
+            mutation.Variables,
             cancellationToken);
 
         var savedEntry = data.SaveMediaListEntry ?? throw new InvalidOperationException("AniList did not return the saved media list entry.");
@@ -222,17 +221,16 @@ public class AniListMediaProvider(
         var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
         var mediaId = ParseProviderMediaId(request.ProviderMediaId);
         var status = ToAniListStatus(request.Status);
+        var mutation = BuildSaveMediaListEntryMutation(
+            mediaId,
+            progress: null,
+            progressVolumes: null,
+            status);
 
         var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
             accessToken,
-            SaveMediaListEntryQuery,
-            new
-            {
-                mediaId,
-                progress = (int?)null,
-                progressVolumes = (int?)null,
-                status
-            },
+            mutation.Query,
+            mutation.Variables,
             cancellationToken);
 
         var savedEntry = data.SaveMediaListEntry ?? throw new InvalidOperationException("AniList did not return the saved media list entry.");
@@ -488,6 +486,60 @@ public class AniListMediaProvider(
         };
     }
 
+    private sealed record AniListSaveMediaListEntryMutation(string Query, IReadOnlyDictionary<string, object> Variables);
+
+    private static AniListSaveMediaListEntryMutation BuildSaveMediaListEntryMutation(
+        int mediaId,
+        int? progress,
+        int? progressVolumes,
+        string? status)
+    {
+        var variableDefinitions = new List<string> { "$mediaId: Int" };
+        var arguments = new List<string> { "mediaId: $mediaId" };
+        var variables = new Dictionary<string, object>
+        {
+            ["mediaId"] = mediaId
+        };
+
+        if (progress.HasValue)
+        {
+            variableDefinitions.Add("$progress: Int");
+            arguments.Add("progress: $progress");
+            variables["progress"] = progress.Value;
+        }
+
+        if (progressVolumes.HasValue)
+        {
+            variableDefinitions.Add("$progressVolumes: Int");
+            arguments.Add("progressVolumes: $progressVolumes");
+            variables["progressVolumes"] = progressVolumes.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            variableDefinitions.Add("$status: MediaListStatus");
+            arguments.Add("status: $status");
+            variables["status"] = status;
+        }
+
+        var query = $$"""
+            mutation ({{string.Join(", ", variableDefinitions)}}) {
+              SaveMediaListEntry({{string.Join(", ", arguments)}}) {
+                id
+                status
+                progress
+                progressVolumes
+                updatedAt
+                media {
+                  id
+                }
+              }
+            }
+            """;
+
+        return new AniListSaveMediaListEntryMutation(query, variables);
+    }
+
     private static AniListReleaseMetadataRaw BuildReleaseMetadata(AniListMedia media, string releaseStatusDimension)
     {
         int? releasedCount = null;
@@ -741,20 +793,6 @@ public class AniListMediaProvider(
         }
         """;
 
-    private const string SaveMediaListEntryQuery = """
-        mutation ($mediaId: Int, $progress: Int, $progressVolumes: Int, $status: MediaListStatus) {
-          SaveMediaListEntry(mediaId: $mediaId, progress: $progress, progressVolumes: $progressVolumes, status: $status) {
-            id
-            status
-            progress
-            progressVolumes
-            updatedAt
-            media {
-              id
-            }
-          }
-        }
-        """;
 }
 
 public class AniListViewerData

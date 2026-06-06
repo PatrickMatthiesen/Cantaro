@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -197,6 +198,82 @@ public class AniListMediaProviderTests
         Assert.Equal(MediaMutationSources.ProviderDisconnect, persistedEntry.LastMutationSource);
     }
 
+    [Fact]
+    public async Task UpdateProgressAsync_AnimeEpisodeProgress_DoesNotSendNullProgressVolumesArgument()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(303, "anilist-progress@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 903,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "303",
+            DisplayName = "Progress Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        const string graphQlResponse = """
+            {
+                "data": {
+                    "SaveMediaListEntry": {
+                        "id": 42,
+                        "status": "CURRENT",
+                        "progress": 6,
+                        "progressVolumes": null,
+                        "updatedAt": 1780776000,
+                        "media": {
+                            "id": 154587
+                        }
+                    }
+                }
+            }
+            """;
+
+        var handler = new StubHttpMessageHandler(graphQlResponse);
+        var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
+
+        await provider.UpdateProgressAsync(
+            user.Id,
+            new MediaProgressUpdateRequest
+            {
+                ProviderMediaId = "154587",
+                ProgressEpisodes = 6
+            },
+            CancellationToken.None);
+
+        Assert.NotNull(handler.LastRequestBody);
+        using var document = JsonDocument.Parse(handler.LastRequestBody);
+        var root = document.RootElement;
+        var query = root.GetProperty("query").GetString();
+        var variables = root.GetProperty("variables");
+
+        Assert.Contains("progress: $progress", query);
+        Assert.DoesNotContain("progressVolumes: $progressVolumes", query);
+        Assert.DoesNotContain("status: $status", query);
+        Assert.Equal(154587, variables.GetProperty("mediaId").GetInt32());
+        Assert.Equal(6, variables.GetProperty("progress").GetInt32());
+        Assert.False(variables.TryGetProperty("progressVolumes", out _));
+        Assert.False(variables.TryGetProperty("status", out _));
+    }
+
     private static AniListMediaProvider CreateProvider(
         ApplicationDbContext dbContext,
         HttpMessageHandler? handler = null,
@@ -231,12 +308,18 @@ public class AniListMediaProviderTests
             _responseBody = responseBody;
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public string? LastRequestBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            LastRequestBody = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(_responseBody, Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 }
