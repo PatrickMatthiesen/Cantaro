@@ -108,23 +108,32 @@ function useEntryDetailState(libraryEntryId: string) {
   const [progressVolumes, setProgressVolumes] = useState<number | undefined>();
   const [selectedStatus, setSelectedStatus] = useState('');
 
+  const applyEntryData = useCallback((data: MediaLibraryEntryDetailDto) => {
+    setEntry(data);
+    setProgressEpisodes(data.progressEpisodes);
+    setProgressChapters(data.progressChapters);
+    setProgressVolumes(data.progressVolumes);
+    setSelectedStatus(data.normalizedStatus);
+  }, []);
+
   const loadEntry = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
       const data = await mediaApi.getLibraryEntry(libraryEntryId);
-      setEntry(data);
-      setProgressEpisodes(data.progressEpisodes);
-      setProgressChapters(data.progressChapters);
-      setProgressVolumes(data.progressVolumes);
-      setSelectedStatus(data.normalizedStatus);
+      applyEntryData(data);
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Failed to load entry'));
     } finally {
       setIsLoading(false);
     }
-  }, [libraryEntryId]);
+  }, [applyEntryData, libraryEntryId]);
+
+  const reloadEntry = useCallback(async () => {
+    const data = await mediaApi.getLibraryEntry(libraryEntryId);
+    applyEntryData(data);
+  }, [applyEntryData, libraryEntryId]);
 
   useEffect(() => {
     void loadEntry();
@@ -136,6 +145,7 @@ function useEntryDetailState(libraryEntryId: string) {
     isLoading,
     error,
     loadEntry,
+    reloadEntry,
     progressEpisodes,
     setProgressEpisodes,
     progressChapters,
@@ -187,7 +197,7 @@ function useProviderAvailability(entry: MediaLibraryEntryDetailDto | null) {
 
 function useRemoteEntryRefresh(
   entry: MediaLibraryEntryDetailDto | null,
-  loadEntry: () => Promise<void>,
+  reloadEntry: () => Promise<void>,
   setSaveMessage: (message: string) => void,
 ) {
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
@@ -219,7 +229,7 @@ function useRemoteEntryRefresh(
         }
 
         writeStoredValue(remoteCheckTimestampKey(refreshProviderId), result.importedAt);
-        await loadEntry();
+        await reloadEntry();
       } catch (refreshError) {
         if (!isCancelled) {
           setSaveMessage(getPrefixedErrorMessage(refreshError, 'Failed to refresh entry'));
@@ -237,14 +247,14 @@ function useRemoteEntryRefresh(
     return () => {
       isCancelled = true;
     };
-  }, [entryId, entryIsConnected, entryProvider, loadEntry, setSaveMessage]);
+  }, [entryId, entryIsConnected, entryProvider, reloadEntry, setSaveMessage]);
 
   return isRefreshingRemote;
 }
 
 function useManualRemoteRefresh(
   entry: MediaLibraryEntryDetailDto | null,
-  loadEntry: () => Promise<void>,
+  reloadEntry: () => Promise<void>,
   showSaveMessage: (message: string) => void,
   setSaveMessage: (message: string) => void,
 ) {
@@ -261,14 +271,14 @@ function useManualRemoteRefresh(
     try {
       const result = await mediaApi.importLibrary(refreshProviderId);
       writeStoredValue(remoteCheckTimestampKey(refreshProviderId), result.importedAt);
-      await loadEntry();
+      await reloadEntry();
       showSaveMessage('Progress refreshed from provider');
     } catch (refreshError) {
       setSaveMessage(getPrefixedErrorMessage(refreshError, 'Failed to refresh from provider'));
     } finally {
       setIsRefreshingRemote(false);
     }
-  }, [entry, loadEntry, setSaveMessage, showSaveMessage]);
+  }, [entry, reloadEntry, setSaveMessage, showSaveMessage]);
 
   return { isRefreshingRemote, handleRefreshFromProvider };
 }
@@ -970,6 +980,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
     isLoading,
     error,
     loadEntry,
+    reloadEntry,
     progressEpisodes,
     setProgressEpisodes,
     progressChapters,
@@ -981,11 +992,11 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
   } = useEntryDetailState(libraryEntryId);
   const availabilityByProviderLink = useProviderAvailability(entry);
   const { message: saveMessage, setMessage: setSaveMessage, showMessage: showSaveMessage } = useTimedMessage();
-  const isRefreshingRemote = useRemoteEntryRefresh(entry, loadEntry, setSaveMessage);
+  const isRefreshingRemote = useRemoteEntryRefresh(entry, reloadEntry, setSaveMessage);
   const {
     isRefreshingRemote: isRefreshingProgress,
     handleRefreshFromProvider,
-  } = useManualRemoteRefresh(entry, loadEntry, showSaveMessage, setSaveMessage);
+  } = useManualRemoteRefresh(entry, reloadEntry, showSaveMessage, setSaveMessage);
   const { isSavingProgress, handleSaveProgress } = useProgressSaveAction(
     libraryEntryId,
     entry,
