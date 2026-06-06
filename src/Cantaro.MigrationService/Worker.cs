@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 
 using OpenTelemetry.Trace;
 
@@ -50,9 +51,45 @@ public class Worker(
         var strategy = dbContext.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
+            await EnsureDatabaseExistsAsync(dbContext, cancellationToken);
+
             // Run migration in a transaction to avoid partial migration if it fails.
             await dbContext.Database.MigrateAsync(cancellationToken);
         });
+    }
+
+    private static async Task EnsureDatabaseExistsAsync(
+        ApplicationDbContext dbContext, CancellationToken cancellationToken)
+    {
+        var connectionString = dbContext.Database.GetDbConnection().ConnectionString;
+        var connectionStringBuilder = new NpgsqlConnectionStringBuilder(connectionString);
+        var databaseName = connectionStringBuilder.Database;
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            return;
+        }
+
+        connectionStringBuilder.Database = "postgres";
+        await using var connection = new NpgsqlConnection(connectionStringBuilder.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using (var checkCommand = new NpgsqlCommand(
+            "SELECT 1 FROM pg_database WHERE datname = @databaseName",
+            connection))
+        {
+            checkCommand.Parameters.AddWithValue("databaseName", databaseName);
+            var exists = await checkCommand.ExecuteScalarAsync(cancellationToken) is not null;
+            if (exists)
+            {
+                return;
+            }
+        }
+
+        var escapedDatabaseName = databaseName.Replace("\"", "\"\"");
+        await using var createCommand = new NpgsqlCommand(
+            $"""CREATE DATABASE "{escapedDatabaseName}" """,
+            connection);
+        await createCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task SeedDataAsync(

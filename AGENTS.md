@@ -10,6 +10,10 @@ We use dotnet for the backend and bun with Vite, React, TypeScript, Tailwind and
 
 We use Aspire for development, use aspire start or stop do boot up the database, backend, and frontend. load the aspire skill if more info is needed on using aspire.
 
+### Aspire publish output
+
+The `aspire-output` folders are generated artifacts from `aspire publish` or `aspire deploy`. Do not hand-edit them as source; update the AppHost or deployment inputs and regenerate the output instead.
+
 ### Tests
 
 If you run the dotnet tests, make sure that aspire is stopped as the processes otherwise hold a lock on files in the bin folder.
