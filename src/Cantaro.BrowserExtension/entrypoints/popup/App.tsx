@@ -6,6 +6,7 @@ import {
   configureMediaApi,
 } from '@cantaro/client-shared/media';
 import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
+import { MediaResolutionPicker } from '../../lib/MediaResolutionPicker';
 import {
   beginInteractiveSignIn,
   getVerifiedExtensionUser,
@@ -24,6 +25,20 @@ import {
   saveExtensionConfig,
   type ExtensionConfig,
 } from '../../lib/extensionRuntimeConfig';
+import {
+  clearEpisodeTrackingTimeout,
+  readEpisodeTrackingTimeout,
+  setEpisodeTrackingTimeout,
+  type EpisodeTrackingTimeoutPreset,
+  type EpisodeTrackingTimeoutState,
+} from '../../lib/episodeTrackingTimeout';
+import type {
+  MediaObservationDto,
+  MediaObservationMessage,
+  ResolveMediaObservationRequest,
+  SubmitMediaObservationResponse,
+} from '../../lib/mediaObservation';
+import { readLatestMediaResolution } from '../../lib/mediaResolutionStorage';
 
 type StatusType = 'success' | 'error';
 type PopupTab = 'music' | 'media';
@@ -47,6 +62,10 @@ function App() {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mediaSessionKey, setMediaSessionKey] = useState(0);
+  const [latestResolution, setLatestResolution] = useState<SubmitMediaObservationResponse | null>(null);
+  const [resolutionError, setResolutionError] = useState<string | null>(null);
+  const [isResolving, setIsResolving] = useState(false);
+  const [trackingTimeout, setTrackingTimeout] = useState<EpisodeTrackingTimeoutState>({});
   const statusTimeout = useRef<number | null>(null);
 
   const showStatus = (message: string, type: StatusType) => {
@@ -85,6 +104,24 @@ function App() {
       if (statusTimeout.current) {
         window.clearTimeout(statusTimeout.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    Promise.all([readLatestMediaResolution(), readEpisodeTrackingTimeout()])
+      .then(([resolution, timeout]) => {
+        if (!mounted) return;
+        setLatestResolution(resolution);
+        setTrackingTimeout(timeout);
+      })
+      .catch((error) => {
+        console.error('Failed to load extension episode state:', error);
+      });
+
+    return () => {
+      mounted = false;
     };
   }, []);
 
@@ -219,6 +256,40 @@ function App() {
     }
   };
 
+  const resolveObservation = async (observationId: string, request: ResolveMediaObservationRequest) => {
+    setIsResolving(true);
+    setResolutionError(null);
+
+    try {
+      const response = await browser.runtime.sendMessage({
+        type: 'RESOLVE_MEDIA_OBSERVATION',
+        payload: { observationId, request },
+      } satisfies MediaObservationMessage);
+      const resolved = (response as { payload?: MediaObservationDto }).payload;
+      setLatestResolution(null);
+      setMediaSessionKey((current) => current + 1);
+      showStatus(`Resolved ${resolved?.observedTitle ?? 'episode'}`, 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resolve episode.';
+      setResolutionError(message);
+      showStatus(message, 'error');
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  const applyTrackingTimeout = async (preset: EpisodeTrackingTimeoutPreset) => {
+    const next = await setEpisodeTrackingTimeout(preset);
+    setTrackingTimeout(next);
+    showStatus('Episode tracking paused', 'success');
+  };
+
+  const resumeTracking = async () => {
+    await clearEpisodeTrackingTimeout();
+    setTrackingTimeout({});
+    showStatus('Episode tracking resumed', 'success');
+  };
+
   const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl;
   const mediaConfigured = isMediaConfigured(savedConfig);
 
@@ -267,6 +338,25 @@ function App() {
             </div>
           </div>
         </GlassCard>
+
+        {mediaConfigured ? (
+          <div className="mt-4 grid gap-3">
+            <EpisodeTrackingTimeoutPanel
+              timeout={trackingTimeout}
+              onPause={applyTrackingTimeout}
+              onResume={resumeTracking}
+            />
+            {latestResolution ? (
+              <MediaResolutionPicker
+                response={latestResolution}
+                surface="popup"
+                resolving={isResolving}
+                error={resolutionError}
+                onResolve={resolveObservation}
+              />
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="relative mt-4 flex-1 overflow-hidden rounded-4xl">
           {activeTab === 'music' ? (
@@ -331,3 +421,41 @@ function App() {
 }
 
 export default App;
+
+function EpisodeTrackingTimeoutPanel({
+  timeout,
+  onPause,
+  onResume,
+}: {
+  timeout: EpisodeTrackingTimeoutState;
+  onPause: (preset: EpisodeTrackingTimeoutPreset) => void | Promise<void>;
+  onResume: () => void | Promise<void>;
+}) {
+  const disabledUntil = timeout.disabledUntil ? new Date(timeout.disabledUntil) : null;
+  const active = disabledUntil !== null && disabledUntil > new Date();
+
+  return (
+    <GlassCard className="p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="mr-auto">
+          <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">Episode tracking</p>
+          <p className="text-sm text-gray-700">
+            {active ? `Paused until ${disabledUntil.toLocaleString()}` : 'Active'}
+          </p>
+        </div>
+        <button className="rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm" type="button" onClick={() => onPause('30m')}>
+          30 min
+        </button>
+        <button className="rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm" type="button" onClick={() => onPause('2h')}>
+          2 hours
+        </button>
+        <button className="rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm" type="button" onClick={() => onPause('tomorrow')}>
+          Tomorrow
+        </button>
+        {active ? (
+          <GradientButton tone="soft" onClick={onResume}>Resume</GradientButton>
+        ) : null}
+      </div>
+    </GlassCard>
+  );
+}

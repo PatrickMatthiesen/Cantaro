@@ -55,7 +55,6 @@ public class MediaLibraryEntryDetailDto
     public DateTimeOffset? LastSyncedAt { get; set; }
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
-    public bool AutoProgressFromObservations { get; set; }
     public required IReadOnlyList<MediaProviderLinkSummaryDto> ProviderLinks { get; set; }
 }
 
@@ -104,12 +103,3 @@ public class MediaLinkConflictDto
     public required string ConflictingCanonicalTitle { get; set; }
 }
 
-public class MediaAutoProgressRequest
-{
-    /// <summary>
-    /// When true, the backend will automatically advance progress counters
-    /// for this entry from matched observations (subject to monotonic and
-    /// sync-metadata guards).
-    /// </summary>
-    public bool Enabled { get; set; }
-}

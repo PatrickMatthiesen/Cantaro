@@ -60,6 +60,215 @@ public class MediaObservationsApiTests
         Assert.Equal(1231.2m, root.GetProperty("positionSeconds").GetDecimal());
     }
 
+    [Fact]
+    public async Task Submit_WhenNoMatch_SearchesProviderChoicesAndLogsThem()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(new SearchOnlyMediaProvider()));
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/NO_MATCH/episode-4",
+            SiteMediaId = "NO_MATCH",
+            ObservedTitle = "Frieren - Episode 4",
+            SeriesTitle = "Frieren",
+            EpisodeNumber = 4,
+            ObservedAt = DateTimeOffset.Parse("2026-04-28T10:30:00Z"),
+            ExtensionVersion = "0.1.0"
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
+
+        Assert.True(response.RequiresResolution);
+        Assert.Single(response.ProviderChoices);
+        Assert.Equal("anilist", response.ProviderChoices[0].ProviderId);
+        Assert.Equal("154587", response.ProviderChoices[0].ProviderMediaId);
+
+        var observation = await fixture.Db.MediaObservations.SingleAsync();
+        Assert.NotNull(observation.ProviderChoicesPayload);
+        Assert.Contains("154587", observation.ProviderChoicesPayload);
+    }
+
+    [Fact]
+    public async Task Submit_WhenNoMatchAndProviderNotConnected_StoresObservationWithoutChoices()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(new SearchOnlyMediaProvider(connected: false)));
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/NO_PROVIDER/episode-4",
+            SiteMediaId = "NO_PROVIDER",
+            ObservedTitle = "Frieren - Episode 4",
+            SeriesTitle = "Frieren",
+            EpisodeNumber = 4,
+            ObservedAt = DateTimeOffset.Parse("2026-04-28T10:30:00Z"),
+            ExtensionVersion = "0.1.0"
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
+
+        Assert.True(response.RequiresResolution);
+        Assert.Empty(response.ProviderChoices);
+        Assert.Equal("anilist_not_connected", response.ProviderChoicesUnavailableReason);
+
+        var observation = await fixture.Db.MediaObservations.SingleAsync();
+        Assert.Null(observation.ProviderChoicesPayload);
+        Assert.Equal(MediaObservationStatuses.NoMatch, observation.MatchStatus);
+    }
+
+    [Fact]
+    public async Task Submit_DeduplicatedMatchedObservation_AdvancesLocalProgress()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "The Genius Prince's Guide to Raising a Nation Out of Debt",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            SupportsEpisodeProgress = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var account = new ConnectedServiceAccount
+        {
+            Id = 6110,
+            UserId = fixture.UserId,
+            Service = "anilist",
+            ExternalAccountId = "viewer-611",
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        };
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            MediaTitleId = title.Id,
+            ConnectedServiceAccountId = account.Id,
+            Provider = "anilist",
+            ProviderAccountId = "viewer-611",
+            ProviderMediaId = "129190",
+            NormalizedStatus = MediaLibraryStatuses.Current,
+            ProgressEpisodes = 1,
+            LastRemoteUpdateAt = now.AddMinutes(-10),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var existingObservation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/GWDU8WDNQ/old",
+            SiteMediaId = "GWDU8WDNQ",
+            ObservedTitle = "The Genius Prince's Guide to Raising a Nation Out of Debt - E1",
+            ProgressHint = "1",
+            ObservedAt = now.AddMinutes(-10),
+            MatchStatus = MediaObservationStatuses.Matched,
+            MediaTitleId = title.Id,
+            CreatedAt = now.AddMinutes(-10),
+            UpdatedAt = now.AddMinutes(-10)
+        };
+
+        fixture.Db.MediaTitles.Add(title);
+        fixture.Db.ConnectedServiceAccounts.Add(account);
+        fixture.Db.MediaLibraryEntries.Add(entry);
+        fixture.Db.MediaObservations.Add(existingObservation);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/GWDU8WDNQ/episode-5",
+            SiteMediaId = "GWDU8WDNQ",
+            ObservedTitle = "The Genius Prince's Guide to Raising a Nation Out of Debt - E5 - A Diabolical Scheme",
+            EpisodeNumber = 5,
+            WatchProgressPercent = 85.01m,
+            DurationSeconds = 1446.03m,
+            PositionSeconds = 1229.25m,
+            ObservedAt = now,
+            ExtensionVersion = "0.1.0"
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
+        Assert.True(response.WasDeduplicated);
+
+        var persistedEntry = await fixture.Db.MediaLibraryEntries.SingleAsync(item => item.Id == entry.Id);
+        Assert.Equal(5, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
+        Assert.Equal(1, await fixture.Db.MediaProviderOperations.CountAsync());
+
+        var persistedObservation = await fixture.Db.MediaObservations.SingleAsync(item => item.Id == existingObservation.Id);
+        Assert.Equal("5", persistedObservation.ProgressHint);
+        Assert.Equal(5, persistedObservation.ResolvedProgress);
+    }
+
+    [Fact]
+    public async Task Resolve_WithOffset_StoresResolvedProgressAndOffset()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Season Two Show",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/OFFSET/episode-16",
+            SiteMediaId = "OFFSET",
+            ObservedTitle = "Season Two Show - Episode 16",
+            ProgressHint = "16",
+            ObservedAt = now,
+            MatchStatus = MediaObservationStatuses.Ambiguous,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var candidate = new MediaObservationCandidate
+        {
+            Id = Guid.NewGuid(),
+            MediaObservationId = observation.Id,
+            MediaTitleId = title.Id,
+            CandidateSource = MediaObservationCandidateSources.LibraryTitleSearch,
+            Title = title.CanonicalTitle,
+            MediaKind = title.MediaKind,
+            Score = 0.5m,
+            CreatedAt = now
+        };
+        fixture.Db.MediaTitles.Add(title);
+        fixture.Db.MediaObservations.Add(observation);
+        fixture.Db.MediaObservationCandidates.Add(candidate);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            CandidateId = candidate.Id,
+            EpisodeOffset = -12
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var persisted = await fixture.Db.MediaObservations.SingleAsync(item => item.Id == observation.Id);
+        Assert.Equal(-12, persisted.EpisodeOffset);
+        Assert.Equal(4, persisted.ResolvedProgress);
+        Assert.NotNull(persisted.ResolutionHistoryPayload);
+        Assert.Single(await fixture.Db.MediaObservationEpisodeOffsets.ToListAsync());
+    }
+
     private sealed class MediaObservationFixture : IAsyncDisposable
     {
         private MediaObservationFixture(
@@ -76,8 +285,9 @@ public class MediaObservationsApiTests
 
         public ApplicationDbContext Db { get; }
         public MediaObservationsController Controller { get; }
+        public int UserId { get; } = 611;
 
-        public static async Task<MediaObservationFixture> CreateAsync()
+        public static async Task<MediaObservationFixture> CreateAsync(IMediaProviderRegistry? registry = null)
         {
             const int userId = 611;
             const string email = "observations.api@example.com";
@@ -110,6 +320,7 @@ public class MediaObservationsApiTests
                 userManager,
                 matchingService,
                 progressService,
+                registry ?? new EmptyMediaProviderRegistry(),
                 NullLogger<MediaObservationsController>.Instance);
 
             controller.ControllerContext = new ControllerContext
@@ -147,6 +358,62 @@ public class MediaObservationsApiTests
         }
 
         public IReadOnlyCollection<string> GetSupportedProviderIds() => [];
+    }
+
+    private sealed class SingleProviderRegistry(IMediaProvider provider) : IMediaProviderRegistry
+    {
+        public bool IsSupported(string providerId) => string.Equals(providerId, provider.ProviderId, StringComparison.OrdinalIgnoreCase);
+
+        public IMediaProvider GetRequired(string providerId) => IsSupported(providerId) ? provider : throw new NotSupportedException();
+
+        public IReadOnlyCollection<string> GetSupportedProviderIds() => [provider.ProviderId];
+    }
+
+    private sealed class SearchOnlyMediaProvider(bool connected = true) : IMediaProvider
+    {
+        public string ProviderId => "anilist";
+
+        public Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<MediaProviderSearchResult> results =
+            [
+                new MediaProviderSearchResult
+                {
+                    ProviderId = ProviderId,
+                    ProviderMediaId = "154587",
+                    Title = "Frieren: Beyond Journey's End",
+                    MediaKind = MediaKinds.Anime,
+                    EpisodeCount = 28,
+                    PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                    ReleaseStatusDimension = MediaProgressDimensions.Episode
+                }
+            ];
+            return Task.FromResult(results);
+        }
+
+        public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            ConnectedServiceAccount? account = connected
+                ? new ConnectedServiceAccount
+                {
+                    Id = 901,
+                    UserId = userId,
+                    Service = ProviderId,
+                    ExternalAccountId = "viewer-901",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+                : null;
+            return Task.FromResult(account);
+        }
+        public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge) => throw new NotSupportedException();
+        public Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(int userId, string authorizationCode, string redirectUri, string codeVerifier, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task DisconnectAsync(int userId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderLibraryImportResult> ImportLibraryAsync(int userId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private static UserManager<User> CreateUserManager(ApplicationDbContext db)

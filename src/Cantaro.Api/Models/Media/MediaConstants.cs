@@ -45,7 +45,7 @@ public static class MediaMutationSources
 
     /// <summary>
     /// Progress was automatically advanced by a matched site observation,
-    /// subject to user opt-in and monotonic / sync-metadata guards.
+    /// subject to monotonic and sync-metadata guards.
     /// </summary>
     public const string ObservationAutoProgress = "observation_auto_progress";
 }

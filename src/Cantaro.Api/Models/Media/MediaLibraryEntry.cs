@@ -55,14 +55,6 @@ public class MediaLibraryEntry
 
     public DateTimeOffset UpdatedAt { get; set; }
 
-    /// <summary>
-    /// When true the backend will automatically advance this entry's progress
-    /// counter whenever a matched, linked observation carries a numeric progress
-    /// hint that exceeds the current value.  Disabled by default; the user must
-    /// explicitly opt in per entry.
-    /// </summary>
-    public bool AutoProgressFromObservations { get; set; }
-
     public User? User { get; set; }
 
     public MediaTitle? MediaTitle { get; set; }

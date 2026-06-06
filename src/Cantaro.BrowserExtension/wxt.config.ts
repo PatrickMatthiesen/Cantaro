@@ -59,7 +59,10 @@ export default defineConfig({
     ],
   },
   webExt: {
-    // disabled: false,
+    // Avoid automation signals from WXT's Chromium dev runner on sites with bot checks.
+    chromiumArgs: [
+      '--disable-blink-features=AutomationControlled',
+    ],
   },
   dev: {
     server: {

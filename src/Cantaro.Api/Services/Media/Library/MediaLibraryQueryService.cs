@@ -252,7 +252,6 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             LastSyncedAt = entry.LastSyncedAt,
             LastRemoteUpdateAt = entry.LastRemoteUpdateAt,
             UpdatedAt = entry.UpdatedAt,
-            AutoProgressFromObservations = entry.AutoProgressFromObservations,
             ProviderLinks = title.ProviderLinks
                 .Select(l => new MediaProviderLinkSummaryDto
                 {
