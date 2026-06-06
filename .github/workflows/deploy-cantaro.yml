@@ -1,0 +1,99 @@
+name: Deploy Cantaro
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cantaro
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Publish and deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: "Production"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Install Aspire CLI
+        run: |
+          curl -sSL https://aspire.dev/install.sh | bash -s -- --quality "dev"
+          echo "$HOME/.aspire/bin" >> "$GITHUB_PATH"
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore
+          bun install --frozen-lockfile
+
+      - name: Publish Docker Compose artifacts
+        env:
+          Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}
+          Parameters__YouTubeClientSecret: ${{ secrets.CANTARO_YOUTUBE_CLIENT_SECRET }}
+          Parameters__AniListClientId: ${{ secrets.CANTARO_ANILIST_CLIENT_ID }}
+          Parameters__AniListClientSecret: ${{ secrets.CANTARO_ANILIST_CLIENT_SECRET }}
+          Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}
+          Parameters__postgres_password: ${{ secrets.CANTARO_POSTGRES_PASSWORD }}
+        run: |
+          aspire publish --output-path ./aspire-output --non-interactive
+
+      - name: Upload Aspire publish output
+        uses: actions/upload-artifact@v4
+        with:
+          name: cantaro-aspire-output
+          path: ./aspire-output/
+          retention-days: 14
+          include-hidden-files: true
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          use-cache: "true"
+          version: latest
+          ping: ${{ env.DEPLOY_HOST }}
+
+      - name: Add SSH host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" 'docker version && docker compose version'
+
+      - name: Deploy with Aspire through Docker context
+        env:
+          ASPIRE_CONTAINER_RUNTIME: docker
+          COMPOSE_PROJECT_NAME: cantaro
+          DOCKER_CONTEXT_NAME: docker-host-${{ github.run_id }}
+          Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}
+          Parameters__YouTubeClientSecret: ${{ secrets.CANTARO_YOUTUBE_CLIENT_SECRET }}
+          Parameters__AniListClientId: ${{ secrets.CANTARO_ANILIST_CLIENT_ID }}
+          Parameters__AniListClientSecret: ${{ secrets.CANTARO_ANILIST_CLIENT_SECRET }}
+          Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}
+          Parameters__postgres_password: ${{ secrets.CANTARO_POSTGRES_PASSWORD }}
+        run: |
+          docker context create "$DOCKER_CONTEXT_NAME" --docker "host=ssh://${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+          trap 'docker context rm "$DOCKER_CONTEXT_NAME" || true' EXIT
+
+      - name: Verify remote containers
+        if: always()
+        run: |
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "docker ps --filter label=com.docker.compose.project=cantaro --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
