@@ -107,16 +107,21 @@ public class MediaLibraryImportService(
                 entry.MediaTitleId = link.MediaTitleId;
                 entry.ConnectedServiceAccountId = account.Id;
                 entry.ProviderLibraryEntryId = item.ProviderLibraryEntryId;
-                entry.NormalizedStatus = item.NormalizedStatus;
-                entry.RawStatus = item.RawStatus;
-                entry.RawListName = item.RawListName;
-                entry.ProgressEpisodes = item.ProgressEpisodes;
-                entry.ProgressChapters = item.ProgressChapters;
-                entry.ProgressVolumes = item.ProgressVolumes;
+                var shouldApplyRemoteLibraryState = ShouldApplyRemoteLibraryState(entry, item);
+                if (shouldApplyRemoteLibraryState)
+                {
+                    entry.NormalizedStatus = item.NormalizedStatus;
+                    entry.RawStatus = item.RawStatus;
+                    entry.RawListName = item.RawListName;
+                    entry.ProgressEpisodes = item.ProgressEpisodes;
+                    entry.ProgressChapters = item.ProgressChapters;
+                    entry.ProgressVolumes = item.ProgressVolumes;
+                    entry.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
+                    entry.LastMutationSource = MediaMutationSources.ProviderImport;
+                    entry.RawMetadata = item.RawMetadata;
+                }
+
                 entry.LastSyncedAt = importResult.ImportedAt;
-                entry.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
-                entry.LastMutationSource = MediaMutationSources.ProviderImport;
-                entry.RawMetadata = item.RawMetadata;
                 entry.UpdatedAt = importResult.ImportedAt;
                 updatedEntries++;
             }
@@ -168,6 +173,39 @@ public class MediaLibraryImportService(
             CreatedAt = timestamp,
             UpdatedAt = timestamp
         };
+    }
+
+    private static bool ShouldApplyRemoteLibraryState(MediaLibraryEntry entry, MediaProviderLibraryItem item)
+    {
+        if (entry.LastRemoteUpdateAt is null || item.LastRemoteUpdateAt is null)
+        {
+            return true;
+        }
+
+        if (item.LastRemoteUpdateAt > entry.LastRemoteUpdateAt)
+        {
+            return true;
+        }
+
+        if (item.LastRemoteUpdateAt < entry.LastRemoteUpdateAt)
+        {
+            return false;
+        }
+
+        return !HasLocalMutationAtOrAfterRemoteSnapshot(entry);
+    }
+
+    private static bool HasLocalMutationAtOrAfterRemoteSnapshot(MediaLibraryEntry entry)
+    {
+        if (entry.LastLocalEditAt is null || entry.LastRemoteUpdateAt is null)
+        {
+            return false;
+        }
+
+        return entry.LastLocalEditAt >= entry.LastRemoteUpdateAt
+            && entry.LastMutationSource is MediaMutationSources.UserProgressUpdate
+                or MediaMutationSources.UserStatusUpdate
+                or MediaMutationSources.ObservationAutoProgress;
     }
 
     private static void ApplyToMediaTitle(MediaTitle title, MediaProviderLibraryItem item, DateTimeOffset timestamp)

@@ -242,6 +242,37 @@ function useRemoteEntryRefresh(
   return isRefreshingRemote;
 }
 
+function useManualRemoteRefresh(
+  entry: MediaLibraryEntryDetailDto | null,
+  loadEntry: () => Promise<void>,
+  showSaveMessage: (message: string) => void,
+  setSaveMessage: (message: string) => void,
+) {
+  const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
+
+  const handleRefreshFromProvider = useCallback(async () => {
+    if (!entry?.isConnected) {
+      return;
+    }
+
+    const refreshProviderId = entry.provider || mainMediaProviderId;
+    setIsRefreshingRemote(true);
+
+    try {
+      const result = await mediaApi.importLibrary(refreshProviderId);
+      writeStoredValue(remoteCheckTimestampKey(refreshProviderId), result.importedAt);
+      await loadEntry();
+      showSaveMessage('Progress refreshed from provider');
+    } catch (refreshError) {
+      setSaveMessage(getPrefixedErrorMessage(refreshError, 'Failed to refresh from provider'));
+    } finally {
+      setIsRefreshingRemote(false);
+    }
+  }, [entry, loadEntry, setSaveMessage, showSaveMessage]);
+
+  return { isRefreshingRemote, handleRefreshFromProvider };
+}
+
 function useProgressSaveAction(
   libraryEntryId: string,
   entry: MediaLibraryEntryDetailDto | null,
@@ -447,10 +478,22 @@ interface ProgressCardProps {
   supportsVolumes: boolean;
   hasProgressChanged: boolean;
   isSavingProgress: boolean;
+  isRefreshingProgress: boolean;
+  canRefreshProgress: boolean;
   onProgressEpisodesChange: (value: number) => void;
   onProgressChaptersChange: (value: number) => void;
   onProgressVolumesChange: (value: number) => void;
   onSaveProgress: () => void;
+  onRefreshProgress: () => void;
+}
+
+interface ProgressActionRowProps {
+  hasProgressChanged: boolean;
+  isSavingProgress: boolean;
+  isRefreshingProgress: boolean;
+  canRefreshProgress: boolean;
+  onSaveProgress: () => void;
+  onRefreshProgress: () => void;
 }
 
 interface MediaEntryDetailContentProps {
@@ -459,6 +502,7 @@ interface MediaEntryDetailContentProps {
   embedded: boolean;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingRemote: boolean;
+  isRefreshingProgress: boolean;
   isSavingProgress: boolean;
   isSavingStatus: boolean;
   saveMessage: string | null;
@@ -476,6 +520,7 @@ interface MediaEntryDetailContentProps {
   onSetProgressVolumes: (value: number) => void;
   onSetSelectedStatus: (value: string) => void;
   onSaveProgress: () => void;
+  onRefreshProgress: () => void;
   onSaveStatus: () => void;
   onUnlink: (providerId: string) => void;
 }
@@ -575,6 +620,7 @@ function EntryDetailPanels({
   progressVolumes,
   selectedStatus,
   isSavingProgress,
+  isRefreshingProgress,
   isSavingStatus,
   onSetShowLinkDialog,
   onSetProgressEpisodes,
@@ -582,6 +628,7 @@ function EntryDetailPanels({
   onSetProgressVolumes,
   onSetSelectedStatus,
   onSaveProgress,
+  onRefreshProgress,
   onSaveStatus,
   onUnlink,
 }: Pick<
@@ -594,6 +641,7 @@ function EntryDetailPanels({
   | 'progressVolumes'
   | 'selectedStatus'
   | 'isSavingProgress'
+  | 'isRefreshingProgress'
   | 'isSavingStatus'
   | 'onSetShowLinkDialog'
   | 'onSetProgressEpisodes'
@@ -601,6 +649,7 @@ function EntryDetailPanels({
   | 'onSetProgressVolumes'
   | 'onSetSelectedStatus'
   | 'onSaveProgress'
+  | 'onRefreshProgress'
   | 'onSaveStatus'
   | 'onUnlink'
 >) {
@@ -637,10 +686,13 @@ function EntryDetailPanels({
         supportsVolumes={supportsVolumes}
         hasProgressChanged={hasProgressChanged}
         isSavingProgress={isSavingProgress}
+        isRefreshingProgress={isRefreshingProgress}
+        canRefreshProgress={entry.isConnected}
         onProgressEpisodesChange={onSetProgressEpisodes}
         onProgressChaptersChange={onSetProgressChapters}
         onProgressVolumesChange={onSetProgressVolumes}
         onSaveProgress={onSaveProgress}
+        onRefreshProgress={onRefreshProgress}
       />
       <ProviderLinksCard
         providerLinks={entry.providerLinks}
@@ -726,10 +778,13 @@ function ProgressCard({
   supportsVolumes,
   hasProgressChanged,
   isSavingProgress,
+  isRefreshingProgress,
+  canRefreshProgress,
   onProgressEpisodesChange,
   onProgressChaptersChange,
   onProgressVolumesChange,
   onSaveProgress,
+  onRefreshProgress,
 }: ProgressCardProps) {
   return (
     <GlassCard className="p-6">
@@ -757,21 +812,74 @@ function ProgressCard({
           onChange={onProgressVolumesChange}
         />
       </div>
-      <div className="mt-4">
-        <GradientButton
-          gradient="from-indigo-500 to-purple-500"
-          onClick={onSaveProgress}
-          disabled={!hasProgressChanged || isSavingProgress}
-          aria-busy={isSavingProgress}
-        >
-          {isSavingProgress ? 'Saving…' : 'Save progress'}
-        </GradientButton>
-      </div>
+      <ProgressActionRow
+        hasProgressChanged={hasProgressChanged}
+        isSavingProgress={isSavingProgress}
+        isRefreshingProgress={isRefreshingProgress}
+        canRefreshProgress={canRefreshProgress}
+        onSaveProgress={onSaveProgress}
+        onRefreshProgress={onRefreshProgress}
+      />
       <p className="mt-3 text-xs text-gray-400">
-        Editing progress here updates Cantaro only. Changes are not automatically pushed to your connected provider.
+        Save writes progress to Cantaro and your connected provider. Refresh pulls the latest provider state.
       </p>
     </GlassCard>
   );
+}
+
+function ProgressActionRow({
+  hasProgressChanged,
+  isSavingProgress,
+  isRefreshingProgress,
+  canRefreshProgress,
+  onSaveProgress,
+  onRefreshProgress,
+}: ProgressActionRowProps) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <GradientButton
+        gradient="from-indigo-500 to-purple-500"
+        onClick={onSaveProgress}
+        disabled={isProgressSaveDisabled(hasProgressChanged, isSavingProgress, isRefreshingProgress)}
+        aria-busy={isSavingProgress}
+      >
+        {getProgressSaveLabel(isSavingProgress)}
+      </GradientButton>
+      <GradientButton
+        tone="soft"
+        onClick={onRefreshProgress}
+        disabled={isProgressRefreshDisabled(canRefreshProgress, isSavingProgress, isRefreshingProgress)}
+        aria-busy={isRefreshingProgress}
+        title={canRefreshProgress ? 'Refresh progress from provider' : 'Entry must be synced to refresh progress'}
+      >
+        {getProgressRefreshLabel(isRefreshingProgress)}
+      </GradientButton>
+    </div>
+  );
+}
+
+function isProgressSaveDisabled(
+  hasProgressChanged: boolean,
+  isSavingProgress: boolean,
+  isRefreshingProgress: boolean,
+) {
+  return [!hasProgressChanged, isSavingProgress, isRefreshingProgress].some(Boolean);
+}
+
+function isProgressRefreshDisabled(
+  canRefreshProgress: boolean,
+  isSavingProgress: boolean,
+  isRefreshingProgress: boolean,
+) {
+  return [!canRefreshProgress, isSavingProgress, isRefreshingProgress].some(Boolean);
+}
+
+function getProgressSaveLabel(isSavingProgress: boolean) {
+  return isSavingProgress ? 'Saving…' : 'Save progress';
+}
+
+function getProgressRefreshLabel(isRefreshingProgress: boolean) {
+  return isRefreshingProgress ? 'Refreshing…' : 'Refresh';
 }
 
 // ── Entry detail page ──────────────────────────────────────────────────────────
@@ -788,6 +896,7 @@ function MediaEntryDetailContent({
   embedded,
   availabilityByProviderLink,
   isRefreshingRemote,
+  isRefreshingProgress,
   isSavingProgress,
   isSavingStatus,
   saveMessage,
@@ -805,6 +914,7 @@ function MediaEntryDetailContent({
   onSetProgressVolumes,
   onSetSelectedStatus,
   onSaveProgress,
+  onRefreshProgress,
   onSaveStatus,
   onUnlink,
 }: MediaEntryDetailContentProps) {
@@ -824,6 +934,7 @@ function MediaEntryDetailContent({
           progressVolumes={progressVolumes}
           selectedStatus={selectedStatus}
           isSavingProgress={isSavingProgress}
+          isRefreshingProgress={isRefreshingProgress}
           isSavingStatus={isSavingStatus}
           onSetShowLinkDialog={onSetShowLinkDialog}
           onSetProgressEpisodes={onSetProgressEpisodes}
@@ -831,6 +942,7 @@ function MediaEntryDetailContent({
           onSetProgressVolumes={onSetProgressVolumes}
           onSetSelectedStatus={onSetSelectedStatus}
           onSaveProgress={onSaveProgress}
+          onRefreshProgress={onRefreshProgress}
           onSaveStatus={onSaveStatus}
           onUnlink={onUnlink}
         />
@@ -870,6 +982,10 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
   const availabilityByProviderLink = useProviderAvailability(entry);
   const { message: saveMessage, setMessage: setSaveMessage, showMessage: showSaveMessage } = useTimedMessage();
   const isRefreshingRemote = useRemoteEntryRefresh(entry, loadEntry, setSaveMessage);
+  const {
+    isRefreshingRemote: isRefreshingProgress,
+    handleRefreshFromProvider,
+  } = useManualRemoteRefresh(entry, loadEntry, showSaveMessage, setSaveMessage);
   const { isSavingProgress, handleSaveProgress } = useProgressSaveAction(
     libraryEntryId,
     entry,
@@ -906,6 +1022,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
       embedded={embedded}
       availabilityByProviderLink={availabilityByProviderLink}
       isRefreshingRemote={isRefreshingRemote}
+      isRefreshingProgress={isRefreshingProgress}
       isSavingProgress={isSavingProgress}
       isSavingStatus={isSavingStatus}
       saveMessage={saveMessage}
@@ -923,6 +1040,7 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
       onSetProgressVolumes={setProgressVolumes}
       onSetSelectedStatus={setSelectedStatus}
       onSaveProgress={() => void handleSaveProgress()}
+      onRefreshProgress={() => void handleRefreshFromProvider()}
       onSaveStatus={() => void handleSaveStatus()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
     />

@@ -235,6 +235,33 @@ public class MediaProviderDtoContractTests
     }
 
     [Fact]
+    public async Task UpdateProgress_PersistsLocalProgressWhenOperationRemainsQueued()
+    {
+        var provider = new StubMediaProvider
+        {
+            ThrowOnProgressUpdate = true
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var entry = await SeedMediaEntryAsync(fixture);
+
+        var result = await fixture.Controller.UpdateProgress(
+            entry.Id,
+            new MediaProgressUpdateDto { ProgressEpisodes = 17 },
+            CancellationToken.None);
+
+        Assert.IsType<AcceptedResult>(result);
+
+        var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync(item => item.Id == entry.Id);
+        Assert.Equal(17, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaMutationSources.UserProgressUpdate, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
+
+        var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
+        Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);
+        Assert.Contains("simulated", queuedOperation.LastError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task UpdateStatus_ReturnsAcceptedWhenOperationRemainsQueued()
     {
         var provider = new StubMediaProvider
@@ -250,6 +277,11 @@ public class MediaProviderDtoContractTests
             CancellationToken.None);
 
         Assert.IsType<AcceptedResult>(result);
+
+        var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync(item => item.Id == entry.Id);
+        Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.NormalizedStatus);
+        Assert.Equal(MediaMutationSources.UserStatusUpdate, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
 
         var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);

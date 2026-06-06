@@ -386,6 +386,8 @@ public class MediaProvidersController(
             return Conflict(new { error = "This media entry is disconnected from its provider account." });
         }
 
+        ApplyLocalProgressUpdate(entry, request);
+
         var operation = await _mediaProviderOperationProcessor.EnqueueProgressUpdateAsync(
             userId,
             entry,
@@ -432,6 +434,8 @@ public class MediaProvidersController(
             return Conflict(new { error = "This media entry is disconnected from its provider account." });
         }
 
+        ApplyLocalStatusUpdate(entry, request);
+
         var operation = await _mediaProviderOperationProcessor.EnqueueStatusUpdateAsync(
             userId,
             entry,
@@ -445,6 +449,26 @@ public class MediaProvidersController(
 
         var result = await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken);
         return BuildOperationResult(result);
+    }
+
+    private static void ApplyLocalProgressUpdate(MediaLibraryEntry entry, MediaProgressUpdateDto request)
+    {
+        var now = DateTimeOffset.UtcNow;
+        entry.ProgressEpisodes = request.ProgressEpisodes ?? entry.ProgressEpisodes;
+        entry.ProgressChapters = request.ProgressChapters ?? entry.ProgressChapters;
+        entry.ProgressVolumes = request.ProgressVolumes ?? entry.ProgressVolumes;
+        entry.LastLocalEditAt = now;
+        entry.LastMutationSource = MediaMutationSources.UserProgressUpdate;
+        entry.UpdatedAt = now;
+    }
+
+    private static void ApplyLocalStatusUpdate(MediaLibraryEntry entry, MediaStatusUpdateDto request)
+    {
+        var now = DateTimeOffset.UtcNow;
+        entry.NormalizedStatus = request.Status;
+        entry.LastLocalEditAt = now;
+        entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
+        entry.UpdatedAt = now;
     }
 
     private static ActionResult BuildOperationResult(MediaProviderOperationExecutionResult result)
