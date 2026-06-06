@@ -38,8 +38,17 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("YouTube:ClientSecret", youtubeClientSecret)
     .WithEnvironment("AniList:ClientId", aniListClientId)
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
-    .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey)
-    .WithReference(migrationService)
+    .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey);
+
+if (builder.ExecutionContext.IsPublishMode)
+{
+    api.PublishAsDockerComposeService((_, service) =>
+    {
+        service.Restart = "unless-stopped";
+    });
+}
+
+api.WithReference(migrationService)
     .WaitForCompletion(migrationService)
     .WithReference(db);
 

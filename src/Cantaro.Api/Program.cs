@@ -4,6 +4,8 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
@@ -20,8 +22,12 @@ builder.AddServiceDefaults();
 // Add PostgreSQL database context via Aspire defaults.
 builder.AddNpgsqlDbContext<ApplicationDbContext>(connectionName: "cantaro-db");
 
-// Add Data Protection for token encryption
-builder.Services.AddDataProtection();
+// Add Data Protection for auth cookies and token encryption.
+builder.Services
+    .AddDataProtection()
+    .SetApplicationName("Cantaro")
+    .PersistKeysToDbContext<ApplicationDbContext>();
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<FrontendUrlOptions>(builder.Configuration.GetSection(FrontendUrlOptions.SectionName));
 builder.Services

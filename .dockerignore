@@ -1,0 +1,17 @@
+.git
+.github
+.playwright-mcp
+.vscode
+.codex
+.agents
+node_modules
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/.fallow
+**/.tanstack
+**/*.log
+codex-build
+aspire-output-codex-check
+src/Cantaro.AppHost/aspire-output
