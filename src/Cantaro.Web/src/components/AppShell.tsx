@@ -11,6 +11,12 @@ interface AuthenticatedShellProps {
   contentClassName?: string;
 }
 
+export interface GlobalHeadingState {
+  eyebrow: string;
+  title: string;
+  details?: string[];
+}
+
 function AppLoadingState() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-800">
@@ -100,12 +106,10 @@ export function AppPageShell({ children, contentClassName = 'max-w-6xl' }: Authe
 }
 
 export function GlobalHeader({
-  eyebrow,
-  title,
+  heading,
   children,
 }: {
-  eyebrow: string;
-  title: string;
+  heading: GlobalHeadingState;
   children?: ReactNode;
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -113,8 +117,11 @@ export function GlobalHeader({
   return (
     <header className="flex flex-wrap items-center justify-between gap-4">
       <div>
-        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">{eyebrow}</p>
-        <h1 className="mt-1 text-3xl font-bold text-gray-900">{title}</h1>
+        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">{heading.eyebrow}</p>
+        <h1 className="mt-1 text-3xl font-bold text-gray-900">{heading.title}</h1>
+        {heading.details?.map((detail) => (
+          <p key={detail} className="mt-1 text-sm text-gray-500">{detail}</p>
+        ))}
       </div>
       <div className="flex flex-wrap items-center gap-3">
         {children}

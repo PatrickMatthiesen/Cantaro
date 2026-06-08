@@ -50,7 +50,7 @@ function FilterSelect({ label, value, options, onChange, disabled = false }: Fil
         <div className="flex flex-col gap-1">
             <label className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</label>
             <select
-                className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-9 rounded-xl border border-gray-200 bg-white/80 px-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 value={value}
                 onChange={(event) => onChange(event.target.value || undefined)}
                 disabled={disabled}
@@ -69,7 +69,7 @@ function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: Sort
             <label className="text-xs font-medium tracking-wide text-gray-500 uppercase">Sort by</label>
             <div className="flex gap-1">
                 <select
-                    className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                    className="h-9 rounded-xl border border-gray-200 bg-white/80 px-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                     value={sortBy}
                     onChange={(event) => onSortByChange(event.target.value)}
                 >
@@ -80,7 +80,7 @@ function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: Sort
                 </select>
                 <button
                     type="button"
-                    className="rounded-xl border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 transition hover:bg-white"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white/80 text-sm text-gray-600 transition hover:bg-white"
                     onClick={onToggleSortDir}
                     title={sortDir === 'asc' ? 'Ascending - click to switch' : 'Descending - click to switch'}
                 >
@@ -131,11 +131,11 @@ export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onN
     return (
         <div className="ml-auto flex flex-col gap-1">
             <span className="text-xs font-medium tracking-wide text-gray-500 uppercase">Providers</span>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
                 {onNavigateProviders ? (
                     <button
                         type="button"
-                        className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white"
+                        className="inline-flex h-9 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-3 text-sm font-medium text-gray-700 transition hover:bg-white"
                         onClick={onNavigateProviders}
                     >
                         Manage
@@ -144,13 +144,13 @@ export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onN
                 {isConnected ? (
                     <button
                         type="button"
-                        className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-4 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-9 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-3 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
                         onClick={() => void onRefresh()}
                         disabled={isRefreshing}
                         aria-busy={isRefreshing}
                         title="Reload the primary provider library"
                     >
-                        {isRefreshing ? 'Reloading…' : '↻ Reload'}
+                        {isRefreshing ? 'Reloading...' : 'Reload'}
                     </button>
                 ) : null}
             </div>

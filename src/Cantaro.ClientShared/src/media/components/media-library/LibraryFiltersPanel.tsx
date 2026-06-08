@@ -65,8 +65,8 @@ export function LibraryFiltersPanel({
     ];
 
     return (
-        <GlassCard className="p-4">
-            <div className="flex flex-wrap items-end gap-3">
+        <GlassCard className="p-3">
+            <div className="flex flex-wrap items-end gap-2">
                 <LibraryFilterFields
                     statusValue={filters.status ?? ''}
                     mediaKindValue={filters.mediaKind ?? ''}

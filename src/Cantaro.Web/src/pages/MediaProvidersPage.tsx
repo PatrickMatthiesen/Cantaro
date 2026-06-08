@@ -9,43 +9,61 @@ interface MediaProvidersPageProps {
   embedded?: boolean;
 }
 
+function MediaProvidersHeader({
+  navigation,
+  onNavigateLibrary,
+}: {
+  navigation?: ReactNode;
+  onNavigateLibrary?: () => void;
+}) {
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
+        <h1 className="mt-1 text-3xl font-bold">Media providers</h1>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        {navigation}
+        {onNavigateLibrary ? (
+          <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onNavigateLibrary}>
+            View Library
+          </GradientButton>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
 export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = false }: MediaProvidersPageProps) {
   const content = (
     <>
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
-            <h1 className="mt-1 text-3xl font-bold">Media providers</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {navigation}
-            {onNavigateLibrary ? (
-              <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onNavigateLibrary}>
-                View Library
-              </GradientButton>
-            ) : null}
-          </div>
-        </header>
+      {embedded && navigation ? (
+        <div>{navigation}</div>
+      ) : null}
 
-        <GlassCard className="p-5">
-          <p className="text-sm text-gray-700">
-            Connect media tracking services to import your anime and manga library into Cantaro. Once
-            connected, you can import your list and track progress across providers.
-          </p>
-        </GlassCard>
+      {!embedded ? (
+        <MediaProvidersHeader navigation={navigation} onNavigateLibrary={onNavigateLibrary} />
+      ) : null}
 
-        <section className="space-y-4" aria-label="Media provider accounts">
-          {mediaProviderCatalog.map((provider) => (
-            <ProviderPanel
-              key={provider.id}
-              providerId={provider.id}
-              name={provider.name}
-              icon={provider.icon}
-              gradient={provider.gradient}
-              description={provider.description}
-            />
-          ))}
-        </section>
+      <GlassCard className="p-5">
+        <p className="text-sm text-gray-700">
+          Connect media tracking services to import your anime and manga library into Cantaro. Once
+          connected, you can import your list and track progress across providers.
+        </p>
+      </GlassCard>
+
+      <section className="space-y-4" aria-label="Media provider accounts">
+        {mediaProviderCatalog.map((provider) => (
+          <ProviderPanel
+            key={provider.id}
+            providerId={provider.id}
+            name={provider.name}
+            icon={provider.icon}
+            gradient={provider.gradient}
+            description={provider.description}
+          />
+        ))}
+      </section>
     </>
   );
 

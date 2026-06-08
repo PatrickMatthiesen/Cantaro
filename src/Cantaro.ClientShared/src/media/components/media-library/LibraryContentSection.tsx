@@ -1,5 +1,6 @@
 import { LibraryEntryCard } from '../LibraryEntryCard';
 import { GlassCard, GradientButton } from '../../../ui';
+import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
 import type { MediaLibraryListItemDto, MediaLibraryQueryParams } from '../../services/mediaApi';
 
 export interface LibraryContentSectionProps {
@@ -14,13 +15,27 @@ export interface LibraryContentSectionProps {
     onNavigateProviders?: () => void;
     onPreviousPage: () => void;
     onNextPage: () => void;
+    density?: MediaLibraryDensity;
 }
 
-function LibraryLoadingGrid() {
+function libraryGridClassName(density: MediaLibraryDensity) {
+    return density === 'compact'
+        ? 'grid grid-cols-3 gap-2'
+        : 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
+}
+
+function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
+    const skeletonCount = density === 'compact' ? 9 : 10;
+
     return (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-            {Array.from({ length: 10 }).map((_, index) => (
-                <GlassCard key={index} className="aspect-[0.72] animate-pulse bg-white/50" />
+        <div className={libraryGridClassName(density)}>
+            {Array.from({ length: skeletonCount }).map((_, index) => (
+                <div
+                    key={index}
+                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-slate-200/55 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'min-h-80 rounded-[1.75rem]'}`}
+                >
+                    <div className="h-full w-full bg-linear-to-br from-white/70 via-slate-200/70 to-slate-300/60" />
+                </div>
             ))}
         </div>
     );
@@ -89,13 +104,14 @@ export function LibraryContentSection({
     onNavigateProviders,
     onPreviousPage,
     onNextPage,
+    density = 'comfortable',
 }: LibraryContentSectionProps) {
     if (error) {
         return <LibraryErrorState error={error} onRetry={onRetry} />;
     }
 
     if (isLoading) {
-        return <LibraryLoadingGrid />;
+        return <LibraryLoadingGrid density={density} />;
     }
 
     if (items.length === 0) {
@@ -104,9 +120,14 @@ export function LibraryContentSection({
 
     return (
         <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <div className={libraryGridClassName(density)}>
                 {items.map((entry) => (
-                    <LibraryEntryCard key={entry.id} entry={entry} onClick={() => onNavigateEntry(entry.id)} />
+                    <LibraryEntryCard
+                        key={entry.id}
+                        entry={entry}
+                        density={density}
+                        onClick={() => onNavigateEntry(entry.id)}
+                    />
                 ))}
             </div>
 
