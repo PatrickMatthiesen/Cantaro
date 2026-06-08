@@ -1,15 +1,16 @@
 import { useState } from 'react';
-import { GlassCard } from '../../ui';
 import {
     LibraryEntryCardBadges,
     LibraryEntryCardDetails,
 } from './media-library/LibraryEntryCardSections';
 import { formatRelativeReleaseTime } from '../services/mediaFormatting';
+import type { MediaLibraryDensity } from '../pages/MediaLibraryPage';
 import type { MediaLibraryListItemDto } from '../services/mediaApi';
 
 export interface LibraryEntryCardProps {
     entry: MediaLibraryListItemDto;
     onClick: () => void;
+    density?: MediaLibraryDensity;
 }
 
 const PROGRESS_DIMENSION_CONFIG = {
@@ -81,7 +82,7 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
     );
 }
 
-export function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
+export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: LibraryEntryCardProps) {
     const progress = progressText(entry);
     const completion = progressPercent(entry);
     const nextReleaseRelative = formatRelativeReleaseTime(entry.nextReleaseAt);
@@ -94,20 +95,28 @@ export function LibraryEntryCard({ entry, onClick }: LibraryEntryCardProps) {
         : null;
 
     return (
-        <button type="button" onClick={onClick} className="h-full w-full text-left">
-            <GlassCard interactive className="group h-full p-0 transition duration-500">
-                <div className="relative aspect-[0.72] min-h-80 overflow-hidden rounded-[1.75rem]">
-                    <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />
-                    <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-slate-900/10" aria-hidden />
+        <button
+            type="button"
+            onClick={onClick}
+            className="group h-full w-full text-left transition-transform duration-300 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+        >
+            <div className={`relative aspect-[0.72] overflow-hidden bg-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.22)] ${density === 'compact' ? 'rounded-2xl' : 'min-h-80 rounded-[1.75rem]'}`}>
+                <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />
+                <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-slate-900/10" aria-hidden />
 
-                    <LibraryEntryCardBadges topLeftBadge={topLeftBadge} progress={progress} isConnected={entry.isConnected} />
+                <LibraryEntryCardBadges
+                    topLeftBadge={topLeftBadge}
+                    progress={progress}
+                    isConnected={entry.isConnected}
+                    density={density}
+                />
 
-                    <LibraryEntryCardDetails
-                        entry={entry}
-                        completion={completion}
-                    />
-                </div>
-            </GlassCard>
+                <LibraryEntryCardDetails
+                    entry={entry}
+                    completion={completion}
+                    density={density}
+                />
+            </div>
         </button>
     );
 }

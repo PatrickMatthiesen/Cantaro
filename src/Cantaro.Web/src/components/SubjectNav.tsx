@@ -6,10 +6,22 @@ export interface SubjectNavItem {
   to: AppRouteTo;
 }
 
-export function SubjectNav({ label, items }: { label: string; items: SubjectNavItem[] }) {
+export function SubjectNav({
+  label,
+  items,
+  chrome = 'panel',
+}: {
+  label: string;
+  items: SubjectNavItem[];
+  chrome?: 'panel' | 'bare';
+}) {
+  const navClassName = chrome === 'panel'
+    ? 'inline-flex flex-wrap gap-2 rounded-2xl border border-white/80 bg-white/60 p-2 shadow-[0_8px_24px_rgba(31,41,55,0.05)] backdrop-blur'
+    : 'inline-flex flex-wrap gap-2';
+
   return (
     <nav
-      className="inline-flex flex-wrap gap-2 rounded-2xl border border-white/80 bg-white/60 p-2 shadow-[0_8px_24px_rgba(31,41,55,0.05)] backdrop-blur"
+      className={navClassName}
       aria-label={label}
     >
       {items.map((item) => (

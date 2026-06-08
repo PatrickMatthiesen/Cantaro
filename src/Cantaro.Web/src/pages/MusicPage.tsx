@@ -267,7 +267,7 @@ export function MusicLayout() {
   return (
     <RequireAuth>
       <AppPageShell contentClassName="max-w-7xl">
-        <GlobalHeader eyebrow="Cantaro · Music" title="Music library" />
+        <GlobalHeader heading={{ eyebrow: 'Cantaro · Music', title: 'Music library' }} />
         <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
           <main className="space-y-5">
             <SubjectNav label="Music sections" items={musicNavItems} />

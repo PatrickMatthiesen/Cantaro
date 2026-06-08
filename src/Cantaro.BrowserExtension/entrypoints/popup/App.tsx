@@ -368,6 +368,7 @@ function App() {
               <MediaLibraryPage
                 key={`library-${mediaSessionKey}`}
                 embedded
+                density="compact"
                 onNavigateEntry={(id) => startTransition(() => setMediaRoute({ kind: 'entry', id }))}
               />
             ) : (

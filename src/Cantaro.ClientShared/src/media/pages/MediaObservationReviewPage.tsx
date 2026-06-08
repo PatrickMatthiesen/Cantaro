@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { mediaApi } from '../services/mediaApi';
 import type {
   MediaObservationCandidateDto,
@@ -339,20 +339,36 @@ function ObservationReviewContent({
   );
 }
 
-export function MediaObservationReviewPage({ embedded = false }: { embedded?: boolean }) {
+function ReviewPageIntro({ embedded, navigation }: { embedded: boolean; navigation?: ReactNode }) {
+  if (embedded) {
+    return navigation ? <div>{navigation}</div> : null;
+  }
+
+  return (
+    <section>
+      <p className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Observation review</p>
+      <h1 className="mt-2 text-3xl font-semibold text-slate-950">Resolve media matches</h1>
+      <p className="mt-2 max-w-3xl text-sm text-slate-600">
+        Choose a candidate when Cantaro is unsure, or mark the observation as no match. Confirmed choices apply to your account only.
+      </p>
+    </section>
+  );
+}
+
+export function MediaObservationReviewPage({
+  embedded = false,
+  navigation,
+}: {
+  embedded?: boolean;
+  navigation?: ReactNode;
+}) {
   const state = useMediaObservationReviewState();
 
   const contentClassName = `space-y-5 ${embedded ? '' : 'relative z-10 mx-auto max-w-320 px-6 pt-8 pb-16'}`;
 
   const content = (
     <div className={contentClassName}>
-      <section>
-        <p className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Observation review</p>
-        <h1 className="mt-2 text-3xl font-semibold text-slate-950">Resolve media matches</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Choose a candidate when Cantaro is unsure, or mark the observation as no match. Confirmed choices apply to your account only.
-        </p>
-      </section>
+      <ReviewPageIntro embedded={embedded} navigation={navigation} />
 
       <SummaryStrip summary={state.summary} />
 

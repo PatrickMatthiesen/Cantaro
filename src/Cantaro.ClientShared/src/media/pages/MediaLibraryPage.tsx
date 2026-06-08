@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { CatalogSearchSection } from '../components/media-library/CatalogSearchSection';
 import { LibraryContentSection } from '../components/media-library/LibraryContentSection';
 import { LibraryFiltersPanel } from '../components/media-library/LibraryFiltersPanel';
@@ -14,9 +14,19 @@ interface MediaLibraryPageProps {
   onNavigateProviders?: () => void;
   onNavigateEntry: (id: string) => void;
   onNavigateCatalogResult?: (providerId: string, providerMediaId: string) => void;
+  onHeadingChange?: (heading: MediaPageHeading) => void;
   navigation?: ReactNode;
+  density?: MediaLibraryDensity;
   embedded?: boolean;
 }
+
+export interface MediaPageHeading {
+  eyebrow: string;
+  title: string;
+  details?: string[];
+}
+
+export type MediaLibraryDensity = 'comfortable' | 'compact';
 
 type LibraryState = ReturnType<typeof useMediaLibraryState>;
 type SearchState = ReturnType<typeof useLibrarySearchState>;
@@ -28,10 +38,12 @@ function defaultCatalogNavigation(providerId: string, providerMediaId: string) {
 function LibraryToolbar({
   library,
   search,
+  navigation,
   onNavigateProviders,
 }: {
   library: LibraryState;
   search: SearchState;
+  navigation?: ReactNode;
   onNavigateProviders?: () => void;
 }) {
   return (
@@ -41,6 +53,7 @@ function LibraryToolbar({
         mode={search.searchMode}
         connectedProviderIds={search.connectedProviderIds}
         isSearchingProvider={search.isCatalogSearching}
+        navigation={navigation}
         onQueryChange={search.setSearchQuery}
         onModeChange={search.handleSearchModeChange}
         onSubmit={search.handleSearchSubmit}
@@ -70,12 +83,14 @@ function LibrarySearchResults({
   onNavigateEntry,
   onNavigateProviders,
   onNavigateCatalogResult,
+  density,
 }: {
   library: LibraryState;
   search: SearchState;
   onNavigateEntry: (id: string) => void;
   onNavigateProviders?: () => void;
   onNavigateCatalogResult?: (providerId: string, providerMediaId: string) => void;
+  density: MediaLibraryDensity;
 }) {
   if (search.searchMode !== 'library') {
     return (
@@ -106,6 +121,7 @@ function LibrarySearchResults({
       onNavigateProviders={onNavigateProviders}
       onPreviousPage={library.goToPreviousPage}
       onNextPage={library.goToNextPage}
+      density={density}
     />
   );
 }
@@ -114,34 +130,49 @@ function MediaLibraryContent({
   library,
   search,
   navigation,
+  onHeadingChange,
   onNavigateProviders,
   onNavigateEntry,
   onNavigateCatalogResult,
+  density,
 }: {
   library: LibraryState;
   search: SearchState;
   navigation?: ReactNode;
+  onHeadingChange?: (heading: MediaPageHeading) => void;
   onNavigateProviders?: () => void;
   onNavigateEntry: (id: string) => void;
   onNavigateCatalogResult?: (providerId: string, providerMediaId: string) => void;
+  density: MediaLibraryDensity;
 }) {
+  useEffect(() => {
+    onHeadingChange?.({
+      eyebrow: 'Cantaro · Media',
+      title: 'My Library',
+    });
+  }, [onHeadingChange]);
+
   return (
     <>
-      <MediaLibraryHeader
-        totalCount={library.totalCount}
-        isLoading={library.isLoading}
-        isProviderConnected={Boolean(library.providerStatus?.isConnected)}
-        formattedLastRemoteCheckAt={library.formattedLastRemoteCheckAt}
-        navigation={navigation}
-      />
+      {!onHeadingChange ? (
+        <MediaLibraryHeader
+          navigation={navigation}
+        />
+      ) : null}
       <MediaLibraryRefreshErrorNotice error={library.refreshError} />
-      <LibraryToolbar library={library} search={search} onNavigateProviders={onNavigateProviders} />
+      <LibraryToolbar
+        library={library}
+        search={search}
+        navigation={navigation}
+        onNavigateProviders={onNavigateProviders}
+      />
       <LibrarySearchResults
         library={library}
         search={search}
         onNavigateEntry={onNavigateEntry}
         onNavigateProviders={onNavigateProviders}
         onNavigateCatalogResult={onNavigateCatalogResult}
+        density={density}
       />
     </>
   );
@@ -151,7 +182,9 @@ export function MediaLibraryPage({
   onNavigateProviders,
   onNavigateEntry,
   onNavigateCatalogResult,
+  onHeadingChange,
   navigation,
+  density = 'comfortable',
   embedded = false,
 }: MediaLibraryPageProps) {
   const library = useMediaLibraryState();
@@ -161,7 +194,7 @@ export function MediaLibraryPage({
     isProviderConnected: Boolean(library.providerStatus?.isConnected),
     updateFilter: library.updateFilter,
   });
-  const contentClassName = `space-y-6 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-6 pt-8 pb-16'}`;
+  const contentClassName = `space-y-4 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-6 pt-8 pb-16'}`;
 
   const content = (
     <div className={contentClassName}>
@@ -169,9 +202,11 @@ export function MediaLibraryPage({
         library={library}
         search={search}
         navigation={navigation}
+        onHeadingChange={onHeadingChange}
         onNavigateProviders={onNavigateProviders}
         onNavigateEntry={onNavigateEntry}
         onNavigateCatalogResult={onNavigateCatalogResult}
+        density={density}
       />
     </div>
   );

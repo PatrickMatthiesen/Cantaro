@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { mediaProviderCatalog } from '../../services/mediaProviders';
 
 export type LibrarySearchMode = 'library' | string;
@@ -7,6 +8,7 @@ export interface LibrarySearchBarProps {
     mode: LibrarySearchMode;
     connectedProviderIds: string[];
     isSearchingProvider: boolean;
+    navigation?: ReactNode;
     onQueryChange: (query: string) => void;
     onModeChange: (mode: LibrarySearchMode) => void;
     onSubmit: () => void;
@@ -97,6 +99,7 @@ export function LibrarySearchBar({
     mode,
     connectedProviderIds,
     isSearchingProvider,
+    navigation,
     onQueryChange,
     onModeChange,
     onSubmit,
@@ -106,12 +109,14 @@ export function LibrarySearchBar({
     return (
         <section className="rounded-3xl border border-white/70 bg-white/80 p-3 shadow-sm shadow-indigo-100/50 backdrop-blur">
             <form
-                className="flex flex-col gap-3 lg:flex-row lg:items-center"
+                className="flex flex-col gap-3 xl:flex-row xl:items-center"
                 onSubmit={(event) => {
                     event.preventDefault();
                     onSubmit();
                 }}
             >
+                {navigation ? <div className="shrink-0">{navigation}</div> : null}
+                {navigation ? <div className="h-px w-full shrink-0 bg-gray-200/80 xl:h-8 xl:w-px" aria-hidden /> : null}
                 <SearchModeTabs mode={mode} connectedProviderIds={connectedProviderIds} onModeChange={onModeChange} />
                 <SearchTextInput query={query} mode={mode} onQueryChange={onQueryChange} />
                 <SearchSubmitButton query={query} isProviderMode={isProviderMode} isSearchingProvider={isSearchingProvider} />

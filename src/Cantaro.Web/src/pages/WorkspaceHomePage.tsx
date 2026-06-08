@@ -265,7 +265,7 @@ function WorkspaceHomeContent() {
 
   return (
     <AppPageShell>
-      <GlobalHeader eyebrow="Cantaro" title="Workspace" />
+      <GlobalHeader heading={{ eyebrow: 'Cantaro', title: 'Workspace' }} />
 
       <main className="grid flex-1 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <section className="space-y-6">
