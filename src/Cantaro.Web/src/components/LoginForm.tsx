@@ -37,7 +37,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
     <AuthFormLayout
       eyebrow="Sign in"
       title="Welcome back"
-      description="Open your workspace and continue syncing playlists."
+      description="Open Cantaro and continue syncing playlists."
       onSubmit={handleSubmit}
       error={error}
       submitLabel="Sign in"

@@ -40,7 +40,7 @@ function LandingPage() {
         <header className="mb-8">
           <p className="text-xs tracking-[0.35em] text-gray-500 uppercase">Cantaro</p>
           <h1 className="mt-1 bg-linear-to-r from-indigo-600 to-pink-600 bg-clip-text text-3xl font-bold text-transparent">
-            Playlist workspace
+            Music and media library
           </h1>
         </header>
 
@@ -53,7 +53,7 @@ function LandingPage() {
             <ol className="mt-6 space-y-3">
               {[
                 'Create an account and sign in.',
-                'Connect your first service workspace. YouTube is available now, with more platforms coming later.',
+                'Connect your first music service. YouTube is available now, with more platforms coming later.',
                 'Run sync and manage playlist updates from Cantaro.',
               ].map((item, index) => (
                 <li key={item} className="flex items-start gap-3 rounded-2xl bg-white/70 p-4">

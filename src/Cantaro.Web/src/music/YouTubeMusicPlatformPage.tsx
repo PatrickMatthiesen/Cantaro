@@ -1,0 +1,465 @@
+import { useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useYouTubePlaylistsState, type PlatformPlaylist, type PlatformSong } from '@cantaro/client-shared/music';
+import { MusicPageShell } from './MusicPageShell';
+
+type PlaylistRouteSyncAction =
+  | { type: 'clear' }
+  | { type: 'select'; playlist: PlatformPlaylist }
+  | { type: 'idle' };
+
+function canSyncPlaylistRoute(isConnected: boolean, isLoading: boolean) {
+  return isConnected && !isLoading;
+}
+
+function getRoutePlaylist(playlistId: string | null, playlists: PlatformPlaylist[]) {
+  return playlistId ? playlists.find((playlist) => playlist.id === playlistId) ?? null : null;
+}
+
+function shouldSelectRoutePlaylist(
+  playlistId: string | null,
+  routePlaylist: PlatformPlaylist | null,
+  selectedPlaylist: PlatformPlaylist | null,
+): routePlaylist is PlatformPlaylist {
+  return Boolean(playlistId && routePlaylist && selectedPlaylist?.id !== playlistId);
+}
+
+function shouldClearRoutePlaylist(
+  playlistId: string | null,
+  routePlaylist: PlatformPlaylist | null,
+  selectedPlaylist: PlatformPlaylist | null,
+) {
+  return Boolean(selectedPlaylist && (!playlistId || !routePlaylist));
+}
+
+function getPlaylistRouteSyncAction({
+  isConnected,
+  isLoading,
+  playlistId,
+  playlists,
+  selectedPlaylist,
+}: {
+  isConnected: boolean;
+  isLoading: boolean;
+  playlistId: string | null;
+  playlists: PlatformPlaylist[];
+  selectedPlaylist: PlatformPlaylist | null;
+}): PlaylistRouteSyncAction {
+  if (!canSyncPlaylistRoute(isConnected, isLoading)) {
+    return { type: 'idle' };
+  }
+
+  const routePlaylist = getRoutePlaylist(playlistId, playlists);
+  if (shouldSelectRoutePlaylist(playlistId, routePlaylist, selectedPlaylist)) {
+    return { type: 'select', playlist: routePlaylist };
+  }
+
+  return shouldClearRoutePlaylist(playlistId, routePlaylist, selectedPlaylist) ? { type: 'clear' } : { type: 'idle' };
+}
+
+function useSyncYouTubePlaylistRoute({
+  clearSelectedPlaylist,
+  isConnected,
+  isLoading,
+  playlistId,
+  playlists,
+  selectPlaylist,
+  selectedPlaylist,
+}: {
+  clearSelectedPlaylist: () => void;
+  isConnected: boolean;
+  isLoading: boolean;
+  playlistId: string | null;
+  playlists: PlatformPlaylist[];
+  selectPlaylist: (playlist: PlatformPlaylist) => Promise<void>;
+  selectedPlaylist: PlatformPlaylist | null;
+}) {
+  useEffect(() => {
+    const action = getPlaylistRouteSyncAction({
+      isConnected,
+      isLoading,
+      playlistId,
+      playlists,
+      selectedPlaylist,
+    });
+
+    if (action.type === 'clear') {
+      clearSelectedPlaylist();
+    }
+
+    if (action.type === 'select') {
+      void selectPlaylist(action.playlist);
+    }
+  }, [clearSelectedPlaylist, isConnected, isLoading, playlistId, playlists, selectPlaylist, selectedPlaylist]);
+}
+
+function isMissingPlaylistRoute({
+  isConnected,
+  isLoading,
+  playlistId,
+  playlists,
+}: {
+  isConnected: boolean;
+  isLoading: boolean;
+  playlistId: string | null;
+  playlists: PlatformPlaylist[];
+}) {
+  return Boolean(
+    canSyncPlaylistRoute(isConnected, isLoading)
+    && playlistId
+    && !getRoutePlaylist(playlistId, playlists),
+  );
+}
+
+function YouTubePageHeader({
+  accountName,
+  isConnected,
+  playlistCount,
+  onRefresh,
+  onDisconnect,
+}: {
+  accountName?: string | null;
+  isConnected: boolean;
+  playlistCount: number;
+  onRefresh: () => void;
+  onDisconnect: () => void;
+}) {
+  return (
+    <section className="relative overflow-hidden rounded-3xl bg-[#ef4444] p-6 text-white shadow-[0_28px_90px_rgba(185,28,28,0.18)]">
+      <div className="absolute inset-0 bg-linear-to-r from-[#3b0b16]/92 via-[#dc2626]/78 to-[#f9a8d4]/35" />
+      <div className="relative flex flex-wrap items-end justify-between gap-5">
+        <div>
+          <p className="text-xs font-black tracking-[0.22em] text-white/75 uppercase">Music platform</p>
+          <h1 className="mt-2 text-4xl leading-tight font-black sm:text-5xl">YouTube</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-white/82">
+            {isConnected
+              ? `Connected as ${accountName ?? 'YouTube account'} with ${playlistCount.toLocaleString()} playlists ready to browse.`
+              : 'Connect YouTube to bring playlists into your Cantaro music page.'}
+          </p>
+        </div>
+        {isConnected ? (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded-2xl bg-white/18 px-5 py-3 text-sm font-black backdrop-blur transition hover:bg-white/25" onClick={onRefresh}>
+              Refresh
+            </button>
+            <button type="button" className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800" onClick={onDisconnect}>
+              Disconnect
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function YouTubeDisconnectedPanel({ onConnect }: { onConnect: () => void }) {
+  return (
+    <section className="rounded-3xl bg-white/70 p-6 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+      <p className="text-xs font-black tracking-[0.22em] text-rose-600 uppercase">Not connected</p>
+      <h2 className="mt-2 text-2xl font-black text-slate-950">Connect YouTube to begin</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 font-medium text-slate-500">
+        Once connected, your YouTube playlists show up here as part of the same music browsing surface as the rest of your library.
+      </p>
+      <button
+        type="button"
+        className="mt-5 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800"
+        onClick={onConnect}
+      >
+        Connect YouTube
+      </button>
+    </section>
+  );
+}
+
+function YouTubePlaylistCard({ playlist, onSelect }: { playlist: PlatformPlaylist; onSelect: (playlist: PlatformPlaylist) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(playlist)}
+      className="group overflow-hidden rounded-3xl bg-white/70 text-left shadow-[0_24px_80px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-white"
+    >
+      {playlist.thumbnailUrl ? (
+        <img src={playlist.thumbnailUrl} alt="" className="h-44 w-full object-cover transition group-hover:scale-105" />
+      ) : (
+        <div className="flex h-44 w-full items-center justify-center bg-rose-50 text-sm font-black text-rose-600">YouTube</div>
+      )}
+      <div className="p-4">
+        <h3 className="line-clamp-2 text-base font-black text-slate-950">{playlist.title}</h3>
+        {playlist.description ? <p className="mt-2 line-clamp-2 text-sm font-medium text-slate-500">{playlist.description}</p> : null}
+      </div>
+    </button>
+  );
+}
+
+function YouTubePlaylistGrid({
+  playlists,
+  onSelectPlaylist,
+}: {
+  playlists: PlatformPlaylist[];
+  onSelectPlaylist: (playlist: PlatformPlaylist) => void;
+}) {
+  if (playlists.length === 0) {
+    return (
+      <section className="rounded-3xl border border-dashed border-[#ded8f2] bg-white/54 p-6">
+        <p className="font-black text-slate-950">No playlists found</p>
+        <p className="mt-1 text-sm font-medium text-slate-500">This account has no YouTube playlists available to Cantaro.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      {playlists.map((playlist) => (
+        <YouTubePlaylistCard key={playlist.id} playlist={playlist} onSelect={onSelectPlaylist} />
+      ))}
+    </section>
+  );
+}
+
+function YouTubeSongList({ playlistItems, isLoadingItems }: { playlistItems: PlatformSong[]; isLoadingItems: boolean }) {
+  if (isLoadingItems) {
+    return <p className="p-6 text-sm font-semibold text-slate-500">Loading playlist items...</p>;
+  }
+
+  if (playlistItems.length === 0) {
+    return <p className="p-6 text-sm font-semibold text-slate-500">This playlist has no items yet.</p>;
+  }
+
+  return (
+    <ol className="divide-y divide-[#ece8fb]">
+      {playlistItems.map((item, index) => (
+        <li key={item.id} className="grid grid-cols-[40px_auto_1fr] items-center gap-3 px-4 py-3 text-sm text-slate-700">
+          <span className="font-mono text-xs text-slate-500">{index + 1}</span>
+          {item.thumbnailUrl ? (
+            <img src={item.thumbnailUrl} alt="" className="h-14 w-24 rounded-xl object-cover" />
+          ) : (
+            <div className="h-14 w-24 rounded-xl bg-rose-50" aria-hidden />
+          )}
+          <div className="min-w-0">
+            <p className="line-clamp-2 font-black text-slate-950">{item.title}</p>
+            {item.artistName ? <p className="truncate text-xs font-semibold text-slate-500">{item.artistName}</p> : null}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function YouTubePlaylistDetail({
+  playlist,
+  playlistItems,
+  isLoadingItems,
+  onBack,
+}: {
+  playlist: PlatformPlaylist;
+  playlistItems: PlatformSong[];
+  isLoadingItems: boolean;
+  onBack: () => void;
+}) {
+  return (
+    <section className="grid gap-5 xl:grid-cols-[320px_1fr]">
+      <div className="rounded-3xl bg-white/70 p-5 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+        <button type="button" className="mb-4 text-sm font-black text-violet-600" onClick={onBack}>
+          All playlists
+        </button>
+        {playlist.thumbnailUrl ? (
+          <img src={playlist.thumbnailUrl} alt="" className="h-56 w-full rounded-3xl object-cover" />
+        ) : (
+          <div className="flex h-56 w-full items-center justify-center rounded-3xl bg-rose-50 text-sm font-black text-rose-600">YouTube</div>
+        )}
+        <h2 className="mt-4 text-2xl font-black text-slate-950">{playlist.title}</h2>
+        {playlist.description ? <p className="mt-2 text-sm leading-6 font-medium text-slate-500">{playlist.description}</p> : null}
+      </div>
+
+      <div className="overflow-hidden rounded-3xl bg-white/70 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+        <YouTubeSongList playlistItems={playlistItems} isLoadingItems={isLoadingItems} />
+      </div>
+    </section>
+  );
+}
+
+function YouTubePlaylistMissingState({
+  playlistId,
+  onBack,
+  onRefresh,
+}: {
+  playlistId: string;
+  onBack: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="rounded-3xl bg-rose-50 p-6 text-rose-800 shadow-[0_24px_80px_rgba(185,28,28,0.08)]">
+      <p className="text-xs font-black tracking-[0.2em] uppercase">Playlist not found</p>
+      <h2 className="mt-2 text-2xl font-black">This YouTube playlist is not available</h2>
+      <p className="mt-2 text-sm font-semibold">
+        Cantaro could not find playlist <span className="font-black">{playlistId}</span> in the connected account.
+      </p>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" className="rounded-2xl bg-rose-900 px-5 py-3 text-sm font-black text-white transition hover:bg-rose-800" onClick={onBack}>
+          All playlists
+        </button>
+        <button type="button" className="rounded-2xl bg-white/80 px-5 py-3 text-sm font-black text-rose-800 transition hover:bg-white" onClick={onRefresh}>
+          Refresh playlists
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function YouTubeError({ error }: { error: string | null }) {
+  if (!error) return null;
+
+  return (
+    <section className="rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
+      {error}
+    </section>
+  );
+}
+
+function YouTubeLoadingState() {
+  return (
+    <section className="rounded-3xl bg-white/70 p-6 text-sm font-semibold text-slate-500 shadow-[0_24px_80px_rgba(88,74,150,0.08)]">
+      Loading YouTube playlists...
+    </section>
+  );
+}
+
+function getMissingPlaylistId({
+  isConnected,
+  isLoading,
+  playlistId,
+  playlists,
+}: {
+  isConnected: boolean;
+  isLoading: boolean;
+  playlistId: string | null;
+  playlists: PlatformPlaylist[];
+}) {
+  return isMissingPlaylistRoute({ isConnected, isLoading, playlistId, playlists }) ? playlistId : null;
+}
+
+function YouTubePlatformContent({
+  isConnected,
+  isLoading,
+  isLoadingItems,
+  missingPlaylistId,
+  playlistItems,
+  playlists,
+  selectedPlaylist,
+  onBackToPlaylists,
+  onConnect,
+  onRefresh,
+  onSelectPlaylist,
+}: {
+  isConnected: boolean;
+  isLoading: boolean;
+  isLoadingItems: boolean;
+  missingPlaylistId: string | null;
+  playlistItems: PlatformSong[];
+  playlists: PlatformPlaylist[];
+  selectedPlaylist: PlatformPlaylist | null;
+  onBackToPlaylists: () => void;
+  onConnect: () => void;
+  onRefresh: () => void;
+  onSelectPlaylist: (playlist: PlatformPlaylist) => void;
+}) {
+  if (isLoading) return <YouTubeLoadingState />;
+  if (!isConnected) return <YouTubeDisconnectedPanel onConnect={onConnect} />;
+
+  if (missingPlaylistId) {
+    return (
+      <YouTubePlaylistMissingState
+        playlistId={missingPlaylistId}
+        onBack={onBackToPlaylists}
+        onRefresh={onRefresh}
+      />
+    );
+  }
+
+  if (selectedPlaylist) {
+    return (
+      <YouTubePlaylistDetail
+        playlist={selectedPlaylist}
+        playlistItems={playlistItems}
+        isLoadingItems={isLoadingItems}
+        onBack={onBackToPlaylists}
+      />
+    );
+  }
+
+  return <YouTubePlaylistGrid playlists={playlists} onSelectPlaylist={onSelectPlaylist} />;
+}
+
+export function YouTubeMusicPlatformPage({ playlistId = null }: { playlistId?: string | null }) {
+  const navigate = useNavigate();
+  const {
+    status,
+    playlists,
+    selectedPlaylist,
+    playlistItems,
+    isLoading,
+    isLoadingItems,
+    error,
+    connect,
+    disconnect,
+    selectPlaylist,
+    clearSelectedPlaylist,
+    refreshPlaylists,
+  } = useYouTubePlaylistsState();
+  const isConnected = Boolean(status?.isConnected);
+
+  useSyncYouTubePlaylistRoute({
+    clearSelectedPlaylist,
+    isConnected,
+    isLoading,
+    playlistId,
+    playlists,
+    selectPlaylist,
+    selectedPlaylist,
+  });
+
+  const handleSelectPlaylist = (playlist: PlatformPlaylist) => {
+    void navigate({
+      to: '/music/platforms/$platformId/playlists/$playlistId',
+      params: { platformId: 'youtube', playlistId: playlist.id },
+    });
+    void selectPlaylist(playlist);
+  };
+
+  const handleBackToPlaylists = () => {
+    void navigate({ to: '/music/platforms/$platformId', params: { platformId: 'youtube' } });
+    clearSelectedPlaylist();
+  };
+
+  const missingPlaylistId = getMissingPlaylistId({ isConnected, isLoading, playlistId, playlists });
+
+  return (
+    <MusicPageShell>
+      <div className="space-y-6">
+        <YouTubePageHeader
+          accountName={status?.displayName}
+          isConnected={isConnected}
+          playlistCount={playlists.length}
+          onRefresh={() => void refreshPlaylists()}
+          onDisconnect={() => void disconnect()}
+        />
+
+        <YouTubeError error={error} />
+
+        <YouTubePlatformContent
+          isConnected={isConnected}
+          isLoading={isLoading}
+          isLoadingItems={isLoadingItems}
+          missingPlaylistId={missingPlaylistId}
+          playlistItems={playlistItems}
+          playlists={playlists}
+          selectedPlaylist={selectedPlaylist}
+          onBackToPlaylists={handleBackToPlaylists}
+          onConnect={() => void connect()}
+          onRefresh={() => void refreshPlaylists()}
+          onSelectPlaylist={handleSelectPlaylist}
+        />
+      </div>
+    </MusicPageShell>
+  );
+}
