@@ -46,4 +46,27 @@ body {
     border-color: rgba(148, 163, 184, 0.35);
     box-shadow: 0 24px 80px rgba(15, 23, 42, 0.9);
   }
+
+  .hidden-scrollbar-until-hover {
+    scrollbar-color: transparent transparent;
+    scrollbar-width: thin;
+  }
+
+  .hidden-scrollbar-until-hover:hover {
+    scrollbar-color: rgba(100, 116, 139, 0.55) transparent;
+  }
+
+  .hidden-scrollbar-until-hover::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .hidden-scrollbar-until-hover::-webkit-scrollbar-track,
+  .hidden-scrollbar-until-hover::-webkit-scrollbar-thumb {
+    background-color: transparent;
+  }
+
+  .hidden-scrollbar-until-hover:hover::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background-color: rgba(100, 116, 139, 0.45);
+  }
 }
