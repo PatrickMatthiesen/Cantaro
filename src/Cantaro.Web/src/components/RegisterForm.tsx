@@ -39,7 +39,7 @@ export const RegisterForm = ({ onSwitchToLogin }: RegisterFormProps) => {
   return (
     <AuthFormLayout
       eyebrow="Create account"
-      title="Create your workspace"
+      title="Create your Cantaro account"
       description="Set up an account to connect services and sync playlists."
       onSubmit={handleSubmit}
       error={error}

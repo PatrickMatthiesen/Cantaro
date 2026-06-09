@@ -6,15 +6,9 @@ import {
   MediaLibraryPage,
   MediaObservationReviewPage,
 } from '@cantaro/client-shared/media';
-import { AppPageShell, GlobalHeader, RequireAuth, type GlobalHeadingState } from '../components/AppShell';
-import { SubjectNav, type SubjectNavItem } from '../components/SubjectNav';
+import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
+import { MediaPageShell } from '../media/MediaPageShell';
 import { MediaProvidersPage } from './MediaProvidersPage';
-
-const mediaNavItems: SubjectNavItem[] = [
-  { label: 'Library', to: '/media/library' },
-  { label: 'Review', to: '/media/review' },
-  { label: 'Providers', to: '/media/providers' },
-];
 
 const defaultMediaHeading: GlobalHeadingState = {
   eyebrow: 'Cantaro · Media',
@@ -34,10 +28,6 @@ function useMediaShell() {
   return context;
 }
 
-function MediaSectionNav({ integrated = false }: { integrated?: boolean }) {
-  return <SubjectNav label="Media sections" items={mediaNavItems} chrome={integrated ? 'bare' : 'panel'} />;
-}
-
 function useStaticMediaHeading(heading: GlobalHeadingState) {
   const { setHeading } = useMediaShell();
 
@@ -46,20 +36,34 @@ function useStaticMediaHeading(heading: GlobalHeadingState) {
   }, [heading, setHeading]);
 }
 
+function MediaSectionHeader({ heading }: { heading: GlobalHeadingState }) {
+  return (
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p className="text-xs font-black tracking-[0.22em] text-violet-600 uppercase">{heading.eyebrow}</p>
+        <h1 className="mt-2 text-4xl font-black text-slate-950">{heading.title}</h1>
+        {heading.details?.map((detail) => (
+          <p key={detail} className="mt-1 text-sm font-semibold text-slate-500">{detail}</p>
+        ))}
+      </div>
+    </header>
+  );
+}
+
 export function MediaLayout() {
   const [heading, setHeading] = useState(defaultMediaHeading);
   const contextValue = useMemo(() => ({ setHeading }), [setHeading]);
 
   return (
     <RequireAuth>
-      <AppPageShell contentClassName="max-w-7xl">
+      <MediaPageShell>
         <MediaShellContext.Provider value={contextValue}>
-          <GlobalHeader heading={heading} />
+          <MediaSectionHeader heading={heading} />
           <main className="space-y-5">
             <Outlet />
           </main>
         </MediaShellContext.Provider>
-      </AppPageShell>
+      </MediaPageShell>
     </RequireAuth>
   );
 }
@@ -71,7 +75,6 @@ export function MediaLibraryRoutePage() {
   return (
     <MediaLibraryPage
       embedded
-      navigation={<MediaSectionNav integrated />}
       onHeadingChange={setHeading}
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
       onNavigateEntry={(id) => void navigate({ to: '/media/library/$entryId', params: { entryId: id } })}
@@ -94,7 +97,6 @@ export function MediaProvidersRoutePage() {
   return (
     <MediaProvidersPage
       embedded
-      navigation={<MediaSectionNav />}
       onNavigateLibrary={() => void navigate({ to: '/media/library' })}
     />
   );
@@ -110,7 +112,6 @@ export function MediaReviewRoutePage() {
   return (
     <MediaObservationReviewPage
       embedded
-      navigation={<MediaSectionNav />}
     />
   );
 }

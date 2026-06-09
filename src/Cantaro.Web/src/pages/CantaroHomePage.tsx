@@ -227,7 +227,7 @@ function MediaTrackingCard() {
   );
 }
 
-function WorkspaceHomeContent() {
+function CantaroHomeContent() {
   const [showAddPlatformMenu, setShowAddPlatformMenu] = useState(false);
   const addPlatformMenuRef = useRef<HTMLDivElement | null>(null);
   const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
@@ -265,7 +265,7 @@ function WorkspaceHomeContent() {
 
   return (
     <AppPageShell>
-      <GlobalHeader heading={{ eyebrow: 'Cantaro', title: 'Workspace' }} />
+      <GlobalHeader heading={{ eyebrow: 'Cantaro', title: 'Home' }} />
 
       <main className="grid flex-1 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <section className="space-y-6">
@@ -298,10 +298,10 @@ function WorkspaceHomeContent() {
   );
 }
 
-export function WorkspaceHomePage() {
+export function CantaroHomePage() {
   return (
     <RequireAuth>
-      <WorkspaceHomeContent />
+      <CantaroHomeContent />
     </RequireAuth>
   );
 }
