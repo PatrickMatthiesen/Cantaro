@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { platformCatalog, type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
+import { MusicTrackTable, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
 import {
   fallbackArtwork,
@@ -68,6 +69,7 @@ function HeroPanel({
   featuredSong: MusicLibrarySong | null;
 }) {
   const hero = getHeroContent(library, featuredSong);
+  const firstPlaylist = library.playlists[0] ?? null;
 
   return (
     <section className="relative overflow-hidden rounded-3xl bg-[#7c6ae5] p-5 text-white shadow-[0_28px_90px_rgba(89,75,180,0.22)]">
@@ -85,7 +87,11 @@ function HeroPanel({
             <button type="button" className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.22)]">
               Play
             </button>
-            <Link to="/music/playlists" className="rounded-2xl bg-white/18 px-5 py-3 text-sm font-black text-white backdrop-blur transition hover:bg-white/25">
+            <Link
+              to={firstPlaylist ? '/music/playlists/$playlistId' : '/music/playlists'}
+              params={firstPlaylist ? { playlistId: firstPlaylist.id } : undefined}
+              className="rounded-2xl bg-white/18 px-5 py-3 text-sm font-black text-white backdrop-blur transition hover:bg-white/25"
+            >
               View playlist
             </Link>
           </div>
@@ -108,17 +114,22 @@ function PlaylistStrip({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
       {visiblePlaylists.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-4">
           {visiblePlaylists.map((playlist, index) => (
-            <article key={playlist.id} className={`group relative min-h-[160px] overflow-hidden rounded-3xl bg-linear-to-br ${playlistGradients[index % playlistGradients.length]} p-4 text-white shadow-[0_18px_44px_rgba(88,74,150,0.12)]`}>
-              <img src={playlistArtwork(playlist, index)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-45 transition group-hover:scale-105 group-hover:opacity-60" />
-              <div className="absolute inset-0 bg-linear-to-t from-slate-950/82 via-slate-950/22 to-transparent" />
-              <div className="relative flex h-full flex-col justify-end">
+            <Link
+              key={playlist.id}
+              to="/music/playlists/$playlistId"
+              params={{ playlistId: playlist.id }}
+              className={`group relative min-h-[160px] overflow-hidden rounded-3xl bg-linear-to-br ${playlistGradients[index % playlistGradients.length]} p-4 text-white shadow-[0_18px_44px_rgba(88,74,150,0.12)] transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none`}
+            >
+              <img src={playlistArtwork(playlist, index)} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-45 transition group-hover:scale-105 group-hover:opacity-60" />
+              <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-slate-950/82 via-slate-950/22 to-transparent" />
+              <div className="pointer-events-none relative flex h-full flex-col justify-end">
                 <h3 className="line-clamp-2 text-sm font-black">{playlist.name}</h3>
                 <p className="mt-1 text-xs font-semibold text-white/75">{playlist.entryCount.toLocaleString()} songs</p>
-                <button type="button" className="absolute right-0 bottom-0 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-950 shadow-lg" aria-label={`Play ${playlist.name}`}>
+                <span className="absolute right-0 bottom-0 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-950 shadow-lg" aria-hidden>
                   &gt;
-                </button>
+                </span>
               </div>
-            </article>
+            </Link>
           ))}
         </div>
       ) : (
@@ -128,14 +139,31 @@ function PlaylistStrip({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
   );
 }
 
+function mapSongToTrack(song: MusicLibrarySong, index: number, activeSongId?: string): MusicCollectionTrack {
+  return {
+    id: song.id,
+    title: song.title,
+    artist: songArtist(song),
+    album: visiblePlatformNames(song).join(', '),
+    artworkUrl: songArtwork(song, index),
+    durationSeconds: song.durationSeconds,
+    platformNames: visiblePlatformNames(song),
+    isPlaying: song.id === activeSongId,
+  };
+}
+
 function SongTable({
-  songs,
+  tracks,
   query,
   onQueryChange,
+  onPlayTrack,
+  onQueueTrack,
 }: {
-  songs: MusicLibrarySong[];
+  tracks: MusicCollectionTrack[];
   query: string;
   onQueryChange: (value: string) => void;
+  onPlayTrack: (track: MusicCollectionTrack) => void;
+  onQueueTrack: (track: MusicCollectionTrack) => void;
 }) {
   return (
     <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
@@ -161,51 +189,13 @@ function SongTable({
         </div>
       </div>
 
-      {songs.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse">
-            <thead>
-              <tr className="text-left text-xs font-black tracking-[0.14em] text-slate-500 uppercase">
-                <th className="w-12 px-3 py-3">#</th>
-                <th className="px-3 py-3">Title</th>
-                <th className="px-3 py-3">Artist</th>
-                <th className="px-3 py-3">Available</th>
-                <th className="px-3 py-3 text-right">Time</th>
-                <th className="w-12 px-3 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {songs.slice(0, 10).map((song, index) => (
-                <tr key={song.id} className="group border-t border-[#ece8fb] text-sm text-slate-700 transition hover:bg-white/70">
-                  <td className="px-3 py-3 font-mono text-slate-500">{index + 1}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-3">
-                      <img src={songArtwork(song, index)} alt="" className="h-10 w-10 rounded-xl object-cover" />
-                      <div className="min-w-0">
-                        <p className="truncate font-black text-slate-950">{song.title}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3">{songArtist(song)}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {visiblePlatformNames(song).slice(0, 3).map((source) => (
-                        <span key={source} className="rounded-full bg-[#eeeaff] px-2.5 py-1 text-xs font-black text-violet-700">
-                          {source}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-right font-mono">{formatDuration(song.durationSeconds)}</td>
-                  <td className="px-3 py-3 text-right font-black text-slate-500">...</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <MusicEmptyPanel title="No songs found" detail="Try a different search." />
-      )}
+      <MusicTrackTable
+        tracks={tracks.slice(0, 10)}
+        emptyTrackLabel="No songs found"
+        emptyTrackDetail="Try a different search."
+        onPlayTrack={onPlayTrack}
+        onQueueTrack={onQueueTrack}
+      />
     </section>
   );
 }
@@ -297,10 +287,38 @@ function PlatformsPanel() {
   );
 }
 
+function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLibrarySong[]) {
+  const [activeSongId, setActiveSongId] = useState<string | undefined>();
+  const [queuedSongId, setQueuedSongId] = useState<string | undefined>();
+  const activeSong = songs.find((song) => song.id === activeSongId);
+  const queuedSong = songs.find((song) => song.id === queuedSongId);
+
+  return {
+    activeSong,
+    queuedSong,
+    tracks: filteredSongs.map((song, index) => mapSongToTrack(song, index, activeSongId)),
+    playTrack: (track: MusicCollectionTrack) => setActiveSongId(track.id),
+    queueTrack: (track: MusicCollectionTrack) => setQueuedSongId(track.id),
+    stopTrack: () => setActiveSongId(undefined),
+  };
+}
+
+function CurrentPlaybackPanel({
+  activeSong,
+  queuedSong,
+}: {
+  activeSong?: MusicLibrarySong;
+  queuedSong?: MusicLibrarySong;
+}) {
+  const songs = [activeSong, queuedSong].filter((song): song is MusicLibrarySong => Boolean(song));
+  if (songs.length === 0) return null;
+
+  return <CompactSongPanel title={activeSong ? 'Now Playing' : 'Up Next'} songs={songs} />;
+}
+
 export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse }) {
   const [query, setQuery] = useState('');
   const songs = library.songs;
-  const featuredSong = songs[0] ?? null;
   const filteredSongs = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return songs;
@@ -313,17 +331,25 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
       return haystack.includes(normalizedQuery);
     });
   }, [query, songs]);
+  const playback = useMusicHomePlayback(songs, filteredSongs);
 
   return (
-    <MusicPageShell library={library} activeSong={featuredSong ?? undefined}>
+    <MusicPageShell library={library} activeSong={playback.activeSong} onStopActiveSong={playback.stopTrack}>
       <div className="grid gap-6 xl:grid-cols-[1fr_278px] 2xl:grid-cols-[1fr_320px]">
         <div className="min-w-0 space-y-7">
-          <HeroPanel library={library} featuredSong={featuredSong} />
+          <HeroPanel library={library} featuredSong={playback.activeSong ?? songs[0] ?? null} />
           <PlaylistStrip playlists={library.playlists} />
-          <SongTable songs={filteredSongs} query={query} onQueryChange={setQuery} />
+          <SongTable
+            tracks={playback.tracks}
+            query={query}
+            onQueryChange={setQuery}
+            onPlayTrack={playback.playTrack}
+            onQueueTrack={playback.queueTrack}
+          />
         </div>
 
         <aside className="space-y-5">
+          <CurrentPlaybackPanel activeSong={playback.activeSong} queuedSong={playback.queuedSong} />
           <CompactSongPanel title="Added Recently" songs={songs.slice(0, 5)} />
           <CompactSongPanel title="Old Bangers" songs={[...songs].reverse().slice(0, 5)} ranked />
           <MoodPanel />

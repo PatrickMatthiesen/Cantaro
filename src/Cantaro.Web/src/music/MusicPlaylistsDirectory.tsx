@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { type MusicLibraryResponse } from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
@@ -5,7 +6,7 @@ import { formatTimestamp, platformName, playlistArtwork } from './musicPresentat
 
 export function MusicPlaylistsDirectory({ library }: { library: MusicLibraryResponse }) {
   return (
-    <MusicPageShell library={library} activeSong={library.songs[0]}>
+    <MusicPageShell library={library}>
       <section className="space-y-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -27,7 +28,12 @@ export function MusicPlaylistsDirectory({ library }: { library: MusicLibraryResp
                 .at(-1);
 
               return (
-                <article key={playlist.id} className="overflow-hidden rounded-3xl bg-white/70 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur">
+                <Link
+                  key={playlist.id}
+                  to="/music/playlists/$playlistId"
+                  params={{ playlistId: playlist.id }}
+                  className="group overflow-hidden rounded-3xl bg-white/70 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur transition hover:-translate-y-0.5 hover:bg-white"
+                >
                   <img src={playlistArtwork(playlist, index)} alt="" className="h-40 w-full object-cover" />
                   <div className="p-5">
                     <div className="flex items-start justify-between gap-3">
@@ -50,7 +56,7 @@ export function MusicPlaylistsDirectory({ library }: { library: MusicLibraryResp
                     </div>
                     {lastSyncedAt ? <p className="mt-4 text-xs font-semibold text-slate-400">Updated {formatTimestamp(lastSyncedAt)}</p> : null}
                   </div>
-                </article>
+                </Link>
               );
             })}
           </div>

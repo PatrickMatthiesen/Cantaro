@@ -6,6 +6,7 @@ import { MusicHomeDashboard } from '../music/MusicHomeDashboard';
 import { MusicLibraryPanel } from '../music/MusicLibraryPanel';
 import { MusicPlatformSurface } from '../music/MusicPlatformPage';
 import { MusicPageShell } from '../music/MusicPageShell';
+import { MusicPlaylistDetailPage } from '../music/MusicPlaylistDetailPage';
 import { MusicPlaylistsDirectory } from '../music/MusicPlaylistsDirectory';
 
 export function MusicLayout() {
@@ -28,6 +29,14 @@ export function MusicPlaylistsPage() {
   return (
     <MusicLibraryPanel>
       {(library) => <MusicPlaylistsDirectory library={library} />}
+    </MusicLibraryPanel>
+  );
+}
+
+export function MusicPlaylistPage({ playlistId }: { playlistId: string }) {
+  return (
+    <MusicLibraryPanel>
+      {(library) => <MusicPlaylistDetailPage library={library} playlistId={playlistId} />}
     </MusicLibraryPanel>
   );
 }

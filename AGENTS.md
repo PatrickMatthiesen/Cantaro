@@ -8,7 +8,8 @@ We use dotnet for the backend and bun with Vite, React, TypeScript, Tailwind and
 
 ### Running the application
 
-We use Aspire for development, use aspire start or stop do boot up the database, backend, and frontend. load the aspire skill if more info is needed on using aspire.
+We use Aspire for development, use aspire start or stop to boot up the database, backend, and frontend. load the aspire skill if more info is needed on using aspire.
+Aspire is using https and the test users credentials are in Cantaro.MigrationService\appsettings.Development.json
 
 ### Aspire publish output
 

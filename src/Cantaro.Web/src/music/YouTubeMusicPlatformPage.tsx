@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useYouTubePlaylistsState, type PlatformPlaylist, type PlatformSong } from '@cantaro/client-shared/music';
+import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
 
 type PlaylistRouteSyncAction =
@@ -216,65 +217,96 @@ function YouTubePlaylistGrid({
   );
 }
 
-function YouTubeSongList({ playlistItems, isLoadingItems }: { playlistItems: PlatformSong[]; isLoadingItems: boolean }) {
-  if (isLoadingItems) {
-    return <p className="p-6 text-sm font-semibold text-slate-500">Loading playlist items...</p>;
-  }
+function mapPlatformSongToTrack(item: PlatformSong, activeTrackId?: string): MusicCollectionTrack {
+  return {
+    id: item.id,
+    title: item.title,
+    artist: item.artistName ?? 'YouTube',
+    album: 'YouTube',
+    artworkUrl: item.thumbnailUrl,
+    addedLabel: item.publishedAt,
+    platformNames: ['YouTube'],
+    isPlaying: item.id === activeTrackId,
+  };
+}
 
-  if (playlistItems.length === 0) {
-    return <p className="p-6 text-sm font-semibold text-slate-500">This playlist has no items yet.</p>;
-  }
-
-  return (
-    <ol className="divide-y divide-[#ece8fb]">
-      {playlistItems.map((item, index) => (
-        <li key={item.id} className="grid grid-cols-[40px_auto_1fr] items-center gap-3 px-4 py-3 text-sm text-slate-700">
-          <span className="font-mono text-xs text-slate-500">{index + 1}</span>
-          {item.thumbnailUrl ? (
-            <img src={item.thumbnailUrl} alt="" className="h-14 w-24 rounded-xl object-cover" />
-          ) : (
-            <div className="h-14 w-24 rounded-xl bg-rose-50" aria-hidden />
-          )}
-          <div className="min-w-0">
-            <p className="line-clamp-2 font-black text-slate-950">{item.title}</p>
-            {item.artistName ? <p className="truncate text-xs font-semibold text-slate-500">{item.artistName}</p> : null}
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
+function getPlatformSuggestions(playlists: PlatformPlaylist[], selectedPlaylistId: string): MusicCollectionSuggestion[] {
+  return playlists
+    .filter((playlist) => playlist.id !== selectedPlaylistId)
+    .slice(0, 5)
+    .map((playlist) => ({
+      id: playlist.id,
+      title: playlist.title,
+      detail: `${playlist.itemCount.toLocaleString()} songs`,
+      artworkUrl: playlist.thumbnailUrl,
+    }));
 }
 
 function YouTubePlaylistDetail({
   playlist,
   playlistItems,
   isLoadingItems,
-  onBack,
+  playlists,
 }: {
   playlist: PlatformPlaylist;
   playlistItems: PlatformSong[];
   isLoadingItems: boolean;
-  onBack: () => void;
+  playlists: PlatformPlaylist[];
 }) {
-  return (
-    <section className="grid gap-5 xl:grid-cols-[320px_1fr]">
-      <div className="rounded-3xl bg-white/70 p-5 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
-        <button type="button" className="mb-4 text-sm font-black text-violet-600" onClick={onBack}>
-          All playlists
-        </button>
-        {playlist.thumbnailUrl ? (
-          <img src={playlist.thumbnailUrl} alt="" className="h-56 w-full rounded-3xl object-cover" />
-        ) : (
-          <div className="flex h-56 w-full items-center justify-center rounded-3xl bg-rose-50 text-sm font-black text-rose-600">YouTube</div>
-        )}
-        <h2 className="mt-4 text-2xl font-black text-slate-950">{playlist.title}</h2>
-        {playlist.description ? <p className="mt-2 text-sm leading-6 font-medium text-slate-500">{playlist.description}</p> : null}
-      </div>
+  const [activeTrackId, setActiveTrackId] = useState<string | undefined>();
+  const [queuedTrackId, setQueuedTrackId] = useState<string | undefined>();
 
-      <div className="overflow-hidden rounded-3xl bg-white/70 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
-        <YouTubeSongList playlistItems={playlistItems} isLoadingItems={isLoadingItems} />
-      </div>
-    </section>
+  useEffect(() => {
+    setActiveTrackId(undefined);
+    setQueuedTrackId(undefined);
+  }, [playlist.id]);
+
+  const tracks = playlistItems.map((item) => mapPlatformSongToTrack(item, activeTrackId));
+  const activeTrack = tracks.find((track) => track.id === activeTrackId);
+  const queuedTrack = tracks.find((track) => track.id === queuedTrackId);
+  const trackIds = tracks.map((track) => track.id);
+
+  const playTrack = (track: MusicCollectionTrack) => {
+    setActiveTrackId(track.id);
+  };
+
+  const queueTrack = (track: MusicCollectionTrack) => {
+    setQueuedTrackId(track.id);
+  };
+
+  const playFirstTrack = () => {
+    setActiveTrackId(trackIds[0]);
+  };
+
+  const playRandomTrack = () => {
+    if (trackIds.length === 0) return;
+    setActiveTrackId(trackIds[Math.floor(Math.random() * trackIds.length)]);
+  };
+
+  return (
+    <MusicCollectionDetailPage
+      eyebrow="Playlist"
+      title={playlist.title}
+      description={playlist.description}
+      artworkUrl={playlist.thumbnailUrl}
+      backTo="/music/platforms/$platformId"
+      backParams={{ platformId: 'youtube' }}
+      backLabel="Back to YouTube playlists"
+      ownerLabel="YouTube"
+      updatedAt={playlist.publishedAt}
+      songsLabel={`${playlist.itemCount.toLocaleString()} songs`}
+      chips={['YouTube', 'Platform playlist']}
+      tracks={tracks}
+      isLoadingTracks={isLoadingItems}
+      emptyTrackLabel="This playlist has no items yet"
+      activeTrack={activeTrack}
+      queuedTrack={queuedTrack}
+      suggestions={getPlatformSuggestions(playlists, playlist.id)}
+      onPlayAll={playFirstTrack}
+      onShuffle={playRandomTrack}
+      onPlayTrack={playTrack}
+      onQueueTrack={queueTrack}
+    />
   );
 }
 
@@ -382,7 +414,7 @@ function YouTubePlatformContent({
         playlist={selectedPlaylist}
         playlistItems={playlistItems}
         isLoadingItems={isLoadingItems}
-        onBack={onBackToPlaylists}
+        playlists={playlists}
       />
     );
   }
@@ -432,17 +464,20 @@ export function YouTubeMusicPlatformPage({ playlistId = null }: { playlistId?: s
   };
 
   const missingPlaylistId = getMissingPlaylistId({ isConnected, isLoading, playlistId, playlists });
+  const isPlaylistDetail = Boolean(selectedPlaylist || missingPlaylistId);
 
   return (
     <MusicPageShell>
       <div className="space-y-6">
-        <YouTubePageHeader
-          accountName={status?.displayName}
-          isConnected={isConnected}
-          playlistCount={playlists.length}
-          onRefresh={() => void refreshPlaylists()}
-          onDisconnect={() => void disconnect()}
-        />
+        {!isPlaylistDetail ? (
+          <YouTubePageHeader
+            accountName={status?.displayName}
+            isConnected={isConnected}
+            playlistCount={playlists.length}
+            onRefresh={() => void refreshPlaylists()}
+            onDisconnect={() => void disconnect()}
+          />
+        ) : null}
 
         <YouTubeError error={error} />
 
