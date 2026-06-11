@@ -16,6 +16,10 @@ interface UseLibrarySearchStateOptions {
     providerId?: string;
     isProviderConnected: boolean;
     updateFilter: UpdateLibraryFilter;
+    searchQuery?: string;
+    searchMode?: LibrarySearchMode;
+    onSearchQueryChange?: (query: string) => void;
+    onSearchModeChange?: (mode: LibrarySearchMode) => void;
 }
 
 interface CatalogSearchControls {
@@ -136,6 +140,7 @@ function useCatalogSearch() {
 function useDebouncedSearch(
     searchMode: LibrarySearchMode,
     searchQuery: string,
+    connectedProviderIds: string[],
     updateFilterRef: MutableRefObject<UpdateLibraryFilter>,
     runCatalogSearch: (providerId: string, query: string) => Promise<void>,
     resetCatalogSearch: () => void,
@@ -145,7 +150,7 @@ function useDebouncedSearch(
             const trimmedQuery = searchQuery.trim();
             if (searchMode === 'library') {
                 updateFilterRef.current('query', trimmedQuery || undefined);
-            } else if (trimmedQuery) {
+            } else if (trimmedQuery && connectedProviderIds.includes(searchMode)) {
                 void runCatalogSearch(searchMode, trimmedQuery);
             } else {
                 resetCatalogSearch();
@@ -153,7 +158,7 @@ function useDebouncedSearch(
         }, SEARCH_DEBOUNCE_MS);
 
         return () => clearTimeout(timeoutId);
-    }, [resetCatalogSearch, runCatalogSearch, searchMode, searchQuery, updateFilterRef]);
+    }, [connectedProviderIds, resetCatalogSearch, runCatalogSearch, searchMode, searchQuery, updateFilterRef]);
 }
 
 export function useLibrarySearchState({
@@ -161,9 +166,15 @@ export function useLibrarySearchState({
     providerId,
     isProviderConnected,
     updateFilter,
+    searchQuery: controlledSearchQuery,
+    searchMode: controlledSearchMode,
+    onSearchQueryChange,
+    onSearchModeChange,
 }: UseLibrarySearchStateOptions) {
-    const [searchMode, setSearchMode] = useState<LibrarySearchMode>('library');
-    const [searchQuery, setSearchQuery] = useState(() => filters.query ?? '');
+    const [internalSearchMode, setInternalSearchMode] = useState<LibrarySearchMode>('library');
+    const [internalSearchQuery, setInternalSearchQuery] = useState(() => filters.query ?? '');
+    const searchMode = controlledSearchMode ?? internalSearchMode;
+    const searchQuery = controlledSearchQuery ?? internalSearchQuery;
     const updateFilterRef = useLatestFilterUpdater(updateFilter);
     const catalogSearch = useCatalogSearch();
 
@@ -172,21 +183,42 @@ export function useLibrarySearchState({
         [isProviderConnected, providerId],
     );
 
-    useDebouncedSearch(searchMode, searchQuery, updateFilterRef, catalogSearch.runCatalogSearch, catalogSearch.resetCatalogSearch);
+    useDebouncedSearch(
+        searchMode,
+        searchQuery,
+        connectedProviderIds,
+        updateFilterRef,
+        catalogSearch.runCatalogSearch,
+        catalogSearch.resetCatalogSearch,
+    );
+
+    const setSearchQuery = useCallback((query: string) => {
+        if (onSearchQueryChange) {
+            onSearchQueryChange(query);
+            return;
+        }
+
+        setInternalSearchQuery(query);
+    }, [onSearchQueryChange]);
 
     const handleSearchSubmit = useCallback(() => {
         const trimmedQuery = searchQuery.trim();
         if (searchMode === 'library') {
             updateFilter('query', trimmedQuery || undefined);
-        } else if (trimmedQuery) {
+        } else if (trimmedQuery && connectedProviderIds.includes(searchMode)) {
             void catalogSearch.runCatalogSearch(searchMode, trimmedQuery);
         }
-    }, [catalogSearch, searchMode, searchQuery, updateFilter]);
+    }, [catalogSearch, connectedProviderIds, searchMode, searchQuery, updateFilter]);
 
     const handleSearchModeChange = useCallback((mode: LibrarySearchMode) => {
-        setSearchMode(mode);
+        if (onSearchModeChange) {
+            onSearchModeChange(mode);
+        } else {
+            setInternalSearchMode(mode);
+        }
+
         catalogSearch.resetCatalogSearch();
-    }, [catalogSearch]);
+    }, [catalogSearch, onSearchModeChange]);
 
     return {
         searchMode,

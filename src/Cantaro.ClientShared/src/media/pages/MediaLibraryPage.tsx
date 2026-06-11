@@ -9,6 +9,7 @@ import {
 } from '../components/media-library/MediaLibraryHeader';
 import { useLibrarySearchState } from '../components/media-library/useLibrarySearchState';
 import { useMediaLibraryState } from '../components/media-library/useMediaLibraryState';
+import type { LibrarySearchMode } from '../components/media-library/LibrarySearchBar';
 
 interface MediaLibraryPageProps {
   onNavigateProviders?: () => void;
@@ -18,6 +19,10 @@ interface MediaLibraryPageProps {
   navigation?: ReactNode;
   density?: MediaLibraryDensity;
   embedded?: boolean;
+  searchQuery?: string;
+  searchMode?: LibrarySearchMode;
+  onSearchQueryChange?: (query: string) => void;
+  onSearchModeChange?: (mode: LibrarySearchMode) => void;
 }
 
 export interface MediaPageHeading {
@@ -186,6 +191,10 @@ export function MediaLibraryPage({
   navigation,
   density = 'comfortable',
   embedded = false,
+  searchQuery,
+  searchMode,
+  onSearchQueryChange,
+  onSearchModeChange,
 }: MediaLibraryPageProps) {
   const library = useMediaLibraryState();
   const search = useLibrarySearchState({
@@ -193,6 +202,10 @@ export function MediaLibraryPage({
     providerId: library.providerStatus?.providerId,
     isProviderConnected: Boolean(library.providerStatus?.isConnected),
     updateFilter: library.updateFilter,
+    searchQuery,
+    searchMode,
+    onSearchQueryChange,
+    onSearchModeChange,
   });
   const contentClassName = `space-y-4 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-6 pt-8 pb-16'}`;
 

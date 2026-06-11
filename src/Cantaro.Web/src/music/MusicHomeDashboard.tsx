@@ -334,7 +334,13 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
   const playback = useMusicHomePlayback(songs, filteredSongs);
 
   return (
-    <MusicPageShell library={library} activeSong={playback.activeSong} onStopActiveSong={playback.stopTrack}>
+    <MusicPageShell
+      library={library}
+      activeSong={playback.activeSong}
+      onStopActiveSong={playback.stopTrack}
+      searchValue={query}
+      onSearchChange={setQuery}
+    >
       <div className="grid gap-6 xl:grid-cols-[1fr_278px] 2xl:grid-cols-[1fr_320px]">
         <div className="min-w-0 space-y-7">
           <HeroPanel library={library} featuredSong={playback.activeSong ?? songs[0] ?? null} />

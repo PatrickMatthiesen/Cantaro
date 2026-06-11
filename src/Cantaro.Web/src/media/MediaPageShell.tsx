@@ -1,5 +1,6 @@
-import { useRouterState } from '@tanstack/react-router';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { mainMediaProviderId } from '@cantaro/client-shared/media';
 import { PageShell } from '../components/PageShell';
 import { PageSideNavigation, type PageNavigationSection } from '../components/PageNavigation';
 
@@ -43,10 +44,32 @@ function MediaSidebar() {
 }
 
 export function MediaPageShell({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+  const location = useRouterState({ select: (state) => state.location });
+  const search = location.search as Record<string, unknown>;
+  const searchValue = typeof search.q === 'string' ? search.q : '';
+
+  const updateLibrarySearch = (value: string) => {
+    const trimmedValue = value.trim();
+
+    void navigate({
+      to: '/media/library',
+      search: {
+        ...search,
+        q: trimmedValue || undefined,
+        searchMode: typeof search.searchMode === 'string' ? search.searchMode : 'library',
+      },
+      replace: location.pathname === '/media/library',
+    });
+  };
+
   return (
     <PageShell
       sidebar={<MediaSidebar />}
-      searchPlaceholder="Search media, providers, reviews..."
+      searchPlaceholder={search.searchMode === mainMediaProviderId ? 'Search AniList...' : 'Search media library...'}
+      searchValue={searchValue}
+      onSearchChange={updateLibrarySearch}
+      onSearchSubmit={() => updateLibrarySearch(searchValue)}
     >
       {children}
     </PageShell>

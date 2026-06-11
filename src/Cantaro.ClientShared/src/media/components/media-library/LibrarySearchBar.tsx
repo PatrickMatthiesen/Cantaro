@@ -59,29 +59,12 @@ function SearchModeTabs({
     );
 }
 
-function SearchTextInput({
-    query,
-    mode,
-    onQueryChange,
-}: Pick<LibrarySearchBarProps, 'query' | 'mode' | 'onQueryChange'>) {
-    return (
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2 focus-within:ring-2 focus-within:ring-indigo-300">
-            <input
-                type="search"
-                value={query}
-                onChange={(event) => onQueryChange(event.target.value)}
-                placeholder={`Search ${modeLabel(mode)}...`}
-                className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 outline-none placeholder:text-gray-400"
-            />
-        </div>
-    );
-}
-
 function SearchSubmitButton({
     query,
+    mode,
     isProviderMode,
     isSearchingProvider,
-}: Pick<LibrarySearchBarProps, 'query' | 'isSearchingProvider'> & { isProviderMode: boolean }) {
+}: Pick<LibrarySearchBarProps, 'query' | 'mode' | 'isSearchingProvider'> & { isProviderMode: boolean }) {
     return (
         <button
             type="submit"
@@ -89,7 +72,7 @@ function SearchSubmitButton({
             disabled={isProviderMode && (!query.trim() || isSearchingProvider)}
             aria-busy={isSearchingProvider}
         >
-            {isProviderMode && isSearchingProvider ? 'Searching...' : 'Search'}
+            {isProviderMode && isSearchingProvider ? 'Searching...' : `Search ${modeLabel(mode)}`}
         </button>
     );
 }
@@ -100,7 +83,6 @@ export function LibrarySearchBar({
     connectedProviderIds,
     isSearchingProvider,
     navigation,
-    onQueryChange,
     onModeChange,
     onSubmit,
 }: LibrarySearchBarProps) {
@@ -118,8 +100,8 @@ export function LibrarySearchBar({
                 {navigation ? <div className="shrink-0">{navigation}</div> : null}
                 {navigation ? <div className="h-px w-full shrink-0 bg-gray-200/80 xl:h-8 xl:w-px" aria-hidden /> : null}
                 <SearchModeTabs mode={mode} connectedProviderIds={connectedProviderIds} onModeChange={onModeChange} />
-                <SearchTextInput query={query} mode={mode} onQueryChange={onQueryChange} />
-                <SearchSubmitButton query={query} isProviderMode={isProviderMode} isSearchingProvider={isSearchingProvider} />
+                <div className="min-w-0 flex-1" />
+                <SearchSubmitButton query={query} mode={mode} isProviderMode={isProviderMode} isSearchingProvider={isSearchingProvider} />
             </form>
         </section>
     );
