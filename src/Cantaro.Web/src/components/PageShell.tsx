@@ -9,11 +9,30 @@ interface PageShellProps {
   bottomSlot?: ReactNode;
   contentClassName?: string;
   searchPlaceholder?: string;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
+  onSearchSubmit?: () => void;
 }
 
-function TopSearchInput({ placeholder }: { placeholder: string }) {
+function TopSearchInput({
+  placeholder,
+  value,
+  onChange,
+  onSubmit,
+}: {
+  placeholder: string;
+  value?: string;
+  onChange?: (value: string) => void;
+  onSubmit?: () => void;
+}) {
   return (
-    <div className="min-w-[220px] flex-1">
+    <form
+      className="min-w-[220px] flex-1"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit?.();
+      }}
+    >
       <label className="relative block">
         <svg
           className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -33,9 +52,11 @@ function TopSearchInput({ placeholder }: { placeholder: string }) {
           className="h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-4 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
           placeholder={placeholder}
           type="search"
+          value={onChange ? value ?? '' : undefined}
+          onChange={(event) => onChange?.(event.target.value)}
         />
       </label>
-    </div>
+    </form>
   );
 }
 
@@ -83,17 +104,28 @@ function ProfileButton({ userEmail }: { userEmail?: string }) {
 function PageTopBar({
   pathname,
   searchPlaceholder,
+  searchValue,
+  onSearchChange,
+  onSearchSubmit,
   userEmail,
 }: {
   pathname: string;
   searchPlaceholder: string;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
+  onSearchSubmit?: () => void;
   userEmail?: string;
 }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-4 backdrop-blur-xl sm:px-8 lg:px-10">
       <div className="flex flex-wrap items-center gap-4">
         <AppNavigation pathname={pathname} />
-        <TopSearchInput placeholder={searchPlaceholder} />
+        <TopSearchInput
+          placeholder={searchPlaceholder}
+          value={searchValue}
+          onChange={onSearchChange}
+          onSubmit={onSearchSubmit}
+        />
         <NotificationButton />
         <ProfileButton userEmail={userEmail} />
       </div>
@@ -107,6 +139,9 @@ export function PageShell({
   bottomSlot,
   contentClassName = '',
   searchPlaceholder = 'Search Cantaro...',
+  searchValue,
+  onSearchChange,
+  onSearchSubmit,
 }: PageShellProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { user } = useAuth();
@@ -117,7 +152,14 @@ export function PageShell({
         {sidebar}
 
         <div className="flex min-w-0 flex-col pb-28">
-          <PageTopBar pathname={pathname} searchPlaceholder={searchPlaceholder} userEmail={user?.email} />
+          <PageTopBar
+            pathname={pathname}
+            searchPlaceholder={searchPlaceholder}
+            searchValue={searchValue}
+            onSearchChange={onSearchChange}
+            onSearchSubmit={onSearchSubmit}
+            userEmail={user?.email}
+          />
 
           <main className={`w-full px-4 py-6 sm:px-8 lg:px-10 ${contentClassName}`}>
             {children}

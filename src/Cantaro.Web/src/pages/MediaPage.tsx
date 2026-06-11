@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { Outlet, useNavigate } from '@tanstack/react-router';
+import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   MediaCatalogDetailPage,
   MediaEntryDetailPage,
@@ -70,11 +70,30 @@ export function MediaLayout() {
 
 export function MediaLibraryRoutePage() {
   const navigate = useNavigate();
+  const location = useRouterState({ select: (state) => state.location });
   const { setHeading } = useMediaShell();
+  const search = location.search as Record<string, unknown>;
+  const searchQuery = typeof search.q === 'string' ? search.q : '';
+  const searchMode = typeof search.searchMode === 'string' ? search.searchMode : 'library';
+  const updateSearchState = (next: { query?: string; mode?: string }) => {
+    void navigate({
+      to: '/media/library',
+      search: {
+        ...search,
+        q: next.query?.trim() || undefined,
+        searchMode: next.mode ?? searchMode,
+      },
+      replace: true,
+    });
+  };
 
   return (
     <MediaLibraryPage
       embedded
+      searchQuery={searchQuery}
+      searchMode={searchMode}
+      onSearchQueryChange={(query) => updateSearchState({ query })}
+      onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
       onHeadingChange={setHeading}
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
       onNavigateEntry={(id) => void navigate({ to: '/media/library/$entryId', params: { entryId: id } })}

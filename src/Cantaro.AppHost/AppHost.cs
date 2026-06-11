@@ -40,6 +40,12 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
     .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey);
 
+if (builder.ExecutionContext.IsRunMode)
+{
+    api.WithEnvironment("Frontend:TrustLoopbackOrigins", "true");
+    api.WithEnvironment("Frontend:TrustedHostSuffixes:0", ".ts.net");
+}
+
 if (builder.ExecutionContext.IsPublishMode)
 {
     api.PublishAsDockerComposeService((_, service) =>

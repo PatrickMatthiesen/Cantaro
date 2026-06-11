@@ -173,6 +173,9 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
+        var frontendOptions = builder.Configuration
+            .GetSection(FrontendUrlOptions.SectionName)
+            .Get<FrontendUrlOptions>() ?? new FrontendUrlOptions();
         var allowedOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var frontendUrl = builder.Configuration["services:web:http:0"]
             ?? builder.Configuration["services:web:https:0"]
@@ -184,9 +187,18 @@ builder.Services.AddCors(options =>
             allowedOrigins.Add(frontendUrl.TrimEnd('/'));
         }
 
+        foreach (var trustedOrigin in frontendOptions.TrustedOrigins)
+        {
+            if (!string.IsNullOrWhiteSpace(trustedOrigin))
+            {
+                allowedOrigins.Add(trustedOrigin.TrimEnd('/'));
+            }
+        }
+
         if (allowedOrigins.Count > 0)
         {
             policy.WithOrigins(allowedOrigins.ToArray())
+                .SetIsOriginAllowed(origin => IsTrustedFrontendOrigin(origin, frontendOptions))
                 .AllowAnyMethod()
                 .AllowAnyHeader()
                 .AllowCredentials();
@@ -339,6 +351,50 @@ static async Task SeedDevUserAsync(
 
     EnsureIdentitySuccess(passwordResult, $"Setting password for seeded test user '{email}'");
     logger.LogInformation("Reset seeded test user password for {Email}.", email);
+}
+
+static bool IsTrustedFrontendOrigin(string origin, FrontendUrlOptions options)
+{
+    if (string.IsNullOrWhiteSpace(origin) || !Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+    {
+        return false;
+    }
+
+    if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    if (options.TrustLoopbackOrigins && uri.IsLoopback)
+    {
+        return true;
+    }
+
+    foreach (var trustedOrigin in options.TrustedOrigins)
+    {
+        if (!Uri.TryCreate(trustedOrigin, UriKind.Absolute, out var trustedUri))
+        {
+            continue;
+        }
+
+        if (Uri.Compare(uri, trustedUri, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
+        {
+            return true;
+        }
+    }
+
+    foreach (var suffix in options.TrustedHostSuffixes)
+    {
+        var normalizedSuffix = suffix.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedSuffix)
+            && uri.Host.EndsWith(normalizedSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static void EnsureIdentitySuccess(IdentityResult result, string operation)

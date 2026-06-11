@@ -39,11 +39,18 @@ export default defineConfig(({ command }) => ({
     tailwindcss(),
   ],
   server: {
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      '::1',
+      '.ts.net',
+    ],
     strictPort: true,
     proxy: {
       '/api': {
         target: apiProxyTarget,
-        changeOrigin: true,
+        changeOrigin: false,
+        xfwd: true,
         secure: false
       },
     },
