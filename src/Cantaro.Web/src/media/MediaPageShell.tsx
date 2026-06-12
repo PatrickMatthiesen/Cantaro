@@ -50,13 +50,11 @@ export function MediaPageShell({ children }: { children: ReactNode }) {
   const searchValue = typeof search.q === 'string' ? search.q : '';
 
   const updateLibrarySearch = (value: string) => {
-    const trimmedValue = value.trim();
-
     void navigate({
       to: '/media/library',
       search: {
         ...search,
-        q: trimmedValue || undefined,
+        q: value || undefined,
         searchMode: typeof search.searchMode === 'string' ? search.searchMode : 'library',
       },
       replace: location.pathname === '/media/library',

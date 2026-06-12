@@ -80,7 +80,7 @@ export function MediaLibraryRoutePage() {
       to: '/media/library',
       search: {
         ...search,
-        q: next.query?.trim() || undefined,
+        q: next.query || undefined,
         searchMode: next.mode ?? searchMode,
       },
       replace: true,
