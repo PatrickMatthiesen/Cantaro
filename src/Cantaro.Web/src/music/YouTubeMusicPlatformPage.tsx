@@ -239,6 +239,7 @@ function getPlatformSuggestions(playlists: PlatformPlaylist[], selectedPlaylistI
       title: playlist.title,
       detail: `${playlist.itemCount.toLocaleString()} songs`,
       artworkUrl: playlist.thumbnailUrl,
+      route: { type: 'platformPlaylist', platformId: 'youtube' },
     }));
 }
 
@@ -274,6 +275,11 @@ function YouTubePlaylistDetail({
     setQueuedTrackId(track.id);
   };
 
+  const clearQueue = () => {
+    setActiveTrackId(undefined);
+    setQueuedTrackId(undefined);
+  };
+
   const playFirstTrack = () => {
     setActiveTrackId(trackIds[0]);
   };
@@ -306,6 +312,7 @@ function YouTubePlaylistDetail({
       onShuffle={playRandomTrack}
       onPlayTrack={playTrack}
       onQueueTrack={queueTrack}
+      onClearQueue={clearQueue}
     />
   );
 }

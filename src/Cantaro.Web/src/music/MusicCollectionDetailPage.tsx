@@ -19,6 +19,9 @@ export interface MusicCollectionSuggestion {
   title: string;
   detail: string;
   artworkUrl?: string;
+  route:
+    | { type: 'libraryPlaylist' }
+    | { type: 'platformPlaylist'; platformId: string };
 }
 
 interface MusicCollectionDetailPageProps {
@@ -46,6 +49,7 @@ interface MusicCollectionDetailPageProps {
   onShuffle?: () => void;
   onPlayTrack?: (track: MusicCollectionTrack) => void;
   onQueueTrack?: (track: MusicCollectionTrack) => void;
+  onClearQueue?: () => void;
 }
 
 function CollectionArtwork({ artworkUrl, title }: { artworkUrl?: string; title: string }) {
@@ -93,14 +97,6 @@ function ShuffleIcon() {
   );
 }
 
-function DotsIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M6 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm8 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z" />
-    </svg>
-  );
-}
-
 function QueueIcon() {
   return (
     <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -125,7 +121,7 @@ function HeaderActions({
       <button
         type="button"
         className="inline-flex h-11 items-center gap-2 rounded-full bg-slate-950 px-6 text-sm font-black text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
-        disabled={!hasTracks}
+        disabled={!hasTracks || !onPlayAll}
         onClick={onPlayAll}
       >
         <PlayIcon />
@@ -134,20 +130,13 @@ function HeaderActions({
       <button
         type="button"
         className="inline-flex h-11 items-center gap-2 rounded-full bg-white/76 px-5 text-sm font-black text-slate-800 shadow-[0_14px_34px_rgba(88,74,150,0.09)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-        disabled={!hasTracks}
+        disabled={!hasTracks || !onShuffle}
         onClick={onShuffle}
       >
         <ShuffleIcon />
         Shuffle
       </button>
       {actionSlot}
-      <button
-        type="button"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/76 text-slate-800 shadow-[0_14px_34px_rgba(88,74,150,0.09)] transition hover:bg-white"
-        aria-label="More actions"
-      >
-        <DotsIcon />
-      </button>
     </div>
   );
 }
@@ -165,6 +154,41 @@ function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: nu
   );
 }
 
+function TrackHoverControls({
+  track,
+  onPlayTrack,
+  onQueueTrack,
+}: {
+  track: MusicCollectionTrack;
+  onPlayTrack?: (track: MusicCollectionTrack) => void;
+  onQueueTrack?: (track: MusicCollectionTrack) => void;
+}) {
+  return (
+    <span className="absolute left-0 flex items-center gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
+      {onPlayTrack ? (
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)] transition hover:bg-slate-800"
+          aria-label={`Play ${track.title}`}
+          onClick={() => onPlayTrack(track)}
+        >
+          <PlayIcon />
+        </button>
+      ) : null}
+      {onQueueTrack ? (
+        <button
+          type="button"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white text-violet-700 shadow-[0_8px_18px_rgba(88,74,150,0.14)] transition hover:text-violet-500"
+          aria-label={`Add ${track.title} up next`}
+          onClick={() => onQueueTrack(track)}
+        >
+          <QueueIcon />
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
 function TrackNumber({
   track,
   index,
@@ -176,29 +200,14 @@ function TrackNumber({
   onPlayTrack?: (track: MusicCollectionTrack) => void;
   onQueueTrack?: (track: MusicCollectionTrack) => void;
 }) {
+  const hasTrackControls = Boolean(onPlayTrack || onQueueTrack);
+
   return (
     <span className="relative flex h-9 items-center">
       <span className={`font-mono text-xs transition group-focus-within:opacity-0 group-hover:opacity-0 ${track.isPlaying ? 'font-black text-violet-600' : 'text-slate-500'}`}>
         {track.isPlaying ? '||' : index + 1}
       </span>
-      <span className="absolute left-0 flex items-center gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
-        <button
-          type="button"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)] transition hover:bg-slate-800"
-          aria-label={`Play ${track.title}`}
-          onClick={() => onPlayTrack?.(track)}
-        >
-          <PlayIcon />
-        </button>
-        <button
-          type="button"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white text-violet-700 shadow-[0_8px_18px_rgba(88,74,150,0.14)] transition hover:text-violet-500"
-          aria-label={`Add ${track.title} up next`}
-          onClick={() => onQueueTrack?.(track)}
-        >
-          <QueueIcon />
-        </button>
-      </span>
+      {hasTrackControls ? <TrackHoverControls track={track} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} /> : null}
     </span>
   );
 }
@@ -213,14 +222,25 @@ function NowPlayingBadge({ isPlaying }: { isPlaying?: boolean }) {
   );
 }
 
-function MoreTrackActions({ title }: { title: string }) {
+function MoreTrackActions({
+  title,
+  track,
+  onQueueTrack,
+}: {
+  title: string;
+  track: MusicCollectionTrack;
+  onQueueTrack?: (track: MusicCollectionTrack) => void;
+}) {
+  if (!onQueueTrack) return null;
+
   return (
     <button
       type="button"
       className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-950"
-      aria-label={`More actions for ${title}`}
+      aria-label={`Add ${title} up next`}
+      onClick={() => onQueueTrack(track)}
     >
-      <DotsIcon />
+      <QueueIcon />
     </button>
   );
 }
@@ -258,7 +278,7 @@ function TrackRow({
       <span className="truncate font-medium max-xl:hidden">{artist}</span>
       <span className="truncate font-medium max-xl:hidden">{album}</span>
       <span className="font-mono text-xs text-slate-600">{formatDuration(track.durationSeconds)}</span>
-      <MoreTrackActions title={track.title} />
+      <MoreTrackActions title={track.title} track={track} onQueueTrack={onQueueTrack} />
     </li>
   );
 }
@@ -344,16 +364,29 @@ function CurrentQueuePanel({
   activeTrack,
   queuedTrack,
   rightRailTitle,
+  onClearQueue,
 }: {
   activeTrack?: MusicCollectionTrack;
   queuedTrack?: MusicCollectionTrack;
   rightRailTitle?: string;
+  onClearQueue?: () => void;
 }) {
+  const hasQueue = Boolean(activeTrack || queuedTrack);
+
   return (
     <section className="rounded-[1.75rem] border border-white/62 bg-white/48 p-5 shadow-[0_18px_60px_rgba(88,74,150,0.07)] backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-black text-slate-950">{rightRailTitle ?? 'Up Next'}</h2>
-        <button type="button" className="text-xs font-black text-violet-600">Clear</button>
+        {onClearQueue ? (
+          <button
+            type="button"
+            className="text-xs font-black text-violet-600 transition hover:text-violet-500 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={!hasQueue}
+            onClick={onClearQueue}
+          >
+            Clear
+          </button>
+        ) : null}
       </div>
       <div className="mt-4 space-y-3">
         {activeTrack ? (
@@ -377,24 +410,67 @@ function SuggestionThumb({ suggestion }: { suggestion: MusicCollectionSuggestion
   return <div className="h-12 w-12 rounded-xl bg-[#eeeaff]" aria-hidden />;
 }
 
-function SuggestionsPanel({ suggestions }: { suggestions?: MusicCollectionSuggestion[] }) {
+function SuggestionLink({
+  suggestion,
+  children,
+  className,
+}: {
+  suggestion: MusicCollectionSuggestion;
+  children: ReactNode;
+  className: string;
+}) {
+  if (suggestion.route.type === 'platformPlaylist') {
+    return (
+      <Link
+        to="/music/platforms/$platformId/playlists/$playlistId"
+        params={{ platformId: suggestion.route.platformId, playlistId: suggestion.id }}
+        className={className}
+      >
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      to="/music/playlists/$playlistId"
+      params={{ playlistId: suggestion.id }}
+      className={className}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function SuggestionContent({ suggestion }: { suggestion: MusicCollectionSuggestion }) {
+  return (
+    <>
+      <SuggestionThumb suggestion={suggestion} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-black text-slate-950">{suggestion.title}</p>
+        <p className="truncate text-xs font-semibold text-slate-500">{suggestion.detail}</p>
+      </div>
+    </>
+  );
+}
+
+function SuggestionsPanel({ suggestions, className = '' }: { suggestions?: MusicCollectionSuggestion[]; className?: string }) {
   if (!suggestions || suggestions.length === 0) return null;
 
   return (
-    <section className="rounded-[1.75rem] border border-white/62 bg-white/48 p-5 shadow-[0_18px_60px_rgba(88,74,150,0.07)] backdrop-blur">
+    <section className={`rounded-[1.75rem] border border-white/62 bg-white/48 p-5 shadow-[0_18px_60px_rgba(88,74,150,0.07)] backdrop-blur ${className}`}>
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-black text-slate-950">More like this</h2>
-        <button type="button" className="text-xs font-black text-violet-600">See all</button>
       </div>
       <div className="mt-4 space-y-3">
         {suggestions.slice(0, 4).map((suggestion) => (
-          <div key={suggestion.id} className="flex items-center gap-3">
-            <SuggestionThumb suggestion={suggestion} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-black text-slate-950">{suggestion.title}</p>
-              <p className="truncate text-xs font-semibold text-slate-500">{suggestion.detail}</p>
-            </div>
-          </div>
+          <SuggestionLink
+            key={suggestion.id}
+            suggestion={suggestion}
+            className="flex items-center gap-3 rounded-2xl p-2 transition hover:bg-white/64 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+          >
+            <SuggestionContent suggestion={suggestion} />
+          </SuggestionLink>
         ))}
       </div>
     </section>
@@ -406,16 +482,23 @@ function RightRail({
   queuedTrack,
   rightRailTitle,
   suggestions,
+  onClearQueue,
 }: {
   activeTrack?: MusicCollectionTrack;
   queuedTrack?: MusicCollectionTrack;
   rightRailTitle?: string;
   suggestions?: MusicCollectionSuggestion[];
+  onClearQueue?: () => void;
 }) {
   return (
     <aside className="space-y-4">
-      <CurrentQueuePanel activeTrack={activeTrack} queuedTrack={queuedTrack} rightRailTitle={rightRailTitle} />
-      <SuggestionsPanel suggestions={suggestions} />
+      <CurrentQueuePanel
+        activeTrack={activeTrack}
+        queuedTrack={queuedTrack}
+        rightRailTitle={rightRailTitle}
+        onClearQueue={onClearQueue}
+      />
+      <SuggestionsPanel suggestions={suggestions} className="hidden 2xl:block" />
     </aside>
   );
 }
@@ -506,6 +589,7 @@ export function MusicCollectionDetailPage({
   onShuffle,
   onPlayTrack,
   onQueueTrack,
+  onClearQueue,
 }: MusicCollectionDetailPageProps) {
   return (
     <div className="space-y-5">
@@ -545,7 +629,13 @@ export function MusicCollectionDetailPage({
           />
         </div>
 
-        <RightRail activeTrack={activeTrack} queuedTrack={queuedTrack} rightRailTitle={rightRailTitle} suggestions={suggestions} />
+        <RightRail
+          activeTrack={activeTrack}
+          queuedTrack={queuedTrack}
+          rightRailTitle={rightRailTitle}
+          suggestions={suggestions}
+          onClearQueue={onClearQueue}
+        />
       </div>
 
       {suggestions && suggestions.length > 0 ? (
@@ -553,13 +643,17 @@ export function MusicCollectionDetailPage({
           <h2 className="mb-3 text-lg font-black text-slate-950">More like this</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {suggestions.slice(0, 4).map((suggestion) => (
-              <article key={suggestion.id} className="overflow-hidden rounded-2xl bg-white/60 shadow-[0_16px_45px_rgba(88,74,150,0.08)]">
+              <SuggestionLink
+                key={suggestion.id}
+                suggestion={suggestion}
+                className="overflow-hidden rounded-2xl bg-white/60 shadow-[0_16px_45px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+              >
                 {suggestion.artworkUrl ? <img src={suggestion.artworkUrl} alt="" className="h-24 w-full object-cover" /> : null}
                 <div className="p-3">
                   <p className="truncate text-sm font-black text-slate-950">{suggestion.title}</p>
                   <p className="truncate text-xs font-semibold text-slate-500">{suggestion.detail}</p>
                 </div>
-              </article>
+              </SuggestionLink>
             ))}
           </div>
         </section>

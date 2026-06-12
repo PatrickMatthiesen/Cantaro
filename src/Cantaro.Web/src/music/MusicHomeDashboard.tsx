@@ -64,9 +64,11 @@ function heroSubtitle(
 function HeroPanel({
   library,
   featuredSong,
+  onPlayFeaturedSong,
 }: {
   library: MusicLibraryResponse;
   featuredSong: MusicLibrarySong | null;
+  onPlayFeaturedSong: (song: MusicLibrarySong) => void;
 }) {
   const hero = getHeroContent(library, featuredSong);
   const firstPlaylist = library.playlists[0] ?? null;
@@ -84,7 +86,14 @@ function HeroPanel({
           <h1 className="mt-3 max-w-2xl text-4xl leading-tight font-black sm:text-5xl">{hero.title}</h1>
           <p className="mt-3 max-w-xl text-base leading-7 font-medium text-white/88">{hero.subtitle}</p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <button type="button" className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.22)]">
+            <button
+              type="button"
+              className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.22)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={!featuredSong}
+              onClick={() => {
+                if (featuredSong) onPlayFeaturedSong(featuredSong);
+              }}
+            >
               Play
             </button>
             <Link
@@ -177,15 +186,6 @@ function SongTable({
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
           />
-          {['All', 'Songs', 'Albums'].map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              className={`rounded-2xl px-4 py-2 text-xs font-black ${filter === 'All' ? 'bg-slate-950 text-white' : 'border border-[#e3def8] bg-white/70 text-slate-700'}`}
-            >
-              {filter}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -213,7 +213,7 @@ function CompactSongPanel({
     <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-base font-black text-slate-950">{title}</h2>
-        <button type="button" className="text-xs font-black text-violet-600">View all</button>
+        <Link to="/music/songs" className="text-xs font-black text-violet-600 transition hover:text-violet-500">View all</Link>
       </div>
       <div className="space-y-3">
         {songs.length > 0 ? songs.map((song, index) => (
@@ -239,17 +239,15 @@ function MoodPanel() {
     <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-base font-black text-slate-950">Browse Moods</h2>
-        <button type="button" className="text-xs font-black text-violet-600">View all</button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {moodTiles.map((mood) => (
-          <button
+          <div
             key={mood.label}
-            type="button"
             className={`min-h-14 rounded-2xl bg-linear-to-br ${mood.className} px-3 text-left text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.12)]`}
           >
             {mood.label}
-          </button>
+          </div>
         ))}
       </div>
     </section>
@@ -298,6 +296,7 @@ function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLib
     queuedSong,
     tracks: filteredSongs.map((song, index) => mapSongToTrack(song, index, activeSongId)),
     playTrack: (track: MusicCollectionTrack) => setActiveSongId(track.id),
+    playSong: (song: MusicLibrarySong) => setActiveSongId(song.id),
     queueTrack: (track: MusicCollectionTrack) => setQueuedSongId(track.id),
     stopTrack: () => setActiveSongId(undefined),
   };
@@ -343,7 +342,11 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
     >
       <div className="grid gap-6 xl:grid-cols-[1fr_278px] 2xl:grid-cols-[1fr_320px]">
         <div className="min-w-0 space-y-7">
-          <HeroPanel library={library} featuredSong={playback.activeSong ?? songs[0] ?? null} />
+          <HeroPanel
+            library={library}
+            featuredSong={playback.activeSong ?? songs[0] ?? null}
+            onPlayFeaturedSong={playback.playSong}
+          />
           <PlaylistStrip playlists={library.playlists} />
           <SongTable
             tracks={playback.tracks}

@@ -13,24 +13,6 @@ function PlayerIcon({ children }: { children: ReactNode }) {
   );
 }
 
-function PreviousIcon() {
-  return (
-    <PlayerIcon>
-      <path d="M6.5 5.5a1 1 0 0 1 1-1h.5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-.5a1 1 0 0 1-1-1v-13Z" />
-      <path d="M9.8 12.8a1 1 0 0 1 0-1.6l7.7-5.6A1 1 0 0 1 19 6.4v11.2a1 1 0 0 1-1.5.8l-7.7-5.6Z" />
-    </PlayerIcon>
-  );
-}
-
-function NextIcon() {
-  return (
-    <PlayerIcon>
-      <path d="M15 5.5a1 1 0 0 1 1-1h.5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H16a1 1 0 0 1-1-1v-13Z" />
-      <path d="M14.2 11.2a1 1 0 0 1 0 1.6l-7.7 5.6a1 1 0 0 1-1.5-.8V6.4a1 1 0 0 1 1.5-.8l7.7 5.6Z" />
-    </PlayerIcon>
-  );
-}
-
 function PlayIcon() {
   return (
     <PlayerIcon>
@@ -89,12 +71,12 @@ function SidebarMixtapeCard() {
     <div className="rounded-3xl bg-white/70 p-5 shadow-[0_20px_60px_rgba(88,74,150,0.08)]">
       <p className="text-lg font-black">Today's Mixtape</p>
       <p className="mt-2 text-sm leading-6 text-slate-600">A mix from your saved songs and playlists.</p>
-      <button
-        type="button"
+      <Link
+        to="/music/songs"
         className="mt-5 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-slate-800"
       >
-        Play Mix
-      </button>
+        Open songs
+      </Link>
     </div>
   );
 }
@@ -178,10 +160,6 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
           </div>
         </div>
         <div className="hidden items-center justify-center gap-5 md:flex">
-          <button type="button" className="text-lg font-black text-slate-700" aria-label="Repeat">R</button>
-          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-950/8 hover:text-slate-950" aria-label="Previous">
-            <PreviousIcon />
-          </button>
           <button
             type="button"
             className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)] transition hover:bg-slate-800"
@@ -189,9 +167,6 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
             onClick={() => setIsPaused((current) => !current)}
           >
             {isPaused ? <PlayIcon /> : <PauseIcon />}
-          </button>
-          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-950/8 hover:text-slate-950" aria-label="Next">
-            <NextIcon />
           </button>
           <button
             type="button"
