@@ -48,6 +48,7 @@ function getSuggestions(library: MusicLibraryResponse, currentPlaylistId: string
       title: playlist.name,
       detail: `${playlist.entryCount.toLocaleString()} songs`,
       artworkUrl: playlistArtwork(playlist, index),
+      route: { type: 'libraryPlaylist' },
     }));
 }
 
@@ -86,6 +87,11 @@ export function MusicPlaylistDetailPage({
     setQueuedSongId(track.id);
   };
 
+  const clearQueue = () => {
+    setActiveSongId(undefined);
+    setQueuedSongId(undefined);
+  };
+
   const playFirstTrack = () => {
     setActiveSongId(trackIds[0]);
   };
@@ -117,6 +123,7 @@ export function MusicPlaylistDetailPage({
         onShuffle={playRandomTrack}
         onPlayTrack={playTrack}
         onQueueTrack={queueTrack}
+        onClearQueue={clearQueue}
       />
     </MusicPageShell>
   );
