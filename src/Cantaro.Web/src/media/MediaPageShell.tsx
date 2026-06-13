@@ -17,9 +17,27 @@ function createMediaNavigationSections(): PageNavigationSection[] {
     {
       title: 'Browse',
       items: [
-        { label: 'Anime', to: '/media/library', icon: 'A', matchPrefix: '/media/browse/anime' },
-        { label: 'Manga', to: '/media/library', icon: 'M', matchPrefix: '/media/browse/manga' },
-        { label: 'Recently Updated', to: '/media/library', icon: 'U', matchPrefix: '/media/browse/recently-updated' },
+        {
+          label: 'Anime',
+          to: '/media/library',
+          icon: 'A',
+          search: { mediaKind: 'anime', sortBy: 'updatedAt', sortDir: 'desc' },
+          matchPrefix: '/media/browse/anime',
+        },
+        {
+          label: 'Manga',
+          to: '/media/library',
+          icon: 'M',
+          search: { mediaKind: 'manga', sortBy: 'updatedAt', sortDir: 'desc' },
+          matchPrefix: '/media/browse/manga',
+        },
+        {
+          label: 'Recently Updated',
+          to: '/media/library',
+          icon: 'U',
+          search: { sortBy: 'updatedAt', sortDir: 'desc' },
+          matchPrefix: '/media/browse/recently-updated',
+        },
       ],
     },
   ];

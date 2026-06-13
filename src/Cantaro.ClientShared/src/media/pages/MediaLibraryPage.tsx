@@ -10,6 +10,7 @@ import {
 import { useLibrarySearchState } from '../components/media-library/useLibrarySearchState';
 import { useMediaLibraryState } from '../components/media-library/useMediaLibraryState';
 import type { LibrarySearchMode } from '../components/media-library/LibrarySearchBar';
+import type { MediaLibraryFilterDefaults } from '../components/media-library/useMediaLibraryState';
 
 interface MediaLibraryPageProps {
   onNavigateProviders?: () => void;
@@ -21,6 +22,7 @@ interface MediaLibraryPageProps {
   embedded?: boolean;
   searchQuery?: string;
   searchMode?: LibrarySearchMode;
+  filterDefaults?: MediaLibraryFilterDefaults;
   onSearchQueryChange?: (query: string) => void;
   onSearchModeChange?: (mode: LibrarySearchMode) => void;
 }
@@ -193,10 +195,11 @@ export function MediaLibraryPage({
   embedded = false,
   searchQuery,
   searchMode,
+  filterDefaults,
   onSearchQueryChange,
   onSearchModeChange,
 }: MediaLibraryPageProps) {
-  const library = useMediaLibraryState();
+  const library = useMediaLibraryState(filterDefaults);
   const search = useLibrarySearchState({
     filters: library.filters,
     providerId: library.providerStatus?.providerId,

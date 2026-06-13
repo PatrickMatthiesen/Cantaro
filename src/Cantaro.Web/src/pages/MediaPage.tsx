@@ -5,6 +5,7 @@ import {
   MediaEntryDetailPage,
   MediaLibraryPage,
   MediaObservationReviewPage,
+  type MediaLibraryQueryParams,
 } from '@cantaro/client-shared/media';
 import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
 import { MediaPageShell } from '../media/MediaPageShell';
@@ -50,6 +51,34 @@ function MediaSectionHeader({ heading }: { heading: GlobalHeadingState }) {
   );
 }
 
+function readOptionalSearchString(search: Record<string, unknown>, key: string) {
+  return typeof search[key] === 'string' && search[key] ? search[key] as string : undefined;
+}
+
+function readSortDir(search: Record<string, unknown>) {
+  return search.sortDir === 'asc' || search.sortDir === 'desc' ? search.sortDir : undefined;
+}
+
+function hasMediaFilterDefaults(search: Record<string, unknown>) {
+  return ['status', 'mediaKind', 'provider', 'listName', 'sortBy', 'sortDir'].some((key) => key in search);
+}
+
+function getMediaFilterDefaults(search: Record<string, unknown>): Partial<MediaLibraryQueryParams> | undefined {
+  if (!hasMediaFilterDefaults(search)) {
+    return undefined;
+  }
+
+  return {
+    status: readOptionalSearchString(search, 'status'),
+    mediaKind: readOptionalSearchString(search, 'mediaKind'),
+    provider: readOptionalSearchString(search, 'provider'),
+    listName: readOptionalSearchString(search, 'listName'),
+    sortBy: readOptionalSearchString(search, 'sortBy') ?? 'updatedAt',
+    sortDir: readSortDir(search) ?? 'desc',
+    page: 1,
+  };
+}
+
 export function MediaLayout() {
   const [heading, setHeading] = useState(defaultMediaHeading);
   const contextValue = useMemo(() => ({ setHeading }), [setHeading]);
@@ -75,6 +104,7 @@ export function MediaLibraryRoutePage() {
   const search = location.search as Record<string, unknown>;
   const searchQuery = typeof search.q === 'string' ? search.q : '';
   const searchMode = typeof search.searchMode === 'string' ? search.searchMode : 'library';
+  const filterDefaults = useMemo(() => getMediaFilterDefaults(search), [search]);
   const updateSearchState = (next: { query?: string; mode?: string }) => {
     void navigate({
       to: '/media/library',
@@ -92,6 +122,7 @@ export function MediaLibraryRoutePage() {
       embedded
       searchQuery={searchQuery}
       searchMode={searchMode}
+      filterDefaults={filterDefaults}
       onSearchQueryChange={(query) => updateSearchState({ query })}
       onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
       onHeadingChange={setHeading}

@@ -10,6 +10,7 @@ export interface PageNavigationItem {
   exact?: boolean;
   matchPrefix?: string;
   params?: Record<string, string>;
+  search?: Record<string, unknown>;
   disabled?: boolean;
 }
 
@@ -99,6 +100,7 @@ export function PageSideNavigation({
                       key={`${item.to}-${item.label}`}
                       to={item.to}
                       params={item.params as never}
+                      search={item.search as never}
                       className={itemClassName}
                       aria-current={isActive ? 'page' : undefined}
                     >
