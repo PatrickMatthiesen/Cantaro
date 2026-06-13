@@ -16,6 +16,11 @@ export interface PageNavigationItem {
 
 export interface PageNavigationSection {
   title: string;
+  titleAction?: {
+    label: string;
+    to: AppRouteTo;
+    params?: Record<string, string>;
+  };
   items: PageNavigationItem[];
 }
 
@@ -68,9 +73,20 @@ export function PageSideNavigation({
         <div className="mt-8 space-y-8">
           {sections.map((section) => (
             <section key={section.title}>
-              <h2 className="mb-3 text-xs font-black tracking-[0.22em] text-slate-500 uppercase">
-                {section.title}
-              </h2>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="text-xs font-black tracking-[0.22em] text-slate-500 uppercase">
+                  {section.title}
+                </h2>
+                {section.titleAction ? (
+                  <Link
+                    to={section.titleAction.to}
+                    params={section.titleAction.params as never}
+                    className="text-xs font-black text-violet-600 transition hover:text-violet-500"
+                  >
+                    {section.titleAction.label}
+                  </Link>
+                ) : null}
+              </div>
               <div className="space-y-1.5">
                 {section.items.map((item) => {
                   const isActive = isNavigationItemActive(activePathname, item);

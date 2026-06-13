@@ -102,6 +102,7 @@ function createMusicNavigationSections(): PageNavigationSection[] {
     },
     {
       title: 'Platforms',
+      titleAction: { label: 'All', to: '/music/platforms' },
       items: platformCatalog.map((platform) => ({
         label: platform.name,
         to: '/music/platforms/$platformId',
