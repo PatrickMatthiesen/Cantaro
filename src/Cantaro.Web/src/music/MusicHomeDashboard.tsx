@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { platformCatalog, type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
+import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicTrackTable, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
@@ -254,37 +254,6 @@ function MoodPanel() {
   );
 }
 
-function PlatformsPanel() {
-  return (
-    <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-black text-slate-950">Platforms</h2>
-        <span className="text-xs font-black text-slate-400">Sources</span>
-      </div>
-      <div className="space-y-2">
-        {platformCatalog.map((platform) => (
-          <Link
-            key={platform.id}
-            to="/music/platforms/$platformId"
-            params={{ platformId: platform.id }}
-            disabled={!platform.implemented}
-            className="group flex items-center gap-3 rounded-2xl bg-white/62 p-3 text-left transition hover:bg-white aria-disabled:pointer-events-none aria-disabled:opacity-55"
-          >
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br ${platform.gradient} text-sm font-black text-white shadow-[0_12px_26px_rgba(88,74,150,0.14)]`}>
-              {platform.icon}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-black text-slate-950">{platform.name}</p>
-              <p className="text-xs font-semibold text-slate-500">{platform.implemented ? 'Available' : 'Coming soon'}</p>
-            </div>
-            <span className="text-sm font-black text-violet-500 opacity-0 transition group-hover:opacity-100">&gt;</span>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLibrarySong[]) {
   const [activeSongId, setActiveSongId] = useState<string | undefined>();
   const [queuedSongId, setQueuedSongId] = useState<string | undefined>();
@@ -362,7 +331,6 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
           <CompactSongPanel title="Added Recently" songs={songs.slice(0, 5)} />
           <CompactSongPanel title="Old Bangers" songs={[...songs].reverse().slice(0, 5)} ranked />
           <MoodPanel />
-          <PlatformsPanel />
         </aside>
       </div>
     </MusicPageShell>
