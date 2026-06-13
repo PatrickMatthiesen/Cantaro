@@ -18,9 +18,14 @@ import type {
 
 const PRIMARY_PROVIDER_ID = mainMediaProviderId;
 const DEFAULT_PRIMARY_LIST_NAME = 'Watching';
+export type MediaLibraryFilterDefaults = Partial<MediaLibraryQueryParams>;
 
 function storedListNameKey(providerId: string): string {
   return `cantaro.media.provider.${providerId}.lastListName`;
+}
+
+function serializeFilterDefaults(filterDefaults?: MediaLibraryFilterDefaults) {
+  return JSON.stringify(filterDefaults ?? {});
 }
 
 function listNameForProvider(provider: string | undefined): string | undefined {
@@ -82,7 +87,7 @@ function useLibraryDataState() {
   };
 }
 
-function useLibraryFilters(availableListNames: string[]) {
+function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaLibraryFilterDefaults) {
   const initialStoredListNameRef = useRef(readStoredValue(storedListNameKey(PRIMARY_PROVIDER_ID)));
   const hasAppliedInitialListFallbackRef = useRef(Boolean(initialStoredListNameRef.current));
   const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => ({
@@ -92,7 +97,22 @@ function useLibraryFilters(availableListNames: string[]) {
     sortDir: 'desc',
     page: 1,
     pageSize: 24,
+    ...filterDefaults,
   }));
+  const filterDefaultsKey = serializeFilterDefaults(filterDefaults);
+
+  useEffect(() => {
+    if (!filterDefaults) {
+      return;
+    }
+
+    setFilters((prev) => ({
+      ...prev,
+      ...filterDefaults,
+      page: 1,
+      pageSize: prev.pageSize ?? 24,
+    }));
+  }, [filterDefaults, filterDefaultsKey]);
 
   useEffect(() => {
     if (filters.provider !== PRIMARY_PROVIDER_ID) {
@@ -233,10 +253,10 @@ function useProviderRefresh(
   };
 }
 
-export function useMediaLibraryState() {
+export function useMediaLibraryState(filterDefaults?: MediaLibraryFilterDefaults) {
   const libraryData = useLibraryDataState();
   const { availableListNames, loadLibrary } = libraryData;
-  const filterState = useLibraryFilters(availableListNames);
+  const filterState = useLibraryFilters(availableListNames, filterDefaults);
   const filtersRef = useRef(filterState.filters);
 
   useEffect(() => {
