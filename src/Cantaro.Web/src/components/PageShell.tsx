@@ -1,5 +1,6 @@
 import { useRouterState } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
+import { Bell, Menu, Search, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -12,6 +13,45 @@ interface PageShellProps {
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   onSearchSubmit?: () => void;
+}
+
+const drawerFocusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function getDrawerFocusableElements(drawer: HTMLDivElement | null): HTMLElement[] {
+  return Array.from(drawer?.querySelectorAll<HTMLElement>(drawerFocusableSelector) ?? [])
+    .filter((element) => element.offsetParent !== null);
+}
+
+function trapDrawerFocus(event: KeyboardEvent, drawer: HTMLDivElement | null) {
+  const focusableElements = getDrawerFocusableElements(drawer);
+  if (focusableElements.length === 0) return;
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements[focusableElements.length - 1];
+  const shouldMoveToEnd = event.shiftKey && document.activeElement === firstElement;
+  const shouldMoveToStart = !event.shiftKey && document.activeElement === lastElement;
+
+  if (shouldMoveToEnd) {
+    event.preventDefault();
+    lastElement.focus();
+  }
+
+  if (shouldMoveToStart) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+}
+
+function handleDrawerKeyboard(event: KeyboardEvent, drawer: HTMLDivElement | null, onClose: () => void) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    onClose();
+    return;
+  }
+
+  if (event.key === 'Tab') {
+    trapDrawerFocus(event, drawer);
+  }
 }
 
 function TopSearchInput({
@@ -27,27 +67,14 @@ function TopSearchInput({
 }) {
   return (
     <form
-      className="min-w-[220px] flex-1"
+      className="min-w-0 flex-1"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit?.();
       }}
     >
       <label className="relative block">
-        <svg
-          className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-slate-400"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden
-        >
-          <path
-            d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-          />
-        </svg>
+        <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
         <input
           className="h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-4 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
           placeholder={placeholder}
@@ -67,22 +94,21 @@ function NotificationButton() {
       className="flex h-11 w-11 items-center justify-center rounded-full text-slate-700 transition hover:bg-white/70"
       aria-label="Notifications"
     >
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d="M18 8.8a6 6 0 0 0-12 0c0 7.2-3 7.2-3 9.2h18c0-2-3-2-3-9.2Z"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.8"
-        />
-        <path
-          d="M9.8 21a2.4 2.4 0 0 0 4.4 0"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.8"
-        />
-      </svg>
+      <Bell className="h-5 w-5" aria-hidden />
+    </button>
+  );
+}
+
+function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLButtonElement | null>; onClick: () => void }) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/70 text-slate-800 shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-white lg:hidden"
+      aria-label="Open navigation menu"
+      onClick={onClick}
+    >
+      <Menu className="h-5 w-5" aria-hidden />
     </button>
   );
 }
@@ -108,6 +134,8 @@ function PageTopBar({
   onSearchChange,
   onSearchSubmit,
   userEmail,
+  onOpenNavigation,
+  navigationButtonRef,
 }: {
   pathname: string;
   searchPlaceholder: string;
@@ -115,21 +143,86 @@ function PageTopBar({
   onSearchChange?: (value: string) => void;
   onSearchSubmit?: () => void;
   userEmail?: string;
+  onOpenNavigation: () => void;
+  navigationButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-4 backdrop-blur-xl sm:px-8 lg:px-10">
-      <div className="flex flex-wrap items-center gap-4">
-        <AppNavigation pathname={pathname} />
-        <TopSearchInput
-          placeholder={searchPlaceholder}
-          value={searchValue}
-          onChange={onSearchChange}
-          onSubmit={onSearchSubmit}
-        />
-        <NotificationButton />
-        <ProfileButton userEmail={userEmail} />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+        <div className="flex min-w-0 items-center gap-3 lg:hidden">
+          <MobileMenuButton buttonRef={navigationButtonRef} onClick={onOpenNavigation} />
+          <AppNavigation pathname={pathname} />
+        </div>
+        <div className="hidden lg:block">
+          <AppNavigation pathname={pathname} />
+        </div>
+        <div className="flex min-w-0 items-center gap-3 lg:flex-1">
+          <TopSearchInput
+            placeholder={searchPlaceholder}
+            value={searchValue}
+            onChange={onSearchChange}
+            onSubmit={onSearchSubmit}
+          />
+          <div className="flex items-center gap-2">
+            <NotificationButton />
+            <ProfileButton userEmail={userEmail} />
+          </div>
+        </div>
       </div>
     </header>
+  );
+}
+
+function MobileNavigationDrawer({
+  isOpen,
+  onClose,
+  children,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const drawerRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      handleDrawerKeyboard(event, drawerRef.current, onClose);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-950/35 backdrop-blur-sm"
+        aria-label="Close navigation menu"
+        onClick={onClose}
+      />
+      <div ref={drawerRef} className="relative h-full w-[min(86vw,22rem)] overflow-hidden rounded-r-[2rem] bg-[#f7f5ff] shadow-[24px_0_80px_rgba(15,23,42,0.24)]">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          className="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/80 text-slate-700 shadow-[0_12px_34px_rgba(88,74,150,0.08)]"
+          aria-label="Close navigation menu"
+          onClick={onClose}
+        >
+          <X className="h-5 w-5" aria-hidden />
+        </button>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -145,11 +238,24 @@ export function PageShell({
 }: PageShellProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { user } = useAuth();
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
+  const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeMobileNavigation = useCallback(() => {
+    setIsMobileNavigationOpen(false);
+    window.requestAnimationFrame(() => {
+      mobileNavigationButtonRef.current?.focus();
+    });
+  }, []);
+
+  useEffect(() => {
+    setIsMobileNavigationOpen(false);
+  }, [pathname]);
 
   return (
     <div className="min-h-screen bg-[#f7f5ff] text-slate-950">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[272px_1fr]">
-        {sidebar}
+        <div className="hidden lg:block">{sidebar}</div>
 
         <div className="flex min-w-0 flex-col pb-28">
           <PageTopBar
@@ -159,6 +265,8 @@ export function PageShell({
             onSearchChange={onSearchChange}
             onSearchSubmit={onSearchSubmit}
             userEmail={user?.email}
+            navigationButtonRef={mobileNavigationButtonRef}
+            onOpenNavigation={() => setIsMobileNavigationOpen(true)}
           />
 
           <main className={`w-full px-4 py-6 sm:px-8 lg:px-10 ${contentClassName}`}>
@@ -166,6 +274,10 @@ export function PageShell({
           </main>
         </div>
       </div>
+
+      <MobileNavigationDrawer isOpen={isMobileNavigationOpen} onClose={closeMobileNavigation}>
+        {sidebar}
+      </MobileNavigationDrawer>
 
       {bottomSlot}
     </div>

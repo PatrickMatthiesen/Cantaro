@@ -19,6 +19,7 @@ export interface PageNavigationSection {
   titleAction?: {
     label: string;
     to: AppRouteTo;
+    icon?: ReactNode;
     params?: Record<string, string>;
     search?: Record<string, unknown>;
     ariaLabel?: string;
@@ -60,7 +61,7 @@ export function PageSideNavigation({
   footer,
 }: PageSideNavigationProps) {
   return (
-    <aside className="hidden-scrollbar-until-hover sticky top-0 hidden h-screen overflow-y-auto border-r border-[#e8e4fb] bg-white/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl lg:block">
+    <aside className="hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-[#e8e4fb] bg-white/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
       <div className="min-h-full pb-32">
         <Link to="/" className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-600 text-lg font-black text-white shadow-[0_12px_30px_rgba(124,92,255,0.3)]">
@@ -84,9 +85,10 @@ export function PageSideNavigation({
                     to={section.titleAction.to}
                     params={section.titleAction.params as never}
                     search={section.titleAction.search as never}
-                    className="flex h-7 w-7 items-center justify-center rounded-xl text-base leading-none font-black text-violet-600 transition hover:bg-white hover:text-violet-500"
+                    className="flex h-7 items-center justify-center gap-1.5 rounded-xl px-2.5 text-[11px] leading-none font-black text-violet-600 transition hover:bg-white hover:text-violet-500"
                     aria-label={section.titleAction.ariaLabel ?? section.titleAction.label}
                   >
+                    {section.titleAction.icon ? <span className="shrink-0">{section.titleAction.icon}</span> : null}
                     {section.titleAction.label}
                   </Link>
                 ) : null}

@@ -16,7 +16,9 @@
     "check:fallow": "bunx fallow"
   },
   "dependencies": {
+    "@thesvg/react": "^3.0.15",
     "dompurify": "^3.4.5",
+    "lucide-react": "^1.18.0",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
