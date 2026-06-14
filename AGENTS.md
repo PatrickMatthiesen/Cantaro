@@ -2,6 +2,16 @@
 
 This is a media and music library management application.
 
+## Music
+
+The goal for music in Cantaro is to have a unified experience across platforms and sync playlists and libraries across platforms, and to have a web interface for managing the library.
+So if one platform is connected and a playlists is chosen to be synced, then that playlist will be synced to all other platforms that are connected. If a change is made on a platform, then the change will be synced back to Cantaro and out to all other platforms that are connected.
+
+## Media (Movies, TV shows, Anime, etc.)
+
+This is for tracking what episodes and movies have been watched. The browser extension injects into the streaming service and tracks what has been watched, and then syncs that back to Cantaro and out to a provider like Anilist or Trakt.
+The web app then shows all the media based on what has been watched and what is in the library, and allows for searching and filtering of the media.
+
 ## Dev tools
 
 We use Aspire for development, which is a tool that helps with running and managing the application.
