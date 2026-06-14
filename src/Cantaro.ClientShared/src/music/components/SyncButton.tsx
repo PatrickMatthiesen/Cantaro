@@ -3,15 +3,18 @@ import {
   SyncEmptyState,
   SyncLoadingState,
 } from './sync/SyncButtonPanel';
+import { useEffect, useRef } from 'react';
 import { useSyncButtonState } from './sync/useSyncButtonState';
 import type { PlatformId } from '../platforms';
 
 interface SyncButtonProps {
   platformId: PlatformId;
   platformName: string;
+  initiallyShowPlaylistSelector?: boolean;
 }
 
-export function SyncButton({ platformId, platformName }: SyncButtonProps) {
+export function SyncButton({ platformId, platformName, initiallyShowPlaylistSelector = false }: SyncButtonProps) {
+  const hasAppliedInitialPlaylistSelector = useRef(false);
   const {
     syncStatus,
     availablePlaylists,
@@ -35,6 +38,19 @@ export function SyncButton({ platformId, platformName }: SyncButtonProps) {
     handleSync,
     togglePlaylistSelection,
   } = useSyncButtonState(platformId, platformName);
+
+  useEffect(() => {
+    if (
+      initiallyShowPlaylistSelector
+      && !hasAppliedInitialPlaylistSelector.current
+      && !showPlaylistSelector
+      && availablePlaylists.length > 0
+      && canSync
+    ) {
+      hasAppliedInitialPlaylistSelector.current = true;
+      setShowPlaylistSelector(true);
+    }
+  }, [availablePlaylists.length, canSync, initiallyShowPlaylistSelector, setShowPlaylistSelector, showPlaylistSelector]);
 
   if (isLoading) {
     return <SyncLoadingState />;

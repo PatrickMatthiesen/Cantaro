@@ -43,7 +43,14 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-xs font-black tracking-[0.22em] text-slate-500 uppercase">Playlists</h2>
-        <span className="text-lg font-semibold text-slate-500">+</span>
+        <Link
+          to="/music/platforms"
+          search={{ sync: 'playlists' }}
+          className="flex h-7 w-7 items-center justify-center rounded-xl text-lg leading-none font-black text-slate-500 transition hover:bg-white hover:text-violet-600"
+          aria-label="Sync playlists"
+        >
+          +
+        </Link>
       </div>
       <div className="space-y-1.5">
         {playlists.slice(0, 6).map((playlist, index) => (
@@ -102,7 +109,7 @@ function createMusicNavigationSections(): PageNavigationSection[] {
     },
     {
       title: 'Platforms',
-      titleAction: { label: 'All', to: '/music/platforms' },
+      titleAction: { label: '+', to: '/music/platforms', search: { action: 'add-platform' }, ariaLabel: 'Add platform' },
       items: platformCatalog.map((platform) => ({
         label: platform.name,
         to: '/music/platforms/$platformId',

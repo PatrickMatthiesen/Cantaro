@@ -20,6 +20,8 @@ export interface PageNavigationSection {
     label: string;
     to: AppRouteTo;
     params?: Record<string, string>;
+    search?: Record<string, unknown>;
+    ariaLabel?: string;
   };
   items: PageNavigationItem[];
 }
@@ -81,7 +83,9 @@ export function PageSideNavigation({
                   <Link
                     to={section.titleAction.to}
                     params={section.titleAction.params as never}
-                    className="text-xs font-black text-violet-600 transition hover:text-violet-500"
+                    search={section.titleAction.search as never}
+                    className="flex h-7 w-7 items-center justify-center rounded-xl text-base leading-none font-black text-violet-600 transition hover:bg-white hover:text-violet-500"
+                    aria-label={section.titleAction.ariaLabel ?? section.titleAction.label}
                   >
                     {section.titleAction.label}
                   </Link>
