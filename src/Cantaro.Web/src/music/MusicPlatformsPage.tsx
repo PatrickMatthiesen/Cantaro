@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { platformCatalog, platformManager, SyncButton, type PlatformId } from '@cantaro/client-shared/music';
 import { GlassCard, GradientButton, StatusBadge } from '@cantaro/client-shared/ui';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
@@ -207,11 +207,15 @@ function WorkflowNotesCard() {
 export function MusicPlatformsPage() {
   const [showAddPlatformMenu, setShowAddPlatformMenu] = useState(false);
   const addPlatformMenuRef = useRef<HTMLDivElement | null>(null);
+  const routeSearch = useRouterState({
+    select: (state) => state.location.search as { action?: unknown; sync?: unknown },
+  });
   const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
   const hasConnectedAccounts = connectedPlatformIds.length > 0;
   const primaryConnectedPlatform = connectedPlatformIds[0] ?? 'youtube';
   const primaryConnectedPlatformDetails =
     platformCatalog.find((platform) => platform.id === primaryConnectedPlatform) ?? platformCatalog[0];
+  const shouldOpenPlaylistSync = routeSearch.sync === 'playlists';
 
   useEffect(() => {
     const handleDocumentMouseDown = (event: MouseEvent) => {
@@ -223,6 +227,12 @@ export function MusicPlatformsPage() {
     document.addEventListener('mousedown', handleDocumentMouseDown);
     return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
   }, []);
+
+  useEffect(() => {
+    if (routeSearch.action === 'add-platform') {
+      setShowAddPlatformMenu(true);
+    }
+  }, [routeSearch.action]);
 
   const handleSelectPlatform = useCallback(async (platform: (typeof platformCatalog)[number]) => {
     setShowAddPlatformMenu(false);
@@ -266,6 +276,7 @@ export function MusicPlatformsPage() {
               <SyncButton
                 platformId={primaryConnectedPlatform}
                 platformName={primaryConnectedPlatformDetails.name}
+                initiallyShowPlaylistSelector={shouldOpenPlaylistSync}
               />
             ) : (
               <SetupCard />

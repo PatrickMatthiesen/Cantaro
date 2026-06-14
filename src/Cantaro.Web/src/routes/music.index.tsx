@@ -1,7 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
+import { MusicRootPage } from '../pages/MusicPage';
 
 export const Route = createFileRoute('/music/')({
-  beforeLoad: () => {
-    throw redirect({ to: '/music/songs', replace: true });
-  },
+  component: MusicRootPage,
 });
