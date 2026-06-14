@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { musicLibraryApi, type MusicLibraryResponse } from '@cantaro/client-shared/music';
 import { GlassCard } from '@cantaro/client-shared/ui';
 import { MusicPageShell } from './MusicPageShell';
+import { playlistSyncDataRefreshEventName } from './playlistSyncProgress';
 
 function useMusicLibrary() {
   const [library, setLibrary] = useState<MusicLibraryResponse | null>(null);
@@ -23,6 +24,15 @@ function useMusicLibrary() {
 
   useEffect(() => {
     void loadLibrary();
+  }, [loadLibrary]);
+
+  useEffect(() => {
+    const handlePlaylistSyncDataRefresh = () => {
+      void loadLibrary();
+    };
+
+    window.addEventListener(playlistSyncDataRefreshEventName, handlePlaylistSyncDataRefresh);
+    return () => window.removeEventListener(playlistSyncDataRefreshEventName, handlePlaylistSyncDataRefresh);
   }, [loadLibrary]);
 
   return { library, error, isLoading, loadLibrary };

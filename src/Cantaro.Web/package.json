@@ -15,6 +15,7 @@
   "dependencies": {
     "@cantaro/client-shared": "workspace:*",
     "@tanstack/react-router": "^1.170.8",
+    "lucide-react": "^1.18.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },

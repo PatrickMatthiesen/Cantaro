@@ -6,6 +6,7 @@ import { MusicHomeDashboard } from '../music/MusicHomeDashboard';
 import { MusicLibraryPanel } from '../music/MusicLibraryPanel';
 import { MusicPlatformSurface } from '../music/MusicPlatformPage';
 import { MusicPageShell } from '../music/MusicPageShell';
+import { MusicPlaylistSyncSetupPage } from '../music/MusicPlaylistSyncSetupPage';
 import { MusicPlaylistDetailPage } from '../music/MusicPlaylistDetailPage';
 import { MusicPlaylistsDirectory } from '../music/MusicPlaylistsDirectory';
 import { MusicPlatformsPage } from '../music/MusicPlatformsPage';
@@ -76,4 +77,8 @@ export function MusicMatchingPage() {
 
 export function MusicPlatformPage({ platformId, playlistId = null }: { platformId: string; playlistId?: string | null }) {
   return <MusicPlatformSurface platformId={platformId} playlistId={playlistId} />;
+}
+
+export function MusicPlatformSyncSetupPage() {
+  return <MusicPlaylistSyncSetupPage />;
 }

@@ -1,41 +1,20 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { platformCatalog, type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
+import { MusicPlatformIcon, MusicUiIcon, platformCatalog, type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
 import { useEffect, useState, type ReactNode } from 'react';
 import { PageShell } from '../components/PageShell';
 import { PageSideNavigation, type PageNavigationSection } from '../components/PageNavigation';
 import { formatDuration, playlistArtwork, songArtist, songArtwork, visiblePlatformNames } from './musicPresentation';
 
-function PlayerIcon({ children }: { children: ReactNode }) {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-      {children}
-    </svg>
-  );
-}
-
 function PlayIcon() {
-  return (
-    <PlayerIcon>
-      <path d="M8 5.8a1.2 1.2 0 0 1 1.8-1l8.4 6.2a1.2 1.2 0 0 1 0 1.9l-8.4 6.2A1.2 1.2 0 0 1 8 18.2V5.8Z" />
-    </PlayerIcon>
-  );
+  return <MusicUiIcon name="play" className="h-5 w-5 fill-current" />;
 }
 
 function PauseIcon() {
-  return (
-    <PlayerIcon>
-      <path d="M7.5 5a1.2 1.2 0 0 1 1.2-1.2h.8A1.2 1.2 0 0 1 10.7 5v14a1.2 1.2 0 0 1-1.2 1.2h-.8A1.2 1.2 0 0 1 7.5 19V5Z" />
-      <path d="M13.3 5a1.2 1.2 0 0 1 1.2-1.2h.8A1.2 1.2 0 0 1 16.5 5v14a1.2 1.2 0 0 1-1.2 1.2h-.8a1.2 1.2 0 0 1-1.2-1.2V5Z" />
-    </PlayerIcon>
-  );
+  return <MusicUiIcon name="pause" className="h-5 w-5" />;
 }
 
 function StopIcon() {
-  return (
-    <PlayerIcon>
-      <path d="M7 6h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" />
-    </PlayerIcon>
-  );
+  return <MusicUiIcon name="square" className="h-5 w-5 fill-current" />;
 }
 
 function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
@@ -44,12 +23,11 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-xs font-black tracking-[0.22em] text-slate-500 uppercase">Playlists</h2>
         <Link
-          to="/music/platforms"
-          search={{ sync: 'playlists' }}
-          className="flex h-7 w-7 items-center justify-center rounded-xl text-lg leading-none font-black text-slate-500 transition hover:bg-white hover:text-violet-600"
-          aria-label="Sync playlists"
+          to="/music/platforms/sync"
+          className="flex h-7 w-7 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white hover:text-violet-600"
+          aria-label="Create playlist sync"
         >
-          +
+          <MusicUiIcon name="refresh" className="h-3.5 w-3.5" />
         </Link>
       </div>
       <div className="space-y-1.5">
@@ -93,28 +71,39 @@ function createMusicNavigationSections(): PageNavigationSection[] {
     {
       title: 'Music',
       items: [
-        { label: 'Song Browsing', to: '/music/songs', icon: 'S', matchPrefix: '/music/songs' },
-        { label: 'Playlists', to: '/music/playlists', icon: 'P', matchPrefix: '/music/playlists' },
-        { label: 'YouTube', to: '/music/platforms/$platformId', params: { platformId: 'youtube' }, icon: 'Y', matchPrefix: '/music/platforms/youtube' },
-        { label: 'Matching', to: '/music/matching', icon: 'M', matchPrefix: '/music/matching' },
+        { label: 'Song Browsing', to: '/music/songs', icon: <MusicUiIcon name="music" className="h-4 w-4" />, matchPrefix: '/music/songs' },
+        { label: 'Playlists', to: '/music/playlists', icon: <MusicUiIcon name="listMusic" className="h-4 w-4" />, matchPrefix: '/music/playlists' },
+        { label: 'YouTube', to: '/music/platforms/$platformId', params: { platformId: 'youtube' }, icon: <MusicPlatformIcon platformId="youtube" className="h-4 w-4" />, matchPrefix: '/music/platforms/youtube' },
+        { label: 'Matching', to: '/music/matching', icon: <MusicUiIcon name="sparkles" className="h-4 w-4" />, matchPrefix: '/music/matching' },
       ],
     },
     {
       title: 'Discover',
       items: [
-        { label: 'Added Recently', to: '/music/songs', icon: 'A', matchPrefix: '/music/discover/added-recently' },
-        { label: 'Old Bangers', to: '/music/songs', icon: 'O', matchPrefix: '/music/discover/old-bangers' },
-        { label: "Today's Mixtape", to: '/music/songs', icon: 'T', matchPrefix: '/music/discover/todays-mixtape' },
+        { label: 'Added Recently', to: '/music/songs', icon: <MusicUiIcon name="clock" className="h-4 w-4" />, matchPrefix: '/music/discover/added-recently' },
+        { label: 'Old Bangers', to: '/music/songs', icon: <MusicUiIcon name="library" className="h-4 w-4" />, matchPrefix: '/music/discover/old-bangers' },
+        { label: "Today's Mixtape", to: '/music/songs', icon: <MusicUiIcon name="radio" className="h-4 w-4" />, matchPrefix: '/music/discover/todays-mixtape' },
+      ],
+    },
+    {
+      title: 'Tools',
+      items: [
+        { label: 'Playlist Sync', to: '/music/platforms', icon: <MusicUiIcon name="refresh" className="h-4 w-4" />, exact: true },
       ],
     },
     {
       title: 'Platforms',
-      titleAction: { label: '+', to: '/music/platforms', search: { action: 'add-platform' }, ariaLabel: 'Add platform' },
+      titleAction: {
+        label: 'Manage',
+        to: '/music/platforms',
+        icon: <MusicUiIcon name="settings" className="h-3.5 w-3.5" />,
+        ariaLabel: 'Manage platforms',
+      },
       items: platformCatalog.map((platform) => ({
         label: platform.name,
         to: '/music/platforms/$platformId',
         params: { platformId: platform.id },
-        icon: platform.icon,
+        icon: <MusicPlatformIcon platformId={platform.iconId} className="h-4 w-4" />,
         detail: platform.implemented ? 'Available' : 'Coming soon',
         disabled: !platform.implemented,
         matchPrefix: `/music/platforms/${platform.id}`,
