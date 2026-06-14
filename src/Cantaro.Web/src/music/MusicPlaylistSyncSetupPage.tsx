@@ -220,6 +220,105 @@ function SyncSetupMetrics({
   );
 }
 
+function PlaylistPickerHeader({
+  sourcePlatformId,
+  playlists,
+  selectedPlaylistIds,
+  isLoading,
+  onSelectAll,
+}: {
+  sourcePlatformId: PlatformId;
+  playlists: PlatformPlaylist[];
+  selectedPlaylistIds: Set<string>;
+  isLoading: boolean;
+  onSelectAll: () => void;
+}) {
+  const hasSelectedEveryPlaylist = playlists.length > 0 && selectedPlaylistIds.size === playlists.length;
+
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0 flex-1">
+        <h2 className="text-lg font-black text-slate-950">1. Source playlists</h2>
+        <p className="mt-1 text-sm font-semibold text-slate-500">Choose playlists to sync from {platformById.get(sourcePlatformId)?.name}.</p>
+      </div>
+      <button
+        type="button"
+        className="shrink-0 rounded-2xl bg-white px-4 py-2 text-sm font-black whitespace-nowrap text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:text-slate-400"
+        disabled={isLoading || playlists.length === 0}
+        onClick={onSelectAll}
+      >
+        {hasSelectedEveryPlaylist ? 'Clear' : 'Select all'}
+      </button>
+    </div>
+  );
+}
+
+function LoadingPlaylistsState() {
+  return (
+    <div className="flex min-h-56 items-center justify-center rounded-2xl bg-white/60">
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-500">
+        <MusicUiIcon name="loader" className="h-4 w-4 animate-spin" />
+        Loading playlists
+      </div>
+    </div>
+  );
+}
+
+function EmptyPlaylistsState() {
+  return (
+    <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl bg-white/60 text-center">
+      <MusicUiIcon name="listMusic" className="h-9 w-9 text-slate-300" />
+      <p className="mt-2 text-sm font-black text-slate-800">No playlists found</p>
+      <p className="mt-1 text-xs font-semibold text-slate-500">Refresh the platform connection and try again.</p>
+    </div>
+  );
+}
+
+function PlaylistArtworkThumbnail({ playlist, sourcePlatformId }: { playlist: PlatformPlaylist; sourcePlatformId: PlatformId }) {
+  const artwork = playlistArtwork(playlist);
+
+  if (artwork) {
+    return <img src={artwork} alt="" className="h-11 w-11 rounded-xl object-cover" />;
+  }
+
+  return (
+    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
+      <MusicPlatformIcon platformId={sourcePlatformId} className="h-6 w-6" />
+    </span>
+  );
+}
+
+function PlaylistPickerRow({
+  playlist,
+  sourcePlatformId,
+  isSelected,
+  onTogglePlaylist,
+}: {
+  playlist: PlatformPlaylist;
+  sourcePlatformId: PlatformId;
+  isSelected: boolean;
+  onTogglePlaylist: (playlistId: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`grid w-full grid-cols-[auto_44px_1fr] items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition ${
+        isSelected ? 'border-violet-300 bg-white shadow-[0_12px_30px_rgba(88,74,150,0.1)]' : 'border-white/70 bg-white/58 hover:bg-white'
+      }`}
+      onClick={() => onTogglePlaylist(playlist.id)}
+    >
+      <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${isSelected ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>
+        <MusicUiIcon name="squareCheck" className="h-3.5 w-3.5" />
+      </span>
+      <PlaylistArtworkThumbnail playlist={playlist} sourcePlatformId={sourcePlatformId} />
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-black text-slate-900">{playlist.title}</span>
+        <span className="block text-xs font-semibold text-slate-500">{playlist.itemCount.toLocaleString()} songs</span>
+      </span>
+    </button>
+  );
+}
+
 function PlaylistPicker({
   sourcePlatformId,
   playlists,
@@ -237,59 +336,31 @@ function PlaylistPicker({
 }) {
   return (
     <GlassCard className="p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-slate-950">1. Source playlists</h2>
-          <p className="mt-1 text-sm font-semibold text-slate-500">Choose playlists to sync from {platformById.get(sourcePlatformId)?.name}.</p>
-        </div>
-        <button type="button" className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-50" onClick={onSelectAll}>
-          {selectedPlaylistIds.size === playlists.length ? 'Clear' : 'Select all'}
-        </button>
-      </div>
+      <PlaylistPickerHeader
+        sourcePlatformId={sourcePlatformId}
+        playlists={playlists}
+        selectedPlaylistIds={selectedPlaylistIds}
+        isLoading={isLoading}
+        onSelectAll={onSelectAll}
+      />
 
       <div className="mt-4 max-h-[560px] space-y-2 overflow-y-auto pr-1">
         {isLoading ? (
-          <div className="flex min-h-56 items-center justify-center rounded-2xl bg-white/60">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-500">
-              <MusicUiIcon name="loader" className="h-4 w-4 animate-spin" />
-              Loading playlists
-            </div>
-          </div>
+          <LoadingPlaylistsState />
         ) : playlists.length > 0 ? playlists.map((playlist) => {
           const isSelected = selectedPlaylistIds.has(playlist.id);
-          const artwork = playlistArtwork(playlist);
 
           return (
-            <button
+            <PlaylistPickerRow
               key={playlist.id}
-              type="button"
-              className={`grid w-full grid-cols-[auto_44px_1fr] items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition ${
-                isSelected ? 'border-violet-300 bg-white shadow-[0_12px_30px_rgba(88,74,150,0.1)]' : 'border-white/70 bg-white/58 hover:bg-white'
-              }`}
-              onClick={() => onTogglePlaylist(playlist.id)}
-            >
-              <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${isSelected ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>
-                <MusicUiIcon name="squareCheck" className="h-3.5 w-3.5" />
-              </span>
-              {artwork ? (
-                <img src={artwork} alt="" className="h-11 w-11 rounded-xl object-cover" />
-              ) : (
-                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
-                  <MusicPlatformIcon platformId={sourcePlatformId} className="h-6 w-6" />
-                </span>
-              )}
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-black text-slate-900">{playlist.title}</span>
-                <span className="block text-xs font-semibold text-slate-500">{playlist.itemCount.toLocaleString()} songs</span>
-              </span>
-            </button>
+              playlist={playlist}
+              sourcePlatformId={sourcePlatformId}
+              isSelected={isSelected}
+              onTogglePlaylist={onTogglePlaylist}
+            />
           );
         }) : (
-          <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl bg-white/60 text-center">
-            <MusicUiIcon name="listMusic" className="h-9 w-9 text-slate-300" />
-            <p className="mt-2 text-sm font-black text-slate-800">No playlists found</p>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Refresh the platform connection and try again.</p>
-          </div>
+          <EmptyPlaylistsState />
         )}
       </div>
     </GlassCard>
@@ -332,7 +403,7 @@ function RulesPanel({
         <div className="rounded-2xl border border-white/80 bg-white/52 p-4 text-left opacity-65">
           <div className="flex items-center justify-between gap-3">
             <MusicUiIcon name="library" className="h-5 w-5 text-slate-500" />
-            <span className="text-xs font-black text-slate-400">Later</span>
+            <span className="text-xs font-black text-slate-400">Coming Later</span>
           </div>
           <p className="mt-3 text-sm font-black text-slate-900">Update library</p>
           <p className="mt-1 text-xs leading-5 font-semibold text-slate-500">Add tracks without removing existing entries.</p>
@@ -635,7 +706,7 @@ function SyncSetupHeader({
 
 function SyncSetupGrid({ controller }: { controller: SyncSetupController }) {
   return (
-    <main className="grid gap-5 2xl:grid-cols-[360px_minmax(360px,1fr)_440px]">
+    <main className="grid gap-5 2xl:grid-cols-[minmax(420px,1.15fr)_minmax(320px,0.75fr)_minmax(420px,1fr)]">
       <PlaylistPicker
         sourcePlatformId={controller.sourcePlatformId}
         playlists={controller.playlists}
