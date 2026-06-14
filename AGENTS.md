@@ -4,6 +4,7 @@ This is a media and music library management application.
 
 ## Dev tools
 
+We use Aspire for development, which is a tool that helps with running and managing the application.
 We use dotnet for the backend and bun with Vite, React, TypeScript, Tailwind and Tanstack router for the frontend.
 
 ### Running the application
