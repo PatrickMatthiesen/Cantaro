@@ -46,7 +46,10 @@ builder.Services
 builder.Services.AddScoped<TokenEncryptionService>();
 builder.Services.AddScoped<YouTubeService>();
 builder.Services.AddScoped<YouTubePlaylistSyncService>();
+builder.Services.AddHttpClient<SpotifyService>();
+builder.Services.AddScoped<SpotifyPlaylistSyncService>();
 builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
+builder.Services.AddScoped<IPlatformService, SpotifyPlatformService>();
 builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
 builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();

@@ -171,7 +171,7 @@ function SourcePlatformSelector({
       </div>
       {connectedSourcePlatforms.length === 0 ? (
         <div className="mt-3 rounded-2xl bg-white/70 p-4 text-sm font-semibold text-slate-500">
-          Connect YouTube Music first, then return here to choose source playlists.
+          Connect a music platform first, then return here to choose source playlists.
         </div>
       ) : null}
     </GlassCard>

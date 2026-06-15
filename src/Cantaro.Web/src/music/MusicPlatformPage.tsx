@@ -1,11 +1,11 @@
-import { platformCatalog } from '@cantaro/client-shared/music';
+import { platformCatalog, type PlatformId } from '@cantaro/client-shared/music';
 import { GlassCard } from '@cantaro/client-shared/ui';
 import { MusicPageShell } from './MusicPageShell';
 import { YouTubeMusicPlatformPage } from './YouTubeMusicPlatformPage';
 
 export function MusicPlatformSurface({ platformId, playlistId = null }: { platformId: string; playlistId?: string | null }) {
-  if (platformId === 'youtube') {
-    return <YouTubeMusicPlatformPage playlistId={playlistId} />;
+  if (platformId === 'youtube' || platformId === 'spotify') {
+    return <YouTubeMusicPlatformPage platformId={platformId as PlatformId} playlistId={playlistId} />;
   }
 
   const platform = platformCatalog.find((item) => item.id === platformId);

@@ -4,6 +4,7 @@ export {
   YouTubePlaylistBrowser,
   YouTubePlaylistDetailView,
 } from './components/youtube/YouTubePlaylistViews';
+export { usePlatformPlaylistsState } from './components/usePlatformPlaylistsState';
 export { useYouTubePlaylistsState } from './components/youtube/useYouTubePlaylistsState';
 export * from './platforms';
 export * from './platforms/catalog';
