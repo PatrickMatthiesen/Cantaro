@@ -48,6 +48,7 @@ artifacts/
 node_modules/
 dist/
 .fallow/
+src/Cantaro.Web/.tanstack/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
