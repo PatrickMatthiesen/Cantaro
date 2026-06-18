@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useYouTubePlaylistsState, type PlatformPlaylist, type PlatformSong } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
+import { useMusicQueue } from './useMusicQueue';
 import { MusicPageShell } from './MusicPageShell';
 
 type PlaylistRouteSyncAction =
@@ -217,16 +218,14 @@ function YouTubePlaylistGrid({
   );
 }
 
-function mapPlatformSongToTrack(item: PlatformSong, activeTrackId?: string): MusicCollectionTrack {
+function mapPlatformSongToTrack(item: PlatformSong): MusicCollectionTrack {
   return {
     id: item.id,
     title: item.title,
     artist: item.artistName ?? 'YouTube',
-    album: 'YouTube',
     artworkUrl: item.thumbnailUrl,
     addedLabel: item.publishedAt,
-    platformNames: ['YouTube'],
-    isPlaying: item.id === activeTrackId,
+    platformIds: ['youtube'],
   };
 }
 
@@ -254,40 +253,9 @@ function YouTubePlaylistDetail({
   isLoadingItems: boolean;
   playlists: PlatformPlaylist[];
 }) {
-  const [activeTrackId, setActiveTrackId] = useState<string | undefined>();
-  const [queuedTrackId, setQueuedTrackId] = useState<string | undefined>();
-
-  useEffect(() => {
-    setActiveTrackId(undefined);
-    setQueuedTrackId(undefined);
-  }, [playlist.id]);
-
-  const tracks = playlistItems.map((item) => mapPlatformSongToTrack(item, activeTrackId));
-  const activeTrack = tracks.find((track) => track.id === activeTrackId);
-  const queuedTrack = tracks.find((track) => track.id === queuedTrackId);
-  const trackIds = tracks.map((track) => track.id);
-
-  const playTrack = (track: MusicCollectionTrack) => {
-    setActiveTrackId(track.id);
-  };
-
-  const queueTrack = (track: MusicCollectionTrack) => {
-    setQueuedTrackId(track.id);
-  };
-
-  const clearQueue = () => {
-    setActiveTrackId(undefined);
-    setQueuedTrackId(undefined);
-  };
-
-  const playFirstTrack = () => {
-    setActiveTrackId(trackIds[0]);
-  };
-
-  const playRandomTrack = () => {
-    if (trackIds.length === 0) return;
-    setActiveTrackId(trackIds[Math.floor(Math.random() * trackIds.length)]);
-  };
+  const baseTracks = playlistItems.map(mapPlatformSongToTrack);
+  const queue = useMusicQueue(baseTracks, playlist.id);
+  const tracks = baseTracks.map((track) => ({ ...track, isPlaying: track.id === queue.activeTrackId }));
 
   return (
     <MusicCollectionDetailPage
@@ -305,14 +273,14 @@ function YouTubePlaylistDetail({
       tracks={tracks}
       isLoadingTracks={isLoadingItems}
       emptyTrackLabel="This playlist has no items yet"
-      activeTrack={activeTrack}
-      queuedTrack={queuedTrack}
+      activeTrack={queue.activeTrack}
+      queuedTracks={queue.queuedTracks}
       suggestions={getPlatformSuggestions(playlists, playlist.id)}
-      onPlayAll={playFirstTrack}
-      onShuffle={playRandomTrack}
-      onPlayTrack={playTrack}
-      onQueueTrack={queueTrack}
-      onClearQueue={clearQueue}
+      onPlayAll={queue.playAll}
+      onShuffle={queue.shuffle}
+      onPlayTrack={queue.playTrack}
+      onQueueTrack={queue.queueTrack}
+      onClearQueue={queue.clearQueue}
     />
   );
 }

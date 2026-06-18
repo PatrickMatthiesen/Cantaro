@@ -13,6 +13,7 @@ export interface MusicLibrarySong {
   id: string;
   title: string;
   artist?: string;
+  albums: string[];
   thumbnailUrl?: string;
   durationSeconds?: number;
   matchStatus?: string;

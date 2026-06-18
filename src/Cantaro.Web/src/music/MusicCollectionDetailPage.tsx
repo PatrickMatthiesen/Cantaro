@@ -1,16 +1,19 @@
 import { Link } from '@tanstack/react-router';
 import { type ReactNode } from 'react';
-import { formatDuration, formatTimestamp } from './musicPresentation';
+import { MusicPlatformIcon, type PlatformId } from '@cantaro/client-shared/music';
+import { MusicUpNextPanel } from './MusicUpNextPanel';
+import { formatDuration, formatTimestamp, platformName } from './musicPresentation';
 
 export interface MusicCollectionTrack {
   id: string;
+  detailSongId?: string;
   title: string;
   artist?: string;
-  album?: string;
+  albums?: string[];
   artworkUrl?: string;
   durationSeconds?: number;
   addedLabel?: string;
-  platformNames?: string[];
+  platformIds?: PlatformId[];
   isPlaying?: boolean;
 }
 
@@ -41,7 +44,7 @@ interface MusicCollectionDetailPageProps {
   isLoadingTracks?: boolean;
   emptyTrackLabel: string;
   activeTrack?: MusicCollectionTrack;
-  queuedTrack?: MusicCollectionTrack;
+  queuedTracks?: MusicCollectionTrack[];
   rightRailTitle?: string;
   suggestions?: MusicCollectionSuggestion[];
   actionSlot?: ReactNode;
@@ -157,11 +160,9 @@ function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: nu
 function TrackHoverControls({
   track,
   onPlayTrack,
-  onQueueTrack,
 }: {
   track: MusicCollectionTrack;
   onPlayTrack?: (track: MusicCollectionTrack) => void;
-  onQueueTrack?: (track: MusicCollectionTrack) => void;
 }) {
   return (
     <span className="absolute left-0 flex items-center gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
@@ -175,16 +176,6 @@ function TrackHoverControls({
           <PlayIcon />
         </button>
       ) : null}
-      {onQueueTrack ? (
-        <button
-          type="button"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white text-violet-700 shadow-[0_8px_18px_rgba(88,74,150,0.14)] transition hover:text-violet-500"
-          aria-label={`Add ${track.title} up next`}
-          onClick={() => onQueueTrack(track)}
-        >
-          <QueueIcon />
-        </button>
-      ) : null}
     </span>
   );
 }
@@ -193,21 +184,19 @@ function TrackNumber({
   track,
   index,
   onPlayTrack,
-  onQueueTrack,
 }: {
   track: MusicCollectionTrack;
   index: number;
   onPlayTrack?: (track: MusicCollectionTrack) => void;
-  onQueueTrack?: (track: MusicCollectionTrack) => void;
 }) {
-  const hasTrackControls = Boolean(onPlayTrack || onQueueTrack);
+  const hasTrackControls = Boolean(onPlayTrack);
 
   return (
     <span className="relative flex h-9 items-center">
       <span className={`font-mono text-xs transition group-focus-within:opacity-0 group-hover:opacity-0 ${track.isPlaying ? 'font-black text-violet-600' : 'text-slate-500'}`}>
         {track.isPlaying ? '||' : index + 1}
       </span>
-      {hasTrackControls ? <TrackHoverControls track={track} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} /> : null}
+      {hasTrackControls ? <TrackHoverControls track={track} onPlayTrack={onPlayTrack} /> : null}
     </span>
   );
 }
@@ -245,38 +234,83 @@ function MoreTrackActions({
   );
 }
 
+function TrackIdentity({ track, index, artist }: { track: MusicCollectionTrack; index: number; artist: string }) {
+  const content = (
+    <>
+      <TrackArtwork track={track} index={index} />
+      <span className="min-w-0">
+        <span className="block truncate font-black text-slate-950">
+          {track.title}
+          <NowPlayingBadge isPlaying={track.isPlaying} />
+        </span>
+        <span className="block truncate text-xs font-semibold text-slate-500 xl:hidden">{artist}</span>
+      </span>
+    </>
+  );
+
+  if (!track.detailSongId) {
+    return <div className="flex min-w-0 items-center gap-3">{content}</div>;
+  }
+
+  return (
+    <Link
+      to="/music/songs/$songId"
+      params={{ songId: track.detailSongId }}
+      className="group/identity flex min-w-0 items-center gap-3 rounded-xl focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+    >
+      {content}
+    </Link>
+  );
+}
+
+function TrackPlatforms({ platformIds = [] }: { platformIds?: PlatformId[] }) {
+  if (platformIds.length === 0) {
+    return <span className="text-xs font-semibold text-slate-400">-</span>;
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      {platformIds.map((platformId) => (
+        <span key={platformId} className="inline-flex items-center justify-center" title={platformName(platformId)}>
+          <MusicPlatformIcon platformId={platformId} className="h-5 w-5" title={platformName(platformId)} />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function trackGridClassName(showAlbums: boolean) {
+  return showAlbums
+    ? 'grid-cols-[72px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.1fr)_110px_82px_54px]'
+    : 'grid-cols-[72px_minmax(0,2fr)_minmax(0,1.1fr)_110px_82px_54px]';
+}
+
 function TrackRow({
   track,
   index,
+  showAlbums,
   onPlayTrack,
   onQueueTrack,
 }: {
   track: MusicCollectionTrack;
   index: number;
+  showAlbums: boolean;
   onPlayTrack?: (track: MusicCollectionTrack) => void;
   onQueueTrack?: (track: MusicCollectionTrack) => void;
 }) {
   const artist = track.artist ?? 'Unknown artist';
-  const album = track.album ?? track.platformNames?.join(', ') ?? 'Cantaro';
+  const albums = track.albums?.join(', ') ?? '';
   const rowStateClassName = track.isPlaying ? 'bg-[#eeeaff]/75' : 'hover:bg-white/56';
 
   return (
     <li
-      className={`group grid grid-cols-[72px_minmax(0,2.1fr)_minmax(0,1.1fr)_minmax(0,1fr)_92px_54px] items-center gap-3 px-5 py-3 text-sm text-slate-700 max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${rowStateClassName}`}
+      className={`group grid items-center gap-3 px-5 py-3 text-sm text-slate-700 max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
     >
-      <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
-      <div className="flex min-w-0 items-center gap-3">
-        <TrackArtwork track={track} index={index} />
-        <div className="min-w-0">
-          <p className="truncate font-black text-slate-950">
-            {track.title}
-            <NowPlayingBadge isPlaying={track.isPlaying} />
-          </p>
-          <p className="truncate text-xs font-semibold text-slate-500 xl:hidden">{artist}</p>
-        </div>
-      </div>
+      <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} />
+      <TrackIdentity track={track} index={index} artist={artist} />
       <span className="truncate font-medium max-xl:hidden">{artist}</span>
-      <span className="truncate font-medium max-xl:hidden">{album}</span>
+      {showAlbums ? <span className="truncate font-medium max-xl:hidden" title={albums}>{albums || '-'}</span> : null}
+      <span className="max-xl:hidden"><TrackPlatforms platformIds={track.platformIds} /></span>
       <span className="font-mono text-xs text-slate-600">{formatDuration(track.durationSeconds)}</span>
       <MoreTrackActions title={track.title} track={track} onQueueTrack={onQueueTrack} />
     </li>
@@ -315,89 +349,24 @@ export function MusicTrackTable({
     );
   }
 
+  const showAlbums = tracks.some((track) => (track.albums?.length ?? 0) > 0);
+
   return (
     <section className="overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/42 shadow-[0_20px_70px_rgba(88,74,150,0.07)] backdrop-blur">
-      <div className="grid grid-cols-[72px_minmax(0,2.1fr)_minmax(0,1.1fr)_minmax(0,1fr)_92px_54px] gap-3 border-b border-[#e8e3fa] px-5 py-3 text-[0.68rem] font-black tracking-[0.14em] text-slate-500 uppercase max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px]">
+      <div className={`grid gap-3 border-b border-[#e8e3fa] px-5 py-3 text-[0.68rem] font-black tracking-[0.14em] text-slate-500 uppercase max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)}`}>
         <span>#</span>
         <span>Title</span>
         <span className="max-xl:hidden">Artist</span>
-        <span className="max-xl:hidden">Album</span>
+        {showAlbums ? <span className="max-xl:hidden">Albums</span> : null}
+        <span className="max-xl:hidden">Platforms</span>
         <span>Time</span>
         <span />
       </div>
       <ol className="divide-y divide-[#eeeafa]">
         {tracks.map((track, index) => (
-          <TrackRow key={track.id} track={track} index={index} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
+          <TrackRow key={track.id} track={track} index={index} showAlbums={showAlbums} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
         ))}
       </ol>
-    </section>
-  );
-}
-
-function RailTrackCard({
-  track,
-  label,
-  labelClassName,
-  index,
-  className,
-}: {
-  track: MusicCollectionTrack;
-  label: string;
-  labelClassName: string;
-  index: number;
-  className: string;
-}) {
-  return (
-    <div className={`flex items-center gap-3 rounded-2xl p-2 ${className}`}>
-      <TrackArtwork track={track} index={index} />
-      <div className="min-w-0 flex-1">
-        <p className={`text-[0.62rem] font-black tracking-[0.14em] uppercase ${labelClassName}`}>{label}</p>
-        <p className="truncate text-sm font-black text-slate-950">{track.title}</p>
-        <p className="truncate text-xs font-semibold text-slate-500">{track.artist ?? 'Unknown artist'}</p>
-      </div>
-      <span className="font-mono text-xs text-slate-500">{formatDuration(track.durationSeconds)}</span>
-    </div>
-  );
-}
-
-function CurrentQueuePanel({
-  activeTrack,
-  queuedTrack,
-  rightRailTitle,
-  onClearQueue,
-}: {
-  activeTrack?: MusicCollectionTrack;
-  queuedTrack?: MusicCollectionTrack;
-  rightRailTitle?: string;
-  onClearQueue?: () => void;
-}) {
-  const hasQueue = Boolean(activeTrack || queuedTrack);
-
-  return (
-    <section className="rounded-[1.75rem] border border-white/62 bg-white/48 p-5 shadow-[0_18px_60px_rgba(88,74,150,0.07)] backdrop-blur">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-black text-slate-950">{rightRailTitle ?? 'Up Next'}</h2>
-        {onClearQueue ? (
-          <button
-            type="button"
-            className="text-xs font-black text-violet-600 transition hover:text-violet-500 disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={!hasQueue}
-            onClick={onClearQueue}
-          >
-            Clear
-          </button>
-        ) : null}
-      </div>
-      <div className="mt-4 space-y-3">
-        {activeTrack ? (
-          <RailTrackCard track={activeTrack} label="Now playing" labelClassName="text-violet-600" index={0} className="bg-white/54" />
-        ) : (
-          <p className="text-sm font-medium text-slate-500">Pick a track to start the queue.</p>
-        )}
-        {queuedTrack ? (
-          <RailTrackCard track={queuedTrack} label="Up next" labelClassName="text-slate-500" index={1} className="bg-[#f7f4ff]" />
-        ) : null}
-      </div>
     </section>
   );
 }
@@ -479,23 +448,23 @@ function SuggestionsPanel({ suggestions, className = '' }: { suggestions?: Music
 
 function RightRail({
   activeTrack,
-  queuedTrack,
+  queuedTracks = [],
   rightRailTitle,
   suggestions,
   onClearQueue,
 }: {
   activeTrack?: MusicCollectionTrack;
-  queuedTrack?: MusicCollectionTrack;
+  queuedTracks?: MusicCollectionTrack[];
   rightRailTitle?: string;
   suggestions?: MusicCollectionSuggestion[];
   onClearQueue?: () => void;
 }) {
   return (
     <aside className="space-y-4">
-      <CurrentQueuePanel
+      <MusicUpNextPanel
         activeTrack={activeTrack}
-        queuedTrack={queuedTrack}
-        rightRailTitle={rightRailTitle}
+        queuedTracks={queuedTracks}
+        title={rightRailTitle}
         onClearQueue={onClearQueue}
       />
       <SuggestionsPanel suggestions={suggestions} className="hidden 2xl:block" />
@@ -581,7 +550,7 @@ export function MusicCollectionDetailPage({
   isLoadingTracks,
   emptyTrackLabel,
   activeTrack,
-  queuedTrack,
+  queuedTracks,
   rightRailTitle,
   suggestions,
   actionSlot,
@@ -631,7 +600,7 @@ export function MusicCollectionDetailPage({
 
         <RightRail
           activeTrack={activeTrack}
-          queuedTrack={queuedTrack}
+          queuedTracks={queuedTracks}
           rightRailTitle={rightRailTitle}
           suggestions={suggestions}
           onClearQueue={onClearQueue}

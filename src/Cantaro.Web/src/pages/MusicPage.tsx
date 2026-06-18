@@ -10,6 +10,7 @@ import { MusicPlaylistSyncSetupPage } from '../music/MusicPlaylistSyncSetupPage'
 import { MusicPlaylistDetailPage } from '../music/MusicPlaylistDetailPage';
 import { MusicPlaylistsDirectory } from '../music/MusicPlaylistsDirectory';
 import { MusicPlatformsPage } from '../music/MusicPlatformsPage';
+import { MusicSongDetailPage } from '../music/MusicSongPages';
 import { useConnectedMusicPlatforms } from '../music/useConnectedMusicPlatforms';
 
 export function MusicLayout() {
@@ -24,6 +25,14 @@ export function MusicSongsPage() {
   return (
     <MusicLibraryPanel>
       {(library) => <MusicHomeDashboard library={library} />}
+    </MusicLibraryPanel>
+  );
+}
+
+export function MusicSongPage({ songId }: { songId: string }) {
+  return (
+    <MusicLibraryPanel>
+      {(library) => <MusicSongDetailPage library={library} songId={songId} />}
     </MusicLibraryPanel>
   );
 }

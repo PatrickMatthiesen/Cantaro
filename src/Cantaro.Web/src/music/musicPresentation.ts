@@ -1,4 +1,4 @@
-import { platformCatalog, type MusicLibraryPlaylist, type MusicLibrarySong } from '@cantaro/client-shared/music';
+import { platformCatalog, type MusicLibraryPlaylist, type MusicLibrarySong, type PlatformId } from '@cantaro/client-shared/music';
 
 export const fallbackArtwork = [
   'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=640&q=80',
@@ -42,6 +42,11 @@ export function visiblePlatformNames(song: MusicLibrarySong): string[] {
     .map(platformName);
 
   return names.length > 0 ? names : ['Library'];
+}
+
+export function visiblePlatformIds(song: MusicLibrarySong): PlatformId[] {
+  return song.sourcePlatforms.filter((source): source is PlatformId =>
+    platformCatalog.some((platform) => platform.id === source));
 }
 
 export function songArtwork(song: MusicLibrarySong, index = 0): string {
