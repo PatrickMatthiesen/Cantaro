@@ -78,6 +78,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             Id = group.Key,
             Title = metadata.Title,
             Artist = metadata.Artist,
+            Albums = metadata.Albums,
             ThumbnailUrl = metadata.ThumbnailUrl,
             DurationSeconds = metadata.DurationSeconds,
             MatchStatus = metadata.MatchStatus == TrackMatchingStatuses.Matched ? null : metadata.MatchStatus,
@@ -117,6 +118,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         return new SongMetadata(
             title,
             artist,
+            (canonicalMetadata?.Albums ?? [])
+                .Where(album => !string.IsNullOrWhiteSpace(album))
+                .Select(album => album.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             FirstNonEmpty(canonicalMetadata?.ThumbnailUrl, observation?.ThumbnailUrl, observationMetadata?.ThumbnailUrl),
             canonicalMetadata?.DurationSeconds ?? observation?.DurationSeconds ?? observationMetadata?.DurationSeconds,
             observation?.MatchStatus ?? (entry.TrackId is not null ? TrackMatchingStatuses.Matched : null));
@@ -181,5 +187,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
     }
 
     private sealed record MusicLibraryEntryContext(Playlist Playlist, PlaylistEntry Entry);
-    private sealed record SongMetadata(string Title, string? Artist, string? ThumbnailUrl, int? DurationSeconds, string? MatchStatus);
+    private sealed record SongMetadata(
+        string Title,
+        string? Artist,
+        List<string> Albums,
+        string? ThumbnailUrl,
+        int? DurationSeconds,
+        string? MatchStatus);
 }

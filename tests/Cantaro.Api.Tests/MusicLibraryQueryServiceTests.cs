@@ -40,6 +40,7 @@ public class MusicLibraryQueryServiceTests
             {
                 Title = "Canonical Song",
                 Artist = "Canonical Artist",
+                Albums = ["Studio Album", "Anniversary Edition"],
                 ThumbnailUrl = "https://img.example/song.jpg",
                 DurationSeconds = 214
             }),
@@ -79,6 +80,7 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal($"track:{track.Id}", song.Id);
         Assert.Equal("Canonical Song", song.Title);
         Assert.Equal("Canonical Artist", song.Artist);
+        Assert.Equal(["Studio Album", "Anniversary Edition"], song.Albums);
         Assert.Null(song.MatchStatus);
         Assert.Equal(["musicbrainz", "youtube"], song.SourcePlatforms);
         Assert.Equal(2, song.Playlists.Count);
@@ -130,6 +132,7 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal("https://img.example/video.jpg", song.ThumbnailUrl);
         Assert.Equal(189, song.DurationSeconds);
         Assert.Equal(TrackMatchingStatuses.Ambiguous, song.MatchStatus);
+        Assert.Empty(song.Albums);
         Assert.Equal(["youtube"], song.SourcePlatforms);
     }
 

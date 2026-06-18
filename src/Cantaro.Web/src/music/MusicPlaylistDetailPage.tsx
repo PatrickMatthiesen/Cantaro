@@ -1,9 +1,9 @@
-import { useState } from 'react';
 import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { platformName, playlistArtwork, songArtist, songArtwork, visiblePlatformNames } from './musicPresentation';
+import { useMusicQueue } from './useMusicQueue';
+import { platformName, playlistArtwork, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
 
 function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
   return library.songs
@@ -23,19 +23,17 @@ function getLastSyncedAt(playlist: MusicLibraryPlaylist) {
     .at(-1);
 }
 
-function mapSongToCollectionTrack(song: MusicLibrarySong, index: number, activeSongId?: string): MusicCollectionTrack {
-  const platforms = visiblePlatformNames(song);
-
+function mapSongToCollectionTrack(song: MusicLibrarySong, index: number): MusicCollectionTrack {
   return {
     id: song.id,
+    detailSongId: song.id,
     title: song.title,
     artist: songArtist(song),
-    album: platforms.join(', '),
+    albums: song.albums,
     artworkUrl: songArtwork(song, index),
     durationSeconds: song.durationSeconds,
     addedLabel: song.playlists[0]?.playlistName,
-    platformNames: platforms,
-    isPlaying: song.id === activeSongId,
+    platformIds: visiblePlatformIds(song),
   };
 }
 
@@ -59,9 +57,10 @@ export function MusicPlaylistDetailPage({
   library: MusicLibraryResponse;
   playlistId: string;
 }) {
-  const [activeSongId, setActiveSongId] = useState<string | undefined>();
-  const [queuedSongId, setQueuedSongId] = useState<string | undefined>();
   const playlist = library.playlists.find((item) => item.id === playlistId);
+  const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
+  const baseTracks = playlistSongEntries.map(({ song }, index) => mapSongToCollectionTrack(song, index));
+  const queue = useMusicQueue(baseTracks, playlistId);
 
   if (!playlist) {
     return (
@@ -71,38 +70,12 @@ export function MusicPlaylistDetailPage({
     );
   }
 
-  const playlistSongEntries = getPlaylistSongs(library, playlistId);
-  const activeSong = playlistSongEntries.find(({ song }) => song.id === activeSongId)?.song;
-  const tracks = playlistSongEntries.map(({ song }, index) => mapSongToCollectionTrack(song, index, activeSongId));
-  const activeTrack = tracks.find((track) => track.id === activeSongId);
-  const queuedTrack = tracks.find((track) => track.id === queuedSongId);
+  const activeSong = playlistSongEntries.find(({ song }) => song.id === queue.activeTrackId)?.song;
+  const tracks = baseTracks.map((track) => ({ ...track, isPlaying: track.id === queue.activeTrackId }));
   const chips = playlist.services.length > 0 ? playlist.services.map((service) => platformName(service.service)) : ['Cantaro'];
-  const trackIds = tracks.map((track) => track.id);
-
-  const playTrack = (track: MusicCollectionTrack) => {
-    setActiveSongId(track.id);
-  };
-
-  const queueTrack = (track: MusicCollectionTrack) => {
-    setQueuedSongId(track.id);
-  };
-
-  const clearQueue = () => {
-    setActiveSongId(undefined);
-    setQueuedSongId(undefined);
-  };
-
-  const playFirstTrack = () => {
-    setActiveSongId(trackIds[0]);
-  };
-
-  const playRandomTrack = () => {
-    if (trackIds.length === 0) return;
-    setActiveSongId(trackIds[Math.floor(Math.random() * trackIds.length)]);
-  };
 
   return (
-    <MusicPageShell library={library} activeSong={activeSong} onStopActiveSong={() => setActiveSongId(undefined)}>
+    <MusicPageShell library={library} activeSong={activeSong} onStopActiveSong={queue.stop}>
       <MusicCollectionDetailPage
         eyebrow="Playlist"
         title={playlist.name}
@@ -116,14 +89,14 @@ export function MusicPlaylistDetailPage({
         chips={chips}
         tracks={tracks}
         emptyTrackLabel="This playlist has no songs yet"
-        activeTrack={activeTrack}
-        queuedTrack={queuedTrack}
+        activeTrack={queue.activeTrack}
+        queuedTracks={queue.queuedTracks}
         suggestions={getSuggestions(library, playlist.id)}
-        onPlayAll={playFirstTrack}
-        onShuffle={playRandomTrack}
-        onPlayTrack={playTrack}
-        onQueueTrack={queueTrack}
-        onClearQueue={clearQueue}
+        onPlayAll={queue.playAll}
+        onShuffle={queue.shuffle}
+        onPlayTrack={queue.playTrack}
+        onQueueTrack={queue.queueTrack}
+        onClearQueue={queue.clearQueue}
       />
     </MusicPageShell>
   );

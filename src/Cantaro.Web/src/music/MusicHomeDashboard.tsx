@@ -4,6 +4,8 @@ import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrary
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicTrackTable, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
+import { MusicUpNextPanel } from './MusicUpNextPanel';
+import { useMusicQueue } from './useMusicQueue';
 import {
   fallbackArtwork,
   formatDuration,
@@ -11,7 +13,7 @@ import {
   playlistGradients,
   songArtist,
   songArtwork,
-  visiblePlatformNames,
+  visiblePlatformIds,
 } from './musicPresentation';
 
 const moodTiles = [
@@ -148,16 +150,16 @@ function PlaylistStrip({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
   );
 }
 
-function mapSongToTrack(song: MusicLibrarySong, index: number, activeSongId?: string): MusicCollectionTrack {
+function mapSongToTrack(song: MusicLibrarySong, index: number): MusicCollectionTrack {
   return {
     id: song.id,
+    detailSongId: song.id,
     title: song.title,
     artist: songArtist(song),
-    album: visiblePlatformNames(song).join(', '),
+    albums: song.albums,
     artworkUrl: songArtwork(song, index),
     durationSeconds: song.durationSeconds,
-    platformNames: visiblePlatformNames(song),
-    isPlaying: song.id === activeSongId,
+    platformIds: visiblePlatformIds(song),
   };
 }
 
@@ -217,8 +219,11 @@ function CompactSongPanel({
       </div>
       <div className="space-y-3">
         {songs.length > 0 ? songs.map((song, index) => (
-          <div key={song.id} className="grid grid-cols-[auto_44px_1fr_auto] items-center gap-3">
-            {ranked ? <span className="w-4 text-sm font-black text-slate-500">{index + 1}</span> : null}
+          <div
+            key={song.id}
+            className={`grid items-center gap-3 ${ranked ? 'grid-cols-[20px_44px_minmax(0,1fr)_auto]' : 'grid-cols-[44px_minmax(0,1fr)_auto]'}`}
+          >
+            {ranked ? <span className="text-sm font-black text-slate-500">{index + 1}</span> : null}
             <img src={songArtwork(song, index)} alt="" className="h-11 w-11 rounded-xl object-cover" />
             <div className="min-w-0">
               <p className="truncate text-sm font-black text-slate-950">{song.title}</p>
@@ -255,33 +260,27 @@ function MoodPanel() {
 }
 
 function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLibrarySong[]) {
-  const [activeSongId, setActiveSongId] = useState<string | undefined>();
-  const [queuedSongId, setQueuedSongId] = useState<string | undefined>();
-  const activeSong = songs.find((song) => song.id === activeSongId);
-  const queuedSong = songs.find((song) => song.id === queuedSongId);
+  const allTracks = songs.map(mapSongToTrack);
+  const queue = useMusicQueue(allTracks);
+  const activeSong = songs.find((song) => song.id === queue.activeTrackId);
 
   return {
     activeSong,
-    queuedSong,
-    tracks: filteredSongs.map((song, index) => mapSongToTrack(song, index, activeSongId)),
-    playTrack: (track: MusicCollectionTrack) => setActiveSongId(track.id),
-    playSong: (song: MusicLibrarySong) => setActiveSongId(song.id),
-    queueTrack: (track: MusicCollectionTrack) => setQueuedSongId(track.id),
-    stopTrack: () => setActiveSongId(undefined),
+    activeTrack: queue.activeTrack,
+    queuedTracks: queue.queuedTracks,
+    tracks: filteredSongs.map((song, index) => ({
+      ...mapSongToTrack(song, index),
+      isPlaying: song.id === queue.activeTrackId,
+    })),
+    playTrack: queue.playTrack,
+    playSong: (song: MusicLibrarySong) => {
+      const track = allTracks.find((candidate) => candidate.id === song.id);
+      if (track) queue.playTrack(track);
+    },
+    queueTrack: queue.queueTrack,
+    clearQueue: queue.clearQueue,
+    stopTrack: queue.stop,
   };
-}
-
-function CurrentPlaybackPanel({
-  activeSong,
-  queuedSong,
-}: {
-  activeSong?: MusicLibrarySong;
-  queuedSong?: MusicLibrarySong;
-}) {
-  const songs = [activeSong, queuedSong].filter((song): song is MusicLibrarySong => Boolean(song));
-  if (songs.length === 0) return null;
-
-  return <CompactSongPanel title={activeSong ? 'Now Playing' : 'Up Next'} songs={songs} />;
 }
 
 export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse }) {
@@ -327,7 +326,11 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
         </div>
 
         <aside className="space-y-5">
-          <CurrentPlaybackPanel activeSong={playback.activeSong} queuedSong={playback.queuedSong} />
+          <MusicUpNextPanel
+            activeTrack={playback.activeTrack}
+            queuedTracks={playback.queuedTracks}
+            onClearQueue={playback.clearQueue}
+          />
           <CompactSongPanel title="Added Recently" songs={songs.slice(0, 5)} />
           <CompactSongPanel title="Old Bangers" songs={[...songs].reverse().slice(0, 5)} ranked />
           <MoodPanel />

@@ -18,6 +18,7 @@ public sealed class MusicLibrarySongDto
     public required string Id { get; set; }
     public required string Title { get; set; }
     public string? Artist { get; set; }
+    public required List<string> Albums { get; set; }
     public string? ThumbnailUrl { get; set; }
     public int? DurationSeconds { get; set; }
     public string? MatchStatus { get; set; }
