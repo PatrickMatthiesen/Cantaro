@@ -1,11 +1,12 @@
 import { Outlet } from '@tanstack/react-router';
+import type { PlatformId } from '@cantaro/client-shared/music';
 import { StatusBadge } from '@cantaro/client-shared/ui';
 import { RequireAuth } from '../components/AppShell';
 import { MatchingReviewPage } from './MatchingReviewPage';
 import { MusicHomeDashboard } from '../music/MusicHomeDashboard';
 import { MusicLibraryPanel } from '../music/MusicLibraryPanel';
-import { MusicPlatformSurface } from '../music/MusicPlatformPage';
 import { MusicPageShell } from '../music/MusicPageShell';
+import { MusicPlatformSurface } from '../music/MusicPlatformPage';
 import { MusicPlaylistSyncSetupPage } from '../music/MusicPlaylistSyncSetupPage';
 import { MusicPlaylistDetailPage } from '../music/MusicPlaylistDetailPage';
 import { MusicPlaylistsDirectory } from '../music/MusicPlaylistsDirectory';
@@ -88,6 +89,6 @@ export function MusicPlatformPage({ platformId, playlistId = null }: { platformI
   return <MusicPlatformSurface platformId={platformId} playlistId={playlistId} />;
 }
 
-export function MusicPlatformSyncSetupPage() {
-  return <MusicPlaylistSyncSetupPage />;
+export function MusicPlatformSyncSetupPage({ initialSourcePlatformId }: { initialSourcePlatformId?: PlatformId }) {
+  return <MusicPlaylistSyncSetupPage initialSourcePlatformId={initialSourcePlatformId} />;
 }
