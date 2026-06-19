@@ -21,6 +21,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<Playlist> Playlists => Set<Playlist>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
+    public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
     public DbSet<MediaTitle> MediaTitles => Set<MediaTitle>();
     public DbSet<MediaProviderLink> MediaProviderLinks => Set<MediaProviderLink>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
@@ -220,6 +221,21 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasOne(e => e.Playlist)
                 .WithMany(p => p.ServiceMappings)
                 .HasForeignKey(e => e.PlaylistId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MusicSyncJob>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.UserId, e.Status, e.CreatedAt });
+            entity.Property(e => e.Service).HasMaxLength(64);
+            entity.Property(e => e.Status).HasMaxLength(32);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

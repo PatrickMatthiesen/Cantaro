@@ -16,11 +16,10 @@ var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
 // Add PostgreSQL database
 var postgres = builder.AddPostgres("postgres")
     .WithLifetime(ContainerLifetime.Persistent)
+    .WithDataVolume("cantaro-postgres-data")
     .WithHostPort(5432);
 if (builder.ExecutionContext.IsRunMode) {
     postgres.WithContainerName("cantaro-postgres");
-} else {
-    postgres.WithDataVolume("cantaro-postgres-data");
 }
 
 var db = postgres.AddDatabase("cantaro-db");

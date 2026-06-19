@@ -17,8 +17,11 @@ import {
   consumePlaylistSyncActivityFocus,
   playlistSyncDataRefreshEventName,
   playlistSyncProgressEventName,
+  progressFromSyncJob,
   readPlaylistSyncProgress,
+  requestPlaylistSyncDataRefresh,
   type PlaylistSyncProgress,
+  writePlaylistSyncProgress,
 } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
 
@@ -144,7 +147,7 @@ function useAddPlatformMenu() {
 
     try {
       await platformManager.connect(platform.id, {
-        route: window.location.pathname,
+        route: `/music/platforms/sync?source=${platform.id}`,
         trigger: 'add-platform-menu',
       });
     } catch {
@@ -192,6 +195,38 @@ function usePlaylistSyncProgress() {
       window.removeEventListener(playlistSyncProgressEventName, refreshProgress);
     };
   }, []);
+
+  useEffect(() => {
+    if (!progress?.jobId || progress.phase !== 'syncing') return;
+
+    let disposed = false;
+    const applyJob = (job: Awaited<ReturnType<typeof syncApi.getSyncJob>>) => {
+      if (disposed) return;
+      const next = progressFromSyncJob(job);
+      writePlaylistSyncProgress(next);
+      if (next.phase !== 'syncing') {
+        requestPlaylistSyncDataRefresh();
+      }
+    };
+
+    void syncApi.getSyncJob(progress.jobId).then(applyJob).catch(() => undefined);
+    const eventSource = new EventSource(`/api/sync/jobs/${encodeURIComponent(progress.jobId)}/events`);
+    eventSource.onmessage = (event) => {
+      try {
+        applyJob(JSON.parse(event.data) as Awaited<ReturnType<typeof syncApi.getSyncJob>>);
+      } catch {
+        // Ignore malformed events and recover from the next persisted snapshot.
+      }
+    };
+    eventSource.onerror = () => {
+      void syncApi.getSyncJob(progress.jobId).then(applyJob).catch(() => undefined);
+    };
+
+    return () => {
+      disposed = true;
+      eventSource.close();
+    };
+  }, [progress?.jobId, progress?.phase]);
 
   return progress;
 }
@@ -390,13 +425,14 @@ function progressStatusLabel(phase: PlaylistSyncProgress['phase']): string {
   return statusLabels[phase];
 }
 
-function progressDetail(progress: PlaylistSyncProgress, platformName: string): string {
+function progressDetail(progress: PlaylistSyncProgress): string {
   if (progress.phase === 'failed' && progress.errorMessage) {
     return progress.errorMessage;
   }
 
-  const targetLabel = progress.targetCount === 1 ? 'fan-out target' : 'fan-out targets';
-  return `${platformName} -> Cantaro -> ${progress.targetCount.toLocaleString()} ${targetLabel}`;
+  const processedPlaylists = progress.processedPlaylistCount ?? 0;
+  const processedSongs = progress.processedSongCount ?? 0;
+  return `${processedPlaylists.toLocaleString()}/${progress.playlistCount.toLocaleString()} playlists · ${processedSongs.toLocaleString()}/${progress.songCount.toLocaleString()} songs`;
 }
 
 function ProgressSpinner({ phase }: { phase: PlaylistSyncProgress['phase'] }) {
@@ -437,7 +473,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
           {progress.playlistCount.toLocaleString()} playlist{progress.playlistCount === 1 ? '' : 's'} importing from {platformName}
         </span>
         <span className="block truncate text-xs font-semibold text-slate-600">
-          {progressDetail(progress, platformName)} · {progress.songCount.toLocaleString()} songs
+          {progressDetail(progress)}
         </span>
         <ProgressPlaylistNames names={progress.playlistNames} />
       </span>

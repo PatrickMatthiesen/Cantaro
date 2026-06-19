@@ -1,4 +1,4 @@
-import type { PlatformId } from '@cantaro/client-shared/music';
+import type { MusicSyncJobResponse, PlatformId } from '@cantaro/client-shared/music';
 
 const playlistSyncProgressKey = 'cantaro.playlistSyncProgress.v1';
 const maxProgressAgeMs = 10 * 60 * 1000;
@@ -9,6 +9,7 @@ export const playlistSyncDataRefreshEventName = 'cantaro-playlist-sync-data-refr
 export type PlaylistSyncProgressPhase = 'syncing' | 'completed' | 'failed';
 
 export interface PlaylistSyncProgress {
+  jobId: string;
   phase: PlaylistSyncProgressPhase;
   sourcePlatformId: PlatformId;
   playlistCount: number;
@@ -20,7 +21,35 @@ export interface PlaylistSyncProgress {
   successCount?: number;
   failureCount?: number;
   errorMessage?: string;
+  processedPlaylistCount?: number;
+  processedSongCount?: number;
   focusActivity?: boolean;
+}
+
+export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = false): PlaylistSyncProgress {
+  const phase: PlaylistSyncProgressPhase = job.status === 'completed'
+    ? 'completed'
+    : job.status === 'failed'
+      ? 'failed'
+      : 'syncing';
+
+  return {
+    jobId: job.id,
+    phase,
+    sourcePlatformId: job.service as PlatformId,
+    playlistCount: job.playlistCount,
+    songCount: job.songCount,
+    targetCount: 0,
+    playlistNames: job.playlistNames,
+    startedAt: job.startedAt ?? job.createdAt,
+    updatedAt: job.updatedAt,
+    successCount: job.successCount,
+    failureCount: job.failureCount,
+    errorMessage: job.errorMessage ?? undefined,
+    processedPlaylistCount: job.processedPlaylistCount,
+    processedSongCount: job.processedSongCount,
+    focusActivity,
+  };
 }
 
 function isProgressFresh(progress: PlaylistSyncProgress): boolean {
@@ -33,6 +62,10 @@ export function readPlaylistSyncProgress(): PlaylistSyncProgress | null {
     if (!rawProgress) return null;
 
     const progress = JSON.parse(rawProgress) as PlaylistSyncProgress;
+    if (!progress.jobId) {
+      window.sessionStorage.removeItem(playlistSyncProgressKey);
+      return null;
+    }
     if (!isProgressFresh(progress)) {
       window.sessionStorage.removeItem(playlistSyncProgressKey);
       return null;

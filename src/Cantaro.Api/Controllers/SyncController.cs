@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Concurrent;
 
 namespace Cantaro.Api.Controllers;
 
@@ -75,49 +74,23 @@ public class BatchSyncResult
 [Authorize]
 public class SyncController : ControllerBase
 {
-    private sealed class SyncUsageBucket
-    {
-        public object SyncRoot { get; } = new();
-        public List<SyncUsageEvent> Events { get; } = [];
-    }
-
-    private sealed class SyncUsageEvent
-    {
-        public DateTimeOffset OccurredAt { get; init; }
-        public int SongsSynced { get; init; }
-    }
-
-    private sealed class SyncThrottleStatus
-    {
-        public int Usage { get; init; }
-        public int Remaining { get; init; }
-        public bool CanSyncNow { get; init; }
-        public string? Message { get; init; }
-    }
-
-    private const int SongSyncLimitPerWindow = 2000;
-    private const int SyncWindowMinutes = 10;
-    // Cap how many songs from a single sync run are counted towards usage to avoid one very large run
-    // overwhelming the rolling window accounting. This is set to 2x SongSyncLimitPerWindow (2 * 2000)
-    // so that, even in edge cases (e.g. large initial sync or retries), a single run cannot contribute
-    // more than twice the allowed per-window usage.
-    private const int MaxSongsCountedPerSyncRun = SongSyncLimitPerWindow * 2;
-    private static readonly ConcurrentDictionary<string, SyncUsageBucket> _syncUsageByUserAndService = new();
-
     private readonly ApplicationDbContext _dbContext;
     private readonly UserManager<User> _userManager;
     private readonly IPlatformRegistry _platformRegistry;
+    private readonly MusicSyncThrottleService _throttleService;
     private readonly ILogger<SyncController> _logger;
 
     public SyncController(
         ApplicationDbContext dbContext,
         UserManager<User> userManager,
         IPlatformRegistry platformRegistry,
+        MusicSyncThrottleService throttleService,
         ILogger<SyncController> logger)
     {
         _dbContext = dbContext;
         _userManager = userManager;
         _platformRegistry = platformRegistry;
+        _throttleService = throttleService;
         _logger = logger;
     }
 
@@ -153,14 +126,12 @@ public class SyncController : ControllerBase
             var now = DateTimeOffset.UtcNow;
             var resolvedService = ResolveServiceForStatus(service, mappings.Select(m => m.Service));
             var throttleStatus = resolvedService is null
-                ? new SyncThrottleStatus
-                {
-                    Usage = 0,
-                    Remaining = SongSyncLimitPerWindow,
-                    CanSyncNow = false,
-                    Message = "No supported platform is available for sync."
-                }
-                : BuildSyncThrottleStatus(userId, resolvedService, now);
+                ? new MusicSyncThrottleStatus(
+                    0,
+                    MusicSyncThrottleService.SongSyncLimitPerWindow,
+                    false,
+                    "No supported platform is available for sync.")
+                : _throttleService.GetStatus(userId, resolvedService, now);
             bool needsAutoSync = lastSync == null || (now - lastSync.Value).TotalHours >= 24;
 
             return Ok(new SyncStatusResponse
@@ -172,8 +143,8 @@ public class SyncController : ControllerBase
                     CanSyncNow = throttleStatus.CanSyncNow,
                     SongsSyncedInWindow = throttleStatus.Usage,
                     RemainingSongsInWindow = throttleStatus.Remaining,
-                    SongSyncLimit = SongSyncLimitPerWindow,
-                    WindowMinutes = SyncWindowMinutes,
+                    SongSyncLimit = MusicSyncThrottleService.SongSyncLimitPerWindow,
+                    WindowMinutes = MusicSyncThrottleService.SyncWindowMinutes,
                     Message = throttleStatus.Message
                 },
                 Playlists = playlistInfos
@@ -269,12 +240,12 @@ public class SyncController : ControllerBase
                 return Math.Max(0, remoteSongCount - existingSongCount);
             });
 
-            var throttleStatus = BuildSyncThrottleStatus(userId, normalizedService, now);
+            var throttleStatus = _throttleService.GetStatus(userId, normalizedService, now);
             if (throttleStatus.Usage > 0 && estimatedNewSongsToSync > throttleStatus.Remaining)
             {
                 return BadRequest(new
                 {
-                    error = $"This sync would process approximately {estimatedNewSongsToSync} new songs, but only {throttleStatus.Remaining} songs remain in the current {SyncWindowMinutes}-minute window."
+                    error = $"This sync would process approximately {estimatedNewSongsToSync} new songs, but only {throttleStatus.Remaining} songs remain in the current {MusicSyncThrottleService.SyncWindowMinutes}-minute window."
                 });
             }
 
@@ -334,7 +305,7 @@ public class SyncController : ControllerBase
                 SongsSynced = songsSynced
             };
 
-            AddSyncUsage(userId, normalizedService, Math.Min(songsSynced, MaxSongsCountedPerSyncRun), now);
+            _throttleService.AddUsage(userId, normalizedService, songsSynced, now);
 
             _logger.LogInformation(
                 "Batch sync completed: {Success} succeeded, {Failed} failed",
@@ -377,65 +348,4 @@ public class SyncController : ControllerBase
         return _platformRegistry.GetSupportedPlatformIds().FirstOrDefault();
     }
 
-    private static string BuildUsageKey(int userId, string service) => $"{userId}:{service}";
-
-    private static SyncThrottleStatus BuildSyncThrottleStatus(int userId, string service, DateTimeOffset now)
-    {
-        var usage = GetSongsSyncedInWindow(userId, service, now);
-        var remaining = Math.Max(0, SongSyncLimitPerWindow - usage);
-        var canSyncNow = usage <= 0 || remaining > 0;
-
-        string? message = null;
-        if (usage > 0 && remaining <= 0)
-        {
-            message = $"Song sync limit reached ({SongSyncLimitPerWindow} songs per {SyncWindowMinutes} minutes).";
-        }
-        else if (usage > 0)
-        {
-            message = $"You can sync up to {remaining} more songs in the current {SyncWindowMinutes}-minute window.";
-        }
-
-        return new SyncThrottleStatus
-        {
-            Usage = usage,
-            Remaining = remaining,
-            CanSyncNow = canSyncNow,
-            Message = message
-        };
-    }
-
-    private static int GetSongsSyncedInWindow(int userId, string service, DateTimeOffset now)
-    {
-        var key = BuildUsageKey(userId, service);
-        var bucket = _syncUsageByUserAndService.GetOrAdd(key, _ => new SyncUsageBucket());
-        var cutoff = now.AddMinutes(-SyncWindowMinutes);
-
-        lock (bucket.SyncRoot)
-        {
-            bucket.Events.RemoveAll(e => e.OccurredAt < cutoff);
-            return bucket.Events.Sum(e => e.SongsSynced);
-        }
-    }
-
-    private static void AddSyncUsage(int userId, string service, int songsSynced, DateTimeOffset now)
-    {
-        if (songsSynced <= 0)
-        {
-            return;
-        }
-
-        var key = BuildUsageKey(userId, service);
-        var bucket = _syncUsageByUserAndService.GetOrAdd(key, _ => new SyncUsageBucket());
-        var cutoff = now.AddMinutes(-SyncWindowMinutes);
-
-        lock (bucket.SyncRoot)
-        {
-            bucket.Events.RemoveAll(e => e.OccurredAt < cutoff);
-            bucket.Events.Add(new SyncUsageEvent
-            {
-                OccurredAt = now,
-                SongsSynced = songsSynced
-            });
-        }
-    }
 }

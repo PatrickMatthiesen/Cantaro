@@ -15,7 +15,7 @@ import { GlassCard, GradientButton, StatusBadge } from '@cantaro/client-shared/u
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MusicLibraryPanel } from './MusicLibraryPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { requestPlaylistSyncDataRefresh, writePlaylistSyncProgress } from './playlistSyncProgress';
+import { progressFromSyncJob, writePlaylistSyncProgress } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
 
 const platformById = new Map(platformCatalog.map((platform) => [platform.id, platform]));
@@ -39,57 +39,24 @@ function toggleSetValue(previous: Set<string>, value: string): Set<string> {
   return next;
 }
 
-function buildPlaylistSyncProgressBase({
-  sourcePlatformId,
-  selectedPlaylists,
-  targetPlatformCount,
-}: {
-  sourcePlatformId: PlatformId;
-  selectedPlaylists: PlatformPlaylist[];
-  targetPlatformCount: number;
-}) {
-  return {
-    sourcePlatformId,
-    playlistCount: selectedPlaylists.length,
-    songCount: selectedPlaylists.reduce((sum, playlist) => sum + playlist.itemCount, 0),
-    targetCount: targetPlatformCount,
-    playlistNames: selectedPlaylists.map((playlist) => playlist.title).slice(0, 3),
-    startedAt: new Date().toISOString(),
-  };
-}
-
 function syncUnavailableMessage(status: SyncStatusResponse | null): string {
   return status?.overall.message ?? 'Cantaro could not confirm sync readiness. Please try again.';
 }
 
-function writeStartedPlaylistSync(progressBase: ReturnType<typeof buildPlaylistSyncProgressBase>) {
-  writePlaylistSyncProgress({
-    ...progressBase,
-    phase: 'syncing',
-    updatedAt: progressBase.startedAt,
-    focusActivity: true,
-  });
+function selectSourcePlatform(
+  requestedPlatformId: PlatformId | undefined,
+  connectedPlatformIds: PlatformId[],
+  fallbackPlatformId: PlatformId,
+): PlatformId {
+  if (requestedPlatformId && connectedPlatformIds.includes(requestedPlatformId)) {
+    return requestedPlatformId;
+  }
+
+  return fallbackPlatformId;
 }
 
-function writeCompletedPlaylistSync(progressBase: ReturnType<typeof buildPlaylistSyncProgressBase>, result: BatchSyncResponse) {
-  writePlaylistSyncProgress({
-    ...progressBase,
-    phase: result.failureCount > 0 ? 'failed' : 'completed',
-    updatedAt: new Date().toISOString(),
-    successCount: result.successCount,
-    failureCount: result.failureCount,
-  });
-  requestPlaylistSyncDataRefresh();
-}
-
-function writeFailedPlaylistSync(progressBase: ReturnType<typeof buildPlaylistSyncProgressBase>, errorMessage: string) {
-  writePlaylistSyncProgress({
-    ...progressBase,
-    phase: 'failed',
-    updatedAt: new Date().toISOString(),
-    errorMessage,
-  });
-  requestPlaylistSyncDataRefresh();
+function selectInitialSourcePlatform(requestedPlatformId: PlatformId | undefined, fallbackPlatformId: PlatformId): PlatformId {
+  return requestedPlatformId ?? fallbackPlatformId;
 }
 
 function ToggleRow({
@@ -515,11 +482,12 @@ function SyncPreview({
   );
 }
 
-function useSyncSetupController() {
+function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
   const navigate = useNavigate();
   const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
   const firstConnectedSource = platformCatalog.find((platform) => platform.implemented && connectedPlatformIds.includes(platform.id))?.id ?? 'youtube';
-  const [sourcePlatformId, setSourcePlatformId] = useState<PlatformId>(firstConnectedSource);
+  const preferredSource = selectSourcePlatform(initialSourcePlatformId, connectedPlatformIds, firstConnectedSource);
+  const [sourcePlatformId, setSourcePlatformId] = useState<PlatformId>(() => selectInitialSourcePlatform(initialSourcePlatformId, firstConnectedSource));
   const [playlists, setPlaylists] = useState<PlatformPlaylist[]>([]);
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set());
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
@@ -534,9 +502,9 @@ function useSyncSetupController() {
 
   useEffect(() => {
     if (!isCheckingConnectedAccounts) {
-      setSourcePlatformId(firstConnectedSource);
+      setSourcePlatformId(preferredSource);
     }
-  }, [firstConnectedSource, isCheckingConnectedAccounts]);
+  }, [isCheckingConnectedAccounts, preferredSource]);
 
   useEffect(() => {
     let isMounted = true;
@@ -599,33 +567,20 @@ function useSyncSetupController() {
       return;
     }
 
-    const progressBase = buildPlaylistSyncProgressBase({
-      sourcePlatformId,
-      selectedPlaylists,
-      targetPlatformCount: targetPlatformIds.length,
-    });
-
-    writeStartedPlaylistSync(progressBase);
-    void navigate({ to: '/music/platforms' });
-
     try {
-      const result = await syncApi.batchSync({
+      const job = await syncApi.createSyncJob({
         service: sourcePlatformId,
         servicePlaylistIds: Array.from(selectedPlaylistIds),
       });
-      setSyncResult(result);
-      writeCompletedPlaylistSync(progressBase, result);
-      await syncApi.getSyncStatus(sourcePlatformId)
-        .then(setSyncStatus)
-        .catch(() => undefined);
+      writePlaylistSyncProgress(progressFromSyncJob(job, true));
+      void navigate({ to: '/music/platforms' });
     } catch (syncError) {
       const errorMessage = getSyncErrorMessage(syncError, 'Failed to sync playlists');
       setError(errorMessage);
-      writeFailedPlaylistSync(progressBase, errorMessage);
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, navigate, selectedPlaylistIds, selectedPlaylists, sourcePlatformId, targetPlatformIds.length]);
+  }, [isSyncing, navigate, selectedPlaylistIds, sourcePlatformId]);
 
   return {
     connectedPlatformIds,
@@ -782,8 +737,8 @@ function SyncSetupSurface({ library, controller }: { library: MusicLibraryRespon
   );
 }
 
-export function MusicPlaylistSyncSetupPage() {
-  const controller = useSyncSetupController();
+export function MusicPlaylistSyncSetupPage({ initialSourcePlatformId }: { initialSourcePlatformId?: PlatformId }) {
+  const controller = useSyncSetupController(initialSourcePlatformId);
 
   return (
     <MusicLibraryPanel>

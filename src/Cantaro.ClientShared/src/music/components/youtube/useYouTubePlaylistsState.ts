@@ -53,7 +53,7 @@ export function useYouTubePlaylistsState() {
 
   const connect = useCallback(() => {
     void platformManager.connect('youtube', {
-      route: window.location.pathname,
+      route: '/music/platforms/sync?source=youtube',
       trigger: 'youtube-page-connect',
     });
   }, []);
