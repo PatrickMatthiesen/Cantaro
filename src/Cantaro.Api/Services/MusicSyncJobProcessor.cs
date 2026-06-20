@@ -31,6 +31,7 @@ public sealed class MusicSyncJobProcessor(
 
     internal async Task ProcessAsync(MusicSyncJob job, CancellationToken cancellationToken)
     {
+        var jobId = job.Id;
         var playlists = JsonSerializer.Deserialize<List<MusicSyncJobPlaylist>>(job.PlaylistsJson) ?? [];
         var results = string.IsNullOrWhiteSpace(job.ResultsJson)
             ? []
@@ -51,17 +52,17 @@ public sealed class MusicSyncJobProcessor(
                 job.UpdatedAt = DateTimeOffset.UtcNow;
                 await _dbContext.SaveChangesAsync(cancellationToken);
 
+                BatchSyncResult result;
                 try
                 {
                     var cantaroPlaylistId = await platform.SyncPlaylistAsync(job.UserId, playlist.Id, cancellationToken);
-                    results.Add(new BatchSyncResult
+                    result = new BatchSyncResult
                     {
                         ServicePlaylistId = playlist.Id,
                         PlaylistName = playlist.Name,
                         Success = true,
                         CantaroPlaylistId = cantaroPlaylistId.ToString()
-                    });
-                    job.SuccessCount++;
+                    };
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -69,17 +70,29 @@ public sealed class MusicSyncJobProcessor(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Music sync job {JobId} failed playlist {PlaylistId}", job.Id, playlist.Id);
-                    results.Add(new BatchSyncResult
+                    _logger.LogError(ex, "Music sync job {JobId} failed playlist {PlaylistId}", jobId, playlist.Id);
+                    result = new BatchSyncResult
                     {
                         ServicePlaylistId = playlist.Id,
                         PlaylistName = playlist.Name,
                         Success = false,
                         Error = ex.Message
-                    });
-                    job.FailureCount++;
+                    };
                 }
 
+                // Platform sync uses this scoped DbContext and may roll back its own
+                // transaction. Clear all tracked platform entities before persisting
+                // job progress so rolled-back state cannot leak into the next playlist.
+                job = await ReloadJobAsync(jobId, cancellationToken);
+                results.Add(result);
+                if (result.Success)
+                {
+                    job.SuccessCount++;
+                }
+                else
+                {
+                    job.FailureCount++;
+                }
                 job.ProcessedPlaylistCount++;
                 job.ProcessedSongCount += playlist.SongCount;
                 job.ResultsJson = JsonSerializer.Serialize(results);
@@ -97,12 +110,13 @@ public sealed class MusicSyncJobProcessor(
 
             _logger.LogInformation(
                 "Music sync job {JobId} completed: {SuccessCount} succeeded, {FailureCount} failed",
-                job.Id,
+                jobId,
                 job.SuccessCount,
                 job.FailureCount);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            job = await ReloadJobAsync(jobId, CancellationToken.None);
             job.Status = MusicSyncJobStatuses.Queued;
             job.CurrentPlaylistName = null;
             job.UpdatedAt = DateTimeOffset.UtcNow;
@@ -111,13 +125,20 @@ public sealed class MusicSyncJobProcessor(
         }
         catch (Exception ex)
         {
+            job = await ReloadJobAsync(jobId, CancellationToken.None);
             job.Status = MusicSyncJobStatuses.Failed;
             job.ErrorMessage = ex.Message;
             job.CurrentPlaylistName = null;
             job.CompletedAt = DateTimeOffset.UtcNow;
             job.UpdatedAt = job.CompletedAt.Value;
             await _dbContext.SaveChangesAsync(CancellationToken.None);
-            _logger.LogError(ex, "Music sync job {JobId} failed", job.Id);
+            _logger.LogError(ex, "Music sync job {JobId} failed", jobId);
         }
+    }
+
+    private async Task<MusicSyncJob> ReloadJobAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        _dbContext.ChangeTracker.Clear();
+        return await _dbContext.MusicSyncJobs.SingleAsync(item => item.Id == jobId, cancellationToken);
     }
 }

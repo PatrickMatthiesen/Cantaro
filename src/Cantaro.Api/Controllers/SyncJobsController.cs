@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Cantaro.Api.Controllers;
 
@@ -136,7 +137,30 @@ public sealed class SyncJobsController(
             UpdatedAt = now
         };
         _dbContext.MusicSyncJobs.Add(job);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "IX_MusicSyncJobs_UserId_Service"
+            })
+        {
+            _dbContext.Entry(job).State = EntityState.Detached;
+            var concurrentJobId = await _dbContext.MusicSyncJobs
+                .AsNoTracking()
+                .Where(item => item.UserId == userId
+                    && item.Service == service
+                    && (item.Status == MusicSyncJobStatuses.Queued || item.Status == MusicSyncJobStatuses.Running))
+                .Select(item => item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            return Conflict(new
+            {
+                error = "A sync is already running for this platform.",
+                jobId = concurrentJobId
+            });
+        }
 
         return AcceptedAtAction(nameof(Get), new { id = job.Id }, ToResponse(job));
     }

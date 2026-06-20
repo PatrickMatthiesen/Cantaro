@@ -219,9 +219,11 @@ function CompactSongPanel({
       </div>
       <div className="space-y-3">
         {songs.length > 0 ? songs.map((song, index) => (
-          <div
+          <Link
             key={song.id}
-            className={`grid items-center gap-3 ${ranked ? 'grid-cols-[20px_44px_minmax(0,1fr)_auto]' : 'grid-cols-[44px_minmax(0,1fr)_auto]'}`}
+            to="/music/songs/$songId"
+            params={{ songId: song.id }}
+            className={`-mx-2 grid items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-white/72 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none ${ranked ? 'grid-cols-[20px_44px_minmax(0,1fr)_auto]' : 'grid-cols-[44px_minmax(0,1fr)_auto]'}`}
           >
             {ranked ? <span className="text-sm font-black text-slate-500">{index + 1}</span> : null}
             <img src={songArtwork(song, index)} alt="" className="h-11 w-11 rounded-xl object-cover" />
@@ -230,7 +232,7 @@ function CompactSongPanel({
               <p className="truncate text-xs font-semibold text-slate-500">{songArtist(song)}</p>
             </div>
             <span className="font-mono text-xs text-slate-500">{formatDuration(song.durationSeconds)}</span>
-          </div>
+          </Link>
         )) : (
           <p className="text-sm font-medium text-slate-500">Nothing here yet</p>
         )}
