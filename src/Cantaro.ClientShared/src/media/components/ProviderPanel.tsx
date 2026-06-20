@@ -1,4 +1,5 @@
 import { GlassCard } from '../../ui';
+import type { ReactNode } from 'react';
 import {
     ProviderPanelActions,
     ProviderPanelError,
@@ -10,7 +11,7 @@ import { useProviderPanelState } from './media-providers/useProviderPanelState';
 export interface ProviderPanelProps {
     providerId: string;
     name: string;
-    icon: string;
+    icon: ReactNode;
     gradient: string;
     description: string;
 }

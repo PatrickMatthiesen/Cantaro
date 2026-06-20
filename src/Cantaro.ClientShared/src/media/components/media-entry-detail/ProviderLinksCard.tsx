@@ -1,5 +1,6 @@
 import { GradientButton, GlassCard } from '../../../ui';
 import { mediaProviderCatalog } from '../../services/mediaProviders';
+import { MediaProviderIcon } from '../MediaProviderIcon';
 import type { MediaProviderLinkSummaryDto } from '../../services/mediaApi';
 import type { ProviderAvailabilityMap, ProviderAvailabilityState } from './providerAvailability';
 import { providerAvailabilityKey } from './providerAvailability';
@@ -89,7 +90,7 @@ function ProviderLinkIdentity({ link }: { link: MediaProviderLinkSummaryDto }) {
 
     return (
         <>
-            {catalog ? <span className="text-lg" aria-hidden>{catalog.icon}</span> : null}
+            {catalog ? <MediaProviderIcon providerId={catalog.iconId} className="h-5 w-5 shrink-0" aria-hidden /> : null}
             <div className="min-w-0">
                 <p className="text-sm font-medium text-gray-800">{catalog?.name ?? link.provider}</p>
                 <p className="text-xs text-gray-500">

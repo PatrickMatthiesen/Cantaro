@@ -50,9 +50,15 @@
 }
 
 .settings-input,
-.settings-row {
+.settings-surface-row {
   border-color: var(--cantaro-border);
   background-color: var(--cantaro-panel-solid);
+  color: var(--cantaro-text);
+}
+
+.settings-toggle-group,
+.settings-toggle-row {
+  border-color: var(--cantaro-border);
   color: var(--cantaro-text);
 }
 
