@@ -228,6 +228,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.UserId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.UserId, e.Service })
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('queued', 'running')");
             entity.Property(e => e.Service).HasMaxLength(64);
             entity.Property(e => e.Status).HasMaxLength(32);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

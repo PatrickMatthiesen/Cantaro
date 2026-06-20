@@ -53,7 +53,8 @@ export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = f
 }
 
 function isProgressFresh(progress: PlaylistSyncProgress): boolean {
-  return Date.now() - new Date(progress.updatedAt).getTime() < maxProgressAgeMs;
+  return progress.phase === 'syncing'
+    || Date.now() - new Date(progress.updatedAt).getTime() < maxProgressAgeMs;
 }
 
 export function readPlaylistSyncProgress(): PlaylistSyncProgress | null {
