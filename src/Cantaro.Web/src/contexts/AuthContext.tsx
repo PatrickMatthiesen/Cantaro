@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { authApi } from '@cantaro/client-shared/auth';
-import type { User, RegisterRequest, LoginRequest } from '@cantaro/client-shared/auth';
+import type { User, RegisterRequest, LoginRequest, ThemePreference } from '@cantaro/client-shared/auth';
 
 interface AuthContextType {
   user: User | null;
@@ -10,6 +10,8 @@ interface AuthContextType {
   login: (request: LoginRequest) => Promise<void>;
   register: (request: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
+  setProfile: (user: User) => void;
+  refreshProfile: () => Promise<User>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -66,6 +68,27 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
+  const setProfile = (profile: User) => setUser(profile);
+  const refreshProfile = async () => {
+    const profile = await authApi.getCurrentUser();
+    setUser(profile);
+    return profile;
+  };
+
+  useEffect(() => {
+    const theme = user?.preferences.theme ?? (localStorage.getItem('cantaro-theme') as ThemePreference | null) ?? 'system';
+    localStorage.setItem('cantaro-theme', theme);
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const resolved = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+    applyTheme();
+    media.addEventListener('change', applyTheme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, [user?.preferences.theme]);
+
   const value: AuthContextType = {
     user,
     isAuthenticated: !!user,
@@ -73,6 +96,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     login,
     register,
     logout,
+    setProfile,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

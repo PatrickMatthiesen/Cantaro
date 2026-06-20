@@ -22,6 +22,80 @@
   font-family: var(--font-display);
   background-color: rgb(2 6 23);
   color: rgb(226 232 240);
+  --cantaro-canvas: #f7f5ff;
+  --cantaro-panel: rgba(255, 255, 255, 0.78);
+  --cantaro-panel-solid: #ffffff;
+  --cantaro-border: #e7e2f7;
+  --cantaro-text: #0f172a;
+  --cantaro-muted: #64748b;
+}
+
+:root[data-theme="dark"] {
+  --cantaro-canvas: #090d18;
+  --cantaro-panel: rgba(20, 26, 43, 0.82);
+  --cantaro-panel-solid: #161d2e;
+  --cantaro-border: #2b354c;
+  --cantaro-text: #f1f5f9;
+  --cantaro-muted: #9aa8bf;
+}
+
+:root[data-theme="dark"] body {
+  background: radial-gradient(circle at 15% 10%, rgba(124, 92, 255, .15), transparent 32%), #090d18;
+}
+
+.settings-sidebar,
+.settings-card {
+  border-color: var(--cantaro-border);
+  background: var(--cantaro-panel);
+}
+
+.settings-input,
+.settings-row {
+  border-color: var(--cantaro-border);
+  background-color: var(--cantaro-panel-solid);
+  color: var(--cantaro-text);
+}
+
+:root[data-theme="dark"] [class~="bg-[#f7f5ff]"],
+:root[data-theme="dark"] [class~="bg-[#f7f5ff]/82"] {
+  background-color: var(--cantaro-canvas) !important;
+}
+
+:root[data-theme="dark"] [class~="bg-white"],
+:root[data-theme="dark"] [class*="bg-white/"] {
+  background-color: var(--cantaro-panel) !important;
+}
+
+:root[data-theme="dark"] [class~="text-slate-950"],
+:root[data-theme="dark"] [class~="text-slate-900"],
+:root[data-theme="dark"] [class~="text-gray-900"],
+:root[data-theme="dark"] [class~="text-gray-800"] {
+  color: var(--cantaro-text) !important;
+}
+
+:root[data-theme="dark"] [class~="text-slate-700"],
+:root[data-theme="dark"] [class~="text-slate-600"],
+:root[data-theme="dark"] [class~="text-slate-500"],
+:root[data-theme="dark"] [class~="text-gray-700"],
+:root[data-theme="dark"] [class~="text-gray-600"],
+:root[data-theme="dark"] [class~="text-gray-500"] {
+  color: var(--cantaro-muted) !important;
+}
+
+:root[data-theme="dark"] [class*="border-white"] {
+  border-color: var(--cantaro-border) !important;
+}
+
+.settings-content {
+  background-color: var(--cantaro-canvas);
+}
+
+.app-gradient-shell {
+  background: linear-gradient(135deg, #eef2ff, #faf5ff 52%, #fdf2f8);
+}
+
+:root[data-theme="dark"] .app-gradient-shell {
+  background: radial-gradient(circle at 20% 15%, rgba(124, 92, 255, .18), transparent 36%), #090d18;
 }
 
 body {

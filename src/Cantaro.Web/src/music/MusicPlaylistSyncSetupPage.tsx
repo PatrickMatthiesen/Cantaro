@@ -17,6 +17,7 @@ import { MusicLibraryPanel } from './MusicLibraryPanel';
 import { MusicPageShell } from './MusicPageShell';
 import { progressFromSyncJob, writePlaylistSyncProgress } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
+import { useAuth } from '../contexts/AuthContext';
 
 const platformById = new Map(platformCatalog.map((platform) => [platform.id, platform]));
 
@@ -483,6 +484,8 @@ function SyncPreview({
 }
 
 function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
+  const { user } = useAuth();
+  const syncDefaults = user?.preferences;
   const navigate = useNavigate();
   const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
   const firstConnectedSource = platformCatalog.find((platform) => platform.implemented && connectedPlatformIds.includes(platform.id))?.id ?? 'youtube';
@@ -495,10 +498,10 @@ function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
   const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [keepOrder, setKeepOrder] = useState(true);
-  const [keepMetadata, setKeepMetadata] = useState(true);
-  const [hideUnavailable, setHideUnavailable] = useState(true);
-  const [scheduledSync, setScheduledSync] = useState(true);
+  const [keepOrder, setKeepOrder] = useState(syncDefaults?.keepPlaylistOrder ?? true);
+  const [keepMetadata, setKeepMetadata] = useState(syncDefaults?.keepPlaylistMetadata ?? true);
+  const [hideUnavailable, setHideUnavailable] = useState(syncDefaults?.hideUnavailableTracks ?? true);
+  const [scheduledSync, setScheduledSync] = useState(syncDefaults?.scheduledSync ?? true);
 
   useEffect(() => {
     if (!isCheckingConnectedAccounts) {

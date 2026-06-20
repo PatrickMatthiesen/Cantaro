@@ -1,4 +1,4 @@
-import { useRouterState } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { Bell, Menu, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
@@ -113,17 +113,17 @@ function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLBut
   );
 }
 
-function ProfileButton({ userEmail }: { userEmail?: string }) {
-  const userInitial = userEmail?.trim().charAt(0).toUpperCase() || 'C';
+function ProfileButton({ userEmail, displayName, avatarUrl }: { userEmail?: string; displayName?: string; avatarUrl?: string }) {
+  const userInitial = displayName?.trim().charAt(0).toUpperCase() || userEmail?.trim().charAt(0).toUpperCase() || 'C';
 
   return (
-    <button
-      type="button"
-      className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)]"
-      aria-label="Profile"
+    <Link
+      to="/settings"
+      className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none"
+      aria-label={`Open settings for ${displayName || userEmail || 'profile'}`}
     >
-      {userInitial}
-    </button>
+      {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : userInitial}
+    </Link>
   );
 }
 
@@ -134,6 +134,8 @@ function PageTopBar({
   onSearchChange,
   onSearchSubmit,
   userEmail,
+  displayName,
+  avatarUrl,
   onOpenNavigation,
   navigationButtonRef,
 }: {
@@ -143,6 +145,8 @@ function PageTopBar({
   onSearchChange?: (value: string) => void;
   onSearchSubmit?: () => void;
   userEmail?: string;
+  displayName?: string;
+  avatarUrl?: string;
   onOpenNavigation: () => void;
   navigationButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
@@ -165,7 +169,7 @@ function PageTopBar({
           />
           <div className="flex items-center gap-2">
             <NotificationButton />
-            <ProfileButton userEmail={userEmail} />
+            <ProfileButton userEmail={userEmail} displayName={displayName} avatarUrl={avatarUrl} />
           </div>
         </div>
       </div>
@@ -265,6 +269,8 @@ export function PageShell({
             onSearchChange={onSearchChange}
             onSearchSubmit={onSearchSubmit}
             userEmail={user?.email}
+            displayName={user?.displayName}
+            avatarUrl={user?.avatarUrl}
             navigationButtonRef={mobileNavigationButtonRef}
             onOpenNavigation={() => setIsMobileNavigationOpen(true)}
           />

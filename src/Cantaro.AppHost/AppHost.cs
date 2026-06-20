@@ -24,6 +24,10 @@ if (builder.ExecutionContext.IsRunMode) {
 
 var db = postgres.AddDatabase("cantaro-db");
 
+var minio = builder.AddMinioContainer("minio")
+    .WithLifetime(ContainerLifetime.Persistent)
+    .WithVolume("cantaro-minio-data", "/data");
+
 // Optionally, add pgAdmin for database management (runs in a separate container)
 // var pgAdmin = postgres.WithPgAdmin();
 
@@ -55,7 +59,9 @@ if (builder.ExecutionContext.IsPublishMode)
 
 api.WithReference(migrationService)
     .WaitForCompletion(migrationService)
-    .WithReference(db);
+    .WithReference(db)
+    .WithReference(minio)
+    .WaitFor(minio);
 
 if (builder.ExecutionContext.IsPublishMode)
 {

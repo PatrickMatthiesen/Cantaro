@@ -21,6 +21,7 @@ builder.AddServiceDefaults();
 
 // Add PostgreSQL database context via Aspire defaults.
 builder.AddNpgsqlDbContext<ApplicationDbContext>(connectionName: "cantaro-db");
+builder.AddMinioClient("minio");
 
 // Add Data Protection for auth cookies and token encryption.
 builder.Services
@@ -68,6 +69,7 @@ builder.Services.AddHostedService<MusicSyncJobWorker>();
 builder.Services.AddHostedService<MediaProviderOperationWorker>();
 builder.Services.AddScoped<ExtensionAuthorizationCodeStore>();
 builder.Services.AddScoped<ExtensionAuthService>();
+builder.Services.AddSingleton<IAvatarStore, MinioAvatarStore>();
 
 builder.Services.AddIdentityApiEndpoints<User>(c =>
 {

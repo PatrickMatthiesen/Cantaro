@@ -3,6 +3,7 @@ using System;
 using Cantaro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cantaro.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260619202320_AddUserSettings")]
+    partial class AddUserSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -643,86 +646,6 @@ namespace Cantaro.Api.Migrations
                     b.HasIndex("MediaKind", "CanonicalTitle");
 
                     b.ToTable("MediaTitles");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MusicSyncJob", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("CurrentPlaylistName")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("text");
-
-                    b.Property<int>("EstimatedNewSongCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("FailureCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("PlaylistCount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PlaylistsJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("ProcessedPlaylistCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ProcessedSongCount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ResultsJson")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Service")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int>("SongCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<int>("SuccessCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "Service")
-                        .IsUnique()
-                        .HasFilter("\"Status\" IN ('queued', 'running')");
-
-                    b.HasIndex("UserId", "Status", "CreatedAt");
-
-                    b.ToTable("MusicSyncJobs");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.Playlist", b =>
@@ -1483,17 +1406,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("ConnectedServiceAccount");
 
                     b.Navigation("MediaLibraryEntry");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.MusicSyncJob", b =>
-                {
-                    b.HasOne("Cantaro.Api.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
 
                     b.Navigation("User");
                 });

@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as YoutubeRouteImport } from './routes/youtube'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MusicRouteImport } from './routes/music'
 import { Route as MediaRouteImport } from './routes/media'
 import { Route as MatchingRouteImport } from './routes/matching'
@@ -41,6 +42,11 @@ import { Route as MusicPlatformsPlatformIdPlaylistsPlaylistIdRouteImport } from 
 const YoutubeRoute = YoutubeRouteImport.update({
   id: '/youtube',
   path: '/youtube',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MusicRoute = MusicRouteImport.update({
@@ -191,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/matching': typeof MatchingRoute
   '/media': typeof MediaRouteWithChildren
   '/music': typeof MusicRouteWithChildren
+  '/settings': typeof SettingsRoute
   '/youtube': typeof YoutubeRouteWithChildren
   '/media/library': typeof MediaLibraryRouteWithChildren
   '/media/providers': typeof MediaProvidersRoute
@@ -219,6 +226,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/extension-auth': typeof ExtensionAuthRoute
   '/matching': typeof MatchingRoute
+  '/settings': typeof SettingsRoute
   '/youtube': typeof YoutubeRouteWithChildren
   '/media/providers': typeof MediaProvidersRoute
   '/media/review': typeof MediaReviewRoute
@@ -245,6 +253,7 @@ export interface FileRoutesById {
   '/matching': typeof MatchingRoute
   '/media': typeof MediaRouteWithChildren
   '/music': typeof MusicRouteWithChildren
+  '/settings': typeof SettingsRoute
   '/youtube': typeof YoutubeRouteWithChildren
   '/media/library': typeof MediaLibraryRouteWithChildren
   '/media/providers': typeof MediaProvidersRoute
@@ -277,6 +286,7 @@ export interface FileRouteTypes {
     | '/matching'
     | '/media'
     | '/music'
+    | '/settings'
     | '/youtube'
     | '/media/library'
     | '/media/providers'
@@ -305,6 +315,7 @@ export interface FileRouteTypes {
     | '/'
     | '/extension-auth'
     | '/matching'
+    | '/settings'
     | '/youtube'
     | '/media/providers'
     | '/media/review'
@@ -330,6 +341,7 @@ export interface FileRouteTypes {
     | '/matching'
     | '/media'
     | '/music'
+    | '/settings'
     | '/youtube'
     | '/media/library'
     | '/media/providers'
@@ -361,6 +373,7 @@ export interface RootRouteChildren {
   MatchingRoute: typeof MatchingRoute
   MediaRoute: typeof MediaRouteWithChildren
   MusicRoute: typeof MusicRouteWithChildren
+  SettingsRoute: typeof SettingsRoute
   YoutubeRoute: typeof YoutubeRouteWithChildren
 }
 
@@ -371,6 +384,13 @@ declare module '@tanstack/react-router' {
       path: '/youtube'
       fullPath: '/youtube'
       preLoaderRoute: typeof YoutubeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/music': {
@@ -694,6 +714,7 @@ const rootRouteChildren: RootRouteChildren = {
   MatchingRoute: MatchingRoute,
   MediaRoute: MediaRouteWithChildren,
   MusicRoute: MusicRouteWithChildren,
+  SettingsRoute: SettingsRoute,
   YoutubeRoute: YoutubeRouteWithChildren,
 }
 export const routeTree = rootRouteImport
