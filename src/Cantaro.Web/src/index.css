@@ -34,7 +34,7 @@
   --cantaro-canvas: #090d18;
   --cantaro-panel: rgba(20, 26, 43, 0.82);
   --cantaro-panel-solid: #161d2e;
-  --cantaro-border: #2b354c;
+  --cantaro-border: rgba(148, 163, 184, 0.13);
   --cantaro-text: #f1f5f9;
   --cantaro-muted: #9aa8bf;
 }
@@ -60,6 +60,146 @@
 .settings-toggle-row {
   border-color: var(--cantaro-border);
   color: var(--cantaro-text);
+}
+
+.app-nav-link--active {
+  color: white;
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  box-shadow: 0 10px 28px rgba(99, 102, 241, 0.24);
+}
+
+:root[data-theme="dark"] .app-nav-link--active {
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  box-shadow: 0 12px 32px rgba(76, 29, 149, 0.32);
+}
+
+.status-badge--connected,
+.status-badge--available,
+.status-badge--warning {
+  border: 1px solid;
+}
+
+.status-badge--connected {
+  color: #047857;
+  background-color: #d1fae5;
+  border-color: #a7f3d0;
+}
+
+.status-badge--available {
+  color: #0369a1;
+  background: linear-gradient(135deg, #cffafe, #dbeafe);
+  border-color: #a5f3fc;
+}
+
+.status-badge--warning {
+  color: #b45309;
+  background-color: #fef3c7;
+  border-color: #fde68a;
+}
+
+:root[data-theme="dark"] .status-badge--connected {
+  color: #6ee7b7;
+  background-color: rgba(16, 185, 129, 0.14);
+  border-color: rgba(52, 211, 153, 0.25);
+}
+
+:root[data-theme="dark"] .status-badge--available {
+  color: #67e8f9;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.18), rgba(59, 130, 246, 0.16));
+  border-color: rgba(103, 232, 249, 0.28);
+}
+
+:root[data-theme="dark"] .status-badge--warning {
+  color: #fcd34d;
+  background-color: rgba(245, 158, 11, 0.14);
+  border-color: rgba(251, 191, 36, 0.25);
+}
+
+.ui-pill {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+}
+
+.ui-pill--neutral {
+  color: #0f172a;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.ui-pill--info {
+  color: #075985;
+  background: linear-gradient(135deg, rgba(207, 250, 254, 0.96), rgba(219, 234, 254, 0.96));
+  border-color: rgba(103, 232, 249, 0.58);
+}
+
+.ui-pill--success {
+  color: #047857;
+  background-color: rgba(209, 250, 229, 0.94);
+  border-color: rgba(110, 231, 183, 0.52);
+}
+
+.ui-pill--warning {
+  color: #78350f;
+  background-color: rgba(251, 191, 36, 0.94);
+  border-color: rgba(253, 230, 138, 0.62);
+}
+
+:root[data-theme="dark"] .ui-pill--neutral {
+  color: #e2e8f0;
+  background-color: rgba(15, 23, 42, 0.82);
+  border-color: rgba(226, 232, 240, 0.16);
+}
+
+:root[data-theme="dark"] .ui-pill--info {
+  color: #cffafe;
+  background: linear-gradient(135deg, rgba(8, 145, 178, 0.82), rgba(37, 99, 235, 0.78));
+  border-color: rgba(103, 232, 249, 0.32);
+}
+
+:root[data-theme="dark"] .ui-pill--success {
+  color: #d1fae5;
+  background-color: rgba(5, 150, 105, 0.78);
+  border-color: rgba(110, 231, 183, 0.3);
+}
+
+:root[data-theme="dark"] .ui-pill--warning {
+  color: #fffbeb;
+  background-color: rgba(217, 119, 6, 0.88);
+  border-color: rgba(253, 230, 138, 0.32);
+}
+
+.segmented-switch--embedded {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .segmented-switch {
+  border-color: rgba(148, 163, 184, 0.1) !important;
+  background-color: rgba(15, 23, 42, 0.3);
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .segmented-switch--embedded {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .segmented-switch__track {
+  background: rgba(15, 23, 42, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.09);
+}
+
+:root[data-theme="dark"] .segmented-switch__indicator {
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  box-shadow: 0 10px 28px rgba(49, 46, 129, 0.3);
+}
+
+:root[data-theme="dark"] .segmented-switch__option:not(.segmented-switch__option--selected) {
+  color: #94a3b8 !important;
+}
+
+:root[data-theme="dark"] .segmented-switch__option:not(.segmented-switch__option--selected):hover {
+  color: #e2e8f0 !important;
 }
 
 :root[data-theme="dark"] [class~="bg-[#f7f5ff]"],
@@ -90,6 +230,83 @@
 
 :root[data-theme="dark"] [class*="border-white"] {
   border-color: var(--cantaro-border) !important;
+}
+
+:root[data-theme="dark"] [class*="border-gray-"],
+:root[data-theme="dark"] [class*="border-slate-"],
+:root[data-theme="dark"] [class*="border-[#e"],
+:root[data-theme="dark"] [class*="border-[#d"] {
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+:root[data-theme="dark"] .glass-surface {
+  border-color: rgba(148, 163, 184, 0.1) !important;
+  box-shadow:
+    0 20px 55px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+}
+
+:root[data-theme="dark"] .app-top-bar,
+:root[data-theme="dark"] .app-sidebar {
+  border-color: rgba(148, 163, 184, 0.09) !important;
+}
+
+:root[data-theme="dark"] .app-top-search-input {
+  color: #e2e8f0 !important;
+  background-color: rgba(15, 23, 42, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.13) !important;
+}
+
+:root[data-theme="dark"] .app-top-search-input::placeholder {
+  color: #64748b !important;
+}
+
+:root[data-theme="dark"] .app-top-search-input:focus {
+  border-color: rgba(139, 92, 246, 0.7) !important;
+  background-color: rgba(15, 23, 42, 0.9) !important;
+}
+
+:root[data-theme="dark"] .app-mobile-menu-button {
+  color: #c4b5fd !important;
+  background: rgba(30, 41, 59, 0.78) !important;
+  border-color: rgba(139, 92, 246, 0.28) !important;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.24);
+}
+
+:root[data-theme="dark"] .app-mobile-menu-button:hover {
+  color: #ffffff !important;
+  background: rgba(109, 40, 217, 0.42) !important;
+  border-color: rgba(167, 139, 250, 0.48) !important;
+}
+
+:root[data-theme="dark"] .song-track-table {
+  border-color: rgba(148, 163, 184, 0.08) !important;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-theme="dark"] .song-track-header,
+:root[data-theme="dark"] .song-track-list > * {
+  border-color: rgba(148, 163, 184, 0.065) !important;
+}
+
+.song-track-row--idle {
+  transition: background-color 160ms ease;
+}
+
+.song-track-row--idle:hover {
+  background-color: rgba(255, 255, 255, 0.56);
+}
+
+.song-track-row--playing {
+  background-color: rgba(238, 234, 255, 0.75);
+}
+
+:root[data-theme="dark"] .song-track-row--idle:hover {
+  background-color: rgba(124, 92, 255, 0.07);
+}
+
+:root[data-theme="dark"] .song-track-row--playing {
+  background-color: rgba(124, 92, 255, 0.12);
 }
 
 .settings-content {

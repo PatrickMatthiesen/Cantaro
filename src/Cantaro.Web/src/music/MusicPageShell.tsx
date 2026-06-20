@@ -58,7 +58,7 @@ function SidebarMixtapeCard() {
       <p className="mt-2 text-sm leading-6 text-slate-600">A mix from your saved songs and playlists.</p>
       <Link
         to="/music/songs"
-        className="mt-5 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-slate-800"
+        className="mt-5 flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-slate-800"
       >
         Open songs
       </Link>

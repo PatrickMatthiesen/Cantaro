@@ -61,7 +61,7 @@ export function PageSideNavigation({
   footer,
 }: PageSideNavigationProps) {
   return (
-    <aside className="hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-[#e8e4fb] bg-white/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
+    <aside className="app-sidebar hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-[#e8e4fb] bg-white/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
       <div className="min-h-full pb-32">
         <Link to="/" className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-600 text-lg font-black text-white shadow-[0_12px_30px_rgba(124,92,255,0.3)]">

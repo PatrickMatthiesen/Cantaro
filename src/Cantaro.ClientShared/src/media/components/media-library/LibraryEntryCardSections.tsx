@@ -1,5 +1,6 @@
 import type { MediaLibraryListItemDto } from '../../services/mediaApi';
 import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
+import { Pill } from '../../../ui';
 
 interface TopLeftBadge {
     label: string;
@@ -15,7 +16,7 @@ const DETAILS_CLASS_NAMES: Record<MediaLibraryDensity, {
     comfortable: {
         container: 'p-4',
         panel: 'rounded-3xl p-4',
-        title: 'mt-3 text-xl',
+        title: 'text-xl',
         originalTitle: 'mt-1 text-sm',
     },
     compact: {
@@ -47,10 +48,10 @@ function LibraryEntryReleaseBadge({ badge, density }: { badge: TopLeftBadge | nu
     const compact = density === 'compact';
 
     return (
-        <span className={`inline-flex min-w-0 max-w-40 gap-x-1 rounded-full bg-cyan-50/92 text-left text-slate-900 shadow-lg backdrop-blur-md ${compact ? 'px-1.5 py-0.5 text-[0.6rem]' : 'px-2 py-1 text-xs'}`}>
+        <Pill tone="info" size={compact ? 'compact' : 'regular'} className="min-w-0 max-w-40 gap-x-1 text-left shadow-lg">
             <span className="max-w-fit whitespace-nowrap font-semibold">{badge.label}</span>
-            {!compact && badge.detail ? <span className="max-w-fit whitespace-nowrap text-slate-700">{badge.detail}</span> : null}
-        </span>
+            {!compact && badge.detail ? <span className="max-w-fit whitespace-nowrap opacity-75">{badge.detail}</span> : null}
+        </Pill>
     );
 }
 
@@ -60,14 +61,14 @@ function LibraryEntryProgressBadges({ progress, isConnected, density }: { progre
     return (
         <div className={`flex flex-col items-end ${compact ? 'gap-1' : 'gap-2'}`}>
             {progress ? (
-                <span className={`max-w-fit whitespace-nowrap rounded-full bg-white/90 font-semibold text-slate-900 shadow-lg backdrop-blur-md ${compact ? 'px-1.5 py-0.5 text-[0.6rem]' : 'px-2 py-1 text-xs'}`}>
+                <Pill size={compact ? 'compact' : 'regular'} className="max-w-fit whitespace-nowrap shadow-lg">
                     {progress}
-                </span>
+                </Pill>
             ) : null}
             {!isConnected ? (
-                <span className={`rounded-full bg-amber-400/95 font-semibold tracking-wide text-slate-950 uppercase shadow-lg ${compact ? 'px-1.5 py-0.5 text-[0.55rem]' : 'px-3 py-1 text-xs'}`}>
+                <Pill tone="warning" size={compact ? 'compact' : 'regular'} className="tracking-wide uppercase shadow-lg">
                     Not synced
-                </span>
+                </Pill>
             ) : null}
         </div>
     );

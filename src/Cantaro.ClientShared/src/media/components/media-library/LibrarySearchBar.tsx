@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { mediaProviderCatalog } from '../../services/mediaProviders';
+import { SegmentedSwitch } from '../../../ui';
 
 export type LibrarySearchMode = 'library' | string;
 
@@ -22,40 +23,24 @@ function modeLabel(mode: LibrarySearchMode): string {
     return mediaProviderCatalog.find((provider) => provider.id === mode)?.name ?? mode;
 }
 
-function modeButtonClassName(isSelected: boolean): string {
-    return `rounded-xl px-3 py-2 text-sm font-semibold transition ${isSelected
-        ? 'bg-white text-gray-950 shadow-sm'
-        : 'text-gray-500 hover:text-gray-800'
-        }`;
-}
-
 function SearchModeTabs({
     mode,
     connectedProviderIds,
     onModeChange,
 }: Pick<LibrarySearchBarProps, 'mode' | 'connectedProviderIds' | 'onModeChange'>) {
     const providerModes = mediaProviderCatalog.filter((provider) => connectedProviderIds.includes(provider.id));
+    const options = [
+        { value: 'library', label: 'My library' },
+        ...providerModes.map((provider) => ({ value: provider.id, label: provider.name })),
+    ];
 
     return (
-        <div className="flex shrink-0 flex-wrap gap-1 rounded-2xl bg-gray-100/80 p-1">
-            <button
-                type="button"
-                className={modeButtonClassName(mode === 'library')}
-                onClick={() => onModeChange('library')}
-            >
-                My library
-            </button>
-            {providerModes.map((provider) => (
-                <button
-                    key={provider.id}
-                    type="button"
-                    className={modeButtonClassName(mode === provider.id)}
-                    onClick={() => onModeChange(provider.id)}
-                >
-                    {provider.name}
-                </button>
-            ))}
-        </div>
+        <SegmentedSwitch
+            value={mode}
+            options={options}
+            onChange={onModeChange}
+            className="segmented-switch--embedded shrink-0"
+        />
     );
 }
 
@@ -91,14 +76,14 @@ export function LibrarySearchBar({
     return (
         <section className="rounded-3xl border border-white/70 bg-white/80 p-3 shadow-sm shadow-indigo-100/50 backdrop-blur">
             <form
-                className="flex flex-col gap-3 xl:flex-row xl:items-center"
+                className="flex flex-col gap-3 md:flex-row md:items-center"
                 onSubmit={(event) => {
                     event.preventDefault();
                     onSubmit();
                 }}
             >
                 {navigation ? <div className="shrink-0">{navigation}</div> : null}
-                {navigation ? <div className="h-px w-full shrink-0 bg-gray-200/80 xl:h-8 xl:w-px" aria-hidden /> : null}
+                {navigation ? <div className="h-px w-full shrink-0 bg-gray-200/80 md:h-8 md:w-px" aria-hidden /> : null}
                 <SearchModeTabs mode={mode} connectedProviderIds={connectedProviderIds} onModeChange={onModeChange} />
                 <div className="min-w-0 flex-1" />
                 <SearchSubmitButton query={query} mode={mode} isProviderMode={isProviderMode} isSearchingProvider={isSearchingProvider} />
