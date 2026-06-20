@@ -23,7 +23,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.5.0-preview.1.26319.13" />
-    <PackageReference Include="CommunityToolkit.Aspire.Minio.Client" Version="13.4.0" />
+    <PackageReference Include="AWSSDK.S3" Version="4.0.25.2" />
   </ItemGroup>
 
   <ItemGroup>

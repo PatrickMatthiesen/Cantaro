@@ -10,7 +10,7 @@ services:
       - "aspire"
     restart: "always"
   postgres:
-    image: "docker.io/library/postgres:17.6"
+    image: "docker.io/library/postgres:18.3"
     environment:
       POSTGRES_HOST_AUTH_METHOD: "scram-sha-256"
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
@@ -20,9 +20,47 @@ services:
       - "5432"
     volumes:
       - type: "volume"
-        target: "/var/lib/postgresql/data"
+        target: "/var/lib/postgresql"
         source: "cantaro-postgres-data"
         read_only: false
+    networks:
+      - "aspire"
+  garage:
+    image: "dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690"
+    command:
+      - "/garage"
+      - "server"
+    environment:
+      GARAGE_CONFIG_FILE: "/etc/garage.toml"
+      GARAGE_RPC_SECRET: "${GARAGE_RPC_SECRET}"
+      GARAGE_ADMIN_TOKEN: "${GARAGE_ADMIN_TOKEN}"
+    expose:
+      - "3900"
+      - "3903"
+      - "3901"
+    volumes:
+      - type: "bind"
+        target: "/etc"
+        source: "${GARAGE_BINDMOUNT_0}"
+        read_only: true
+      - type: "volume"
+        target: "/var/lib/garage"
+        source: "cantaro-garage-data"
+        read_only: false
+    networks:
+      - "aspire"
+  garage-provisioner:
+    image: "${GARAGE_PROVISIONER_IMAGE}"
+    environment:
+      OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY: "in_memory"
+      ConnectionStrings__garage: "AdminUrl=http://garage:3903;AdminToken=${GARAGE_ADMIN_TOKEN}"
+      ConnectionStrings__avatars: "ServiceUrl=http://garage:3900;AccessKeyId=${GARAGE_ACCESS_KEY_ID};SecretAccessKey=${GARAGE_SECRET_ACCESS_KEY};Region=garage;ForcePathStyle=true;BucketName=cantaro-avatars"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://docker-compose-dashboard:18889"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+      OTEL_SERVICE_NAME: "garage-provisioner"
+    depends_on:
+      garage:
+        condition: "service_started"
     networks:
       - "aspire"
   migration-service:
@@ -64,6 +102,7 @@ services:
       CANTARO_DB_URI: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cantaro-db"
       CANTARO_DB_JDBCCONNECTIONSTRING: "jdbc:postgresql://postgres:5432/cantaro-db"
       CANTARO_DB_DATABASENAME: "cantaro-db"
+      ConnectionStrings__avatars: "ServiceUrl=http://garage:3900;AccessKeyId=${GARAGE_ACCESS_KEY_ID};SecretAccessKey=${GARAGE_SECRET_ACCESS_KEY};Region=garage;ForcePathStyle=true;BucketName=cantaro-avatars"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://docker-compose-dashboard:18889"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "api"
@@ -73,11 +112,16 @@ services:
     depends_on:
       migration-service:
         condition: "service_completed_successfully"
+      garage-provisioner:
+        condition: "service_completed_successfully"
     networks:
       - "aspire"
+    restart: "unless-stopped"
 networks:
   aspire:
     driver: "bridge"
 volumes:
   cantaro-postgres-data:
+    driver: "local"
+  cantaro-garage-data:
     driver: "local"

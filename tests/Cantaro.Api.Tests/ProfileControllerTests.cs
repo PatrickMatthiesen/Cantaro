@@ -89,6 +89,34 @@ public sealed class ProfileControllerTests
         Assert.Empty(fixture.Store.Objects);
     }
 
+    [Fact]
+    public async Task ReplacingAvatarDeletesPreviousObject()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var bytes = new byte[] { 0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50 };
+
+        await using var firstStream = new MemoryStream(bytes);
+        var firstFile = new FormFile(firstStream, 0, bytes.Length, "avatar", "first.webp")
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = "image/webp"
+        };
+        await fixture.Controller.UploadAvatar(firstFile, CancellationToken.None);
+        var previousObjectKey = Assert.Single(fixture.Store.Objects).Key;
+
+        await using var replacementStream = new MemoryStream(bytes);
+        var replacementFile = new FormFile(replacementStream, 0, bytes.Length, "avatar", "replacement.webp")
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = "image/webp"
+        };
+        await fixture.Controller.UploadAvatar(replacementFile, CancellationToken.None);
+
+        var replacementObjectKey = Assert.Single(fixture.Store.Objects).Key;
+        Assert.NotEqual(previousObjectKey, replacementObjectKey);
+        Assert.False(fixture.Store.Objects.ContainsKey(previousObjectKey));
+    }
+
     private sealed class ProfileFixture : IAsyncDisposable
     {
         private ProfileFixture(SqliteConnection connection, ApplicationDbContext db, User user, FakeAvatarStore store, DefaultHttpContext httpContext, ProfileController controller)

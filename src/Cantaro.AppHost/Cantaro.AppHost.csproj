@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Cantaro.Api\Cantaro.Api.csproj" />
+    <ProjectReference Include="..\Cantaro.Aspire.Hosting.Garage\Cantaro.Aspire.Hosting.Garage.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\Cantaro.GarageProvisioner\Cantaro.GarageProvisioner.csproj" />
     <ProjectReference Include="..\Cantaro.MigrationService\Cantaro.MigrationService.csproj" />
     <ProjectReference Include="..\Cantaro.ServiceDefaults\Cantaro.ServiceDefaults.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
@@ -11,7 +13,6 @@
     <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.5.0-preview.1.26319.13" />
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.5.0-preview.1.26319.13" />
     <PackageReference Include="CommunityToolkit.Aspire.Hosting.Bun" Version="13.0.0-beta.439" />
-    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Minio" Version="13.4.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 

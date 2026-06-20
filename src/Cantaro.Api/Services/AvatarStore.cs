@@ -1,5 +1,6 @@
-using Minio;
-using Minio.DataModel.Args;
+using System.Net;
+using Amazon.S3;
+using Amazon.S3.Model;
 
 namespace Cantaro.Api.Services;
 
@@ -12,44 +13,42 @@ public interface IAvatarStore
     Task DeleteAsync(string objectKey, CancellationToken cancellationToken);
 }
 
-public sealed class MinioAvatarStore(IMinioClient client, ILogger<MinioAvatarStore> logger) : IAvatarStore
+public sealed class S3AvatarStore(IAmazonS3 client, S3ObjectStorageOptions options, ILogger<S3AvatarStore> logger) : IAvatarStore
 {
-    private const string BucketName = "cantaro-avatars";
-    private readonly SemaphoreSlim _bucketLock = new(1, 1);
-    private bool _bucketReady;
-
-    public async Task<string> PutAsync(string objectKey, Stream content, long length, string contentType, CancellationToken cancellationToken)
+    public async Task<string> PutAsync(
+        string objectKey,
+        Stream content,
+        long length,
+        string contentType,
+        CancellationToken cancellationToken)
     {
-        await EnsureBucketAsync(cancellationToken);
-        var response = await client.PutObjectAsync(
-            new PutObjectArgs()
-                .WithBucket(BucketName)
-                .WithObject(objectKey)
-                .WithStreamData(content)
-                .WithObjectSize(length)
-                .WithContentType(contentType),
-            cancellationToken);
-        return response.Etag;
+        var request = new PutObjectRequest
+        {
+            BucketName = options.BucketName,
+            Key = objectKey,
+            InputStream = content,
+            ContentType = contentType,
+            AutoCloseStream = false,
+            UseChunkEncoding = false
+        };
+        request.Headers.ContentLength = length;
+        var response = await client.PutObjectAsync(request, cancellationToken);
+        return NormalizeETag(response.ETag);
     }
 
     public async Task<StoredAvatar?> GetAsync(string objectKey, CancellationToken cancellationToken)
     {
-        await EnsureBucketAsync(cancellationToken);
         try
         {
-            var stat = await client.StatObjectAsync(
-                new StatObjectArgs().WithBucket(BucketName).WithObject(objectKey),
-                cancellationToken);
-            await using var buffer = new MemoryStream((int)stat.Size);
-            await client.GetObjectAsync(
-                new GetObjectArgs()
-                    .WithBucket(BucketName)
-                    .WithObject(objectKey)
-                    .WithCallbackStream(stream => stream.CopyTo(buffer)),
-                cancellationToken);
-            return new StoredAvatar(buffer.ToArray(), stat.ContentType ?? "image/webp", stat.ETag);
+            using var response = await client.GetObjectAsync(options.BucketName, objectKey, cancellationToken);
+            await using var buffer = new MemoryStream();
+            await response.ResponseStream.CopyToAsync(buffer, cancellationToken);
+            return new StoredAvatar(
+                buffer.ToArray(),
+                response.Headers.ContentType ?? "image/webp",
+                NormalizeETag(response.ETag));
         }
-        catch (Minio.Exceptions.ObjectNotFoundException)
+        catch (AmazonS3Exception ex) when (IsNotFound(ex))
         {
             return null;
         }
@@ -57,38 +56,19 @@ public sealed class MinioAvatarStore(IMinioClient client, ILogger<MinioAvatarSto
 
     public async Task DeleteAsync(string objectKey, CancellationToken cancellationToken)
     {
-        await EnsureBucketAsync(cancellationToken);
         try
         {
-            await client.RemoveObjectAsync(
-                new RemoveObjectArgs().WithBucket(BucketName).WithObject(objectKey),
-                cancellationToken);
+            await client.DeleteObjectAsync(options.BucketName, objectKey, cancellationToken);
         }
-        catch (Minio.Exceptions.ObjectNotFoundException)
+        catch (AmazonS3Exception ex) when (IsNotFound(ex))
         {
             logger.LogDebug("Avatar object {ObjectKey} was already absent.", objectKey);
         }
     }
 
-    private async Task EnsureBucketAsync(CancellationToken cancellationToken)
-    {
-        if (_bucketReady) return;
-        await _bucketLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (_bucketReady) return;
-            var exists = await client.BucketExistsAsync(
-                new BucketExistsArgs().WithBucket(BucketName),
-                cancellationToken);
-            if (!exists)
-            {
-                await client.MakeBucketAsync(new MakeBucketArgs().WithBucket(BucketName), cancellationToken);
-            }
-            _bucketReady = true;
-        }
-        finally
-        {
-            _bucketLock.Release();
-        }
-    }
+    private static bool IsNotFound(AmazonS3Exception exception) =>
+        exception.StatusCode == HttpStatusCode.NotFound
+        && string.Equals(exception.ErrorCode, "NoSuchKey", StringComparison.Ordinal);
+
+    private static string NormalizeETag(string? etag) => etag?.Trim('"') ?? string.Empty;
 }
