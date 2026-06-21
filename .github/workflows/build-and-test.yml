@@ -65,6 +65,11 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
+        
+      - name: Install Aspire CLI
+        run: |
+          curl -sSL https://aspire.dev/install.sh | bash -s -- --quality "dev"
+          echo "$HOME/.aspire/bin" >> "$GITHUB_PATH"
 
       - name: Restore
         run: dotnet restore
