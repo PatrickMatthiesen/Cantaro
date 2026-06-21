@@ -110,6 +110,37 @@ cd src/Cantaro.Web
 bun run build
 ```
 
+### Deployment
+
+Manually running **Deploy Cantaro** from GitHub Actions publishes the Aspire Docker Compose model, connects the runner to the tailnet, and uses Tailscale SSH to run `aspire deploy` against Docker on the remote host.
+The host must have Docker 28+ with Docker Compose, and the tailnet policy must allow `tag:ci` to reach it over Tailscale SSH.
+
+In production, the frontend is built and copied into the API container, which serves both the UI and the `/api` routes. Aspire publishes that container on host port `7689`; configure the reverse proxy to forward the site to `http://<docker-host>:7689` and terminate HTTPS at the proxy.
+
+Configure the OAuth applications with callback URLs based on the public HTTPS origin served by that proxy (replace `cantaro.example.com` with the real hostname):
+
+- YouTube/Google: `https://cantaro.example.com/api/platforms/youtube/callback`
+- AniList: `https://cantaro.example.com/api/media/providers/anilist/callback`
+
+The redirect URLs must match exactly, including the `https` scheme and path. The reverse proxy must preserve the original host and send `X-Forwarded-Host` and `X-Forwarded-Proto: https` so Cantaro generates the same public callback URLs during OAuth authorization.
+
+Create a GitHub environment named `Production` and add these environment secrets:
+
+- `SSH_HOST` and `SSH_USER`
+- `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET`
+- `CANTARO_POSTGRES_PASSWORD`
+- `CANTARO_YOUTUBE_CLIENT_ID` and `CANTARO_YOUTUBE_CLIENT_SECRET`
+- `CANTARO_ANILIST_CLIENT_ID` and `CANTARO_ANILIST_CLIENT_SECRET`
+- `CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY`
+
+Generate the JWT signing key from at least 32 bytes of cryptographically secure random data; do not use a password or memorable phrase. For example:
+
+```bash
+openssl rand -base64 32
+```
+
+Copy the complete output into `CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY` without committing it to the repository. Keep the value stable between deployments; replacing it invalidates outstanding browser-extension authorization tokens.
+
 ## Project Structure
 
 ```
