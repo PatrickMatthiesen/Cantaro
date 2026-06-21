@@ -1,7 +1,23 @@
 export interface User {
   id: number;
   email: string;
+  displayName: string;
+  avatarUrl?: string;
   createdAt: string;
+  preferences: ProfilePreferences;
+}
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+export interface ProfilePreferences {
+  theme: ThemePreference;
+  notifyOnSyncSuccess: boolean;
+  notifyOnSyncFailure: boolean;
+  notifyOnMediaReview: boolean;
+  keepPlaylistOrder: boolean;
+  keepPlaylistMetadata: boolean;
+  hideUnavailableTracks: boolean;
+  scheduledSync: boolean;
 }
 
 export interface RegisterRequest {
@@ -16,11 +32,11 @@ export interface LoginRequest {
 
 async function readApiError(response: Response, fallbackMessage: string): Promise<string> {
   const error = await response.json().catch(() => ({ message: fallbackMessage }));
-  return error.message || fallbackMessage;
+  return error.error || error.message || fallbackMessage;
 }
 
 interface AuthRequestOptions {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   fallbackMessage: string;
   body?: unknown;
 }
@@ -71,12 +87,43 @@ class AuthApiClient {
   }
 
   async getCurrentUser(): Promise<User> {
-    const response = await this.request('/api/auth/me', {
+    const response = await this.request('/api/profile', {
       method: 'GET',
       fallbackMessage: 'Failed to fetch user',
     });
 
     return response.json();
+  }
+
+  async updateProfile(displayName: string): Promise<User> {
+    const response = await this.request('/api/profile', { method: 'PUT', fallbackMessage: 'Failed to update profile', body: { displayName } });
+    return response.json();
+  }
+
+  async updatePreferences(preferences: ProfilePreferences): Promise<User> {
+    const response = await this.request('/api/profile/preferences', { method: 'PUT', fallbackMessage: 'Failed to update preferences', body: preferences });
+    return response.json();
+  }
+
+  async uploadAvatar(avatar: Blob): Promise<User> {
+    const form = new FormData();
+    form.append('avatar', avatar, 'avatar.webp');
+    const response = await fetch('/api/profile/avatar', { method: 'POST', credentials: 'include', body: form });
+    if (!response.ok) throw new Error(await readApiError(response, 'Failed to upload avatar'));
+    return response.json();
+  }
+
+  async deleteAvatar(): Promise<User> {
+    const response = await this.request('/api/profile/avatar', { method: 'DELETE', fallbackMessage: 'Failed to remove avatar' });
+    return response.json();
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request('/api/profile/change-password', { method: 'POST', fallbackMessage: 'Failed to change password', body: { currentPassword, newPassword } });
+  }
+
+  async deleteAccount(currentPassword: string): Promise<void> {
+    await this.request('/api/profile', { method: 'DELETE', fallbackMessage: 'Failed to delete account', body: { currentPassword } });
   }
 }
 

@@ -1,9 +1,10 @@
 import { GradientButton, StatusBadge } from '../../../ui';
+import type { ReactNode } from 'react';
 import type { MediaImportDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
 
 interface ProviderPanelHeaderProps {
     name: string;
-    icon: string;
+    icon: ReactNode;
     gradient: string;
     description: string;
     status: MediaProviderAccountStatusDto | null;

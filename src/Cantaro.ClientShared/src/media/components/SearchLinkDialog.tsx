@@ -4,6 +4,7 @@ import { GradientButton } from '../../ui';
 import { mediaApi } from '../services/mediaApi';
 import { mediaKindLabel } from '../services/mediaFormatting';
 import { mediaProviderCatalog } from '../services/mediaProviders';
+import { MediaProviderIcon } from './MediaProviderIcon';
 import type {
     MediaLinkConflictDto,
     MediaProviderLinkSummaryDto,
@@ -183,7 +184,9 @@ function SearchResultPoster({ posterUrl, title }: Pick<MediaProviderSearchResult
                     onError={(event) => { event.currentTarget.style.display = 'none'; }}
                 />
             ) : (
-                <div className="flex h-full w-full items-center justify-center text-xl">🎌</div>
+                <div className="flex h-full w-full items-center justify-center">
+                    <MediaProviderIcon providerId="anilist" className="h-6 w-6" aria-hidden />
+                </div>
             )}
         </div>
     );
@@ -322,7 +325,7 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                         }`}
                                 >
-                                    {provider.icon} {provider.name}
+                                    <MediaProviderIcon providerId={provider.iconId} className="mr-1 inline h-4 w-4" aria-hidden /> {provider.name}
                                 </button>
                             ))}
                         </div>

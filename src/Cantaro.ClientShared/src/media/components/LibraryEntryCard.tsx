@@ -6,6 +6,7 @@ import {
 import { formatRelativeReleaseTime } from '../services/mediaFormatting';
 import type { MediaLibraryDensity } from '../pages/MediaLibraryPage';
 import type { MediaLibraryListItemDto } from '../services/mediaApi';
+import { MediaProviderIcon } from './MediaProviderIcon';
 
 export interface LibraryEntryCardProps {
     entry: MediaLibraryListItemDto;
@@ -66,7 +67,7 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
     if (!posterUrl || failed) {
         return (
             <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-indigo-100 to-purple-100">
-                <span className="text-2xl" aria-hidden>🎌</span>
+                <MediaProviderIcon providerId="anilist" className="h-8 w-8" aria-hidden />
                 <span className="sr-only">{title} — no artwork available</span>
             </div>
         );

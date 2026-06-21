@@ -1,4 +1,4 @@
-import { useRouterState } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { Bell, Menu, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
@@ -76,7 +76,7 @@ function TopSearchInput({
       <label className="relative block">
         <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
         <input
-          className="h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-4 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
+          className="app-top-search-input h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-4 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
           placeholder={placeholder}
           type="search"
           value={onChange ? value ?? '' : undefined}
@@ -104,7 +104,7 @@ function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLBut
     <button
       ref={buttonRef}
       type="button"
-      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/70 text-slate-800 shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-white lg:hidden"
+      className="app-mobile-menu-button flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/70 text-slate-800 shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none lg:hidden"
       aria-label="Open navigation menu"
       onClick={onClick}
     >
@@ -113,17 +113,17 @@ function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLBut
   );
 }
 
-function ProfileButton({ userEmail }: { userEmail?: string }) {
-  const userInitial = userEmail?.trim().charAt(0).toUpperCase() || 'C';
+function ProfileButton({ userEmail, displayName, avatarUrl }: { userEmail?: string; displayName?: string; avatarUrl?: string }) {
+  const userInitial = displayName?.trim().charAt(0).toUpperCase() || userEmail?.trim().charAt(0).toUpperCase() || 'C';
 
   return (
-    <button
-      type="button"
-      className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)]"
-      aria-label="Profile"
+    <Link
+      to="/settings"
+      className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none"
+      aria-label={`Open settings for ${displayName || userEmail || 'profile'}`}
     >
-      {userInitial}
-    </button>
+      {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : userInitial}
+    </Link>
   );
 }
 
@@ -134,6 +134,8 @@ function PageTopBar({
   onSearchChange,
   onSearchSubmit,
   userEmail,
+  displayName,
+  avatarUrl,
   onOpenNavigation,
   navigationButtonRef,
 }: {
@@ -143,11 +145,13 @@ function PageTopBar({
   onSearchChange?: (value: string) => void;
   onSearchSubmit?: () => void;
   userEmail?: string;
+  displayName?: string;
+  avatarUrl?: string;
   onOpenNavigation: () => void;
   navigationButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   return (
-    <header className="sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-4 backdrop-blur-xl sm:px-8 lg:px-10">
+    <header className="app-top-bar sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-4 backdrop-blur-xl sm:px-8 lg:px-10">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
         <div className="flex min-w-0 items-center gap-3 lg:hidden">
           <MobileMenuButton buttonRef={navigationButtonRef} onClick={onOpenNavigation} />
@@ -165,7 +169,7 @@ function PageTopBar({
           />
           <div className="flex items-center gap-2">
             <NotificationButton />
-            <ProfileButton userEmail={userEmail} />
+            <ProfileButton userEmail={userEmail} displayName={displayName} avatarUrl={avatarUrl} />
           </div>
         </div>
       </div>
@@ -265,6 +269,8 @@ export function PageShell({
             onSearchChange={onSearchChange}
             onSearchSubmit={onSearchSubmit}
             userEmail={user?.email}
+            displayName={user?.displayName}
+            avatarUrl={user?.avatarUrl}
             navigationButtonRef={mobileNavigationButtonRef}
             onOpenNavigation={() => setIsMobileNavigationOpen(true)}
           />

@@ -3,6 +3,7 @@ export {
   GradientButton,
   GradientPageShell,
   PageLoadingState,
+  Pill,
   StatusBadge,
 } from './GlassComponents';
 

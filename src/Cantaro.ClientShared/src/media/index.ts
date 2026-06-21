@@ -3,6 +3,7 @@ export { MediaCatalogDetailPage } from './pages/MediaCatalogDetailPage';
 export { MediaLibraryPage, type MediaPageHeading } from './pages/MediaLibraryPage';
 export { MediaObservationReviewPage } from './pages/MediaObservationReviewPage';
 export { ProviderPanel } from './components/ProviderPanel';
+export { MediaProviderIcon } from './components/MediaProviderIcon';
 export * from './services/mediaApi';
 export * from './services/mediaFormatting';
 export * from './services/mediaProviders';

@@ -300,11 +300,11 @@ function TrackRow({
 }) {
   const artist = track.artist ?? 'Unknown artist';
   const albums = track.albums?.join(', ') ?? '';
-  const rowStateClassName = track.isPlaying ? 'bg-[#eeeaff]/75' : 'hover:bg-white/56';
+  const rowStateClassName = track.isPlaying ? 'song-track-row--playing' : 'song-track-row--idle';
 
   return (
     <li
-      className={`group grid items-center gap-3 px-5 py-3 text-sm text-slate-700 max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
+      className={`song-track-row group grid items-center gap-3 px-5 py-3 text-sm text-slate-700 max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
     >
       <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} />
       <TrackIdentity track={track} index={index} artist={artist} />
@@ -352,8 +352,8 @@ export function MusicTrackTable({
   const showAlbums = tracks.some((track) => (track.albums?.length ?? 0) > 0);
 
   return (
-    <section className="overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/42 shadow-[0_20px_70px_rgba(88,74,150,0.07)] backdrop-blur">
-      <div className={`grid gap-3 border-b border-[#e8e3fa] px-5 py-3 text-[0.68rem] font-black tracking-[0.14em] text-slate-500 uppercase max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)}`}>
+    <section className="song-track-table overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/42 shadow-[0_20px_70px_rgba(88,74,150,0.07)] backdrop-blur">
+      <div className={`song-track-header grid gap-3 border-b border-[#e8e3fa] px-5 py-3 text-[0.68rem] font-black tracking-[0.14em] text-slate-500 uppercase max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)}`}>
         <span>#</span>
         <span>Title</span>
         <span className="max-xl:hidden">Artist</span>
@@ -362,7 +362,7 @@ export function MusicTrackTable({
         <span>Time</span>
         <span />
       </div>
-      <ol className="divide-y divide-[#eeeafa]">
+      <ol className="song-track-list divide-y divide-[#eeeafa]">
         {tracks.map((track, index) => (
           <TrackRow key={track.id} track={track} index={index} showAlbums={showAlbums} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
         ))}

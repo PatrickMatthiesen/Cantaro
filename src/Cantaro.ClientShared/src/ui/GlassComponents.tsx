@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
 
 const glassSurfaceClass =
-  'rounded-3xl border border-white/80 bg-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]';
+  'glass-surface rounded-3xl border border-white/80 bg-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]';
 
 interface GlassCardProps extends HTMLAttributes<HTMLDivElement> {
   interactive?: boolean;
@@ -67,14 +67,30 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status }: StatusBadgeProps) {
   const map = {
-    connected: 'bg-green-100 text-green-800',
-    available: 'bg-slate-100 text-slate-700',
-    warning: 'bg-amber-100 text-amber-800',
+    connected: 'status-badge--connected',
+    available: 'status-badge--available',
+    warning: 'status-badge--warning',
   } as const;
 
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-semibold tracking-wide uppercase ${map[status]}`}>
       {status}
+    </span>
+  );
+}
+
+interface PillProps extends HTMLAttributes<HTMLSpanElement> {
+  tone?: 'neutral' | 'info' | 'success' | 'warning';
+  size?: 'compact' | 'regular';
+}
+
+export function Pill({ tone = 'neutral', size = 'regular', className = '', children, ...rest }: PillProps) {
+  return (
+    <span
+      className={`ui-pill ui-pill--${tone} inline-flex items-center rounded-full font-semibold backdrop-blur-md ${size === 'compact' ? 'px-1.5 py-0.5 text-[0.6rem]' : 'px-2.5 py-1 text-xs'} ${className}`}
+      {...rest}
+    >
+      {children}
     </span>
   );
 }

@@ -15,4 +15,6 @@ public class User : IdentityUser<int>
     public ICollection<MediaLibraryEntry> MediaLibraryEntries { get; set; } = [];
 
     public ICollection<MediaProviderOperation> MediaProviderOperations { get; set; } = [];
+
+    public UserSettings? Settings { get; set; }
 }

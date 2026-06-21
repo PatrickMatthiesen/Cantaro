@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ProviderPanel } from '@cantaro/client-shared/media';
+import { MediaProviderIcon, ProviderPanel } from '@cantaro/client-shared/media';
 import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
 import { mediaProviderCatalog } from '@cantaro/client-shared/media';
 
@@ -58,7 +58,7 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
             key={provider.id}
             providerId={provider.id}
             name={provider.name}
-            icon={provider.icon}
+            icon={<MediaProviderIcon providerId={provider.iconId} variant="mono" className="h-8 w-8 text-white" aria-hidden />}
             gradient={provider.gradient}
             description={provider.description}
           />

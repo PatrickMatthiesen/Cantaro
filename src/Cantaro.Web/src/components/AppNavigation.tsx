@@ -27,7 +27,7 @@ export function AppNavigation({ pathname }: { pathname: string }) {
             to={item.to}
             className={`inline-flex min-w-20 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black transition sm:min-w-24 sm:px-5 ${
               isActive
-                ? 'bg-[#ebe7ff] text-slate-950'
+                ? 'app-nav-link--active'
                 : 'text-slate-700 hover:bg-white/80'
             }`}
             aria-current={isActive ? 'page' : undefined}
