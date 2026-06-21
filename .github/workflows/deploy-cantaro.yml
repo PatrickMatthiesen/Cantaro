@@ -2,8 +2,6 @@ name: Deploy Cantaro
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -18,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: "Production"
+    env:
+      DOCKER_CONTEXT_NAME: docker-host-${{ github.run_id }}
 
     steps:
       - name: Checkout code
@@ -70,9 +70,12 @@ jobs:
           tags: tag:ci
           use-cache: "true"
           version: latest
-          ping: ${{ env.DEPLOY_HOST }}
+          ping: ${{ secrets.SSH_HOST }}
 
       - name: Add SSH host key
+        env:
+          DEPLOY_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.SSH_USER }}
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
@@ -82,7 +85,8 @@ jobs:
         env:
           ASPIRE_CONTAINER_RUNTIME: docker
           COMPOSE_PROJECT_NAME: cantaro
-          DOCKER_CONTEXT_NAME: docker-host-${{ github.run_id }}
+          DEPLOY_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.SSH_USER }}
           Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}
           Parameters__YouTubeClientSecret: ${{ secrets.CANTARO_YOUTUBE_CLIENT_SECRET }}
           Parameters__AniListClientId: ${{ secrets.CANTARO_ANILIST_CLIENT_ID }}
@@ -90,10 +94,20 @@ jobs:
           Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}
           Parameters__postgres_password: ${{ secrets.CANTARO_POSTGRES_PASSWORD }}
         run: |
-          docker context create "$DOCKER_CONTEXT_NAME" --docker "host=ssh://${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
-          trap 'docker context rm "$DOCKER_CONTEXT_NAME" || true' EXIT
+          docker context create "$DOCKER_CONTEXT_NAME" --docker "host=ssh://$DEPLOY_USER@$DEPLOY_HOST"
+          docker context use "$DOCKER_CONTEXT_NAME"
+          aspire deploy --environment Production --non-interactive
 
       - name: Verify remote containers
         if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.SSH_USER }}
         run: |
           ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "docker ps --filter label=com.docker.compose.project=cantaro --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+
+      - name: Remove temporary Docker context
+        if: always()
+        run: |
+          docker context use default
+          docker context rm "$DOCKER_CONTEXT_NAME" || true
