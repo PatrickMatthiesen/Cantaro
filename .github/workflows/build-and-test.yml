@@ -66,16 +66,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
         
-      - name: Install Aspire CLI
-        run: |
-          curl -sSL https://aspire.dev/install.sh | bash -s -- --version "13.5.0-preview.1.26319.13"
-          echo "$HOME/.aspire/bin" >> "$GITHUB_PATH"
-
       - name: Restore
         run: dotnet restore
 
       - name: Build
-        run: dotnet build --configuration Release --no-restore -p:AspireCliPath="$HOME/.aspire/bin/aspire"
+        run: dotnet build --configuration Release --no-restore -p:AspireUseCliBundle=false
 
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal
