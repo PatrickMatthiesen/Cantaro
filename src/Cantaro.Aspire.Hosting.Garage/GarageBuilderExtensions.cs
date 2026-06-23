@@ -39,7 +39,7 @@ public static class GarageBuilderExtensions
                 new ContainerFile
                 {
                     Name = Path.GetFileName(GarageResource.ConfigPath),
-                    SourcePath = configPath
+                    Contents = File.ReadAllText(configPath)
                 }
             ])
             .WithEnvironment("GARAGE_CONFIG_FILE", GarageResource.ConfigPath)

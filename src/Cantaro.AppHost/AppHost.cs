@@ -84,6 +84,32 @@ var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithReference(api)
     .WaitFor(api)
     .WithHttpsDeveloperCertificate();
+
+if (builder.ExecutionContext.IsPublishMode)
+{
+    // Keep the local Vite resource rooted in src/Cantaro.Web, but build the publish-only
+    // static asset image from the repo root so Bun can resolve workspace packages.
+    if (builder.TryCreateResourceBuilder<ContainerResource>("web", out var frontendContainer))
+    {
+        foreach (var dockerfile in frontendContainer.Resource.Annotations
+                     .OfType<Aspire.Hosting.ApplicationModel.DockerfileBuildAnnotation>()
+                     .ToArray())
+        {
+            frontendContainer.Resource.Annotations.Remove(dockerfile);
+        }
+
+        var contextPath = Path.GetFullPath("../..", builder.AppHostDirectory);
+        var dockerfilePath = Path.GetFullPath("src/Cantaro.Web/Dockerfile", contextPath);
+
+        frontendContainer.Resource.Annotations.Add(new Aspire.Hosting.ApplicationModel.DockerfileBuildAnnotation(
+            contextPath,
+            dockerfilePath,
+            stage: null)
+        {
+            HasEntrypoint = false,
+        });
+    }
+}
 #pragma warning restore ASPIRECERTIFICATES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 api.PublishWithContainerFiles(frontend, "/app/wwwroot");
