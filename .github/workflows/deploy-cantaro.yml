@@ -79,7 +79,6 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" 'docker version && docker compose version'
 
       - name: Deploy with Aspire through Docker context
         env:
