@@ -107,7 +107,8 @@ class AuthApiClient {
 
   async uploadAvatar(avatar: Blob): Promise<User> {
     const form = new FormData();
-    form.append('avatar', avatar, 'avatar.webp');
+    const extension = avatar.type === 'image/jpeg' ? 'jpg' : avatar.type === 'image/png' ? 'png' : 'webp';
+    form.append('avatar', avatar, `avatar.${extension}`);
     const response = await fetch('/api/profile/avatar', { method: 'POST', credentials: 'include', body: form });
     if (!response.ok) throw new Error(await readApiError(response, 'Failed to upload avatar'));
     return response.json();

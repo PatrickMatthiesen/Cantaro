@@ -63,7 +63,7 @@ public sealed class ProfileControllerTests
         Assert.StartsWith($"avatars/{fixture.User.Id}/", Assert.Single(fixture.Store.Objects).Key);
 
         var avatar = await fixture.Controller.GetAvatar(null, CancellationToken.None);
-        Assert.IsType<FileContentResult>(avatar);
+        Assert.Equal("image/webp", Assert.IsType<FileContentResult>(avatar).ContentType);
         Assert.Equal("private, max-age=31536000, immutable", fixture.HttpContext.Response.Headers.CacheControl);
         Assert.Equal("nosniff", fixture.HttpContext.Response.Headers.XContentTypeOptions);
         Assert.Equal("\"test-etag\"", fixture.HttpContext.Response.Headers.ETag);
@@ -77,11 +77,54 @@ public sealed class ProfileControllerTests
     }
 
     [Fact]
-    public async Task AvatarUploadRejectsNonWebPContent()
+    public async Task AvatarUploadAcceptsJpegAndPngFallbacks()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var jpegBytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0, 0 };
+        await using var jpegStream = new MemoryStream(jpegBytes);
+        var jpegFile = new FormFile(jpegStream, 0, jpegBytes.Length, "avatar", "avatar.jpg") { Headers = new HeaderDictionary(), ContentType = "image/jpeg" };
+
+        var jpegUpload = await fixture.Controller.UploadAvatar(jpegFile, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(jpegUpload.Result);
+        var jpegObject = Assert.Single(fixture.Store.Objects);
+        Assert.EndsWith(".jpg", jpegObject.Key);
+        Assert.Equal("image/jpeg", jpegObject.Value.ContentType);
+        Assert.Equal("image/jpeg", Assert.IsType<FileContentResult>(await fixture.Controller.GetAvatar(null, CancellationToken.None)).ContentType);
+
+        var pngBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        await using var pngStream = new MemoryStream(pngBytes);
+        var pngFile = new FormFile(pngStream, 0, pngBytes.Length, "avatar", "avatar.png") { Headers = new HeaderDictionary(), ContentType = "image/png" };
+
+        var pngUpload = await fixture.Controller.UploadAvatar(pngFile, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(pngUpload.Result);
+        var pngObject = Assert.Single(fixture.Store.Objects);
+        Assert.EndsWith(".png", pngObject.Key);
+        Assert.Equal("image/png", pngObject.Value.ContentType);
+        Assert.Equal("image/png", Assert.IsType<FileContentResult>(await fixture.Controller.GetAvatar(null, CancellationToken.None)).ContentType);
+    }
+
+    [Fact]
+    public async Task AvatarUploadRejectsUnsupportedContent()
     {
         await using var fixture = await ProfileFixture.CreateAsync();
         await using var stream = new MemoryStream([1, 2, 3, 4]);
         var file = new FormFile(stream, 0, stream.Length, "avatar", "avatar.webp") { Headers = new HeaderDictionary(), ContentType = "image/webp" };
+
+        var result = await fixture.Controller.UploadAvatar(file, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(fixture.Store.Objects);
+    }
+
+    [Fact]
+    public async Task AvatarUploadRejectsContentTypeMismatch()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0, 0 };
+        await using var stream = new MemoryStream(bytes);
+        var file = new FormFile(stream, 0, bytes.Length, "avatar", "avatar.webp") { Headers = new HeaderDictionary(), ContentType = "image/webp" };
 
         var result = await fixture.Controller.UploadAvatar(file, CancellationToken.None);
 

@@ -22,6 +22,8 @@ public sealed class ProfileController(
 {
     private const long MaxAvatarBytes = 1024 * 1024;
     private const string AvatarContentType = "image/webp";
+    private const string JpegContentType = "image/jpeg";
+    private const string PngContentType = "image/png";
 
     [HttpGet]
     public async Task<ActionResult<ProfileDto>> GetProfile(CancellationToken cancellationToken)
@@ -78,16 +80,17 @@ public sealed class ProfileController(
     [HttpPost("avatar")]
     public async Task<ActionResult<ProfileDto>> UploadAvatar([FromForm] IFormFile avatar, CancellationToken cancellationToken)
     {
-        if (avatar.Length is <= 0 or > MaxAvatarBytes || !string.Equals(avatar.ContentType, AvatarContentType, StringComparison.OrdinalIgnoreCase))
+        if (avatar.Length is <= 0 or > MaxAvatarBytes)
         {
-            return BadRequest(new { error = "Avatar must be a WebP image no larger than 1 MiB." });
+            return BadRequest(new { error = "Avatar must be an image no larger than 1 MiB." });
         }
 
         await using var content = new MemoryStream((int)avatar.Length);
         await avatar.CopyToAsync(content, cancellationToken);
-        if (!IsWebP(content.GetBuffer().AsSpan(0, (int)content.Length)))
+        var contentType = ResolveAvatarContentType(content.GetBuffer().AsSpan(0, (int)content.Length));
+        if (contentType is null || !string.Equals(avatar.ContentType, contentType, StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { error = "The uploaded file is not a valid WebP image." });
+            return BadRequest(new { error = "Avatar must be a valid WebP, JPEG, or PNG image." });
         }
 
         var user = await GetCurrentUserAsync(cancellationToken);
@@ -95,13 +98,13 @@ public sealed class ProfileController(
         var settings = await GetOrCreateSettingsAsync(user, cancellationToken);
         var previousObjectKey = settings.AvatarObjectKey;
         var version = Guid.NewGuid();
-        var objectKey = $"avatars/{user.Id}/{version:N}.webp";
+        var objectKey = $"avatars/{user.Id}/{version:N}.{AvatarFileExtension(contentType)}";
         content.Position = 0;
 
         string etag;
         try
         {
-            etag = await avatarStore.PutAsync(objectKey, content, content.Length, AvatarContentType, cancellationToken);
+            etag = await avatarStore.PutAsync(objectKey, content, content.Length, contentType, cancellationToken);
             settings.AvatarObjectKey = objectKey;
             settings.AvatarETag = etag;
             settings.AvatarVersion = version;
@@ -147,7 +150,7 @@ public sealed class ProfileController(
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        return File(avatar.Content, AvatarContentType);
+        return File(avatar.Content, ResolveAvatarContentType(avatar.Content) ?? AvatarContentType);
     }
 
     [HttpDelete("avatar")]
@@ -239,7 +242,7 @@ public sealed class ProfileController(
             }
             if (settings.AvatarObjectKey is not null && await avatarStore.GetAsync(settings.AvatarObjectKey, cancellationToken) is { } avatar)
             {
-                var avatarEntry = archive.CreateEntry("avatar.webp", CompressionLevel.NoCompression);
+                var avatarEntry = archive.CreateEntry($"avatar.{AvatarFileExtension(avatar.ContentType)}", CompressionLevel.NoCompression);
                 await using var stream = avatarEntry.Open();
                 await stream.WriteAsync(avatar.Content, cancellationToken);
             }
@@ -320,9 +323,42 @@ public sealed class ProfileController(
         return string.IsNullOrWhiteSpace(localPart) ? "Cantaro listener" : localPart;
     }
 
-    private static bool IsWebP(ReadOnlySpan<byte> bytes) => bytes.Length >= 12
-        && bytes[..4].SequenceEqual("RIFF"u8)
-        && bytes.Slice(8, 4).SequenceEqual("WEBP"u8);
+    private static string? ResolveAvatarContentType(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length >= 12
+            && bytes[..4].SequenceEqual("RIFF"u8)
+            && bytes.Slice(8, 4).SequenceEqual("WEBP"u8))
+        {
+            return AvatarContentType;
+        }
+
+        if (bytes.Length >= 3
+            && bytes[0] == 0xFF
+            && bytes[1] == 0xD8
+            && bytes[2] == 0xFF)
+        {
+            return JpegContentType;
+        }
+
+        return bytes.Length >= 8
+            && bytes[0] == 0x89
+            && bytes[1] == 0x50
+            && bytes[2] == 0x4E
+            && bytes[3] == 0x47
+            && bytes[4] == 0x0D
+            && bytes[5] == 0x0A
+            && bytes[6] == 0x1A
+            && bytes[7] == 0x0A
+                ? PngContentType
+                : null;
+    }
+
+    private static string AvatarFileExtension(string contentType) => contentType.ToLowerInvariant() switch
+    {
+        JpegContentType => "jpg",
+        PngContentType => "png",
+        _ => "webp"
+    };
 
     private async Task TryDeleteAvatarAsync(string objectKey, CancellationToken cancellationToken)
     {
