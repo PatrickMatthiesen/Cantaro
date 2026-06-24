@@ -10,6 +10,12 @@ interface AvatarCropDialogProps {
   onConfirm: (avatar: Blob) => Promise<void>;
 }
 
+const maxAvatarBytes = 1024 * 1024;
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
 async function renderAvatar(file: File, crop: Area): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const canvas = document.createElement('canvas');
@@ -26,11 +32,33 @@ async function renderAvatar(file: File, crop: Area): Promise<Blob> {
   context.drawImage(bitmap, crop.x, crop.y, crop.width, crop.height, 0, 0, 512, 512);
   bitmap.close();
 
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.86));
-  if (!blob || blob.size > 1024 * 1024) {
+  const webp = await canvasToBlob(canvas, 'image/webp', 0.86);
+  if (webp?.type === 'image/webp' && webp.size <= maxAvatarBytes) {
+    return webp;
+  }
+
+  const jpeg = await canvasToBlob(canvas, 'image/jpeg', 0.88);
+  if (jpeg?.type === 'image/jpeg' && jpeg.size <= maxAvatarBytes) {
+    return jpeg;
+  }
+
+  const png = await canvasToBlob(canvas, 'image/png');
+  if (png?.type === 'image/png' && png.size <= maxAvatarBytes) {
+    return png;
+  }
+
+  if (webp && webp.size <= maxAvatarBytes) {
+    return webp;
+  }
+
+  if (!webp && !jpeg && !png) {
+    throw new Error('Your browser could not prepare this image.');
+  }
+
+  if ([webp, jpeg, png].some(blob => blob && blob.size > maxAvatarBytes)) {
     throw new Error('The prepared avatar is too large. Try a simpler image.');
   }
-  return blob;
+  throw new Error('Your browser prepared an image format Cantaro cannot upload.');
 }
 
 export function AvatarCropDialog({ file, imageUrl, isSaving, onCancel, onConfirm }: AvatarCropDialogProps) {
