@@ -1,15 +1,8 @@
 import { useState, type ReactNode } from 'react';
-import { useRouterState } from '@tanstack/react-router';
 import { GlassCard } from '@cantaro/client-shared/ui';
 import { LoginForm } from './LoginForm';
 import { RegisterForm } from './RegisterForm';
-import { AppNavigation } from './AppNavigation';
 import { useAuth } from '../contexts/AuthContext';
-
-interface AuthenticatedShellProps {
-  children: ReactNode;
-  contentClassName?: string;
-}
 
 export interface GlobalHeadingState {
   eyebrow: string;
@@ -91,42 +84,4 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   return <>{children}</>;
-}
-
-export function AppPageShell({ children, contentClassName = 'max-w-6xl' }: AuthenticatedShellProps) {
-  return (
-    <div className="app-gradient-shell relative min-h-screen overflow-hidden text-gray-900">
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
-      <div className={`relative z-10 mx-auto min-h-screen space-y-6 px-6 pt-8 pb-16 ${contentClassName}`}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-export function GlobalHeader({
-  heading,
-  children,
-}: {
-  heading: GlobalHeadingState;
-  children?: ReactNode;
-}) {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-
-  return (
-    <header className="flex flex-wrap items-center justify-between gap-4">
-      <div>
-        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">{heading.eyebrow}</p>
-        <h1 className="mt-1 text-3xl font-bold text-gray-900">{heading.title}</h1>
-        {heading.details?.map((detail) => (
-          <p key={detail} className="mt-1 text-sm text-gray-500">{detail}</p>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        {children}
-        <AppNavigation pathname={pathname} />
-      </div>
-    </header>
-  );
 }

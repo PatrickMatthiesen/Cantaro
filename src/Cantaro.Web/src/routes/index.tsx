@@ -1,6 +1,8 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { CantaroHomePage } from '../pages/CantaroHomePage';
+import { createFileRoute, redirect } from '@tanstack/react-router';
+import { getLastActiveAreaRoute } from '../appAreaRouting';
 
 export const Route = createFileRoute('/')({
-  component: CantaroHomePage,
+  beforeLoad: () => {
+    throw redirect({ to: getLastActiveAreaRoute(), replace: true });
+  },
 });
