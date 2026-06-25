@@ -123,7 +123,7 @@ function HeaderActions({
     <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="inline-flex h-11 items-center gap-2 rounded-full bg-slate-950 px-6 text-sm font-black text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+        className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-black text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-6"
         disabled={!hasTracks || !onPlayAll}
         onClick={onPlayAll}
       >
@@ -132,7 +132,7 @@ function HeaderActions({
       </button>
       <button
         type="button"
-        className="inline-flex h-11 items-center gap-2 rounded-full bg-white/76 px-5 text-sm font-black text-slate-800 shadow-[0_14px_34px_rgba(88,74,150,0.09)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+        className="inline-flex h-10 items-center gap-2 rounded-full bg-white/76 px-4 text-sm font-black text-slate-800 shadow-[0_14px_34px_rgba(88,74,150,0.09)] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-5"
         disabled={!hasTracks || !onShuffle}
         onClick={onShuffle}
       >
@@ -146,12 +146,12 @@ function HeaderActions({
 
 function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: number }) {
   if (track.artworkUrl) {
-    return <img src={track.artworkUrl} alt="" className="h-10 w-10 rounded-xl object-cover" />;
+    return <img src={track.artworkUrl} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />;
   }
 
   return (
     <div
-      className="h-10 w-10 rounded-xl bg-[linear-gradient(135deg,#172554,#7c3aed_52%,#fb7185)]"
+      className="h-10 w-10 shrink-0 rounded-xl bg-[linear-gradient(135deg,#172554,#7c3aed_52%,#fb7185)]"
       aria-label={`Track ${index + 1}`}
     />
   );
@@ -238,7 +238,7 @@ function TrackIdentity({ track, index, artist }: { track: MusicCollectionTrack; 
   const content = (
     <>
       <TrackArtwork track={track} index={index} />
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate font-black text-slate-950">
           {track.title}
           <NowPlayingBadge isPlaying={track.isPlaying} />
@@ -249,14 +249,14 @@ function TrackIdentity({ track, index, artist }: { track: MusicCollectionTrack; 
   );
 
   if (!track.detailSongId) {
-    return <div className="flex min-w-0 items-center gap-3">{content}</div>;
+    return <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">{content}</div>;
   }
 
   return (
     <Link
       to="/music/songs/$songId"
       params={{ songId: track.detailSongId }}
-      className="group/identity flex min-w-0 items-center gap-3 rounded-xl focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+      className="group/identity flex min-w-0 items-center gap-2.5 rounded-xl focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none sm:gap-3"
     >
       {content}
     </Link>
@@ -281,8 +281,8 @@ function TrackPlatforms({ platformIds = [] }: { platformIds?: PlatformId[] }) {
 
 function trackGridClassName(showAlbums: boolean) {
   return showAlbums
-    ? 'grid-cols-[72px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.1fr)_110px_82px_54px]'
-    : 'grid-cols-[72px_minmax(0,2fr)_minmax(0,1.1fr)_110px_82px_54px]';
+    ? 'xl:grid-cols-[72px_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.1fr)_110px_82px_54px]'
+    : 'xl:grid-cols-[72px_minmax(0,2fr)_minmax(0,1.1fr)_110px_82px_54px]';
 }
 
 function TrackRow({
@@ -304,14 +304,14 @@ function TrackRow({
 
   return (
     <li
-      className={`song-track-row group grid items-center gap-3 px-5 py-3 text-sm text-slate-700 max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
+      className={`song-track-row group grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] items-center gap-2 px-3 py-3 text-sm text-slate-700 sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
     >
       <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} />
       <TrackIdentity track={track} index={index} artist={artist} />
       <span className="truncate font-medium max-xl:hidden">{artist}</span>
       {showAlbums ? <span className="truncate font-medium max-xl:hidden" title={albums}>{albums || '-'}</span> : null}
       <span className="max-xl:hidden"><TrackPlatforms platformIds={track.platformIds} /></span>
-      <span className="font-mono text-xs text-slate-600">{formatDuration(track.durationSeconds)}</span>
+      <span className="justify-self-start font-mono text-xs text-slate-600 sm:justify-self-auto">{formatDuration(track.durationSeconds)}</span>
       <MoreTrackActions title={track.title} track={track} onQueueTrack={onQueueTrack} />
     </li>
   );
@@ -352,8 +352,8 @@ export function MusicTrackTable({
   const showAlbums = tracks.some((track) => (track.albums?.length ?? 0) > 0);
 
   return (
-    <section className="song-track-table overflow-hidden rounded-[1.75rem] border border-white/60 bg-white/42 shadow-[0_20px_70px_rgba(88,74,150,0.07)] backdrop-blur">
-      <div className={`song-track-header grid gap-3 border-b border-[#e8e3fa] px-5 py-3 text-[0.68rem] font-black tracking-[0.14em] text-slate-500 uppercase max-xl:grid-cols-[72px_minmax(0,1fr)_86px_44px] ${trackGridClassName(showAlbums)}`}>
+    <section className="song-track-table overflow-hidden rounded-[1.35rem] border border-white/60 bg-white/42 shadow-[0_20px_70px_rgba(88,74,150,0.07)] backdrop-blur sm:rounded-[1.75rem]">
+      <div className={`song-track-header grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] gap-2 border-b border-[#e8e3fa] px-3 py-3 text-[0.68rem] font-black tracking-[0.14em] text-slate-500 uppercase sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)}`}>
         <span>#</span>
         <span>Title</span>
         <span className="max-xl:hidden">Artist</span>
@@ -501,20 +501,20 @@ function CollectionHero({
   const computedDurationLabel = getCollectionDurationLabel(tracks, durationLabel);
 
   return (
-    <section className="relative overflow-hidden rounded-[2rem] bg-[#ece9ff] px-5 py-5 shadow-[0_28px_90px_rgba(88,74,150,0.12)] md:px-7">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.95),transparent_32%),radial-gradient(circle_at_82%_26%,rgba(199,210,254,0.9),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.64),rgba(221,214,254,0.74))]" />
-      <div className="relative grid gap-6 md:grid-cols-[minmax(180px,270px)_1fr] md:items-end">
+    <section className="music-detail-hero relative overflow-hidden rounded-[1.5rem] bg-[#ece9ff] px-4 py-4 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:py-5 md:px-7">
+      <div className="music-detail-hero__wash absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.95),transparent_32%),radial-gradient(circle_at_82%_26%,rgba(199,210,254,0.9),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.64),rgba(221,214,254,0.74))]" />
+      <div className="relative grid grid-cols-[76px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[minmax(132px,180px)_1fr] sm:gap-5 md:grid-cols-[minmax(180px,270px)_1fr] md:items-end md:gap-6">
         <CollectionArtwork artworkUrl={artworkUrl} title={title} />
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-4 sm:space-y-5">
           <div>
             <p className="text-xs font-black tracking-[0.18em] text-slate-600 uppercase">{eyebrow}</p>
-            <h1 className="mt-2 text-4xl leading-tight font-black text-slate-950 sm:text-5xl">{title}</h1>
+            <h1 className="mt-1.5 text-3xl leading-tight font-black text-slate-950 sm:mt-2 sm:text-4xl md:text-5xl">{title}</h1>
             {description ? <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-slate-600">{description}</p> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {chips.length > 0 ? chips.map((chip) => <Pill key={chip}>{chip}</Pill>) : <Pill>Cantaro</Pill>}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-5">
+          <div className="col-span-2 flex flex-wrap items-center justify-between gap-4 sm:col-span-1 sm:gap-5">
             <div className="space-y-3">
               <p className="text-sm font-black text-slate-700">
                 {songsLabel}

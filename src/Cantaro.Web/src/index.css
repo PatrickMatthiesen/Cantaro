@@ -207,6 +207,25 @@
   background-color: var(--cantaro-canvas) !important;
 }
 
+:root[data-theme="dark"] [class~="bg-[#ece9ff]"],
+:root[data-theme="dark"] [class~="bg-[#eeeaff]"],
+:root[data-theme="dark"] [class~="bg-slate-50"],
+:root[data-theme="dark"] [class~="bg-slate-100"],
+:root[data-theme="dark"] [class~="bg-slate-200"] {
+  background-color: rgba(30, 41, 59, 0.72) !important;
+}
+
+:root[data-theme="dark"] [class~="bg-rose-50"],
+:root[data-theme="dark"] [class~="bg-rose-100"] {
+  background-color: rgba(127, 29, 29, 0.28) !important;
+}
+
+:root[data-theme="dark"] [class~="text-rose-600"],
+:root[data-theme="dark"] [class~="text-rose-700"],
+:root[data-theme="dark"] [class~="text-rose-800"] {
+  color: #fda4af !important;
+}
+
 :root[data-theme="dark"] [class~="bg-white"],
 :root[data-theme="dark"] [class*="bg-white/"] {
   background-color: var(--cantaro-panel) !important;
@@ -214,6 +233,7 @@
 
 :root[data-theme="dark"] [class~="text-slate-950"],
 :root[data-theme="dark"] [class~="text-slate-900"],
+:root[data-theme="dark"] [class~="text-slate-800"],
 :root[data-theme="dark"] [class~="text-gray-900"],
 :root[data-theme="dark"] [class~="text-gray-800"] {
   color: var(--cantaro-text) !important;
@@ -277,6 +297,18 @@
   color: #ffffff !important;
   background: rgba(109, 40, 217, 0.42) !important;
   border-color: rgba(167, 139, 250, 0.48) !important;
+}
+
+:root[data-theme="dark"] .music-detail-hero {
+  background-color: #111827 !important;
+  box-shadow: 0 28px 90px rgba(2, 6, 23, 0.32) !important;
+}
+
+:root[data-theme="dark"] .music-detail-hero__wash {
+  background:
+    radial-gradient(circle at 16% 12%, rgba(124, 92, 255, 0.18), transparent 34%),
+    radial-gradient(circle at 82% 20%, rgba(14, 165, 233, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.84)) !important;
 }
 
 :root[data-theme="dark"] .song-track-table {

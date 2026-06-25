@@ -27,8 +27,8 @@ function isPlatformId(value: string): value is PlatformId {
 function getMatchTone(matchStatus?: string): SongDerivedMetadata['matchTone'] {
   const normalizedStatus = matchStatus?.toLowerCase() ?? '';
 
-  if (/match/.test(normalizedStatus) && !/unmatched/.test(normalizedStatus)) return 'ready';
-  if (/review|candidate|unmatched/.test(normalizedStatus)) return 'warning';
+  if (/ambiguous|candidate|no[_ -]?match|review|unmatched/.test(normalizedStatus)) return 'warning';
+  if (/match/.test(normalizedStatus)) return 'ready';
   return 'neutral';
 }
 
@@ -82,9 +82,9 @@ function EmptyPlatformPill() {
   );
 }
 
-function SongArtworkBlock({ song, index = 0 }: { song: MusicLibrarySong; index?: number }) {
+function SongArtworkBlock({ song, index = 0, className = '' }: { song: MusicLibrarySong; index?: number; className?: string }) {
   return (
-    <div className="relative overflow-hidden rounded-[1.6rem] bg-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
+    <div className={`relative overflow-hidden rounded-[1.35rem] bg-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.18)] sm:rounded-[1.6rem] ${className}`}>
       <img src={songArtwork(song, index)} alt="" className="aspect-square w-full object-cover" />
       <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-slate-950/30 via-transparent to-white/5" />
     </div>
@@ -100,11 +100,11 @@ function SongStatusBadge({ metadata }: { metadata: SongDerivedMetadata }) {
   );
 }
 
-function DetailMetric({ label, value }: { label: string; value: ReactNode }) {
+function DetailMetric({ label, value, compact = false }: { label: string; value: ReactNode; compact?: boolean }) {
   return (
-    <div className="rounded-2xl bg-white/64 p-4">
+    <div className={`rounded-2xl bg-white/64 ${compact ? 'p-2.5' : 'p-3 sm:p-4'}`}>
       <p className="text-[0.66rem] font-black tracking-[0.14em] text-slate-500 uppercase">{label}</p>
-      <div className="mt-1 text-sm font-black text-slate-950">{value}</div>
+      <div className={`${compact ? 'mt-0.5' : 'mt-1'} text-sm font-black text-slate-950`}>{value}</div>
     </div>
   );
 }
@@ -113,26 +113,104 @@ function DetailActionButton({
   children,
   icon,
   onClick,
+  compactOnNarrow = false,
   primary = false,
 }: {
   children: ReactNode;
   icon: ReactNode;
   onClick?: () => void;
+  compactOnNarrow?: boolean;
   primary?: boolean;
 }) {
+  const label = typeof children === 'string' ? children : undefined;
+
   return (
     <button
       type="button"
-      className={`inline-flex h-11 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black transition ${
+      className={`inline-flex h-10 items-center justify-center gap-2 rounded-2xl text-sm font-black transition sm:h-11 ${
+        compactOnNarrow ? 'w-10 px-0 sm:w-11 sm:px-0 xl:w-auto xl:px-4' : 'px-3 sm:px-4'
+      } ${
         primary
           ? 'bg-slate-950 text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)] hover:bg-slate-800'
           : 'border border-[#e3def8] bg-white/74 text-slate-700 hover:bg-white'
       }`}
+      aria-label={label}
       onClick={onClick}
     >
       {icon}
-      {children}
+      <span className={compactOnNarrow ? 'sr-only xl:not-sr-only' : undefined}>{children}</span>
     </button>
+  );
+}
+
+function SongMetrics({ song, metadata, className = '' }: { song: MusicLibrarySong; metadata: SongDerivedMetadata; className?: string }) {
+  return (
+    <div className={`grid grid-cols-3 gap-2 sm:gap-3 ${className}`}>
+      <DetailMetric compact label="Duration" value={formatDuration(song.durationSeconds)} />
+      <DetailMetric compact label="Playlists" value={song.playlists.length.toLocaleString()} />
+      <DetailMetric compact label="Sources" value={(metadata.platformIds.length + (metadata.hasMusicBrainzSource ? 1 : 0)).toLocaleString()} />
+    </div>
+  );
+}
+
+function SongHeroActions({ onPlayPreview, className = '' }: { onPlayPreview: () => void; className?: string }) {
+  return (
+    <div className={`flex flex-wrap gap-2 ${className}`}>
+      <DetailActionButton primary icon={<MusicUiIcon name="play" className="h-4 w-4" />} onClick={onPlayPreview}>
+        Play preview
+      </DetailActionButton>
+      <DetailActionButton compactOnNarrow icon={<MusicUiIcon name="sparkles" className="h-4 w-4" />}>
+        Match
+      </DetailActionButton>
+      <DetailActionButton compactOnNarrow icon={<MusicUiIcon name="heart" className="h-4 w-4" />}>
+        Favorite
+      </DetailActionButton>
+      <DetailActionButton compactOnNarrow icon={<MusicUiIcon name="more" className="h-4 w-4" />}>
+        More
+      </DetailActionButton>
+    </div>
+  );
+}
+
+function SongDetailHero({
+  song,
+  metadata,
+  songIndex,
+  onPlayPreview,
+}: {
+  song: MusicLibrarySong;
+  metadata: SongDerivedMetadata;
+  songIndex: number;
+  onPlayPreview: () => void;
+}) {
+  return (
+    <section className="music-detail-hero relative overflow-hidden rounded-[1.5rem] bg-[#ece9ff] px-4 pt-4 pb-3 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:pt-5 sm:pb-4 md:px-6 md:pt-6 md:pb-5 xl:px-7 xl:pt-7">
+      <div className="music-detail-hero__wash absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(255,255,255,0.96),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(199,210,254,0.84),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.72),rgba(224,231,255,0.72))]" />
+      <div className="relative">
+        <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[136px_minmax(0,1fr)] sm:gap-5 md:grid-cols-[168px_minmax(0,1fr)] md:gap-y-4 xl:grid-cols-[184px_minmax(0,1fr)]">
+          <SongArtworkBlock song={song} index={songIndex} className="w-full" />
+          <div className="min-w-0 space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <SongStatusBadge metadata={metadata} />
+              {metadata.platformIds.length > 0 ? metadata.platformIds.map((platformId) => <PlatformPill key={platformId} platformId={platformId} />) : <EmptyPlatformPill />}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl leading-tight font-black text-slate-950 sm:text-4xl xl:text-5xl">{song.title}</h1>
+              <p className="mt-1.5 text-base font-black text-violet-700 sm:mt-2 sm:text-xl">{songArtist(song)}</p>
+            </div>
+          </div>
+          <div className="hidden md:block" />
+          <div className="hidden min-w-0 items-center justify-between gap-4 md:flex">
+            <SongMetrics song={song} metadata={metadata} className="max-w-[24rem] flex-1" />
+            <SongHeroActions onPlayPreview={onPlayPreview} className="shrink-0 justify-end" />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:mt-5 md:hidden">
+          <SongMetrics song={song} metadata={metadata} />
+          <SongHeroActions onPlayPreview={onPlayPreview} />
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -315,7 +393,7 @@ export function MusicSongDetailPage({ library, songId }: { library: MusicLibrary
 
   return (
     <MusicPageShell library={library} activeSong={activeSong} onStopActiveSong={() => setActiveSongId(undefined)}>
-      <div className="space-y-5">
+      <div>
         <Link
           to="/music/songs"
           className="inline-flex items-center gap-2 text-sm font-black text-violet-600 transition hover:text-violet-500"
@@ -324,52 +402,25 @@ export function MusicSongDetailPage({ library, songId }: { library: MusicLibrary
           Back to song library
         </Link>
 
-        <section className="relative overflow-hidden rounded-[2rem] bg-[#ece9ff] p-5 shadow-[0_28px_90px_rgba(88,74,150,0.12)] md:p-7">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(255,255,255,0.96),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(199,210,254,0.84),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.72),rgba(224,231,255,0.72))]" />
-          <div className="relative grid gap-6 xl:grid-cols-[minmax(220px,320px)_1fr] xl:items-end">
-            <SongArtworkBlock song={song} index={songIndex} />
-            <div className="min-w-0 space-y-5">
-              <div>
-                <SongStatusBadge metadata={metadata} />
-                <h1 className="mt-3 text-4xl leading-tight font-black text-slate-950 sm:text-5xl">{song.title}</h1>
-                <p className="mt-2 text-xl font-black text-violet-700">{songArtist(song)}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {metadata.platformIds.length > 0 ? metadata.platformIds.map((platformId) => <PlatformPill key={platformId} platformId={platformId} />) : <EmptyPlatformPill />}
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <DetailMetric label="Duration" value={formatDuration(song.durationSeconds)} />
-                <DetailMetric label="Playlists" value={song.playlists.length.toLocaleString()} />
-                <DetailMetric label="Sources" value={(metadata.platformIds.length + (metadata.hasMusicBrainzSource ? 1 : 0)).toLocaleString()} />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <DetailActionButton primary icon={<MusicUiIcon name="play" className="h-4 w-4" />} onClick={() => setActiveSongId(song.id)}>
-                  Play preview
-                </DetailActionButton>
-                <DetailActionButton icon={<MusicUiIcon name="sparkles" className="h-4 w-4" />}>
-                  Match across platforms
-                </DetailActionButton>
-                <DetailActionButton icon={<MusicUiIcon name="heart" className="h-4 w-4" />}>
-                  Favorite
-                </DetailActionButton>
-                <DetailActionButton icon={<MusicUiIcon name="more" className="h-4 w-4" />}>
-                  More
-                </DetailActionButton>
-              </div>
-            </div>
-          </div>
-        </section>
+        <div className="mt-5 space-y-3">
+          <SongDetailHero
+            song={song}
+            metadata={metadata}
+            songIndex={songIndex}
+            onPlayPreview={() => setActiveSongId(song.id)}
+          />
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 space-y-5">
-            <PlatformAvailabilityCard song={song} />
-            <VersionsCard song={song} />
-            <PlaylistAppearancesCard song={song} />
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-w-0 space-y-5">
+              <PlatformAvailabilityCard song={song} />
+              <VersionsCard song={song} />
+              <PlaylistAppearancesCard song={song} />
+            </div>
+            <aside className="space-y-5">
+              <MetadataReadinessCard song={song} />
+              <RelatedSongsCard library={library} song={song} />
+            </aside>
           </div>
-          <aside className="space-y-5">
-            <MetadataReadinessCard song={song} />
-            <RelatedSongsCard library={library} song={song} />
-          </aside>
         </div>
       </div>
     </MusicPageShell>

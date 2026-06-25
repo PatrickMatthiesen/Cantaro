@@ -145,7 +145,7 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
 function ConnectionCard({ name, detail, icon, implemented, connected, busy, onAction }: { name: string; detail: string; icon: ReactNode; implemented: boolean; connected: boolean; busy: boolean; onAction: () => void }) {
   return (
     <article className="settings-surface-row flex items-center gap-4 rounded-3xl border p-4">
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm">{icon}</span>
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-950 shadow-sm">{icon}</span>
       <span className="min-w-0 flex-1"><strong className="block text-sm text-slate-950">{name}</strong><span className="block truncate text-xs text-slate-500">{implemented ? detail : 'Coming later'}</span></span>
       {implemented ? <button type="button" disabled={busy} onClick={onAction} className={`rounded-xl px-4 py-2 text-xs font-black transition ${connected ? 'bg-emerald-50 text-emerald-700 hover:bg-rose-50 hover:text-rose-700' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>{busy ? 'Working…' : connected ? 'Connected' : 'Connect'}</button> : <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black tracking-wider text-slate-500 uppercase">Coming Soon</span>}
     </article>

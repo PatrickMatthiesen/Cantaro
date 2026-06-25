@@ -92,7 +92,7 @@ function NotificationButton() {
   return (
     <button
       type="button"
-      className="flex h-11 w-11 items-center justify-center rounded-full text-slate-700 transition hover:bg-white/70"
+      className="flex h-10 w-10 items-center justify-center rounded-full text-slate-700 transition hover:bg-white/70 sm:h-11 sm:w-11"
       aria-label="Notifications"
     >
       <Bell className="h-5 w-5" aria-hidden />
@@ -105,7 +105,7 @@ function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLBut
     <button
       ref={buttonRef}
       type="button"
-      className="app-mobile-menu-button flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/70 text-slate-800 shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none lg:hidden"
+      className="app-mobile-menu-button flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/70 text-slate-800 shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none sm:h-11 sm:w-11 lg:hidden"
       aria-label="Open navigation menu"
       onClick={onClick}
     >
@@ -120,7 +120,7 @@ function ProfileButton({ userEmail, displayName, avatarUrl }: { userEmail?: stri
   return (
     <Link
       to="/settings"
-      className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none"
+      className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none sm:h-12 sm:w-12"
       aria-label={`Open settings for ${displayName || userEmail || 'profile'}`}
     >
       {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : userInitial}
@@ -152,27 +152,24 @@ function PageTopBar({
   navigationButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   return (
-    <header className="app-top-bar sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-4 backdrop-blur-xl sm:px-8 lg:px-10">
+    <header className="app-top-bar sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-3 backdrop-blur-xl sm:px-8 sm:py-4 lg:px-10">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-        <div className="flex min-w-0 items-center gap-3 lg:hidden">
-          <MobileMenuButton buttonRef={navigationButtonRef} onClick={onOpenNavigation} />
-          <AppNavigation pathname={pathname} />
-        </div>
-        <div className="hidden lg:block">
-          <AppNavigation pathname={pathname} />
-        </div>
-        <div className="flex min-w-0 items-center gap-3 lg:flex-1">
-          <TopSearchInput
-            placeholder={searchPlaceholder}
-            value={searchValue}
-            onChange={onSearchChange}
-            onSubmit={onSearchSubmit}
-          />
-          <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center justify-between gap-3 lg:contents">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <MobileMenuButton buttonRef={navigationButtonRef} onClick={onOpenNavigation} />
+            <AppNavigation pathname={pathname} />
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:order-3">
             <NotificationButton />
             <ProfileButton userEmail={userEmail} displayName={displayName} avatarUrl={avatarUrl} />
           </div>
         </div>
+        <TopSearchInput
+          placeholder={searchPlaceholder}
+          value={searchValue}
+          onChange={onSearchChange}
+          onSubmit={onSearchSubmit}
+        />
       </div>
     </header>
   );
@@ -277,7 +274,7 @@ export function PageShell({
             onOpenNavigation={() => setIsMobileNavigationOpen(true)}
           />
 
-          <main className={`w-full px-4 py-6 sm:px-8 lg:px-10 ${contentClassName}`}>
+          <main className={`w-full px-3 py-5 sm:px-8 sm:py-6 lg:px-10 ${contentClassName}`}>
             {children}
           </main>
         </div>

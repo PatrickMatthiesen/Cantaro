@@ -1,6 +1,5 @@
 import { useId, type ElementType, type SVGProps } from 'react';
 import Spotify from '@thesvg/react/spotify';
-import Tidal from '@thesvg/react/tidal';
 import YouTubeMusic from '@thesvg/react/youtube-music';
 import {
   Activity,
@@ -63,11 +62,22 @@ function AppleMusicIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   );
 }
 
+function TidalIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 1001 667" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} {...props}>
+      <path
+        fill="currentColor"
+        d="M84 83.5 0.5 167l83 83c45.6 45.6 83.4 83 84 83 .5 0 38.3-37.4 84-83l83-83 83 83 83 83-83.5 83.5L333.5 500l83.5 83.5 83.5 83.5 83.5-83.5 83.5-83.5-83.3-83.3-83.2-83.2 83.3-83.3 83.2-83.2 83.3 83.2 83.2 83.3 83.5-83.5 83.5-83.5-83.5-83.5-83.5-83.5-83.5 83.5-83.5 83.5-83.3-83.3L500.5 0 417.2 83.2 334 166.5l-83.3-83.3L167.5 0 84 83.5Z"
+      />
+    </svg>
+  );
+}
+
 const platformIconById: Record<PlatformId, SvgIconComponent> = {
   youtube: YouTubeMusic,
   spotify: Spotify,
   apple: AppleMusicIcon,
-  tidal: Tidal,
+  tidal: TidalIcon,
 };
 
 export type MusicUiIconName =

@@ -24,7 +24,7 @@ export function AppNavigation({ pathname }: { pathname: string }) {
           <Link
             key={item.id}
             to={item.to}
-            className={`inline-flex min-w-20 items-center justify-center rounded-2xl px-4 py-3 text-sm font-black transition sm:min-w-24 sm:px-5 ${
+            className={`inline-flex min-w-16 items-center justify-center rounded-2xl px-3 py-2.5 text-sm font-black transition sm:min-w-24 sm:px-5 sm:py-3 ${
               isActive
                 ? 'app-nav-link--active'
                 : 'text-slate-700 hover:bg-white/80'
