@@ -1,14 +1,13 @@
 import { Link } from '@tanstack/react-router';
+import type { AppArea } from '../appAreaRouting';
 import type { AppRouteTo } from '../routerTypes';
 
-type AppSection = 'music' | 'media';
-
-const navigationItems: Array<{ id: AppSection; label: string; to: AppRouteTo }> = [
-  { id: 'music', label: 'Music', to: '/music/songs' },
+const navigationItems: Array<{ id: AppArea; label: string; to: AppRouteTo }> = [
+  { id: 'music', label: 'Music', to: '/music' },
   { id: 'media', label: 'Media', to: '/media' },
 ];
 
-function isItemActive(section: AppSection, pathname: string): boolean {
+function isItemActive(section: AppArea, pathname: string): boolean {
   return pathname === `/${section}` || pathname.startsWith(`/${section}/`);
 }
 

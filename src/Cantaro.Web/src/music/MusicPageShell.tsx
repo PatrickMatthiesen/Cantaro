@@ -71,7 +71,7 @@ function createMusicNavigationSections(): PageNavigationSection[] {
     {
       title: 'Music',
       items: [
-        { label: 'Home', to: '/music/songs', icon: <MusicUiIcon name="music" className="h-4 w-4" />, matchPrefix: '/music/songs' },
+        { label: 'Songs', to: '/music/songs', icon: <MusicUiIcon name="music" className="h-4 w-4" />, matchPrefix: '/music/songs' },
         { label: 'Playlists', to: '/music/playlists', icon: <MusicUiIcon name="listMusic" className="h-4 w-4" />, matchPrefix: '/music/playlists' },
         { label: 'YouTube', to: '/music/platforms/$platformId', params: { platformId: 'youtube' }, icon: <MusicPlatformIcon platformId="youtube" className="h-4 w-4" />, matchPrefix: '/music/platforms/youtube' },
         { label: 'Matching', to: '/music/matching', icon: <MusicUiIcon name="sparkles" className="h-4 w-4" />, matchPrefix: '/music/matching' },

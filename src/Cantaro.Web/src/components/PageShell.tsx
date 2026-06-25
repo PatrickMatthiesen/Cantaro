@@ -2,6 +2,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import { Bell, Menu, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
+import { rememberActiveArea } from '../appAreaRouting';
 import { useAuth } from '../contexts/AuthContext';
 
 interface PageShellProps {
@@ -254,6 +255,7 @@ export function PageShell({
 
   useEffect(() => {
     setIsMobileNavigationOpen(false);
+    rememberActiveArea(pathname);
   }, [pathname]);
 
   return (
