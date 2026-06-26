@@ -1,0 +1,1375 @@
+{
+  "resources": [
+    {
+      "name": "AniListClientId",
+      "displayName": "AniListClientId",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:AniListClientId",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=AniListClientId",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:AniListClientId",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "AniListClientId",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for AniListClientId",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "AniListClientSecret",
+      "displayName": "AniListClientSecret",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:AniListClientSecret",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=AniListClientSecret",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:AniListClientSecret",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "AniListClientSecret",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for AniListClientSecret",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "api-qbptubvm",
+      "displayName": "api",
+      "resourceType": "Project",
+      "state": "Running",
+      "creationTimestamp": "2026-06-26T19:46:57+00:00",
+      "startTimestamp": "2026-06-26T19:46:57.052+00:00",
+      "source": "Cantaro.Api.csproj",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=api-qbptubvm",
+      "relationships": [
+        {
+          "type": "Reference",
+          "resourceName": "YouTubeClientId"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "YouTubeClientSecret"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "AniListClientId"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "AniListClientSecret"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "ExtensionAuthJwtSigningKey"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "migration-service-hyhbjgqv"
+        },
+        {
+          "type": "WaitFor",
+          "resourceName": "migration-service-hyhbjgqv"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "cantaro-db"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "avatars"
+        },
+        {
+          "type": "WaitFor",
+          "resourceName": "garage-provisioner-mmkdjvjk"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "web-mhaqczmz"
+        }
+      ],
+      "urls": [
+        {
+          "name": "http",
+          "url": "http://localhost:5039"
+        },
+        {
+          "name": "https",
+          "url": "https://localhost:7203"
+        }
+      ],
+      "volumes": [],
+      "properties": {
+        "executable.args": null,
+        "executable.path": "dotnet",
+        "executable.pid": 51360,
+        "executable.workDir": "D:\\opensource\\Cantaro\\src\\Cantaro.Api",
+        "project.launchProfile": "https",
+        "project.path": "D:\\opensource\\Cantaro\\src\\Cantaro.Api\\Cantaro.Api.csproj",
+        "resource.appArgs": [],
+        "resource.appArgsSensitivity": []
+      },
+      "environment": {
+        "AniList:ClientId": null,
+        "AniList:ClientSecret": null,
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_HTTPS_PORT": "7203",
+        "ASPNETCORE_URLS": "https://localhost:57586;http://localhost:57587",
+        "CANTARO_DB_DATABASENAME": "cantaro-db",
+        "CANTARO_DB_HOST": "localhost",
+        "CANTARO_DB_JDBCCONNECTIONSTRING": "jdbc:postgresql://localhost:5432/cantaro-db",
+        "CANTARO_DB_PASSWORD": "fkcd9)36_3y_sxn4HfH}70",
+        "CANTARO_DB_PORT": "5432",
+        "CANTARO_DB_URI": "postgresql://postgres:fkcd9%2936_3y_sxn4HfH%7D70@localhost:5432/cantaro-db",
+        "CANTARO_DB_USERNAME": "postgres",
+        "ConnectionStrings__avatars": "ServiceUrl=http://127.0.0.1:29844;AccessKeyId=77503751440033680120094845;SecretAccessKey=2856927595372738022955474644733009256265059226549690346150577879;Region=garage;ForcePathStyle=true;BucketName=cantaro-avatars",
+        "ConnectionStrings__cantaro-db": "Host=localhost;Port=5432;Username=postgres;Password=fkcd9)36_3y_sxn4HfH}70;Database=cantaro-db",
+        "DOTNET_LAUNCH_PROFILE": "https",
+        "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION": "true",
+        "ExtensionAuth:JwtSigningKey": "Cantaro.ExtensionAuth.Development.Signing.Key.2026.04.26",
+        "Frontend:TrustedHostSuffixes:0": ".ts.net",
+        "Frontend:TrustLoopbackOrigins": "true",
+        "LOGGING__CONSOLE__FORMATTERNAME": "simple",
+        "OTEL_BLRP_SCHEDULE_DELAY": "1000",
+        "OTEL_BSP_SCHEDULE_DELAY": "1000",
+        "OTEL_DOTNET_EXPERIMENTAL_ASPNETCORE_DISABLE_URL_QUERY_REDACTION": "true",
+        "OTEL_DOTNET_EXPERIMENTAL_HTTPCLIENT_DISABLE_URL_QUERY_REDACTION": "true",
+        "OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY": "in_memory",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "https://localhost:21093",
+        "OTEL_EXPORTER_OTLP_HEADERS": "x-otlp-api-key=448556b092f619199ab60e3b5d380b8b",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true",
+        "OTEL_METRIC_EXPORT_INTERVAL": "1000",
+        "OTEL_METRICS_EXEMPLAR_FILTER": "trace_based",
+        "OTEL_RESOURCE_ATTRIBUTES": "service.instance.id=qbptubvm",
+        "OTEL_SERVICE_NAME": "api",
+        "OTEL_TRACES_SAMPLER": "always_on",
+        "services__web__https__0": "https://localhost:5173",
+        "WEB_HTTP": "https://localhost:5173",
+        "YouTube:ClientId": null,
+        "YouTube:ClientSecret": null
+      },
+      "healthReports": {},
+      "commands": {
+        "rebuild": {
+          "displayName": "Rebuild",
+          "description": "Stop the resource, rebuild the project from source, and restart. Use this to apply source code changes.",
+          "state": "Enabled",
+          "sortOrder": 3
+        },
+        "restart": {
+          "displayName": "Restart",
+          "description": "Restart resource. Source code is not recompiled.",
+          "state": "Enabled",
+          "sortOrder": 2
+        },
+        "stop": {
+          "displayName": "Stop",
+          "description": "Stop resource",
+          "state": "Enabled",
+          "sortOrder": 1
+        }
+      }
+    },
+    {
+      "name": "avatars",
+      "displayName": "avatars",
+      "resourceType": "GarageBucketResource",
+      "state": "Running",
+      "startTimestamp": "2026-06-26T19:46:22.559281+00:00",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=avatars",
+      "relationships": [
+        {
+          "type": "Parent",
+          "resourceName": "garage-003fe770"
+        }
+      ],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.connectionString": null,
+        "resource.parentName": "garage-003fe770"
+      },
+      "environment": {},
+      "healthReports": {
+        "garage_admin_/health_200_check": {
+          "status": "Healthy"
+        }
+      },
+      "commands": {}
+    },
+    {
+      "name": "browser-extension-hyfjascv",
+      "displayName": "browser-extension",
+      "resourceType": "Executable",
+      "state": "NotStarted",
+      "source": "bun",
+      "dashboardUrl": "https://localhost:17156/?resource=browser-extension-hyfjascv",
+      "relationships": [
+        {
+          "type": "Reference",
+          "resourceName": "api-qbptubvm"
+        }
+      ],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "executable.args": null,
+        "executable.path": "bun",
+        "executable.pid": null,
+        "executable.workDir": "D:\\opensource\\Cantaro\\src\\Cantaro.BrowserExtension",
+        "resource.appArgs": null,
+        "resource.appArgsSensitivity": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "start": {
+          "displayName": "Start",
+          "description": "Start resource",
+          "state": "Enabled",
+          "sortOrder": 0
+        }
+      }
+    },
+    {
+      "name": "cantaro-db",
+      "displayName": "cantaro-db",
+      "resourceType": "PostgresDatabaseResource",
+      "state": "Running",
+      "startTimestamp": "2026-06-26T19:46:24.117786+00:00",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=cantaro-db",
+      "relationships": [
+        {
+          "type": "Parent",
+          "resourceName": "cantaro-postgres"
+        }
+      ],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.connectionString": null,
+        "resource.parentName": "cantaro-postgres"
+      },
+      "environment": {},
+      "healthReports": {
+        "cantaro-db_check": {
+          "status": "Healthy"
+        },
+        "postgres_check": {
+          "status": "Healthy"
+        }
+      },
+      "commands": {}
+    },
+    {
+      "name": "cantaro-postgres",
+      "displayName": "postgres",
+      "resourceType": "Container",
+      "state": "Running",
+      "creationTimestamp": "2026-06-26T19:46:01+00:00",
+      "startTimestamp": "2026-06-26T19:46:24.117786+00:00",
+      "source": "docker.io/library/postgres:18.3",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=cantaro-postgres",
+      "relationships": [],
+      "urls": [
+        {
+          "name": "tcp",
+          "url": "tcp://localhost:5432"
+        }
+      ],
+      "volumes": [
+        {
+          "source": "cantaro-postgres-data",
+          "target": "/var/lib/postgresql",
+          "mountType": "volume"
+        }
+      ],
+      "properties": {
+        "container.args": null,
+        "container.command": null,
+        "container.id": "1e9483dff8195cd9ab4125010c87fd015e45c9e57bf6a192db9c3e2b8a2d30f7",
+        "container.image": "docker.io/library/postgres:18.3",
+        "container.lifetime": "Persistent",
+        "container.ports": [
+          5432
+        ],
+        "resource.appArgs": [],
+        "resource.appArgsSensitivity": [],
+        "resource.connectionString": null
+      },
+      "environment": {
+        "POSTGRES_HOST_AUTH_METHOD": "scram-sha-256",
+        "POSTGRES_INITDB_ARGS": "--auth-host=scram-sha-256 --auth-local=scram-sha-256",
+        "POSTGRES_PASSWORD": "fkcd9)36_3y_sxn4HfH}70",
+        "POSTGRES_USER": "postgres",
+        "SSL_CERT_DIR": "/usr/lib/ssl/aspire/certs:/etc/ssl/certs:/usr/local/share/ca-certificates:/etc/pki/tls/certs"
+      },
+      "healthReports": {
+        "postgres_check": {
+          "status": "Healthy"
+        }
+      },
+      "commands": {
+        "restart": {
+          "displayName": "Restart",
+          "description": "Restart resource",
+          "state": "Enabled",
+          "sortOrder": 2
+        },
+        "stop": {
+          "displayName": "Stop",
+          "description": "Stop resource",
+          "state": "Enabled",
+          "sortOrder": 1
+        }
+      }
+    },
+    {
+      "name": "ExtensionAuthJwtSigningKey",
+      "displayName": "ExtensionAuthJwtSigningKey",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:ExtensionAuthJwtSigningKey",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=ExtensionAuthJwtSigningKey",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:ExtensionAuthJwtSigningKey",
+        "Value": "Cantaro.ExtensionAuth.Development.Signing.Key.2026.04.26"
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "ExtensionAuthJwtSigningKey",
+              "inputType": "Text",
+              "required": true,
+              "placeholder": "Enter value for ExtensionAuthJwtSigningKey",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "garage-003fe770",
+      "displayName": "garage",
+      "resourceType": "Container",
+      "state": "Running",
+      "creationTimestamp": "2026-06-26T19:46:01+00:00",
+      "startTimestamp": "2026-06-26T19:46:22.559281+00:00",
+      "source": "dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=garage-003fe770",
+      "relationships": [
+        {
+          "type": "Reference",
+          "resourceName": "garage-rpc-secret"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "garage-admin-token"
+        }
+      ],
+      "urls": [
+        {
+          "name": "rpc",
+          "url": "tcp://localhost:29846"
+        },
+        {
+          "name": "admin",
+          "url": "http://127.0.0.1:29845"
+        },
+        {
+          "name": "s3",
+          "url": "http://127.0.0.1:29844"
+        }
+      ],
+      "volumes": [
+        {
+          "source": "cantaro-garage-data",
+          "target": "/var/lib/garage",
+          "mountType": "volume"
+        }
+      ],
+      "properties": {
+        "container.args": null,
+        "container.command": null,
+        "container.id": "2c067a6f8fe1e3b2748c1cf9f636cd4815ab9dac27a54f415d298e626a6e8dfc",
+        "container.image": "dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690",
+        "container.lifetime": "Persistent",
+        "container.ports": [
+          3901,
+          3903,
+          3900
+        ],
+        "resource.appArgs": [
+          "/garage",
+          "server"
+        ],
+        "resource.appArgsSensitivity": [
+          0,
+          0
+        ],
+        "resource.connectionString": null
+      },
+      "environment": {
+        "GARAGE_ADMIN_TOKEN": null,
+        "GARAGE_CONFIG_FILE": "/etc/garage.toml",
+        "GARAGE_RPC_SECRET": null,
+        "SSL_CERT_DIR": "/usr/lib/ssl/aspire/certs:/etc/ssl/certs:/usr/local/share/ca-certificates:/etc/pki/tls/certs"
+      },
+      "healthReports": {
+        "garage_admin_/health_200_check": {
+          "status": "Healthy"
+        }
+      },
+      "commands": {
+        "restart": {
+          "displayName": "Restart",
+          "description": "Restart resource",
+          "state": "Enabled",
+          "sortOrder": 2
+        },
+        "stop": {
+          "displayName": "Stop",
+          "description": "Stop resource",
+          "state": "Enabled",
+          "sortOrder": 1
+        }
+      }
+    },
+    {
+      "name": "garage-access-key-id",
+      "displayName": "garage-access-key-id",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:garage-access-key-id",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=garage-access-key-id",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:garage-access-key-id",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "garage-access-key-id",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for garage-access-key-id",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "garage-admin-token",
+      "displayName": "garage-admin-token",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:garage-admin-token",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=garage-admin-token",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:garage-admin-token",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "garage-admin-token",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for garage-admin-token",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "garage-provisioner-mmkdjvjk",
+      "displayName": "garage-provisioner",
+      "resourceType": "Project",
+      "state": "Finished",
+      "creationTimestamp": "2026-06-26T19:46:22+00:00",
+      "startTimestamp": "2026-06-26T19:46:22.577+00:00",
+      "stopTimestamp": "2026-06-26T19:46:23.309232+00:00",
+      "source": "Cantaro.GarageProvisioner.csproj",
+      "exitCode": 0,
+      "dashboardUrl": "https://localhost:17156/?resource=garage-provisioner-mmkdjvjk",
+      "relationships": [
+        {
+          "type": "Reference",
+          "resourceName": "garage-003fe770"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "avatars"
+        },
+        {
+          "type": "WaitFor",
+          "resourceName": "garage-003fe770"
+        }
+      ],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "executable.args": null,
+        "executable.path": "dotnet",
+        "executable.pid": 15136,
+        "executable.workDir": "D:\\opensource\\Cantaro\\src\\Cantaro.GarageProvisioner",
+        "project.launchProfile": null,
+        "project.path": "D:\\opensource\\Cantaro\\src\\Cantaro.GarageProvisioner\\Cantaro.GarageProvisioner.csproj",
+        "resource.appArgs": [],
+        "resource.appArgsSensitivity": []
+      },
+      "environment": {
+        "ConnectionStrings__avatars": "ServiceUrl=http://127.0.0.1:29844;AccessKeyId=77503751440033680120094845;SecretAccessKey=2856927595372738022955474644733009256265059226549690346150577879;Region=garage;ForcePathStyle=true;BucketName=cantaro-avatars",
+        "ConnectionStrings__garage": "AdminUrl=http://127.0.0.1:29845;AdminToken=1961957681657791119632166105766602552230907421665666975902729579",
+        "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION": "true",
+        "LOGGING__CONSOLE__FORMATTERNAME": "simple",
+        "OTEL_BLRP_SCHEDULE_DELAY": "1000",
+        "OTEL_BSP_SCHEDULE_DELAY": "1000",
+        "OTEL_DOTNET_EXPERIMENTAL_ASPNETCORE_DISABLE_URL_QUERY_REDACTION": "true",
+        "OTEL_DOTNET_EXPERIMENTAL_HTTPCLIENT_DISABLE_URL_QUERY_REDACTION": "true",
+        "OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY": "in_memory",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "https://localhost:21093",
+        "OTEL_EXPORTER_OTLP_HEADERS": "x-otlp-api-key=448556b092f619199ab60e3b5d380b8b",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true",
+        "OTEL_METRIC_EXPORT_INTERVAL": "1000",
+        "OTEL_METRICS_EXEMPLAR_FILTER": "trace_based",
+        "OTEL_RESOURCE_ATTRIBUTES": "service.instance.id=mmkdjvjk",
+        "OTEL_SERVICE_NAME": "garage-provisioner",
+        "OTEL_TRACES_SAMPLER": "always_on"
+      },
+      "healthReports": {},
+      "commands": {
+        "rebuild": {
+          "displayName": "Rebuild",
+          "description": "Stop the resource, rebuild the project from source, and restart. Use this to apply source code changes.",
+          "state": "Enabled",
+          "sortOrder": 3
+        },
+        "start": {
+          "displayName": "Start",
+          "description": "Start resource",
+          "state": "Enabled",
+          "sortOrder": 0
+        }
+      }
+    },
+    {
+      "name": "garage-rpc-secret",
+      "displayName": "garage-rpc-secret",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:garage-rpc-secret",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=garage-rpc-secret",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:garage-rpc-secret",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "garage-rpc-secret",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for garage-rpc-secret",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "garage-secret-access-key",
+      "displayName": "garage-secret-access-key",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:garage-secret-access-key",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=garage-secret-access-key",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:garage-secret-access-key",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "garage-secret-access-key",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for garage-secret-access-key",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "migration-service-hyhbjgqv",
+      "displayName": "migration-service",
+      "resourceType": "Project",
+      "state": "Finished",
+      "creationTimestamp": "2026-06-26T19:46:31+00:00",
+      "startTimestamp": "2026-06-26T19:46:31.841+00:00",
+      "stopTimestamp": "2026-06-26T19:46:56.532212+00:00",
+      "source": "Cantaro.MigrationService.csproj",
+      "exitCode": 0,
+      "dashboardUrl": "https://localhost:17156/?resource=migration-service-hyhbjgqv",
+      "relationships": [
+        {
+          "type": "Reference",
+          "resourceName": "cantaro-db"
+        },
+        {
+          "type": "WaitFor",
+          "resourceName": "cantaro-db"
+        }
+      ],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "executable.args": null,
+        "executable.path": "dotnet",
+        "executable.pid": 27144,
+        "executable.workDir": "D:\\opensource\\Cantaro\\src\\Cantaro.MigrationService",
+        "project.launchProfile": "Cantaro.MigrationService",
+        "project.path": "D:\\opensource\\Cantaro\\src\\Cantaro.MigrationService\\Cantaro.MigrationService.csproj",
+        "resource.appArgs": [],
+        "resource.appArgsSensitivity": []
+      },
+      "environment": {
+        "CANTARO_DB_DATABASENAME": "cantaro-db",
+        "CANTARO_DB_HOST": "localhost",
+        "CANTARO_DB_JDBCCONNECTIONSTRING": "jdbc:postgresql://localhost:5432/cantaro-db",
+        "CANTARO_DB_PASSWORD": "fkcd9)36_3y_sxn4HfH}70",
+        "CANTARO_DB_PORT": "5432",
+        "CANTARO_DB_URI": "postgresql://postgres:fkcd9%2936_3y_sxn4HfH%7D70@localhost:5432/cantaro-db",
+        "CANTARO_DB_USERNAME": "postgres",
+        "ConnectionStrings__cantaro-db": "Host=localhost;Port=5432;Username=postgres;Password=fkcd9)36_3y_sxn4HfH}70;Database=cantaro-db",
+        "DOTNET_ENVIRONMENT": "Development",
+        "DOTNET_LAUNCH_PROFILE": "Cantaro.MigrationService",
+        "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION": "true",
+        "LOGGING__CONSOLE__FORMATTERNAME": "simple",
+        "OTEL_BLRP_SCHEDULE_DELAY": "1000",
+        "OTEL_BSP_SCHEDULE_DELAY": "1000",
+        "OTEL_DOTNET_EXPERIMENTAL_ASPNETCORE_DISABLE_URL_QUERY_REDACTION": "true",
+        "OTEL_DOTNET_EXPERIMENTAL_HTTPCLIENT_DISABLE_URL_QUERY_REDACTION": "true",
+        "OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY": "in_memory",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "https://localhost:21093",
+        "OTEL_EXPORTER_OTLP_HEADERS": "x-otlp-api-key=448556b092f619199ab60e3b5d380b8b",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true",
+        "OTEL_METRIC_EXPORT_INTERVAL": "1000",
+        "OTEL_METRICS_EXEMPLAR_FILTER": "trace_based",
+        "OTEL_RESOURCE_ATTRIBUTES": "service.instance.id=hyhbjgqv",
+        "OTEL_SERVICE_NAME": "migration-service",
+        "OTEL_TRACES_SAMPLER": "always_on"
+      },
+      "healthReports": {},
+      "commands": {
+        "rebuild": {
+          "displayName": "Rebuild",
+          "description": "Stop the resource, rebuild the project from source, and restart. Use this to apply source code changes.",
+          "state": "Enabled",
+          "sortOrder": 3
+        },
+        "start": {
+          "displayName": "Start",
+          "description": "Start resource",
+          "state": "Enabled",
+          "sortOrder": 0
+        }
+      }
+    },
+    {
+      "name": "web-installer-ctabaynb",
+      "displayName": "web-installer",
+      "resourceType": "Executable",
+      "state": "Finished",
+      "creationTimestamp": "2026-06-26T19:46:01+00:00",
+      "startTimestamp": "2026-06-26T19:46:01.301+00:00",
+      "stopTimestamp": "2026-06-26T19:46:04.106225+00:00",
+      "source": "bun",
+      "exitCode": 0,
+      "dashboardUrl": "https://localhost:17156/?resource=web-installer-ctabaynb",
+      "relationships": [
+        {
+          "type": "Parent",
+          "resourceName": "web-mhaqczmz"
+        }
+      ],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "executable.args": null,
+        "executable.path": "bun",
+        "executable.pid": 52828,
+        "executable.workDir": "D:\\opensource\\Cantaro\\src\\Cantaro.Web",
+        "resource.appArgs": [
+          "install"
+        ],
+        "resource.appArgsSensitivity": [
+          0
+        ],
+        "resource.parentName": "web-mhaqczmz"
+      },
+      "environment": {
+        "__COMPAT_LAYER": "DetectorsAppHealth",
+        "3DVPATH": "C:\\AMD\\Chipset_Software\\Binaries\\3D_V-Cache_Performance_Optimizer_Driver\\",
+        "ALLUSERSPROFILE": "C:\\ProgramData",
+        "APPDATA": "C:\\Users\\patr7\\AppData\\Roaming",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPIRE_BACKCHANNEL_PATH": "C:\\Users\\patr7\\.aspire\\cli\\bch\\cldFepBXr",
+        "ASPIRE_BUNDLE_VERSION_DIR": "C:\\Users\\patr7\\.aspire\\versions\\13.5.0-preview.1.26319.13_879b860e723d9ca2390385e1fa0365fc591c18dd-2e7c926bba0251c4",
+        "ASPIRE_CLI_LOG_FILE": "C:\\Users\\patr7\\.aspire\\logs\\cli_20260626T194551639_detach-child_fa4bb939f1f543d9a7dc0aa61886054e.log",
+        "ASPIRE_CLI_PID": "18924",
+        "ASPIRE_CLI_RUN_DETACHED": "true",
+        "ASPIRE_CLI_STARTED": "1782503151",
+        "ASPIRE_DASHBOARD_MCP_ENDPOINT_URL": "http://localhost:23219",
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://localhost:21093",
+        "ASPIRE_DASHBOARD_PATH": "C:\\Users\\patr7\\.aspire\\versions\\13.5.0-preview.1.26319.13_879b860e723d9ca2390385e1fa0365fc591c18dd-2e7c926bba0251c4\\managed\\aspire-managed.exe",
+        "ASPIRE_DCP_PATH": "C:\\Users\\patr7\\.aspire\\versions\\13.5.0-preview.1.26319.13_879b860e723d9ca2390385e1fa0365fc591c18dd-2e7c926bba0251c4\\dcp",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://localhost:22284",
+        "ASPIRE_TERMINAL_HOST_INVOCATION_ARGS": "terminalhost",
+        "ASPIRE_TERMINAL_HOST_PATH": "C:\\Users\\patr7\\.aspire\\versions\\13.5.0-preview.1.26319.13_879b860e723d9ca2390385e1fa0365fc591c18dd-2e7c926bba0251c4\\managed\\aspire-managed.exe",
+        "AspireCliBundlePath": "C:\\Users\\patr7\\.aspire\\versions\\13.5.0-preview.1.26319.13_879b860e723d9ca2390385e1fa0365fc591c18dd-2e7c926bba0251c4",
+        "AspireCliPath": "C:\\Users\\patr7\\.aspire\\bin\\aspire.exe",
+        "CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "Codex Desktop",
+        "CODEX_SHELL": "1",
+        "CODEX_THREAD_ID": "019f00e5-382f-7971-80b1-670de3733294",
+        "CommonProgramFiles": "C:\\Program Files\\Common Files",
+        "CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files",
+        "CommonProgramW6432": "C:\\Program Files\\Common Files",
+        "COMPUTERNAME": "SNOWFALL",
+        "ComSpec": "C:\\WINDOWS\\system32\\cmd.exe",
+        "CONDA_PROMPT_MODIFIER": "False",
+        "DISABLE_AUTO_UPDATE": "true",
+        "DOTNET_NOLOGO": "1",
+        "DriverData": "C:\\Windows\\System32\\Drivers\\DriverData",
+        "GOPATH": "C:\\Users\\patr7\\go",
+        "HOMEDRIVE": "C:",
+        "HOMEPATH": "\\Users\\patr7",
+        "JAVA_HOME": "C:\\Program Files\\Microsoft\\jdk-11.0.30.7-hotspot\\",
+        "LOCALAPPDATA": "C:\\Users\\patr7\\AppData\\Local",
+        "LOG_FORMAT": "json",
+        "LOGONSERVER": "\\\\SNOWFALL",
+        "MSBUILDTERMINALLOGGER": "false",
+        "NUMBER_OF_PROCESSORS": "16",
+        "OhMyDot_Debug": "D:\\opensource\\oh-my-dot\\build",
+        "OneDrive": "C:\\Users\\patr7\\OneDrive",
+        "OneDriveConsumer": "C:\\Users\\patr7\\OneDrive",
+        "OS": "Windows_NT",
+        "Path": "C:\\Program Files\\PowerShell\\7;C:\\Users\\patr7\\.codex\\tmp\\arg0\\codex-arg0uwf6Wi;C:\\Users\\patr7\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin;C:\\Program Files\\coreutils\\bin;C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin;C:\\Program Files\\Microsoft\\jdk-11.0.30.7-hotspot\\bin;C:\\Program Files\\Microsoft\\jdk-21.0.10.7-hotspot\\bin;C:\\VulkanSDK\\1.4.328.1\\Bin;C:\\Program Files\\OpenSSH\\;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\Tailscale\\;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;C:\\Program Files\\Microsoft SQL Server\\170\\Tools\\Binn\\;C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\170\\Tools\\Binn\\;C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\;C:\\Program Files\\Microsoft Visual Studio\\18\\Insiders\\VC\\Tools\\Llvm\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\dotnet\\;C:\\Program Files\\GitHub CLI\\;C:\\Program Files\\Go\\bin;C:\\Program Files\\Neovim\\bin;C:\\Program Files\\CMake\\bin;C:\\Program Files\\k6\\;C:\\Program Files\\nodejs\\;C:\\Program Files\\PowerShell\\7\\;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Users\\patr7\\AppData\\Local\\Programs\\oh-my-posh\\bin\\;C:\\Users\\patr7\\AppData\\Local\\Programs\\Python\\Launcher\\;C:\\Users\\patr7\\.aspire\\bin;C:\\Program Files\\WindowsApps\\Microsoft.PowerShellPreview_7.6.6.0_x64__8wekyb3d8bbwe;C:\\Users\\patr7\\AppData\\Local\\Programs\\Python\\Python312\\Scripts;C:\\Users\\patr7\\AppData\\Local\\Programs\\Python\\Python312;C:\\Users\\patr7\\AppData\\Local\\Programs\\Python\\Launcher;C:\\Users\\patr7\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\patr7\\go\\bin;C:\\Users\\patr7\\AppData\\Local\\PowerToys\\DSCModules;C:\\Users\\patr7\\AppData\\Local\\Programs\\Azure Dev CLI;C:\\Users\\patr7\\.dotnet\\tools;C:\\Users\\patr7\\AppData\\Local\\Microsoft\\WinGet\\Links;C:\\Users\\patr7\\AppData\\Local\\GitHubDesktop\\bin;C:\\Users\\patr7\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\patr7\\.bun\\bin;C:\\Users\\patr7\\AppData\\Local\\Programs\\oh-my-posh\\bin;D:\\opensource\\oh-my-dot\\build;D:\\opensource\\oh-my-dot\\build;C:\\texlive\\2025\\bin\\windows;C:\\Users\\patr7\\.dotnet\\tools;C:\\Users\\patr7\\AppData\\Local\\SpacetimeDB;C:\\Users\\patr7\\.dotnet\\tools;C:\\Users\\patr7\\AppData\\Local\\Programs\\Microsoft VS Code Insiders\\bin;C:\\Users\\patr7\\go\\bin;C:\\Users\\patr7\\AppData\\Local\\Programs\\Ollama;C:\\Users\\patr7\\AppData\\Local\\tally;C:\\Users\\patr7\\AppData\\Local\\Programs\\Azure Dev CLI\\;C:\\Users\\patr7\\go\\bin;C:\\Users\\patr7\\AppData\\Roaming\\npm;C:\\Users\\patr7\\AppData\\Local\\PowerToys\\DSCModules\\;C:\\Users\\patr7\\.dotnet\\tools;C:\\Users\\patr7\\AppData\\Local\\Programs\\homeops;C:\\Users\\patr7\\AppData\\Local\\OpenAI\\Codex\\bin\\ada252862d154cdd;C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.623.4041.0_x64__2p2nqsd0c76g0\\app\\resources",
+        "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL",
+        "POSH_INSTALLER": "manual",
+        "POSH_SESSION_ID": "2d483797-8748-4b82-8906-48ada80c1acf",
+        "POSH_SHELL": "pwsh",
+        "POSH_SHELL_VERSION": "7.6.1",
+        "POSH_THEMES_PATH": "C:\\Users\\patr7\\AppData\\Local\\Programs\\oh-my-posh\\themes\\",
+        "POWERLINE_COMMAND": "oh-my-posh",
+        "POWERSHELL_DISTRIBUTION_CHANNEL": "MSI:Windows 10 Home",
+        "PROCESSOR_ARCHITECTURE": "AMD64",
+        "PROCESSOR_IDENTIFIER": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+        "PROCESSOR_LEVEL": "26",
+        "PROCESSOR_REVISION": "4400",
+        "ProgramData": "C:\\ProgramData",
+        "ProgramFiles": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "PSModulePath": "C:\\Users\\patr7\\Documents\\PowerShell\\Modules;C:\\Program Files\\PowerShell\\Modules;c:\\program files\\powershell\\7\\Modules;C:\\Users\\patr7\\Documents\\WindowsPowerShell\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules;C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\Modules",
+        "PUBLIC": "C:\\Users\\Public",
+        "PYENV_VIRTUALENV_DISABLE_PROMPT": "1",
+        "RUST_LOG": "warn",
+        "SHELL": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "SystemDrive": "C:",
+        "SystemRoot": "C:\\WINDOWS",
+        "TEMP": "C:\\Users\\patr7\\AppData\\Local\\Temp",
+        "TMP": "C:\\Users\\patr7\\AppData\\Local\\Temp",
+        "USERDOMAIN": "SNOWFALL",
+        "USERDOMAIN_ROAMINGPROFILE": "SNOWFALL",
+        "USERNAME": "patr7",
+        "USERPROFILE": "C:\\Users\\patr7",
+        "VIRTUAL_ENV_DISABLE_PROMPT": "1",
+        "VK_SDK_PATH": "C:\\VulkanSDK\\1.4.328.1",
+        "VULKAN_SDK": "C:\\VulkanSDK\\1.4.328.1",
+        "windir": "C:\\WINDOWS",
+        "ZSH_TMUX_AUTOSTART": "false",
+        "ZSH_TMUX_AUTOSTARTED": "true"
+      },
+      "healthReports": {},
+      "commands": {
+        "start": {
+          "displayName": "Start",
+          "description": "Start resource",
+          "state": "Enabled",
+          "sortOrder": 0
+        }
+      }
+    },
+    {
+      "name": "web-mhaqczmz",
+      "displayName": "web",
+      "resourceType": "Executable",
+      "state": "Running",
+      "creationTimestamp": "2026-06-26T19:46:57+00:00",
+      "startTimestamp": "2026-06-26T19:46:57.127+00:00",
+      "source": "bun",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=web-mhaqczmz",
+      "relationships": [
+        {
+          "type": "WaitFor",
+          "resourceName": "web-installer-ctabaynb"
+        },
+        {
+          "type": "Reference",
+          "resourceName": "api-qbptubvm"
+        },
+        {
+          "type": "WaitFor",
+          "resourceName": "api-qbptubvm"
+        }
+      ],
+      "urls": [
+        {
+          "name": "http",
+          "url": "https://localhost:5173"
+        }
+      ],
+      "volumes": [],
+      "properties": {
+        "executable.args": null,
+        "executable.path": "bun",
+        "executable.pid": 24976,
+        "executable.workDir": "D:\\opensource\\Cantaro\\src\\Cantaro.Web",
+        "resource.appArgs": [
+          "run",
+          "dev",
+          "--port",
+          "57588",
+          "--config",
+          "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\node_modules\\.bin\\aspire.vite.config.ts"
+        ],
+        "resource.appArgsSensitivity": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "environment": {
+        "API_HTTP": "http://localhost:5039",
+        "API_HTTPS": "https://localhost:7203",
+        "NODE_ENV": "development",
+        "NODE_EXTRA_CA_CERTS": "C:\\Users\\patr7\\AppData\\Local\\Temp\\aspire-dcpkiykz53p.ugs\\web-mhaqczmz\\cert.pem",
+        "OTEL_BLRP_SCHEDULE_DELAY": "1000",
+        "OTEL_BSP_SCHEDULE_DELAY": "1000",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "https://localhost:21093",
+        "OTEL_EXPORTER_OTLP_HEADERS": "x-otlp-api-key=448556b092f619199ab60e3b5d380b8b",
+        "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true",
+        "OTEL_METRIC_EXPORT_INTERVAL": "1000",
+        "OTEL_METRICS_EXEMPLAR_FILTER": "trace_based",
+        "OTEL_RESOURCE_ATTRIBUTES": "service.instance.id=mhaqczmz",
+        "OTEL_SERVICE_NAME": "web",
+        "OTEL_TRACES_SAMPLER": "always_on",
+        "PORT": "57588",
+        "services__api__http__0": "http://localhost:5039",
+        "services__api__https__0": "https://localhost:7203",
+        "SSL_CERT_DIR": "C:\\Users\\patr7\\AppData\\Local\\Temp\\aspire-dcpkiykz53p.ugs\\web-mhaqczmz\\certs",
+        "TLS_CONFIG_PFX": "C:\\Users\\patr7\\AppData\\Local\\Temp\\aspire-dcpkiykz53p.ugs\\web-mhaqczmz\\private\\EA27C2ED7BB581290ED89CFBA74A4AF68FB84C58.pfx"
+      },
+      "healthReports": {},
+      "commands": {
+        "restart": {
+          "displayName": "Restart",
+          "description": "Restart resource",
+          "state": "Enabled",
+          "sortOrder": 2
+        },
+        "stop": {
+          "displayName": "Stop",
+          "description": "Stop resource",
+          "state": "Enabled",
+          "sortOrder": 1
+        }
+      }
+    },
+    {
+      "name": "YouTubeClientId",
+      "displayName": "YouTubeClientId",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:YouTubeClientId",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=YouTubeClientId",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:YouTubeClientId",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "YouTubeClientId",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for YouTubeClientId",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "YouTubeClientSecret",
+      "displayName": "YouTubeClientSecret",
+      "resourceType": "Parameter",
+      "state": "Running",
+      "source": "Parameters:YouTubeClientSecret",
+      "healthStatus": "Healthy",
+      "dashboardUrl": "https://localhost:17156/?resource=YouTubeClientSecret",
+      "relationships": [],
+      "urls": [],
+      "volumes": [],
+      "properties": {
+        "resource.source": "Parameters:YouTubeClientSecret",
+        "Value": null
+      },
+      "environment": {},
+      "healthReports": {},
+      "commands": {
+        "delete-parameter": {
+          "displayName": "Delete parameter",
+          "description": "Delete parameter value",
+          "state": "Enabled",
+          "sortOrder": 1,
+          "argumentInputs": [
+            {
+              "name": "DeleteFromUserSecrets",
+              "label": "Delete from user secrets",
+              "description": "Delete a value that is saved in [user secrets](https://aka.ms/aspire/user-secrets).",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            }
+          ]
+        },
+        "set-parameter": {
+          "displayName": "Set parameter",
+          "description": "Set parameter value",
+          "state": "Enabled",
+          "sortOrder": 0,
+          "argumentInputs": [
+            {
+              "name": "Value",
+              "label": "YouTubeClientSecret",
+              "inputType": "SecretText",
+              "required": true,
+              "placeholder": "Enter value for YouTubeClientSecret",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true
+              }
+            },
+            {
+              "name": "SaveToUserSecrets",
+              "label": "Save to user secrets",
+              "description": "Save value to [user secrets](https://aka.ms/aspire/user-secrets) for future use.",
+              "enableDescriptionMarkdown": true,
+              "inputType": "Boolean",
+              "dynamicLoading": {
+                "alwaysLoadOnStart": true,
+                "dependsOnInputs": [
+                  "Value"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

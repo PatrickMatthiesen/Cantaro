@@ -1,0 +1,112 @@
+[
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicHomeDashboard.tsx",
+    "line": 116,
+    "snippet": "text-slate-800 on bg-violet-50"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicHomeDashboard.tsx",
+    "line": 188,
+    "snippet": "text-slate-700 on bg-sky-50"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicPageShell.tsx",
+    "line": 172,
+    "snippet": "text-slate-500 on bg-red-50",
+    "importedBy": [
+      "MusicHomeDashboard.tsx",
+      "MusicLibraryPanel.tsx",
+      "MusicPlatformPage.tsx",
+      "MusicPlatformsPage.tsx",
+      "MusicPlaylistDetailPage.tsx",
+      "MusicPlaylistsDirectory.tsx",
+      "MusicPlaylistSyncSetupPage.tsx",
+      "MusicSongPages.tsx",
+      "YouTubeMusicPlatformPage.tsx"
+    ]
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicPlatformsPage.tsx",
+    "line": 248,
+    "snippet": "text-slate-500 on bg-emerald-100"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicPlaylistSyncSetupPage.tsx",
+    "line": 214,
+    "snippet": "text-slate-400 on bg-violet-50"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicPlaylistSyncSetupPage.tsx",
+    "line": 645,
+    "snippet": "text-slate-500 on bg-violet-700"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.ClientShared\\src\\ui\\GlassComponents.tsx",
+    "line": 51,
+    "snippet": "text-slate-800 on bg-violet-50"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.ClientShared\\src\\music\\components\\sync\\SyncButtonPanel.tsx",
+    "line": 122,
+    "snippet": "text-slate-500 on bg-violet-700",
+    "importedBy": [
+      "SyncButton.tsx"
+    ]
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.ClientShared\\src\\music\\components\\sync\\SyncButtonPanel.tsx",
+    "line": 129,
+    "snippet": "text-slate-400 on bg-violet-50",
+    "importedBy": [
+      "SyncButton.tsx"
+    ]
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.ClientShared\\src\\music\\components\\sync\\SyncButtonPanel.tsx",
+    "line": 232,
+    "snippet": "text-slate-500 on bg-violet-700",
+    "importedBy": [
+      "SyncButton.tsx"
+    ]
+  }
+]

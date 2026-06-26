@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-25T22:46:22.866Z",
+  "title": "Design System: Cantaro",
+  "extensions": {
+    "colorMeta": {
+      "archive-violet": {
+        "role": "primary",
+        "displayName": "Archive Violet",
+        "canonical": "#7c3aed",
+        "tonalRamp": ["oklch(15% 0.09 298)", "oklch(25% 0.12 298)", "oklch(36% 0.16 298)", "oklch(48% 0.20 298)", "oklch(58% 0.22 298)", "oklch(70% 0.16 298)", "oklch(83% 0.10 298)", "oklch(95% 0.04 298)"]
+      },
+      "archive-indigo": {
+        "role": "secondary",
+        "displayName": "Archive Indigo",
+        "canonical": "#4f46e5",
+        "tonalRamp": ["oklch(15% 0.08 276)", "oklch(25% 0.11 276)", "oklch(36% 0.15 276)", "oklch(48% 0.19 276)", "oklch(58% 0.21 276)", "oklch(70% 0.15 276)", "oklch(83% 0.09 276)", "oklch(95% 0.035 276)"]
+      },
+      "canvas-lavender": {
+        "role": "neutral",
+        "displayName": "Canvas Lavender",
+        "canonical": "#f7f5ff",
+        "tonalRamp": ["oklch(15% 0.025 292)", "oklch(28% 0.025 292)", "oklch(42% 0.025 292)", "oklch(58% 0.025 292)", "oklch(72% 0.025 292)", "oklch(84% 0.025 292)", "oklch(92% 0.025 292)", "oklch(97% 0.018 292)"]
+      },
+      "text-ink": {
+        "role": "neutral",
+        "displayName": "Text Ink",
+        "canonical": "#0f172a",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#94a3b8", "#e2e8f0"]
+      },
+      "brand-500": {
+        "role": "tertiary",
+        "displayName": "Brand Rose",
+        "canonical": "oklch(65% 0.14 21)",
+        "tonalRamp": ["#773737", "#8e3e3f", "#a74447", "#bf5355", "#d76869", "#e79492", "#f0adab", "#fbe0de"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Major collection titles and page-level personality moments only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section headers, settings cards, and important empty states."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Dense product copy, metadata, rows, and explanations."
+      },
+      "label": {
+        "displayName": "Tracked Label",
+        "purpose": "Sparse labels for sidebars, table headers, and status groups."
+      }
+    },
+    "shadows": [
+      {
+        "name": "glass-surface",
+        "value": "0 8px 32px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+        "purpose": "Shared translucent panels."
+      },
+      {
+        "name": "panel-lift",
+        "value": "0 20px 60px rgba(88,74,150,0.08)",
+        "purpose": "Secondary cards and sidebar feature panels."
+      },
+      {
+        "name": "hero-depth",
+        "value": "0 28px 90px rgba(88,74,150,0.12)",
+        "purpose": "Collection hero surfaces."
+      },
+      {
+        "name": "floating-player",
+        "value": "0 24px 80px rgba(55,45,120,0.16)",
+        "purpose": "Persistent player and elevated floating controls."
+      },
+      {
+        "name": "dialog-depth",
+        "value": "0 32px 120px rgba(2,6,23,0.45)",
+        "purpose": "Modal overlays only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "160ms ease",
+        "purpose": "Hover and row state changes."
+      },
+      {
+        "name": "state-standard",
+        "value": "200ms ease-out",
+        "purpose": "Color and focus transitions."
+      },
+      {
+        "name": "segmented-indicator",
+        "value": "300ms ease-out",
+        "purpose": "Segmented switch indicator movement."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      },
+      {
+        "name": "2xl",
+        "value": "1536px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Grounded command button for trusted actions like Save, Play, Search, and Open.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { border: 0; border-radius: 16px; background: #0f172a; color: #ffffff; padding: 12px 20px; font: 900 14px/1.2 Space Grotesk, Inter, SF Pro Display, system-ui, sans-serif; transition: background 160ms ease, transform 160ms ease; } .ds-btn-primary:hover { background: #1e293b; transform: translateY(-1px); } .ds-btn-primary:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }"
+    },
+    {
+      "name": "Accent Connect Button",
+      "kind": "button",
+      "refersTo": "button-accent",
+      "description": "Violet action for connection, selection, and high-affordance provider actions.",
+      "html": "<button class=\"ds-btn-accent\">Connect</button>",
+      "css": ".ds-btn-accent { border: 0; border-radius: 12px; background: #7c3aed; color: #ffffff; padding: 10px 16px; font: 900 12px/1.2 Space Grotesk, Inter, SF Pro Display, system-ui, sans-serif; transition: background 160ms ease; } .ds-btn-accent:hover { background: #6d28d9; } .ds-btn-accent:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; }"
+    },
+    {
+      "name": "Glass Card",
+      "kind": "card",
+      "refersTo": "card-glass",
+      "description": "Current shared translucent panel used across auth, sync, filters, and media surfaces.",
+      "html": "<section class=\"ds-card\"><p class=\"ds-card-kicker\">Your constellation</p><h3 class=\"ds-card-title\">Connected services</h3><p class=\"ds-card-body\">Manage provider accounts without making Cantaro feel like a provider clone.</p></section>",
+      "css": ".ds-card { border: 1px solid rgba(255,255,255,0.8); border-radius: 32px; background: rgba(255,255,255,0.70); color: #0f172a; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9); backdrop-filter: blur(20px); } .ds-card-kicker { margin: 0 0 8px; color: #7c3aed; font: 900 11px/1.2 Space Grotesk, Inter, system-ui, sans-serif; letter-spacing: .28em; text-transform: uppercase; } .ds-card-title { margin: 0; font: 900 24px/1.15 Space Grotesk, Inter, system-ui, sans-serif; } .ds-card-body { margin: 8px 0 0; color: #64748b; font: 500 14px/1.6 Space Grotesk, Inter, system-ui, sans-serif; }"
+    },
+    {
+      "name": "Top Search Field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Persistent app search field with lavender border, white surface, and slate text.",
+      "html": "<label class=\"ds-search\"><svg class=\"ds-search-icon\" viewBox=\"0 0 24 24\" fill=\"none\"><path d=\"m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/></svg><input placeholder=\"Search songs, artists, playlists...\" /></label>",
+      "css": ".ds-search { position: relative; display: block; width: 100%; max-width: 520px; } .ds-search input { width: 100%; height: 48px; border: 1px solid #e3def8; border-radius: 16px; background: rgba(255,255,255,.70); color: #0f172a; padding: 0 16px 0 44px; font: 500 14px/1 Space Grotesk, Inter, system-ui, sans-serif; transition: border-color 160ms ease, background 160ms ease; } .ds-search input::placeholder { color: #64748b; opacity: .72; } .ds-search input:focus { border-color: #c4b5fd; background: #ffffff; outline: none; } .ds-search input:focus-visible { box-shadow: 0 0 0 3px rgba(124,58,237,.16); } .ds-search-icon { position: absolute; top: 50%; left: 16px; width: 16px; height: 16px; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }"
+    },
+    {
+      "name": "Segmented Switch",
+      "kind": "custom",
+      "refersTo": "chip",
+      "description": "Search mode and filter switch with lavender track and dark selected indicator.",
+      "html": "<div class=\"ds-segmented\"><span class=\"ds-segmented-label\">Mode</span><div class=\"ds-segmented-track\"><span class=\"ds-segmented-indicator\"></span><button class=\"ds-segmented-option ds-selected\">My library</button><button class=\"ds-segmented-option\">AniList</button></div></div>",
+      "css": ".ds-segmented { display: inline-flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,.8); border-radius: 24px; background: rgba(255,255,255,.48); padding: 6px; box-shadow: 0 14px 40px rgba(88,74,150,.08); } .ds-segmented-label { padding: 0 12px; color: #64748b; font: 900 12px/1.2 Space Grotesk, Inter, system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; } .ds-segmented-track { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0; border-radius: 21px; background: rgba(238,234,255,.82); padding: 4px; box-shadow: inset 0 0 0 1px rgba(226,218,248,.88); } .ds-segmented-indicator { position: absolute; inset: 4px auto 4px 4px; width: calc((100% - 8px) / 2); border-radius: 16px; background: #0f172a; box-shadow: 0 14px 34px rgba(15,23,42,.18); transition: transform 300ms ease-out; } .ds-segmented-option { position: relative; z-index: 1; min-width: 112px; height: 40px; border: 0; border-radius: 16px; background: transparent; color: #64748b; padding: 0 16px; font: 900 14px/1 Space Grotesk, Inter, system-ui, sans-serif; } .ds-segmented-option.ds-selected { color: #ffffff; } .ds-segmented-option:not(.ds-selected):hover { color: #0f172a; }"
+    },
+    {
+      "name": "Side Navigation Row",
+      "kind": "nav",
+      "refersTo": "button-soft",
+      "description": "Sidebar navigation row with compact icon cell and selected white surface.",
+      "html": "<a class=\"ds-nav-row ds-active\" href=\"#\"><span class=\"ds-nav-icon\">M</span><span><strong>Music</strong><small>Available</small></span></a>",
+      "css": ".ds-nav-row { display: flex; align-items: center; gap: 12px; border-radius: 16px; color: #334155; padding: 10px 12px; text-decoration: none; font: 700 14px/1.2 Space Grotesk, Inter, system-ui, sans-serif; transition: background 160ms ease, color 160ms ease; } .ds-nav-row:hover, .ds-nav-row.ds-active { background: #ffffff; color: #0f172a; } .ds-nav-row.ds-active { box-shadow: 0 12px 34px rgba(88,74,150,.08); } .ds-nav-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid #e3def8; border-radius: 12px; background: rgba(255,255,255,.55); color: #7c3aed; font: 900 12px/1 Space Grotesk, Inter, system-ui, sans-serif; } .ds-nav-row small { display: block; margin-top: 3px; color: #94a3b8; font: 700 12px/1.2 Space Grotesk, Inter, system-ui, sans-serif; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Semantic status pill for connection, availability, warning, and playback labels.",
+      "html": "<span class=\"ds-chip ds-chip-success\">Connected</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; border: 1px solid transparent; border-radius: 9999px; padding: 4px 10px; font: 700 12px/1.2 Space Grotesk, Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; } .ds-chip-success { border-color: #a7f3d0; background: #d1fae5; color: #047857; } .ds-chip-info { border-color: #a5f3fc; background: #cffafe; color: #0369a1; } .ds-chip-warning { border-color: #fde68a; background: #fef3c7; color: #b45309; }"
+    },
+    {
+      "name": "Media Library Card",
+      "kind": "card",
+      "refersTo": "card-glass",
+      "description": "Artwork-led card for anime/media library browsing.",
+      "html": "<button class=\"ds-media-card\"><div class=\"ds-poster\"><div class=\"ds-poster-fallback\">A</div><div class=\"ds-poster-shade\"></div><div class=\"ds-poster-copy\"><span class=\"ds-chip ds-chip-info\">Watching</span><strong>Frieren</strong><small>Ep 12 / 28</small></div></div></button>",
+      "css": ".ds-media-card { border: 0; background: transparent; padding: 0; text-align: left; transition: transform 300ms ease; } .ds-media-card:hover { transform: scale(1.01); } .ds-media-card:focus-visible { outline: 2px solid #67e8f9; outline-offset: 3px; border-radius: 28px; } .ds-poster { position: relative; width: 180px; aspect-ratio: .72; overflow: hidden; border-radius: 28px; background: #0f172a; box-shadow: 0 18px 45px rgba(15,23,42,.22); } .ds-poster-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background: linear-gradient(135deg,#e0e7ff,#f3e8ff); color: #7c3aed; font: 900 40px/1 Space Grotesk, Inter, system-ui, sans-serif; } .ds-poster-shade { position: absolute; inset: 0; background: linear-gradient(to top, #020617, rgba(15,23,42,.30), rgba(15,23,42,.10)); } .ds-poster-copy { position: absolute; inset: auto 12px 12px; color: white; } .ds-poster-copy strong { display: block; margin-top: 8px; font: 900 16px/1.2 Space Grotesk, Inter, system-ui, sans-serif; } .ds-poster-copy small { display: block; margin-top: 4px; color: rgba(255,255,255,.78); font: 700 12px/1.2 Space Grotesk, Inter, system-ui, sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Living Personal Archive",
+    "overview": "Cantaro's current visual system is a soft product shell for personal collections: pale lavender canvases, translucent white panels, violet selection states, dark slate actions, cover art, and calm library language. It should feel like years of collected music and watched stories have become browsable and alive, not like another streaming service trying to own the collection.\n\nThe system is product-first. Navigation, search, tables, filters, provider states, and review queues must stay predictable and fast, while the atmosphere can carry a little warmth through artwork, softened panels, and careful copy. The magic belongs in rediscovery and confidence, not in decorative effects that compete with the task.\n\nIt explicitly rejects YouTube, Spotify, AniList, Trakt, generic SaaS dashboards, business/enterprise gray, and workplace/workspace metaphors. Cantaro is the canonical layer between services; external providers are endpoints, never the visual model.",
+    "keyCharacteristics": [
+      "Pale lavender app canvas with white translucent panels and slate text.",
+      "Violet/indigo active states used for current location, focus, and important provider actions.",
+      "Large, soft radii on existing cards and controls, with tighter radii reserved for dense rows and inputs.",
+      "Artwork-led music and media moments that make existing collections feel worth revisiting.",
+      "Direct product copy: friendly enough to be personal, precise enough to be trusted."
+    ],
+    "rules": [
+      {
+        "name": "The Cantaro Owns It Rule",
+        "body": "Provider brand colors may appear in icons, provider cards, and connection states, but they must never define the surrounding page.",
+        "section": "colors"
+      },
+      {
+        "name": "The Violet Is State Rule",
+        "body": "Violet is for selection, focus, connection, and current location. If a decorative element can be removed without changing meaning, it should not be violet.",
+        "section": "colors"
+      },
+      {
+        "name": "The No Enterprise Gray Rule",
+        "body": "Neutral surfaces must remain lavender-tinted or slate-anchored; flat gray dashboards are prohibited.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "Product UI stays in the configured sans stack. Do not introduce display fonts for buttons, labels, inputs, or data.",
+        "section": "typography"
+      },
+      {
+        "name": "The Heavy With Restraint Rule",
+        "body": "Heavy `font-black` titles are part of Cantaro, but long prose and metadata must use medium or semibold weights so screens do not shout.",
+        "section": "typography"
+      },
+      {
+        "name": "The Layer Must Earn It Rule",
+        "body": "Shadows belong to actual layers: card, hero, player, drawer, dialog, toast. Do not add glow to ordinary text, icons, or inactive controls.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Glass Budget Rule",
+        "body": "Glass is already a major visual material. New glass surfaces must serve hierarchy, not decoration.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep Cantaro's default app surface on Canvas Lavender with Panel White layers and slate text.",
+      "Do use Archive Violet for active state, selection, focus, provider connection, and current location.",
+      "Do make sync state, provider conflicts, unavailable tracks, and media progress visible with text, not color alone.",
+      "Do let album art, posters, and provider icons create local richness while keeping page chrome provider-independent.",
+      "Do use skeletons, empty states, and review queues that explain what the user can do next.",
+      "Do preserve keyboard focus states and reduced-motion alternatives for every interactive pattern."
+    ],
+    "donts": [
+      "Don't make Cantaro look or feel like YouTube, Spotify, AniList, Trakt, or any other connected platform clone.",
+      "Don't make the product cold, business-like, enterprise, workplace, workspace, gray, or boring.",
+      "Don't use generic SaaS dashboard tropes, hero metric blocks, gradient text, colored side-stripe cards, or repeated uppercase eyebrows as scaffolding.",
+      "Don't hide complexity behind vague polish; sync, matching, provider state, and review differences must stay understandable.",
+      "Don't add glassmorphism as decoration. Glass is allowed only when it clarifies layers.",
+      "Don't pair 1px borders with huge decorative shadows on routine cards. Pick a restrained layer treatment that matches the component's importance."
+    ]
+  }
+}

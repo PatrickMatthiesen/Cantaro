@@ -1,0 +1,691 @@
+[
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\music\\MusicPageShell.tsx",
+    "line": 172,
+    "snippet": "text-slate-500 on bg-red-50"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 43,
+    "snippet": "Undocumented color rgba(124, 92, 255, .15) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(124, 92, 255, .15)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 72,
+    "snippet": "Undocumented color #2563eb is outside DESIGN.md colors",
+    "ignoreValue": "#2563eb"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 73,
+    "snippet": "Undocumented color rgba(76, 29, 149, 0.32) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(76, 29, 149, 0.32)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 84,
+    "snippet": "Undocumented color #d1fae5 is outside DESIGN.md colors",
+    "ignoreValue": "#d1fae5"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 85,
+    "snippet": "Undocumented color #a7f3d0 is outside DESIGN.md colors",
+    "ignoreValue": "#a7f3d0"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 90,
+    "snippet": "Undocumented color #cffafe is outside DESIGN.md colors",
+    "ignoreValue": "#cffafe"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 90,
+    "snippet": "Undocumented color #dbeafe is outside DESIGN.md colors",
+    "ignoreValue": "#dbeafe"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 91,
+    "snippet": "Undocumented color #a5f3fc is outside DESIGN.md colors",
+    "ignoreValue": "#a5f3fc"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 96,
+    "snippet": "Undocumented color #fef3c7 is outside DESIGN.md colors",
+    "ignoreValue": "#fef3c7"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 97,
+    "snippet": "Undocumented color #fde68a is outside DESIGN.md colors",
+    "ignoreValue": "#fde68a"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 101,
+    "snippet": "Undocumented color #6ee7b7 is outside DESIGN.md colors",
+    "ignoreValue": "#6ee7b7"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 102,
+    "snippet": "Undocumented color rgba(16, 185, 129, 0.14) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(16, 185, 129, 0.14)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 103,
+    "snippet": "Undocumented color rgba(52, 211, 153, 0.25) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(52, 211, 153, 0.25)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 107,
+    "snippet": "Undocumented color #67e8f9 is outside DESIGN.md colors",
+    "ignoreValue": "#67e8f9"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 108,
+    "snippet": "Undocumented color rgba(6, 182, 212, 0.18) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(6, 182, 212, 0.18)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 108,
+    "snippet": "Undocumented color rgba(59, 130, 246, 0.16) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(59, 130, 246, 0.16)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 109,
+    "snippet": "Undocumented color rgba(103, 232, 249, 0.28) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(103, 232, 249, 0.28)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 113,
+    "snippet": "Undocumented color #fcd34d is outside DESIGN.md colors",
+    "ignoreValue": "#fcd34d"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 114,
+    "snippet": "Undocumented color rgba(245, 158, 11, 0.14) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(245, 158, 11, 0.14)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 115,
+    "snippet": "Undocumented color rgba(251, 191, 36, 0.25) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(251, 191, 36, 0.25)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 129,
+    "snippet": "Undocumented color #075985 is outside DESIGN.md colors",
+    "ignoreValue": "#075985"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 130,
+    "snippet": "Undocumented color rgba(207, 250, 254, 0.96) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(207, 250, 254, 0.96)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 130,
+    "snippet": "Undocumented color rgba(219, 234, 254, 0.96) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(219, 234, 254, 0.96)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 131,
+    "snippet": "Undocumented color rgba(103, 232, 249, 0.58) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(103, 232, 249, 0.58)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 136,
+    "snippet": "Undocumented color rgba(209, 250, 229, 0.94) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(209, 250, 229, 0.94)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 137,
+    "snippet": "Undocumented color rgba(110, 231, 183, 0.52) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(110, 231, 183, 0.52)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 141,
+    "snippet": "Undocumented color #78350f is outside DESIGN.md colors",
+    "ignoreValue": "#78350f"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 142,
+    "snippet": "Undocumented color rgba(251, 191, 36, 0.94) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(251, 191, 36, 0.94)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 143,
+    "snippet": "Undocumented color rgba(253, 230, 138, 0.62) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(253, 230, 138, 0.62)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 153,
+    "snippet": "Undocumented color #cffafe is outside DESIGN.md colors",
+    "ignoreValue": "#cffafe"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 154,
+    "snippet": "Undocumented color rgba(8, 145, 178, 0.82) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(8, 145, 178, 0.82)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 154,
+    "snippet": "Undocumented color rgba(37, 99, 235, 0.78) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(37, 99, 235, 0.78)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 155,
+    "snippet": "Undocumented color rgba(103, 232, 249, 0.32) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(103, 232, 249, 0.32)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 159,
+    "snippet": "Undocumented color #d1fae5 is outside DESIGN.md colors",
+    "ignoreValue": "#d1fae5"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 160,
+    "snippet": "Undocumented color rgba(5, 150, 105, 0.78) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(5, 150, 105, 0.78)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 161,
+    "snippet": "Undocumented color rgba(110, 231, 183, 0.3) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(110, 231, 183, 0.3)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 165,
+    "snippet": "Undocumented color #fffbeb is outside DESIGN.md colors",
+    "ignoreValue": "#fffbeb"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 166,
+    "snippet": "Undocumented color rgba(217, 119, 6, 0.88) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(217, 119, 6, 0.88)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 167,
+    "snippet": "Undocumented color rgba(253, 230, 138, 0.32) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(253, 230, 138, 0.32)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 193,
+    "snippet": "Undocumented color #2563eb is outside DESIGN.md colors",
+    "ignoreValue": "#2563eb"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 194,
+    "snippet": "Undocumented color rgba(49, 46, 129, 0.3) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(49, 46, 129, 0.3)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 220,
+    "snippet": "Undocumented color rgba(127, 29, 29, 0.28) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(127, 29, 29, 0.28)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 226,
+    "snippet": "Undocumented color #fda4af is outside DESIGN.md colors",
+    "ignoreValue": "#fda4af"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 288,
+    "snippet": "Undocumented color #9b5cff is outside DESIGN.md colors",
+    "ignoreValue": "#9b5cff"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 302,
+    "snippet": "Undocumented color rgba(139, 92, 246, 0.7) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(139, 92, 246, 0.7)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 307,
+    "snippet": "Undocumented color #c4b5fd is outside DESIGN.md colors",
+    "ignoreValue": "#c4b5fd"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 309,
+    "snippet": "Undocumented color rgba(139, 92, 246, 0.28) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(139, 92, 246, 0.28)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 315,
+    "snippet": "Undocumented color rgba(109, 40, 217, 0.42) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(109, 40, 217, 0.42)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 326,
+    "snippet": "Undocumented color rgba(124, 92, 255, 0.18) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(124, 92, 255, 0.18)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 327,
+    "snippet": "Undocumented color rgba(14, 165, 233, 0.14) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(14, 165, 233, 0.14)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 333,
+    "snippet": "Undocumented color rgba(0, 0, 0, 0.18) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(0, 0, 0, 0.18)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 354,
+    "snippet": "Undocumented color rgba(124, 92, 255, 0.07) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(124, 92, 255, 0.07)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 358,
+    "snippet": "Undocumented color rgba(124, 92, 255, 0.12) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(124, 92, 255, 0.12)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 365,
+    "snippet": "Undocumented color rgba(16, 185, 129, 0.09) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(16, 185, 129, 0.09)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 379,
+    "snippet": "Undocumented color rgba(16, 185, 129, 0.16) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(16, 185, 129, 0.16)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 387,
+    "snippet": "Undocumented color rgba(52, 211, 153, 0.34) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(52, 211, 153, 0.34)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 388,
+    "snippet": "Undocumented color rgba(6, 78, 59, 0.38) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(6, 78, 59, 0.38)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 389,
+    "snippet": "Undocumented color #a7f3d0 is outside DESIGN.md colors",
+    "ignoreValue": "#a7f3d0"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 394,
+    "snippet": "Undocumented color rgba(91, 33, 182, 0.34) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(91, 33, 182, 0.34)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 395,
+    "snippet": "Undocumented color #ddd6fe is outside DESIGN.md colors",
+    "ignoreValue": "#ddd6fe"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 399,
+    "snippet": "Undocumented color rgba(251, 191, 36, 0.4) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(251, 191, 36, 0.4)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 400,
+    "snippet": "Undocumented color rgba(120, 53, 15, 0.34) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(120, 53, 15, 0.34)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 401,
+    "snippet": "Undocumented color #fde68a is outside DESIGN.md colors",
+    "ignoreValue": "#fde68a"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 409,
+    "snippet": "Undocumented color #10b981 is outside DESIGN.md colors",
+    "ignoreValue": "#10b981"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 437,
+    "snippet": "Undocumented color #fdf2f8 is outside DESIGN.md colors",
+    "ignoreValue": "#fdf2f8"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 441,
+    "snippet": "Undocumented color rgba(124, 92, 255, .18) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(124, 92, 255, .18)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 448,
+    "snippet": "Undocumented color rgba(59, 130, 246, 0.25) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(59, 130, 246, 0.25)"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "file": "D:\\opensource\\Cantaro\\src\\Cantaro.Web\\src\\index.css",
+    "line": 449,
+    "snippet": "Undocumented color rgba(236, 72, 153, 0.18) is outside DESIGN.md colors",
+    "ignoreValue": "rgba(236, 72, 153, 0.18)"
+  }
+]
