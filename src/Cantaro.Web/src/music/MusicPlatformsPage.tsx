@@ -9,10 +9,11 @@ import {
   type PlatformId,
   type SyncStatusResponse,
 } from '@cantaro/client-shared/music';
-import { GlassCard, GradientButton, SegmentedSwitch, StatusBadge, type SegmentedSwitchOption } from '@cantaro/client-shared/ui';
+import { GlassCard, SegmentedSwitch, StatusBadge, type SegmentedSwitchOption } from '@cantaro/client-shared/ui';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { MusicLibraryPanel } from './MusicLibraryPanel';
 import { MusicPageShell } from './MusicPageShell';
+import { formatRelativeTime, isPlatformId, latestTimestamp, platformName } from './musicPresentation';
 import {
   consumePlaylistSyncActivityFocus,
   playlistSyncDataRefreshEventName,
@@ -40,40 +41,12 @@ interface AddPlatformMenuProps {
   onSelectPlatform: (platform: (typeof platformCatalog)[number]) => void;
 }
 
-const platformById = new Map(platformCatalog.map((platform) => [platform.id, platform]));
-
 function serviceName(service: string): string {
-  return platformById.get(service as PlatformId)?.name ?? service;
+  return platformName(service);
 }
 
 function asPlatformId(service: string): PlatformId | null {
-  return platformCatalog.some((platform) => platform.id === service) ? service as PlatformId : null;
-}
-
-function formatRelativeTime(value?: string | null): string {
-  if (!value) return 'Never';
-
-  const date = new Date(value);
-  const diffMs = Date.now() - date.getTime();
-  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
-
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-
-  return `${Math.round(diffHours / 24)}d ago`;
-}
-
-function latestTimestamp(values: Array<string | undefined | null>): string | null {
-  const timestamps = values
-    .filter((value): value is string => Boolean(value))
-    .map((value) => new Date(value).getTime())
-    .filter(Number.isFinite);
-
-  if (timestamps.length === 0) return null;
-  return new Date(Math.max(...timestamps)).toISOString();
+  return isPlatformId(service) ? service : null;
 }
 
 function statusLabel(status?: string | null): string {
@@ -86,17 +59,16 @@ function statusLabel(status?: string | null): string {
 function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPlatform }: AddPlatformMenuProps) {
   return (
     <div ref={menuRef} className="relative">
-      <GradientButton
+      <button
         type="button"
-        gradient="from-violet-500 to-fuchsia-500"
         aria-expanded={isOpen}
         aria-haspopup="menu"
         onClick={onToggle}
-        className="inline-flex items-center gap-2"
+        className="inline-flex h-12 items-center gap-2 rounded-2xl border border-violet-200 bg-white px-5 text-sm font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
       >
-        <MusicUiIcon name="plus" className="h-4 w-4" />
-        Add Platform
-      </GradientButton>
+        <MusicUiIcon name="plus" className="h-5 w-5" />
+        Add platform
+      </button>
       {isOpen ? (
         <div className="absolute right-0 z-20 mt-2 w-64 rounded-2xl border border-white/80 bg-white/95 p-2 shadow-lg backdrop-blur">
           {platformsToAdd.length === 0 ? (
@@ -456,7 +428,7 @@ function ProgressPlaylistNames({ names }: { names: string[] }) {
 }
 
 function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
-  const platformName = platformById.get(progress.sourcePlatformId)?.name ?? progress.sourcePlatformId;
+  const sourcePlatformName = serviceName(progress.sourcePlatformId);
   const statusStyles = {
     className: progressStatusClassName(progress.phase),
     label: progressStatusLabel(progress.phase),
@@ -470,7 +442,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
       </span>
       <span className="min-w-0">
         <span className="block truncate text-sm font-black text-slate-900">
-          {progress.playlistCount.toLocaleString()} playlist{progress.playlistCount === 1 ? '' : 's'} importing from {platformName}
+          {progress.playlistCount.toLocaleString()} playlist{progress.playlistCount === 1 ? '' : 's'} importing from {sourcePlatformName}
         </span>
         <span className="block truncate text-xs font-semibold text-slate-600">
           {progressDetail(progress)}
@@ -559,7 +531,7 @@ function HealthPanel({ library, syncStatus }: { library: MusicLibraryResponse; s
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-black text-slate-950">Sync health</h2>
-          <p className="mt-1 text-sm font-semibold text-slate-500">Current readiness from existing sync status.</p>
+          <p className="mt-1 text-sm font-semibold text-slate-500">Whether Cantaro can safely run playlist sync right now.</p>
         </div>
         <MusicUiIcon name="shieldCheck" className="h-5 w-5 text-emerald-500" />
       </div>
@@ -595,10 +567,10 @@ function OverviewHeader({
   return (
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <p className="text-xs font-black tracking-[0.22em] text-violet-600 uppercase">Music operations</p>
-        <h1 className="mt-2 text-4xl font-black text-slate-950">Playlist Sync</h1>
+        <p className="text-xs font-black tracking-[0.22em] text-violet-600 uppercase">Archive sync</p>
+        <h1 className="mt-2 text-4xl font-black text-slate-950">Playlist sync</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 font-semibold text-slate-500">
-          Cantaro keeps a canonical copy of selected playlists, then prepares those changes for every connected platform.
+          Cantaro keeps the canonical playlist copy here, then tracks which connected platforms have a mapped version.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
@@ -606,8 +578,8 @@ function OverviewHeader({
           to="/music/platforms/sync"
           className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white shadow-[0_16px_40px_rgba(15,23,42,0.18)] transition hover:bg-slate-800"
         >
-          <MusicUiIcon name="refresh" className="h-4 w-4" />
-          Add Playlist sync
+          <MusicUiIcon name="refresh" className="h-5 w-5" />
+          Add playlist sync
         </Link>
         <AddPlatformMenu
           menuRef={menuRef}

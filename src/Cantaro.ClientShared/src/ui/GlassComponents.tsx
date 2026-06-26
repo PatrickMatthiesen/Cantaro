@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
 
 const glassSurfaceClass =
-  'glass-surface rounded-3xl border border-white/80 bg-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px]';
+  'glass-surface rounded-[1.5rem] border border-white/80 bg-white/70 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur';
 
 interface GlassCardProps extends HTMLAttributes<HTMLDivElement> {
   interactive?: boolean;
@@ -38,7 +38,7 @@ interface GradientButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function GradientButton({
-  gradient = 'from-indigo-500 to-purple-500',
+  gradient,
   tone = 'primary',
   className = '',
   children,
@@ -46,14 +46,16 @@ export function GradientButton({
 }: GradientButtonProps) {
   const toneClass =
     tone === 'dark'
-      ? 'bg-gray-900 text-white hover:bg-gray-700'
+      ? 'bg-slate-950 text-white hover:bg-violet-700'
       : tone === 'soft'
-        ? 'bg-white/70 text-gray-800 hover:bg-mist-100'
-        : `bg-linear-to-r ${gradient} text-white hover:brightness-105`;
+        ? 'border border-[#e3def8] bg-white/70 text-slate-800 hover:bg-violet-50 hover:text-violet-800'
+        : gradient
+          ? `bg-linear-to-r ${gradient} text-white hover:brightness-105`
+          : 'bg-slate-950 text-white hover:bg-violet-700';
 
   return (
     <button
-      className={`rounded-2xl px-5 py-3 text-sm font-semibold transition-all hover:scale-[1.03] ${toneClass} disabled:cursor-not-allowed disabled:bg-none disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none disabled:hover:scale-100 disabled:hover:bg-gray-200 disabled:hover:brightness-100 ${className}`}
+      className={`rounded-2xl px-5 py-3 text-sm font-black transition-colors ${toneClass} disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none disabled:hover:bg-slate-200 disabled:hover:brightness-100 ${className}`}
       {...rest}
     >
       {children}
@@ -103,9 +105,7 @@ interface GradientPageShellProps {
 
 export function GradientPageShell({ children, contentClassName = '', className = '' }: GradientPageShellProps) {
   return (
-    <div className={`relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 ${className}`}>
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+    <div className={`relative min-h-screen overflow-hidden bg-[#f7f5ff] ${className}`}>
       <div className={`relative z-10 mx-auto max-w-6xl space-y-5 px-6 pt-8 pb-16 ${contentClassName}`}>
         {children}
       </div>
@@ -119,9 +119,9 @@ interface PageLoadingStateProps {
 
 export function PageLoadingState({ message }: PageLoadingStateProps) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50">
+    <div className="flex min-h-screen items-center justify-center bg-[#f7f5ff]">
       <GlassCard className="px-6 py-4">
-        <p className="text-sm text-gray-700">{message}</p>
+        <p className="text-sm font-semibold text-slate-700">{message}</p>
       </GlassCard>
     </div>
   );

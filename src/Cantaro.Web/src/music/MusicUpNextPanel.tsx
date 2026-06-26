@@ -39,7 +39,7 @@ export function MusicUpNextPanel({
   const hasContent = Boolean(activeTrack || queuedTracks.length > 0);
 
   return (
-    <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+    <section className="rounded-[1.5rem] border border-white/80 bg-white/58 p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="font-black text-slate-950">{title}</h2>
         {onClearQueue ? (

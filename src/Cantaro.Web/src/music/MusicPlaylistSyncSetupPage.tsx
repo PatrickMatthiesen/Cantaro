@@ -11,7 +11,7 @@ import {
   type PlatformPlaylist,
   type SyncStatusResponse,
 } from '@cantaro/client-shared/music';
-import { GlassCard, GradientButton, StatusBadge } from '@cantaro/client-shared/ui';
+import { GlassCard, StatusBadge } from '@cantaro/client-shared/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MusicLibraryPanel } from './MusicLibraryPanel';
 import { MusicPageShell } from './MusicPageShell';
@@ -41,7 +41,7 @@ function toggleSetValue(previous: Set<string>, value: string): Set<string> {
 }
 
 function syncUnavailableMessage(status: SyncStatusResponse | null): string {
-  return status?.overall.message ?? 'Cantaro could not confirm sync readiness. Please try again.';
+  return status?.overall.message ?? 'Cantaro could not confirm that playlist sync can run right now. Please try again.';
 }
 
 function selectSourcePlatform(
@@ -180,7 +180,7 @@ function SyncSetupMetrics({
       <p className="text-xs font-black tracking-[0.18em] text-slate-500 uppercase">Sync summary</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <SyncSetupMetric icon="refresh" value={selectedPlaylists.length.toLocaleString()} label="Source playlists" />
-        <SyncSetupMetric icon="cable" value={targetPlatformIds.length.toLocaleString()} label="Fan-out targets" />
+        <SyncSetupMetric icon="cable" value={targetPlatformIds.length.toLocaleString()} label="Other platforms" />
         <SyncSetupMetric icon="music" value={totalSongs.toLocaleString()} label="Total songs" />
         <SyncSetupMetric icon="clock" value="~2 min" label="Estimated time" />
       </div>
@@ -357,7 +357,7 @@ function RulesPanel({
   return (
     <GlassCard className="p-4">
       <h2 className="text-lg font-black text-slate-950">2. Sync rules</h2>
-      <p className="mt-1 text-sm font-semibold text-slate-500">These settings prepare the future fan-out behavior while the current run imports into Cantaro.</p>
+      <p className="mt-1 text-sm font-semibold text-slate-500">This run imports the selected source playlists into Cantaro. These rules describe how Cantaro should preserve them for later platform updates.</p>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <div className="rounded-2xl border border-violet-300 bg-white p-4 text-left shadow-[0_12px_30px_rgba(88,74,150,0.08)]">
@@ -371,7 +371,7 @@ function RulesPanel({
         <div className="rounded-2xl border border-white/80 bg-white/52 p-4 text-left opacity-65">
           <div className="flex items-center justify-between gap-3">
             <MusicUiIcon name="library" className="h-5 w-5 text-slate-500" />
-            <span className="text-xs font-black text-slate-400">Coming Later</span>
+            <span className="text-xs font-black text-slate-400">Later</span>
           </div>
           <p className="mt-3 text-sm font-black text-slate-900">Update library</p>
           <p className="mt-1 text-xs leading-5 font-semibold text-slate-500">Add tracks without removing existing entries.</p>
@@ -390,7 +390,7 @@ function RulesPanel({
 
 function PreviewTargets({ targetPlatformIds }: { targetPlatformIds: PlatformId[] }) {
   if (targetPlatformIds.length === 0) {
-    return <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">Connect more platforms for fan-out</span>;
+    return <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">Connect another platform for cross-platform sync</span>;
   }
 
   return targetPlatformIds.map((platformId) => (
@@ -444,7 +444,7 @@ function SyncPreview({
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-black text-slate-950">3. Sync preview</h2>
-          <p className="mt-1 text-sm font-semibold text-slate-500">Review the Cantaro import and inferred platform fan-out.</p>
+          <p className="mt-1 text-sm font-semibold text-slate-500">Review what Cantaro will import now and which connected platforms can receive this playlist later.</p>
         </div>
         <MusicUiIcon name="cloudSync" className="h-5 w-5 text-violet-500" />
       </div>
@@ -461,7 +461,7 @@ function SyncPreview({
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-black text-slate-500">
-          <span>Cantaro -&gt;</span>
+          <span>Cantaro can map to</span>
           <PreviewTargets targetPlatformIds={targetPlatformIds} />
         </div>
       </div>
@@ -629,34 +629,24 @@ function SyncSetupHeader({
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <Link to="/music/platforms" className="inline-flex items-center gap-2 text-sm font-black text-violet-700 transition hover:text-violet-500">
-          <MusicUiIcon name="arrowRight" className="h-4 w-4 rotate-180" />
+          <MusicUiIcon name="arrowRight" className="h-5 w-5 rotate-180" />
           Back to sync overview
         </Link>
         <h1 className="mt-3 text-4xl font-black text-slate-950">Create playlist sync</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 font-semibold text-slate-500">
-          Pick a source platform and the playlists Cantaro should import, match, and prepare for all other connected platforms.
+          Pick a source platform and the playlists Cantaro should import into the canonical archive. Other connected platforms become available as mapped destinations after Cantaro knows the songs.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          disabled
-          className="inline-flex h-12 cursor-not-allowed items-center gap-2 rounded-2xl bg-white/70 px-5 text-sm font-black text-slate-400 shadow-[0_14px_34px_rgba(88,74,150,0.08)]"
-          title="Preset saving will be available in a later sync iteration."
-        >
-          <MusicUiIcon name="save" className="h-4 w-4" />
-          Save as preset
-        </button>
-        <GradientButton
-          type="button"
-          gradient="from-violet-500 to-fuchsia-500"
           disabled={!canSync}
           onClick={onSync}
-          className="inline-flex items-center gap-2"
+          className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
         >
-          <MusicUiIcon name={isSyncing ? 'loader' : 'refresh'} className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+          <MusicUiIcon name={isSyncing ? 'loader' : 'refresh'} className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
           {isSyncing ? 'Syncing' : 'Sync playlists'}
-        </GradientButton>
+        </button>
       </div>
     </header>
   );

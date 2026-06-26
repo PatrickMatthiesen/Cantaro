@@ -3,14 +3,13 @@ import { useState, type ReactNode } from 'react';
 import {
   MusicPlatformIcon,
   MusicUiIcon,
-  platformCatalog,
   type MusicLibraryResponse,
   type MusicLibrarySong,
   type PlatformId,
 } from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { formatDuration, platformName, songArtist, songArtwork } from './musicPresentation';
+import { formatDuration, isPlatformId, platformName, songArtist, songArtwork } from './musicPresentation';
 
 
 interface SongDerivedMetadata {
@@ -18,10 +17,6 @@ interface SongDerivedMetadata {
   hasMusicBrainzSource: boolean;
   matchLabel: string;
   matchTone: 'ready' | 'warning' | 'neutral';
-}
-
-function isPlatformId(value: string): value is PlatformId {
-  return platformCatalog.some((platform) => platform.id === value);
 }
 
 function getMatchTone(matchStatus?: string): SongDerivedMetadata['matchTone'] {
@@ -281,7 +276,7 @@ function MetadataReadinessCard({ song }: { song: MusicLibrarySong }) {
 
   return (
     <section className={panelClassName('p-5')}>
-      <SectionHeader title="Metadata readiness" detail="What this detail page can grow into as the backend learns more." />
+      <SectionHeader title="Archive metadata" detail="What Cantaro knows now, and what is still waiting on richer sources." />
       <div className="mt-4 divide-y divide-[#eeeafa] overflow-hidden rounded-2xl bg-white/58">
         {rows.map((row) => (
           <div key={row.label} className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[180px_1fr]">

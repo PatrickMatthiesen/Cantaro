@@ -1,144 +1,324 @@
 import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
+import {
+  MusicPlatformIcon,
+  MusicUiIcon,
+  platformCatalog,
+  type MusicLibraryPlaylist,
+  type MusicLibraryResponse,
+  type MusicLibrarySong,
+  type PlatformId,
+} from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicTrackTable, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
 import { MusicUpNextPanel } from './MusicUpNextPanel';
 import { useMusicQueue } from './useMusicQueue';
 import {
-  fallbackArtwork,
   formatDuration,
+  formatRelativeTime,
+  latestTimestamp,
+  platformHoverClass,
+  platformName,
   playlistArtwork,
   playlistGradients,
+  playlistLastSyncedAt,
   songArtist,
   songArtwork,
   visiblePlatformIds,
 } from './musicPresentation';
 
-const moodTiles = [
-  { label: 'Bright', className: 'from-rose-300 to-orange-300' },
-  { label: 'Late night', className: 'from-indigo-400 to-slate-800' },
-  { label: 'Soft focus', className: 'from-emerald-300 to-cyan-500' },
-  { label: 'Loud', className: 'from-fuchsia-400 to-red-500' },
-  { label: 'Rainy', className: 'from-sky-300 to-violet-500' },
-  { label: 'Golden', className: 'from-amber-300 to-yellow-500' },
+const discoveryTiles = [
+  { label: 'Recently added', detail: 'Newest arrivals', tint: 'hover:border-sky-300 hover:bg-sky-50/80 hover:text-sky-900' },
+  { label: 'Large playlists', detail: 'The monoliths', tint: 'hover:border-violet-300 hover:bg-violet-50/80 hover:text-violet-900' },
+  { label: 'Needs coverage', detail: 'Sparse platforms', tint: 'hover:border-amber-300 hover:bg-amber-50/80 hover:text-amber-900' },
+  { label: 'Deep cuts', detail: 'Older saves', tint: 'hover:border-rose-300 hover:bg-rose-50/80 hover:text-rose-900' },
 ];
 
-function heroArtwork(featuredSong: MusicLibrarySong | null): string {
-  return featuredSong ? songArtwork(featuredSong) : fallbackArtwork[0];
+const implementedPlatformIds = platformCatalog
+  .filter((platform) => platform.implemented)
+  .map((platform) => platform.id);
+
+function playlistHasSyncProblem(playlist: MusicLibraryPlaylist): boolean {
+  return playlist.services.some((service) => service.lastSyncStatus === 'partial_failure' || service.lastSyncStatus === 'error');
 }
 
-function heroPlaylistSubtitle(library: MusicLibraryResponse, playlist: MusicLibraryPlaylist): string {
-  const otherSongs = Math.max(library.summary.songCount - playlist.entryCount, 0).toLocaleString();
-  return `${playlist.entryCount.toLocaleString()} songs ready here, with ${otherSongs} more across your library.`;
-}
-
-function heroSongSubtitle(library: MusicLibraryResponse, featuredSong: MusicLibrarySong): string {
-  const otherSongs = Math.max(library.summary.songCount - 1, 0).toLocaleString();
-  return `${songArtist(featuredSong)} is ready alongside ${otherSongs} more songs.`;
-}
-
-function getHeroContent(library: MusicLibraryResponse, featuredSong: MusicLibrarySong | null) {
-  const firstPlaylist = library.playlists[0] ?? null;
+function getArchiveStats(library: MusicLibraryResponse) {
+  const syncedPlaylists = library.playlists.filter((playlist) => playlist.services.length > 0);
+  const serviceMappings = syncedPlaylists.flatMap((playlist) => playlist.services);
+  const lastSync = latestTimestamp(serviceMappings.map((service) => service.lastSyncedAt));
+  const problemCount = syncedPlaylists.filter(playlistHasSyncProblem).length;
+  const unsyncedPlaylists = Math.max(library.summary.playlistCount - syncedPlaylists.length, 0);
 
   return {
-    artwork: heroArtwork(featuredSong),
-    title: heroTitle(firstPlaylist, featuredSong),
-    subtitle: heroSubtitle(library, firstPlaylist, featuredSong),
+    syncedPlaylists,
+    serviceMappings,
+    lastSync,
+    problemCount,
+    unsyncedPlaylists,
   };
 }
 
-function heroTitle(firstPlaylist: MusicLibraryPlaylist | null, featuredSong: MusicLibrarySong | null): string {
-  return firstPlaylist?.name || featuredSong?.title || 'Your music library';
-}
-
-function heroSubtitle(
-  library: MusicLibraryResponse,
-  firstPlaylist: MusicLibraryPlaylist | null,
-  featuredSong: MusicLibrarySong | null,
-): string {
-  if (firstPlaylist) return heroPlaylistSubtitle(library, firstPlaylist);
-  if (featuredSong) return heroSongSubtitle(library, featuredSong);
-  return 'Add songs and playlists to start building your personal listening home.';
-}
-
-function HeroPanel({
-  library,
-  featuredSong,
-  onPlayFeaturedSong,
+function ArchiveMetric({
+  label,
+  value,
+  detail,
+  tone = 'slate',
 }: {
-  library: MusicLibraryResponse;
-  featuredSong: MusicLibrarySong | null;
-  onPlayFeaturedSong: (song: MusicLibrarySong) => void;
+  label: string;
+  value: string;
+  detail: string;
+  tone?: 'slate' | 'violet' | 'emerald' | 'amber';
 }) {
-  const hero = getHeroContent(library, featuredSong);
-  const firstPlaylist = library.playlists[0] ?? null;
+  const toneClass = {
+    slate: 'border-slate-200 bg-white/72 text-slate-700',
+    violet: 'border-violet-200 bg-violet-50/80 text-violet-800',
+    emerald: 'border-emerald-200 bg-emerald-50/80 text-emerald-800',
+    amber: 'border-amber-200 bg-amber-50/80 text-amber-800',
+  }[tone];
 
   return (
-    <section className="relative overflow-hidden rounded-3xl bg-[#7c6ae5] p-5 text-white shadow-[0_28px_90px_rgba(89,75,180,0.22)]">
-      <div className="absolute inset-0">
-        <img src={hero.artwork} alt="" className="h-full w-full object-cover opacity-45" />
-        <div className="absolute inset-0 bg-linear-to-r from-[#271d66]/95 via-[#5f54c8]/76 to-[#f5a7ba]/22" />
-      </div>
-      <div className="relative grid gap-6 md:grid-cols-[190px_1fr]">
-        <img src={hero.artwork} alt="" className="aspect-square w-full max-w-[190px] rounded-3xl border border-white/45 object-cover shadow-[0_24px_70px_rgba(15,23,42,0.28)]" />
-        <div className="flex min-h-[190px] flex-col justify-center">
-          <p className="text-xs font-black tracking-[0.22em] text-white/78 uppercase">From your library</p>
-          <h1 className="mt-3 max-w-2xl text-4xl leading-tight font-black sm:text-5xl">{hero.title}</h1>
-          <p className="mt-3 max-w-xl text-base leading-7 font-medium text-white/88">{hero.subtitle}</p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-[0_14px_30px_rgba(15,23,42,0.22)] transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={!featuredSong}
-              onClick={() => {
-                if (featuredSong) onPlayFeaturedSong(featuredSong);
-              }}
-            >
-              Play
-            </button>
+    <div className={`music-archive-metric music-archive-metric--${tone} rounded-2xl border px-3.5 py-2.5 ${toneClass}`}>
+      <p className="text-[0.62rem] font-black tracking-[0.13em] uppercase opacity-75">{label}</p>
+      <p className="mt-1 text-lg font-black text-slate-950">{value}</p>
+      <p className="mt-0.5 text-[0.68rem] leading-4 font-semibold opacity-80">{detail}</p>
+    </div>
+  );
+}
+
+function PlatformChipContent({ platformId }: { platformId: PlatformId }) {
+  const platform = platformCatalog.find((item) => item.id === platformId);
+
+  return (
+    <>
+      <MusicPlatformIcon platformId={platform?.iconId ?? platformId} className="h-5 w-5" />
+      <span className="hidden sm:inline">{platform?.name ?? platformId}</span>
+    </>
+  );
+}
+
+function PlatformCoverageChip({ platformId, isMapped }: { platformId: PlatformId; isMapped: boolean }) {
+  if (!isMapped) {
+    return (
+      <span
+        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-dashed border-slate-200 bg-white/46 px-2.5 text-[0.72rem] font-black text-slate-400"
+        title={`${platformName(platformId)} is not mapped yet`}
+      >
+        <PlatformChipContent platformId={platformId} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`inline-flex h-8 items-center gap-1.5 rounded-full border border-white bg-white px-2.5 text-[0.72rem] font-black text-slate-800 shadow-sm transition ${platformHoverClass(platformId, 'hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700')}`}
+      title={`${platformName(platformId)} is mapped`}
+    >
+      <PlatformChipContent platformId={platformId} />
+    </span>
+  );
+}
+
+function getArchiveHealth(stats: ReturnType<typeof getArchiveStats>) {
+  if (stats.problemCount > 0) {
+    return {
+      tone: 'amber' as const,
+      label: 'Needs review',
+      detail: `${stats.problemCount.toLocaleString()} playlist${stats.problemCount === 1 ? '' : 's'} need attention`,
+    };
+  }
+
+  if (stats.syncedPlaylists.length > 0) {
+    return {
+      tone: 'emerald' as const,
+      label: 'Ready',
+      detail: 'No failed playlist mappings found',
+    };
+  }
+
+  return {
+    tone: 'violet' as const,
+    label: 'Start syncing',
+    detail: 'Choose a source playlist to create the first mapping',
+  };
+}
+
+function getLastSyncDetail(unsyncedPlaylists: number): string {
+  return unsyncedPlaylists > 0
+    ? `${unsyncedPlaylists.toLocaleString()} playlist${unsyncedPlaylists === 1 ? '' : 's'} only in Cantaro`
+    : 'Every playlist has a platform mapping';
+}
+
+function ArchiveCommandPanel({ library }: { library: MusicLibraryResponse }) {
+  const stats = getArchiveStats(library);
+  const health = getArchiveHealth(stats);
+
+  return (
+    <section className="music-archive-panel relative overflow-hidden rounded-[1.75rem] border border-white/80 bg-white/76 p-5 shadow-[0_18px_54px_rgba(88,74,150,0.08)] backdrop-blur-xl sm:p-6">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-linear-to-r from-violet-500 via-slate-950 to-emerald-500" aria-hidden />
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
+        <div className="min-w-0">
+          <p className="text-[0.68rem] font-black tracking-[0.16em] text-violet-700 uppercase">Archive command</p>
+          <h1 className="mt-2 max-w-2xl text-3xl leading-tight font-black tracking-[-0.03em] text-slate-950 sm:text-4xl">
+            Know what is synced before you send it anywhere.
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-slate-600 sm:text-base sm:leading-7">
+            Cantaro keeps the canonical playlist copy here, then tracks which platforms have a mapped version and where gaps need review.
+          </p>
+
+          <div className="mt-5 flex flex-wrap gap-3">
             <Link
-              to={firstPlaylist ? '/music/playlists/$playlistId' : '/music/playlists'}
-              params={firstPlaylist ? { playlistId: firstPlaylist.id } : undefined}
-              className="rounded-2xl bg-white/18 px-5 py-3 text-sm font-black text-white backdrop-blur transition hover:bg-white/25"
+              to="/music/platforms"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-violet-700 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
             >
-              View playlist
+              <MusicUiIcon name="shieldCheck" className="h-5 w-5" />
+              Review sync health
+            </Link>
+            <Link
+              to="/music/platforms/sync"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-violet-200 bg-white px-4 text-sm font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              <MusicUiIcon name="refresh" className="h-5 w-5" />
+              Add playlist sync
+            </Link>
+            <Link
+              to="/music/playlists"
+              className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white/72 px-4 text-sm font-black text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              <MusicUiIcon name="listMusic" className="h-5 w-5" />
+              Browse playlists
             </Link>
           </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+          <ArchiveMetric
+            label="Sync health"
+            value={health.label}
+            detail={health.detail}
+            tone={health.tone}
+          />
+          <ArchiveMetric
+            label="Mapped playlists"
+            value={`${stats.syncedPlaylists.length.toLocaleString()} / ${library.summary.playlistCount.toLocaleString()}`}
+            detail={`${stats.serviceMappings.length.toLocaleString()} platform mapping${stats.serviceMappings.length === 1 ? '' : 's'}`}
+            tone="violet"
+          />
+          <ArchiveMetric
+            label="Last known sync"
+            value={formatRelativeTime(stats.lastSync)}
+            detail={getLastSyncDetail(stats.unsyncedPlaylists)}
+          />
         </div>
       </div>
     </section>
   );
 }
 
-function PlaylistStrip({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
-  const visiblePlaylists = playlists.slice(0, 8);
+function PlaylistCoveragePanel({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
+  const visiblePlaylists = playlists
+    .slice()
+    .sort((left, right) => {
+      const leftProblem = playlistHasSyncProblem(left) ? 1 : 0;
+      const rightProblem = playlistHasSyncProblem(right) ? 1 : 0;
+      if (leftProblem !== rightProblem) return rightProblem - leftProblem;
+      return right.services.length - left.services.length;
+    })
+    .slice(0, 5);
 
   return (
-    <section>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-slate-950">Library Playlists</h2>
-        <Link to="/music/playlists" className="text-sm font-black text-violet-600">View all</Link>
+    <section className="music-panel rounded-[1.75rem] border border-white/80 bg-white/62 p-4 shadow-[0_16px_48px_rgba(88,74,150,0.06)] backdrop-blur">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-black text-slate-950">Playlist coverage</h2>
+          <p className="mt-1 text-sm font-semibold text-slate-500">See which playlists already have platform mappings before syncing more.</p>
+        </div>
+        <Link to="/music/playlists" className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-50">View all</Link>
       </div>
 
       {visiblePlaylists.length > 0 ? (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-4">
+        <div className="mt-4 space-y-3">
           {visiblePlaylists.map((playlist, index) => (
             <Link
               key={playlist.id}
               to="/music/playlists/$playlistId"
               params={{ playlistId: playlist.id }}
-              className={`group relative min-h-[160px] overflow-hidden rounded-3xl bg-linear-to-br ${playlistGradients[index % playlistGradients.length]} p-4 text-white shadow-[0_18px_44px_rgba(88,74,150,0.12)] transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none`}
+              className="group grid gap-3 rounded-2xl border border-white/70 bg-white/66 p-2.5 transition hover:border-violet-200 hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none md:grid-cols-[56px_minmax(0,1fr)_auto]"
             >
-              <img src={playlistArtwork(playlist, index)} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-45 transition group-hover:scale-105 group-hover:opacity-60" />
-              <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-slate-950/82 via-slate-950/22 to-transparent" />
-              <div className="pointer-events-none relative flex h-full flex-col justify-end">
-                <h3 className="line-clamp-2 text-sm font-black">{playlist.name}</h3>
-                <p className="mt-1 text-xs font-semibold text-white/75">{playlist.entryCount.toLocaleString()} songs</p>
-                <span className="absolute right-0 bottom-0 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-950 shadow-lg" aria-hidden>
-                  &gt;
+              <img src={playlistArtwork(playlist, index)} alt="" className="h-14 w-14 rounded-xl object-cover shadow-[0_10px_24px_rgba(15,23,42,0.12)]" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="min-w-0 truncate text-base font-black text-slate-950">{playlist.name}</h3>
+                  {playlistHasSyncProblem(playlist) ? (
+                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700">Review</span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  {playlist.entryCount.toLocaleString()} songs · {formatRelativeTime(playlistLastSyncedAt(playlist))}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5 md:hidden">
+                  {implementedPlatformIds.map((platformId) => (
+                    <PlatformCoverageChip
+                      key={`${playlist.id}-${platformId}`}
+                      platformId={platformId}
+                      isMapped={playlist.services.some((service) => service.service === platformId)}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="hidden items-center gap-2 self-center md:flex">
+                {implementedPlatformIds.map((platformId) => (
+                  <PlatformCoverageChip
+                    key={`${playlist.id}-${platformId}-desktop`}
+                    platformId={platformId}
+                    isMapped={playlist.services.some((service) => service.service === platformId)}
+                  />
+                ))}
+                <span className="rounded-full bg-[#eeeaff] px-3 py-1.5 text-xs font-black text-violet-700">
+                  {playlist.services.length.toLocaleString()} mapped
                 </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4">
+          <MusicEmptyPanel title="No playlists yet" detail="Connect a platform to import playlists into Cantaro's archive." />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PlaylistBrowser({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
+  const visiblePlaylists = playlists.slice(0, 6);
+
+  return (
+    <section>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black text-slate-950">Browse the archive</h2>
+          <p className="mt-1 text-sm font-semibold text-slate-500">Open playlists to inspect the actual songs before choosing sync targets.</p>
+        </div>
+        <Link to="/music/playlists" className="text-sm font-black text-violet-600 transition hover:text-violet-500">View all</Link>
+      </div>
+
+      {visiblePlaylists.length > 0 ? (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-4">
+          {visiblePlaylists.map((playlist, index) => (
+            <Link
+              key={playlist.id}
+              to="/music/playlists/$playlistId"
+              params={{ playlistId: playlist.id }}
+              className="group overflow-hidden rounded-2xl border border-white/80 bg-white/64 shadow-[0_12px_34px_rgba(88,74,150,0.07)] transition hover:-translate-y-0.5 hover:border-violet-200 hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              <div className={`relative h-24 bg-linear-to-br ${playlistGradients[index % playlistGradients.length]}`}>
+                <img src={playlistArtwork(playlist, index)} alt="" className="h-full w-full object-cover opacity-70 transition group-hover:scale-[1.03]" />
+                <div className="absolute inset-0 bg-linear-to-t from-slate-950/62 to-transparent" />
+              </div>
+              <div className="p-4">
+                <h3 className="line-clamp-2 text-sm font-black text-slate-950">{playlist.name}</h3>
+                <p className="mt-2 text-xs font-semibold text-slate-500">{playlist.entryCount.toLocaleString()} songs</p>
               </div>
             </Link>
           ))}
@@ -165,30 +345,25 @@ function mapSongToTrack(song: MusicLibrarySong, index: number): MusicCollectionT
 
 function SongTable({
   tracks,
-  query,
-  onQueryChange,
   onPlayTrack,
   onQueueTrack,
+  query,
 }: {
   tracks: MusicCollectionTrack[];
   query: string;
-  onQueryChange: (value: string) => void;
   onPlayTrack: (track: MusicCollectionTrack) => void;
   onQueueTrack: (track: MusicCollectionTrack) => void;
 }) {
   return (
-    <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+    <section className="music-panel rounded-[1.75rem] border border-white/80 bg-white/62 p-4 shadow-[0_16px_48px_rgba(88,74,150,0.06)] backdrop-blur">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-black text-slate-950">Today's Mixtape</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="h-10 rounded-2xl border border-[#e3def8] bg-white/80 px-4 text-sm font-medium outline-none placeholder:text-slate-400 focus:border-violet-300"
-            placeholder="Filter songs"
-            type="search"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-          />
+        <div>
+          <h2 className="text-lg font-black text-slate-950">{query.trim() ? 'Matching songs' : 'Songs in the archive'}</h2>
+          <p className="mt-1 text-sm font-semibold text-slate-500">
+            {query.trim() ? 'Filtered by the global music search.' : 'Use the top search to inspect songs, artists, or source playlists.'}
+          </p>
         </div>
+        <Link to="/music/songs" className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-50">Open songs</Link>
       </div>
 
       <MusicTrackTable
@@ -202,19 +377,24 @@ function SongTable({
   );
 }
 
-function CompactSongPanel({
+function RediscoverySongPanel({
   title,
+  detail,
   songs,
   ranked = false,
 }: {
   title: string;
+  detail: string;
   songs: MusicLibrarySong[];
   ranked?: boolean;
 }) {
   return (
-    <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+    <section className="music-panel rounded-[1.5rem] border border-white/80 bg-white/58 p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-black text-slate-950">{title}</h2>
+        <div className="min-w-0">
+          <h2 className="text-base font-black text-slate-950">{title}</h2>
+          <p className="mt-1 text-xs font-semibold text-slate-500">{detail}</p>
+        </div>
         <Link to="/music/songs" className="text-xs font-black text-violet-600 transition hover:text-violet-500">View all</Link>
       </div>
       <div className="space-y-3">
@@ -223,10 +403,10 @@ function CompactSongPanel({
             key={song.id}
             to="/music/songs/$songId"
             params={{ songId: song.id }}
-            className={`-mx-2 grid items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-white/72 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none ${ranked ? 'grid-cols-[20px_44px_minmax(0,1fr)_auto]' : 'grid-cols-[44px_minmax(0,1fr)_auto]'}`}
+            className={`group -mx-2 grid items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-white/80 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none ${ranked ? 'grid-cols-[20px_44px_minmax(0,1fr)_auto]' : 'grid-cols-[44px_minmax(0,1fr)_auto]'}`}
           >
             {ranked ? <span className="text-sm font-black text-slate-500">{index + 1}</span> : null}
-            <img src={songArtwork(song, index)} alt="" className="h-11 w-11 rounded-xl object-cover" />
+            <img src={songArtwork(song, index)} alt="" className="h-11 w-11 rounded-xl object-cover transition group-hover:ring-2 group-hover:ring-violet-300" />
             <div className="min-w-0">
               <p className="truncate text-sm font-black text-slate-950">{song.title}</p>
               <p className="truncate text-xs font-semibold text-slate-500">{songArtist(song)}</p>
@@ -241,20 +421,25 @@ function CompactSongPanel({
   );
 }
 
-function MoodPanel() {
+function RediscoveryPanel() {
   return (
-    <section className="rounded-3xl bg-white/64 p-4 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+    <section className="music-panel rounded-[1.5rem] border border-white/80 bg-white/58 p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-black text-slate-950">Browse Moods</h2>
+        <div>
+          <h2 className="text-base font-black text-slate-950">Rediscovery</h2>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Small ways back into the archive.</p>
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        {moodTiles.map((mood) => (
-          <div
-            key={mood.label}
-            className={`min-h-14 rounded-2xl bg-linear-to-br ${mood.className} px-3 text-left text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.12)]`}
+      <div className="grid grid-cols-2 gap-2">
+        {discoveryTiles.map((tile) => (
+          <Link
+            key={tile.label}
+            to="/music/songs"
+            className={`rounded-2xl border border-slate-200/70 bg-white/64 p-3 text-left text-slate-700 transition ${tile.tint} focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none`}
           >
-            {mood.label}
-          </div>
+            <span className="block text-sm font-black">{tile.label}</span>
+            <span className="mt-1 block text-xs font-semibold opacity-75">{tile.detail}</span>
+          </Link>
         ))}
       </div>
     </section>
@@ -310,18 +495,14 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
       searchValue={query}
       onSearchChange={setQuery}
     >
-      <div className="grid gap-6 xl:grid-cols-[1fr_278px] 2xl:grid-cols-[1fr_320px]">
-        <div className="min-w-0 space-y-7">
-          <HeroPanel
-            library={library}
-            featuredSong={playback.activeSong ?? songs[0] ?? null}
-            onPlayFeaturedSong={playback.playSong}
-          />
-          <PlaylistStrip playlists={library.playlists} />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-6">
+          <ArchiveCommandPanel library={library} />
+          <PlaylistCoveragePanel playlists={library.playlists} />
+          <PlaylistBrowser playlists={library.playlists} />
           <SongTable
             tracks={playback.tracks}
             query={query}
-            onQueryChange={setQuery}
             onPlayTrack={playback.playTrack}
             onQueueTrack={playback.queueTrack}
           />
@@ -333,9 +514,9 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
             queuedTracks={playback.queuedTracks}
             onClearQueue={playback.clearQueue}
           />
-          <CompactSongPanel title="Added Recently" songs={songs.slice(0, 5)} />
-          <CompactSongPanel title="Old Bangers" songs={[...songs].reverse().slice(0, 5)} ranked />
-          <MoodPanel />
+          <RediscoverySongPanel title="Recently added" detail="Fresh imports to inspect" songs={songs.slice(0, 5)} />
+          <RediscoverySongPanel title="Deep cuts" detail="Older saves worth checking" songs={[...songs].reverse().slice(0, 5)} ranked />
+          <RediscoveryPanel />
         </aside>
       </div>
     </MusicPageShell>

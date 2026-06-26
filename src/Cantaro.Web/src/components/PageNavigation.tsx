@@ -5,8 +5,10 @@ import type { AppRouteTo } from '../routerTypes';
 export interface PageNavigationItem {
   label: string;
   to: AppRouteTo;
+  hash?: string;
   detail?: string;
   icon?: ReactNode;
+  tone?: 'violet' | 'indigo' | 'sky' | 'red' | 'rose' | 'pink' | 'emerald' | 'amber' | 'slate';
   exact?: boolean;
   matchPrefix?: string;
   params?: Record<string, string>;
@@ -29,32 +31,103 @@ export interface PageNavigationSection {
 
 interface PageSideNavigationProps {
   activePathname: string;
+  activeHash?: string;
   sections: PageNavigationSection[];
   subtitle: string;
   footer?: ReactNode;
 }
 
-function isNavigationItemActive(pathname: string, item: PageNavigationItem): boolean {
+function isPathActive(pathname: string, path: string): boolean {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+function isHashNavigationItemActive(pathname: string, item: PageNavigationItem, hash?: string): boolean {
+  return pathname === item.to && hash === item.hash;
+}
+
+function isNavigationItemActive(pathname: string, item: PageNavigationItem, hash?: string): boolean {
+  if (item.hash) return isHashNavigationItemActive(pathname, item, hash);
   if (item.exact) {
     return pathname === item.to;
   }
 
   if (item.matchPrefix) {
-    return pathname === item.matchPrefix || pathname.startsWith(`${item.matchPrefix}/`);
+    return isPathActive(pathname, item.matchPrefix);
   }
 
-  return pathname === item.to || pathname.startsWith(`${item.to}/`);
+  return isPathActive(pathname, item.to);
 }
 
 function NavigationIcon({ icon, label }: { icon?: ReactNode; label: string }) {
   return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[#e3def8] bg-white/55 text-xs font-black text-violet-600">
+    <span className="app-side-nav-icon flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-violet-600 transition [&_svg]:h-5 [&_svg]:w-5">
       {icon ?? label.charAt(0)}
     </span>
   );
 }
 
+function NavigationItemContent({ item }: { item: PageNavigationItem }) {
+  return (
+    <>
+      <NavigationIcon icon={item.icon} label={item.label} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{item.label}</span>
+        {item.detail ? <span className="block truncate text-xs font-semibold text-slate-400">{item.detail}</span> : null}
+      </span>
+    </>
+  );
+}
+
+function getNavigationItemClassName(item: PageNavigationItem, isActive: boolean): string {
+  const itemTone = item.tone ?? 'violet';
+
+  return `app-side-nav-item app-side-nav-item--${itemTone} group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+    isActive ? 'app-side-nav-item--active text-slate-950' : 'text-slate-700'
+  }`;
+}
+
+function PageSideNavigationItem({
+  activeHash,
+  activePathname,
+  item,
+}: {
+  activeHash?: string;
+  activePathname: string;
+  item: PageNavigationItem;
+}) {
+  const isActive = isNavigationItemActive(activePathname, item, activeHash);
+  const itemClassName = getNavigationItemClassName(item, isActive);
+
+  if (item.disabled) {
+    return (
+      <button
+        key={`${item.to}-${item.label}`}
+        type="button"
+        className={`${itemClassName} cursor-not-allowed opacity-55`}
+        disabled
+      >
+        <NavigationItemContent item={item} />
+      </button>
+    );
+  }
+
+  return (
+    <Link
+      key={`${item.to}-${item.label}`}
+      to={item.to}
+      hash={item.hash}
+      params={item.params as never}
+      search={item.search as never}
+      className={itemClassName}
+      aria-current={isActive ? 'page' : undefined}
+    >
+      <NavigationItemContent item={item} />
+    </Link>
+  );
+}
+
 export function PageSideNavigation({
+  activeHash,
   activePathname,
   sections,
   subtitle,
@@ -64,9 +137,11 @@ export function PageSideNavigation({
     <aside className="app-sidebar hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-[#e8e4fb] bg-white/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
       <div className="min-h-full pb-32">
         <Link to="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-600 text-lg font-black text-white shadow-[0_12px_30px_rgba(124,92,255,0.3)]">
-            C
-          </div>
+          <img
+            src="/icon-192.png"
+            alt=""
+            className="h-12 w-12 rounded-2xl shadow-[0_12px_30px_rgba(124,92,255,0.24)]"
+          />
           <div>
             <p className="text-lg font-black tracking-[0.04em] text-slate-950">CANTARO</p>
             <p className="text-xs font-bold tracking-[0.32em] text-slate-500 uppercase">{subtitle}</p>
@@ -94,46 +169,14 @@ export function PageSideNavigation({
                 ) : null}
               </div>
               <div className="space-y-1.5">
-                {section.items.map((item) => {
-                  const isActive = isNavigationItemActive(activePathname, item);
-                  const itemClassName = `group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-                    isActive ? 'bg-white text-slate-950 shadow-[0_12px_34px_rgba(88,74,150,0.08)]' : 'text-slate-700 hover:bg-white'
-                  }`;
-
-                  if (item.disabled) {
-                    return (
-                      <button
-                        key={`${item.to}-${item.label}`}
-                        type="button"
-                        className={`${itemClassName} cursor-not-allowed opacity-55`}
-                        disabled
-                      >
-                        <NavigationIcon icon={item.icon} label={item.label} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{item.label}</span>
-                          {item.detail ? <span className="block truncate text-xs font-semibold text-slate-400">{item.detail}</span> : null}
-                        </span>
-                      </button>
-                    );
-                  }
-
-                  return (
-                    <Link
-                      key={`${item.to}-${item.label}`}
-                      to={item.to}
-                      params={item.params as never}
-                      search={item.search as never}
-                      className={itemClassName}
-                      aria-current={isActive ? 'page' : undefined}
-                    >
-                      <NavigationIcon icon={item.icon} label={item.label} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">{item.label}</span>
-                        {item.detail ? <span className="block truncate text-xs font-semibold text-slate-400">{item.detail}</span> : null}
-                      </span>
-                    </Link>
-                  );
-                })}
+                {section.items.map((item) => (
+                  <PageSideNavigationItem
+                    key={`${item.to}-${item.label}`}
+                    activeHash={activeHash}
+                    activePathname={activePathname}
+                    item={item}
+                  />
+                ))}
               </div>
             </section>
           ))}
