@@ -87,3 +87,13 @@ coverage/
 
 # Codex
 .codex/
+
+# Impeccable
+**/.impeccable/**
+!**/.impeccable/
+!**/.impeccable/config.json
+!**/.impeccable/design.json
+!**/.impeccable/live/
+!**/.impeccable/live/config.json
+!**/.impeccable/critique/
+!**/.impeccable/critique/ignore.md
