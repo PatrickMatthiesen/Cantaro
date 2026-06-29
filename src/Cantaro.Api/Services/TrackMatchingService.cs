@@ -433,6 +433,10 @@ public class TrackMatchingService
             ProviderRawMetadata = result.Candidate.RawMetadata,
             Matching = new TrackMatchCandidateDiagnostics
             {
+                ObservationSearchTitle = result.ObservationMetadata.SearchTitle,
+                ObservationSearchArtist = result.ObservationMetadata.SearchArtist,
+                CandidateSearchTitle = result.CandidateMetadata.SearchTitle,
+                CandidateSearchArtist = result.CandidateMetadata.SearchArtist,
                 ObservationVersionMarkers = [.. result.ObservationMetadata.VersionMarkers],
                 ObservationPlaybackModifiers = [.. result.ObservationMetadata.PlaybackModifiers],
                 CandidateVersionMarkers = [.. result.CandidateMetadata.VersionMarkers],

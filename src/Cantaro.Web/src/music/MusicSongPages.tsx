@@ -60,23 +60,6 @@ function SectionHeader({ title, detail, action }: { title: string; detail?: stri
   );
 }
 
-function PlatformPill({ platformId }: { platformId: PlatformId }) {
-  return (
-    <span className="inline-flex h-9 items-center gap-2 rounded-full border border-[#e7e0fb] bg-white/76 px-3 text-xs font-black text-slate-800">
-      <MusicPlatformIcon platformId={platformId} className="h-4 w-4" title={platformName(platformId)} />
-      {platformName(platformId)}
-    </span>
-  );
-}
-
-function EmptyPlatformPill() {
-  return (
-    <span className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white/70 px-3 text-xs font-black text-slate-500">
-      Local library
-    </span>
-  );
-}
-
 function SongArtworkBlock({ song, index = 0, className = '' }: { song: MusicLibrarySong; index?: number; className?: string }) {
   return (
     <div className={`relative overflow-hidden rounded-[1.35rem] bg-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.18)] sm:rounded-[1.6rem] ${className}`}>
@@ -179,30 +162,22 @@ function SongDetailHero({
   onPlayPreview: () => void;
 }) {
   return (
-    <section className="music-detail-hero relative overflow-hidden rounded-[1.5rem] bg-[#ece9ff] px-4 pt-4 pb-3 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:pt-5 sm:pb-4 md:px-6 md:pt-6 md:pb-5 xl:px-7 xl:pt-7">
-      <div className="music-detail-hero__wash absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(255,255,255,0.96),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(199,210,254,0.84),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.72),rgba(224,231,255,0.72))]" />
+    <section className="music-detail-hero relative overflow-visible rounded-[1.5rem] bg-[#ece9ff] px-4 pt-4 pb-3 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:pt-5 sm:pb-4 md:px-6 md:pt-6 md:pb-5 xl:px-7 xl:pt-7">
+      <div className="music-detail-hero__wash absolute inset-0 overflow-hidden rounded-[inherit] bg-[radial-gradient(circle_at_16%_12%,rgba(255,255,255,0.96),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(199,210,254,0.84),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.72),rgba(224,231,255,0.72))]" />
+      <div className="absolute top-0 right-5 z-20 -translate-y-1/2 sm:right-7">
+        <SongStatusBadge metadata={metadata} />
+      </div>
       <div className="relative">
-        <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[136px_minmax(0,1fr)] sm:gap-5 md:grid-cols-[168px_minmax(0,1fr)] md:gap-y-4 xl:grid-cols-[184px_minmax(0,1fr)]">
+        <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-x-4 gap-y-4 sm:grid-cols-[136px_minmax(0,1fr)] sm:gap-x-5 md:grid-cols-[168px_minmax(0,1fr)] xl:grid-cols-[184px_minmax(0,1fr)]">
           <SongArtworkBlock song={song} index={songIndex} className="w-full" />
-          <div className="min-w-0 space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <SongStatusBadge metadata={metadata} />
-              {metadata.platformIds.length > 0 ? metadata.platformIds.map((platformId) => <PlatformPill key={platformId} platformId={platformId} />) : <EmptyPlatformPill />}
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-2xl leading-tight font-black text-slate-950 sm:text-4xl xl:text-5xl">{song.title}</h1>
-              <p className="mt-1.5 text-base font-black text-violet-700 sm:mt-2 sm:text-xl">{songArtist(song)}</p>
-            </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl leading-tight font-black text-slate-950 sm:text-4xl xl:text-5xl">{song.title}</h1>
+            <p className="mt-1.5 text-base font-black text-violet-700 sm:mt-2 sm:text-xl">{songArtist(song)}</p>
           </div>
-          <div className="hidden md:block" />
-          <div className="hidden min-w-0 items-center justify-between gap-4 md:flex">
-            <SongMetrics song={song} metadata={metadata} className="max-w-[24rem] flex-1" />
-            <SongHeroActions onPlayPreview={onPlayPreview} className="shrink-0 justify-end" />
+          <div className="col-span-2 flex min-w-0 flex-wrap items-center justify-end gap-3 md:gap-4">
+            <SongMetrics song={song} metadata={metadata} className="w-full max-w-[24rem] sm:w-auto sm:flex-1" />
+            <SongHeroActions onPlayPreview={onPlayPreview} className="justify-end" />
           </div>
-        </div>
-        <div className="mt-4 grid gap-3 sm:mt-5 md:hidden">
-          <SongMetrics song={song} metadata={metadata} />
-          <SongHeroActions onPlayPreview={onPlayPreview} />
         </div>
       </div>
     </section>

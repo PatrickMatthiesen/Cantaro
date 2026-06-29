@@ -41,6 +41,10 @@ public sealed class TrackMatchCandidateStoredMetadata
 
 public sealed class TrackMatchCandidateDiagnostics
 {
+    public string? ObservationSearchTitle { get; set; }
+    public string? ObservationSearchArtist { get; set; }
+    public string? CandidateSearchTitle { get; set; }
+    public string? CandidateSearchArtist { get; set; }
     public List<string> ObservationVersionMarkers { get; set; } = [];
     public List<string> ObservationPlaybackModifiers { get; set; } = [];
     public List<string> CandidateVersionMarkers { get; set; } = [];

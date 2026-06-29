@@ -523,6 +523,27 @@ interface StatusActionRowProps {
   onRefreshProgress: () => void;
 }
 
+interface EntryDetailPanelsProps extends Pick<
+  MediaEntryDetailContentProps,
+  'entry'
+  | 'availabilityByProviderLink'
+  | 'unlinkingId'
+  | 'progressEpisodes'
+  | 'progressChapters'
+  | 'progressVolumes'
+  | 'selectedStatus'
+  | 'isRefreshingProgress'
+  | 'isSavingStatus'
+  | 'onSetShowLinkDialog'
+  | 'onSetProgressEpisodes'
+  | 'onSetProgressChapters'
+  | 'onSetProgressVolumes'
+  | 'onSetSelectedStatus'
+  | 'onRefreshProgress'
+  | 'onSaveStatus'
+  | 'onUnlink'
+> {}
+
 interface MediaEntryDetailContentProps {
   libraryEntryId: string;
   entry: MediaLibraryEntryDetailDto;
@@ -609,89 +630,55 @@ function DetailHeader({ mediaKind, isConnected, onNavigateBack }: DetailHeaderPr
   );
 }
 
-function EntryDetailPanels({
-  entry,
-  availabilityByProviderLink,
-  unlinkingId,
-  progressEpisodes,
-  progressChapters,
-  progressVolumes,
-  selectedStatus,
-  isRefreshingProgress,
-  isSavingStatus,
-  onSetShowLinkDialog,
-  onSetProgressEpisodes,
-  onSetProgressChapters,
-  onSetProgressVolumes,
-  onSetSelectedStatus,
-  onRefreshProgress,
-  onSaveStatus,
-  onUnlink,
-}: Pick<
-  MediaEntryDetailContentProps,
-  'entry'
-  | 'availabilityByProviderLink'
-  | 'unlinkingId'
-  | 'progressEpisodes'
-  | 'progressChapters'
-  | 'progressVolumes'
-  | 'selectedStatus'
-  | 'isRefreshingProgress'
-  | 'isSavingStatus'
-  | 'onSetShowLinkDialog'
-  | 'onSetProgressEpisodes'
-  | 'onSetProgressChapters'
-  | 'onSetProgressVolumes'
-  | 'onSetSelectedStatus'
-  | 'onRefreshProgress'
-  | 'onSaveStatus'
-  | 'onUnlink'
->) {
-  const { title } = entry;
+function getProgressCapabilities(title: MediaLibraryEntryDetailDto['title']) {
   const dim = title.primaryProgressDimension;
-  const supportsEpisodes = dim === 'episode';
-  const supportsChapters = dim === 'chapter';
-  const supportsVolumes = dim === 'volume' || dim === 'chapter';
-  const hasProgressChanged =
-    progressEpisodes !== entry.progressEpisodes
-    || progressChapters !== entry.progressChapters
-    || progressVolumes !== entry.progressVolumes;
-  const hasStatusChanged =
-    selectedStatus !== entry.normalizedStatus
-    || hasProgressChanged;
-  const nextRelease = formatNextReleaseDisplay(entry.nextReleaseAt);
+  return {
+    supportsEpisodes: dim === 'episode',
+    supportsChapters: dim === 'chapter',
+    supportsVolumes: dim === 'volume' || dim === 'chapter',
+  };
+}
+
+function getEntryStatusChanged(props: EntryDetailPanelsProps) {
+  return props.selectedStatus !== props.entry.normalizedStatus
+    || props.progressEpisodes !== props.entry.progressEpisodes
+    || props.progressChapters !== props.entry.progressChapters
+    || props.progressVolumes !== props.entry.progressVolumes;
+}
+
+function EntryDetailPanels(props: EntryDetailPanelsProps) {
+  const { entry } = props;
+  const capabilities = getProgressCapabilities(entry.title);
 
   return (
     <>
-      <EntryOverviewCard entry={entry} nextRelease={nextRelease} />
+      <EntryOverviewCard entry={entry} nextRelease={formatNextReleaseDisplay(entry.nextReleaseAt)} />
       <StatusCard
-        title={title}
-        selectedStatus={selectedStatus}
-        hasStatusChanged={hasStatusChanged}
-        isSavingStatus={isSavingStatus}
-        progressEpisodes={progressEpisodes}
-        progressChapters={progressChapters}
-        progressVolumes={progressVolumes}
-        supportsEpisodes={supportsEpisodes}
-        supportsChapters={supportsChapters}
-        supportsVolumes={supportsVolumes}
-        isRefreshingProgress={isRefreshingProgress}
+        title={entry.title}
+        selectedStatus={props.selectedStatus}
+        hasStatusChanged={getEntryStatusChanged(props)}
+        isSavingStatus={props.isSavingStatus}
+        progressEpisodes={props.progressEpisodes}
+        progressChapters={props.progressChapters}
+        progressVolumes={props.progressVolumes}
+        {...capabilities}
+        isRefreshingProgress={props.isRefreshingProgress}
         canRefreshProgress={entry.isConnected}
         updatedAt={entry.updatedAt}
-        onStatusChange={onSetSelectedStatus}
-        onProgressEpisodesChange={onSetProgressEpisodes}
-        onProgressChaptersChange={onSetProgressChapters}
-        onProgressVolumesChange={onSetProgressVolumes}
-        onSaveStatus={onSaveStatus}
-        onRefreshProgress={onRefreshProgress}
+        onStatusChange={props.onSetSelectedStatus}
+        onProgressEpisodesChange={props.onSetProgressEpisodes}
+        onProgressChaptersChange={props.onSetProgressChapters}
+        onProgressVolumesChange={props.onSetProgressVolumes}
+        onSaveStatus={props.onSaveStatus}
+        onRefreshProgress={props.onRefreshProgress}
       />
       <ProviderLinksCard
         providerLinks={entry.providerLinks}
-        availabilityByProviderLink={availabilityByProviderLink}
-        unlinkingId={unlinkingId}
+        availabilityByProviderLink={props.availabilityByProviderLink}
+        unlinkingId={props.unlinkingId}
         lastSyncedAt={entry.lastSyncedAt}
-        onLinkProvider={() => onSetShowLinkDialog(true)}
-        onUnlink={onUnlink}
+        onLinkProvider={() => props.onSetShowLinkDialog(true)}
+        onUnlink={props.onUnlink}
       />
     </>
   );
@@ -727,79 +714,70 @@ function EntryLinkDialog({
   );
 }
 
-function StatusCard({
-  title,
-  selectedStatus,
-  progressEpisodes,
-  progressChapters,
-  progressVolumes,
-  supportsEpisodes,
-  supportsChapters,
-  supportsVolumes,
-  hasStatusChanged,
-  isSavingStatus,
-  isRefreshingProgress,
-  canRefreshProgress,
-  updatedAt,
-  onStatusChange,
-  onProgressEpisodesChange,
-  onProgressChaptersChange,
-  onProgressVolumesChange,
-  onSaveStatus,
-  onRefreshProgress,
-}: StatusCardProps) {
+function StatusCardHeader({ selectedStatus, updatedAt, onStatusChange }: Pick<StatusCardProps, 'selectedStatus' | 'updatedAt' | 'onStatusChange'>) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Status</h2>
+        <p className="mt-1 text-xs text-gray-400">
+          Last updated {new Date(updatedAt).toLocaleDateString()}
+        </p>
+      </div>
+      <select
+        className="min-w-52 rounded-xl border border-gray-200 bg-white/80 px-4 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+        value={selectedStatus}
+        onChange={(event) => onStatusChange(event.target.value)}
+      >
+        {NORMALIZED_STATUSES.map((status) => (
+          <option key={status.value} value={status.value}>{status.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+type StatusProgressFieldsProps = Pick<
+  StatusCardProps,
+  'title'
+  | 'progressEpisodes'
+  | 'progressChapters'
+  | 'progressVolumes'
+  | 'supportsEpisodes'
+  | 'supportsChapters'
+  | 'supportsVolumes'
+  | 'onProgressEpisodesChange'
+  | 'onProgressChaptersChange'
+  | 'onProgressVolumesChange'
+>;
+
+function StatusProgressFields(props: StatusProgressFieldsProps) {
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      {props.supportsEpisodes ? (
+        <ProgressField label="Episodes" value={props.progressEpisodes} max={props.title.episodeCount} onChange={props.onProgressEpisodesChange} />
+      ) : null}
+      {props.supportsChapters ? (
+        <ProgressField label="Chapters" value={props.progressChapters} max={props.title.chapterCount} onChange={props.onProgressChaptersChange} />
+      ) : null}
+      {props.supportsVolumes ? (
+        <ProgressField label="Volumes" value={props.progressVolumes} max={props.title.volumeCount} onChange={props.onProgressVolumesChange} />
+      ) : null}
+    </div>
+  );
+}
+
+function StatusCard(props: StatusCardProps) {
   return (
     <GlassCard className="p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Status</h2>
-          <p className="mt-1 text-xs text-gray-400">
-            Last updated {new Date(updatedAt).toLocaleDateString()}
-          </p>
-        </div>
-        <select
-          className="min-w-52 rounded-xl border border-gray-200 bg-white/80 px-4 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-          value={selectedStatus}
-          onChange={(event) => onStatusChange(event.target.value)}
-        >
-          {NORMALIZED_STATUSES.map((status) => (
-            <option key={status.value} value={status.value}>{status.label}</option>
-          ))}
-        </select>
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {supportsEpisodes ? (
-          <ProgressField
-            label="Episodes"
-            value={progressEpisodes}
-            max={title.episodeCount}
-            onChange={onProgressEpisodesChange}
-          />
-        ) : null}
-        {supportsChapters ? (
-          <ProgressField
-            label="Chapters"
-            value={progressChapters}
-            max={title.chapterCount}
-            onChange={onProgressChaptersChange}
-          />
-        ) : null}
-        {supportsVolumes ? (
-          <ProgressField
-            label="Volumes"
-            value={progressVolumes}
-            max={title.volumeCount}
-            onChange={onProgressVolumesChange}
-          />
-        ) : null}
-      </div>
+      <StatusCardHeader {...props} />
+      <StatusProgressFields {...props} />
       <StatusActionRow
-        hasStatusChanged={hasStatusChanged}
-        isSavingStatus={isSavingStatus}
-        isRefreshingProgress={isRefreshingProgress}
-        canRefreshProgress={canRefreshProgress}
-        onSaveStatus={onSaveStatus}
-        onRefreshProgress={onRefreshProgress}
+        hasStatusChanged={props.hasStatusChanged}
+        isSavingStatus={props.isSavingStatus}
+        isRefreshingProgress={props.isRefreshingProgress}
+        canRefreshProgress={props.canRefreshProgress}
+        onSaveStatus={props.onSaveStatus}
+        onRefreshProgress={props.onRefreshProgress}
       />
     </GlassCard>
   );
@@ -875,66 +853,30 @@ interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProp
   snackbar: SnackbarNotification | null;
 }
 
-function MediaEntryDetailContent({
-  libraryEntryId,
-  entry,
-  embedded,
-  availabilityByProviderLink,
-  isRefreshingProgress,
-  isSavingStatus,
-  showLinkDialog,
-  unlinkingId,
-  progressEpisodes,
-  progressChapters,
-  progressVolumes,
-  selectedStatus,
-  onNavigateBack,
-  onLoadEntry,
-  onSetShowLinkDialog,
-  onSetProgressEpisodes,
-  onSetProgressChapters,
-  onSetProgressVolumes,
-  onSetSelectedStatus,
-  onRefreshProgress,
-  onSaveStatus,
-  onUnlink,
-}: MediaEntryDetailContentProps) {
-  const mediaKind = entry.title.mediaKind;
+function MediaEntryDetailBody(props: MediaEntryDetailContentProps & { mediaKind: string }) {
+  return (
+    <DetailPageLayout embedded={props.embedded}>
+      <DetailHeader mediaKind={props.mediaKind} isConnected={props.entry.isConnected} onNavigateBack={props.onNavigateBack} />
+      <EntryDetailPanels {...props} />
+    </DetailPageLayout>
+  );
+}
+
+function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
+  const mediaKind = props.entry.title.mediaKind;
 
   return (
     <>
-      <DetailPageLayout embedded={embedded}>
-        <DetailHeader mediaKind={mediaKind} isConnected={entry.isConnected} onNavigateBack={onNavigateBack} />
-        <EntryDetailPanels
-          entry={entry}
-          availabilityByProviderLink={availabilityByProviderLink}
-          unlinkingId={unlinkingId}
-          progressEpisodes={progressEpisodes}
-          progressChapters={progressChapters}
-          progressVolumes={progressVolumes}
-          selectedStatus={selectedStatus}
-          isRefreshingProgress={isRefreshingProgress}
-          isSavingStatus={isSavingStatus}
-          onSetShowLinkDialog={onSetShowLinkDialog}
-          onSetProgressEpisodes={onSetProgressEpisodes}
-          onSetProgressChapters={onSetProgressChapters}
-          onSetProgressVolumes={onSetProgressVolumes}
-          onSetSelectedStatus={onSetSelectedStatus}
-          onRefreshProgress={onRefreshProgress}
-          onSaveStatus={onSaveStatus}
-          onUnlink={onUnlink}
-        />
-      </DetailPageLayout>
-
+      <MediaEntryDetailBody {...props} mediaKind={mediaKind} />
       <EntryLinkDialog
-        showLinkDialog={showLinkDialog}
-        libraryEntryId={libraryEntryId}
+        showLinkDialog={props.showLinkDialog}
+        libraryEntryId={props.libraryEntryId}
         mediaKind={mediaKind}
-        existingLinks={entry.providerLinks}
-        onClose={() => onSetShowLinkDialog(false)}
+        existingLinks={props.entry.providerLinks}
+        onClose={() => props.onSetShowLinkDialog(false)}
         onLinked={() => {
-          onSetShowLinkDialog(false);
-          void onLoadEntry();
+          props.onSetShowLinkDialog(false);
+          void props.onLoadEntry();
         }}
       />
     </>

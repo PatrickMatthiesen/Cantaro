@@ -161,6 +161,49 @@ function useDebouncedSearch(
     }, [connectedProviderIds, resetCatalogSearch, runCatalogSearch, searchMode, searchQuery, updateFilterRef]);
 }
 
+function submitSearch(
+    searchMode: LibrarySearchMode,
+    searchQuery: string,
+    connectedProviderIds: string[],
+    updateFilter: UpdateLibraryFilter,
+    runCatalogSearch: (providerId: string, query: string) => Promise<void>,
+) {
+    const trimmedQuery = searchQuery.trim();
+    if (searchMode === 'library') {
+        updateFilter('query', trimmedQuery || undefined);
+    } else if (trimmedQuery && connectedProviderIds.includes(searchMode)) {
+        void runCatalogSearch(searchMode, trimmedQuery);
+    }
+}
+
+function useSearchInputControls({
+    initialSearchQuery,
+    onSearchModeChange,
+    onSearchQueryChange,
+}: Pick<UseLibrarySearchStateOptions, 'onSearchModeChange' | 'onSearchQueryChange'> & { initialSearchQuery: string }) {
+    const [internalSearchMode, setInternalSearchMode] = useState<LibrarySearchMode>('library');
+    const [internalSearchQuery, setInternalSearchQuery] = useState(initialSearchQuery);
+
+    const setSearchQuery = useCallback((query: string) => {
+        if (onSearchQueryChange) {
+            onSearchQueryChange(query);
+            return;
+        }
+
+        setInternalSearchQuery(query);
+    }, [onSearchQueryChange]);
+
+    const setSearchMode = useCallback((mode: LibrarySearchMode) => {
+        if (onSearchModeChange) {
+            onSearchModeChange(mode);
+        } else {
+            setInternalSearchMode(mode);
+        }
+    }, [onSearchModeChange]);
+
+    return { internalSearchMode, internalSearchQuery, setSearchMode, setSearchQuery };
+}
+
 export function useLibrarySearchState({
     filters,
     providerId,
@@ -171,10 +214,13 @@ export function useLibrarySearchState({
     onSearchQueryChange,
     onSearchModeChange,
 }: UseLibrarySearchStateOptions) {
-    const [internalSearchMode, setInternalSearchMode] = useState<LibrarySearchMode>('library');
-    const [internalSearchQuery, setInternalSearchQuery] = useState(() => filters.query ?? '');
-    const searchMode = controlledSearchMode ?? internalSearchMode;
-    const searchQuery = controlledSearchQuery ?? internalSearchQuery;
+    const inputControls = useSearchInputControls({
+        initialSearchQuery: filters.query ?? '',
+        onSearchModeChange,
+        onSearchQueryChange,
+    });
+    const searchMode = controlledSearchMode ?? inputControls.internalSearchMode;
+    const searchQuery = controlledSearchQuery ?? inputControls.internalSearchQuery;
     const updateFilterRef = useLatestFilterUpdater(updateFilter);
     const catalogSearch = useCatalogSearch();
 
@@ -192,33 +238,14 @@ export function useLibrarySearchState({
         catalogSearch.resetCatalogSearch,
     );
 
-    const setSearchQuery = useCallback((query: string) => {
-        if (onSearchQueryChange) {
-            onSearchQueryChange(query);
-            return;
-        }
-
-        setInternalSearchQuery(query);
-    }, [onSearchQueryChange]);
-
     const handleSearchSubmit = useCallback(() => {
-        const trimmedQuery = searchQuery.trim();
-        if (searchMode === 'library') {
-            updateFilter('query', trimmedQuery || undefined);
-        } else if (trimmedQuery && connectedProviderIds.includes(searchMode)) {
-            void catalogSearch.runCatalogSearch(searchMode, trimmedQuery);
-        }
+        submitSearch(searchMode, searchQuery, connectedProviderIds, updateFilter, catalogSearch.runCatalogSearch);
     }, [catalogSearch, connectedProviderIds, searchMode, searchQuery, updateFilter]);
 
     const handleSearchModeChange = useCallback((mode: LibrarySearchMode) => {
-        if (onSearchModeChange) {
-            onSearchModeChange(mode);
-        } else {
-            setInternalSearchMode(mode);
-        }
-
+        inputControls.setSearchMode(mode);
         catalogSearch.resetCatalogSearch();
-    }, [catalogSearch, onSearchModeChange]);
+    }, [catalogSearch, inputControls]);
 
     return {
         searchMode,
@@ -229,7 +256,7 @@ export function useLibrarySearchState({
         hasCatalogSearched: catalogSearch.hasCatalogSearched,
         connectedProviderIds,
         providerName: providerDisplayName(searchMode),
-        setSearchQuery,
+        setSearchQuery: inputControls.setSearchQuery,
         handleSearchSubmit,
         handleSearchModeChange,
         runCatalogSearch: catalogSearch.runCatalogSearch,

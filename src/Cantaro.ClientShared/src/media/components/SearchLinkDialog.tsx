@@ -34,6 +34,16 @@ interface SearchResultsListProps {
     onLink: (providerMediaId: string) => void;
 }
 
+interface LinkFeedbackState {
+    linkingId: string | null;
+    conflict: { providerMediaId: string; conflictInfo: MediaLinkConflictDto } | null;
+    linkError: string | null;
+    setLinkingId: (linkingId: string | null) => void;
+    setConflict: (conflict: { providerMediaId: string; conflictInfo: MediaLinkConflictDto } | null) => void;
+    setLinkError: (linkError: string | null) => void;
+    resetLinkState: () => void;
+}
+
 function getErrorMessage(error: unknown, fallbackMessage: string): string {
     return error instanceof Error ? error.message : fallbackMessage;
 }
@@ -50,36 +60,50 @@ function parseLinkConflict(error: unknown): MediaLinkConflictDto | null {
     }
 }
 
-function useSearchLinkDialogState({
-    libraryEntryId,
-    mediaKind,
-    onLinked,
-}: Pick<SearchLinkDialogProps, 'libraryEntryId' | 'mediaKind' | 'onLinked'>) {
-    const [providerId, setProviderId] = useState<string>(mediaProviderCatalog[0]?.id ?? '');
-    const [query, setQuery] = useState('');
-    const [results, setResults] = useState<MediaProviderSearchResultDto[]>([]);
-    const [isSearching, setIsSearching] = useState(false);
-    const [searchError, setSearchError] = useState<string | null>(null);
+function useLinkFeedbackState(): LinkFeedbackState {
     const [linkingId, setLinkingId] = useState<string | null>(null);
     const [conflict, setConflict] = useState<{ providerMediaId: string; conflictInfo: MediaLinkConflictDto } | null>(null);
     const [linkError, setLinkError] = useState<string | null>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        inputRef.current?.focus();
-    }, []);
 
     const resetLinkState = useCallback(() => {
         setConflict(null);
         setLinkError(null);
     }, []);
 
+    return { linkingId, conflict, linkError, setLinkingId, setConflict, setLinkError, resetLinkState };
+}
+
+function useSearchFields(resetLinkState: () => void) {
+    const [providerId, setProviderId] = useState<string>(mediaProviderCatalog[0]?.id ?? '');
+    const [query, setQuery] = useState('');
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        inputRef.current?.focus();
+    }, []);
+
     const selectProvider = useCallback((nextProviderId: string) => {
         setProviderId(nextProviderId);
-        setResults([]);
-        setSearchError(null);
         resetLinkState();
     }, [resetLinkState]);
+
+    return { providerId, query, setQuery, inputRef, selectProvider };
+}
+
+function useProviderSearch(
+    mediaKind: string,
+    providerId: string,
+    query: string,
+    resetLinkState: () => void,
+) {
+    const [results, setResults] = useState<MediaProviderSearchResultDto[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchError, setSearchError] = useState<string | null>(null);
+
+    const clearSearchResults = useCallback(() => {
+        setResults([]);
+        setSearchError(null);
+    }, []);
 
     const handleSearch = useCallback(async () => {
         if (!query.trim()) {
@@ -105,9 +129,18 @@ function useSearchLinkDialogState({
         }
     }, [mediaKind, providerId, query, resetLinkState]);
 
+    return { results, isSearching, searchError, clearSearchResults, handleSearch };
+}
+
+function useProviderLink(
+    libraryEntryId: string,
+    providerId: string,
+    onLinked: () => void,
+    feedback: LinkFeedbackState,
+) {
     const handleLink = useCallback(async (providerMediaId: string, forceRelink = false) => {
-        setLinkingId(providerMediaId);
-        resetLinkState();
+        feedback.setLinkingId(providerMediaId);
+        feedback.resetLinkState();
 
         try {
             await mediaApi.linkProvider(libraryEntryId, { providerId, providerMediaId, forceRelink });
@@ -115,30 +148,48 @@ function useSearchLinkDialogState({
         } catch (linkFailure) {
             const parsedConflict = parseLinkConflict(linkFailure);
             if (parsedConflict) {
-                setConflict({ providerMediaId, conflictInfo: parsedConflict });
+                feedback.setConflict({ providerMediaId, conflictInfo: parsedConflict });
             } else {
-                setLinkError(getErrorMessage(linkFailure, 'Failed to link provider'));
+                feedback.setLinkError(getErrorMessage(linkFailure, 'Failed to link provider'));
             }
         } finally {
-            setLinkingId(null);
+            feedback.setLinkingId(null);
         }
-    }, [libraryEntryId, onLinked, providerId, resetLinkState]);
+    }, [feedback, libraryEntryId, onLinked, providerId]);
+
+    return handleLink;
+}
+
+function useSearchLinkDialogState({
+    libraryEntryId,
+    mediaKind,
+    onLinked,
+}: Pick<SearchLinkDialogProps, 'libraryEntryId' | 'mediaKind' | 'onLinked'>) {
+    const feedback = useLinkFeedbackState();
+    const fields = useSearchFields(feedback.resetLinkState);
+    const search = useProviderSearch(mediaKind, fields.providerId, fields.query, feedback.resetLinkState);
+    const handleLink = useProviderLink(libraryEntryId, fields.providerId, onLinked, feedback);
+
+    const selectProvider = useCallback((nextProviderId: string) => {
+        fields.selectProvider(nextProviderId);
+        search.clearSearchResults();
+    }, [fields, search]);
 
     return {
-        providerId,
-        query,
-        setQuery,
-        results,
-        isSearching,
-        searchError,
-        linkingId,
-        conflict,
-        linkError,
-        inputRef,
+        providerId: fields.providerId,
+        query: fields.query,
+        setQuery: fields.setQuery,
+        results: search.results,
+        isSearching: search.isSearching,
+        searchError: search.searchError,
+        linkingId: feedback.linkingId,
+        conflict: feedback.conflict,
+        linkError: feedback.linkError,
+        inputRef: fields.inputRef,
         selectProvider,
-        handleSearch,
+        handleSearch: search.handleSearch,
         handleLink,
-        clearConflict: () => setConflict(null),
+        clearConflict: () => feedback.setConflict(null),
     };
 }
 

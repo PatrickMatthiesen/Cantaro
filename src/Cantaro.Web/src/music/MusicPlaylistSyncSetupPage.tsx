@@ -483,31 +483,59 @@ function SyncPreview({
   );
 }
 
-function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
-  const { user } = useAuth();
-  const syncDefaults = user?.preferences;
-  const navigate = useNavigate();
-  const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
+interface SyncRuleDefaults {
+  keepPlaylistOrder?: boolean;
+  keepPlaylistMetadata?: boolean;
+  hideUnavailableTracks?: boolean;
+  scheduledSync?: boolean;
+}
+
+const defaultSyncRuleDefaults: Required<SyncRuleDefaults> = {
+  keepPlaylistOrder: true,
+  keepPlaylistMetadata: true,
+  hideUnavailableTracks: true,
+  scheduledSync: true,
+};
+
+function syncRuleDefaults(syncDefaults: SyncRuleDefaults | undefined) {
+  return { ...defaultSyncRuleDefaults, ...syncDefaults };
+}
+
+function useSourcePlatformSelection(
+  initialSourcePlatformId: PlatformId | undefined,
+  connectedPlatformIds: PlatformId[],
+  isCheckingConnectedAccounts: boolean,
+) {
   const firstConnectedSource = platformCatalog.find((platform) => platform.implemented && connectedPlatformIds.includes(platform.id))?.id ?? 'youtube';
   const preferredSource = selectSourcePlatform(initialSourcePlatformId, connectedPlatformIds, firstConnectedSource);
   const [sourcePlatformId, setSourcePlatformId] = useState<PlatformId>(() => selectInitialSourcePlatform(initialSourcePlatformId, firstConnectedSource));
-  const [playlists, setPlaylists] = useState<PlatformPlaylist[]>([]);
-  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set());
-  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
-  const [syncResult, setSyncResult] = useState<BatchSyncResponse | null>(null);
-  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [keepOrder, setKeepOrder] = useState(syncDefaults?.keepPlaylistOrder ?? true);
-  const [keepMetadata, setKeepMetadata] = useState(syncDefaults?.keepPlaylistMetadata ?? true);
-  const [hideUnavailable, setHideUnavailable] = useState(syncDefaults?.hideUnavailableTracks ?? true);
-  const [scheduledSync, setScheduledSync] = useState(syncDefaults?.scheduledSync ?? true);
 
   useEffect(() => {
     if (!isCheckingConnectedAccounts) {
       setSourcePlatformId(preferredSource);
     }
   }, [isCheckingConnectedAccounts, preferredSource]);
+
+  return { sourcePlatformId, setSourcePlatformId };
+}
+
+function useSyncRules(syncDefaults: SyncRuleDefaults | undefined) {
+  const defaults = syncRuleDefaults(syncDefaults);
+  const [keepOrder, setKeepOrder] = useState(defaults.keepPlaylistOrder);
+  const [keepMetadata, setKeepMetadata] = useState(defaults.keepPlaylistMetadata);
+  const [hideUnavailable, setHideUnavailable] = useState(defaults.hideUnavailableTracks);
+  const [scheduledSync, setScheduledSync] = useState(defaults.scheduledSync);
+
+  return { keepOrder, keepMetadata, hideUnavailable, scheduledSync, setKeepOrder, setKeepMetadata, setHideUnavailable, setScheduledSync };
+}
+
+function useSyncSetupData(sourcePlatformId: PlatformId) {
+  const [playlists, setPlaylists] = useState<PlatformPlaylist[]>([]);
+  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set());
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
+  const [syncResult, setSyncResult] = useState<BatchSyncResponse | null>(null);
+  const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -543,18 +571,29 @@ function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
     };
   }, [sourcePlatformId]);
 
-  const selectedPlaylists = useMemo(
-    () => playlists.filter((playlist) => selectedPlaylistIds.has(playlist.id)),
-    [playlists, selectedPlaylistIds],
-  );
-  const targetPlatformIds = connectedPlatformIds.filter((platformId) => platformId !== sourcePlatformId);
-  const canSync = selectedPlaylistIds.size > 0 && !isSyncing && Boolean(syncStatus?.overall.canSyncNow);
+  return { playlists, selectedPlaylistIds, syncStatus, syncResult, isLoadingPlaylists, error, setError, setSelectedPlaylistIds, setSyncResult, setSyncStatus };
+}
 
-  const handleSelectAll = useCallback(() => {
-    setSelectedPlaylistIds((previous) => previous.size === playlists.length ? new Set() : new Set(playlists.map((playlist) => playlist.id)));
-  }, [playlists]);
+function useSyncJob({
+  isSyncing,
+  selectedPlaylistIds,
+  sourcePlatformId,
+  setError,
+  setIsSyncing,
+  setSyncResult,
+  setSyncStatus,
+}: {
+  isSyncing: boolean;
+  selectedPlaylistIds: Set<string>;
+  sourcePlatformId: PlatformId;
+  setError: (message: string | null) => void;
+  setIsSyncing: (isSyncing: boolean) => void;
+  setSyncResult: (result: BatchSyncResponse | null) => void;
+  setSyncStatus: (status: SyncStatusResponse | null) => void;
+}) {
+  const navigate = useNavigate();
 
-  const handleSync = useCallback(async () => {
+  return useCallback(async () => {
     if (selectedPlaylistIds.size === 0 || isSyncing) return;
 
     setIsSyncing(true);
@@ -583,34 +622,47 @@ function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
     } finally {
       setIsSyncing(false);
     }
-  }, [isSyncing, navigate, selectedPlaylistIds, sourcePlatformId]);
+  }, [isSyncing, navigate, selectedPlaylistIds, setError, setIsSyncing, setSyncResult, setSyncStatus, sourcePlatformId]);
+}
+
+function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
+  const { user } = useAuth();
+  const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
+  const sourceSelection = useSourcePlatformSelection(initialSourcePlatformId, connectedPlatformIds, isCheckingConnectedAccounts);
+  const setupData = useSyncSetupData(sourceSelection.sourcePlatformId);
+  const rules = useSyncRules(user?.preferences);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const selectedPlaylists = useMemo(
+    () => setupData.playlists.filter((playlist) => setupData.selectedPlaylistIds.has(playlist.id)),
+    [setupData.playlists, setupData.selectedPlaylistIds],
+  );
+  const targetPlatformIds = connectedPlatformIds.filter((platformId) => platformId !== sourceSelection.sourcePlatformId);
+  const canSync = setupData.selectedPlaylistIds.size > 0 && !isSyncing && Boolean(setupData.syncStatus?.overall.canSyncNow);
+  const handleSelectAll = useCallback(() => {
+    setupData.setSelectedPlaylistIds((previous) => previous.size === setupData.playlists.length ? new Set() : new Set(setupData.playlists.map((playlist) => playlist.id)));
+  }, [setupData]);
+  const handleSync = useSyncJob({
+    isSyncing,
+    selectedPlaylistIds: setupData.selectedPlaylistIds,
+    sourcePlatformId: sourceSelection.sourcePlatformId,
+    setError: setupData.setError,
+    setIsSyncing,
+    setSyncResult: setupData.setSyncResult,
+    setSyncStatus: setupData.setSyncStatus,
+  });
 
   return {
     connectedPlatformIds,
     isCheckingConnectedAccounts,
-    sourcePlatformId,
-    setSourcePlatformId,
-    playlists,
-    selectedPlaylistIds,
+    ...sourceSelection,
+    ...setupData,
     selectedPlaylists,
     targetPlatformIds,
-    syncStatus,
-    syncResult,
-    isLoadingPlaylists,
     isSyncing,
-    error,
-    keepOrder,
-    keepMetadata,
-    hideUnavailable,
-    scheduledSync,
     canSync,
     handleSelectAll,
     handleSync,
-    setSelectedPlaylistIds,
-    setKeepOrder,
-    setKeepMetadata,
-    setHideUnavailable,
-    setScheduledSync,
+    ...rules,
   };
 }
 

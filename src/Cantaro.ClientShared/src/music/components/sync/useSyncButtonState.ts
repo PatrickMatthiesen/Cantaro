@@ -13,6 +13,19 @@ function getSyncBlockedMessage(status: SyncStatusResponse | null): string {
     ?? `Song sync limit reached. Please wait for the ${status?.overall.windowMinutes ?? 10}-minute window to reset.`;
 }
 
+interface SyncActionOptions {
+  platformId: PlatformId;
+  isSyncing: boolean;
+  setIsSyncing: (isSyncing: boolean) => void;
+  loadSyncStatus: () => Promise<SyncStatusResponse | null>;
+  setError: (message: string | null) => void;
+  appendStatus: (message: string) => void;
+  startProgressSimulation: (playlistCount: number) => void;
+  stopProgressSimulation: () => void;
+  setSyncProgress: (progress: number) => void;
+  setShowStatusDrawer: (visible: boolean | ((previous: boolean) => boolean)) => void;
+}
+
 function toggleSelectedPlaylist(previous: Set<string>, playlistId: string): Set<string> {
   const next = new Set(previous);
   if (next.has(playlistId)) {
@@ -200,16 +213,18 @@ async function handleSyncFailure(
 }
 
 function useSyncActions(
-  platformId: PlatformId,
-  isSyncing: boolean,
-  setIsSyncing: (isSyncing: boolean) => void,
-  loadSyncStatus: () => Promise<SyncStatusResponse | null>,
-  setError: (message: string | null) => void,
-  appendStatus: (message: string) => void,
-  startProgressSimulation: (playlistCount: number) => void,
-  stopProgressSimulation: () => void,
-  setSyncProgress: (progress: number) => void,
-  setShowStatusDrawer: (visible: boolean | ((previous: boolean) => boolean)) => void,
+  {
+    platformId,
+    isSyncing,
+    setIsSyncing,
+    loadSyncStatus,
+    setError,
+    appendStatus,
+    startProgressSimulation,
+    stopProgressSimulation,
+    setSyncProgress,
+    setShowStatusDrawer,
+  }: SyncActionOptions,
 ) {
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [selectedPlaylists, setSelectedPlaylists] = useState<Set<string>>(new Set());
@@ -270,6 +285,22 @@ function useSyncActions(
   };
 }
 
+function getSyncUsageSummary(syncStatus: SyncStatusResponse | null, isSyncing: boolean) {
+  const songsSyncedInWindow = syncStatus?.overall.songsSyncedInWindow ?? 0;
+  const songSyncLimit = syncStatus?.overall.songSyncLimit ?? 2000;
+  const windowMinutes = syncStatus?.overall.windowMinutes ?? 10;
+  const remainingSongs = syncStatus?.overall.remainingSongsInWindow ?? 0;
+
+  return {
+    songsSyncedInWindow,
+    songSyncLimit,
+    windowMinutes,
+    remainingSongs,
+    windowUsagePercent: Math.min(100, Math.round((songsSyncedInWindow / Math.max(1, songSyncLimit)) * 100)),
+    canSync: Boolean(syncStatus?.overall.canSyncNow) && !isSyncing,
+  };
+}
+
 export function useSyncButtonState(platformId: PlatformId, platformName: string) {
   const [isSyncing, setIsSyncing] = useState(false);
   const {
@@ -297,7 +328,7 @@ export function useSyncButtonState(platformId: PlatformId, platformName: string)
     syncResult,
     handleSync,
     togglePlaylistSelection,
-  } = useSyncActions(
+  } = useSyncActions({
     platformId,
     isSyncing,
     setIsSyncing,
@@ -308,14 +339,8 @@ export function useSyncButtonState(platformId: PlatformId, platformName: string)
     stopProgressSimulation,
     setSyncProgress,
     setShowStatusDrawer,
-  );
-
-  const songsSyncedInWindow = syncStatus?.overall.songsSyncedInWindow ?? 0;
-  const songSyncLimit = syncStatus?.overall.songSyncLimit ?? 2000;
-  const windowMinutes = syncStatus?.overall.windowMinutes ?? 10;
-  const remainingSongs = syncStatus?.overall.remainingSongsInWindow ?? 0;
-  const windowUsagePercent = Math.min(100, Math.round((songsSyncedInWindow / Math.max(1, songSyncLimit)) * 100));
-  const canSync = Boolean(syncStatus?.overall.canSyncNow) && !isSyncing;
+  });
+  const usageSummary = getSyncUsageSummary(syncStatus, isSyncing);
 
   return {
     syncStatus,
@@ -329,12 +354,7 @@ export function useSyncButtonState(platformId: PlatformId, platformName: string)
     showPlaylistSelector,
     selectedPlaylists,
     syncResult,
-    songsSyncedInWindow,
-    songSyncLimit,
-    windowMinutes,
-    remainingSongs,
-    windowUsagePercent,
-    canSync,
+    ...usageSummary,
     setShowStatusDrawer,
     setShowPlaylistSelector,
     handleSync,

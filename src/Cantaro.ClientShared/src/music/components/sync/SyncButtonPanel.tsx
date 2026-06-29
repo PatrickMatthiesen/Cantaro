@@ -290,39 +290,31 @@ function SyncButtonFeedback({
     );
 }
 
-export function SyncButtonPanel({
+function SyncButtonHeader({
     platformName,
-    syncStatus,
-    availablePlaylists,
-    isSyncing,
-    syncProgress,
-    statusUpdates,
-    showStatusDrawer,
-    showPlaylistSelector,
-    selectedPlaylists,
-    syncResult,
-    error,
     songsSyncedInWindow,
     songSyncLimit,
     windowMinutes,
     remainingSongs,
     windowUsagePercent,
-    canSync,
-    onSyncAll,
-    onTogglePlaylistSelector,
-    onToggleStatusDrawer,
-    onTogglePlaylistSelection,
-    onSyncSelected,
-    onClosePlaylistSelector,
-}: SyncButtonPanelProps) {
+    syncStatus,
+}: Pick<
+    SyncButtonPanelProps,
+    'platformName'
+    | 'songsSyncedInWindow'
+    | 'songSyncLimit'
+    | 'windowMinutes'
+    | 'remainingSongs'
+    | 'windowUsagePercent'
+    | 'syncStatus'
+>) {
     return (
-        <section className="rounded-[1.5rem] border border-white/80 bg-white/70 p-6 text-slate-900 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+        <>
             <p className="text-xs font-black tracking-[0.18em] text-violet-700 uppercase">Playlist sync</p>
             <h3 className="mt-2 text-xl font-black">Keep your playlists aligned</h3>
             <p className="mt-1 text-sm font-semibold text-slate-600">
                 {platformName} limit: {songSyncLimit.toLocaleString()} songs per {windowMinutes} minutes.
             </p>
-
             <SyncUsageSummary
                 syncStatus={syncStatus}
                 windowUsagePercent={windowUsagePercent}
@@ -330,7 +322,32 @@ export function SyncButtonPanel({
                 songsSyncedInWindow={songsSyncedInWindow}
                 remainingSongs={remainingSongs}
             />
+        </>
+    );
+}
 
+function SyncButtonControls({
+    canSync,
+    isSyncing,
+    syncProgress,
+    showPlaylistSelector,
+    showStatusDrawer,
+    onSyncAll,
+    onTogglePlaylistSelector,
+    onToggleStatusDrawer,
+}: Pick<
+    SyncButtonPanelProps,
+    'canSync'
+    | 'isSyncing'
+    | 'syncProgress'
+    | 'showPlaylistSelector'
+    | 'showStatusDrawer'
+    | 'onSyncAll'
+    | 'onTogglePlaylistSelector'
+    | 'onToggleStatusDrawer'
+>) {
+    return (
+        <>
             <SyncActionBar
                 canSync={canSync}
                 isSyncing={isSyncing}
@@ -341,21 +358,37 @@ export function SyncButtonPanel({
                 onTogglePlaylistSelector={onTogglePlaylistSelector}
                 onToggleStatusDrawer={onToggleStatusDrawer}
             />
-
             <SyncProgressPanel isSyncing={isSyncing} syncProgress={syncProgress} />
-            {showStatusDrawer && statusUpdates.length > 0 ? <SyncStatusDrawer statusUpdates={statusUpdates} /> : null}
+        </>
+    );
+}
+
+function SyncButtonPanelContent(props: SyncButtonPanelProps) {
+    return (
+        <>
+            <SyncButtonHeader {...props} />
+            <SyncButtonControls {...props} />
+            {props.showStatusDrawer && props.statusUpdates.length > 0 ? <SyncStatusDrawer statusUpdates={props.statusUpdates} /> : null}
 
             <SyncButtonFeedback
-                error={error}
-                syncResult={syncResult}
-                showPlaylistSelector={showPlaylistSelector}
-                availablePlaylists={availablePlaylists}
-                selectedPlaylists={selectedPlaylists}
-                isSyncing={isSyncing}
-                onTogglePlaylistSelection={onTogglePlaylistSelection}
-                onSyncSelected={onSyncSelected}
-                onClosePlaylistSelector={onClosePlaylistSelector}
+                error={props.error}
+                syncResult={props.syncResult}
+                showPlaylistSelector={props.showPlaylistSelector}
+                availablePlaylists={props.availablePlaylists}
+                selectedPlaylists={props.selectedPlaylists}
+                isSyncing={props.isSyncing}
+                onTogglePlaylistSelection={props.onTogglePlaylistSelection}
+                onSyncSelected={props.onSyncSelected}
+                onClosePlaylistSelector={props.onClosePlaylistSelector}
             />
+        </>
+    );
+}
+
+export function SyncButtonPanel(props: SyncButtonPanelProps) {
+    return (
+        <section className="rounded-[1.5rem] border border-white/80 bg-white/70 p-6 text-slate-900 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+            <SyncButtonPanelContent {...props} />
         </section>
     );
 }

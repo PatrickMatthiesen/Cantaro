@@ -3,6 +3,7 @@ import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '
 import { matchingApi } from '@cantaro/client-shared/music';
 import type { ReactNode } from 'react';
 import type {
+  MatchingCandidateComparisonResponse,
   MatchingQueueCandidateResponse,
   MatchingQueueItemResponse,
   MatchingQueuePlaylistResponse,
@@ -446,12 +447,13 @@ function ObservationActions({
 
 function PlaylistAppearances({ playlists }: { playlists: MatchingQueuePlaylistResponse[] }) {
   return (
-    <div className="rounded-2xl bg-white/70 p-4">
-      <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">Appears in playlists</p>
-      <ul className="mt-3 space-y-2 text-sm text-gray-700">
+    <div className="matching-playlist-appearances">
+      <p>Appears in</p>
+      <ul>
         {playlists.map((playlist) => (
-          <li key={`${playlist.playlistId}-${playlist.position}`} className="rounded-xl bg-white px-3 py-2">
-            {playlist.playlistName} <span className="text-gray-500">- position {playlist.position + 1}</span>
+          <li key={`${playlist.playlistId}-${playlist.position}`}>
+            <span>{playlist.playlistName}</span>
+            <span>#{playlist.position + 1}</span>
           </li>
         ))}
       </ul>
@@ -503,15 +505,31 @@ function CandidateList({
     return <p className="mt-3 text-sm text-gray-600">No candidates were stored for this observation yet.</p>;
   }
 
+  const candidateRows: MatchingQueueCandidateResponse[][] = [];
+  for (let index = 0; index < candidates.length; index += 2) {
+    candidateRows.push(candidates.slice(index, index + 2));
+  }
+
   return (
-    <div className="mt-3 space-y-3">
-      {candidates.map((candidate) => (
-        <CandidateCard
-          key={candidate.candidateId}
-          candidate={candidate}
-          disabled={disabled}
-          onUse={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, candidate.candidateId))}
-        />
+    <div className="matching-candidate-grid mt-4">
+      {candidateRows.map((row) => (
+        <div key={row.map((candidate) => candidate.candidateId).join('-')} className="matching-candidate-row">
+          <CandidateCard
+            candidate={row[0]}
+            disabled={disabled}
+            onUse={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, row[0].candidateId))}
+          />
+          {row[1] ? (
+            <>
+              <div className="matching-candidate-column-divider" aria-hidden="true" />
+              <CandidateCard
+                candidate={row[1]}
+                disabled={disabled}
+                onUse={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, row[1].candidateId))}
+              />
+            </>
+          ) : null}
+        </div>
       ))}
     </div>
   );
@@ -530,7 +548,7 @@ function QueueObservationItem({ item, activeObservationId, onAction }: QueueObse
         <ObservationActions isBusy={isBusy} item={item} onAction={onAction} />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="mt-4 space-y-3">
         <PlaylistAppearances playlists={item.playlists} />
         <CandidateSection
           candidates={item.candidates}
@@ -543,65 +561,194 @@ function QueueObservationItem({ item, activeObservationId, onAction }: QueueObse
   );
 }
 
-// fallow-ignore-next-line complexity
-function CandidateScoreBadges({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
+type ScoreTone = 'match' | 'close' | 'miss' | 'neutral';
+
+function scoreTone(value?: number): ScoreTone {
+  if (value === undefined || value === null) {
+    return 'neutral';
+  }
+
+  if (value >= 0.9) {
+    return 'match';
+  }
+
+  if (value >= 0.65) {
+    return 'close';
+  }
+
+  return 'miss';
+}
+
+function scoreToneClasses(tone: ScoreTone): string {
+  switch (tone) {
+    case 'match':
+      return 'score-tone--match';
+    case 'close':
+      return 'score-tone--close';
+    case 'miss':
+      return 'score-tone--miss';
+    default:
+      return 'score-tone--neutral';
+  }
+}
+
+function CandidateConfidence({ score }: { score: number }) {
+  return (
+    <span className={`matching-candidate-confidence ${scoreToneClasses(scoreTone(score))}`}>
+      {Math.round(score * 100)}%
+    </span>
+  );
+}
+
+function formatCandidateSource(source?: string): string {
+  if (!source) {
+    return 'Unknown';
+  }
+
+  switch (source) {
+    case 'musicbrainz':
+      return 'MusicBrainz';
+    default:
+      return source.replace(/_/g, ' ');
+  }
+}
+
+function CandidateMeta({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
   const duration = formatDuration(candidate.durationSeconds);
-  const semanticClass = candidate.semanticAdjustment && candidate.semanticAdjustment < 0
-    ? 'bg-rose-100 text-rose-700'
-    : 'bg-emerald-100 text-emerald-700';
-  const semanticLabel = candidate.semanticAdjustment !== undefined
-    ? `${candidate.semanticAdjustment > 0 ? '+' : ''}${Math.round(candidate.semanticAdjustment * 100)} pts`
-    : '—';
+  const sourceLabel = formatCandidateSource(candidate.candidateSource);
+  const source = candidate.mbidRecording && candidate.candidateSource === 'musicbrainz'
+    ? (
+        <a
+          href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`}
+          target="_blank"
+          rel="noreferrer"
+          className="matching-candidate-source-link"
+        >
+          {sourceLabel}
+        </a>
+      )
+    : sourceLabel;
 
   return (
+    <p className="matching-candidate-meta">
+      <span>{candidate.artist ?? 'Unknown artist'}</span>
+      {duration ? <span>{duration}</span> : null}
+      <span>{source}</span>
+    </p>
+  );
+}
+
+function CandidateMarkers({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
+  return (
     <>
-      <p className="mt-1 text-xs text-gray-500">
-        {candidate.artist ?? 'Unknown artist'} {duration ? `- ${duration}` : ''} - {candidate.candidateSource}
-      </p>
       <MarkerList markers={candidate.versionMarkers} tone="version" />
       <MarkerList markers={candidate.playbackModifiers} tone="playback" />
-      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600">
-        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-          Title {formatPercent(candidate.titleSimilarity) ?? '—'}
-        </span>
-        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-          Artist {formatPercent(candidate.artistSimilarity) ?? '—'}
-        </span>
-        <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-          Duration {formatPercent(candidate.durationScore) ?? '—'}
-        </span>
-        <span className={`rounded-full px-2 py-1 font-semibold ${semanticClass}`}>
-          Semantic {semanticLabel}
-        </span>
-        <span className="rounded-full bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
-          Cluster size {candidate.clusterSize}
-        </span>
-      </div>
     </>
   );
 }
 
-function CandidateNotes({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
-  const clusterReason = formatClusterReason(candidate.clusterReason);
+function EvidenceRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <>
-      {clusterReason ? <p className="mt-2 text-xs font-medium text-gray-600">{clusterReason}</p> : null}
-      {candidate.semanticExplanation ? <p className="mt-2 text-xs text-gray-600">{candidate.semanticExplanation}</p> : null}
-      {candidate.mbidRecording ? (
-        <p className="mt-1 text-xs text-gray-500">
-          MBID:{' '}
-          <a
-            href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`}
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800"
-          >
-            {candidate.mbidRecording}
-          </a>
-        </p>
+    <div className="matching-evidence-row">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+interface CandidateEvidenceItem {
+  label: string;
+  value: ReactNode;
+}
+
+function hasEvidenceItem(item: CandidateEvidenceItem | null): item is CandidateEvidenceItem {
+  return item !== null;
+}
+
+function getClusterEvidence(candidate: MatchingQueueCandidateResponse): CandidateEvidenceItem | null {
+  const clusterReason = formatClusterReason(candidate.clusterReason);
+  const shouldShowCluster = clusterReason && (candidate.clusterSize > 1 || candidate.clusterReason !== 'representative');
+
+  return shouldShowCluster ? { label: 'Cluster', value: `${clusterReason} (${candidate.clusterSize})` } : null;
+}
+
+function getCandidateEvidenceItems(candidate: MatchingQueueCandidateResponse): CandidateEvidenceItem[] {
+  return [
+    getClusterEvidence(candidate),
+  ].filter(hasEvidenceItem);
+}
+
+function CandidateEvidenceTable({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
+  const evidenceItems = getCandidateEvidenceItems(candidate);
+
+  if (evidenceItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <dl className="matching-evidence-table">
+      {evidenceItems.map((item) => (
+        <EvidenceRow key={item.label} label={item.label} value={item.value} />
+      ))}
+    </dl>
+  );
+}
+
+function formatComparisonScore(comparison: MatchingCandidateComparisonResponse): string {
+  if (comparison.scoreLabel) {
+    return comparison.scoreLabel;
+  }
+
+  return comparison.score === undefined || comparison.score === null
+    ? '-'
+    : formatPercent(comparison.score) ?? '-';
+}
+
+function CandidateDiffRow({ comparison }: { comparison: MatchingCandidateComparisonResponse }) {
+  return (
+    <div className="matching-diff-row" role="row">
+      <span className="matching-diff-label" role="cell">{comparison.label}</span>
+      <span role="cell">{comparison.observationValue ?? 'None'}</span>
+      <span role="cell">{comparison.candidateValue ?? 'None'}</span>
+      <span role="cell">
+        <span className={`matching-diff-score ${scoreToneClasses(comparison.tone)}`}>
+          {formatComparisonScore(comparison)}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function CandidateDiffTable({ comparisons }: { comparisons: MatchingCandidateComparisonResponse[] }) {
+  if (comparisons.length === 0) {
+    return null;
+  }
+
+  const hiddenMatches = comparisons.filter((comparison) => comparison.scoreLabel === 'Match');
+  const visibleComparisons = comparisons.filter((comparison) => comparison.scoreLabel !== 'Match');
+
+  return (
+    <div className="matching-diff-table" role="table" aria-label="Candidate differences">
+      <div className="matching-diff-header" role="row">
+        <span role="columnheader">Field</span>
+        <span role="columnheader">Observation</span>
+        <span role="columnheader">Candidate</span>
+        <span role="columnheader">Match</span>
+      </div>
+      {visibleComparisons.map((comparison) => (
+        <CandidateDiffRow key={comparison.label} comparison={comparison} />
+      ))}
+      {hiddenMatches.length > 0 ? (
+        <details className="matching-diff-matches">
+          <summary>{hiddenMatches.length} matching {hiddenMatches.length === 1 ? 'field' : 'fields'} hidden</summary>
+          <div className="matching-diff-matches-body">
+            {hiddenMatches.map((comparison) => (
+              <CandidateDiffRow key={comparison.label} comparison={comparison} />
+            ))}
+          </div>
+        </details>
       ) : null}
-      {candidate.explanation ? <p className="mt-2 text-sm text-gray-700">{candidate.explanation}</p> : null}
-    </>
+    </div>
   );
 }
 
@@ -615,27 +762,30 @@ function CandidateCard({
   onUse: () => void;
 }) {
   return (
-    <div className="rounded-2xl bg-white px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-gray-900">{candidate.title}</p>
-            <span className="rounded-full bg-indigo-100 px-2 py-1 text-[11px] font-semibold text-indigo-800">
-              {Math.round(candidate.score * 100)}%
-            </span>
+    <div className="matching-candidate-card">
+      <div className="matching-candidate-shell">
+        <div className="matching-candidate-header">
+          <div className="min-w-0">
+            <div className="matching-candidate-title-row">
+              <h3>{candidate.title}</h3>
+              <CandidateConfidence score={candidate.score} />
+            </div>
+            <CandidateMeta candidate={candidate} />
           </div>
-          <CandidateScoreBadges candidate={candidate} />
-          <CandidateNotes candidate={candidate} />
+
+          <button
+            type="button"
+            className="matching-candidate-action"
+            onClick={onUse}
+            disabled={disabled}
+          >
+            Use match
+          </button>
         </div>
 
-        <button
-          type="button"
-          className="rounded-xl bg-linear-to-r from-indigo-500 to-purple-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
-          onClick={onUse}
-          disabled={disabled}
-        >
-          Use match
-        </button>
+        <CandidateMarkers candidate={candidate} />
+        <CandidateDiffTable comparisons={candidate.comparisons ?? []} />
+        <CandidateEvidenceTable candidate={candidate} />
       </div>
     </div>
   );

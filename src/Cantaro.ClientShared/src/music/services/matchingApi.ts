@@ -11,6 +11,15 @@ export interface MatchingQueuePlaylistResponse {
   position: number;
 }
 
+export interface MatchingCandidateComparisonResponse {
+  label: string;
+  observationValue?: string;
+  candidateValue?: string;
+  score?: number;
+  scoreLabel?: string;
+  tone: 'match' | 'close' | 'miss' | 'neutral';
+}
+
 export interface MatchingQueueCandidateResponse {
   candidateId: string;
   candidateSource: string;
@@ -25,6 +34,7 @@ export interface MatchingQueueCandidateResponse {
   isAccepted: boolean;
   versionMarkers: string[];
   playbackModifiers: string[];
+  comparisons?: MatchingCandidateComparisonResponse[];
   titleSimilarity?: number;
   artistSimilarity?: number;
   durationScore?: number;
