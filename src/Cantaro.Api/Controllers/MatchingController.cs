@@ -24,6 +24,16 @@ public class MatchingQueuePlaylistResponse
     public int Position { get; set; }
 }
 
+public class MatchingCandidateComparisonResponse
+{
+    public required string Label { get; set; }
+    public string? ObservationValue { get; set; }
+    public string? CandidateValue { get; set; }
+    public decimal? Score { get; set; }
+    public string? ScoreLabel { get; set; }
+    public required string Tone { get; set; }
+}
+
 public class MatchingQueueCandidateResponse
 {
     public required string CandidateId { get; set; }
@@ -39,6 +49,7 @@ public class MatchingQueueCandidateResponse
     public bool IsAccepted { get; set; }
     public List<string> VersionMarkers { get; set; } = [];
     public List<string> PlaybackModifiers { get; set; } = [];
+    public List<MatchingCandidateComparisonResponse> Comparisons { get; set; } = [];
     public decimal? TitleSimilarity { get; set; }
     public decimal? ArtistSimilarity { get; set; }
     public decimal? DurationScore { get; set; }
@@ -268,6 +279,7 @@ public class MatchingController(
                     IsAccepted = projection.Candidate.IsAccepted,
                     VersionMarkers = projection.Diagnostics.CandidateVersionMarkers,
                     PlaybackModifiers = projection.Diagnostics.CandidatePlaybackModifiers,
+                    Comparisons = BuildCandidateComparisons(observation, projection.Candidate, projection.Diagnostics),
                     TitleSimilarity = projection.Diagnostics.TitleSimilarity,
                     ArtistSimilarity = projection.Diagnostics.ArtistSimilarity,
                     DurationScore = projection.Diagnostics.DurationScore,
@@ -279,6 +291,127 @@ public class MatchingController(
                 })
                 .ToList()
         };
+    }
+
+    private static List<MatchingCandidateComparisonResponse> BuildCandidateComparisons(
+        TrackObservation observation,
+        TrackResolutionCandidate candidate,
+        TrackMatchCandidateDiagnostics diagnostics)
+    {
+        var observationMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var candidateMetadata = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
+        var observationTitle = PreferValue(diagnostics.ObservationSearchTitle, observationMetadata.SearchTitle, observation.Title);
+        var observationArtist = PreferValue(diagnostics.ObservationSearchArtist, observationMetadata.SearchArtist, observation.Artist);
+        var candidateTitle = PreferValue(diagnostics.CandidateSearchTitle, candidateMetadata.SearchTitle, candidate.Title);
+        var candidateArtist = PreferValue(diagnostics.CandidateSearchArtist, candidateMetadata.SearchArtist, candidate.Artist);
+
+        var comparisons = new List<MatchingCandidateComparisonResponse>
+        {
+            CreateComparison("Title", observationTitle, candidateTitle, diagnostics.TitleSimilarity),
+            CreateComparison("Artist", observationArtist, candidateArtist, diagnostics.ArtistSimilarity),
+            CreateComparison(
+                "Duration",
+                FormatDuration(observation.DurationSeconds),
+                FormatDuration(candidate.DurationSeconds),
+                diagnostics.DurationScore),
+            CreateMarkerComparison(
+                "Version",
+                diagnostics.ObservationVersionMarkers.Count > 0 ? diagnostics.ObservationVersionMarkers : observationMetadata.VersionMarkers,
+                diagnostics.CandidateVersionMarkers.Count > 0 ? diagnostics.CandidateVersionMarkers : candidateMetadata.VersionMarkers),
+            CreateMarkerComparison(
+                "Playback",
+                diagnostics.ObservationPlaybackModifiers.Count > 0 ? diagnostics.ObservationPlaybackModifiers : observationMetadata.PlaybackModifiers,
+                diagnostics.CandidatePlaybackModifiers.Count > 0 ? diagnostics.CandidatePlaybackModifiers : candidateMetadata.PlaybackModifiers)
+        };
+
+        comparisons.Add(CreateSemanticComparison(diagnostics.SemanticAdjustment, diagnostics.SemanticExplanation));
+
+        return comparisons;
+    }
+
+    private static MatchingCandidateComparisonResponse CreateComparison(
+        string label,
+        string? observationValue,
+        string? candidateValue,
+        decimal? score)
+    {
+        return new MatchingCandidateComparisonResponse
+        {
+            Label = label,
+            ObservationValue = string.IsNullOrWhiteSpace(observationValue) ? "None" : observationValue,
+            CandidateValue = string.IsNullOrWhiteSpace(candidateValue) ? "None" : candidateValue,
+            Score = score,
+            ScoreLabel = null,
+            Tone = ScoreTone(score)
+        };
+    }
+
+    private static MatchingCandidateComparisonResponse CreateMarkerComparison(
+        string label,
+        IReadOnlyList<string> observationMarkers,
+        IReadOnlyList<string> candidateMarkers)
+    {
+        var score = TrackMatchScorer.HaveSameMarkers(observationMarkers, candidateMarkers) ? 1m : 0m;
+        var comparison = CreateComparison(label, FormatMarkers(observationMarkers), FormatMarkers(candidateMarkers), score);
+        comparison.ScoreLabel = score == 1m ? "Match" : "Diff";
+        return comparison;
+    }
+
+    private static MatchingCandidateComparisonResponse CreateSemanticComparison(decimal adjustment, string? explanation)
+    {
+        var label = adjustment switch
+        {
+            > 0m => $"+{Math.Round(adjustment * 100m, 0, MidpointRounding.AwayFromZero)} pts",
+            < 0m => $"{Math.Round(adjustment * 100m, 0, MidpointRounding.AwayFromZero)} pts",
+            _ => "0 pts"
+        };
+
+        return new MatchingCandidateComparisonResponse
+        {
+            Label = "Semantic",
+            ObservationValue = "Rule adjustment",
+            CandidateValue = string.IsNullOrWhiteSpace(explanation) ? "No marker penalty" : explanation.Trim().TrimEnd('.'),
+            Score = null,
+            ScoreLabel = label,
+            Tone = adjustment < 0m ? "miss" : "match"
+        };
+    }
+
+    private static string? PreferValue(params string?[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static string FormatDuration(int? durationSeconds)
+    {
+        if (!durationSeconds.HasValue || durationSeconds.Value <= 0)
+        {
+            return "Unknown";
+        }
+
+        var minutes = durationSeconds.Value / 60;
+        var seconds = durationSeconds.Value % 60;
+        return $"{minutes}:{seconds:00}";
+    }
+
+    private static string FormatMarkers(IReadOnlyList<string> markers)
+    {
+        return markers.Count == 0 ? "None" : string.Join(", ", markers);
+    }
+
+    private static string ScoreTone(decimal? score)
+    {
+        if (!score.HasValue)
+        {
+            return "neutral";
+        }
+
+        if (score.Value >= 0.9m)
+        {
+            return "match";
+        }
+
+        return score.Value >= 0.65m ? "close" : "miss";
     }
 
     private static TrackMatchCandidateDiagnostics ExtractCandidateDiagnostics(TrackResolutionCandidate candidate)

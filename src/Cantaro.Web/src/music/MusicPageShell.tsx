@@ -53,14 +53,14 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
 
 function SidebarMixtapeCard() {
   return (
-    <div className="rounded-3xl bg-white/70 p-5 shadow-[0_20px_60px_rgba(88,74,150,0.08)]">
-      <p className="text-lg font-black">Today's Mixtape</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">A mix from your saved songs and playlists.</p>
+    <div className="rounded-[1.5rem] border border-white/80 bg-white/68 p-5 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+      <p className="text-lg font-black">Archive overview</p>
+      <p className="mt-2 text-sm leading-6 font-semibold text-slate-600">Inspect playlists before deciding what Cantaro should keep aligned.</p>
       <Link
-        to="/music/songs"
-        className="mt-5 flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-slate-800"
+        to="/music/playlists"
+        className="mt-5 flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-violet-700"
       >
-        Open songs
+        Browse playlists
       </Link>
     </div>
   );
@@ -71,24 +71,24 @@ function createMusicNavigationSections(): PageNavigationSection[] {
     {
       title: 'Music',
       items: [
-        { label: 'Songs', to: '/music/songs', icon: <MusicUiIcon name="music" className="h-4 w-4" />, matchPrefix: '/music/songs' },
-        { label: 'Playlists', to: '/music/playlists', icon: <MusicUiIcon name="listMusic" className="h-4 w-4" />, matchPrefix: '/music/playlists' },
-        { label: 'YouTube', to: '/music/platforms/$platformId', params: { platformId: 'youtube' }, icon: <MusicPlatformIcon platformId="youtube" className="h-4 w-4" />, matchPrefix: '/music/platforms/youtube' },
-        { label: 'Matching', to: '/music/matching', icon: <MusicUiIcon name="sparkles" className="h-4 w-4" />, matchPrefix: '/music/matching' },
+        { label: 'Songs', to: '/music/songs', icon: <MusicUiIcon name="music" className="h-4 w-4" />, matchPrefix: '/music/songs', tone: 'indigo' },
+        { label: 'Playlists', to: '/music/playlists', icon: <MusicUiIcon name="listMusic" className="h-4 w-4" />, matchPrefix: '/music/playlists', tone: 'violet' },
+        { label: 'YouTube', to: '/music/platforms/$platformId', params: { platformId: 'youtube' }, icon: <MusicPlatformIcon platformId="youtube" className="h-4 w-4" />, matchPrefix: '/music/platforms/youtube', tone: 'red' },
+        { label: 'Matching', to: '/music/matching', icon: <MusicUiIcon name="sparkles" className="h-4 w-4" />, matchPrefix: '/music/matching', tone: 'pink' },
       ],
     },
     {
       title: 'Discover',
       items: [
-        { label: 'Added Recently', to: '/music/songs', icon: <MusicUiIcon name="clock" className="h-4 w-4" />, matchPrefix: '/music/discover/added-recently' },
-        { label: 'Old Bangers', to: '/music/songs', icon: <MusicUiIcon name="library" className="h-4 w-4" />, matchPrefix: '/music/discover/old-bangers' },
-        { label: "Today's Mixtape", to: '/music/songs', icon: <MusicUiIcon name="radio" className="h-4 w-4" />, matchPrefix: '/music/discover/todays-mixtape' },
+        { label: 'Added Recently', to: '/music/songs', icon: <MusicUiIcon name="clock" className="h-4 w-4" />, matchPrefix: '/music/discover/added-recently', tone: 'sky' },
+        { label: 'Deep cuts', to: '/music/songs', icon: <MusicUiIcon name="library" className="h-4 w-4" />, matchPrefix: '/music/discover/deep-cuts', tone: 'rose' },
+        { label: 'Themed playlists', to: '/music/songs', icon: <MusicUiIcon name="radio" className="h-4 w-4" />, matchPrefix: '/music/discover/themed-playlists', tone: 'violet' },
       ],
     },
     {
       title: 'Tools',
       items: [
-        { label: 'Playlist Sync', to: '/music/platforms', icon: <MusicUiIcon name="refresh" className="h-4 w-4" />, exact: true },
+        { label: 'Playlist Sync', to: '/music/platforms', icon: <MusicUiIcon name="refresh" className="h-4 w-4" />, exact: true, tone: 'emerald' },
       ],
     },
     {
@@ -104,6 +104,7 @@ function createMusicNavigationSections(): PageNavigationSection[] {
         to: '/music/platforms/$platformId',
         params: { platformId: platform.id },
         icon: <MusicPlatformIcon platformId={platform.iconId} className="h-4 w-4" />,
+        tone: platform.id === 'youtube' ? 'red' : platform.id === 'spotify' ? 'emerald' : platform.id === 'apple' ? 'pink' : 'violet',
         detail: platform.implemented ? 'Available' : 'Coming soon',
         disabled: !platform.implemented,
         matchPrefix: `/music/platforms/${platform.id}`,
@@ -147,7 +148,7 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
   if (!isVisible) return null;
 
   return (
-    <div className="fixed right-4 bottom-4 left-4 z-30 rounded-3xl border border-white/80 bg-white/80 px-5 py-4 shadow-[0_24px_80px_rgba(55,45,120,0.16)] backdrop-blur-xl lg:left-[292px]">
+    <div className="fixed right-4 bottom-4 left-4 z-30 rounded-[1.5rem] border border-white/80 bg-white/82 px-5 py-4 shadow-[0_18px_54px_rgba(55,45,120,0.14)] backdrop-blur lg:left-[292px]">
       <div className="grid items-center gap-4 md:grid-cols-[260px_1fr_220px]">
         <div className="flex min-w-0 items-center gap-3">
           <img src={songArtwork(song)} alt="" className="h-14 w-14 rounded-2xl object-cover" />
@@ -159,7 +160,9 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
         <div className="hidden items-center justify-center gap-5 md:flex">
           <button
             type="button"
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)] transition hover:bg-slate-800"
+            className={`flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)] transition ${
+              isPaused ? 'hover:bg-emerald-600' : 'hover:bg-amber-500'
+            }`}
             aria-label={isPaused ? 'Play' : 'Pause'}
             onClick={() => setIsPaused((current) => !current)}
           >
@@ -167,7 +170,7 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
           </button>
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-red-50 hover:text-red-600"
             aria-label="Stop and close player"
             onClick={closePlayer}
           >
@@ -224,6 +227,7 @@ export function MusicPageShell({
       searchValue={searchValue}
       onSearchChange={onSearchChange}
       onSearchSubmit={onSearchSubmit}
+      contentClassName="music-page-content"
     >
       {children}
     </PageShell>

@@ -28,6 +28,27 @@ interface PlatformSongDto {
     publishedAt?: string;
 }
 
+interface ApiErrorResponse {
+    code?: string;
+    error?: string;
+}
+
+const reconnectRequiredCode = 'youtube_reconnect_required';
+const reconnectRequiredMessage = 'Your YouTube connection expired. Reconnect YouTube to continue browsing playlists.';
+
+class YouTubeReconnectRequiredError extends Error {
+    public readonly code = reconnectRequiredCode;
+
+    public constructor(message = reconnectRequiredMessage) {
+        super(message);
+        this.name = 'YouTubeReconnectRequiredError';
+    }
+}
+
+export function isYouTubeReconnectRequiredError(error: unknown): error is YouTubeReconnectRequiredError {
+    return error instanceof YouTubeReconnectRequiredError;
+}
+
 class YouTubePlatformClient implements PlatformManagement {
     public readonly platformId = 'youtube' as const;
 
@@ -41,20 +62,24 @@ class YouTubePlatformClient implements PlatformManagement {
         };
     }
 
-    private async readFetchError(response: Response, fallbackMessage: string): Promise<string> {
+    private async createFetchError(response: Response, fallbackMessage: string): Promise<Error> {
         if (response.status === 401) {
-            return 'Not authenticated. Please log in again.';
+            return new Error('Not authenticated. Please log in again.');
         }
 
         if (response.status === 403) {
-            return 'YouTube account not connected or access denied.';
+            return new Error('YouTube account not connected or access denied.');
         }
 
-        const error = await response.json().catch(() => ({
+        const error = await response.json().catch((): ApiErrorResponse => ({
             error: `${fallbackMessage} (HTTP ${response.status})`,
         }));
 
-        return error.error || fallbackMessage;
+        if (response.status === 409 && error.code === reconnectRequiredCode) {
+            return new YouTubeReconnectRequiredError(error.error);
+        }
+
+        return new Error(error.error || fallbackMessage);
     }
 
     private sanitizeRoute(route: string): string {
@@ -153,7 +178,7 @@ class YouTubePlatformClient implements PlatformManagement {
         });
 
         if (!response.ok) {
-            throw new Error(await this.readFetchError(response, 'Failed to fetch playlists'));
+            throw await this.createFetchError(response, 'Failed to fetch playlists');
         }
 
         const playlistDtos = (await response.json()) as PlatformPlaylistDto[];
@@ -185,7 +210,7 @@ class YouTubePlatformClient implements PlatformManagement {
         });
 
         if (!response.ok) {
-            throw new Error(await this.readFetchError(response, 'Failed to fetch playlist songs'));
+            throw await this.createFetchError(response, 'Failed to fetch playlist songs');
         }
 
         const songDtos = (await response.json()) as PlatformSongDto[];

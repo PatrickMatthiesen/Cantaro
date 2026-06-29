@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Google.Apis.Auth.OAuth2.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -22,6 +23,8 @@ internal sealed class PlatformOAuthState
 [Authorize]
 public class PlatformsController : ControllerBase
 {
+    private const string ReconnectRequiredCode = "youtube_reconnect_required";
+
     private readonly IPlatformRegistry _platformRegistry;
     private readonly UserManager<User> _userManager;
     private readonly ILogger<PlatformsController> _logger;
@@ -201,6 +204,15 @@ public class PlatformsController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+        catch (TokenResponseException ex) when (IsInvalidGrant(ex))
+        {
+            _logger.LogWarning(ex, "{Platform} token is expired or revoked for playlist fetch", platformId);
+            return Conflict(new
+            {
+                code = ReconnectRequiredCode,
+                error = "Your YouTube connection expired. Reconnect YouTube to continue browsing playlists."
+            });
+        }
     }
 
     [HttpGet("playlists/{playlistId}/songs")]
@@ -226,6 +238,15 @@ public class PlatformsController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { error = ex.Message });
+        }
+        catch (TokenResponseException ex) when (IsInvalidGrant(ex))
+        {
+            _logger.LogWarning(ex, "{Platform} token is expired or revoked for playlist item fetch", platformId);
+            return Conflict(new
+            {
+                code = ReconnectRequiredCode,
+                error = "Your YouTube connection expired. Reconnect YouTube to continue browsing playlists."
+            });
         }
     }
 
@@ -253,5 +274,10 @@ public class PlatformsController : ControllerBase
         }
 
         return route;
+    }
+
+    private static bool IsInvalidGrant(TokenResponseException exception)
+    {
+        return string.Equals(exception.Error?.Error, "invalid_grant", StringComparison.OrdinalIgnoreCase);
     }
 }

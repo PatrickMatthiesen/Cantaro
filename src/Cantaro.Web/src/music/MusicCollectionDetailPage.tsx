@@ -483,150 +483,149 @@ function getCollectionDurationLabel(tracks: MusicCollectionTrack[], fallback?: s
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function CollectionHero({
+type CollectionHeroProps = Omit<MusicCollectionDetailPageProps, 'backTo' | 'backParams' | 'backLabel' | 'emptyTrackLabel' | 'onPlayTrack' | 'onQueueTrack'>;
+
+function CollectionHeroTitle({
   eyebrow,
   title,
   description,
-  artworkUrl,
+}: Pick<CollectionHeroProps, 'eyebrow' | 'title' | 'description'>) {
+  return (
+    <div>
+      <p className="text-xs font-black tracking-[0.18em] text-slate-600 uppercase">{eyebrow}</p>
+      <h1 className="mt-1.5 text-3xl leading-tight font-black text-slate-950 sm:mt-2 sm:text-4xl md:text-5xl">{title}</h1>
+      {description ? <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-slate-600">{description}</p> : null}
+    </div>
+  );
+}
+
+function CollectionHeroChips({ chips }: Pick<CollectionHeroProps, 'chips'>) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {chips.length > 0 ? chips.map((chip) => <Pill key={chip}>{chip}</Pill>) : <Pill>Cantaro</Pill>}
+    </div>
+  );
+}
+
+function CollectionHeroMeta({
   ownerLabel,
   updatedAt,
   songsLabel,
   durationLabel,
-  chips,
   tracks,
   actionSlot,
   onPlayAll,
   onShuffle,
-}: Omit<MusicCollectionDetailPageProps, 'backTo' | 'backParams' | 'backLabel' | 'emptyTrackLabel' | 'onPlayTrack' | 'onQueueTrack'>) {
+}: Pick<CollectionHeroProps, 'ownerLabel' | 'updatedAt' | 'songsLabel' | 'durationLabel' | 'tracks' | 'actionSlot' | 'onPlayAll' | 'onShuffle'>) {
   const computedDurationLabel = getCollectionDurationLabel(tracks, durationLabel);
 
+  return (
+    <div className="col-span-2 flex flex-wrap items-center justify-between gap-4 sm:col-span-1 sm:gap-5">
+      <div className="space-y-3">
+        <p className="text-sm font-black text-slate-700">
+          {songsLabel}
+          {computedDurationLabel ? <span className="font-semibold text-slate-500"> · {computedDurationLabel}</span> : null}
+        </p>
+        <p className="text-sm font-semibold text-slate-600">
+          {ownerLabel}
+          {updatedAt ? <span className="block text-xs text-slate-500">Updated {formatTimestamp(updatedAt) ?? updatedAt}</span> : null}
+        </p>
+      </div>
+      <HeaderActions actionSlot={actionSlot} hasTracks={tracks.length > 0} onPlayAll={onPlayAll} onShuffle={onShuffle} />
+    </div>
+  );
+}
+
+function CollectionHero(props: CollectionHeroProps) {
   return (
     <section className="music-detail-hero relative overflow-hidden rounded-[1.5rem] bg-[#ece9ff] px-4 py-4 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:py-5 md:px-7">
       <div className="music-detail-hero__wash absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.95),transparent_32%),radial-gradient(circle_at_82%_26%,rgba(199,210,254,0.9),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.64),rgba(221,214,254,0.74))]" />
       <div className="relative grid grid-cols-[76px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[minmax(132px,180px)_1fr] sm:gap-5 md:grid-cols-[minmax(180px,270px)_1fr] md:items-end md:gap-6">
-        <CollectionArtwork artworkUrl={artworkUrl} title={title} />
+        <CollectionArtwork artworkUrl={props.artworkUrl} title={props.title} />
         <div className="min-w-0 space-y-4 sm:space-y-5">
-          <div>
-            <p className="text-xs font-black tracking-[0.18em] text-slate-600 uppercase">{eyebrow}</p>
-            <h1 className="mt-1.5 text-3xl leading-tight font-black text-slate-950 sm:mt-2 sm:text-4xl md:text-5xl">{title}</h1>
-            {description ? <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-slate-600">{description}</p> : null}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {chips.length > 0 ? chips.map((chip) => <Pill key={chip}>{chip}</Pill>) : <Pill>Cantaro</Pill>}
-          </div>
-          <div className="col-span-2 flex flex-wrap items-center justify-between gap-4 sm:col-span-1 sm:gap-5">
-            <div className="space-y-3">
-              <p className="text-sm font-black text-slate-700">
-                {songsLabel}
-                {computedDurationLabel ? <span className="font-semibold text-slate-500"> · {computedDurationLabel}</span> : null}
-              </p>
-              <p className="text-sm font-semibold text-slate-600">
-                {ownerLabel}
-                {updatedAt ? <span className="block text-xs text-slate-500">Updated {formatTimestamp(updatedAt) ?? updatedAt}</span> : null}
-              </p>
-            </div>
-            <HeaderActions actionSlot={actionSlot} hasTracks={tracks.length > 0} onPlayAll={onPlayAll} onShuffle={onShuffle} />
-          </div>
+          <CollectionHeroTitle {...props} />
+          <CollectionHeroChips chips={props.chips} />
+          <CollectionHeroMeta {...props} />
         </div>
       </div>
     </section>
   );
 }
 
-export function MusicCollectionDetailPage({
-  eyebrow,
-  title,
-  description,
-  artworkUrl,
-  backTo,
-  backParams,
-  backLabel,
-  ownerLabel,
-  updatedAt,
-  songsLabel,
-  durationLabel,
-  chips,
-  tracks,
-  isLoadingTracks,
-  emptyTrackLabel,
-  activeTrack,
-  queuedTracks,
-  rightRailTitle,
-  suggestions,
-  actionSlot,
-  onPlayAll,
-  onShuffle,
-  onPlayTrack,
-  onQueueTrack,
-  onClearQueue,
-}: MusicCollectionDetailPageProps) {
+function MobileSuggestions({ suggestions }: Pick<MusicCollectionDetailPageProps, 'suggestions'>) {
+  if (!suggestions || suggestions.length === 0) return null;
+
+  return (
+    <section className="2xl:hidden">
+      <h2 className="mb-3 text-lg font-black text-slate-950">More like this</h2>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {suggestions.slice(0, 4).map((suggestion) => (
+          <SuggestionLink
+            key={suggestion.id}
+            suggestion={suggestion}
+            className="overflow-hidden rounded-2xl bg-white/60 shadow-[0_16px_45px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+          >
+            {suggestion.artworkUrl ? <img src={suggestion.artworkUrl} alt="" className="h-24 w-full object-cover" /> : null}
+            <div className="p-3">
+              <p className="truncate text-sm font-black text-slate-950">{suggestion.title}</p>
+              <p className="truncate text-xs font-semibold text-slate-500">{suggestion.detail}</p>
+            </div>
+          </SuggestionLink>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function MusicCollectionDetailPage(props: MusicCollectionDetailPageProps) {
   return (
     <div className="space-y-5">
       <Link
-        to={backTo}
-        params={backParams as never}
+        to={props.backTo}
+        params={props.backParams as never}
         className="inline-flex items-center gap-2 text-sm font-black text-violet-600 transition hover:text-violet-500"
       >
         <span aria-hidden>‹</span>
-        {backLabel}
+        {props.backLabel}
       </Link>
 
       <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_330px]">
         <div className="min-w-0 space-y-5">
           <CollectionHero
-            eyebrow={eyebrow}
-            title={title}
-            description={description}
-            artworkUrl={artworkUrl}
-            ownerLabel={ownerLabel}
-            updatedAt={updatedAt}
-            songsLabel={songsLabel}
-            durationLabel={durationLabel}
-            chips={chips}
-            tracks={tracks}
-            actionSlot={actionSlot}
-            onPlayAll={onPlayAll}
-            onShuffle={onShuffle}
+            eyebrow={props.eyebrow}
+            title={props.title}
+            description={props.description}
+            artworkUrl={props.artworkUrl}
+            ownerLabel={props.ownerLabel}
+            updatedAt={props.updatedAt}
+            songsLabel={props.songsLabel}
+            durationLabel={props.durationLabel}
+            chips={props.chips}
+            tracks={props.tracks}
+            actionSlot={props.actionSlot}
+            onPlayAll={props.onPlayAll}
+            onShuffle={props.onShuffle}
           />
 
           <MusicTrackTable
-            tracks={tracks}
-            isLoadingTracks={isLoadingTracks}
-            emptyTrackLabel={emptyTrackLabel}
-            onPlayTrack={onPlayTrack}
-            onQueueTrack={onQueueTrack}
+            tracks={props.tracks}
+            isLoadingTracks={props.isLoadingTracks}
+            emptyTrackLabel={props.emptyTrackLabel}
+            onPlayTrack={props.onPlayTrack}
+            onQueueTrack={props.onQueueTrack}
           />
         </div>
 
         <RightRail
-          activeTrack={activeTrack}
-          queuedTracks={queuedTracks}
-          rightRailTitle={rightRailTitle}
-          suggestions={suggestions}
-          onClearQueue={onClearQueue}
+          activeTrack={props.activeTrack}
+          queuedTracks={props.queuedTracks}
+          rightRailTitle={props.rightRailTitle}
+          suggestions={props.suggestions}
+          onClearQueue={props.onClearQueue}
         />
       </div>
 
-      {suggestions && suggestions.length > 0 ? (
-        <section className="2xl:hidden">
-          <h2 className="mb-3 text-lg font-black text-slate-950">More like this</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {suggestions.slice(0, 4).map((suggestion) => (
-              <SuggestionLink
-                key={suggestion.id}
-                suggestion={suggestion}
-                className="overflow-hidden rounded-2xl bg-white/60 shadow-[0_16px_45px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
-              >
-                {suggestion.artworkUrl ? <img src={suggestion.artworkUrl} alt="" className="h-24 w-full object-cover" /> : null}
-                <div className="p-3">
-                  <p className="truncate text-sm font-black text-slate-950">{suggestion.title}</p>
-                  <p className="truncate text-xs font-semibold text-slate-500">{suggestion.detail}</p>
-                </div>
-              </SuggestionLink>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      <MobileSuggestions suggestions={props.suggestions} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { platformCatalog, type MusicLibraryPlaylist, type MusicLibrarySong, type PlatformId } from '@cantaro/client-shared/music';
 
-export const fallbackArtwork = [
+const fallbackArtwork = [
   'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=640&q=80',
   'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=640&q=80',
   'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=640&q=80',
@@ -32,8 +32,50 @@ export function formatTimestamp(value?: string): string | null {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+export function formatRelativeTime(value?: string | null, emptyLabel = 'Never synced'): string {
+  if (!value) return emptyLabel;
+
+  const date = new Date(value);
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  return `${Math.round(diffHours / 24)}d ago`;
+}
+
+export function latestTimestamp(values: Array<string | undefined | null>): string | null {
+  const timestamps = values
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite);
+
+  if (timestamps.length === 0) return null;
+  return new Date(Math.max(...timestamps)).toISOString();
+}
+
+export function isPlatformId(value: string): value is PlatformId {
+  return platformCatalog.some((platform) => platform.id === value);
+}
+
 export function platformName(platformId: string): string {
   return platformCatalog.find((platform) => platform.id === platformId)?.name ?? platformId;
+}
+
+export function platformHoverClass(platformId?: PlatformId | null, fallback = 'hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'): string {
+  if (platformId === 'youtube') return 'hover:border-red-300 hover:bg-red-50 hover:text-red-700';
+  if (platformId === 'spotify') return 'hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700';
+  if (platformId === 'apple') return 'hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700';
+  if (platformId === 'tidal') return 'hover:border-slate-400 hover:bg-slate-100 hover:text-slate-950';
+  return fallback;
+}
+
+export function playlistLastSyncedAt(playlist: MusicLibraryPlaylist): string | null {
+  return latestTimestamp(playlist.services.map((service) => service.lastSyncedAt));
 }
 
 export function visiblePlatformNames(song: MusicLibrarySong): string[] {
@@ -45,8 +87,7 @@ export function visiblePlatformNames(song: MusicLibrarySong): string[] {
 }
 
 export function visiblePlatformIds(song: MusicLibrarySong): PlatformId[] {
-  return song.sourcePlatforms.filter((source): source is PlatformId =>
-    platformCatalog.some((platform) => platform.id === source));
+  return song.sourcePlatforms.filter(isPlatformId);
 }
 
 export function songArtwork(song: MusicLibrarySong, index = 0): string {

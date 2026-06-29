@@ -16,6 +16,32 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number)
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
+function findUploadableBlob(blobs: Array<Blob | null>): Blob | null {
+  return blobs.find((blob) => blob && blob.size <= maxAvatarBytes) ?? null;
+}
+
+function throwAvatarRenderError(blobs: Array<Blob | null>): never {
+  if (blobs.every((blob) => !blob)) {
+    throw new Error('Your browser could not prepare this image.');
+  }
+
+  if (blobs.some((blob) => blob && blob.size > maxAvatarBytes)) {
+    throw new Error('The prepared avatar is too large. Try a simpler image.');
+  }
+
+  throw new Error('Your browser prepared an image format Cantaro cannot upload.');
+}
+
+async function createAvatarBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  const blobs = [
+    await canvasToBlob(canvas, 'image/webp', 0.86),
+    await canvasToBlob(canvas, 'image/jpeg', 0.88),
+    await canvasToBlob(canvas, 'image/png'),
+  ];
+
+  return findUploadableBlob(blobs) ?? throwAvatarRenderError(blobs);
+}
+
 async function renderAvatar(file: File, crop: Area): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const canvas = document.createElement('canvas');
@@ -32,33 +58,40 @@ async function renderAvatar(file: File, crop: Area): Promise<Blob> {
   context.drawImage(bitmap, crop.x, crop.y, crop.width, crop.height, 0, 0, 512, 512);
   bitmap.close();
 
-  const webp = await canvasToBlob(canvas, 'image/webp', 0.86);
-  if (webp?.type === 'image/webp' && webp.size <= maxAvatarBytes) {
-    return webp;
+  return createAvatarBlob(canvas);
+}
+
+function focusableElements(dialog: HTMLDivElement | null) {
+  return Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+}
+
+function handleEscapeKey(event: KeyboardEvent, isSaving: boolean, onCancel: () => void) {
+  if (event.key === 'Escape' && !isSaving) {
+    onCancel();
+    return true;
   }
 
-  const jpeg = await canvasToBlob(canvas, 'image/jpeg', 0.88);
-  if (jpeg?.type === 'image/jpeg' && jpeg.size <= maxAvatarBytes) {
-    return jpeg;
+  return false;
+}
+
+function focusWrapTarget(event: KeyboardEvent, first?: HTMLElement, last?: HTMLElement) {
+  if (event.shiftKey) {
+    return document.activeElement === first ? last : null;
   }
 
-  const png = await canvasToBlob(canvas, 'image/png');
-  if (png?.type === 'image/png' && png.size <= maxAvatarBytes) {
-    return png;
-  }
+  return document.activeElement === last ? first : null;
+}
 
-  if (webp && webp.size <= maxAvatarBytes) {
-    return webp;
-  }
+function trapTabFocus(event: KeyboardEvent, dialog: HTMLDivElement | null) {
+  if (event.key !== 'Tab') return;
 
-  if (!webp && !jpeg && !png) {
-    throw new Error('Your browser could not prepare this image.');
-  }
+  const focusable = focusableElements(dialog);
+  const target = focusWrapTarget(event, focusable[0], focusable.at(-1));
 
-  if ([webp, jpeg, png].some(blob => blob && blob.size > maxAvatarBytes)) {
-    throw new Error('The prepared avatar is too large. Try a simpler image.');
-  }
-  throw new Error('Your browser prepared an image format Cantaro cannot upload.');
+  if (!target) return;
+
+  event.preventDefault();
+  target.focus();
 }
 
 export function AvatarCropDialog({ file, imageUrl, isSaving, onCancel, onConfirm }: AvatarCropDialogProps) {
@@ -71,20 +104,8 @@ export function AvatarCropDialog({ file, imageUrl, isSaving, onCancel, onConfirm
   useEffect(() => {
     cancelButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isSaving) {
-        onCancel();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
+      if (!handleEscapeKey(event, isSaving, onCancel)) {
+        trapTabFocus(event, dialogRef.current);
       }
     };
     const previousOverflow = document.body.style.overflow;

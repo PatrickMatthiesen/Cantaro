@@ -1,9 +1,9 @@
-import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
+import { type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
 import { useMusicQueue } from './useMusicQueue';
-import { platformName, playlistArtwork, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
+import { platformName, playlistArtwork, playlistLastSyncedAt, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
 
 function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
   return library.songs
@@ -13,14 +13,6 @@ function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
     })
     .filter((entry): entry is { song: MusicLibrarySong; position: number } => Boolean(entry))
     .sort((left, right) => left.position - right.position);
-}
-
-function getLastSyncedAt(playlist: MusicLibraryPlaylist) {
-  return playlist.services
-    .map((service) => service.lastSyncedAt)
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1);
 }
 
 function mapSongToCollectionTrack(song: MusicLibrarySong, index: number): MusicCollectionTrack {
@@ -84,7 +76,7 @@ export function MusicPlaylistDetailPage({
         backTo="/music/playlists"
         backLabel="Back to playlists"
         ownerLabel="Created by you"
-        updatedAt={getLastSyncedAt(playlist)}
+        updatedAt={playlistLastSyncedAt(playlist) ?? undefined}
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}
         chips={chips}
         tracks={tracks}

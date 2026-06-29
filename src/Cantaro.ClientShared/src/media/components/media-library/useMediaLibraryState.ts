@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MutableRefObject } from 'react';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { mediaApi } from '../../services/mediaApi';
 import { mainMediaProviderId } from '../../services/mediaProviders';
 import {
@@ -50,6 +50,18 @@ function shouldRefreshPrimaryProvider(status: MediaProviderAccountStatusDto): bo
   return status.isConnected && isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID)));
 }
 
+function createInitialFilters(storedListName: string | null, filterDefaults?: MediaLibraryFilterDefaults): MediaLibraryQueryParams {
+  return {
+    provider: PRIMARY_PROVIDER_ID,
+    listName: storedListName || undefined,
+    sortBy: 'updatedAt',
+    sortDir: 'desc',
+    page: 1,
+    pageSize: 24,
+    ...filterDefaults,
+  };
+}
+
 function useLibraryDataState() {
   const [items, setItems] = useState<MediaLibraryListItemDto[]>([]);
   const [availableListNames, setAvailableListNames] = useState<string[]>([]);
@@ -87,18 +99,10 @@ function useLibraryDataState() {
   };
 }
 
-function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaLibraryFilterDefaults) {
-  const initialStoredListNameRef = useRef(readStoredValue(storedListNameKey(PRIMARY_PROVIDER_ID)));
-  const hasAppliedInitialListFallbackRef = useRef(Boolean(initialStoredListNameRef.current));
-  const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => ({
-    provider: PRIMARY_PROVIDER_ID,
-    listName: initialStoredListNameRef.current || undefined,
-    sortBy: 'updatedAt',
-    sortDir: 'desc',
-    page: 1,
-    pageSize: 24,
-    ...filterDefaults,
-  }));
+function useFilterDefaults(
+  setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>>,
+  filterDefaults?: MediaLibraryFilterDefaults,
+) {
   const filterDefaultsKey = serializeFilterDefaults(filterDefaults);
 
   useEffect(() => {
@@ -113,7 +117,9 @@ function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaL
       pageSize: prev.pageSize ?? 24,
     }));
   }, [filterDefaults, filterDefaultsKey]);
+}
 
+function usePersistPrimaryListName(filters: MediaLibraryQueryParams) {
   useEffect(() => {
     if (filters.provider !== PRIMARY_PROVIDER_ID) {
       return;
@@ -127,7 +133,13 @@ function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaL
 
     clearStoredValue(storageKey);
   }, [filters.listName, filters.provider]);
+}
 
+function useAvailableListNameGuard(
+  availableListNames: string[],
+  filters: MediaLibraryQueryParams,
+  setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>>,
+) {
   useEffect(() => {
     if (!filters.listName || availableListNames.length === 0 || availableListNames.includes(filters.listName)) {
       return;
@@ -135,7 +147,14 @@ function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaL
 
     setFilters((prev) => ({ ...prev, listName: undefined, page: 1 }));
   }, [availableListNames, filters.listName]);
+}
 
+function useInitialListFallback(
+  availableListNames: string[],
+  filters: MediaLibraryQueryParams,
+  setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>>,
+  hasAppliedInitialListFallbackRef: MutableRefObject<boolean>,
+) {
   useEffect(() => {
     if (hasAppliedInitialListFallbackRef.current || filters.provider !== PRIMARY_PROVIDER_ID || availableListNames.length === 0) {
       return;
@@ -148,7 +167,9 @@ function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaL
 
     setFilters((prev) => ({ ...prev, listName: DEFAULT_PRIMARY_LIST_NAME, page: 1 }));
   }, [availableListNames, filters.listName, filters.provider]);
+}
 
+function useLibraryFilterActions(setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>>) {
   const updateFilter = <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
   };
@@ -178,14 +199,24 @@ function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaL
     setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) + 1 }));
   };
 
+  return { updateFilter, toggleSortDir, updateProviderFilter, goToPreviousPage, goToNextPage };
+}
+
+function useLibraryFilters(availableListNames: string[], filterDefaults?: MediaLibraryFilterDefaults) {
+  const initialStoredListNameRef = useRef(readStoredValue(storedListNameKey(PRIMARY_PROVIDER_ID)));
+  const hasAppliedInitialListFallbackRef = useRef(Boolean(initialStoredListNameRef.current));
+  const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => createInitialFilters(initialStoredListNameRef.current, filterDefaults));
+  const actions = useLibraryFilterActions(setFilters);
+
+  useFilterDefaults(setFilters, filterDefaults);
+  usePersistPrimaryListName(filters);
+  useAvailableListNameGuard(availableListNames, filters, setFilters);
+  useInitialListFallback(availableListNames, filters, setFilters, hasAppliedInitialListFallbackRef);
+
   return {
     filters,
     setFilters,
-    updateFilter,
-    toggleSortDir,
-    updateProviderFilter,
-    goToPreviousPage,
-    goToNextPage,
+    ...actions,
     hasActiveFilters: hasActiveMediaLibraryFilters(filters),
     isPrimaryProviderSelected: filters.provider === PRIMARY_PROVIDER_ID,
   };

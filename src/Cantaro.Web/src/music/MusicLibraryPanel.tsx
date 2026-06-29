@@ -44,7 +44,7 @@ export function MusicLibraryPanel({ children }: { children: (library: MusicLibra
   if (isLoading) {
     return (
       <MusicPageShell>
-        <div className="flex min-h-[360px] items-center justify-center rounded-3xl border border-white/80 bg-white/65 shadow-[0_24px_80px_rgba(82,70,140,0.08)] backdrop-blur">
+        <div className="flex min-h-[360px] items-center justify-center rounded-[1.5rem] border border-white/80 bg-white/65 shadow-[0_12px_34px_rgba(82,70,140,0.06)] backdrop-blur">
           <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-violet-500" aria-hidden />
             Loading your library

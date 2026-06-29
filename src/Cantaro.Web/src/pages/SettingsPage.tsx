@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { Link } from '@tanstack/react-router';
-import { Bell, Check, ChevronRight, Database, Download, ImagePlus, LockKeyhole, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { Bell, Check, ChevronRight, Database, Download, ImagePlus, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
 import { authApi, type ProfilePreferences, type ThemePreference, type User } from '@cantaro/client-shared/auth';
 import { MusicPlatformIcon, platformCatalog, platformManager, type PlatformAccountStatus, type PlatformId } from '@cantaro/client-shared/music';
 import { MediaProviderIcon, mediaApi, mediaProviderCatalog, type MediaProviderAccountStatusDto } from '@cantaro/client-shared/media';
 import { PageShell } from '../components/PageShell';
+import { PageSideNavigation, type PageNavigationSection } from '../components/PageNavigation';
 import { useAuth } from '../contexts/AuthContext';
 import { AvatarCropDialog } from '../components/AvatarCropDialog';
 
@@ -12,36 +13,38 @@ type SaveState = 'idle' | 'saving' | 'saved';
 type SectionId = 'profile' | 'connections' | 'notifications' | 'appearance' | 'sync' | 'security' | 'data';
 interface AvatarCropSource { file: File; imageUrl: string }
 
-const sections: Array<{ id: SectionId; label: string; icon: ReactNode }> = [
-  { id: 'profile', label: 'Profile', icon: <UserRound className="h-4 w-4" /> },
-  { id: 'connections', label: 'Connections', icon: <Plug className="h-4 w-4" /> },
-  { id: 'notifications', label: 'Notifications', icon: <Bell className="h-4 w-4" /> },
-  { id: 'appearance', label: 'Appearance', icon: <Palette className="h-4 w-4" /> },
-  { id: 'sync', label: 'Sync defaults', icon: <SlidersHorizontal className="h-4 w-4" /> },
-  { id: 'security', label: 'Security', icon: <Shield className="h-4 w-4" /> },
-  { id: 'data', label: 'Data & privacy', icon: <Database className="h-4 w-4" /> },
+const settingsNavigationSections: PageNavigationSection[] = [
+  {
+    title: 'Settings',
+    items: [
+      { label: 'Profile', to: '/settings', hash: 'profile', icon: <UserRound className="h-4 w-4" />, tone: 'violet' },
+      { label: 'Connections', to: '/settings', hash: 'connections', icon: <Plug className="h-4 w-4" />, tone: 'indigo' },
+      { label: 'Notifications', to: '/settings', hash: 'notifications', icon: <Bell className="h-4 w-4" />, tone: 'sky' },
+      { label: 'Appearance', to: '/settings', hash: 'appearance', icon: <Palette className="h-4 w-4" />, tone: 'pink' },
+      { label: 'Sync defaults', to: '/settings', hash: 'sync', icon: <SlidersHorizontal className="h-4 w-4" />, tone: 'emerald' },
+      { label: 'Security', to: '/settings', hash: 'security', icon: <Shield className="h-4 w-4" />, tone: 'violet' },
+      { label: 'Data & privacy', to: '/settings', hash: 'data', icon: <Database className="h-4 w-4" />, tone: 'slate' },
+    ],
+  },
 ];
 
 function SettingsSidebar() {
+  const location = useRouterState({ select: (state) => state.location });
+  const activeHash = location.hash || 'profile';
+
   return (
-    <aside className="settings-sidebar sticky top-0 h-screen overflow-y-auto border-r px-5 py-6">
-      <Link to="/music/songs" className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-600 text-lg font-black text-white shadow-lg shadow-violet-500/25">C</span>
-        <span><strong className="block tracking-widest">CANTARO</strong><small className="font-bold tracking-[.28em] text-slate-500 uppercase">Settings</small></span>
-      </Link>
-      <nav className="mt-10 space-y-1" aria-label="Settings sections">
-        {sections.map((section) => (
-          <a key={section.id} href={`#${section.id}`} className="settings-nav-link flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-bold text-slate-600 transition hover:bg-white/70 hover:text-violet-700">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/70 text-violet-600 shadow-sm">{section.icon}</span>
-            {section.label}
-          </a>
-        ))}
-      </nav>
-      <div className="mt-10 rounded-3xl border border-violet-100 bg-white/65 p-5 text-sm leading-6 text-slate-600 shadow-sm">
-        <LockKeyhole className="mb-3 h-5 w-5 text-violet-600" />
+    <PageSideNavigation
+      activeHash={activeHash}
+      activePathname={location.pathname}
+      sections={settingsNavigationSections}
+      subtitle="Settings"
+      footer={(
+        <div className="settings-trust-card rounded-3xl border border-violet-100 bg-white/65 p-5 text-sm leading-6 text-slate-600 shadow-sm">
+          <Shield className="mb-3 h-5 w-5 text-violet-600" />
         Service credentials stay encrypted on the Cantaro server and are never returned to this page.
-      </div>
-    </aside>
+        </div>
+      )}
+    />
   );
 }
 
@@ -145,7 +148,7 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
 function ConnectionCard({ name, detail, icon, implemented, connected, busy, onAction }: { name: string; detail: string; icon: ReactNode; implemented: boolean; connected: boolean; busy: boolean; onAction: () => void }) {
   return (
     <article className="settings-surface-row flex items-center gap-4 rounded-3xl border p-4">
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-950 shadow-sm">{icon}</span>
+      {icon}
       <span className="min-w-0 flex-1"><strong className="block text-sm text-slate-950">{name}</strong><span className="block truncate text-xs text-slate-500">{implemented ? detail : 'Coming later'}</span></span>
       {implemented ? <button type="button" disabled={busy} onClick={onAction} className={`rounded-xl px-4 py-2 text-xs font-black transition ${connected ? 'bg-emerald-50 text-emerald-700 hover:bg-rose-50 hover:text-rose-700' : 'bg-violet-600 text-white hover:bg-violet-700'}`}>{busy ? 'Working…' : connected ? 'Connected' : 'Connect'}</button> : <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black tracking-wider text-slate-500 uppercase">Coming Soon</span>}
     </article>
@@ -155,13 +158,13 @@ function ConnectionCard({ name, detail, icon, implemented, connected, busy, onAc
 function MusicConnectionCard({ item, status, busyKey, onAction }: { item: (typeof platformCatalog)[number]; status?: PlatformAccountStatus; busyKey: string | null; onAction: () => void }) {
   const connected = Boolean(status?.isConnected);
   const detail = status?.displayName || (connected ? 'Account connected' : 'Music platform');
-  return <ConnectionCard name={item.name} detail={detail} icon={<MusicPlatformIcon platformId={item.id} className="h-9 w-9" />} implemented={item.implemented} connected={connected} busy={busyKey === `music-${item.id}`} onAction={onAction} />;
+  return <ConnectionCard name={item.name} detail={detail} icon={<MusicPlatformIcon platformId={item.id} className="h-10 w-10 shrink-0" />} implemented={item.implemented} connected={connected} busy={busyKey === `music-${item.id}`} onAction={onAction} />;
 }
 
 function MediaConnectionCard({ item, status, busyKey, onAction }: { item: (typeof mediaProviderCatalog)[number]; status?: MediaProviderAccountStatusDto; busyKey: string | null; onAction: () => void }) {
   const connected = Boolean(status?.isConnected);
   const detail = status?.displayName || (connected ? 'Account connected' : 'Media provider');
-  return <ConnectionCard name={item.name} detail={detail} icon={<MediaProviderIcon providerId={item.iconId} className="h-9 w-9" aria-hidden />} implemented={item.implemented} connected={connected} busy={busyKey === `media-${item.id}`} onAction={onAction} />;
+  return <ConnectionCard name={item.name} detail={detail} icon={<MediaProviderIcon providerId={item.iconId} className="h-10 w-10 shrink-0" aria-hidden />} implemented={item.implemented} connected={connected} busy={busyKey === `media-${item.id}`} onAction={onAction} />;
 }
 
 function ConnectionsSection() {
@@ -216,20 +219,100 @@ function ConnectionsSection() {
   );
 }
 
-function PreferencesSections({ profile, onProfile }: { profile: User; onProfile: (profile: User) => void }) {
-  const [preferences, setPreferences] = useState(profile.preferences);
-  const [state, setState] = useState<SaveState>('idle');
-  useEffect(() => setPreferences(profile.preferences), [profile.preferences]);
+function useThemeAutosave(
+  preferences: ProfilePreferences,
+  setPreferences: (preferences: ProfilePreferences) => void,
+  onProfile: (profile: User) => void,
+) {
+  const [themeSaveState, setThemeSaveState] = useState<SaveState>('idle');
+  const themeSaveTimerRef = useRef<number | null>(null);
+  const themeSaveResetTimerRef = useRef<number | null>(null);
+  const pendingThemePreferencesRef = useRef<ProfilePreferences | null>(null);
+  const themeSaveVersionRef = useRef(0);
+
+  const clearThemeSaveTimer = useCallback(() => {
+    if (themeSaveTimerRef.current === null) return;
+    window.clearTimeout(themeSaveTimerRef.current);
+    themeSaveTimerRef.current = null;
+  }, []);
+
+  const clearThemeSaveResetTimer = useCallback(() => {
+    if (themeSaveResetTimerRef.current === null) return;
+    window.clearTimeout(themeSaveResetTimerRef.current);
+    themeSaveResetTimerRef.current = null;
+  }, []);
+
+  const commitThemePreferences = useCallback(async (nextPreferences: ProfilePreferences, version: number) => {
+    setThemeSaveState('saving');
+    clearThemeSaveResetTimer();
+
+    try {
+      const updatedProfile = await authApi.updatePreferences(nextPreferences);
+      if (version !== themeSaveVersionRef.current) return;
+
+      pendingThemePreferencesRef.current = null;
+      onProfile(updatedProfile);
+      setThemeSaveState('saved');
+      themeSaveResetTimerRef.current = window.setTimeout(() => setThemeSaveState('idle'), 1400);
+    } catch {
+      if (version === themeSaveVersionRef.current) setThemeSaveState('idle');
+    }
+  }, [clearThemeSaveResetTimer, onProfile]);
+
+  const flushThemeSave = useCallback(() => {
+    const pendingPreferences = pendingThemePreferencesRef.current;
+    if (!pendingPreferences) return;
+
+    clearThemeSaveTimer();
+    pendingThemePreferencesRef.current = null;
+    const version = ++themeSaveVersionRef.current;
+    void commitThemePreferences(pendingPreferences, version);
+  }, [clearThemeSaveTimer, commitThemePreferences]);
+
+  useEffect(() => {
+    const flushOnPageHide = () => flushThemeSave();
+    window.addEventListener('pagehide', flushOnPageHide);
+
+    return () => {
+      window.removeEventListener('pagehide', flushOnPageHide);
+      flushThemeSave();
+      clearThemeSaveResetTimer();
+    };
+  }, [clearThemeSaveResetTimer, flushThemeSave]);
+
   useEffect(() => {
     const theme = preferences.theme;
     const resolved = theme === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
     document.documentElement.dataset.theme = resolved;
     document.documentElement.style.colorScheme = resolved;
   }, [preferences.theme]);
+
+  const previewTheme = useCallback((theme: ThemePreference) => {
+    if (theme === preferences.theme) return;
+
+    const nextPreferences = { ...preferences, theme };
+    setPreferences(nextPreferences);
+    pendingThemePreferencesRef.current = nextPreferences;
+    const version = ++themeSaveVersionRef.current;
+    clearThemeSaveTimer();
+    clearThemeSaveResetTimer();
+    setThemeSaveState('saving');
+    themeSaveTimerRef.current = window.setTimeout(() => {
+      pendingThemePreferencesRef.current = null;
+      themeSaveTimerRef.current = null;
+      void commitThemePreferences(nextPreferences, version);
+    }, 700);
+  }, [clearThemeSaveResetTimer, clearThemeSaveTimer, commitThemePreferences, preferences, setPreferences]);
+
+  return { previewTheme, themeSaveState };
+}
+
+function PreferencesSections({ profile, onProfile }: { profile: User; onProfile: (profile: User) => void }) {
+  const [preferences, setPreferences] = useState(profile.preferences);
+  const [state, setState] = useState<SaveState>('idle');
+  const { previewTheme, themeSaveState } = useThemeAutosave(preferences, setPreferences, onProfile);
+  useEffect(() => setPreferences(profile.preferences), [profile.preferences]);
   const change = <K extends keyof ProfilePreferences>(key: K, value: ProfilePreferences[K]) => setPreferences(current => ({ ...current, [key]: value }));
-  const previewTheme = (theme: ThemePreference) => {
-    change('theme', theme);
-  };
   const save = async () => { setState('saving'); try { onProfile(await authApi.updatePreferences(preferences)); setState('saved'); window.setTimeout(() => setState('idle'), 1600); } catch { setState('idle'); } };
   const saveFooter = <div className="mt-5 flex justify-end"><SaveButton state={state} type="button" onClick={save} /></div>;
 
@@ -238,7 +321,10 @@ function PreferencesSections({ profile, onProfile }: { profile: User; onProfile:
       <div className="settings-toggle-group overflow-hidden rounded-3xl border px-5"><Toggle checked={preferences.notifyOnSyncSuccess} onChange={value => change('notifyOnSyncSuccess', value)} title="Successful syncs" detail="Let me know when a playlist finishes syncing." /><Toggle checked={preferences.notifyOnSyncFailure} onChange={value => change('notifyOnSyncFailure', value)} title="Sync failures" detail="Surface provider errors and syncs that need attention." /><Toggle checked={preferences.notifyOnMediaReview} onChange={value => change('notifyOnMediaReview', value)} title="Media review queue" detail="Flag new observations that need a match decision." /></div>{saveFooter}
     </SettingsSection>
     <SettingsSection id="appearance" eyebrow="Atmosphere" title="Choose your listening room" description="Follow your device or set a consistent Cantaro appearance everywhere you sign in.">
-      <div className="grid gap-3 sm:grid-cols-3">{(['system','light','dark'] as ThemePreference[]).map(theme => <button key={theme} type="button" onClick={() => previewTheme(theme)} className={`rounded-3xl border p-5 text-left transition ${preferences.theme === theme ? 'border-violet-500 bg-violet-50 ring-2 ring-violet-200' : 'hover:-translate-y-0.5 hover:border-violet-200'}`}><span className={`mb-4 block h-20 rounded-2xl ${theme === 'dark' ? 'bg-slate-950' : theme === 'light' ? 'bg-white shadow-inner' : 'bg-linear-to-r from-white to-slate-950'}`} /><strong className="text-slate-950 capitalize">{theme}</strong></button>)}</div>{saveFooter}
+      <div className="grid gap-3 sm:grid-cols-3">{(['system','light','dark'] as ThemePreference[]).map(theme => <button key={theme} type="button" onClick={() => previewTheme(theme)} className={`settings-theme-option rounded-3xl border p-5 text-left transition ${preferences.theme === theme ? 'settings-theme-option--selected border-violet-500 bg-violet-50 ring-2 ring-violet-200' : 'hover:-translate-y-0.5 hover:border-violet-200'}`}><span className={`mb-4 block h-20 rounded-2xl ${theme === 'dark' ? 'bg-slate-950' : theme === 'light' ? 'bg-white shadow-inner' : 'bg-linear-to-r from-white to-slate-950'}`} /><strong className="text-slate-950 capitalize">{theme}</strong></button>)}</div>
+      <p className="mt-4 text-right text-xs font-bold text-slate-500" role="status">
+        {themeSaveState === 'saving' ? 'Saving appearance…' : themeSaveState === 'saved' ? 'Appearance saved' : 'Appearance saves automatically'}
+      </p>
     </SettingsSection>
     <SettingsSection id="sync" eyebrow="Set it once" title="Playlist sync defaults" description="New playlist sync sessions begin with these rules. You can still change them for an individual run.">
       <div className="settings-toggle-group overflow-hidden rounded-3xl border px-5"><Toggle checked={preferences.keepPlaylistOrder} onChange={value => change('keepPlaylistOrder', value)} title="Preserve song order" detail="Keep the source playlist sequence intact." /><Toggle checked={preferences.keepPlaylistMetadata} onChange={value => change('keepPlaylistMetadata', value)} title="Preserve playlist metadata" detail="Carry title, description, and artwork where providers allow it." /><Toggle checked={preferences.hideUnavailableTracks} onChange={value => change('hideUnavailableTracks', value)} title="Hide unavailable tracks" detail="Keep missing or region-blocked tracks out of sync previews." /><Toggle checked={preferences.scheduledSync} onChange={value => change('scheduledSync', value)} title="Scheduled sync by default" detail="Prepare imported playlists for future automatic sync runs." /></div>{saveFooter}
