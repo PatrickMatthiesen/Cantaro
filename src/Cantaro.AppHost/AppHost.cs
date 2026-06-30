@@ -1,5 +1,5 @@
-// #:sdk Aspire.AppHost.Sdk@13.1.0-preview.1.25567.3
-// #:package Aspire.Hosting.JavaScript@13.1.0-preview.1.25567.3
+// #:sdk Aspire.AppHost.Sdk@13.5.0-preview.1.26319.13
+// #:package Aspire.Hosting.JavaScript@13.5.0-preview.1.26319.13
 
 using Cantaro.Aspire.Hosting.Garage;
 
