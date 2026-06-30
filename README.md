@@ -9,7 +9,7 @@ Cantaro acts as the canonical vessel that holds your music graph and pours it in
 ## Architecture
 
 - **Backend**: ASP.NET Core 10 Web API (C#)
-- **Frontend**: React + TypeScript + Vite (Node till bun works in aspire)
+- **Frontend**: React + TypeScript + Vite (Bun)
 - **Extension**: React + TypeScript + WXT (Bun)
 - **Database**: PostgreSQL
 - **Orchestration**: .NET Aspire 13
