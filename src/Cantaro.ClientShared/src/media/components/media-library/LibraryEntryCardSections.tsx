@@ -14,10 +14,10 @@ const DETAILS_CLASS_NAMES: Record<MediaLibraryDensity, {
     originalTitle: string;
 }> = {
     comfortable: {
-        container: 'p-4',
-        panel: 'rounded-3xl p-4',
-        title: 'text-xl',
-        originalTitle: 'mt-1 text-sm',
+        container: 'p-3 sm:p-4',
+        panel: 'rounded-2xl p-3 sm:rounded-3xl sm:p-4',
+        title: 'text-base sm:text-xl',
+        originalTitle: 'mt-0.5 text-xs sm:mt-1 sm:text-sm',
     },
     compact: {
         container: 'p-2',
@@ -75,7 +75,7 @@ function LibraryEntryProgressBadges({ progress, isConnected, density }: { progre
 }
 
 export function LibraryEntryCardBadges({ topLeftBadge, progress, isConnected, density }: LibraryEntryCardBadgesProps) {
-    const paddingClassName = density === 'compact' ? 'p-2' : 'p-4';
+    const paddingClassName = density === 'compact' ? 'p-2' : 'p-3 sm:p-4';
 
     return (
         <div className={`absolute inset-x-0 top-0 flex items-start justify-between gap-1 ${paddingClassName}`}>
@@ -86,7 +86,7 @@ export function LibraryEntryCardBadges({ topLeftBadge, progress, isConnected, de
 }
 
 function LibraryEntryCompletionBar({ completion, density }: { completion: number | null; density: MediaLibraryDensity }) {
-    const className = density === 'compact' ? 'mt-2 h-1' : 'mt-4 h-2';
+    const className = density === 'compact' ? 'mt-2 h-1' : 'mt-3 h-1.5 sm:mt-4 sm:h-2';
 
     if (completion !== null) {
         return (
