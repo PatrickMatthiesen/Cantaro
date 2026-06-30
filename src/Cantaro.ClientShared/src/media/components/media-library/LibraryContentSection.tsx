@@ -20,8 +20,8 @@ export interface LibraryContentSectionProps {
 
 function libraryGridClassName(density: MediaLibraryDensity) {
     return density === 'compact'
-        ? 'grid grid-cols-3 gap-2'
-        : 'grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
+        ? 'grid grid-cols-[repeat(auto-fill,minmax(min(7rem,100%),1fr))] gap-2'
+        : 'grid grid-cols-[repeat(auto-fill,minmax(min(9rem,100%),1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))]';
 }
 
 function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
@@ -32,7 +32,7 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
             {Array.from({ length: skeletonCount }).map((_, index) => (
                 <div
                     key={index}
-                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-slate-200/55 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'min-h-80 rounded-[1.75rem]'}`}
+                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-slate-200/55 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem] md:min-h-80'}`}
                 >
                     <div className="h-full w-full bg-linear-to-br from-white/70 via-slate-200/70 to-slate-300/60" />
                 </div>

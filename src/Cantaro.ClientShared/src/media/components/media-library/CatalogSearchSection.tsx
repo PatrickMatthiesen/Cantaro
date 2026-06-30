@@ -3,6 +3,8 @@ import { GlassCard, GradientButton } from '../../../ui';
 import { mediaKindLabel } from '../../services/mediaFormatting';
 import type { MediaProviderSearchResultDto } from '../../services/mediaApi';
 
+const CATALOG_RESULTS_GRID_CLASS_NAME = 'grid grid-cols-[repeat(auto-fill,minmax(min(9rem,100%),1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))]';
+
 export interface CatalogSearchSectionProps {
     providerName: string;
     query: string;
@@ -63,7 +65,7 @@ function CatalogResultBadges({ mediaKind, isInLibrary }: { mediaKind: string; is
 function CatalogResultText({ result, metadata }: { result: MediaProviderSearchResultDto; metadata: string[] }) {
     return (
         <div className="absolute right-3 bottom-3 left-3">
-            <h3 className="line-clamp-2 text-lg leading-tight font-semibold text-white">{result.title}</h3>
+            <h3 className="line-clamp-2 text-base leading-tight font-semibold text-white sm:text-lg">{result.title}</h3>
             {result.nativeTitle ? <p className="mt-1 truncate text-xs text-white/70">{result.nativeTitle}</p> : null}
             {metadata.length > 0 ? (
                 <p className="mt-2 text-xs font-medium text-white/70">{metadata.join(' / ')}</p>
@@ -114,7 +116,7 @@ function CatalogResultCard({
                 className="flex h-full w-full flex-col text-left"
                 onClick={() => onNavigateCatalogResult(result.providerId, result.providerMediaId)}
             >
-                <div className="relative aspect-[0.72] min-h-76 overflow-hidden">
+                <div className="relative aspect-[0.72] overflow-hidden md:min-h-76">
                     <CatalogPoster posterUrl={result.posterUrl} title={result.title} />
                     <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-transparent" aria-hidden />
                     <CatalogResultBadges mediaKind={result.mediaKind} isInLibrary={isInLibrary} />
@@ -150,7 +152,7 @@ export function CatalogSearchSection({
 
     if (isLoading) {
         return (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <div className={CATALOG_RESULTS_GRID_CLASS_NAME}>
                 {Array.from({ length: 10 }).map((_, index) => (
                     <GlassCard key={index} className="aspect-[0.72] animate-pulse bg-white/50" />
                 ))}
@@ -175,7 +177,7 @@ export function CatalogSearchSection({
     }
 
     return (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        <div className={CATALOG_RESULTS_GRID_CLASS_NAME}>
             {results.map((result) => (
                 <CatalogResultCard
                     key={`${result.providerId}:${result.providerMediaId}`}
