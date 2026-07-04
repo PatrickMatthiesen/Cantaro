@@ -1,6 +1,6 @@
 import { GradientButton, StatusBadge } from '../../../ui';
 import type { ReactNode } from 'react';
-import type { MediaImportDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
+import type { MediaImportDto, MediaImportRequestDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
 
 interface ProviderPanelHeaderProps {
     name: string;
@@ -19,7 +19,7 @@ interface ProviderPanelActionsProps {
     isImporting: boolean;
     isDisconnecting: boolean;
     onConnect: () => void;
-    onImport: () => Promise<MediaImportDto | null>;
+    onImport: () => Promise<MediaImportRequestDto | null>;
     onDisconnect: () => Promise<void>;
 }
 

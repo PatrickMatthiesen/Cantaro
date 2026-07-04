@@ -18,6 +18,7 @@ export interface ProfilePreferences {
   keepPlaylistMetadata: boolean;
   hideUnavailableTracks: boolean;
   scheduledSync: boolean;
+  blurEmailAddress: boolean;
 }
 
 export interface RegisterRequest {

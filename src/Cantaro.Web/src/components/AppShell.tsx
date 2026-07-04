@@ -8,6 +8,7 @@ export interface GlobalHeadingState {
   eyebrow: string;
   title: string;
   details?: string[];
+  hidden?: boolean;
 }
 
 function AppLoadingState() {

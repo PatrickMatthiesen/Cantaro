@@ -1,3 +1,5 @@
+using System.Net.ServerSentEvents;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -26,7 +28,7 @@ internal sealed class MediaProviderOAuthState
 public class MediaProvidersController(
     ApplicationDbContext dbContext,
     IMediaProviderRegistry mediaProviderRegistry,
-    MediaLibraryImportService mediaLibraryImportService,
+    MediaLibraryImportQueue mediaLibraryImportQueue,
     MediaProviderOperationProcessor mediaProviderOperationProcessor,
     UserManager<User> userManager,
     ILogger<MediaProvidersController> logger,
@@ -35,7 +37,7 @@ public class MediaProvidersController(
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
-    private readonly MediaLibraryImportService _mediaLibraryImportService = mediaLibraryImportService;
+    private readonly MediaLibraryImportQueue _mediaLibraryImportQueue = mediaLibraryImportQueue;
     private readonly MediaProviderOperationProcessor _mediaProviderOperationProcessor = mediaProviderOperationProcessor;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaProvidersController> _logger = logger;
@@ -172,7 +174,7 @@ public class MediaProvidersController(
     }
 
     [HttpPost("providers/{providerId}/import")]
-    public async Task<ActionResult<MediaImportDto>> Import(string providerId, CancellationToken cancellationToken)
+    public async Task<ActionResult<MediaImportRequestDto>> Import(string providerId, CancellationToken cancellationToken)
     {
         if (!_mediaProviderRegistry.IsSupported(providerId))
         {
@@ -187,18 +189,60 @@ public class MediaProvidersController(
             return BadRequest(new { error = $"{provider.ProviderId} is not connected." });
         }
 
-        var importResult = await provider.ImportLibraryAsync(userId, cancellationToken);
-        var persisted = await _mediaLibraryImportService.ImportAsync(userId, account, importResult, cancellationToken);
+        var workItem = await _mediaLibraryImportQueue.EnqueueAsync(userId, provider.ProviderId, cancellationToken);
 
-        return Ok(new MediaImportDto
+        return Accepted(new MediaImportRequestDto
         {
-            ProviderId = persisted.ProviderId,
-            ImportedCount = persisted.ImportedCount,
-            CreatedTitles = persisted.CreatedTitles,
-            CreatedEntries = persisted.CreatedEntries,
-            UpdatedEntries = persisted.UpdatedEntries,
-            ImportedAt = persisted.ImportedAt
+            ProviderId = workItem.ProviderId,
+            ImportId = workItem.ImportId,
+            Status = "queued"
         });
+    }
+
+    [HttpGet("providers/{providerId}/import/events")]
+    [Produces("text/event-stream")]
+    public async IAsyncEnumerable<SseItem<MediaLibraryImportEventDto>> StreamImportEvents(
+        string providerId,
+        [FromQuery] Guid? importId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (!_mediaProviderRegistry.IsSupported(providerId))
+        {
+            yield break;
+        }
+
+        var userId = await GetCurrentUserIdAsync();
+        var reader = _mediaLibraryImportQueue.Subscribe(userId, out var subscriptionId);
+
+        try
+        {
+            if (importId.HasValue
+                && _mediaLibraryImportQueue.TryGetLatestEvent(importId.Value, out var latestEvent)
+                && latestEvent is not null
+                && string.Equals(latestEvent.ProviderId, providerId, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return new SseItem<MediaLibraryImportEventDto>(latestEvent);
+            }
+
+            await foreach (var importEvent in reader.ReadAllAsync(cancellationToken))
+            {
+                if (!string.Equals(importEvent.ProviderId, providerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (importId.HasValue && importEvent.ImportId != importId.Value)
+                {
+                    continue;
+                }
+
+                yield return new SseItem<MediaLibraryImportEventDto>(importEvent);
+            }
+        }
+        finally
+        {
+            _mediaLibraryImportQueue.Unsubscribe(userId, subscriptionId);
+        }
     }
 
     [HttpGet("providers/{providerId}/search")]

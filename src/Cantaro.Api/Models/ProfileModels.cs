@@ -22,6 +22,7 @@ public sealed class ProfilePreferencesDto
     public bool KeepPlaylistMetadata { get; set; }
     public bool HideUnavailableTracks { get; set; }
     public bool ScheduledSync { get; set; }
+    public bool BlurEmailAddress { get; set; }
 }
 
 public sealed class UpdateProfileRequest
@@ -41,6 +42,7 @@ public sealed class UpdateProfilePreferencesRequest
     public bool KeepPlaylistMetadata { get; set; }
     public bool HideUnavailableTracks { get; set; }
     public bool ScheduledSync { get; set; }
+    public bool BlurEmailAddress { get; set; }
 }
 
 public sealed class ChangePasswordRequest

@@ -6,8 +6,9 @@ import type {
     MediaApiRuntimeConfig,
     MediaCatalogAddRequestDto,
     MediaCatalogAddResultDto,
-    MediaImportDto,
+    MediaImportRequestDto,
     MediaLibraryEntryDetailDto,
+    MediaLibraryImportEventDto,
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
     MediaLinkRequestDto,
@@ -124,12 +125,39 @@ export class MediaApiClient {
         await this.ensureOk(response, 'Failed to disconnect media provider');
     }
 
-    async importLibrary(providerId: string): Promise<MediaImportDto> {
+    async importLibrary(providerId: string): Promise<MediaImportRequestDto> {
         const response = await this.request(`/api/media/providers/${encodeURIComponent(providerId)}/import`, {
             method: 'POST',
         });
         await this.ensureOk(response, 'Failed to import media library');
-        return response.json() as Promise<MediaImportDto>;
+        return response.json() as Promise<MediaImportRequestDto>;
+    }
+
+    async subscribeToImportEvents(
+        providerId: string,
+        importId: string | undefined,
+        onEvent: (event: MediaLibraryImportEventDto) => void,
+        onError?: () => void,
+    ): Promise<EventSource> {
+        const { accessToken } = await this.getRuntimeConfig();
+        const query = new URLSearchParams();
+        if (importId) query.set('importId', importId);
+        if (accessToken) query.set('access_token', accessToken);
+        const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+        const eventSource = new EventSource(
+            await this.buildUrl(`/api/media/providers/${encodeURIComponent(providerId)}/import/events${suffix}`),
+            { withCredentials: await this.getCredentialsMode() === 'include' },
+        );
+
+        eventSource.onmessage = (message) => {
+            onEvent(JSON.parse(message.data) as MediaLibraryImportEventDto);
+        };
+        eventSource.onerror = () => {
+            onError?.();
+        };
+
+        return eventSource;
     }
 
     async searchProvider(

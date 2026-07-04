@@ -1,12 +1,29 @@
-import { useState, useEffect, useCallback, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-import { EntryOverviewCard } from '../components/media-entry-detail/EntryOverviewCard';
-import { ProviderLinksCard } from '../components/media-entry-detail/ProviderLinksCard';
-import { providerAvailabilityKey, type ProviderAvailabilityMap } from '../components/media-entry-detail/providerAvailability';
-import { GlassCard, GradientButton, Snackbar, type ShowSnackbar, type SnackbarNotification } from '../../ui';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import {
+  CalendarDays,
+  CheckCircle2,
+  CircleCheck,
+  Clock3,
+  Flame,
+  Heart,
+  Info,
+  Minus,
+  MoreVertical,
+  Play,
+  Plus,
+  RefreshCcw,
+  Save,
+  Star,
+  Tv,
+} from 'lucide-react';
+import { DetailArtwork, SanitizedSynopsis } from '../components/media-entry-detail/EntryDisplayPrimitives';
+import { providerAvailabilityKey, type ProviderAvailabilityMap, type ProviderAvailabilityState } from '../components/media-entry-detail/providerAvailability';
+import { MediaProviderIcon } from '../components/MediaProviderIcon';
 import { SearchLinkDialog } from '../components/SearchLinkDialog';
+import { GradientButton, Snackbar, type ShowSnackbar, type SnackbarNotification } from '../../ui';
 import { mediaApi } from '../services/mediaApi';
 import { formatNextReleaseDisplay, mediaKindLabel } from '../services/mediaFormatting';
-import { mainMediaProviderId } from '../services/mediaProviders';
+import { mainMediaProviderId, mediaProviderCatalog } from '../services/mediaProviders';
 import {
   isRemoteCheckStale,
   readStoredValue,
@@ -15,6 +32,7 @@ import {
 } from '../services/mediaRefreshCache';
 import type {
   MediaLibraryEntryDetailDto,
+  MediaLibraryImportEventDto,
   MediaProviderLinkSummaryDto,
 } from '../services/mediaApi';
 
@@ -26,6 +44,62 @@ const NORMALIZED_STATUSES = [
   { value: 'dropped', label: 'Dropped' },
   { value: 'repeating', label: 'Rewatching / Rereading' },
 ];
+
+const DETAIL_TABS = ['Overview', 'Progress', 'Providers', 'Franchise', 'Characters', 'Details'];
+
+interface StatusDraft {
+  selectedStatus: string;
+  progressEpisodes: number | undefined;
+  progressChapters: number | undefined;
+  progressVolumes: number | undefined;
+}
+
+interface ProgressSummary {
+  label: string;
+  noun: string;
+  value: number | undefined;
+  total?: number;
+  nextLabel: string;
+}
+
+interface MediaEntryDetailPageProps {
+  libraryEntryId: string;
+  onNavigateBack: () => void;
+  embedded?: boolean;
+  onHeadingChange?: (heading: { eyebrow: string; title: string; details?: string[]; hidden?: boolean }) => void;
+}
+
+interface MediaEntryDetailContentProps {
+  libraryEntryId: string;
+  entry: MediaLibraryEntryDetailDto;
+  embedded: boolean;
+  availabilityByProviderLink: ProviderAvailabilityMap;
+  isRefreshingProgress: boolean;
+  isSavingStatus: boolean;
+  showLinkDialog: boolean;
+  unlinkingId: string | null;
+  progressEpisodes: number | undefined;
+  progressChapters: number | undefined;
+  progressVolumes: number | undefined;
+  selectedStatus: string;
+  onNavigateBack: () => void;
+  onLoadEntry: () => Promise<void>;
+  onSetShowLinkDialog: (visible: boolean) => void;
+  onSetProgressEpisodes: (value: number) => void;
+  onSetProgressChapters: (value: number) => void;
+  onSetProgressVolumes: (value: number) => void;
+  onSetSelectedStatus: (value: string) => void;
+  onRefreshProgress: () => void;
+  onSaveStatus: () => void;
+  onUnlink: (providerId: string) => void;
+}
+
+interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProps, 'entry'> {
+  entry: MediaLibraryEntryDetailDto | null;
+  isLoading: boolean;
+  error: string | null;
+  snackbar: SnackbarNotification | null;
+}
 
 function getErrorMessage(error: unknown, fallbackMessage: string): string {
   return error instanceof Error ? error.message : fallbackMessage;
@@ -72,13 +146,6 @@ async function loadAvailabilityStates(providerLinks: MediaProviderLinkSummaryDto
       };
     }
   }));
-}
-
-interface StatusDraft {
-  selectedStatus: string;
-  progressEpisodes: number | undefined;
-  progressChapters: number | undefined;
-  progressVolumes: number | undefined;
 }
 
 function useTimedSnackbar(timeoutMs = 3000) {
@@ -224,29 +291,57 @@ function useRemoteEntryRefresh(
     }
 
     let isCancelled = false;
+    let eventSource: EventSource | null = null;
 
     const refreshFromRemote = async () => {
       refreshInFlightRef.current = true;
       setIsRefreshingRemote(true);
 
       try {
-        const result = await mediaApi.importLibrary(refreshProviderId);
-        if (isCancelled) {
-          return;
-        }
+        const importRequest = await mediaApi.importLibrary(refreshProviderId);
+        if (isCancelled) return;
 
-        writeStoredValue(remoteCheckTimestampKey(refreshProviderId), result.importedAt);
-        await reloadEntry();
+        eventSource = await mediaApi.subscribeToImportEvents(
+          refreshProviderId,
+          importRequest.importId,
+          (event: MediaLibraryImportEventDto) => {
+            if (isCancelled) {
+              return;
+            }
+
+            if (event.status === 'completed') {
+              writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
+              void reloadEntry();
+              refreshInFlightRef.current = false;
+              setIsRefreshingRemote(false);
+              eventSource?.close();
+              return;
+            }
+
+            if (event.status === 'failed') {
+              showSnackbar({
+                message: event.errorMessage || 'Failed to refresh entry',
+                variant: 'error',
+              });
+              refreshInFlightRef.current = false;
+              setIsRefreshingRemote(false);
+              eventSource?.close();
+            }
+          },
+          () => {
+            if (!isCancelled) {
+              refreshInFlightRef.current = false;
+              setIsRefreshingRemote(false);
+            }
+          },
+        );
       } catch (refreshError) {
         if (!isCancelled) {
           showSnackbar({
             message: getPrefixedErrorMessage(refreshError, 'Failed to refresh entry'),
             variant: 'error',
           });
-        }
-      } finally {
-        refreshInFlightRef.current = false;
-        if (!isCancelled) {
+          refreshInFlightRef.current = false;
           setIsRefreshingRemote(false);
         }
       }
@@ -256,6 +351,7 @@ function useRemoteEntryRefresh(
 
     return () => {
       isCancelled = true;
+      eventSource?.close();
     };
   }, [entryId, entryIsConnected, entryProvider, reloadEntry, showSnackbar]);
 
@@ -275,19 +371,40 @@ function useManualRemoteRefresh(
     }
 
     const refreshProviderId = entry.provider || mainMediaProviderId;
+    let eventSource: EventSource | null = null;
     setIsRefreshingRemote(true);
 
     try {
-      const result = await mediaApi.importLibrary(refreshProviderId);
-      writeStoredValue(remoteCheckTimestampKey(refreshProviderId), result.importedAt);
-      await reloadEntry();
-      showSnackbar({ message: 'Status refreshed from provider', variant: 'success' });
+      const importRequest = await mediaApi.importLibrary(refreshProviderId);
+      eventSource = await mediaApi.subscribeToImportEvents(
+        refreshProviderId,
+        importRequest.importId,
+        (event: MediaLibraryImportEventDto) => {
+          if (event.status === 'completed') {
+            writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
+            void reloadEntry();
+            showSnackbar({ message: 'Status refreshed from provider', variant: 'success' });
+            setIsRefreshingRemote(false);
+            eventSource?.close();
+            return;
+          }
+
+          if (event.status === 'failed') {
+            showSnackbar({
+              message: event.errorMessage || 'Failed to refresh from provider',
+              variant: 'error',
+            });
+            setIsRefreshingRemote(false);
+            eventSource?.close();
+          }
+        },
+        () => setIsRefreshingRemote(false),
+      );
     } catch (refreshError) {
       showSnackbar({
         message: getPrefixedErrorMessage(refreshError, 'Failed to refresh from provider'),
         variant: 'error',
       });
-    } finally {
       setIsRefreshingRemote(false);
     }
   }, [entry, reloadEntry, showSnackbar]);
@@ -411,14 +528,33 @@ function useProviderUnlinkAction(
   return { unlinkingId, handleUnlink };
 }
 
+function releaseStatusLabel(dimension: string): string {
+  const map: Record<string, string> = {
+    airing: 'Currently Airing',
+    finished: 'Finished',
+    notYetAired: 'Not Yet Aired',
+    not_yet_aired: 'Not Yet Aired',
+    cancelled: 'Cancelled',
+    hiatus: 'On Hiatus',
+    unknown: 'Unknown',
+  };
+  return map[dimension] ?? dimension;
+}
 
-// ── Progress controls ─────────────────────────────────────────────────────────
+function progressKindLabel(title: MediaLibraryEntryDetailDto['title']) {
+  if (title.primaryProgressDimension === 'episode') {
+    return title.episodeCount ? 'TV Series' : 'Episode tracking';
+  }
 
-interface ProgressFieldProps {
-  label: string;
-  value: number | undefined;
-  max?: number;
-  onChange: (value: number) => void;
+  if (title.primaryProgressDimension === 'chapter') {
+    return 'Manga';
+  }
+
+  if (title.primaryProgressDimension === 'volume') {
+    return 'Volumes';
+  }
+
+  return releaseStatusLabel(title.releaseStatusDimension);
 }
 
 function clampProgressValue(value: number, max?: number) {
@@ -426,208 +562,56 @@ function clampProgressValue(value: number, max?: number) {
   return max ? Math.min(lowerBoundedValue, max) : lowerBoundedValue;
 }
 
-function ProgressField({ label, value, max, onChange }: ProgressFieldProps) {
-  const currentValue = clampProgressValue(value ?? 0, max);
-  const sliderMax = Math.max(max ?? 100, currentValue, 1);
-  const canDecrease = currentValue > 0;
-  const canIncrease = max ? currentValue < max : true;
-  const setProgressValue = (nextValue: number) => {
-    onChange(clampProgressValue(nextValue, max));
-  };
-
-  return (
-    <div className="rounded-xl bg-white/70 px-4 py-3">
-      <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</p>
-      <div className="mt-2 flex items-center gap-3">
-        <button
-          type="button"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-lg font-semibold leading-none text-gray-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
-          onClick={() => setProgressValue(currentValue - 1)}
-          disabled={!canDecrease}
-          aria-label={`Decrease ${label.toLowerCase()}`}
-        >
-          -
-        </button>
-        <div className="min-w-0 flex-1">
-          <input
-            type="range"
-            min={0}
-            max={sliderMax}
-            step={1}
-            value={currentValue}
-            onChange={(event) => setProgressValue(Number(event.target.value))}
-            className="h-2 w-full cursor-pointer accent-indigo-500"
-            aria-label={`${label} progress`}
-          />
-        </div>
-        <button
-          type="button"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-lg font-semibold leading-none text-gray-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-40"
-          onClick={() => setProgressValue(currentValue + 1)}
-          disabled={!canIncrease}
-          aria-label={`Increase ${label.toLowerCase()}`}
-        >
-          +
-        </button>
-      </div>
-      <div className="mt-2 flex items-baseline gap-1">
-        <span className="text-xl font-semibold text-gray-800">{currentValue}</span>
-        {max ? <span className="text-sm text-gray-400">/ {max}</span> : null}
-      </div>
-    </div>
-  );
-}
-
-// ── Manual search / link dialog ────────────────────────────────────────────────
-
-interface DetailPageLayoutProps {
-  children: ReactNode;
-  className?: string;
-  embedded?: boolean;
-}
-
-interface DetailHeaderProps {
-  mediaKind: string;
-  isConnected: boolean;
-  onNavigateBack: () => void;
-}
-
-interface StatusCardProps {
-  title: MediaLibraryEntryDetailDto['title'];
-  selectedStatus: string;
-  progressEpisodes: number | undefined;
-  progressChapters: number | undefined;
-  progressVolumes: number | undefined;
-  supportsEpisodes: boolean;
-  supportsChapters: boolean;
-  supportsVolumes: boolean;
-  hasStatusChanged: boolean;
-  isSavingStatus: boolean;
-  isRefreshingProgress: boolean;
-  canRefreshProgress: boolean;
-  updatedAt: string;
-  onStatusChange: (value: string) => void;
-  onProgressEpisodesChange: (value: number) => void;
-  onProgressChaptersChange: (value: number) => void;
-  onProgressVolumesChange: (value: number) => void;
-  onSaveStatus: () => void;
-  onRefreshProgress: () => void;
-}
-
-interface StatusActionRowProps {
-  hasStatusChanged: boolean;
-  isSavingStatus: boolean;
-  isRefreshingProgress: boolean;
-  canRefreshProgress: boolean;
-  onSaveStatus: () => void;
-  onRefreshProgress: () => void;
-}
-
-interface EntryDetailPanelsProps extends Pick<
-  MediaEntryDetailContentProps,
-  'entry'
-  | 'availabilityByProviderLink'
-  | 'unlinkingId'
-  | 'progressEpisodes'
-  | 'progressChapters'
-  | 'progressVolumes'
-  | 'selectedStatus'
-  | 'isRefreshingProgress'
-  | 'isSavingStatus'
-  | 'onSetShowLinkDialog'
-  | 'onSetProgressEpisodes'
-  | 'onSetProgressChapters'
-  | 'onSetProgressVolumes'
-  | 'onSetSelectedStatus'
-  | 'onRefreshProgress'
-  | 'onSaveStatus'
-  | 'onUnlink'
-> {}
-
-interface MediaEntryDetailContentProps {
-  libraryEntryId: string;
-  entry: MediaLibraryEntryDetailDto;
-  embedded: boolean;
-  availabilityByProviderLink: ProviderAvailabilityMap;
-  isRefreshingProgress: boolean;
-  isSavingStatus: boolean;
-  showLinkDialog: boolean;
-  unlinkingId: string | null;
-  progressEpisodes: number | undefined;
-  progressChapters: number | undefined;
-  progressVolumes: number | undefined;
-  selectedStatus: string;
-  onNavigateBack: () => void;
-  onLoadEntry: () => Promise<void>;
-  onSetShowLinkDialog: (visible: boolean) => void;
-  onSetProgressEpisodes: (value: number) => void;
-  onSetProgressChapters: (value: number) => void;
-  onSetProgressVolumes: (value: number) => void;
-  onSetSelectedStatus: (value: string) => void;
-  onRefreshProgress: () => void;
-  onSaveStatus: () => void;
-  onUnlink: (providerId: string) => void;
-}
-
-function DetailPageLayout({ children, className = 'space-y-6', embedded = false }: DetailPageLayoutProps) {
-  if (embedded) {
-    return (
-      <div className={`mx-auto max-w-4xl ${className}`}>
-        {children}
-      </div>
-    );
+function getPrimaryProgressSummary(
+  title: MediaLibraryEntryDetailDto['title'],
+  progressEpisodes: number | undefined,
+  progressChapters: number | undefined,
+  progressVolumes: number | undefined,
+): ProgressSummary {
+  if (title.primaryProgressDimension === 'chapter') {
+    return {
+      label: 'Chapters read',
+      noun: 'chapters',
+      value: progressChapters,
+      total: title.chapterCount,
+      nextLabel: `Next chapter ${clampProgressValue((progressChapters ?? 0) + 1, title.chapterCount)}`,
+    };
   }
 
-  return (
-    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
+  if (title.primaryProgressDimension === 'volume') {
+    return {
+      label: 'Volumes read',
+      noun: 'volumes',
+      value: progressVolumes,
+      total: title.volumeCount,
+      nextLabel: `Next volume ${clampProgressValue((progressVolumes ?? 0) + 1, title.volumeCount)}`,
+    };
+  }
 
-      <div className={`relative z-10 mx-auto max-w-4xl px-6 pt-8 pb-16 ${className}`}>
-        {children}
-      </div>
-    </div>
-  );
+  return {
+    label: 'Watched',
+    noun: 'episodes',
+    value: progressEpisodes,
+    total: title.episodeCount,
+    nextLabel: `Next up: Episode ${clampProgressValue((progressEpisodes ?? 0) + 1, title.episodeCount)}`,
+  };
 }
 
-function DetailLoadingState({ embedded = false }: { embedded?: boolean }) {
-  return (
-    <DetailPageLayout className="" embedded={embedded}>
-      <GlassCard className="h-96 animate-pulse" />
-    </DetailPageLayout>
-  );
+function getProgressPercent(summary: ProgressSummary) {
+  if (!summary.total || summary.total <= 0) {
+    return 0;
+  }
+
+  return Math.round((Math.min(summary.value ?? 0, summary.total) / summary.total) * 100);
 }
 
-function DetailErrorState({ error, embedded = false, onNavigateBack, onRetry }: { error: string | null; embedded?: boolean; onNavigateBack: () => void; onRetry: () => Promise<void> }) {
-  return (
-    <DetailPageLayout className="space-y-4" embedded={embedded}>
-      <GradientButton tone="soft" onClick={onNavigateBack}>← Back to library</GradientButton>
-      <GlassCard className="p-6">
-        <p className="text-rose-700">{error ?? 'Entry not found'}</p>
-        <div className="mt-3">
-          <GradientButton tone="soft" onClick={() => void onRetry()}>Retry</GradientButton>
-        </div>
-      </GlassCard>
-    </DetailPageLayout>
-  );
-}
+function getRemainingLabel(summary: ProgressSummary) {
+  if (!summary.total) {
+    return 'Total unknown';
+  }
 
-function DetailHeader({ mediaKind, isConnected, onNavigateBack }: DetailHeaderProps) {
-  return (
-    <header className="flex flex-wrap items-center gap-3">
-      <GradientButton tone="soft" onClick={onNavigateBack}>
-        ← Library
-      </GradientButton>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-          {mediaKindLabel(mediaKind)}
-        </span>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isConnected ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
-          {isConnected ? 'Synced' : 'Not synced'}
-        </span>
-      </div>
-    </header>
-  );
+  const remaining = Math.max(summary.total - (summary.value ?? 0), 0);
+  return remaining === 1 ? `1 ${summary.noun.slice(0, -1)} left` : `${remaining} ${summary.noun} left`;
 }
 
 function getProgressCapabilities(title: MediaLibraryEntryDetailDto['title']) {
@@ -639,48 +623,81 @@ function getProgressCapabilities(title: MediaLibraryEntryDetailDto['title']) {
   };
 }
 
-function getEntryStatusChanged(props: EntryDetailPanelsProps) {
+function getEntryStatusChanged(props: Pick<
+  MediaEntryDetailContentProps,
+  'entry' | 'selectedStatus' | 'progressEpisodes' | 'progressChapters' | 'progressVolumes'
+>) {
   return props.selectedStatus !== props.entry.normalizedStatus
     || props.progressEpisodes !== props.entry.progressEpisodes
     || props.progressChapters !== props.entry.progressChapters
     || props.progressVolumes !== props.entry.progressVolumes;
 }
 
-function EntryDetailPanels(props: EntryDetailPanelsProps) {
-  const { entry } = props;
-  const capabilities = getProgressCapabilities(entry.title);
+function getStatusSaveLabel(isSavingStatus: boolean) {
+  return isSavingStatus ? 'Saving...' : 'Save progress';
+}
+
+function isStatusSaveDisabled(
+  hasStatusChanged: boolean,
+  isSavingStatus: boolean,
+  isRefreshingProgress: boolean,
+) {
+  return [!hasStatusChanged, isSavingStatus, isRefreshingProgress].some(Boolean);
+}
+
+function isStatusRefreshDisabled(
+  canRefreshProgress: boolean,
+  isSavingStatus: boolean,
+  isRefreshingProgress: boolean,
+) {
+  return [!canRefreshProgress, isSavingStatus, isRefreshingProgress].some(Boolean);
+}
+
+function DetailPageLayout({ children, className = '', embedded = false }: { children: ReactNode; className?: string; embedded?: boolean }) {
+  if (embedded) {
+    return (
+      <div className={`media-detail-shell ${className}`}>
+        {children}
+      </div>
+    );
+  }
 
   return (
-    <>
-      <EntryOverviewCard entry={entry} nextRelease={formatNextReleaseDisplay(entry.nextReleaseAt)} />
-      <StatusCard
-        title={entry.title}
-        selectedStatus={props.selectedStatus}
-        hasStatusChanged={getEntryStatusChanged(props)}
-        isSavingStatus={props.isSavingStatus}
-        progressEpisodes={props.progressEpisodes}
-        progressChapters={props.progressChapters}
-        progressVolumes={props.progressVolumes}
-        {...capabilities}
-        isRefreshingProgress={props.isRefreshingProgress}
-        canRefreshProgress={entry.isConnected}
-        updatedAt={entry.updatedAt}
-        onStatusChange={props.onSetSelectedStatus}
-        onProgressEpisodesChange={props.onSetProgressEpisodes}
-        onProgressChaptersChange={props.onSetProgressChapters}
-        onProgressVolumesChange={props.onSetProgressVolumes}
-        onSaveStatus={props.onSaveStatus}
-        onRefreshProgress={props.onRefreshProgress}
-      />
-      <ProviderLinksCard
-        providerLinks={entry.providerLinks}
-        availabilityByProviderLink={props.availabilityByProviderLink}
-        unlinkingId={props.unlinkingId}
-        lastSyncedAt={entry.lastSyncedAt}
-        onLinkProvider={() => props.onSetShowLinkDialog(true)}
-        onUnlink={props.onUnlink}
-      />
-    </>
+    <div className="media-detail-standalone">
+      <div className={`media-detail-shell ${className}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function DetailLoadingState({ embedded = false }: { embedded?: boolean }) {
+  return (
+    <DetailPageLayout embedded={embedded}>
+      <div className="media-detail-skeleton" />
+    </DetailPageLayout>
+  );
+}
+
+function DetailErrorState({
+  error,
+  embedded = false,
+  onNavigateBack,
+  onRetry,
+}: {
+  error: string | null;
+  embedded?: boolean;
+  onNavigateBack: () => void;
+  onRetry: () => Promise<void>;
+}) {
+  return (
+    <DetailPageLayout className="space-y-4" embedded={embedded}>
+      <GradientButton tone="soft" onClick={onNavigateBack}>Back to library</GradientButton>
+      <div className="media-detail-empty-panel">
+        <p>{error ?? 'Entry not found'}</p>
+        <button type="button" onClick={() => void onRetry()}>Retry</button>
+      </div>
+    </DetailPageLayout>
   );
 }
 
@@ -714,160 +731,532 @@ function EntryLinkDialog({
   );
 }
 
-function StatusCardHeader({ selectedStatus, updatedAt, onStatusChange }: Pick<StatusCardProps, 'selectedStatus' | 'updatedAt' | 'onStatusChange'>) {
+function DetailTopBar({
+  mediaKind,
+  isConnected,
+  onNavigateBack,
+}: {
+  mediaKind: string;
+  isConnected: boolean;
+  onNavigateBack: () => void;
+}) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Status</h2>
-        <p className="mt-1 text-xs text-gray-400">
-          Last updated {new Date(updatedAt).toLocaleDateString()}
-        </p>
+    <header className="media-detail-topbar">
+      <button type="button" className="media-detail-icon-button" onClick={onNavigateBack} aria-label="Back to library">
+        <span aria-hidden>←</span>
+      </button>
+      <div className="media-detail-topbar-pills">
+        <span className="media-detail-pill media-detail-pill--violet">{mediaKindLabel(mediaKind)}</span>
+        <span className={`media-detail-pill ${isConnected ? 'media-detail-pill--success' : 'media-detail-pill--warning'}`}>
+          {isConnected ? 'Synced' : 'Not synced'}
+        </span>
       </div>
-      <select
-        className="min-w-52 rounded-xl border border-gray-200 bg-white/80 px-4 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-        value={selectedStatus}
-        onChange={(event) => onStatusChange(event.target.value)}
-      >
-        {NORMALIZED_STATUSES.map((status) => (
-          <option key={status.value} value={status.value}>{status.label}</option>
-        ))}
-      </select>
+    </header>
+  );
+}
+
+function MediaHero({
+  entry,
+  progressSummary,
+  onNavigateBack,
+}: {
+  entry: MediaLibraryEntryDetailDto;
+  progressSummary: ProgressSummary;
+  onNavigateBack: () => void;
+}) {
+  const { title } = entry;
+  const nextRelease = formatNextReleaseDisplay(entry.nextReleaseAt);
+  const titleCounts = [
+    title.episodeCount ? `${title.episodeCount} Episodes` : null,
+    title.chapterCount ? `${title.chapterCount} Chapters` : null,
+    title.volumeCount ? `${title.volumeCount} Volumes` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <section className="media-detail-hero">
+      {title.posterUrl ? (
+        <img className="media-detail-hero-bg" src={title.posterUrl} alt="" aria-hidden />
+      ) : null}
+      <div className="media-detail-hero-scrim" aria-hidden />
+      <div className="media-detail-hero-content">
+        <DetailTopBar mediaKind={title.mediaKind} isConnected={entry.isConnected} onNavigateBack={onNavigateBack} />
+        <div className="media-detail-hero-grid">
+          <div className="media-detail-poster">
+            <DetailArtwork posterUrl={title.posterUrl} title={title.canonicalTitle} />
+          </div>
+          <div className="media-detail-title-stack">
+            <div className="media-detail-tag-row">
+              <span className="media-detail-dot media-detail-dot--violet" />
+              <span>{mediaKindLabel(title.mediaKind)}</span>
+              <span className="media-detail-dot media-detail-dot--blue" />
+              <span>{progressKindLabel(title)}</span>
+            </div>
+            <h2>{title.canonicalTitle}</h2>
+            {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
+              <p className="media-detail-original-title">{title.originalTitle}</p>
+            ) : null}
+            <div className="media-detail-meta-row">
+              {title.startYear ? (
+                <span><CalendarDays aria-hidden />{title.startYear}</span>
+              ) : null}
+              {titleCounts.map((count) => (
+                <span key={count}><Tv aria-hidden />{count}</span>
+              ))}
+              {nextRelease ? <span><Clock3 aria-hidden />{nextRelease.relative}</span> : null}
+            </div>
+            <div className="media-detail-rating-pill">
+              <Star aria-hidden />
+              <span>Library progress {getProgressPercent(progressSummary)}%</span>
+            </div>
+            {title.synopsis ? (
+              <SanitizedSynopsis html={title.synopsis} className="media-detail-synopsis" />
+            ) : null}
+            {entry.rawStatus || entry.rawListName ? (
+              <p className="media-detail-provider-status">Provider status: {entry.rawListName ?? entry.rawStatus}</p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProgressRing({ percent }: { percent: number }) {
+  return (
+    <div
+      className="media-detail-progress-ring"
+      style={{ '--media-detail-progress': `${percent * 3.6}deg` } as CSSProperties}
+      aria-label={`${percent}% complete`}
+    >
+      <span>{percent}%</span>
     </div>
   );
 }
 
-type StatusProgressFieldsProps = Pick<
-  StatusCardProps,
-  'title'
+function ProgressStepper({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  max?: number;
+  onChange: (value: number) => void;
+}) {
+  const currentValue = clampProgressValue(value ?? 0, max);
+  const sliderMax = Math.max(max ?? 100, currentValue, 1);
+  const canDecrease = currentValue > 0;
+  const canIncrease = max ? currentValue < max : true;
+  const setProgressValue = (nextValue: number) => onChange(clampProgressValue(nextValue, max));
+
+  return (
+    <div className="media-detail-stepper">
+      <div className="media-detail-stepper-row">
+        <button
+          type="button"
+          onClick={() => setProgressValue(currentValue - 1)}
+          disabled={!canDecrease}
+          aria-label={`Decrease ${label.toLowerCase()}`}
+        >
+          <Minus aria-hidden />
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={sliderMax}
+          step={1}
+          value={currentValue}
+          onChange={(event) => setProgressValue(Number(event.target.value))}
+          aria-label={`${label} progress`}
+        />
+        <button
+          type="button"
+          onClick={() => setProgressValue(currentValue + 1)}
+          disabled={!canIncrease}
+          aria-label={`Increase ${label.toLowerCase()}`}
+        >
+          <Plus aria-hidden />
+        </button>
+      </div>
+      <p>{currentValue}{max ? ` / ${max}` : ''}</p>
+    </div>
+  );
+}
+
+function ProgressCockpit(props: Pick<
+  MediaEntryDetailContentProps,
+  'entry'
+  | 'selectedStatus'
   | 'progressEpisodes'
   | 'progressChapters'
   | 'progressVolumes'
-  | 'supportsEpisodes'
-  | 'supportsChapters'
-  | 'supportsVolumes'
-  | 'onProgressEpisodesChange'
-  | 'onProgressChaptersChange'
-  | 'onProgressVolumesChange'
->;
+  | 'isRefreshingProgress'
+  | 'isSavingStatus'
+  | 'onSetSelectedStatus'
+  | 'onSetProgressEpisodes'
+  | 'onSetProgressChapters'
+  | 'onSetProgressVolumes'
+  | 'onRefreshProgress'
+  | 'onSaveStatus'
+>) {
+  const capabilities = getProgressCapabilities(props.entry.title);
+  const progressSummary = getPrimaryProgressSummary(
+    props.entry.title,
+    props.progressEpisodes,
+    props.progressChapters,
+    props.progressVolumes,
+  );
+  const percent = getProgressPercent(progressSummary);
+  const hasStatusChanged = getEntryStatusChanged(props);
 
-function StatusProgressFields(props: StatusProgressFieldsProps) {
   return (
-    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-      {props.supportsEpisodes ? (
-        <ProgressField label="Episodes" value={props.progressEpisodes} max={props.title.episodeCount} onChange={props.onProgressEpisodesChange} />
-      ) : null}
-      {props.supportsChapters ? (
-        <ProgressField label="Chapters" value={props.progressChapters} max={props.title.chapterCount} onChange={props.onProgressChaptersChange} />
-      ) : null}
-      {props.supportsVolumes ? (
-        <ProgressField label="Volumes" value={props.progressVolumes} max={props.title.volumeCount} onChange={props.onProgressVolumesChange} />
-      ) : null}
-    </div>
+    <section className="media-detail-progress-card">
+      <div className="media-detail-progress-main">
+        <ProgressRing percent={percent} />
+        <div>
+          <p>{progressSummary.label}</p>
+          <strong>{progressSummary.value ?? 0}{progressSummary.total ? ` / ${progressSummary.total}` : ''}</strong>
+          <span>{getRemainingLabel(progressSummary)}</span>
+        </div>
+      </div>
+      <div className="media-detail-progress-next">
+        <div className="media-detail-progress-next-head">
+          <div>
+            <p>{progressSummary.nextLabel}</p>
+            <span>Update progress and sync when the change is ready.</span>
+          </div>
+          <span className={`media-detail-sync-chip ${hasStatusChanged ? 'media-detail-sync-chip--pending' : 'media-detail-sync-chip--ok'}`}>
+            {hasStatusChanged ? <Clock3 aria-hidden /> : <CheckCircle2 aria-hidden />}
+            {hasStatusChanged ? 'Unsaved' : 'Synced'}
+          </span>
+        </div>
+        {capabilities.supportsEpisodes ? (
+          <ProgressStepper label="Episodes" value={props.progressEpisodes} max={props.entry.title.episodeCount} onChange={props.onSetProgressEpisodes} />
+        ) : null}
+        {capabilities.supportsChapters ? (
+          <ProgressStepper label="Chapters" value={props.progressChapters} max={props.entry.title.chapterCount} onChange={props.onSetProgressChapters} />
+        ) : null}
+        {capabilities.supportsVolumes ? (
+          <ProgressStepper label="Volumes" value={props.progressVolumes} max={props.entry.title.volumeCount} onChange={props.onSetProgressVolumes} />
+        ) : null}
+      </div>
+      <div className="media-detail-score-row">
+        <div>
+          <p>Your score</p>
+          <div aria-label="User score unavailable">
+            {[1, 2, 3, 4, 5].map((star) => <Star key={star} aria-hidden />)}
+          </div>
+        </div>
+        <select value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
+          {NORMALIZED_STATUSES.map((status) => (
+            <option key={status.value} value={status.value}>{status.label}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={props.onRefreshProgress}
+          disabled={isStatusRefreshDisabled(props.entry.isConnected, props.isSavingStatus, props.isRefreshingProgress)}
+          aria-busy={props.isRefreshingProgress}
+        >
+          <RefreshCcw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
+          Refresh
+        </button>
+      </div>
+    </section>
   );
 }
 
-function StatusCard(props: StatusCardProps) {
-  return (
-    <GlassCard className="p-6">
-      <StatusCardHeader {...props} />
-      <StatusProgressFields {...props} />
-      <StatusActionRow
-        hasStatusChanged={props.hasStatusChanged}
-        isSavingStatus={props.isSavingStatus}
-        isRefreshingProgress={props.isRefreshingProgress}
-        canRefreshProgress={props.canRefreshProgress}
-        onSaveStatus={props.onSaveStatus}
-        onRefreshProgress={props.onRefreshProgress}
-      />
-    </GlassCard>
-  );
-}
-
-function StatusActionRow({
+function ActionRail({
   hasStatusChanged,
   isSavingStatus,
   isRefreshingProgress,
-  canRefreshProgress,
   onSaveStatus,
-  onRefreshProgress,
-}: StatusActionRowProps) {
+  onLinkProvider,
+}: {
+  hasStatusChanged: boolean;
+  isSavingStatus: boolean;
+  isRefreshingProgress: boolean;
+  onSaveStatus: () => void;
+  onLinkProvider: () => void;
+}) {
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-3">
-      <GradientButton
-        gradient="from-indigo-500 to-purple-500"
+    <div className="media-detail-action-rail">
+      <button
+        type="button"
+        className="media-detail-primary-action"
         onClick={onSaveStatus}
         disabled={isStatusSaveDisabled(hasStatusChanged, isSavingStatus, isRefreshingProgress)}
         aria-busy={isSavingStatus}
       >
-        {getStatusSaveLabel(isSavingStatus)}
-      </GradientButton>
-      <GradientButton
-        tone="soft"
-        onClick={onRefreshProgress}
-        disabled={isStatusRefreshDisabled(canRefreshProgress, isSavingStatus, isRefreshingProgress)}
-        aria-busy={isRefreshingProgress}
-        title={canRefreshProgress ? 'Refresh status from provider' : 'Entry must be synced to refresh status'}
-      >
-        {getProgressRefreshLabel(isRefreshingProgress)}
-      </GradientButton>
+        {hasStatusChanged ? <Save aria-hidden /> : <Play aria-hidden />}
+        <span>{hasStatusChanged ? getStatusSaveLabel(isSavingStatus) : 'Continue Watching'}</span>
+      </button>
+      <button type="button" className="media-detail-secondary-action" onClick={onLinkProvider}>
+        <Plus aria-hidden />
+        Add to Library
+      </button>
+      <button type="button" className="media-detail-more-action" aria-label="More actions">
+        <MoreVertical aria-hidden />
+      </button>
     </div>
   );
 }
 
-function isStatusSaveDisabled(
-  hasStatusChanged: boolean,
-  isSavingStatus: boolean,
-  isRefreshingProgress: boolean,
-) {
-  return [!hasStatusChanged, isSavingStatus, isRefreshingProgress].some(Boolean);
-}
-
-function isStatusRefreshDisabled(
-  canRefreshProgress: boolean,
-  isSavingStatus: boolean,
-  isRefreshingProgress: boolean,
-) {
-  return [!canRefreshProgress, isSavingStatus, isRefreshingProgress].some(Boolean);
-}
-
-function getStatusSaveLabel(isSavingStatus: boolean) {
-  return isSavingStatus ? 'Saving…' : 'Save status';
-}
-
-function getProgressRefreshLabel(isRefreshingProgress: boolean) {
-  return isRefreshingProgress ? 'Refreshing…' : 'Refresh';
-}
-
-// ── Entry detail page ──────────────────────────────────────────────────────────
-
-interface MediaEntryDetailPageProps {
-  libraryEntryId: string;
-  onNavigateBack: () => void;
-  embedded?: boolean;
-}
-
-interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProps, 'entry'> {
-  entry: MediaLibraryEntryDetailDto | null;
-  isLoading: boolean;
-  error: string | null;
-  snackbar: SnackbarNotification | null;
-}
-
-function MediaEntryDetailBody(props: MediaEntryDetailContentProps & { mediaKind: string }) {
+function DetailTabs() {
   return (
-    <DetailPageLayout embedded={props.embedded}>
-      <DetailHeader mediaKind={props.mediaKind} isConnected={props.entry.isConnected} onNavigateBack={props.onNavigateBack} />
-      <EntryDetailPanels {...props} />
-    </DetailPageLayout>
+    <nav className="media-detail-tabs" aria-label="Media detail sections">
+      {DETAIL_TABS.map((tab, index) => (
+        <button key={tab} type="button" className={index === 0 ? 'is-active' : undefined}>
+          {tab}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function providerLabel(providerId: string) {
+  return mediaProviderCatalog.find((provider) => provider.id === providerId)?.name ?? providerId;
+}
+
+function availabilityText(availability?: ProviderAvailabilityState) {
+  if (!availability || availability.status === 'loading') {
+    return 'Checking';
+  }
+
+  if (availability.status === 'error') {
+    return 'Unavailable';
+  }
+
+  return availability.links.length > 0 ? `${availability.links.length} options` : 'Linked';
+}
+
+function ProviderSection({
+  providerLinks,
+  availabilityByProviderLink,
+  unlinkingId,
+  lastSyncedAt,
+  onLinkProvider,
+  onUnlink,
+}: {
+  providerLinks: MediaProviderLinkSummaryDto[];
+  availabilityByProviderLink: ProviderAvailabilityMap;
+  unlinkingId: string | null;
+  lastSyncedAt?: string;
+  onLinkProvider: () => void;
+  onUnlink: (providerId: string) => void;
+}) {
+  const visibleLinks = providerLinks.slice(0, 3);
+  const hiddenCount = Math.max(providerLinks.length - visibleLinks.length, 0);
+
+  return (
+    <section className="media-detail-section">
+      <SectionHeading title="Where to Watch" action={providerLinks.length > 3 ? `More ${hiddenCount}+` : undefined} />
+      {providerLinks.length === 0 ? (
+        <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
+          <Plus aria-hidden />
+          Link a provider to show availability.
+        </button>
+      ) : (
+        <div className="media-detail-provider-grid">
+          {visibleLinks.map((link) => {
+            const availability = availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)];
+            const catalog = mediaProviderCatalog.find((provider) => provider.id === link.provider);
+            return (
+              <article key={link.id} className="media-detail-provider-card">
+                {catalog ? <MediaProviderIcon providerId={catalog.iconId} aria-hidden /> : <span className="media-detail-provider-letter">{link.provider.slice(0, 1).toUpperCase()}</span>}
+                <div>
+                  <h4>{providerLabel(link.provider)}</h4>
+                  <p>{availabilityText(availability)}</p>
+                  {link.externalUrl ? <a href={link.externalUrl} target="_blank" rel="noopener noreferrer">Open</a> : null}
+                </div>
+                <button type="button" onClick={() => onUnlink(link.provider)} disabled={unlinkingId === link.provider}>
+                  {unlinkingId === link.provider ? '...' : 'Unlink'}
+                </button>
+                <CircleCheck aria-hidden className="media-detail-provider-check" />
+              </article>
+            );
+          })}
+          {hiddenCount > 0 ? (
+            <button type="button" className="media-detail-provider-more" onClick={onLinkProvider}>
+              <MoreVertical aria-hidden />
+              More
+              <span>{hiddenCount}+</span>
+            </button>
+          ) : null}
+        </div>
+      )}
+      {lastSyncedAt ? <p className="media-detail-section-note">Last synced {new Date(lastSyncedAt).toLocaleString()}</p> : null}
+    </section>
+  );
+}
+
+function SectionHeading({ title, action }: { title: string; action?: string }) {
+  return (
+    <div className="media-detail-section-heading">
+      <h3>{title}</h3>
+      {action ? <button type="button">{action}</button> : null}
+    </div>
+  );
+}
+
+function FranchiseSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+  const { title } = entry;
+  const items = [
+    { title: title.canonicalTitle, subtitle: title.episodeCount ? `${title.episodeCount} episodes` : 'Current entry', active: true },
+    { title: `${title.canonicalTitle} extras`, subtitle: 'Related media', active: false },
+    { title: `${title.canonicalTitle} specials`, subtitle: 'Upcoming', active: false },
+  ];
+
+  return (
+    <section className="media-detail-section">
+      <SectionHeading title="Franchise Order" />
+      <div className="media-detail-franchise-strip">
+        {items.map((item, index) => (
+          <div key={item.title} className="media-detail-franchise-item-wrap">
+            <article className={`media-detail-franchise-item ${item.active ? 'is-active' : ''}`}>
+              <div className="media-detail-franchise-thumb">
+                <DetailArtwork posterUrl={title.posterUrl} title={item.title} />
+              </div>
+              <div>
+                <h4>{item.title}</h4>
+                <p>{item.subtitle}</p>
+                <span>{item.active ? 'Watched' : 'Linked soon'}</span>
+              </div>
+            </article>
+            {index < items.length - 1 ? <span className="media-detail-franchise-arrow">→</span> : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CharactersSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+  const names = ['Main cast', 'Supporting cast', 'Provider roles', 'Watch notes'];
+
+  return (
+    <section className="media-detail-section">
+      <SectionHeading title="Main Characters" action="See all" />
+      <div className="media-detail-character-row">
+        {names.map((name, index) => (
+          <article key={name} className="media-detail-character-card">
+            <div>
+              <DetailArtwork posterUrl={entry.title.posterUrl} title={name} />
+            </div>
+            <button type="button" aria-label={`Favorite ${name}`}>
+              <Heart aria-hidden />
+            </button>
+            <h4>{index === 0 ? entry.title.canonicalTitle : name}</h4>
+            <p>{index === 0 ? 'Main' : 'Supporting'}</p>
+            <Info aria-hidden className="media-detail-character-info" />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CommunitySection({ entry, progressSummary }: { entry: MediaLibraryEntryDetailDto; progressSummary: ProgressSummary }) {
+  return (
+    <section className="media-detail-community">
+      <SectionHeading title="Community" action="See all" />
+      <div className="media-detail-community-grid">
+        <MetricCard icon={<Star aria-hidden />} label="Progress" value={`${getProgressPercent(progressSummary)}%`} detail={getRemainingLabel(progressSummary)} />
+        <MetricCard icon={<Heart aria-hidden />} label="Library" value={entry.isConnected ? 'Synced' : 'Local'} detail={providerLabel(entry.provider)} />
+        <MetricCard icon={<Flame aria-hidden />} label="Status" value={progressKindLabel(entry.title)} detail={mediaKindLabel(entry.title.mediaKind)} />
+      </div>
+    </section>
+  );
+}
+
+function InformationSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+  const { title } = entry;
+  const rows = [
+    ['Format', progressKindLabel(title)],
+    ['Status', releaseStatusLabel(title.releaseStatusDimension)],
+    ['Aired', title.startYear ? String(title.startYear) : 'Unknown'],
+    ['Provider', providerLabel(entry.provider)],
+    ['Progress', getPrimaryProgressSummary(title, entry.progressEpisodes, entry.progressChapters, entry.progressVolumes).total ? `${getPrimaryProgressSummary(title, entry.progressEpisodes, entry.progressChapters, entry.progressVolumes).total} ${getPrimaryProgressSummary(title, entry.progressEpisodes, entry.progressChapters, entry.progressVolumes).noun}` : 'Unknown'],
+    ['Rating', mediaKindLabel(title.mediaKind)],
+  ];
+
+  return (
+    <section className="media-detail-info-card">
+      <h3>Information</h3>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function MetricCard({ icon, label, value, detail }: { icon: ReactNode; label: string; value: string; detail: string }) {
+  return (
+    <article className="media-detail-metric-card">
+      <p>{label}</p>
+      <strong>{icon}{value}</strong>
+      <span>{detail}</span>
+    </article>
   );
 }
 
 function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
   const mediaKind = props.entry.title.mediaKind;
+  const progressSummary = getPrimaryProgressSummary(
+    props.entry.title,
+    props.progressEpisodes,
+    props.progressChapters,
+    props.progressVolumes,
+  );
+  const hasStatusChanged = getEntryStatusChanged(props);
 
   return (
     <>
-      <MediaEntryDetailBody {...props} mediaKind={mediaKind} />
+      <DetailPageLayout embedded={props.embedded}>
+        <div className="media-detail-layout">
+          <section className="media-detail-top-area">
+            <MediaHero entry={props.entry} progressSummary={progressSummary} onNavigateBack={props.onNavigateBack} />
+            <div className="media-detail-desktop-progress">
+              <ProgressCockpit {...props} />
+            </div>
+            <div className="media-detail-mobile-progress">
+              <ProgressCockpit {...props} />
+            </div>
+          </section>
+          <div className="media-detail-main-column">
+            <ActionRail
+              hasStatusChanged={hasStatusChanged}
+              isSavingStatus={props.isSavingStatus}
+              isRefreshingProgress={props.isRefreshingProgress}
+              onSaveStatus={props.onSaveStatus}
+              onLinkProvider={() => props.onSetShowLinkDialog(true)}
+            />
+            <section className="media-detail-overview-card">
+              <DetailTabs />
+              <ProviderSection
+                providerLinks={props.entry.providerLinks}
+                availabilityByProviderLink={props.availabilityByProviderLink}
+                unlinkingId={props.unlinkingId}
+                lastSyncedAt={props.entry.lastSyncedAt}
+                onLinkProvider={() => props.onSetShowLinkDialog(true)}
+                onUnlink={props.onUnlink}
+              />
+              <FranchiseSection entry={props.entry} />
+              <CharactersSection entry={props.entry} />
+              <div className="media-detail-overview-meta-grid">
+                <InformationSection entry={props.entry} />
+                <CommunitySection entry={props.entry} progressSummary={progressSummary} />
+              </div>
+            </section>
+          </div>
+        </div>
+      </DetailPageLayout>
       <EntryLinkDialog
         showLinkDialog={props.showLinkDialog}
         libraryEntryId={props.libraryEntryId}
@@ -911,7 +1300,12 @@ function MediaEntryDetailPageView({
   );
 }
 
-export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded = false }: MediaEntryDetailPageProps) {
+export function MediaEntryDetailPage({
+  libraryEntryId,
+  onNavigateBack,
+  embedded = false,
+  onHeadingChange,
+}: MediaEntryDetailPageProps) {
   const {
     entry,
     setEntry,
@@ -947,6 +1341,19 @@ export function MediaEntryDetailPage({ libraryEntryId, onNavigateBack, embedded 
   );
   const { unlinkingId, handleUnlink } = useProviderUnlinkAction(libraryEntryId, setEntry, showSnackbar);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
+
+  useEffect(() => {
+    if (!entry || !onHeadingChange) {
+      return;
+    }
+
+    onHeadingChange({
+      eyebrow: 'Cantaro · Media',
+      title: entry.title.canonicalTitle,
+      details: [mediaKindLabel(entry.title.mediaKind), entry.isConnected ? 'Synced' : 'Not synced'],
+      hidden: true,
+    });
+  }, [entry, onHeadingChange]);
 
   return (
     <MediaEntryDetailPageView

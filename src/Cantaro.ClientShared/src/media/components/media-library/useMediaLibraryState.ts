@@ -12,6 +12,7 @@ import {
 } from '../../services/mediaRefreshCache';
 import type {
   MediaLibraryListItemDto,
+  MediaLibraryImportEventDto,
   MediaLibraryQueryParams,
   MediaProviderAccountStatusDto,
 } from '../../services/mediaApi';
@@ -236,15 +237,56 @@ function useProviderRefresh(
     setRefreshError(null);
 
     try {
-      const result = await mediaApi.importLibrary(PRIMARY_PROVIDER_ID);
-      writeStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID), result.importedAt);
-      setLastRemoteCheckAt(result.importedAt);
-      await loadLibrary(filtersRef.current);
+      await mediaApi.importLibrary(PRIMARY_PROVIDER_ID);
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : 'Failed to refresh from AniList');
-    } finally {
       setIsRefreshing(false);
     }
+  }, []);
+
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    let isMounted = true;
+
+    void mediaApi.subscribeToImportEvents(
+      PRIMARY_PROVIDER_ID,
+      undefined,
+      (event: MediaLibraryImportEventDto) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (event.status === 'running') {
+          setIsRefreshing(true);
+          return;
+        }
+
+        if (event.status === 'completed') {
+          writeStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID), event.occurredAt);
+          setLastRemoteCheckAt(event.occurredAt);
+          setIsRefreshing(false);
+          void loadLibrary(filtersRef.current);
+          return;
+        }
+
+        if (event.status === 'failed') {
+          setRefreshError(event.errorMessage || 'Failed to refresh from AniList');
+          setIsRefreshing(false);
+        }
+      },
+      () => {
+        if (isMounted) {
+          setIsRefreshing(false);
+        }
+      },
+    ).then((source) => {
+      eventSource = source;
+    });
+
+    return () => {
+      isMounted = false;
+      eventSource?.close();
+    };
   }, [filtersRef, loadLibrary]);
 
   useEffect(() => {

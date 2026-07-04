@@ -19,6 +19,27 @@ public class MediaImportDto
     public DateTimeOffset ImportedAt { get; set; }
 }
 
+public class MediaImportRequestDto
+{
+    public required string ProviderId { get; set; }
+    public required Guid ImportId { get; set; }
+    public required string Status { get; set; }
+}
+
+public class MediaLibraryImportEventDto
+{
+    public required string ProviderId { get; set; }
+    public required Guid ImportId { get; set; }
+    public required string Status { get; set; }
+    public int ImportedCount { get; set; }
+    public int CreatedTitles { get; set; }
+    public int CreatedEntries { get; set; }
+    public int UpdatedEntries { get; set; }
+    public bool LibraryChanged { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
 public class MediaProgressUpdateDto
 {
     public int? ProgressEpisodes { get; set; }

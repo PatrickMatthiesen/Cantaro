@@ -329,12 +329,12 @@ public class MediaProviderDtoContractTests
             await dbContext.SaveChangesAsync();
 
             var registry = new MediaProviderRegistry([provider]);
-            var importService = new MediaLibraryImportService(dbContext, NullLogger<MediaLibraryImportService>.Instance);
+            var importQueue = new MediaLibraryImportQueue();
             var operationProcessor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
             var controller = new MediaProvidersController(
                 dbContext,
                 registry,
-                importService,
+                importQueue,
                 operationProcessor,
                 CreateUserManager(dbContext),
                 NullLogger<MediaProvidersController>.Instance,
