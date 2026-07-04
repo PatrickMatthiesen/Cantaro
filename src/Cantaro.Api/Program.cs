@@ -40,6 +40,10 @@ builder.Services
     .Bind(builder.Configuration.GetSection(TrackMatchingOptions.SectionName))
     .ValidateDataAnnotations();
 builder.Services
+    .AddOptions<MusicSyncJobWorkerOptions>()
+    .Bind(builder.Configuration.GetSection(MusicSyncJobWorkerOptions.SectionName))
+    .ValidateDataAnnotations();
+builder.Services
     .AddOptions<AniListOptions>()
     .Bind(builder.Configuration.GetSection(AniListOptions.SectionName));
 

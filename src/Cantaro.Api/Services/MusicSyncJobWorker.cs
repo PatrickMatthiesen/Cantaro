@@ -1,10 +1,15 @@
+using Cantaro.Api.Configuration;
+using Microsoft.Extensions.Options;
+
 namespace Cantaro.Api.Services;
 
 public sealed class MusicSyncJobWorker(
     IServiceScopeFactory serviceScopeFactory,
+    IOptions<MusicSyncJobWorkerOptions> options,
     ILogger<MusicSyncJobWorker> logger) : BackgroundService
 {
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
+    private readonly MusicSyncJobWorkerOptions _options = options.Value;
     private readonly ILogger<MusicSyncJobWorker> _logger = logger;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,7 +31,7 @@ public sealed class MusicSyncJobWorker(
                 _logger.LogWarning(ex, "Music sync job worker failed while checking queued work.");
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(750), stoppingToken);
+            await Task.Delay(_options.IdleDelay, stoppingToken);
         }
     }
 }
