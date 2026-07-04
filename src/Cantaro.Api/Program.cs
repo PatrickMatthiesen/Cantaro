@@ -59,6 +59,7 @@ builder.Services.AddHttpClient<IMusicBrainzQueryClient, MusicBrainzQueryClient>(
 builder.Services.AddHttpClient<AniListApiClient>();
 builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
+builder.Services.AddSingleton<MediaLibraryImportQueue>();
 builder.Services.AddScoped<MediaLibraryQueryService>();
 builder.Services.AddScoped<MediaLibraryLinkService>();
 builder.Services.AddScoped<MusicLibraryQueryService>();
@@ -71,6 +72,7 @@ builder.Services.AddSingleton<MusicSyncThrottleService>();
 builder.Services.AddScoped<MusicSyncJobProcessor>();
 builder.Services.AddHostedService<MusicSyncJobWorker>();
 builder.Services.AddHostedService<MediaProviderOperationWorker>();
+builder.Services.AddHostedService<MediaLibraryImportWorker>();
 builder.Services.AddScoped<ExtensionAuthorizationCodeStore>();
 builder.Services.AddScoped<ExtensionAuthService>();
 builder.Services.AddSingleton<IAvatarStore, S3AvatarStore>();
@@ -105,7 +107,11 @@ builder.Services
         options.ForwardDefaultSelector = context =>
         {
             var authorization = context.Request.Headers.Authorization.ToString();
-            return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            var hasSseAccessToken = context.Request.Path.StartsWithSegments("/api/media/providers")
+                && context.Request.Path.Value?.EndsWith("/import/events", StringComparison.OrdinalIgnoreCase) == true
+                && context.Request.Query.ContainsKey("access_token");
+
+            return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) || hasSseAccessToken
                 ? JwtBearerDefaults.AuthenticationScheme
                 : IdentityConstants.ApplicationScheme;
         };
@@ -124,6 +130,20 @@ builder.Services
             ClockSkew = TimeSpan.FromMinutes(1),
             NameClaimType = System.Security.Claims.ClaimTypes.Name,
             RoleClaimType = System.Security.Claims.ClaimTypes.Role
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                if (context.Request.Path.StartsWithSegments("/api/media/providers")
+                    && context.Request.Path.Value?.EndsWith("/import/events", StringComparison.OrdinalIgnoreCase) == true
+                    && context.Request.Query.TryGetValue("access_token", out var accessToken))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 

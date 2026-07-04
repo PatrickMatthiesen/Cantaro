@@ -38,6 +38,10 @@ function useStaticMediaHeading(heading: GlobalHeadingState) {
 }
 
 function MediaSectionHeader({ heading }: { heading: GlobalHeadingState }) {
+  if (heading.hidden) {
+    return null;
+  }
+
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -168,9 +172,11 @@ export function MediaReviewRoutePage() {
 
 export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
   const navigate = useNavigate();
+  const { setHeading } = useMediaShell();
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
     title: 'Library entry',
+    hidden: true,
   }), []);
   useStaticMediaHeading(heading);
 
@@ -178,6 +184,7 @@ export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
     <MediaEntryDetailPage
       embedded
       libraryEntryId={entryId}
+      onHeadingChange={setHeading}
       onNavigateBack={() => void navigate({ to: '/media/library' })}
     />
   );

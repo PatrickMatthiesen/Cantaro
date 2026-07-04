@@ -71,6 +71,7 @@ public sealed class ProfileController(
         settings.KeepPlaylistMetadata = request.KeepPlaylistMetadata;
         settings.HideUnavailableTracks = request.HideUnavailableTracks;
         settings.ScheduledSync = request.ScheduledSync;
+        settings.BlurEmailAddress = request.BlurEmailAddress;
         settings.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(MapProfile(user, settings));
@@ -311,7 +312,8 @@ public sealed class ProfileController(
         KeepPlaylistOrder = settings.KeepPlaylistOrder,
         KeepPlaylistMetadata = settings.KeepPlaylistMetadata,
         HideUnavailableTracks = settings.HideUnavailableTracks,
-        ScheduledSync = settings.ScheduledSync
+        ScheduledSync = settings.ScheduledSync,
+        BlurEmailAddress = settings.BlurEmailAddress
     };
 
     private static string ResolveDisplayName(User user, UserSettings settings) =>

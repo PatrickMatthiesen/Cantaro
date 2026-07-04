@@ -108,6 +108,25 @@ export interface MediaImportDto {
     importedAt: string;
 }
 
+export interface MediaImportRequestDto {
+    providerId: string;
+    importId: string;
+    status: string;
+}
+
+export interface MediaLibraryImportEventDto {
+    providerId: string;
+    importId: string;
+    status: string;
+    importedCount: number;
+    createdTitles: number;
+    createdEntries: number;
+    updatedEntries: number;
+    libraryChanged: boolean;
+    errorMessage?: string;
+    occurredAt: string;
+}
+
 export interface MediaProgressUpdateDto {
     progressEpisodes?: number;
     progressChapters?: number;

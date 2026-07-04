@@ -70,12 +70,24 @@ function SaveButton({ state, children = 'Save changes', type = 'submit', onClick
   );
 }
 
-function Toggle({ checked, onChange, title, detail }: { checked: boolean; onChange: (checked: boolean) => void; title: string; detail: string }) {
+function Toggle({
+  checked,
+  disabled = false,
+  onChange,
+  title,
+  detail,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+  title: string;
+  detail: string;
+}) {
   return (
-    <label className="settings-toggle-row flex cursor-pointer items-center justify-between gap-5 border-b py-4 last:border-0">
+    <label className={`settings-toggle-row flex items-center justify-between gap-5 border-b py-4 last:border-0 ${disabled ? 'cursor-not-allowed opacity-65' : 'cursor-pointer'}`}>
       <span><strong className="block text-sm text-slate-900">{title}</strong><span className="mt-1 block text-xs leading-5 text-slate-500">{detail}</span></span>
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="peer sr-only" />
-      <span className="relative h-7 w-12 shrink-0 rounded-full bg-slate-200 transition peer-checked:bg-violet-600 peer-focus-visible:ring-2 peer-focus-visible:ring-violet-400 peer-focus-visible:ring-offset-2 after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-5" aria-hidden />
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="peer sr-only" />
+      <span className="relative h-7 w-12 shrink-0 rounded-full bg-slate-200 transition peer-checked:bg-violet-600 peer-focus-visible:ring-2 peer-focus-visible:ring-violet-400 peer-focus-visible:ring-offset-2 peer-disabled:bg-slate-200 after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-5 peer-disabled:after:bg-slate-100" aria-hidden />
     </label>
   );
 }
@@ -134,7 +146,14 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
         </div>
         <form onSubmit={save} className="space-y-4">
           <label className="block"><span className="text-xs font-black tracking-wider text-slate-500 uppercase">Display name</span><input value={displayName} maxLength={100} required onChange={(event) => setDisplayName(event.target.value)} className="settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm font-bold transition outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100" /></label>
-          <label className="block"><span className="text-xs font-black tracking-wider text-slate-500 uppercase">Email</span><input value={profile.email} readOnly className="settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm text-slate-500 opacity-75" /></label>
+          <label className="block">
+            <span className="text-xs font-black tracking-wider text-slate-500 uppercase">Email</span>
+            <input
+              value={profile.email}
+              readOnly
+              className={`settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm text-slate-500 opacity-75 ${profile.preferences.blurEmailAddress ? 'blur-sm select-none' : ''}`}
+            />
+          </label>
           {error ? <p className="text-sm font-semibold text-rose-600" role="alert">{error}</p> : null}
           <div className="flex flex-wrap gap-3"><SaveButton state={state} />{profile.avatarUrl ? <button type="button" onClick={async () => onProfile(await authApi.deleteAvatar())} className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-600 hover:bg-rose-50 hover:text-rose-700">Remove photo</button> : null}</div>
         </form>
@@ -337,14 +356,89 @@ function SecuritySection() {
   return <SettingsSection id="security" eyebrow="Account security" title="Change your password" description="Updating your password refreshes your current Cantaro session without exposing credentials to connected services."><form onSubmit={async event => { event.preventDefault(); setState('saving'); setMessage(null); try { await authApi.changePassword(currentPassword, newPassword); setCurrentPassword(''); setNewPassword(''); setMessage('Password changed.'); setState('saved'); } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Password change failed'); setState('idle'); } }} className="grid gap-4 md:grid-cols-2"><input type="password" autoComplete="current-password" required placeholder="Current password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} className="settings-input rounded-2xl border px-4 py-3 text-sm outline-none focus:border-violet-400" /><input type="password" autoComplete="new-password" minLength={6} required placeholder="New password" value={newPassword} onChange={event => setNewPassword(event.target.value)} className="settings-input rounded-2xl border px-4 py-3 text-sm outline-none focus:border-violet-400" /><div className="flex items-center gap-4 md:col-span-2"><SaveButton state={state}>Change password</SaveButton>{message ? <p className="text-sm text-slate-600" role="status">{message}</p> : null}</div></form></SettingsSection>;
 }
 
-function DataSection() {
+function withBlurEmailAddress(profile: User, blurEmailAddress: boolean) {
+  return {
+    ...profile,
+    preferences: {
+      ...profile.preferences,
+      blurEmailAddress,
+    },
+  };
+}
+
+async function recoverBlurEmailAddressPreference(profile: User, fallbackBlurEmailAddress: boolean) {
+  try {
+    const currentProfile = await authApi.getCurrentUser();
+    const blurEmailAddress = typeof currentProfile.preferences.blurEmailAddress === 'boolean'
+      ? currentProfile.preferences.blurEmailAddress
+      : fallbackBlurEmailAddress;
+
+    return {
+      blurEmailAddress,
+      profile: withBlurEmailAddress(currentProfile, blurEmailAddress),
+    };
+  } catch {
+    return {
+      blurEmailAddress: fallbackBlurEmailAddress,
+      profile: withBlurEmailAddress(profile, fallbackBlurEmailAddress),
+    };
+  }
+}
+
+function useBlurEmailAddressPreference(profile: User, onProfile: (profile: User) => void) {
+  const [privacyState, setPrivacyState] = useState<SaveState>('idle');
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const [blurEmailAddress, setBlurEmailAddressValue] = useState(profile.preferences.blurEmailAddress);
+  const privacyStateRef = useRef(privacyState);
+  useEffect(() => {
+    privacyStateRef.current = privacyState;
+  }, [privacyState]);
+  useEffect(() => {
+    if (privacyStateRef.current === 'saving') return;
+    setBlurEmailAddressValue(profile.preferences.blurEmailAddress);
+  }, [profile.preferences.blurEmailAddress]);
+
+  const setBlurEmailAddress = async (nextBlurEmailAddress: boolean) => {
+    if (privacyState === 'saving') {
+      return;
+    }
+
+    const previousBlurEmailAddress = !nextBlurEmailAddress;
+    setBlurEmailAddressValue(nextBlurEmailAddress);
+    setPrivacyState('saving');
+    setPrivacyError(null);
+    try {
+      const updatedProfile = await authApi.updatePreferences({ ...profile.preferences, blurEmailAddress: nextBlurEmailAddress });
+      if (updatedProfile.preferences.blurEmailAddress !== nextBlurEmailAddress) {
+        throw new Error('We could not save that privacy setting. Please try again in a moment.');
+      }
+
+      onProfile(updatedProfile);
+      setBlurEmailAddressValue(updatedProfile.preferences.blurEmailAddress);
+      setPrivacyState('saved');
+      window.setTimeout(() => setPrivacyState('idle'), 1600);
+    } catch (reason) {
+      const recovered = await recoverBlurEmailAddressPreference(profile, previousBlurEmailAddress);
+      onProfile(recovered.profile);
+      setBlurEmailAddressValue(recovered.blurEmailAddress);
+      setPrivacyError(reason instanceof Error ? reason.message : 'Failed to save privacy setting.');
+      setPrivacyState('idle');
+    }
+  };
+
+  return { blurEmailAddress, privacyError, privacyState, setBlurEmailAddress };
+}
+
+function DataSection({ profile, onProfile }: { profile: User; onProfile: (profile: User) => void }) {
   const [password, setPassword] = useState(''); const [error, setError] = useState<string | null>(null);
-  return <SettingsSection id="data" eyebrow="You own the archive" title="Data and privacy" description="Take a portable copy of your Cantaro data, or permanently remove your account and server-held provider credentials."><div className="grid gap-4 md:grid-cols-2"><a href="/api/profile/export" className="settings-surface-row group flex items-center gap-4 rounded-3xl border p-5 transition hover:-translate-y-0.5"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-100 text-violet-700"><Download className="h-5 w-5" /></span><span className="flex-1"><strong className="block text-sm text-slate-950">Export my data</strong><span className="text-xs text-slate-500">Download JSON and your avatar as a ZIP.</span></span><ChevronRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-1" /></a><div className="rounded-3xl border border-rose-200 bg-rose-50/60 p-5"><strong className="text-sm text-rose-900">Delete account</strong><p className="mt-1 text-xs leading-5 text-rose-700">This permanently removes your profile, libraries, connections, and settings.</p><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Current password" className="mt-3 w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm outline-none" /><button type="button" disabled={!password} onClick={async () => { if (!window.confirm('Permanently delete your Cantaro account? This cannot be undone.')) return; setError(null); try { await authApi.deleteAccount(password); window.location.assign('/'); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Account deletion failed'); } }} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50"><Trash2 className="h-4 w-4" />Delete permanently</button>{error ? <p className="mt-2 text-xs font-bold text-rose-700">{error}</p> : null}</div></div></SettingsSection>;
+  const { blurEmailAddress, privacyError, privacyState, setBlurEmailAddress } = useBlurEmailAddressPreference(profile, onProfile);
+
+  return <SettingsSection id="data" eyebrow="You own the archive" title="Data and privacy" description="Take a portable copy of your Cantaro data, reduce stream-visible account details, or permanently remove your account."><div className="mb-5 overflow-hidden rounded-3xl border px-5"><Toggle checked={blurEmailAddress} disabled={privacyState === 'saving'} onChange={value => void setBlurEmailAddress(value)} title="Blur account email on screen" detail="Obscure your email anywhere Cantaro shows it, useful while streaming or sharing your screen." />{privacyState !== 'idle' ? <p className="pb-4 text-right text-xs font-bold text-slate-500" role="status">{privacyState === 'saving' ? 'Saving privacy setting…' : 'Privacy setting saved'}</p> : null}{privacyError ? <p className="pb-4 text-right text-xs font-bold text-rose-700" role="alert">{privacyError}</p> : null}</div><div className="grid gap-4 md:grid-cols-2"><a href="/api/profile/export" className="settings-surface-row group flex items-center gap-4 rounded-3xl border p-5 transition hover:-translate-y-0.5"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-100 text-violet-700"><Download className="h-5 w-5" /></span><span className="flex-1"><strong className="block text-sm text-slate-950">Export my data</strong><span className="text-xs text-slate-500">Download JSON and your avatar as a ZIP.</span></span><ChevronRight className="h-4 w-4 text-slate-400 transition group-hover:translate-x-1" /></a><div className="rounded-3xl border border-rose-200 bg-rose-50/60 p-5"><strong className="text-sm text-rose-900">Delete account</strong><p className="mt-1 text-xs leading-5 text-rose-700">This permanently removes your profile, libraries, connections, and settings.</p><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Current password" className="mt-3 w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm outline-none" /><button type="button" disabled={!password} onClick={async () => { if (!window.confirm('Permanently delete your Cantaro account? This cannot be undone.')) return; setError(null); try { await authApi.deleteAccount(password); window.location.assign('/'); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Account deletion failed'); } }} className="mt-3 inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50"><Trash2 className="h-4 w-4" />Delete permanently</button>{error ? <p className="mt-2 text-xs font-bold text-rose-700">{error}</p> : null}</div></div></SettingsSection>;
 }
 
 export function SettingsPage() {
   const { user, setProfile } = useAuth();
   const profile = useMemo(() => user, [user]);
   if (!profile) return null;
-  return <PageShell sidebar={<SettingsSidebar />} searchPlaceholder="Search settings…" contentClassName="settings-content"><div className="mx-auto max-w-5xl space-y-6"><header className="mb-10"><p className="text-xs font-black tracking-[.3em] text-violet-600 uppercase">Personal control room</p><h1 className="mt-3 text-4xl font-black tracking-[-.04em] text-slate-950 sm:text-5xl">Make Cantaro yours.</h1><p className="mt-3 max-w-2xl text-base leading-7 text-slate-500">Tune the defaults behind every playlist, provider, and late-night library session.</p></header><ProfileSection profile={profile} onProfile={setProfile} /><ConnectionsSection /><PreferencesSections profile={profile} onProfile={setProfile} /><SecuritySection /><DataSection /></div></PageShell>;
+  return <PageShell sidebar={<SettingsSidebar />} searchPlaceholder="Search settings…" contentClassName="settings-content"><div className="mx-auto max-w-5xl space-y-6"><header className="mb-10"><p className="text-xs font-black tracking-[.3em] text-violet-600 uppercase">Personal control room</p><h1 className="mt-3 text-4xl font-black tracking-[-.04em] text-slate-950 sm:text-5xl">Make Cantaro yours.</h1><p className="mt-3 max-w-2xl text-base leading-7 text-slate-500">Tune the defaults behind every playlist, provider, and late-night library session.</p></header><ProfileSection profile={profile} onProfile={setProfile} /><ConnectionsSection /><PreferencesSections profile={profile} onProfile={setProfile} /><SecuritySection /><DataSection profile={profile} onProfile={setProfile} /></div></PageShell>;
 }

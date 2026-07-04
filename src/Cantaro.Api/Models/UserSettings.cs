@@ -28,6 +28,7 @@ public class UserSettings
     public bool KeepPlaylistMetadata { get; set; } = true;
     public bool HideUnavailableTracks { get; set; } = true;
     public bool ScheduledSync { get; set; } = true;
+    public bool BlurEmailAddress { get; set; }
 
     public string? AvatarObjectKey { get; set; }
     public string? AvatarETag { get; set; }

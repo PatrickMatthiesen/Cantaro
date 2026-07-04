@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { mediaApi } from '../../services/mediaApi';
 import { clearStoredValue, remoteCheckTimestampKey, writeStoredValue } from '../../services/mediaRefreshCache';
-import type { MediaImportDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
+import type { MediaImportDto, MediaImportRequestDto, MediaLibraryImportEventDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
 
 function shouldAutoImportAfterConnect(providerId: string): boolean {
   const search = new URLSearchParams(window.location.search);
@@ -56,20 +56,68 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
   const [isImporting, setIsImporting] = useState(false);
   const [lastImport, setLastImport] = useState<MediaImportDto | null>(null);
 
-  const handleImport = useCallback(async () => {
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    let isMounted = true;
+
+    void mediaApi.subscribeToImportEvents(
+      providerId,
+      undefined,
+      (event: MediaLibraryImportEventDto) => {
+        if (!isMounted) {
+          return;
+        }
+
+        if (event.status === 'running') {
+          setIsImporting(true);
+          return;
+        }
+
+        if (event.status === 'completed') {
+          const result = {
+            providerId: event.providerId,
+            importedCount: event.importedCount,
+            createdTitles: event.createdTitles,
+            createdEntries: event.createdEntries,
+            updatedEntries: event.updatedEntries,
+            importedAt: event.occurredAt,
+          };
+          setLastImport(result);
+          writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
+          setIsImporting(false);
+          return;
+        }
+
+        if (event.status === 'failed') {
+          setError(event.errorMessage || 'Import failed');
+          setIsImporting(false);
+        }
+      },
+      () => {
+        if (isMounted) {
+          setIsImporting(false);
+        }
+      },
+    ).then((source) => {
+      eventSource = source;
+    });
+
+    return () => {
+      isMounted = false;
+      eventSource?.close();
+    };
+  }, [providerId, setError]);
+
+  const handleImport = useCallback(async (): Promise<MediaImportRequestDto | null> => {
     setIsImporting(true);
     setError(null);
 
     try {
-      const result = await mediaApi.importLibrary(providerId);
-      setLastImport(result);
-      writeStoredValue(remoteCheckTimestampKey(providerId), result.importedAt);
-      return result;
+      return await mediaApi.importLibrary(providerId);
     } catch (importError) {
       setError(getErrorMessage(importError, 'Import failed'));
-      return null;
-    } finally {
       setIsImporting(false);
+      return null;
     }
   }, [providerId, setError]);
 
@@ -116,7 +164,7 @@ function useProviderDisconnect(
 function useAutoImportAfterConnect(
   providerId: string,
   isConnected: boolean,
-  handleImport: () => Promise<MediaImportDto | null>,
+  handleImport: () => Promise<MediaImportRequestDto | null>,
   hasTriggeredConnectedImport: MutableRefObject<boolean>,
 ) {
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Bell, Menu, Search, X } from 'lucide-react';
+import { Bell, LogOut, Menu, Search, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
 import { rememberActiveArea } from '../appAreaRouting';
@@ -114,17 +114,90 @@ function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLBut
   );
 }
 
-function ProfileButton({ userEmail, displayName, avatarUrl }: { userEmail?: string; displayName?: string; avatarUrl?: string }) {
-  const userInitial = displayName?.trim().charAt(0).toUpperCase() || userEmail?.trim().charAt(0).toUpperCase() || 'C';
+function AccountMenu({
+  displayName,
+  avatarUrl,
+  onLogout,
+}: {
+  displayName?: string;
+  avatarUrl?: string;
+  onLogout: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const userInitial = displayName?.trim().charAt(0).toUpperCase() || 'C';
+  const accountLabel = displayName || 'Account';
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
 
   return (
-    <Link
-      to="/settings"
-      className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none sm:h-12 sm:w-12"
-      aria-label={`Open settings for ${displayName || userEmail || 'profile'}`}
-    >
-      {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : userInitial}
-    </Link>
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none sm:h-12 sm:w-12"
+        aria-label={`Open account menu for ${accountLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : userInitial}
+      </button>
+
+      {isOpen ? (
+        <div
+          role="menu"
+          className="absolute top-full right-0 z-40 mt-3 w-64 overflow-hidden rounded-2xl border border-[#e3def8] bg-white/96 p-2 text-slate-900 shadow-[0_20px_70px_rgba(88,74,150,0.18)] backdrop-blur-xl"
+        >
+          <div className="px-3 py-3">
+            <p className="truncate text-sm font-black text-slate-950">{displayName || 'Cantaro account'}</p>
+            <p className="mt-0.5 text-xs font-semibold text-slate-500">Personal archive controls</p>
+          </div>
+          <div className="h-px bg-[#eeeaff]" />
+          <Link
+            to="/settings"
+            role="menuitem"
+            className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-[#f7f5ff] hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none"
+            onClick={() => setIsOpen(false)}
+          >
+            <Settings className="h-4 w-4 text-violet-600" aria-hidden />
+            Settings
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition hover:bg-rose-50 hover:text-rose-700 focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none"
+            onClick={() => {
+              setIsOpen(false);
+              onLogout();
+            }}
+          >
+            <LogOut className="h-4 w-4" aria-hidden />
+            Log out
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -134,9 +207,9 @@ function PageTopBar({
   searchValue,
   onSearchChange,
   onSearchSubmit,
-  userEmail,
   displayName,
   avatarUrl,
+  onLogout,
   onOpenNavigation,
   navigationButtonRef,
 }: {
@@ -145,9 +218,9 @@ function PageTopBar({
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   onSearchSubmit?: () => void;
-  userEmail?: string;
   displayName?: string;
   avatarUrl?: string;
+  onLogout: () => void;
   onOpenNavigation: () => void;
   navigationButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
@@ -161,7 +234,7 @@ function PageTopBar({
           </div>
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:order-3">
             <NotificationButton />
-            <ProfileButton userEmail={userEmail} displayName={displayName} avatarUrl={avatarUrl} />
+            <AccountMenu displayName={displayName} avatarUrl={avatarUrl} onLogout={onLogout} />
           </div>
         </div>
         <TopSearchInput
@@ -239,7 +312,7 @@ export function PageShell({
   onSearchSubmit,
 }: PageShellProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -267,9 +340,9 @@ export function PageShell({
             searchValue={searchValue}
             onSearchChange={onSearchChange}
             onSearchSubmit={onSearchSubmit}
-            userEmail={user?.email}
             displayName={user?.displayName}
             avatarUrl={user?.avatarUrl}
+            onLogout={() => void logout()}
             navigationButtonRef={mobileNavigationButtonRef}
             onOpenNavigation={() => setIsMobileNavigationOpen(true)}
           />

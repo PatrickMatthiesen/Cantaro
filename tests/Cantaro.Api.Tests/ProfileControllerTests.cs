@@ -42,7 +42,8 @@ public sealed class ProfileControllerTests
             KeepPlaylistOrder = true,
             KeepPlaylistMetadata = true,
             HideUnavailableTracks = true,
-            ScheduledSync = true
+            ScheduledSync = true,
+            BlurEmailAddress = false
         }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);

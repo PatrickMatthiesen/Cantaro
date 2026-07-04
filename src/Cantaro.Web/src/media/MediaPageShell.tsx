@@ -82,6 +82,7 @@ export function MediaPageShell({ children }: { children: ReactNode }) {
   return (
     <PageShell
       sidebar={<MediaSidebar />}
+      contentClassName="media-page-content"
       searchPlaceholder={search.searchMode === mainMediaProviderId ? 'Search AniList...' : 'Search media library...'}
       searchValue={searchValue}
       onSearchChange={updateLibrarySearch}
