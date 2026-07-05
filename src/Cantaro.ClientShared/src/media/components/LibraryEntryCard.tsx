@@ -101,7 +101,7 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: Li
             onClick={onClick}
             className="group h-full w-full text-left transition-transform duration-300 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
         >
-            <div className={`relative aspect-[0.72] overflow-hidden bg-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.22)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem] md:min-h-80'}`}>
+            <div className={`relative aspect-[0.72] overflow-hidden bg-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.22)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}>
                 <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />
                 <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-slate-900/10" aria-hidden />
 

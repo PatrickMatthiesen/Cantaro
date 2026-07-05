@@ -15,8 +15,8 @@ const DETAILS_CLASS_NAMES: Record<MediaLibraryDensity, {
 }> = {
     comfortable: {
         container: 'p-3 sm:p-4',
-        panel: 'rounded-2xl p-3 sm:rounded-3xl sm:p-4',
-        title: 'text-base sm:text-xl',
+        panel: 'rounded-2xl p-3 sm:rounded-3xl sm:p-4 md:p-4',
+        title: 'text-base sm:text-lg md:text-xl',
         originalTitle: 'mt-0.5 text-xs sm:mt-1 sm:text-sm',
     },
     compact: {

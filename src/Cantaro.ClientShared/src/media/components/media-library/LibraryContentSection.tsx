@@ -21,7 +21,7 @@ export interface LibraryContentSectionProps {
 function libraryGridClassName(density: MediaLibraryDensity) {
     return density === 'compact'
         ? 'grid grid-cols-[repeat(auto-fill,minmax(min(7rem,100%),1fr))] gap-2'
-        : 'grid grid-cols-[repeat(auto-fill,minmax(min(9rem,100%),1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))]';
+        : 'grid grid-cols-[repeat(auto-fill,minmax(min(9rem,100%),1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] md:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]';
 }
 
 function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
@@ -32,7 +32,7 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
             {Array.from({ length: skeletonCount }).map((_, index) => (
                 <div
                     key={index}
-                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-slate-200/55 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem] md:min-h-80'}`}
+                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-slate-200/55 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}
                 >
                     <div className="h-full w-full bg-linear-to-br from-white/70 via-slate-200/70 to-slate-300/60" />
                 </div>
