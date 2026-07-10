@@ -3,6 +3,7 @@ import { MusicPlatformIcon, MusicUiIcon, platformCatalog, type MusicLibraryPlayl
 import { useEffect, useState, type ReactNode } from 'react';
 import { PageShell } from '../components/PageShell';
 import { PageSideNavigation, type PageNavigationSection } from '../components/PageNavigation';
+import { useMusicLibraryContext } from './MusicLibraryStateContext';
 import { formatDuration, playlistArtwork, songArtist, songArtwork, visiblePlatformNames } from './musicPresentation';
 
 function PlayIcon() {
@@ -217,11 +218,13 @@ export function MusicPageShell({
   onSearchChange?: (value: string) => void;
   onSearchSubmit?: () => void;
 }) {
+  const { library: sharedLibrary } = useMusicLibraryContext();
   const featuredSong = getFeaturedSong(activeSong);
+  const sidebarLibrary = library ?? sharedLibrary ?? undefined;
 
   return (
     <PageShell
-      sidebar={<MusicSidebar library={library} />}
+      sidebar={<MusicSidebar library={sidebarLibrary} />}
       bottomSlot={featuredSong ? <BottomPlayer song={featuredSong} onStop={onStopActiveSong} /> : null}
       searchPlaceholder="Search songs, artists, playlists..."
       searchValue={searchValue}

@@ -5,6 +5,7 @@ import { RequireAuth } from '../components/AppShell';
 import { MatchingReviewPage } from './MatchingReviewPage';
 import { MusicHomeDashboard } from '../music/MusicHomeDashboard';
 import { MusicLibraryPanel } from '../music/MusicLibraryPanel';
+import { MusicLibraryProvider } from '../music/MusicLibraryContext';
 import { MusicPageShell } from '../music/MusicPageShell';
 import { MusicPlatformSurface } from '../music/MusicPlatformPage';
 import { MusicPlaylistSyncSetupPage } from '../music/MusicPlaylistSyncSetupPage';
@@ -17,7 +18,9 @@ import { useConnectedMusicPlatforms } from '../music/useConnectedMusicPlatforms'
 export function MusicLayout() {
   return (
     <RequireAuth>
-      <Outlet />
+      <MusicLibraryProvider>
+        <Outlet />
+      </MusicLibraryProvider>
     </RequireAuth>
   );
 }

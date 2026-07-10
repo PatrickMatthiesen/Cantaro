@@ -2,6 +2,7 @@ using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Cantaro.Api.Services.Lyrics;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -46,6 +47,10 @@ builder.Services
 builder.Services
     .AddOptions<AniListOptions>()
     .Bind(builder.Configuration.GetSection(AniListOptions.SectionName));
+builder.Services
+    .AddOptions<LyricsOptions>()
+    .Bind(builder.Configuration.GetSection(LyricsOptions.SectionName))
+    .ValidateDataAnnotations();
 
 // Register custom services
 builder.Services.AddScoped<TokenEncryptionService>();
@@ -57,6 +62,15 @@ builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
 builder.Services.AddHttpClient<IMusicBrainzQueryClient, MusicBrainzQueryClient>();
 builder.Services.AddHttpClient<AniListApiClient>();
+builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
+{
+    var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<LyricsOptions>>().Value;
+    client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
+});
+builder.Services.AddSingleton<LyricsProviderCache>();
+builder.Services.AddSingleton<ILyricsProvider, LrclibLyricsProvider>();
+builder.Services.AddScoped<LyricsService>();
 builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
 builder.Services.AddSingleton<MediaLibraryImportQueue>();
@@ -255,8 +269,12 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 app.UseHttpsRedirection();
-app.UseDefaultFiles();
-app.UseStaticFiles();
+var hasWebRoot = Directory.Exists(app.Environment.WebRootPath);
+if (hasWebRoot)
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -265,7 +283,10 @@ app.MapControllers();
 
 // Prefix all Identity API endpoints with /api to hit the vite proxy
 app.MapGroup("/api").MapIdentityApi<User>();
-app.MapFallbackToFile("index.html");
+if (hasWebRoot)
+{
+    app.MapFallbackToFile("index.html");
+}
 
 if (app.Environment.IsDevelopment())
 {

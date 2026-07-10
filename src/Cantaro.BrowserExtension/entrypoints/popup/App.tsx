@@ -44,6 +44,8 @@ type StatusType = 'success' | 'error';
 type PopupTab = 'music' | 'media';
 type MediaRoute = { kind: 'library' } | { kind: 'entry'; id: string };
 
+const suppressEmbeddedHeading = () => undefined;
+
 function isMediaConfigured(config: ExtensionConfig): boolean {
   return Boolean(config.apiBaseUrl.trim() && (config.accessToken.trim() || config.refreshToken.trim()));
 }
@@ -61,6 +63,7 @@ function App() {
   const [isCheckingSession, setIsCheckingSession] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [trackingControlsOpen, setTrackingControlsOpen] = useState(false);
   const [mediaSessionKey, setMediaSessionKey] = useState(0);
   const [latestResolution, setLatestResolution] = useState<SubmitMediaObservationResponse | null>(null);
   const [resolutionError, setResolutionError] = useState<string | null>(null);
@@ -292,75 +295,98 @@ function App() {
 
   const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl;
   const mediaConfigured = isMediaConfigured(savedConfig);
+  const trackingPaused = Boolean(
+    trackingTimeout.disabledUntil && new Date(trackingTimeout.disabledUntil) > new Date(),
+  );
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-gray-900">
+    <div className="relative h-screen overflow-hidden text-gray-900">
       <div className="absolute -left-20 top-0 h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl" aria-hidden />
       <div className="absolute right-0 top-8 h-80 w-80 rounded-full bg-fuchsia-400/16 blur-3xl" aria-hidden />
 
-      <div className="relative z-10 flex min-h-screen flex-col p-4">
-        <GlassCard className="p-2">
-          <div className="flex items-center gap-3">
-            <div className="rounded-full bg-slate-950/78 p-1">
-              <div className="flex items-center gap-1">
-                {(['music', 'media'] as const).map((tab) => {
-                  const active = tab === activeTab;
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setActiveTab(tab)}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${active
-                        ? 'bg-white text-slate-950 shadow-sm'
-                        : 'text-white/72 hover:bg-white/10 hover:text-white'}`}
-                    >
-                      {tab === 'music' ? 'Music' : 'Media'}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+      <div className="relative z-10 flex h-full flex-col p-3">
+        <header className="flex min-h-12 items-center gap-2 rounded-2xl bg-white/88 p-1.5 shadow-sm shadow-slate-950/8 backdrop-blur">
+          <nav className="flex rounded-xl bg-slate-950 p-0.5" aria-label="Popup section">
+            {(['music', 'media'] as const).map((tab) => {
+              const active = tab === activeTab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`min-h-9 rounded-[0.625rem] px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${active
+                    ? 'bg-white text-slate-950'
+                    : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {tab === 'music' ? 'Music' : 'Media'}
+                </button>
+              );
+            })}
+          </nav>
 
-            <div>
-              <p className="text-xs tracking-[0.28em] text-gray-500 uppercase">Cantaro popup</p>
-              <p className="text-sm font-medium text-gray-700">
-                {mediaConfigured ? 'Shared media library UI loaded' : 'Media tab needs setup'}
-              </p>
-            </div>
+          <span className="min-w-0 flex-1 truncate pl-1 text-sm font-semibold text-slate-700">
+            Cantaro
+          </span>
 
-            <div className="ml-auto flex items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${mediaConfigured
-                ? 'bg-emerald-100 text-emerald-700'
-                : 'bg-amber-100 text-amber-700'}`}>
-                {mediaConfigured ? 'Ready' : 'Setup needed'}
-              </span>
-              <GradientButton tone="soft" onClick={() => setSettingsOpen(true)}>Settings</GradientButton>
-            </div>
-          </div>
-        </GlassCard>
+          {mediaConfigured ? (
+            <button
+              type="button"
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${trackingControlsOpen
+                ? 'bg-violet-100 text-violet-800'
+                : 'text-slate-700 hover:bg-slate-100'}`}
+              aria-expanded={trackingControlsOpen}
+              aria-controls="episode-tracking-controls"
+              onClick={() => setTrackingControlsOpen((current) => !current)}
+            >
+              <span className={`h-2 w-2 rounded-full ${trackingPaused ? 'bg-amber-500' : 'bg-emerald-500'}`} aria-hidden />
+              {trackingPaused ? 'Paused' : 'Tracking'}
+            </button>
+          ) : (
+            <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+              Setup needed
+            </span>
+          )}
 
-        {mediaConfigured ? (
-          <div className="mt-4 grid gap-3">
+          <button
+            type="button"
+            className="inline-flex size-9 items-center justify-center rounded-xl text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Open extension settings"
+            title="Settings"
+          >
+            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.6 3.7 10 2h4l.4 1.7a8.6 8.6 0 0 1 1.5.9l1.7-.5 2 3.5-1.3 1.2c.1.5.2 1.1.2 1.7s-.1 1.2-.2 1.7l1.3 1.2-2 3.5-1.7-.5a8.6 8.6 0 0 1-1.5.9L14 19h-4l-.4-1.7a8.6 8.6 0 0 1-1.5-.9l-1.7.5-2-3.5 1.3-1.2a7.8 7.8 0 0 1 0-3.4L4.4 7.6l2-3.5 1.7.5a8.6 8.6 0 0 1 1.5-.9Z" />
+              <circle cx="12" cy="10.5" r="2.5" />
+            </svg>
+          </button>
+        </header>
+
+        {mediaConfigured && trackingControlsOpen ? (
+          <div id="episode-tracking-controls" className="mt-2">
             <EpisodeTrackingTimeoutPanel
               timeout={trackingTimeout}
               onPause={applyTrackingTimeout}
               onResume={resumeTracking}
             />
-            {latestResolution ? (
-              <MediaResolutionPicker
-                response={latestResolution}
-                surface="popup"
-                resolving={isResolving}
-                error={resolutionError}
-                onResolve={resolveObservation}
-              />
-            ) : null}
           </div>
         ) : null}
 
-        <div className="relative mt-4 flex-1 overflow-hidden rounded-4xl">
+        {mediaConfigured && latestResolution ? (
+          <div className="mt-2">
+            <MediaResolutionPicker
+              response={latestResolution}
+              surface="popup"
+              resolving={isResolving}
+              error={resolutionError}
+              onResolve={resolveObservation}
+            />
+          </div>
+        ) : null}
+
+        <main className="relative mt-2 flex-1 overflow-auto rounded-2xl" aria-label={`${activeTab === 'music' ? 'Music' : 'Media'} content`}>
           {activeTab === 'music' ? (
-            <div className="h-full p-2">
+            <div className="h-full py-1">
               <MusicPlaceholder />
             </div>
           ) : mediaConfigured ? (
@@ -369,21 +395,23 @@ function App() {
                 key={`library-${mediaSessionKey}`}
                 embedded
                 density="compact"
+                onHeadingChange={suppressEmbeddedHeading}
                 onNavigateEntry={(id) => startTransition(() => setMediaRoute({ kind: 'entry', id }))}
               />
             ) : (
               <MediaEntryDetailPage
                 key={`entry-${mediaSessionKey}-${mediaRoute.id}`}
                 libraryEntryId={mediaRoute.id}
+                embedded
                 onNavigateBack={() => startTransition(() => setMediaRoute({ kind: 'library' }))}
               />
             )
           ) : (
-            <div className="h-full p-2">
+            <div className="h-full py-1">
               <SetupCard onOpenSettings={() => setSettingsOpen(true)} onSignIn={handleSignIn} isSigningIn={isSigningIn} />
             </div>
           )}
-        </div>
+        </main>
       </div>
 
       {settingsOpen ? (
@@ -436,25 +464,25 @@ function EpisodeTrackingTimeoutPanel({
   const active = disabledUntil !== null && disabledUntil > new Date();
 
   return (
-    <GlassCard className="p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="mr-auto">
-          <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">Episode tracking</p>
-          <p className="text-sm text-gray-700">
-            {active ? `Paused until ${disabledUntil.toLocaleString()}` : 'Active'}
+    <GlassCard className="p-2.5">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800">Episode tracking</p>
+          <p className="truncate text-xs text-slate-600">
+            {active ? `Paused until ${disabledUntil.toLocaleString()}` : 'Active · pause observations for'}
           </p>
         </div>
-        <button className="rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm" type="button" onClick={() => onPause('30m')}>
+        <button className="min-h-9 rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" type="button" onClick={() => onPause('30m')}>
           30 min
         </button>
-        <button className="rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm" type="button" onClick={() => onPause('2h')}>
+        <button className="min-h-9 rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" type="button" onClick={() => onPause('2h')}>
           2 hours
         </button>
-        <button className="rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm" type="button" onClick={() => onPause('tomorrow')}>
+        <button className="min-h-9 rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" type="button" onClick={() => onPause('tomorrow')}>
           Tomorrow
         </button>
         {active ? (
-          <GradientButton tone="soft" onClick={onResume}>Resume</GradientButton>
+          <GradientButton tone="soft" className="min-h-9 rounded-lg px-2.5 py-1 text-xs" onClick={onResume}>Resume</GradientButton>
         ) : null}
       </div>
     </GlassCard>
