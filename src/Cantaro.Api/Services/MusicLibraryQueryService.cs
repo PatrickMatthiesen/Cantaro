@@ -18,6 +18,10 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 .ThenInclude(entry => entry.Track)
                     .ThenInclude(track => track!.SourceIds)
             .Include(playlist => playlist.Entries)
+                .ThenInclude(entry => entry.Track)
+                    .ThenInclude(track => track!.ArtistCredits)
+                        .ThenInclude(credit => credit.Artist)
+            .Include(playlist => playlist.Entries)
                 .ThenInclude(entry => entry.TrackObservation)
             .Where(playlist => playlist.UserId == userId)
             .OrderBy(playlist => playlist.Name)
@@ -84,6 +88,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             Id = group.Key,
             Title = metadata.Title,
             Artist = metadata.Artist,
+            ArtistCredits = BuildArtistCredits(representative.Track),
             Albums = metadata.Albums,
             ThumbnailUrl = metadata.ThumbnailUrl,
             DurationSeconds = metadata.DurationSeconds,
@@ -111,7 +116,9 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
 
     public async Task<MusicLibrarySongDto?> GetCanonicalSongAsync(Guid trackId, int userId, CancellationToken cancellationToken)
     {
-        var track = await _dbContext.Tracks.AsNoTracking().Include(x => x.SourceIds)
+        var track = await _dbContext.Tracks.AsNoTracking()
+            .Include(x => x.SourceIds)
+            .Include(x => x.ArtistCredits).ThenInclude(x => x.Artist)
             .FirstOrDefaultAsync(x => x.Id == trackId, cancellationToken);
         if (track is null) return null;
         var metadata = ParseJson<TrackCanonicalMetadata>(track.CanonicalMetadata);
@@ -123,7 +130,9 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         if (!string.IsNullOrWhiteSpace(track.Isrc)) identities.Add(Identity("isrc", track.Isrc));
         return new MusicLibrarySongDto
         {
-            Id = $"track:{track.Id}", Title = metadata?.Title ?? "Unknown song", Artist = metadata?.Artist,
+            Id = $"track:{track.Id}", Title = metadata?.Title ?? "Unknown song",
+            Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track)),
+            ArtistCredits = BuildArtistCredits(track),
             Albums = metadata?.Albums ?? [], ThumbnailUrl = metadata?.ThumbnailUrl, DurationSeconds = metadata?.DurationSeconds,
             MatchStatus = null, SourcePlatforms = identities.Select(x => x.Source).Distinct().Order().ToList(),
             SourceIdentities = identities, PlatformLinks = BuildPlatformLinks(identities), Playlists = memberships
@@ -218,6 +227,31 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         Url = url
     };
 
+    private static List<MusicLibrarySongArtistCreditDto> BuildArtistCredits(Track? track) =>
+        track?.ArtistCredits
+            .OrderBy(credit => credit.Position)
+            .Select(credit => new MusicLibrarySongArtistCreditDto
+            {
+                ArtistId = credit.ArtistId.ToString(),
+                Name = credit.Artist?.Name ?? credit.CreditedName,
+                CreditedName = credit.CreditedName,
+                Role = credit.Role.ToString().ToLowerInvariant(),
+                Position = credit.Position,
+                MusicBrainzArtistId = credit.Artist?.MusicBrainzArtistId
+            })
+            .ToList() ?? [];
+
+    private static string? BuildArtistDisplay(Track? track)
+    {
+        var creditedNames = track?.ArtistCredits
+            .OrderBy(credit => credit.Position)
+            .Where(credit => credit.Role is TrackArtistRole.Primary or TrackArtistRole.Featured)
+            .Select(credit => credit.CreditedName.Trim())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToList() ?? [];
+        return creditedNames.Count == 0 ? null : string.Join(" ", creditedNames);
+    }
+
     private static SongMetadata BuildSongMetadata(PlaylistEntry entry)
     {
         var canonicalMetadata = ParseJson<TrackCanonicalMetadata>(entry.Track?.CanonicalMetadata);
@@ -231,6 +265,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             "Unknown song")!;
         var artist = FirstNonEmpty(
             canonicalMetadata?.Artist,
+            BuildArtistDisplay(entry.Track),
             observation is null ? null : TrackObservationDisplayFormatter.GetQueueArtist(observation, observationMetadata));
 
         return new SongMetadata(

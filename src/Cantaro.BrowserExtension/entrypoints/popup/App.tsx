@@ -59,6 +59,7 @@ function App() {
   const [savedConfig, setSavedConfig] = useState<ExtensionConfig>(emptyExtensionConfig);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
   const [draftWebBaseUrl, setDraftWebBaseUrl] = useState(emptyExtensionConfig.webBaseUrl);
+  const [draftInjectLyricsOnYouTube, setDraftInjectLyricsOnYouTube] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [blurEmailAddress, setBlurEmailAddress] = useState(true);
   const [status, setStatus] = useState<{ message: string; type: StatusType } | null>(null);
@@ -102,6 +103,7 @@ function App() {
         setSavedConfig(config);
         setDraftApiBaseUrl(config.apiBaseUrl);
         setDraftWebBaseUrl(config.webBaseUrl);
+        setDraftInjectLyricsOnYouTube(config.injectLyricsOnYouTube);
         setSessionEmail(config.sessionEmail || null);
       })
       .catch((error) => {
@@ -161,9 +163,9 @@ function App() {
       if (cancelled) return;
       const blur = profile.preferences?.blurEmailAddress ?? true;
       setBlurEmailAddress(blur);
-      await browser.storage.local.set({ blurEmailAddress: blur });
       const preference = profile.preferences?.theme ?? 'system';
       const theme = preference === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : preference;
+      await browser.storage.local.set({ blurEmailAddress: blur, cantaroTheme: theme });
       document.documentElement.dataset.theme = theme;
     }).catch(async () => {
       const stored = await browser.storage.local.get('blurEmailAddress');
@@ -218,6 +220,7 @@ function App() {
     setSavedConfig(persistedConfig);
     setDraftApiBaseUrl(persistedConfig.apiBaseUrl);
     setDraftWebBaseUrl(persistedConfig.webBaseUrl);
+    setDraftInjectLyricsOnYouTube(persistedConfig.injectLyricsOnYouTube);
     setSessionEmail(persistedConfig.sessionEmail || null);
     setMediaSessionKey((current) => current + 1);
     setSettingsOpen(false);
@@ -237,6 +240,7 @@ function App() {
         ...savedConfig,
         apiBaseUrl: nextApiBaseUrl,
         webBaseUrl: normalizeApiBaseUrl(draftWebBaseUrl) || emptyExtensionConfig.webBaseUrl,
+        injectLyricsOnYouTube: draftInjectLyricsOnYouTube,
         accessToken: apiBaseUrlChanged ? '' : savedConfig.accessToken,
         refreshToken: apiBaseUrlChanged ? '' : savedConfig.refreshToken,
         accessTokenExpiresAt: apiBaseUrlChanged ? '' : savedConfig.accessTokenExpiresAt,
@@ -328,7 +332,9 @@ function App() {
     showStatus('Episode tracking resumed', 'success');
   };
 
-  const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl || draftWebBaseUrl !== savedConfig.webBaseUrl;
+  const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl
+    || draftWebBaseUrl !== savedConfig.webBaseUrl
+    || draftInjectLyricsOnYouTube !== savedConfig.injectLyricsOnYouTube;
   const mediaConfigured = isMediaConfigured(savedConfig);
   const trackingPaused = Boolean(
     trackingTimeout.disabledUntil && new Date(trackingTimeout.disabledUntil) > new Date(),
@@ -423,8 +429,10 @@ function App() {
               webBaseUrl={draftWebBaseUrl}
               isCheckingSession={isCheckingSession} hasUnsavedChanges={hasUnsavedChanges} sessionEmail={sessionEmail}
               blurEmailAddress={blurEmailAddress}
+              injectLyricsOnYouTube={draftInjectLyricsOnYouTube}
               defaultApiBaseUrl={DEFAULT_API_BASE_URL} onClose={() => setSettingsOpen(false)} onSubmit={handleSubmit}
               onSignIn={handleSignIn} onDisconnect={handleDisconnect} onApiBaseUrlChange={setDraftApiBaseUrl} onWebBaseUrlChange={setDraftWebBaseUrl}
+              onInjectLyricsOnYouTubeChange={setDraftInjectLyricsOnYouTube}
             />
           ) : activeTab === 'music' ? (
             <div className="h-full py-1">

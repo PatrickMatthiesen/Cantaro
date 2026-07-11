@@ -63,6 +63,25 @@ public class MusicLibraryQueryServiceTests
         {
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "video-1"
         });
+        var primaryArtist = new Artist
+        {
+            Id = Guid.NewGuid(), Name = "Canonical Artist", SortName = "Artist, Canonical",
+            MusicBrainzArtistId = "0d5f4b04-3be8-427a-8c24-23b1454b2f31", CreatedAt = now, UpdatedAt = now
+        };
+        var featuredArtist = new Artist
+        {
+            Id = Guid.NewGuid(), Name = "Guest Artist", CreatedAt = now, UpdatedAt = now
+        };
+        track.ArtistCredits.Add(new TrackArtistCredit
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, ArtistId = featuredArtist.Id, Artist = featuredArtist,
+            Role = TrackArtistRole.Featured, Position = 1, CreditedName = "feat. Guest Artist"
+        });
+        track.ArtistCredits.Add(new TrackArtistCredit
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, ArtistId = primaryArtist.Id, Artist = primaryArtist,
+            Role = TrackArtistRole.Primary, Position = 0, CreditedName = "Canonical Artist"
+        });
 
         var firstPlaylist = MakePlaylist(userA.Id, "Road songs", now);
         var secondPlaylist = MakePlaylist(userA.Id, "Favorites", now);
@@ -89,6 +108,19 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal($"track:{track.Id}", song.Id);
         Assert.Equal("Canonical Song", song.Title);
         Assert.Equal("Canonical Artist", song.Artist);
+        Assert.Collection(
+            song.ArtistCredits,
+            credit =>
+            {
+                Assert.Equal("primary", credit.Role);
+                Assert.Equal("Canonical Artist", credit.CreditedName);
+                Assert.Equal(primaryArtist.MusicBrainzArtistId, credit.MusicBrainzArtistId);
+            },
+            credit =>
+            {
+                Assert.Equal("featured", credit.Role);
+                Assert.Equal("feat. Guest Artist", credit.CreditedName);
+            });
         Assert.Equal(["Studio Album", "Anniversary Edition"], song.Albums);
         Assert.Null(song.MatchStatus);
         Assert.Equal(["musicbrainz", "youtube"], song.SourcePlatforms);

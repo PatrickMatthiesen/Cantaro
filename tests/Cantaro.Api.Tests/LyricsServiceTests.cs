@@ -57,7 +57,7 @@ public sealed class LyricsServiceTests
     }
 
     [Fact]
-    public async Task GetLyricsAsync_DoesNotExposeTrackOutsideUsersLibrary()
+    public async Task GetLyricsAsync_AllowsCanonicalTrackOutsideUsersLibrary()
     {
         await using var db = CreateDb();
         var trackId = Guid.NewGuid();
@@ -83,8 +83,8 @@ public sealed class LyricsServiceTests
 
         var result = await new LyricsService(db, provider).GetLyricsAsync(7, trackId, CancellationToken.None);
 
-        Assert.Null(result);
-        Assert.Null(provider.Lookup);
+        Assert.NotNull(result);
+        Assert.Equal(trackId, provider.Lookup?.TrackId);
     }
 
     [Fact]

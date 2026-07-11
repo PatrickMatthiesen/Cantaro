@@ -14,6 +14,7 @@ export interface ExtensionConfig {
     refreshToken: string;
     accessTokenExpiresAt: string;
     sessionEmail: string;
+    injectLyricsOnYouTube: boolean;
 }
 
 export function normalizeApiBaseUrl(value: string | null | undefined): string {
@@ -67,6 +68,7 @@ export const emptyExtensionConfig: ExtensionConfig = {
     refreshToken: '',
     accessTokenExpiresAt: '',
     sessionEmail: '',
+    injectLyricsOnYouTube: false,
 };
 
 export async function readExtensionConfig(): Promise<ExtensionConfig> {
@@ -77,6 +79,7 @@ export async function readExtensionConfig(): Promise<ExtensionConfig> {
         'refreshToken',
         'accessTokenExpiresAt',
         'sessionEmail',
+        'injectLyricsOnYouTube',
     ]);
 
     return {
@@ -88,6 +91,7 @@ export async function readExtensionConfig(): Promise<ExtensionConfig> {
         refreshToken: typeof stored.refreshToken === 'string' ? stored.refreshToken : '',
         accessTokenExpiresAt: typeof stored.accessTokenExpiresAt === 'string' ? stored.accessTokenExpiresAt : '',
         sessionEmail: typeof stored.sessionEmail === 'string' ? stored.sessionEmail : '',
+        injectLyricsOnYouTube: stored.injectLyricsOnYouTube === true,
     };
 }
 
@@ -99,6 +103,7 @@ export async function saveExtensionConfig(config: ExtensionConfig): Promise<Exte
         refreshToken: config.refreshToken.trim(),
         accessTokenExpiresAt: config.accessTokenExpiresAt.trim(),
         sessionEmail: config.sessionEmail.trim(),
+        injectLyricsOnYouTube: config.injectLyricsOnYouTube === true,
     };
 
     await browser.storage.local.set({
@@ -108,6 +113,7 @@ export async function saveExtensionConfig(config: ExtensionConfig): Promise<Exte
         refreshToken: persistedConfig.refreshToken || null,
         accessTokenExpiresAt: persistedConfig.accessTokenExpiresAt || null,
         sessionEmail: persistedConfig.sessionEmail || null,
+        injectLyricsOnYouTube: persistedConfig.injectLyricsOnYouTube,
     });
 
     return persistedConfig;
@@ -121,5 +127,6 @@ export async function clearExtensionSession(apiBaseUrl?: string): Promise<Extens
         refreshToken: '',
         accessTokenExpiresAt: '',
         sessionEmail: '',
+        injectLyricsOnYouTube: (await readExtensionConfig()).injectLyricsOnYouTube,
     });
 }

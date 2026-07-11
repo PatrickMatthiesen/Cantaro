@@ -110,3 +110,24 @@ select,
 textarea {
   font: inherit;
 }
+
+.cantaro-lyrics-loading-line {
+  background: #e2e8f0;
+  animation: cantaro-lyrics-pulse 1.4s ease-in-out infinite;
+}
+
+:root[data-theme="dark"] .cantaro-lyrics-loading-line {
+  background: #263249;
+}
+
+@keyframes cantaro-lyrics-pulse {
+  50% {
+    opacity: 0.48;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cantaro-lyrics-loading-line {
+    animation: none;
+  }
+}

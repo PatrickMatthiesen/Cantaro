@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Collections;
 using MetaBrainz.MusicBrainz;
 using MetaBrainz.MusicBrainz.Interfaces.Entities;
 using MetaBrainz.MusicBrainz.Interfaces.Searches;
@@ -41,6 +40,9 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
     {
         var recording = searchResult.Item;
         var artist = FormatArtistCredit(recording.ArtistCredit);
+        var singleArtist = recording.ArtistCredit.Count == 1
+            ? recording.ArtistCredit[0].Artist
+            : null;
         int? durationSeconds = recording.Length.HasValue
             ? (int)Math.Round(recording.Length.Value.TotalSeconds, MidpointRounding.AwayFromZero)
             : null;
@@ -50,6 +52,11 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
             ExternalId = recording.Id.ToString(),
             Title = recording.Title,
             Artist = string.IsNullOrWhiteSpace(artist) ? null : artist,
+            // An aggregate display string cannot safely inherit one member's
+            // identity. Only propagate an artist MBID for a single credited
+            // MusicBrainz artist.
+            ArtistMusicBrainzId = singleArtist?.Id.ToString(),
+            ArtistSortName = singleArtist?.SortName,
             MbidRecording = recording.Id.ToString(),
             Isrc = recording.Isrcs?.FirstOrDefault(),
             DurationSeconds = durationSeconds,
@@ -59,6 +66,13 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
                 Id = recording.Id,
                 recording.Title,
                 Artist = artist,
+                ArtistCredits = recording.ArtistCredit.Select(credit => new
+                {
+                    credit.Name,
+                    credit.JoinPhrase,
+                    MusicBrainzArtistId = credit.Artist?.Id,
+                    SortName = credit.Artist?.SortName
+                }),
                 recording.Isrcs,
                 Length = recording.Length,
                 searchResult.Score
@@ -66,28 +80,14 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
         };
     }
 
-    private static string? FormatArtistCredit(object? artistCredit)
+    private static string? FormatArtistCredit(IReadOnlyList<INameCredit> artistCredit)
     {
-        if (artistCredit is not IEnumerable credits)
+        if (artistCredit.Count == 0)
         {
-            return artistCredit?.ToString();
+            return null;
         }
 
-        var names = new List<string>();
-        foreach (var credit in credits)
-        {
-            if (credit == null)
-            {
-                continue;
-            }
-
-            var name = credit.GetType().GetProperty("Name")?.GetValue(credit)?.ToString();
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                names.Add(name);
-            }
-        }
-
-        return names.Count > 0 ? string.Join(", ", names) : artistCredit.ToString();
+        var display = string.Concat(artistCredit.Select(credit => $"{credit.Name}{credit.JoinPhrase}"));
+        return string.IsNullOrWhiteSpace(display) ? null : display.Trim();
     }
 }

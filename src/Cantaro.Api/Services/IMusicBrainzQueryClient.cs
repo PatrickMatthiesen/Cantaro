@@ -10,6 +10,8 @@ public sealed class MusicBrainzRecordingMatch
     public required string ExternalId { get; init; }
     public required string Title { get; init; }
     public string? Artist { get; init; }
+    public string? ArtistMusicBrainzId { get; init; }
+    public string? ArtistSortName { get; init; }
     public string? MbidRecording { get; init; }
     public string? Isrc { get; init; }
     public int? DurationSeconds { get; init; }
