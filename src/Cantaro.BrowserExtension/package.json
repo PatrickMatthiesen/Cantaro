@@ -28,6 +28,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/webextension-polyfill": "^0.12.5",
     "@wxt-dev/module-react": "^1.2.2",
+    "linkedom": "^0.18.13",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7",
