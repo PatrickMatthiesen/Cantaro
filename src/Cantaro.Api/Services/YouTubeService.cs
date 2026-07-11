@@ -12,6 +12,14 @@ using System.Xml;
 
 namespace Cantaro.Api.Services;
 
+public sealed record YouTubePlaylistRemovalResult(IReadOnlyList<long?> Positions)
+{
+    public bool Changed => Positions.Count > 0;
+}
+
+public sealed class YouTubePlaylistReconciliationException(string message, Exception innerException)
+    : Exception(message, innerException);
+
 /// <summary>
 /// DTO for YouTube playlist information
 /// </summary>
@@ -38,6 +46,19 @@ public class YouTubePlaylistItemDto
     public int Position { get; set; }
     public DateTimeOffset? PublishedAt { get; set; }
     public int? DurationSeconds { get; set; }
+}
+
+public sealed class YouTubeVideoMetadataDto
+{
+    public required string VideoId { get; init; }
+    public required string Title { get; init; }
+    public string? ChannelTitle { get; init; }
+    public string? ThumbnailUrl { get; init; }
+    public string? CategoryId { get; init; }
+    public bool LicensedContent { get; init; }
+    public IReadOnlyList<string> Tags { get; init; } = [];
+    public IReadOnlyList<string> TopicCategories { get; init; } = [];
+    public int? DurationSeconds { get; init; }
 }
 
 /// <summary>
@@ -80,6 +101,48 @@ public class YouTubeService
         return null;
     }
 
+    public async Task<YouTubeVideoMetadataDto?> GetVideoMetadataAsync(int userId, string videoId, CancellationToken cancellationToken)
+    {
+        var account = await GetConnectedAccountAsync(userId);
+        if (account is null) return null;
+        VideoListResponse response;
+        try
+        {
+            using var youtubeService = await CreateYouTubeServiceAsync(account);
+            var request = youtubeService.Videos.List("snippet,contentDetails,topicDetails");
+            request.Id = videoId;
+            request.MaxResults = 1;
+            response = await request.ExecuteAsync(cancellationToken);
+        }
+        catch (Google.Apis.Auth.OAuth2.Responses.TokenResponseException ex)
+        {
+            _logger.LogWarning(ex, "YouTube metadata is unavailable because the account for user {UserId} needs reconnecting", userId);
+            return null;
+        }
+        var video = response.Items?.FirstOrDefault();
+        if (video is null) return null;
+
+        int? durationSeconds = null;
+        if (!string.IsNullOrWhiteSpace(video.ContentDetails?.Duration))
+        {
+            try { durationSeconds = (int)Math.Round(XmlConvert.ToTimeSpan(video.ContentDetails.Duration).TotalSeconds); }
+            catch (FormatException) { }
+        }
+
+        return new YouTubeVideoMetadataDto
+        {
+            VideoId = video.Id,
+            Title = video.Snippet?.Title ?? videoId,
+            ChannelTitle = video.Snippet?.ChannelTitle,
+            ThumbnailUrl = video.Snippet?.Thumbnails?.High?.Url ?? video.Snippet?.Thumbnails?.Default__?.Url,
+            CategoryId = video.Snippet?.CategoryId,
+            LicensedContent = video.ContentDetails?.LicensedContent ?? false,
+            Tags = video.Snippet?.Tags?.ToArray() ?? [],
+            TopicCategories = video.TopicDetails?.TopicCategories?.ToArray() ?? [],
+            DurationSeconds = durationSeconds
+        };
+    }
+
     /// <summary>
     /// Gets the Google OAuth authorization URL for YouTube
     /// </summary>
@@ -90,7 +153,7 @@ public class YouTubeService
 
         var scopes = new[]
         {
-            "https://www.googleapis.com/auth/youtube.readonly",
+            "https://www.googleapis.com/auth/youtube.force-ssl",
             "openid",
             "email",
             "profile"
@@ -107,6 +170,118 @@ public class YouTubeService
 
         return url;
     }
+
+    public async Task<bool> AddVideoToPlaylistAsync(int userId, string playlistId, string videoId, CancellationToken cancellationToken)
+        => await AddVideoToPlaylistAsync(userId, playlistId, videoId, position: null, cancellationToken);
+
+    public async Task<bool> AddVideoToPlaylistAsync(
+        int userId,
+        string playlistId,
+        string videoId,
+        long? position,
+        CancellationToken cancellationToken)
+    {
+        var account = await GetConnectedAccountAsync(userId) ?? throw new InvalidOperationException("YouTube account not connected");
+        if (!HasPlaylistWriteScope(account.Scopes))
+            throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
+        using var service = await CreateYouTubeServiceAsync(account);
+        var existing = service.PlaylistItems.List("id");
+        existing.PlaylistId = playlistId;
+        existing.VideoId = videoId;
+        existing.MaxResults = 1;
+        if ((await existing.ExecuteAsync(cancellationToken)).Items?.Count > 0)
+            return false;
+        await InsertVideoIntoPlaylistAsync(service, playlistId, videoId, position, cancellationToken);
+        return true;
+    }
+
+    public async Task RestoreVideoToPlaylistAsync(
+        int userId,
+        string playlistId,
+        string videoId,
+        long? position,
+        CancellationToken cancellationToken)
+    {
+        var account = await GetConnectedAccountAsync(userId) ?? throw new InvalidOperationException("YouTube account not connected");
+        if (!HasPlaylistWriteScope(account.Scopes))
+            throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
+        using var service = await CreateYouTubeServiceAsync(account);
+        await InsertVideoIntoPlaylistAsync(service, playlistId, videoId, position, cancellationToken);
+    }
+
+    private static async Task InsertVideoIntoPlaylistAsync(
+        Google.Apis.YouTube.v3.YouTubeService service,
+        string playlistId,
+        string videoId,
+        long? position,
+        CancellationToken cancellationToken)
+    {
+        var item = new PlaylistItem
+        {
+            Snippet = new PlaylistItemSnippet
+            {
+                PlaylistId = playlistId,
+                Position = position,
+                ResourceId = new ResourceId { Kind = "youtube#video", VideoId = videoId }
+            }
+        };
+        await service.PlaylistItems.Insert(item, "snippet").ExecuteAsync(cancellationToken);
+    }
+
+    public async Task<YouTubePlaylistRemovalResult> RemoveVideoFromPlaylistAsync(int userId, string playlistId, string videoId, CancellationToken cancellationToken)
+    {
+        var account = await GetConnectedAccountAsync(userId) ?? throw new InvalidOperationException("YouTube account not connected");
+        if (!HasPlaylistWriteScope(account.Scopes))
+            throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
+        using var service = await CreateYouTubeServiceAsync(account);
+        var items = new List<PlaylistItem>();
+        string? pageToken = null;
+        do
+        {
+            var list = service.PlaylistItems.List("id,snippet,contentDetails");
+            list.PlaylistId = playlistId;
+            list.VideoId = videoId;
+            list.MaxResults = 50;
+            list.PageToken = pageToken;
+            var response = await list.ExecuteAsync(cancellationToken);
+            if (response.Items is not null) items.AddRange(response.Items);
+            pageToken = response.NextPageToken;
+        }
+        while (!string.IsNullOrWhiteSpace(pageToken));
+
+        if (items.Count == 0) return new YouTubePlaylistRemovalResult([]);
+        var deletedItems = new List<PlaylistItem>();
+        try
+        {
+            foreach (var item in items)
+            {
+                await service.PlaylistItems.Delete(item.Id).ExecuteAsync(cancellationToken);
+                deletedItems.Add(item);
+            }
+        }
+        catch (Exception deleteException)
+        {
+            try
+            {
+                foreach (var item in deletedItems.OrderBy(item => item.Snippet?.Position))
+                    await InsertVideoIntoPlaylistAsync(service, playlistId, videoId, item.Snippet?.Position, CancellationToken.None);
+            }
+            catch (Exception restoreException)
+            {
+                throw new YouTubePlaylistReconciliationException(
+                    "YouTube changed and the partial playlist update could not be rolled back.",
+                    new AggregateException(deleteException, restoreException));
+            }
+
+            throw;
+        }
+
+        return new YouTubePlaylistRemovalResult(deletedItems.Select(item => item.Snippet?.Position).Order().ToList());
+    }
+
+    private static bool HasPlaylistWriteScope(string? scopes) => (scopes ?? string.Empty)
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Any(scope => scope is "https://www.googleapis.com/auth/youtube" or "https://www.googleapis.com/auth/youtube.force-ssl");
 
     /// <summary>
     /// Exchanges authorization code for tokens and saves the connected account

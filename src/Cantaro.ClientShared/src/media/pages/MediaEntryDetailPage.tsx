@@ -6,7 +6,6 @@ import {
   Clock3,
   Flame,
   Heart,
-  Info,
   Minus,
   MoreVertical,
   Play,
@@ -33,6 +32,7 @@ import {
 import type {
   MediaLibraryEntryDetailDto,
   MediaLibraryImportEventDto,
+  MediaProviderCharacterCreditDto,
   MediaProviderLinkSummaryDto,
 } from '../services/mediaApi';
 
@@ -116,7 +116,7 @@ function buildAvailabilityMap(
   const next: ProviderAvailabilityMap = {};
   for (const link of providerLinks) {
     const key = providerAvailabilityKey(link.provider, link.externalId);
-    next[key] = current[key] ?? { status: 'loading', links: [] };
+    next[key] = current[key] ?? { status: 'loading', links: [], characters: [] };
   }
 
   return next;
@@ -133,6 +133,7 @@ async function loadAvailabilityStates(providerLinks: MediaProviderLinkSummaryDto
         state: {
           status: 'loaded' as const,
           links: details.availabilityLinks ?? [],
+          characters: details.characters ?? [],
         },
       };
     } catch (error) {
@@ -141,6 +142,7 @@ async function loadAvailabilityStates(providerLinks: MediaProviderLinkSummaryDto
         state: {
           status: 'error' as const,
           links: [],
+          characters: [],
           error: getErrorMessage(error, 'Failed to load availability'),
         },
       };
@@ -1132,27 +1134,83 @@ function FranchiseSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
   );
 }
 
-function CharactersSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
-  const names = ['Main cast', 'Supporting cast', 'Provider roles', 'Watch notes'];
+interface CharactersSectionProps {
+  entry: MediaLibraryEntryDetailDto;
+  availabilityByProviderLink: ProviderAvailabilityMap;
+}
+
+interface CharacterSectionData {
+  characters: MediaProviderCharacterCreditDto[];
+  message: string | null;
+  isError: boolean;
+}
+
+function getCharacterSectionMessage(
+  supportedLinkCount: number,
+  states: Array<ProviderAvailabilityState | undefined>,
+  characterCount: number,
+): string | null {
+  if (supportedLinkCount === 0) return 'Character credits are not supported by the linked providers.';
+  if (states.some((state) => !state || state.status === 'loading')) return 'Loading character credits…';
+  if (states.every((state) => state?.status === 'error')) return 'Character credits could not be loaded from AniList.';
+  if (characterCount === 0) return 'AniList has no character credits for this title.';
+  return null;
+}
+
+function getCharacterSectionData({ entry, availabilityByProviderLink }: CharactersSectionProps): CharacterSectionData {
+  const supportedLinks = entry.providerLinks.filter((link) => link.provider === 'anilist');
+  const states = supportedLinks.map((link) => availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]);
+  const characters = states
+    .filter((state): state is ProviderAvailabilityState => state?.status === 'loaded')
+    .flatMap((state) => state.characters)
+    .sort((left, right) => left.order - right.order);
+
+  return {
+    characters,
+    message: getCharacterSectionMessage(supportedLinks.length, states, characters.length),
+    isError: states.some((state) => state?.status === 'error'),
+  };
+}
+
+function CharacterCard({ character }: { character: MediaProviderCharacterCreditDto }) {
+  const name = character.providerUrl
+    ? <a href={character.providerUrl} target="_blank" rel="noreferrer">{character.name}</a>
+    : character.name;
+
+  return (
+    <article className="media-detail-character-card">
+      <div><DetailArtwork posterUrl={character.imageUrl} title={character.name} /></div>
+      <h4>{name}</h4>
+      <p>{character.role === 'main' ? 'Main' : 'Supporting'}</p>
+    </article>
+  );
+}
+
+function CharacterList({ characters }: { characters: MediaProviderCharacterCreditDto[] }) {
+  if (characters.length === 0) return null;
+
+  return (
+    <div className="media-detail-character-row">
+      {characters.map((character) => <CharacterCard key={character.characterId} character={character} />)}
+    </div>
+  );
+}
+
+function CharactersSection(props: CharactersSectionProps) {
+  const [showAll, setShowAll] = useState(false);
+  const data = getCharacterSectionData(props);
+  const visibleCharacters = showAll ? data.characters : data.characters.slice(0, 8);
 
   return (
     <section className="media-detail-section">
-      <SectionHeading title="Main Characters" action="See all" />
-      <div className="media-detail-character-row">
-        {names.map((name, index) => (
-          <article key={name} className="media-detail-character-card">
-            <div>
-              <DetailArtwork posterUrl={entry.title.posterUrl} title={name} />
-            </div>
-            <button type="button" aria-label={`Favorite ${name}`}>
-              <Heart aria-hidden />
-            </button>
-            <h4>{index === 0 ? entry.title.canonicalTitle : name}</h4>
-            <p>{index === 0 ? 'Main' : 'Supporting'}</p>
-            <Info aria-hidden className="media-detail-character-info" />
-          </article>
-        ))}
-      </div>
+      <SectionHeading title="Characters" />
+      {data.message ? <p className="media-detail-character-state" role={data.isError ? 'alert' : undefined}>{data.message}</p> : null}
+      <CharacterList characters={visibleCharacters} />
+      {data.characters.length > 8 ? (
+        <button type="button" className="media-detail-character-more" onClick={() => setShowAll((current) => !current)}>
+          {showAll ? 'Show primary characters' : `View all ${data.characters.length} characters`}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -1248,7 +1306,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 onUnlink={props.onUnlink}
               />
               <FranchiseSection entry={props.entry} />
-              <CharactersSection entry={props.entry} />
+              <CharactersSection entry={props.entry} availabilityByProviderLink={props.availabilityByProviderLink} />
               <div className="media-detail-overview-meta-grid">
                 <InformationSection entry={props.entry} />
                 <CommunitySection entry={props.entry} progressSummary={progressSummary} />

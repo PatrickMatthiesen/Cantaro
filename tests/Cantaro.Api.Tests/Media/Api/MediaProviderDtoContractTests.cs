@@ -90,6 +90,18 @@ public class MediaProviderDtoContractTests
                         IconUrl = "https://example.test/crunchyroll.png"
                     }
                 ],
+                Characters =
+                [
+                    new MediaProviderCharacterCredit
+                    {
+                        CharacterId = "170732",
+                        Name = "Anya Forger",
+                        ImageUrl = "https://example.test/anya.jpg",
+                        Role = "main",
+                        ProviderUrl = "https://anilist.co/character/170732/Anya-Forger",
+                        Order = 0
+                    }
+                ],
                 RawMetadata = "{\"release\":\"internal\"}"
             }
         };
@@ -108,6 +120,13 @@ public class MediaProviderDtoContractTests
         Assert.Equal("Crunchyroll", availability.DisplayName);
         Assert.Equal("streaming", availability.AvailabilityKind);
         Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", availability.Url);
+        var character = Assert.Single(payload.Characters);
+        Assert.Equal("170732", character.CharacterId);
+        Assert.Equal("Anya Forger", character.Name);
+        Assert.Equal("main", character.Role);
+        Assert.Equal("https://example.test/anya.jpg", character.ImageUrl);
+        Assert.Equal("https://anilist.co/character/170732/Anya-Forger", character.ProviderUrl);
+        Assert.Equal(0, character.Order);
         Assert.Null(typeof(MediaProviderTitleDetailsDto).GetProperty(nameof(MediaProviderTitleDetails.RawMetadata)));
     }
 

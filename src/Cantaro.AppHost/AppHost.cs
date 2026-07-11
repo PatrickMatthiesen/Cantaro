@@ -122,6 +122,7 @@ if (builder.ExecutionContext.IsRunMode)
 
 builder.AddBunApp("browser-extension", "../Cantaro.BrowserExtension", entryPoint: "dev")
     .WithReference(api)
+    .WithReference(frontend)
     .WithExplicitStart();
 
 builder.Build().Run();

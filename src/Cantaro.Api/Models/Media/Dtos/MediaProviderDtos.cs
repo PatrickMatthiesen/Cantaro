@@ -111,7 +111,18 @@ public class MediaProviderTitleDetailsDto
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
     public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
+    public IReadOnlyList<MediaProviderCharacterCreditDto> Characters { get; set; } = [];
     public MediaCatalogLibraryStateDto? LibraryState { get; set; }
+}
+
+public class MediaProviderCharacterCreditDto
+{
+    public required string CharacterId { get; set; }
+    public required string Name { get; set; }
+    public string? ImageUrl { get; set; }
+    public required string Role { get; set; }
+    public string? ProviderUrl { get; set; }
+    public int Order { get; set; }
 }
 
 public class MediaProviderAvailabilityLinkDto

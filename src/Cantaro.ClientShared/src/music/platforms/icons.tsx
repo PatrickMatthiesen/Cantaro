@@ -39,6 +39,7 @@ import {
   Sparkles,
   Square,
   SquareCheck,
+  Trash2,
   User,
   type LucideIcon,
 } from 'lucide-react';
@@ -117,6 +118,7 @@ export type MusicUiIconName =
   | 'sparkles'
   | 'square'
   | 'squareCheck'
+  | 'trash'
   | 'warning'
   | 'user';
 
@@ -157,6 +159,7 @@ const uiIconByName: Record<MusicUiIconName, LucideIcon> = {
   sparkles: Sparkles,
   square: Square,
   squareCheck: SquareCheck,
+  trash: Trash2,
   warning: CircleAlert,
   user: User,
 };

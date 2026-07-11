@@ -23,7 +23,22 @@ public sealed class MusicLibrarySongDto
     public int? DurationSeconds { get; set; }
     public string? MatchStatus { get; set; }
     public required List<string> SourcePlatforms { get; set; }
+    public required List<MusicLibrarySongSourceIdentityDto> SourceIdentities { get; set; }
+    public required List<MusicLibrarySongPlatformLinkDto> PlatformLinks { get; set; }
     public required List<MusicLibrarySongPlaylistDto> Playlists { get; set; }
+}
+
+public sealed class MusicLibrarySongSourceIdentityDto
+{
+    public required string Source { get; set; }
+    public required string ExternalId { get; set; }
+}
+
+public sealed class MusicLibrarySongPlatformLinkDto
+{
+    public required string Platform { get; set; }
+    public required string Label { get; set; }
+    public required string Url { get; set; }
 }
 
 public sealed class MusicLibrarySongPlaylistDto

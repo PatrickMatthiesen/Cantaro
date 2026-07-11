@@ -130,7 +130,19 @@ public class MediaProviderTitleDetails
 
     public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
 
+    public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
+
     public string? RawMetadata { get; set; }
+}
+
+public class MediaProviderCharacterCredit
+{
+    public required string CharacterId { get; set; }
+    public required string Name { get; set; }
+    public string? ImageUrl { get; set; }
+    public required string Role { get; set; }
+    public string? ProviderUrl { get; set; }
+    public int Order { get; set; }
 }
 
 public class MediaProviderAvailabilityLink

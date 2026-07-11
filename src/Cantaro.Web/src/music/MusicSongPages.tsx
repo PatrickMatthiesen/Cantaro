@@ -1,8 +1,9 @@
 import { Link } from '@tanstack/react-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   MusicPlatformIcon,
   MusicUiIcon,
+  musicLibraryApi,
   type MusicLibraryResponse,
   type MusicLibrarySong,
   type PlatformId,
@@ -192,16 +193,25 @@ function PlatformAvailabilityCard({ song }: { song: MusicLibrarySong }) {
     <section className={panelClassName('p-5')}>
       <SectionHeader title="Platform availability" detail="Where Cantaro has seen this song so far." />
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {visiblePlatforms.map((platformId) => (
-          <div key={platformId} className="flex items-center justify-between gap-3 rounded-2xl bg-white/66 p-3">
+        {song.platformLinks.map((link) => {
+          const platformId = link.platform === 'youtube-music' ? 'youtube' : link.platform;
+          return (
+          <a key={link.url} href={link.url} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-2xl bg-white/66 p-3 transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none">
             <span className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
-              <MusicPlatformIcon platformId={platformId} className="h-5 w-5" />
-              {platformName(platformId)}
+              {isPlatformId(platformId) ? <MusicPlatformIcon platformId={platformId} className="h-5 w-5" /> : <MusicUiIcon name="externalLink" className="h-5 w-5" />}
+              {link.label}
             </span>
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[0.68rem] font-black text-emerald-700">Known</span>
+            <MusicUiIcon name="externalLink" className="h-4 w-4 text-slate-400" />
+          </a>
+          );
+        })}
+        {song.platformLinks.length === 0 && visiblePlatforms.map((platformId) => (
+          <div key={platformId} className="flex items-center gap-2 rounded-2xl bg-white/66 p-3 text-sm font-black text-slate-700">
+            <MusicPlatformIcon platformId={platformId} className="h-5 w-5" />
+            {platformName(platformId)} source known; no outbound link available
           </div>
         ))}
-        {visiblePlatforms.length === 0 ? (
+        {song.platformLinks.length === 0 && visiblePlatforms.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[#d8d0f4] bg-white/48 p-4 text-sm font-semibold text-slate-500">
             No connected platform source is attached to this song yet.
           </div>
@@ -211,17 +221,50 @@ function PlatformAvailabilityCard({ song }: { song: MusicLibrarySong }) {
   );
 }
 
-function PlaylistAppearancesCard({ song }: { song: MusicLibrarySong }) {
+function PlaylistAppearancesCard({ song, library }: { song: MusicLibrarySong; library: MusicLibraryResponse }) {
+  const [memberships, setMemberships] = useState(song.playlists);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirming, setConfirming] = useState<string>();
+  const [busy, setBusy] = useState<string>();
+  const [message, setMessage] = useState<string>();
+  const youtubeIds = song.sourceIdentities.filter((identity) => identity.source === 'youtube').map((identity) => identity.externalId);
+  const [selectedYouTubeId, setSelectedYouTubeId] = useState(youtubeIds.length === 1 ? youtubeIds[0] : '');
+  useEffect(() => { setMemberships(song.playlists); setConfirming(undefined); setPickerOpen(false); }, [song]);
+  const available = library.playlists.filter((playlist) => !memberships.some((item) => item.playlistId === playlist.id));
+  const add = async (playlistId: string) => {
+    const playlist = library.playlists.find((item) => item.id === playlistId);
+    if (!playlist) return;
+    setBusy(playlistId); setMessage(undefined);
+    try {
+      if (youtubeIds.length > 1 && !selectedYouTubeId) throw new Error('Choose which YouTube version to sync.');
+      await musicLibraryApi.addSongToPlaylist(song.id, playlistId, selectedYouTubeId || undefined);
+      setMemberships((current) => [...current, { playlistId, playlistName: playlist.name, position: playlist.entryCount }]);
+      setMessage(`Added to ${playlist.name} and synced.`); setPickerOpen(false);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not add this song.'); }
+    finally { setBusy(undefined); }
+  };
+  const remove = async (playlistId: string) => {
+    const playlist = memberships.find((item) => item.playlistId === playlistId);
+    setBusy(playlistId); setMessage(undefined);
+    try {
+      await musicLibraryApi.removeSongFromPlaylist(song.id, playlistId, selectedYouTubeId || undefined);
+      setMemberships((current) => current.filter((item) => item.playlistId !== playlistId));
+      setMessage(`Removed from ${playlist?.playlistName ?? 'playlist'} and synced.`); setConfirming(undefined);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not remove this song.'); }
+    finally { setBusy(undefined); }
+  };
   return (
     <section className={panelClassName('p-5')}>
-      <SectionHeader title="Playlist appearances" detail="The places this song currently appears inside Cantaro." />
+      <SectionHeader title="Playlist appearances" detail="The tracked playlists that contain this song." action={available.length > 0 ? <button type="button" onClick={() => setPickerOpen((value) => !value)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-xl font-black text-violet-800 transition hover:bg-violet-200 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none" aria-expanded={pickerOpen} aria-label="Add to another playlist">+</button> : undefined} />
+      {youtubeIds.length > 1 ? <label className="mt-4 block text-xs font-black text-slate-600">YouTube version<select value={selectedYouTubeId} onChange={(event) => setSelectedYouTubeId(event.target.value)} className="mt-1 block w-full rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm"><option value="">Choose a version to sync…</option>{youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}</select></label> : null}
+      {pickerOpen ? <div className="mt-4 flex flex-wrap gap-2 rounded-xl bg-violet-50 p-3">{available.map((playlist) => <button key={playlist.id} type="button" disabled={Boolean(busy)} onClick={() => void add(playlist.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-violet-800 transition hover:bg-violet-100 disabled:opacity-50">{busy === playlist.id ? 'Adding…' : playlist.name}</button>)}</div> : null}
       <div className="mt-4 space-y-2">
-        {song.playlists.length > 0 ? song.playlists.map((playlist) => (
+        {memberships.length > 0 ? memberships.map((playlist) => (
+          <div key={`${playlist.playlistId}-${playlist.position}`} className="group flex items-center gap-2 rounded-2xl bg-white/64 p-2 transition hover:bg-white">
           <Link
-            key={`${playlist.playlistId}-${playlist.position}`}
             to="/music/playlists/$playlistId"
             params={{ playlistId: playlist.playlistId }}
-            className="flex items-center justify-between gap-3 rounded-2xl bg-white/64 p-3 transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+            className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl p-1 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
           >
             <span className="min-w-0">
               <span className="block truncate text-sm font-black text-slate-950">{playlist.playlistName}</span>
@@ -229,24 +272,26 @@ function PlaylistAppearancesCard({ song }: { song: MusicLibrarySong }) {
             </span>
             <MusicUiIcon name="arrowRight" className="h-4 w-4 text-slate-400" />
           </Link>
+          {confirming === playlist.playlistId ? <div className="flex items-center gap-1"><span className="text-xs font-bold text-rose-700">Remove?</span><button type="button" disabled={Boolean(busy)} onClick={() => void remove(playlist.playlistId)} className="rounded-lg bg-rose-700 px-2 py-1 text-xs font-black text-white disabled:opacity-50">{busy === playlist.playlistId ? 'Removing…' : 'Confirm'}</button><button type="button" onClick={() => setConfirming(undefined)} className="rounded-lg px-2 py-1 text-xs font-black text-slate-600">Cancel</button></div> : <button type="button" onClick={() => setConfirming(playlist.playlistId)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-rose-700 opacity-0 transition group-hover:opacity-100 hover:bg-rose-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none" aria-label={`Remove from ${playlist.playlistName}`}><MusicUiIcon name="trash" className="h-4 w-4" /></button>}
+          </div>
         )) : (
           <p className="rounded-2xl border border-dashed border-[#d8d0f4] bg-white/48 p-4 text-sm font-semibold text-slate-500">
             This song is not attached to a synced playlist yet.
           </p>
         )}
       </div>
+      {message ? <p className="mt-3 text-sm font-semibold text-slate-600" role="status">{message}</p> : null}
     </section>
   );
 }
 
 function MetadataReadinessCard({ song }: { song: MusicLibrarySong }) {
-  const metadata = getSongMetadata(song);
   const rows = [
     ...(song.albums.length > 0 ? [{ label: 'Albums', value: song.albums.join(', ') }] : []),
-    { label: 'MusicBrainz identifier', value: metadata.hasMusicBrainzSource ? 'MusicBrainz source detected' : 'Not attached yet' },
+    ...song.sourceIdentities.map((identity) => ({ label: identity.source === 'musicbrainz' ? 'MusicBrainz recording' : identity.source.toUpperCase(), value: identity.externalId })),
     { label: 'Lyrics', value: 'Ready for a future lyrics provider' },
     { label: 'Credits', value: 'Waiting on richer metadata' },
-    { label: 'Platform links', value: metadata.platformIds.length > 0 ? 'Source platform known' : 'No platform link yet' },
+    { label: 'Platform links', value: song.platformLinks.length > 0 ? `${song.platformLinks.length} available` : 'No platform link yet' },
   ];
 
   return (
@@ -328,13 +373,13 @@ function RelatedSongsCard({ library, song }: { library: MusicLibraryResponse; so
   );
 }
 
-function MissingSongPage({ library }: { library: MusicLibraryResponse }) {
+function MissingSongPage({ library, detail = 'Cantaro could not find this song in the current library snapshot.' }: { library: MusicLibraryResponse; detail?: string }) {
   return (
     <MusicPageShell library={library}>
       <div className="mx-auto max-w-2xl">
         <MusicEmptyPanel
           title="Song not found"
-          detail="Cantaro could not find this song in the current library snapshot."
+          detail={detail}
         />
         <Link
           to="/music/songs"
@@ -351,11 +396,23 @@ function MissingSongPage({ library }: { library: MusicLibraryResponse }) {
 // fallow-ignore-next-line complexity
 export function MusicSongDetailPage({ library, songId }: { library: MusicLibraryResponse; songId: string }) {
   const [activeSongId, setActiveSongId] = useState<string | undefined>();
-  const song = library.songs.find((candidate) => candidate.id === songId);
+  const [canonicalSong, setCanonicalSong] = useState<MusicLibrarySong | undefined>();
+  const [canonicalState, setCanonicalState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const librarySong = library.songs.find((candidate) => candidate.id === songId);
+  useEffect(() => {
+    setCanonicalSong(undefined);
+    if (librarySong) { setCanonicalState('idle'); return; }
+    let active = true;
+    setCanonicalState('loading');
+    void musicLibraryApi.getCanonicalSong(songId).then((song) => { if (active) { setCanonicalSong(song); setCanonicalState('idle'); } }).catch(() => { if (active) setCanonicalState('error'); });
+    return () => { active = false; };
+  }, [librarySong, songId]);
+  const song = librarySong ?? canonicalSong;
   const activeSong = library.songs.find((candidate) => candidate.id === activeSongId);
 
+  if (!song && canonicalState === 'loading') return <MusicPageShell library={library}><div className="mx-auto max-w-2xl rounded-2xl bg-white/70 p-6 text-sm font-bold text-slate-600" role="status">Loading song details…</div></MusicPageShell>;
   if (!song) {
-    return <MissingSongPage library={library} />;
+    return <MissingSongPage library={library} detail={canonicalState === 'error' ? 'Cantaro could not load this canonical song. Check the connection and try again.' : undefined} />;
   }
 
   const metadata = getSongMetadata(song);
@@ -384,7 +441,7 @@ export function MusicSongDetailPage({ library, songId }: { library: MusicLibrary
             <div className="min-w-0 space-y-5">
               <PlatformAvailabilityCard song={song} />
               <VersionsCard song={song} />
-              <PlaylistAppearancesCard song={song} />
+              <PlaylistAppearancesCard song={song} library={library} />
             </div>
             <aside className="space-y-5">
               <MetadataReadinessCard song={song} />

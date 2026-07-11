@@ -36,6 +36,7 @@ public class MusicLibraryQueryServiceTests
         var track = new Track
         {
             Id = Guid.NewGuid(),
+            Isrc = "US-ABC-12-34567",
             CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
             {
                 Title = "Canonical Song",
@@ -53,6 +54,14 @@ public class MusicLibraryQueryServiceTests
             TrackId = track.Id,
             SourceType = "musicbrainz",
             ExternalId = "recording-1"
+        });
+        track.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = " MusicBrainz ", ExternalId = " recording-1 "
+        });
+        track.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "video-1"
         });
 
         var firstPlaylist = MakePlaylist(userA.Id, "Road songs", now);
@@ -83,6 +92,13 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal(["Studio Album", "Anniversary Edition"], song.Albums);
         Assert.Null(song.MatchStatus);
         Assert.Equal(["musicbrainz", "youtube"], song.SourcePlatforms);
+        Assert.Equal(3, song.SourceIdentities.Count);
+        Assert.Contains(song.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "US-ABC-12-34567");
+        Assert.Single(song.SourceIdentities, identity => identity.Source == "musicbrainz" && identity.ExternalId == "recording-1");
+        Assert.Equal(3, song.PlatformLinks.Count);
+        Assert.Contains(song.PlatformLinks, link => link.Url == "https://musicbrainz.org/recording/recording-1");
+        Assert.Contains(song.PlatformLinks, link => link.Url == "https://www.youtube.com/watch?v=video-1");
+        Assert.Contains(song.PlatformLinks, link => link.Url == "https://music.youtube.com/watch?v=video-1");
         Assert.Equal(2, song.Playlists.Count);
     }
 
@@ -134,6 +150,63 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal(TrackMatchingStatuses.Ambiguous, song.MatchStatus);
         Assert.Empty(song.Albums);
         Assert.Equal(["youtube"], song.SourcePlatforms);
+        var identity = Assert.Single(song.SourceIdentities);
+        Assert.Equal("youtube", identity.Source);
+        Assert.Equal("video-1", identity.ExternalId);
+        Assert.Equal(2, song.PlatformLinks.Count);
+    }
+
+    [Fact]
+    public async Task AddCanonicalSongToPlaylistAsync_IsUserScopedAndIdempotent()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(704, "owner@example.com");
+        var other = TestUserFactory.Create(705, "other@example.com");
+        var playlist = MakePlaylist(owner.Id, "Owner playlist", now);
+        var track = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        db.AddRange(owner, other, playlist, track);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var service = new MusicLibraryQueryService(db);
+
+        Assert.False(await service.AddCanonicalSongToPlaylistAsync(track.Id, playlist.Id, other.Id, default));
+        Assert.True(await service.AddCanonicalSongToPlaylistAsync(track.Id, playlist.Id, owner.Id, default));
+        Assert.True(await service.AddCanonicalSongToPlaylistAsync(track.Id, playlist.Id, owner.Id, default));
+
+        Assert.Equal(1, await db.PlaylistEntries.CountAsync(x => x.PlaylistId == playlist.Id && x.TrackId == track.Id));
+    }
+
+    [Fact]
+    public async Task RemoveCanonicalSongFromPlaylistAsync_ReindexesRemainingEntriesAndIsIdempotent()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(706, "remove@example.com");
+        var playlist = MakePlaylist(owner.Id, "Playlist", now);
+        var first = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        var removed = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        var last = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        db.AddRange(owner, playlist, first, removed, last);
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.AddRange(
+            MakeEntry(playlist.Id, first.Id, null, 2, "cantaro", now),
+            MakeEntry(playlist.Id, removed.Id, null, 5, "cantaro", now),
+            MakeEntry(playlist.Id, last.Id, null, 9, "cantaro", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var service = new MusicLibraryQueryService(db);
+
+        Assert.True(await service.RemoveCanonicalSongFromPlaylistAsync(removed.Id, playlist.Id, owner.Id, default));
+        Assert.True(await service.RemoveCanonicalSongFromPlaylistAsync(removed.Id, playlist.Id, owner.Id, default));
+
+        var entries = await db.PlaylistEntries.Where(x => x.PlaylistId == playlist.Id).OrderBy(x => x.Position).ToListAsync();
+        Assert.Equal([0, 1], entries.Select(x => x.Position));
+        Assert.DoesNotContain(entries, x => x.TrackId == removed.Id);
     }
 
     private static Playlist MakePlaylist(int userId, string name, DateTimeOffset now)

@@ -1,8 +1,9 @@
-import type { MediaProviderAvailabilityLinkDto } from '../../services/mediaApi';
+import type { MediaProviderAvailabilityLinkDto, MediaProviderCharacterCreditDto } from '../../services/mediaApi';
 
 export interface ProviderAvailabilityState {
   status: 'loading' | 'loaded' | 'error';
   links: MediaProviderAvailabilityLinkDto[];
+  characters: MediaProviderCharacterCreditDto[];
   error?: string;
 }
 
