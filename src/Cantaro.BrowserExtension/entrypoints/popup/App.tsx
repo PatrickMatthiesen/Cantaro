@@ -39,11 +39,9 @@ import type {
   SubmitMediaObservationResponse,
 } from '../../lib/mediaObservation';
 import { readLatestMediaResolution } from '../../lib/mediaResolutionStorage';
-import { readActiveTabMusicContext } from '../../lib/musicContext';
-import { recognizeActiveYouTube } from '../../lib/musicLibrary';
+import { readLastPopupTab, rememberPopupTab, type PopupTab } from '../../lib/popupTabPreference';
 
 type StatusType = 'success' | 'error';
-type PopupTab = 'music' | 'media';
 type MediaRoute = { kind: 'library' } | { kind: 'entry'; id: string };
 
 const suppressEmbeddedHeading = () => undefined;
@@ -54,7 +52,7 @@ function isMediaConfigured(config: ExtensionConfig): boolean {
 
 // fallow-ignore-next-line complexity
 function App() {
-  const [activeTab, setActiveTab] = useState<PopupTab>('media');
+  const [activeTab, setActiveTab] = useState<PopupTab>('music');
   const [mediaRoute, setMediaRoute] = useState<MediaRoute>({ kind: 'library' });
   const [savedConfig, setSavedConfig] = useState<ExtensionConfig>(emptyExtensionConfig);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
@@ -75,6 +73,7 @@ function App() {
   const [isResolving, setIsResolving] = useState(false);
   const [trackingTimeout, setTrackingTimeout] = useState<EpisodeTrackingTimeoutState>({});
   const statusTimeout = useRef<number | null>(null);
+  const hasSelectedTab = useRef(false);
 
   const showStatus = (message: string, type: StatusType) => {
     setStatus({ message, type });
@@ -87,12 +86,9 @@ function App() {
   useEffect(() => {
     let mounted = true;
 
-    void readActiveTabMusicContext()
-      .then((context) => context ? recognizeActiveYouTube(context) : null)
-      .then((recognition) => {
-        if (mounted && recognition?.classification === 'music') setActiveTab('music');
-      })
-      .catch(() => undefined);
+    void readLastPopupTab().then((tab) => {
+      if (mounted && !hasSelectedTab.current) setActiveTab(tab);
+    });
 
     readExtensionConfig()
       .then((config) => {
@@ -123,6 +119,12 @@ function App() {
       }
     };
   }, []);
+
+  const selectTab = (tab: PopupTab) => {
+    hasSelectedTab.current = true;
+    setActiveTab(tab);
+    void rememberPopupTab(tab);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -351,7 +353,7 @@ function App() {
                 <button
                   key={tab}
                   type="button"
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => selectTab(tab)}
                   className={`min-h-9 rounded-[0.625rem] px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${active
                     ? 'bg-white text-slate-950'
                     : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
