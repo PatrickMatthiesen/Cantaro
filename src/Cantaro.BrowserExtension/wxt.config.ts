@@ -19,6 +19,9 @@ const defaultApiBaseUrl = readEnvValue('services__api__https__0')
   ?? readEnvValue('CANTARO_API_BASE_URL')
   ?? readEnvValue('WXT_API_BASE_URL')
   ?? 'https://localhost:7203';
+const defaultWebBaseUrl = readEnvValue('services__web__http__0')
+  ?? readEnvValue('CANTARO_WEB_BASE_URL')
+  ?? 'https://localhost:5173';
 
 function toOriginMatchPattern(value: string): string | null {
   try {
@@ -81,6 +84,7 @@ export default defineConfig({
     plugins: [tailwindcss()],
     define: {
       __CANTARO_DEFAULT_API_BASE_URL__: JSON.stringify(defaultApiBaseUrl),
+      __CANTARO_DEFAULT_WEB_BASE_URL__: JSON.stringify(defaultWebBaseUrl.replace(/\/+$/, '')),
     },
     build: {
       sourcemap: false,

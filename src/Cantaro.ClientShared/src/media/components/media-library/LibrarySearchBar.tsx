@@ -44,30 +44,13 @@ function SearchModeTabs({
     );
 }
 
-function SearchSubmitButton({
-    query,
-    mode,
-    isProviderMode,
-    isSearchingProvider,
-}: Pick<LibrarySearchBarProps, 'query' | 'mode' | 'isSearchingProvider'> & { isProviderMode: boolean }) {
-    return (
-        <button
-            type="submit"
-            className="inline-flex h-11 shrink-0 items-center justify-center rounded-2xl bg-gray-950 px-4 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
-            disabled={isProviderMode && (!query.trim() || isSearchingProvider)}
-            aria-busy={isSearchingProvider}
-        >
-            {isProviderMode && isSearchingProvider ? 'Searching...' : `Search ${modeLabel(mode)}`}
-        </button>
-    );
-}
-
 export function LibrarySearchBar({
     query,
     mode,
     connectedProviderIds,
     isSearchingProvider,
     navigation,
+    onQueryChange,
     onModeChange,
     onSubmit,
 }: LibrarySearchBarProps) {
@@ -85,7 +68,19 @@ export function LibrarySearchBar({
                 {navigation ? <div className="shrink-0">{navigation}</div> : null}
                 {navigation ? <div className="h-px w-full shrink-0 bg-gray-200/80 sm:h-8 sm:w-px" aria-hidden /> : null}
                 <SearchModeTabs mode={mode} connectedProviderIds={connectedProviderIds} onModeChange={onModeChange} />
-                <SearchSubmitButton query={query} mode={mode} isProviderMode={isProviderMode} isSearchingProvider={isSearchingProvider} />
+                <label className="min-w-48 flex-1">
+                    <span className="sr-only">Search {modeLabel(mode)}</span>
+                    <input
+                        type="search"
+                        value={query}
+                        onChange={(event) => onQueryChange(event.target.value)}
+                        placeholder={isProviderMode ? `Search ${modeLabel(mode)}…` : 'Search your library…'}
+                        className="h-11 w-full rounded-xl border border-violet-100 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                    />
+                </label>
+                <span className="self-center px-1 text-xs text-slate-500" aria-live="polite">
+                    {isSearchingProvider ? 'Searching…' : query.trim() ? 'Updates automatically' : ''}
+                </span>
             </form>
         </section>
     );

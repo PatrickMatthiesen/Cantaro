@@ -18,7 +18,20 @@ export interface MusicLibrarySong {
   durationSeconds?: number;
   matchStatus?: string;
   sourcePlatforms: string[];
+  sourceIdentities: MusicLibrarySongSourceIdentity[];
+  platformLinks: MusicLibrarySongPlatformLink[];
   playlists: MusicLibrarySongPlaylist[];
+}
+
+export interface MusicLibrarySongSourceIdentity {
+  source: string;
+  externalId: string;
+}
+
+export interface MusicLibrarySongPlatformLink {
+  platform: string;
+  label: string;
+  url: string;
 }
 
 export interface MusicLibraryPlaylistService {
@@ -57,6 +70,34 @@ class MusicLibraryApiClient {
     }
 
     return response.json();
+  }
+
+  async getCanonicalSong(songId: string): Promise<MusicLibrarySong> {
+    const trackId = songId.startsWith('track:') ? songId.slice(6) : songId;
+    const response = await fetch(`/api/music/library/songs/${encodeURIComponent(trackId)}`, { credentials: 'include' });
+    if (!response.ok) throw new Error('Failed to load song details');
+    return response.json() as Promise<MusicLibrarySong>;
+  }
+
+  async addSongToPlaylist(songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {
+    await this.mutatePlaylistSong('POST', songId, playlistId, youtubeVideoId);
+  }
+
+  async removeSongFromPlaylist(songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {
+    await this.mutatePlaylistSong('DELETE', songId, playlistId, youtubeVideoId);
+  }
+
+  private async mutatePlaylistSong(method: 'POST' | 'DELETE', songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {
+    const trackId = songId.startsWith('track:') ? songId.slice(6) : songId;
+    const query = youtubeVideoId ? `?youtubeVideoId=${encodeURIComponent(youtubeVideoId)}` : '';
+    const response = await fetch(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${query}`, {
+      method,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { error?: string } | null;
+      throw new Error(body?.error ?? `Could not ${method === 'POST' ? 'add' : 'remove'} this song.`);
+    }
   }
 }
 

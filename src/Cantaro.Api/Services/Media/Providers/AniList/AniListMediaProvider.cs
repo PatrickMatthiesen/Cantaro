@@ -381,9 +381,29 @@ public class AniListMediaProvider(
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
             AvailabilityLinks = BuildAvailabilityLinks(media),
+            Characters = MapCharacters(media.Characters),
             RawMetadata = JsonSerializer.Serialize(releaseMetadata)
         };
     }
+
+    private static IReadOnlyList<MediaProviderCharacterCredit> MapCharacters(AniListCharacterConnection? connection)
+    {
+        return (connection?.Edges ?? [])
+            .Where(edge => edge.Node is { Id: > 0 } && !string.IsNullOrWhiteSpace(SelectCharacterName(edge.Node.Name)))
+            .Select((edge, index) => new MediaProviderCharacterCredit
+            {
+                CharacterId = edge.Node!.Id.ToString(CultureInfo.InvariantCulture),
+                Name = SelectCharacterName(edge.Node.Name),
+                ImageUrl = edge.Node.Image?.Large ?? edge.Node.Image?.Medium,
+                Role = string.Equals(edge.Role, "MAIN", StringComparison.OrdinalIgnoreCase) ? "main" : "supporting",
+                ProviderUrl = edge.Node.SiteUrl,
+                Order = index
+            })
+            .ToList();
+    }
+
+    private static string SelectCharacterName(AniListCharacterName? name)
+        => name?.UserPreferred ?? name?.Full ?? name?.Native ?? string.Empty;
 
     private static IReadOnlyList<MediaProviderAvailabilityLink> BuildAvailabilityLinks(AniListMedia media)
     {
@@ -789,6 +809,17 @@ public class AniListMediaProvider(
                 url
                 site
             }
+            characters(sort: [ROLE, RELEVANCE], perPage: 25) {
+                edges {
+                    role
+                    node {
+                        id
+                        siteUrl
+                        name { full native userPreferred }
+                        image { large medium }
+                    }
+                }
+            }
           }
         }
         """;
@@ -946,6 +977,53 @@ public class AniListMedia
 
     [JsonPropertyName("streamingEpisodes")]
     public List<AniListStreamingEpisode>? StreamingEpisodes { get; set; }
+
+    [JsonPropertyName("characters")]
+    public AniListCharacterConnection? Characters { get; set; }
+}
+
+public class AniListCharacterConnection
+{
+    [JsonPropertyName("edges")]
+    public List<AniListCharacterEdge>? Edges { get; set; }
+}
+
+public class AniListCharacterEdge
+{
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+    [JsonPropertyName("node")]
+    public AniListCharacter? Node { get; set; }
+}
+
+public class AniListCharacter
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+    [JsonPropertyName("siteUrl")]
+    public string? SiteUrl { get; set; }
+    [JsonPropertyName("name")]
+    public AniListCharacterName? Name { get; set; }
+    [JsonPropertyName("image")]
+    public AniListCharacterImage? Image { get; set; }
+}
+
+public class AniListCharacterName
+{
+    [JsonPropertyName("full")]
+    public string? Full { get; set; }
+    [JsonPropertyName("native")]
+    public string? Native { get; set; }
+    [JsonPropertyName("userPreferred")]
+    public string? UserPreferred { get; set; }
+}
+
+public class AniListCharacterImage
+{
+    [JsonPropertyName("large")]
+    public string? Large { get; set; }
+    [JsonPropertyName("medium")]
+    public string? Medium { get; set; }
 }
 
 public class AniListExternalLink

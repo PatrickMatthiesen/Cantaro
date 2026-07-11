@@ -587,6 +587,15 @@ public class MediaProvidersController(
                 Notes = link.Notes,
                 IconUrl = link.IconUrl
             }).ToList(),
+            Characters = details.Characters.Select(character => new MediaProviderCharacterCreditDto
+            {
+                CharacterId = character.CharacterId,
+                Name = character.Name,
+                ImageUrl = character.ImageUrl,
+                Role = character.Role,
+                ProviderUrl = character.ProviderUrl,
+                Order = character.Order
+            }).ToList(),
             LibraryState = libraryState ?? new MediaCatalogLibraryStateDto()
         };
     }

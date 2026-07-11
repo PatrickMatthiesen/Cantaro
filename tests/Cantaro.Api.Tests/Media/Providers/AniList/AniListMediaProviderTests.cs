@@ -101,7 +101,29 @@ public class AniListMediaProviderTests
                                             "url": "https://www.netflix.com/watch/81511410",
                                             "site": "Netflix"
                                         }
-                                    ]
+                                    ],
+                                    "characters": {
+                                        "edges": [
+                                            {
+                                                "role": "MAIN",
+                                                "node": {
+                                                    "id": 170732,
+                                                    "siteUrl": "https://anilist.co/character/170732/Anya-Forger",
+                                                    "name": { "full": "Anya Forger", "native": "アーニャ・フォージャー", "userPreferred": "Anya Forger" },
+                                                    "image": { "large": "https://example.test/anya-large.jpg", "medium": "https://example.test/anya.jpg" }
+                                                }
+                                            },
+                                            {
+                                                "role": "SUPPORTING",
+                                                "node": {
+                                                    "id": 170733,
+                                                    "siteUrl": "https://anilist.co/character/170733/Becky-Blackbell",
+                                                    "name": { "full": "Becky Blackbell", "native": null, "userPreferred": null },
+                                                    "image": { "large": null, "medium": "https://example.test/becky.jpg" }
+                                                }
+                                            }
+                                        ]
+                                    }
                                 }
                             }
                         }
@@ -130,6 +152,24 @@ public class AniListMediaProviderTests
                     Assert.Equal("streaming", netflix.AvailabilityKind);
                     Assert.Equal("https://www.netflix.com/watch/81511410", netflix.Url);
                 });
+        Assert.Collection(
+            details.Characters,
+            anya =>
+            {
+                Assert.Equal("170732", anya.CharacterId);
+                Assert.Equal("Anya Forger", anya.Name);
+                Assert.Equal("main", anya.Role);
+                Assert.Equal("https://example.test/anya-large.jpg", anya.ImageUrl);
+                Assert.Equal("https://anilist.co/character/170732/Anya-Forger", anya.ProviderUrl);
+                Assert.Equal(0, anya.Order);
+            },
+            becky =>
+            {
+                Assert.Equal("Becky Blackbell", becky.Name);
+                Assert.Equal("supporting", becky.Role);
+                Assert.Equal("https://example.test/becky.jpg", becky.ImageUrl);
+                Assert.Equal(1, becky.Order);
+            });
     }
 
     [Fact]

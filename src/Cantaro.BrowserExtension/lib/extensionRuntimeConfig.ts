@@ -1,4 +1,5 @@
 declare const __CANTARO_DEFAULT_API_BASE_URL__: string;
+declare const __CANTARO_DEFAULT_WEB_BASE_URL__: string;
 
 function readInjectedDefaultApiBaseUrl(): string {
     return typeof __CANTARO_DEFAULT_API_BASE_URL__ === 'string'
@@ -8,6 +9,7 @@ function readInjectedDefaultApiBaseUrl(): string {
 
 export interface ExtensionConfig {
     apiBaseUrl: string;
+    webBaseUrl: string;
     accessToken: string;
     refreshToken: string;
     accessTokenExpiresAt: string;
@@ -38,6 +40,7 @@ export function apiBaseUrlOriginMatchPattern(value: string | null | undefined): 
 }
 
 export const DEFAULT_API_BASE_URL = normalizeApiBaseUrl(readInjectedDefaultApiBaseUrl()) || 'https://localhost:7203';
+const DEFAULT_WEB_BASE_URL = normalizeApiBaseUrl(typeof __CANTARO_DEFAULT_WEB_BASE_URL__ === 'string' ? __CANTARO_DEFAULT_WEB_BASE_URL__ : '') || 'https://localhost:5173';
 
 export async function ensureApiBaseUrlPermission(apiBaseUrl: string): Promise<void> {
     const originMatchPattern = apiBaseUrlOriginMatchPattern(apiBaseUrl);
@@ -59,6 +62,7 @@ export async function ensureApiBaseUrlPermission(apiBaseUrl: string): Promise<vo
 
 export const emptyExtensionConfig: ExtensionConfig = {
     apiBaseUrl: DEFAULT_API_BASE_URL,
+    webBaseUrl: DEFAULT_WEB_BASE_URL,
     accessToken: '',
     refreshToken: '',
     accessTokenExpiresAt: '',
@@ -68,6 +72,7 @@ export const emptyExtensionConfig: ExtensionConfig = {
 export async function readExtensionConfig(): Promise<ExtensionConfig> {
     const stored = await browser.storage.local.get([
         'apiBaseUrl',
+        'webBaseUrl',
         'accessToken',
         'refreshToken',
         'accessTokenExpiresAt',
@@ -78,6 +83,7 @@ export async function readExtensionConfig(): Promise<ExtensionConfig> {
         apiBaseUrl: normalizeApiBaseUrl(
             typeof stored.apiBaseUrl === 'string' ? stored.apiBaseUrl : DEFAULT_API_BASE_URL,
         ) || DEFAULT_API_BASE_URL,
+        webBaseUrl: normalizeApiBaseUrl(typeof stored.webBaseUrl === 'string' ? stored.webBaseUrl : DEFAULT_WEB_BASE_URL) || DEFAULT_WEB_BASE_URL,
         accessToken: typeof stored.accessToken === 'string' ? stored.accessToken : '',
         refreshToken: typeof stored.refreshToken === 'string' ? stored.refreshToken : '',
         accessTokenExpiresAt: typeof stored.accessTokenExpiresAt === 'string' ? stored.accessTokenExpiresAt : '',
@@ -88,6 +94,7 @@ export async function readExtensionConfig(): Promise<ExtensionConfig> {
 export async function saveExtensionConfig(config: ExtensionConfig): Promise<ExtensionConfig> {
     const persistedConfig: ExtensionConfig = {
         apiBaseUrl: normalizeApiBaseUrl(config.apiBaseUrl) || DEFAULT_API_BASE_URL,
+        webBaseUrl: normalizeApiBaseUrl(config.webBaseUrl) || DEFAULT_WEB_BASE_URL,
         accessToken: config.accessToken.trim(),
         refreshToken: config.refreshToken.trim(),
         accessTokenExpiresAt: config.accessTokenExpiresAt.trim(),
@@ -96,6 +103,7 @@ export async function saveExtensionConfig(config: ExtensionConfig): Promise<Exte
 
     await browser.storage.local.set({
         apiBaseUrl: persistedConfig.apiBaseUrl,
+        webBaseUrl: persistedConfig.webBaseUrl,
         accessToken: persistedConfig.accessToken || null,
         refreshToken: persistedConfig.refreshToken || null,
         accessTokenExpiresAt: persistedConfig.accessTokenExpiresAt || null,
@@ -108,6 +116,7 @@ export async function saveExtensionConfig(config: ExtensionConfig): Promise<Exte
 export async function clearExtensionSession(apiBaseUrl?: string): Promise<ExtensionConfig> {
     return saveExtensionConfig({
         apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl) || DEFAULT_API_BASE_URL,
+        webBaseUrl: (await readExtensionConfig()).webBaseUrl,
         accessToken: '',
         refreshToken: '',
         accessTokenExpiresAt: '',

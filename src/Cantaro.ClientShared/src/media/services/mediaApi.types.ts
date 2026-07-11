@@ -225,7 +225,17 @@ export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
     providerId: string;
     providerMediaId: string;
     availabilityLinks: MediaProviderAvailabilityLinkDto[];
+    characters: MediaProviderCharacterCreditDto[];
     libraryState?: MediaCatalogLibraryStateDto;
+}
+
+export interface MediaProviderCharacterCreditDto {
+    characterId: string;
+    name: string;
+    imageUrl?: string;
+    role: 'main' | 'supporting' | string;
+    providerUrl?: string;
+    order: number;
 }
 
 export interface MediaProviderAvailabilityLinkDto {

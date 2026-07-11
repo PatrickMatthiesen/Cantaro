@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
 import { Bell, Check, ChevronRight, Database, Download, ImagePlus, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
-import { authApi, type ProfilePreferences, type ThemePreference, type User } from '@cantaro/client-shared/auth';
+import { authApi, BlurredEmail, type ProfilePreferences, type ThemePreference, type User } from '@cantaro/client-shared/auth';
 import { MusicPlatformIcon, platformCatalog, platformManager, type PlatformAccountStatus, type PlatformId } from '@cantaro/client-shared/music';
 import { MediaProviderIcon, mediaApi, mediaProviderCatalog, type MediaProviderAccountStatusDto } from '@cantaro/client-shared/media';
 import { PageShell } from '../components/PageShell';
@@ -148,11 +148,9 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
           <label className="block"><span className="text-xs font-black tracking-wider text-slate-500 uppercase">Display name</span><input value={displayName} maxLength={100} required onChange={(event) => setDisplayName(event.target.value)} className="settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm font-bold transition outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100" /></label>
           <label className="block">
             <span className="text-xs font-black tracking-wider text-slate-500 uppercase">Email</span>
-            <input
-              value={profile.email}
-              readOnly
-              className={`settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm text-slate-500 opacity-75 ${profile.preferences.blurEmailAddress ? 'blur-sm select-none' : ''}`}
-            />
+            <div className="settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm text-slate-500 opacity-75">
+              <BlurredEmail email={profile.email} blur={profile.preferences.blurEmailAddress} />
+            </div>
           </label>
           {error ? <p className="text-sm font-semibold text-rose-600" role="alert">{error}</p> : null}
           <div className="flex flex-wrap gap-3"><SaveButton state={state} />{profile.avatarUrl ? <button type="button" onClick={async () => onProfile(await authApi.deleteAvatar())} className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-600 hover:bg-rose-50 hover:text-rose-700">Remove photo</button> : null}</div>

@@ -13,7 +13,7 @@ import {
   resolveAuthenticatedExtensionConfig,
   revokeExtensionSession,
 } from '../../lib/cantaroAuthSession';
-import { MusicPlaceholder } from './components/MusicPlaceholder';
+import { MusicLibrary } from './components/MusicLibrary';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SetupCard } from './components/SetupCard';
 import {
@@ -39,6 +39,8 @@ import type {
   SubmitMediaObservationResponse,
 } from '../../lib/mediaObservation';
 import { readLatestMediaResolution } from '../../lib/mediaResolutionStorage';
+import { readActiveTabMusicContext } from '../../lib/musicContext';
+import { recognizeActiveYouTube } from '../../lib/musicLibrary';
 
 type StatusType = 'success' | 'error';
 type PopupTab = 'music' | 'media';
@@ -56,7 +58,9 @@ function App() {
   const [mediaRoute, setMediaRoute] = useState<MediaRoute>({ kind: 'library' });
   const [savedConfig, setSavedConfig] = useState<ExtensionConfig>(emptyExtensionConfig);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
+  const [draftWebBaseUrl, setDraftWebBaseUrl] = useState(emptyExtensionConfig.webBaseUrl);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [blurEmailAddress, setBlurEmailAddress] = useState(true);
   const [status, setStatus] = useState<{ message: string; type: StatusType } | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -82,6 +86,13 @@ function App() {
   useEffect(() => {
     let mounted = true;
 
+    void readActiveTabMusicContext()
+      .then((context) => context ? recognizeActiveYouTube(context) : null)
+      .then((recognition) => {
+        if (mounted && recognition?.classification === 'music') setActiveTab('music');
+      })
+      .catch(() => undefined);
+
     readExtensionConfig()
       .then((config) => {
         if (!mounted) {
@@ -90,6 +101,7 @@ function App() {
 
         setSavedConfig(config);
         setDraftApiBaseUrl(config.apiBaseUrl);
+        setDraftWebBaseUrl(config.webBaseUrl);
         setSessionEmail(config.sessionEmail || null);
       })
       .catch((error) => {
@@ -140,6 +152,27 @@ function App() {
   }, [savedConfig.apiBaseUrl]);
 
   useEffect(() => {
+    if (!isMediaConfigured(savedConfig)) return;
+    let cancelled = false;
+    void resolveAuthenticatedExtensionConfig(savedConfig.apiBaseUrl.trim()).then(async (config) => {
+      const response = await fetch(`${config.apiBaseUrl}/api/profile`, { headers: { Authorization: `Bearer ${config.accessToken}` } });
+      if (!response.ok) return;
+      const profile = await response.json() as { preferences?: { theme?: 'system' | 'light' | 'dark'; blurEmailAddress?: boolean } };
+      if (cancelled) return;
+      const blur = profile.preferences?.blurEmailAddress ?? true;
+      setBlurEmailAddress(blur);
+      await browser.storage.local.set({ blurEmailAddress: blur });
+      const preference = profile.preferences?.theme ?? 'system';
+      const theme = preference === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : preference;
+      document.documentElement.dataset.theme = theme;
+    }).catch(async () => {
+      const stored = await browser.storage.local.get('blurEmailAddress');
+      setBlurEmailAddress(typeof stored.blurEmailAddress === 'boolean' ? stored.blurEmailAddress : true);
+    });
+    return () => { cancelled = true; };
+  }, [savedConfig]);
+
+  useEffect(() => {
     let cancelled = false;
 
     if (!savedConfig.accessToken.trim() && !savedConfig.refreshToken.trim()) {
@@ -184,6 +217,7 @@ function App() {
 
     setSavedConfig(persistedConfig);
     setDraftApiBaseUrl(persistedConfig.apiBaseUrl);
+    setDraftWebBaseUrl(persistedConfig.webBaseUrl);
     setSessionEmail(persistedConfig.sessionEmail || null);
     setMediaSessionKey((current) => current + 1);
     setSettingsOpen(false);
@@ -202,6 +236,7 @@ function App() {
       const nextConfig = {
         ...savedConfig,
         apiBaseUrl: nextApiBaseUrl,
+        webBaseUrl: normalizeApiBaseUrl(draftWebBaseUrl) || emptyExtensionConfig.webBaseUrl,
         accessToken: apiBaseUrlChanged ? '' : savedConfig.accessToken,
         refreshToken: apiBaseUrlChanged ? '' : savedConfig.refreshToken,
         accessTokenExpiresAt: apiBaseUrlChanged ? '' : savedConfig.accessTokenExpiresAt,
@@ -293,19 +328,16 @@ function App() {
     showStatus('Episode tracking resumed', 'success');
   };
 
-  const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl;
+  const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl || draftWebBaseUrl !== savedConfig.webBaseUrl;
   const mediaConfigured = isMediaConfigured(savedConfig);
   const trackingPaused = Boolean(
     trackingTimeout.disabledUntil && new Date(trackingTimeout.disabledUntil) > new Date(),
   );
 
   return (
-    <div className="relative h-screen overflow-hidden text-gray-900">
-      <div className="absolute -left-20 top-0 h-72 w-72 rounded-full bg-cyan-400/20 blur-3xl" aria-hidden />
-      <div className="absolute right-0 top-8 h-80 w-80 rounded-full bg-fuchsia-400/16 blur-3xl" aria-hidden />
-
-      <div className="relative z-10 flex h-full flex-col p-3">
-        <header className="flex min-h-12 items-center gap-2 rounded-2xl bg-white/88 p-1.5 shadow-sm shadow-slate-950/8 backdrop-blur">
+    <div className="h-screen overflow-hidden bg-[#f7f5ff] text-slate-900">
+      <div className="flex h-full flex-col p-3">
+        <header className="flex min-h-12 items-center gap-2 rounded-xl border border-[#e7e2f7] bg-white p-1.5">
           <nav className="flex rounded-xl bg-slate-950 p-0.5" aria-label="Popup section">
             {(['music', 'media'] as const).map((tab) => {
               const active = tab === activeTab;
@@ -384,10 +416,19 @@ function App() {
           </div>
         ) : null}
 
-        <main className="relative mt-2 flex-1 overflow-auto rounded-2xl" aria-label={`${activeTab === 'music' ? 'Music' : 'Media'} content`}>
-          {activeTab === 'music' ? (
+        <main className="relative mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-xl bg-white/55" aria-label={`${activeTab === 'music' ? 'Music' : 'Media'} content`}>
+          {settingsOpen ? (
+            <SettingsPanel
+              apiBaseUrl={draftApiBaseUrl} loading={loading} isSigningIn={isSigningIn} isDisconnecting={isDisconnecting}
+              webBaseUrl={draftWebBaseUrl}
+              isCheckingSession={isCheckingSession} hasUnsavedChanges={hasUnsavedChanges} sessionEmail={sessionEmail}
+              blurEmailAddress={blurEmailAddress}
+              defaultApiBaseUrl={DEFAULT_API_BASE_URL} onClose={() => setSettingsOpen(false)} onSubmit={handleSubmit}
+              onSignIn={handleSignIn} onDisconnect={handleDisconnect} onApiBaseUrlChange={setDraftApiBaseUrl} onWebBaseUrlChange={setDraftWebBaseUrl}
+            />
+          ) : activeTab === 'music' ? (
             <div className="h-full py-1">
-              <MusicPlaceholder />
+              <MusicLibrary configured={mediaConfigured} onSignIn={handleSignIn} isSigningIn={isSigningIn} />
             </div>
           ) : mediaConfigured ? (
             mediaRoute.kind === 'library' ? (
@@ -413,24 +454,6 @@ function App() {
           )}
         </main>
       </div>
-
-      {settingsOpen ? (
-        <SettingsPanel
-          apiBaseUrl={draftApiBaseUrl}
-          loading={loading}
-          isSigningIn={isSigningIn}
-          isDisconnecting={isDisconnecting}
-          isCheckingSession={isCheckingSession}
-          hasUnsavedChanges={hasUnsavedChanges}
-          sessionEmail={sessionEmail}
-          defaultApiBaseUrl={DEFAULT_API_BASE_URL}
-          onClose={() => setSettingsOpen(false)}
-          onSubmit={handleSubmit}
-          onSignIn={handleSignIn}
-          onDisconnect={handleDisconnect}
-          onApiBaseUrlChange={setDraftApiBaseUrl}
-        />
-      ) : null}
 
       {status ? (
         <div className="pointer-events-none absolute right-4 bottom-4 z-50">

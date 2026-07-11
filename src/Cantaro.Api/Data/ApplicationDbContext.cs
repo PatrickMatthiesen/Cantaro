@@ -234,6 +234,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             // Unique index on (PlaylistId, Position)
             entity.HasIndex(e => new { e.PlaylistId, e.Position })
                 .IsUnique();
+            entity.HasIndex(e => new { e.PlaylistId, e.TrackId })
+                .IsUnique()
+                .HasFilter("\"TrackId\" IS NOT NULL");
 
             entity.HasOne(e => e.Playlist)
                 .WithMany(p => p.Entries)
