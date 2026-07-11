@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { addCanonicalSongToPlaylist, loadExtensionMusicLibrary, recognizeActiveYouTube, removeCanonicalSongFromPlaylist, type MusicRecognitionResult } from '../../../lib/musicLibrary';
 import { MUSIC_CONTEXT_STORAGE_KEY, readActiveTabMusicContext, resolveMusicContext, type BrowserMusicContext } from '../../../lib/musicContext';
 import { readExtensionConfig } from '../../../lib/extensionRuntimeConfig';
+import { displayLyricsText, loadExtensionLyrics, type LyricsResult } from '../../../lib/lyrics';
 
 type Route = { kind: 'home' } | { kind: 'song'; song: MusicLibrarySong };
 
@@ -121,10 +122,79 @@ function SongDetail({ song, playlists, onBack }: { song: MusicLibrarySong; playl
   };
   return <article className="space-y-3 p-1"><button onClick={onBack} className="rounded-lg px-2 py-1 text-xs font-bold text-violet-700 hover:bg-violet-50">← Back to music</button><div className="flex gap-3 rounded-2xl bg-white p-3">{song.thumbnailUrl ? <img src={song.thumbnailUrl} alt="" className="size-20 rounded-xl object-cover" /> : <div className="size-20 rounded-xl bg-violet-100" />}<div className="min-w-0"><h2 className="text-lg font-black">{song.title}</h2><p className="text-sm text-slate-600">{song.artist || 'Unknown artist'}</p><p className="mt-1 text-xs text-slate-500">{song.albums.join(', ') || 'No album'}{song.durationSeconds ? ` · ${Math.floor(song.durationSeconds / 60)}:${String(song.durationSeconds % 60).padStart(2, '0')}` : ''}</p></div></div>
     {song.platformLinks.length > 0 ? <Section title="Listen"><div className="flex flex-wrap gap-2">{song.platformLinks.map((link) => <a key={`${link.platform}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-bold text-white">{link.label}</a>)}</div></Section> : null}
+    <LyricsSection trackId={trackId} />
     {song.sourceIdentities.length > 0 ? <Section title="Identifiers">{song.sourceIdentities.map((identity) => <p key={`${identity.source}-${identity.externalId}`} className="truncate text-xs text-slate-600"><b>{identity.source}:</b> {identity.externalId}</p>)}</Section> : null}
     {youtubeIds.length > 1 ? <Section title="YouTube version"><select value={selectedYouTubeId} onChange={(event) => setSelectedYouTubeId(event.target.value)} className="w-full rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">Choose a version to sync…</option>{youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}</select></Section> : null}
     <Section title="Playlists"><div className="mb-2 flex items-center justify-between gap-3"><p className="text-xs text-slate-500">Tracked playlist memberships</p>{trackId && availablePlaylists.length ? <button onClick={() => setShowPicker((value) => !value)} className="flex size-7 items-center justify-center rounded-full bg-violet-100 text-lg font-bold text-violet-800 hover:bg-violet-200" aria-label="Add to another playlist">+</button> : null}</div>{memberships.length ? <div className="space-y-1">{memberships.map((playlist) => <div key={playlist.playlistId} className="group flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm text-slate-700 hover:bg-rose-50"><span className="min-w-0 flex-1 truncate">{playlist.playlistName} <span className="text-xs text-slate-400">#{playlist.position + 1}</span></span>{confirmingRemoval === playlist.playlistId ? <div className="flex items-center gap-1"><span className="text-[11px] font-semibold text-rose-700">Remove?</span><button disabled={busy !== null} onClick={() => void removeFromPlaylist(playlist.playlistId)} className="rounded bg-rose-700 px-2 py-1 text-[11px] font-bold text-white">Confirm</button><button onClick={() => setConfirmingRemoval(null)} className="rounded px-2 py-1 text-[11px] font-bold text-slate-600">Cancel</button></div> : <button onClick={() => setConfirmingRemoval(playlist.playlistId)} className="flex size-7 items-center justify-center rounded-md text-rose-600 opacity-0 transition hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100" aria-label={`Remove from ${playlist.playlistName}`}><span aria-hidden>🗑</span></button>}</div>)}</div> : <p className="text-xs text-slate-500">Not currently in a playlist.</p>}{showPicker ? <div className="mt-3 flex flex-wrap gap-2 border-t border-violet-100 pt-3">{availablePlaylists.map((playlist) => <button key={playlist.id} disabled={busy !== null} onClick={() => void addToPlaylist(playlist)} className="rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-800 hover:bg-violet-200 disabled:opacity-50">{busy === playlist.id ? 'Adding…' : playlist.name}</button>)}</div> : null}{message ? <p className="mt-2 text-xs text-slate-600" role="status">{message}</p> : null}</Section>
   </article>;
+}
+
+type LyricsView =
+  | { kind: 'loading' }
+  | { kind: 'ready'; result: LyricsResult }
+  | { kind: 'error'; message: string }
+  | { kind: 'unavailable'; message: string };
+
+function LyricsSection({ trackId }: { trackId: string | null }) {
+  const [view, setView] = useState<LyricsView>(trackId ? { kind: 'loading' } : { kind: 'unavailable', message: 'Lyrics are not available for this song.' });
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    const currentRequest = ++requestId.current;
+    const controller = new AbortController();
+
+    if (!trackId) {
+      setView({ kind: 'unavailable', message: 'Lyrics are not available for this song.' });
+      return () => controller.abort();
+    }
+
+    setView({ kind: 'loading' });
+    void loadExtensionLyrics(trackId, controller.signal)
+      .then((result) => {
+        if (requestId.current === currentRequest) setView({ kind: 'ready', result });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || requestId.current !== currentRequest) return;
+        setView({ kind: 'error', message: error instanceof Error ? error.message : 'The lyrics provider could not be reached.' });
+      });
+
+    return () => controller.abort();
+  }, [trackId]);
+
+  const content = view.kind === 'loading'
+    ? <LyricsLoading />
+    : view.kind === 'ready'
+      ? <LyricsResultContent result={view.result} />
+      : <LyricsNoticeContent title={view.kind === 'error' ? 'Lyrics provider unavailable' : 'Lyrics unavailable'} detail={view.message} />;
+
+  return <Section title="Lyrics">{content}</Section>;
+}
+
+function LyricsLoading() {
+  return <div className="space-y-2" aria-label="Loading lyrics"><div className="cantaro-lyrics-loading-line h-3 w-11/12 rounded" /><div className="cantaro-lyrics-loading-line h-3 w-4/5 rounded" /><div className="cantaro-lyrics-loading-line h-3 w-9/12 rounded" /></div>;
+}
+
+const lyricsNotices = {
+  available: { title: 'Lyrics unavailable', fallback: 'No lyrics were found for this song.' },
+  instrumental: { title: 'Instrumental track', fallback: 'This track has no lyrics.' },
+  ambiguous: { title: 'Lyrics need review', fallback: 'Cantaro found more than one possible lyrics match, so it did not choose one.' },
+  provider_error: { title: 'Lyrics provider unavailable', fallback: 'Try again in a moment.' },
+  disabled: { title: 'Lyrics are unavailable', fallback: 'Lyrics lookup is disabled for this Cantaro server.' },
+  unavailable: { title: 'Lyrics unavailable', fallback: 'No lyrics were found for this song.' },
+} satisfies Record<LyricsResult['state'], { title: string; fallback: string }>;
+
+function LyricsResultContent({ result }: { result: LyricsResult }) {
+  const selected = result.state === 'available' ? displayLyricsText(result) : null;
+  if (!selected) {
+    const notice = lyricsNotices[result.state];
+    return <LyricsNoticeContent title={notice.title} detail={result.explanation || notice.fallback} attribution={result.attribution} />;
+  }
+
+  return <><div className="flex items-baseline justify-between gap-3"><p className="text-xs font-semibold text-slate-700">{selected.synchronized ? 'Timed lyrics' : 'Lyrics'}</p><span className="text-[11px] text-slate-500">{result.matchStatus === 'exact' ? 'Matched' : 'Best match'}</span></div><pre className="mt-2 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">{selected.text}</pre><p className="mt-3 text-[11px] text-slate-500">{result.attribution}</p></>;
+}
+
+function LyricsNoticeContent({ title, detail, attribution }: { title: string; detail: string; attribution?: string }) {
+  return <><p className="text-sm font-bold text-slate-800">{title}</p><p className="mt-1 text-xs leading-5 text-slate-600">{detail}</p>{attribution ? <p className="mt-3 text-[11px] text-slate-500">{attribution}</p> : null}</>;
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <section className="rounded-2xl bg-white/80 p-3"><h3 className="mb-2 text-xs font-black tracking-wider text-slate-500 uppercase">{title}</h3>{children}</section>; }
 function State({ title, detail, children }: { title: string; detail: string; children?: React.ReactNode }) { return <div className="m-1 rounded-2xl bg-white/80 p-5 text-center"><h2 className="text-base font-black">{title}</h2><p className="mt-1 text-sm text-slate-500">{detail}</p>{children}</div>; }

@@ -18,6 +18,8 @@ public class MusicBrainzSearchProviderTests
                 ExternalId = "recording-1",
                 Title = "Escape",
                 Artist = "Kx5",
+                ArtistMusicBrainzId = "01796d99-3daf-4a4a-a41b-9c1810a3c5b9",
+                ArtistSortName = "Kx5",
                 MbidRecording = "recording-1",
                 DurationSeconds = 241,
                 SearchScore = 95,
@@ -45,6 +47,8 @@ public class MusicBrainzSearchProviderTests
         Assert.Single(candidates);
         Assert.Equal("Escape", candidates[0].Title);
         Assert.Equal("Kx5", candidates[0].Artist);
+        Assert.Equal("01796d99-3daf-4a4a-a41b-9c1810a3c5b9", candidates[0].ArtistMusicBrainzId);
+        Assert.Equal("Kx5", candidates[0].ArtistSortName);
     }
 
     [Fact]

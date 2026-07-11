@@ -48,6 +48,8 @@ public class TrackMatchingServiceTests
                 ExternalId = "candidate-1",
                 Title = "STAR WALKIN' (League of Legends Worlds Anthem)",
                 Artist = "Lil Nas X",
+                ArtistMusicBrainzId = "151eeb9d-4e8c-4823-b2a0-4a9c9c0e2f2f",
+                ArtistSortName = "Lil Nas X",
                 MbidRecording = "candidate-1",
                 Isrc = "USSM12208809",
                 DurationSeconds = 211,
@@ -114,6 +116,8 @@ public class TrackMatchingServiceTests
                 ExternalId = "candidate-1",
                 Title = "STAR WALKIN' (League of Legends Worlds Anthem)",
                 Artist = "Lil Nas X",
+                ArtistMusicBrainzId = "151eeb9d-4e8c-4823-b2a0-4a9c9c0e2f2f",
+                ArtistSortName = "Lil Nas X",
                 MbidRecording = "candidate-1",
                 Isrc = "USSM12208809",
                 DurationSeconds = 211,
@@ -127,13 +131,68 @@ public class TrackMatchingServiceTests
             NullLogger<TrackMatchingService>.Instance);
 
         var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+        var acceptedCandidateId = result.AcceptedCandidateId;
+        await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
         var acceptedCandidate = await dbContext.TrackResolutionCandidates.SingleAsync();
 
         Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
-        Assert.Equal(acceptedCandidate.Id, result.AcceptedCandidateId);
+        Assert.Equal(acceptedCandidate.Id, acceptedCandidateId);
         Assert.True(acceptedCandidate.IsAccepted);
         Assert.NotNull(result.TrackId);
+        var credit = await dbContext.TrackArtistCredits.Include(item => item.Artist).SingleAsync();
+        Assert.Equal(TrackArtistRole.Primary, credit.Role);
+        Assert.Equal("Lil Nas X", credit.CreditedName);
+        Assert.Equal("151eeb9d-4e8c-4823-b2a0-4a9c9c0e2f2f", credit.Artist?.MusicBrainzArtistId);
+        Assert.Single(await dbContext.Artists.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_ExistingSourceBackfillsCanonicalArtistCreditIdempotently()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var track = new Track
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                Title = "Existing song",
+                Artist = "Canonical Artist"
+            }),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        track.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id,
+            SourceType = "youtube", ExternalId = "existing-video"
+        });
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "existing-video",
+            Title = "Existing song", Artist = "Upload Channel",
+            MatchStatus = TrackMatchingStatuses.Pending, CreatedAt = now, UpdatedAt = now
+        };
+        dbContext.AddRange(track, observation);
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        var service = new TrackMatchingService(
+            dbContext, [], NullLogger<TrackMatchingService>.Instance);
+        await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+        await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var credit = await dbContext.TrackArtistCredits.Include(item => item.Artist).SingleAsync();
+        Assert.Equal("Canonical Artist", credit.CreditedName);
+        Assert.Equal("Canonical Artist", credit.Artist?.Name);
+        Assert.Equal(TrackArtistRole.Primary, credit.Role);
+        Assert.Single(await dbContext.Artists.ToListAsync());
     }
 
     [Fact]

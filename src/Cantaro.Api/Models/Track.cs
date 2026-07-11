@@ -33,6 +33,12 @@ public class Track
     /// Navigation property to source IDs
     /// </summary>
     public ICollection<TrackSourceId> SourceIds { get; set; } = [];
+
+    /// <summary>
+    /// Ordered artist credits. CanonicalMetadata.Artist remains as a legacy
+    /// display snapshot while clients migrate to this structured relationship.
+    /// </summary>
+    public ICollection<TrackArtistCredit> ArtistCredits { get; set; } = [];
     
     /// <summary>
     /// Navigation property to playlist entries

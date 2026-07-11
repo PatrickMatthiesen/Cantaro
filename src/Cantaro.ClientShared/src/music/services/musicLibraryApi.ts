@@ -13,6 +13,7 @@ export interface MusicLibrarySong {
   id: string;
   title: string;
   artist?: string;
+  artistCredits: MusicLibrarySongArtistCredit[];
   albums: string[];
   thumbnailUrl?: string;
   durationSeconds?: number;
@@ -21,6 +22,15 @@ export interface MusicLibrarySong {
   sourceIdentities: MusicLibrarySongSourceIdentity[];
   platformLinks: MusicLibrarySongPlatformLink[];
   playlists: MusicLibrarySongPlaylist[];
+}
+
+export interface MusicLibrarySongArtistCredit {
+  artistId: string;
+  name: string;
+  creditedName: string;
+  role: 'primary' | 'featured' | 'composer' | 'remixer';
+  position: number;
+  musicBrainzArtistId?: string;
 }
 
 export interface MusicLibrarySongSourceIdentity {

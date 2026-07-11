@@ -15,6 +15,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
     public DbSet<ConnectedServiceAccount> ConnectedServiceAccounts => Set<ConnectedServiceAccount>();
     public DbSet<Track> Tracks => Set<Track>();
+    public DbSet<Artist> Artists => Set<Artist>();
+    public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
     public DbSet<TrackSourceId> TrackSourceIds => Set<TrackSourceId>();
     public DbSet<TrackObservation> TrackObservations => Set<TrackObservation>();
     public DbSet<TrackResolutionCandidate> TrackResolutionCandidates => Set<TrackResolutionCandidate>();
@@ -166,6 +168,43 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.HasIndex(e => e.MbidRecording);
             entity.HasIndex(e => e.Isrc);
+        });
+
+        modelBuilder.Entity<Artist>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.MusicBrainzArtistId)
+                .HasMaxLength(36)
+                .HasConversion(
+                    value => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant(),
+                    value => value);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            // Artist names are intentionally not unique. Only a stable external
+            // identity is safe to use when reconciling artist records.
+            entity.HasIndex(e => e.MusicBrainzArtistId)
+                .IsUnique()
+                .HasFilter("\"MusicBrainzArtistId\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<TrackArtistCredit>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).HasConversion<string>().HasMaxLength(32);
+
+            entity.HasIndex(e => new { e.TrackId, e.Position }).IsUnique();
+            entity.HasIndex(e => new { e.TrackId, e.ArtistId, e.Role }).IsUnique();
+
+            entity.HasOne(e => e.Track)
+                .WithMany(t => t.ArtistCredits)
+                .HasForeignKey(e => e.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Artist)
+                .WithMany(a => a.TrackCredits)
+                .HasForeignKey(e => e.ArtistId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<TrackSourceId>(entity =>

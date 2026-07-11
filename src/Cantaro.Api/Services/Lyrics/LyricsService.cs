@@ -8,10 +8,10 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
 {
     public async Task<LyricsResult?> GetLyricsAsync(int userId, Guid trackId, CancellationToken cancellationToken)
     {
+        _ = userId;
         var track = await dbContext.Tracks
             .AsNoTracking()
-            .Where(item => item.Id == trackId
-                && item.PlaylistEntries.Any(entry => entry.Playlist!.UserId == userId))
+            .Where(item => item.Id == trackId)
             .SingleOrDefaultAsync(cancellationToken);
         if (track is null)
         {
