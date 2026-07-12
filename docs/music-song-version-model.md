@@ -101,6 +101,17 @@ historical classification decisions require a later assertion ledger if the
 review workflow demonstrates that need. Migration does not classify old rows,
 and absence of `official` never implies `user`.
 
+Presentation detection remains a pure proposal step. Spotify's provider media
+type can establish `audio`; explicit YouTube title annotations can propose a
+presentation kind. Uploader authority requires an affirmative provider signal:
+the word `official` in a title does not establish an official uploader, and a
+missing official signal never implies a user upload. Detection neither persists
+classifications nor produces musical-version traits. Title markers are accepted
+only in constrained annotation contexts, and provenance identifies the metadata
+snapshot or verified provider fact that produced the proposal. Conflicting
+presentation markers are surfaced as ambiguity rather than resolved by title
+order.
+
 ### Membership and compatibility
 
 `Song` is composition/work-level in Cantaro's own graph. Covers, remixes, and
