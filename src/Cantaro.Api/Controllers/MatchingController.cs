@@ -79,6 +79,15 @@ public class MatchingQueueItemResponse
     public List<MatchingQueueCandidateResponse> Candidates { get; set; } = [];
 }
 
+public class MatchingQueuePageResponse
+{
+    public List<MatchingQueueItemResponse> Items { get; set; } = [];
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public int TotalCount { get; set; }
+    public int TotalPages { get; set; }
+}
+
 public class SelectMatchingCandidateRequest
 {
     public required Guid CandidateId { get; set; }
@@ -120,21 +129,40 @@ public class MatchingController(
     }
 
     [HttpGet("queue")]
-    public async Task<ActionResult<List<MatchingQueueItemResponse>>> GetQueue(CancellationToken cancellationToken)
+    public async Task<ActionResult<MatchingQueuePageResponse>> GetQueue(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 5,
+        CancellationToken cancellationToken = default)
     {
         var userId = await GetCurrentUserIdAsync();
-        var observationIds = await GetUserObservationIdsAsync(userId, cancellationToken);
+        pageSize = Math.Clamp(pageSize, 1, 20);
 
-        var observations = await _dbContext.TrackObservations
+        var unresolved = _dbContext.TrackObservations
+            .Where(observation => observation.MatchStatus != TrackMatchingStatuses.Matched
+                && observation.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId));
+        var totalCount = await unresolved.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+        page = Math.Clamp(page, 1, totalPages);
+
+        var observations = await unresolved
             .Include(o => o.Candidates)
             .Include(o => o.PlaylistEntries)
                 .ThenInclude(entry => entry.Playlist)
-            .Where(o => observationIds.Contains(o.Id) && o.MatchStatus != TrackMatchingStatuses.Matched)
             .OrderByDescending(o => o.MatchStatus == TrackMatchingStatuses.Ambiguous)
             .ThenByDescending(o => o.LastMatchAttemptedAt)
+            .ThenBy(o => o.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        return Ok(observations.Select(observation => MapQueueItem(observation, userId)).ToList());
+        return Ok(new MatchingQueuePageResponse
+        {
+            Items = observations.Select(observation => MapQueueItem(observation, userId)).ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages
+        });
     }
 
     [HttpPost("queue/{observationId:guid}/retry")]

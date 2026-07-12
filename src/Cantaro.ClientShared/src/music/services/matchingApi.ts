@@ -72,6 +72,14 @@ export interface MatchingQueueItemResponse {
   candidates: MatchingQueueCandidateResponse[];
 }
 
+export interface MatchingQueuePageResponse {
+  items: MatchingQueueItemResponse[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
 class MatchingApiClient {
   private getHeaders(): HeadersInit {
     return {
@@ -98,8 +106,9 @@ class MatchingApiClient {
     return response.json();
   }
 
-  async getQueue(): Promise<MatchingQueueItemResponse[]> {
-    const response = await fetch('/api/matching/queue', {
+  async getQueue(page = 1, pageSize = 5): Promise<MatchingQueuePageResponse> {
+    const params = new URLSearchParams({ page: page.toString(), pageSize: pageSize.toString() });
+    const response = await fetch(`/api/matching/queue?${params}`, {
       credentials: 'include',
       headers: this.getHeaders(),
     });

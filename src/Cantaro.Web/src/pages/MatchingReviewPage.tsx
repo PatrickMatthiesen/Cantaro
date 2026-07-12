@@ -6,6 +6,7 @@ import type {
   MatchingCandidateComparisonResponse,
   MatchingQueueCandidateResponse,
   MatchingQueueItemResponse,
+  MatchingQueuePageResponse,
   MatchingQueuePlaylistResponse,
   MatchingSummaryResponse,
 } from '@cantaro/client-shared/music';
@@ -21,9 +22,12 @@ interface MatchingReviewState {
   error: string | null;
   isLoading: boolean;
   loadQueue: () => Promise<void>;
+  page: number;
+  pageData: MatchingQueuePageResponse | null;
   queue: MatchingQueueItemResponse[];
   runObservationAction: MatchingActionHandler;
   summary: MatchingSummaryResponse | null;
+  setPage: (page: number) => void;
 }
 
 function getErrorMessage(error: unknown, fallbackMessage: string): string {
@@ -33,6 +37,8 @@ function getErrorMessage(error: unknown, fallbackMessage: string): string {
 function useMatchingReviewQueue(): MatchingReviewState {
   const [summary, setSummary] = useState<MatchingSummaryResponse | null>(null);
   const [queue, setQueue] = useState<MatchingQueueItemResponse[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageData, setPageData] = useState<MatchingQueuePageResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeObservationId, setActiveObservationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,17 +48,19 @@ function useMatchingReviewQueue(): MatchingReviewState {
     try {
       const [summaryResponse, queueResponse] = await Promise.all([
         matchingApi.getSummary(),
-        matchingApi.getQueue(),
+        matchingApi.getQueue(page),
       ]);
       setSummary(summaryResponse);
-      setQueue(queueResponse);
+      setQueue(queueResponse.items);
+      setPageData(queueResponse);
+      if (queueResponse.page !== page) setPage(queueResponse.page);
       setError(null);
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Failed to load matching queue'));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     void loadQueue();
@@ -73,7 +81,7 @@ function useMatchingReviewQueue(): MatchingReviewState {
     [loadQueue],
   );
 
-  return { activeObservationId, error, isLoading, loadQueue, queue, runObservationAction, summary };
+  return { activeObservationId, error, isLoading, loadQueue, page, pageData, queue, runObservationAction, setPage, summary };
 }
 
 function formatDuration(durationSeconds?: number): string | null {
@@ -303,17 +311,26 @@ function MatchingQueueList({
   );
 }
 
+function MatchingQueuePagination({ pageData, onPageChange }: { pageData: MatchingQueuePageResponse | null; onPageChange: (page: number) => void }) {
+  if (!pageData || pageData.totalPages <= 1) return null;
+  const firstItem = (pageData.page - 1) * pageData.pageSize + 1;
+  const lastItem = Math.min(pageData.page * pageData.pageSize, pageData.totalCount);
+  return <nav className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3" aria-label="Matching queue pages"><p className="text-sm font-medium text-gray-600">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-gray-600">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
+}
+
 function MatchingReviewContent({ review }: { review: MatchingReviewState }) {
   return (
     <>
       <MatchingReviewHeader onRefresh={() => void review.loadQueue()} />
       <MatchingSummaryStats summary={review.summary} />
       <MatchingReviewError error={review.error} />
+      <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} />
       <MatchingQueueList
         activeObservationId={review.activeObservationId}
         onAction={review.runObservationAction}
         queue={review.queue}
       />
+      <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} />
     </>
   );
 }
