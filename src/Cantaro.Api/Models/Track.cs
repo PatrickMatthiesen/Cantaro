@@ -10,6 +10,12 @@ public class Track
     /// Internal canonical TrackID (primary key)
     /// </summary>
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// The underlying Song this musical version belongs to. Nullable while
+    /// existing writers transition to creating Songs alongside Tracks.
+    /// </summary>
+    public Guid? SongId { get; set; }
     
     /// <summary>
     /// Canonical metadata stored as JSON (artist, title, duration, etc.)
@@ -28,6 +34,8 @@ public class Track
     
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    public Song? Song { get; set; }
     
     /// <summary>
     /// Navigation property to source IDs

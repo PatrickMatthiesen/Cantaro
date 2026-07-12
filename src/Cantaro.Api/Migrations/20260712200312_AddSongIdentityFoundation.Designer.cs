@@ -3,6 +3,7 @@ using System;
 using Cantaro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cantaro.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260712200312_AddSongIdentityFoundation")]
+    partial class AddSongIdentityFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -66,13 +69,6 @@ namespace Cantaro.Api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("ConnectionState")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasDefaultValue("connected");
-
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -81,25 +77,12 @@ namespace Cantaro.Api.Migrations
                     b.Property<string>("DisplayName")
                         .HasColumnType("text");
 
-                    b.Property<string>("EncryptedAccessToken")
-                        .HasColumnType("text");
-
                     b.Property<string>("EncryptedRefreshToken")
                         .HasColumnType("text");
 
                     b.Property<string>("ExternalAccountId")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<string>("ReconnectReason")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime?>("ReconnectRequiredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("RefreshTokenExpiresAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Scopes")
                         .HasColumnType("text");
@@ -110,15 +93,6 @@ namespace Cantaro.Api.Migrations
 
                     b.Property<DateTime?>("TokenExpiresAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("TokenRefreshLeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("TokenRefreshLeaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<long>("TokenVersion")
-                        .HasColumnType("bigint");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -131,8 +105,6 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ExternalAccountId");
-
-                    b.HasIndex("TokenRefreshLeaseExpiresAt");
 
                     b.HasIndex("UserId", "Service")
                         .IsUnique();
@@ -806,10 +778,6 @@ namespace Cantaro.Api.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
-                    b.Property<string>("ImportedFromService")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
                     b.Property<string>("Metadata")
                         .HasColumnType("text");
 
@@ -878,9 +846,6 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int?>("ConnectedServiceAccountId")
-                        .HasColumnType("integer");
-
                     b.Property<string>("LastSyncStatus")
                         .HasColumnType("text");
 
@@ -903,8 +868,6 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ConnectedServiceAccountId");
 
                     b.HasIndex("PlaylistId", "Service")
                         .IsUnique();
@@ -1682,18 +1645,11 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.ServicePlaylistMapping", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
-                        .WithMany("ServicePlaylistMappings")
-                        .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.HasOne("Cantaro.Api.Models.Playlist", "Playlist")
                         .WithMany("ServiceMappings")
                         .HasForeignKey("PlaylistId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ConnectedServiceAccount");
 
                     b.Navigation("Playlist");
                 });
@@ -1831,8 +1787,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("MediaLibraryEntries");
 
                     b.Navigation("MediaProviderOperations");
-
-                    b.Navigation("ServicePlaylistMappings");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
