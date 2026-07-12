@@ -86,6 +86,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ITrackVersionTraitVocabulary, TrackVersionTraitVocabulary>();
 builder.Services.AddScoped<ITrackVersionTraitEvidenceService, TrackVersionTraitEvidenceService>();
 builder.Services.AddSingleton<ITrackVersionTraitDetector, TitleMarkerTrackVersionTraitDetector>();
+builder.Services.AddSingleton<ITrackSourcePresentationVocabulary, TrackSourcePresentationVocabulary>();
+builder.Services.AddScoped<ITrackSourcePresentationClassificationService, TrackSourcePresentationClassificationService>();
 builder.Services.AddSingleton<TrackMatchingQueue>();
 builder.Services.AddSingleton<MusicSyncThrottleService>();
 builder.Services.AddScoped<MusicSyncJobProcessor>();

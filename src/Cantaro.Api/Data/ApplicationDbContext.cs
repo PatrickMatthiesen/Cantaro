@@ -282,6 +282,53 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
+            entity.Property(e => e.PresentationKind).HasMaxLength(32);
+            entity.Property(e => e.PresentationKindConfidence).HasPrecision(5, 4);
+            entity.Property(e => e.PresentationKindEvidenceSource).HasMaxLength(64);
+            entity.Property(e => e.PresentationKindEvidenceIdentity).HasMaxLength(256);
+            entity.Property(e => e.PresentationKindEvidenceMethod).HasMaxLength(96);
+            entity.Property(e => e.PresentationKindMethodVersion).HasMaxLength(64);
+            entity.Property(e => e.UploaderAuthority).HasMaxLength(16);
+            entity.Property(e => e.UploaderAuthorityConfidence).HasPrecision(5, 4);
+            entity.Property(e => e.UploaderAuthorityEvidenceSource).HasMaxLength(64);
+            entity.Property(e => e.UploaderAuthorityEvidenceIdentity).HasMaxLength(256);
+            entity.Property(e => e.UploaderAuthorityEvidenceMethod).HasMaxLength(96);
+            entity.Property(e => e.UploaderAuthorityMethodVersion).HasMaxLength(64);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_TrackSourceIds_PresentationKindConfidence",
+                    "\"PresentationKindConfidence\" IS NULL OR " +
+                    "(CAST(\"PresentationKindConfidence\" AS REAL) >= 0 AND " +
+                    "CAST(\"PresentationKindConfidence\" AS REAL) <= 1)");
+                table.HasCheckConstraint(
+                    "CK_TrackSourceIds_PresentationKindBundle",
+                    "(\"PresentationKind\" IS NULL AND \"PresentationKindConfidence\" IS NULL AND " +
+                    "\"PresentationKindEvidenceSource\" IS NULL AND \"PresentationKindEvidenceIdentity\" IS NULL AND " +
+                    "\"PresentationKindEvidenceMethod\" IS NULL AND \"PresentationKindMethodVersion\" IS NULL AND " +
+                    "\"PresentationKindClassifiedAt\" IS NULL AND \"PresentationKindRevision\" IS NULL) OR " +
+                    "(\"PresentationKind\" IS NOT NULL AND \"PresentationKindConfidence\" IS NOT NULL AND " +
+                    "\"PresentationKindEvidenceSource\" IS NOT NULL AND \"PresentationKindEvidenceIdentity\" IS NOT NULL AND " +
+                    "\"PresentationKindEvidenceMethod\" IS NOT NULL AND \"PresentationKindClassifiedAt\" IS NOT NULL AND " +
+                    "\"PresentationKindRevision\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_TrackSourceIds_UploaderAuthorityConfidence",
+                    "\"UploaderAuthorityConfidence\" IS NULL OR " +
+                    "(CAST(\"UploaderAuthorityConfidence\" AS REAL) >= 0 AND " +
+                    "CAST(\"UploaderAuthorityConfidence\" AS REAL) <= 1)");
+                table.HasCheckConstraint(
+                    "CK_TrackSourceIds_UploaderAuthorityBundle",
+                    "(\"UploaderAuthority\" IS NULL AND \"UploaderAuthorityConfidence\" IS NULL AND " +
+                    "\"UploaderAuthorityEvidenceSource\" IS NULL AND \"UploaderAuthorityEvidenceIdentity\" IS NULL AND " +
+                    "\"UploaderAuthorityEvidenceMethod\" IS NULL AND \"UploaderAuthorityMethodVersion\" IS NULL AND " +
+                    "\"UploaderAuthorityClassifiedAt\" IS NULL AND \"UploaderAuthorityRevision\" IS NULL) OR " +
+                    "(\"UploaderAuthority\" IS NOT NULL AND \"UploaderAuthorityConfidence\" IS NOT NULL AND " +
+                    "\"UploaderAuthorityEvidenceSource\" IS NOT NULL AND \"UploaderAuthorityEvidenceIdentity\" IS NOT NULL AND " +
+                    "\"UploaderAuthorityEvidenceMethod\" IS NOT NULL AND \"UploaderAuthorityClassifiedAt\" IS NOT NULL AND " +
+                    "\"UploaderAuthorityRevision\" IS NOT NULL)");
+            });
+
             // Unique index on (SourceType, ExternalId)
             entity.HasIndex(e => new { e.SourceType, e.ExternalId })
                 .IsUnique();

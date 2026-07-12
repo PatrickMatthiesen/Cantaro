@@ -37,6 +37,32 @@ public class TrackSourceId
     /// When this mapping was last verified (nullable)
     /// </summary>
     public DateTimeOffset? LastVerifiedAt { get; set; }
+
+    /// <summary>
+    /// Current provider presentation classification. This is independent from
+    /// the Track's musical-version traits.
+    /// </summary>
+    public string? PresentationKind { get; set; }
+    public decimal? PresentationKindConfidence { get; set; }
+    public string? PresentationKindEvidenceSource { get; set; }
+    public string? PresentationKindEvidenceIdentity { get; set; }
+    public string? PresentationKindEvidenceMethod { get; set; }
+    public string? PresentationKindMethodVersion { get; set; }
+    public DateTimeOffset? PresentationKindClassifiedAt { get; set; }
+    public Guid? PresentationKindRevision { get; set; }
+
+    /// <summary>
+    /// Current uploader-authority classification. Official/user is orthogonal
+    /// to presentation kind, allowing values such as an official lyric video.
+    /// </summary>
+    public string? UploaderAuthority { get; set; }
+    public decimal? UploaderAuthorityConfidence { get; set; }
+    public string? UploaderAuthorityEvidenceSource { get; set; }
+    public string? UploaderAuthorityEvidenceIdentity { get; set; }
+    public string? UploaderAuthorityEvidenceMethod { get; set; }
+    public string? UploaderAuthorityMethodVersion { get; set; }
+    public DateTimeOffset? UploaderAuthorityClassifiedAt { get; set; }
+    public Guid? UploaderAuthorityRevision { get; set; }
     
     /// <summary>
     /// Navigation property to Track

@@ -92,6 +92,15 @@ video rather than forcing one exclusive label. Each inferred dimension retains
 confidence and provenance. Spotify usually remains audio. Existing uniqueness
 on `(SourceType, ExternalId)` and its indexed lookup path are preserved.
 
+The first presentation phase stores the current value for each dimension
+directly on `TrackSourceId`, with independent confidence, stable evidence
+identity/method/version, and classification timestamp. Updates use optimistic
+tokens and explicit unchanged/set/clear operations so separate writers do not
+erase one another. These columns are current state, not a permanent audit log;
+historical classification decisions require a later assertion ledger if the
+review workflow demonstrates that need. Migration does not classify old rows,
+and absence of `official` never implies `user`.
+
 ### Membership and compatibility
 
 `Song` is composition/work-level in Cantaro's own graph. Covers, remixes, and
