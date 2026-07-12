@@ -76,6 +76,12 @@ from the absence of other markers. Assertion history is retained for the life
 of its Track; permanent audit after Track deletion would require a separate
 tombstone or audit-ledger design.
 
+Detectors are pure proposal producers. They may map explicit version markers to
+controlled trait keys with confidence and method version, but they do not write
+assertions or group Tracks. Presentation collisions such as `live video` and
+`cover art audio` are excluded from musical proposals, and missing markers never
+produce an implicit `original` proposal.
+
 ### TrackSourceId presentation (later phase)
 
 Presentation metadata is nullable and provider-neutral where possible. Its
