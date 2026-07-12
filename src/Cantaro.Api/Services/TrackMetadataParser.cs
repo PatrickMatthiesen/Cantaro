@@ -29,7 +29,7 @@ public static partial class TrackMetadataParser
     public static ParsedTrackMetadata Parse(string? rawTitle, string? rawArtist)
     {
         var titleSemantics = ExtractTitleSemantics(rawTitle);
-        var cleanedTitle = CleanupTitle(rawTitle);
+        var cleanedTitle = StripTrailingSoundtrackContext(CleanupTitle(rawTitle));
         var isTopicChannel = IsTopicChannel(rawArtist);
         var cleanedArtist = CleanupArtist(rawArtist);
 
@@ -273,6 +273,47 @@ public static partial class TrackMetadataParser
             : value;
     }
 
+    internal static string StripTrailingSoundtrackContext(string value)
+    {
+        var cleaned = value;
+        while (!string.IsNullOrWhiteSpace(cleaned))
+        {
+            var bracketedMatch = TrailingBracketedContextRegex().Match(cleaned);
+            if (bracketedMatch.Success && SoundtrackContextRegex().IsMatch(bracketedMatch.Groups["context"].Value.Trim()))
+            {
+                cleaned = cleaned[..bracketedMatch.Index].TrimEnd();
+                continue;
+            }
+
+            var removedSuffix = false;
+            foreach (var separator in ArtistTitleSeparators.Append(" | "))
+            {
+                var separatorIndex = cleaned.LastIndexOf(separator, StringComparison.Ordinal);
+                if (separatorIndex <= 0)
+                {
+                    continue;
+                }
+
+                var context = cleaned[(separatorIndex + separator.Length)..].Trim();
+                if (!SoundtrackContextRegex().IsMatch(context))
+                {
+                    continue;
+                }
+
+                cleaned = cleaned[..separatorIndex].TrimEnd();
+                removedSuffix = true;
+                break;
+            }
+
+            if (!removedSuffix)
+            {
+                break;
+            }
+        }
+
+        return CleanupWhitespace(cleaned.Trim(' ', '-', '|'));
+    }
+
     private static string StripPlaybackModifiers(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -346,6 +387,12 @@ public static partial class TrackMetadataParser
 
     [GeneratedRegex(@"[\[(](?<text>.*?)[\])]")]
     private static partial Regex BracketedSegmentRegex();
+
+    [GeneratedRegex(@"[\[(](?<context>[^\])]+)[\])]\s*$")]
+    private static partial Regex TrailingBracketedContextRegex();
+
+    [GeneratedRegex(@"^(?:OST|(?i:(?:original|official)(?:\s+motion\s+picture)?\s+soundtrack|video\s+game\s+soundtrack))$")]
+    private static partial Regex SoundtrackContextRegex();
 
     [GeneratedRegex(@"\b(official|video|audio|lyrics|lyric|visualizer|hq|hd|copyright\s*free|future\s*bass|ncs)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NoiseContentRegex();

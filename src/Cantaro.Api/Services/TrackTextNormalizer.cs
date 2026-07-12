@@ -30,7 +30,7 @@ public static partial class TrackTextNormalizer
             return 0m;
         }
 
-        if (normalizedLeft == normalizedRight)
+        if (AreNormalizedTitlesEquivalent(normalizedLeft, normalizedRight))
         {
             return 1m;
         }
@@ -60,6 +60,34 @@ public static partial class TrackTextNormalizer
         }
 
         return Math.Round((decimal)intersection / union, 3, MidpointRounding.AwayFromZero);
+    }
+
+    public static bool AreEquivalentTitles(string? left, string? right)
+    {
+        var normalizedLeft = Normalize(left);
+        var normalizedRight = Normalize(right);
+        return AreNormalizedTitlesEquivalent(normalizedLeft, normalizedRight);
+    }
+
+    private static bool AreNormalizedTitlesEquivalent(string normalizedLeft, string normalizedRight)
+    {
+        if (string.IsNullOrEmpty(normalizedLeft) || string.IsNullOrEmpty(normalizedRight))
+        {
+            return false;
+        }
+
+        if (string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var leftHasSpaces = normalizedLeft.Contains(' ');
+        var rightHasSpaces = normalizedRight.Contains(' ');
+        return leftHasSpaces != rightHasSpaces
+            && string.Equals(
+                normalizedLeft.Replace(" ", string.Empty, StringComparison.Ordinal),
+                normalizedRight.Replace(" ", string.Empty, StringComparison.Ordinal),
+                StringComparison.Ordinal);
     }
 
     [GeneratedRegex(@"\[(.*?)\]|\((.*?)\)", RegexOptions.Compiled)]

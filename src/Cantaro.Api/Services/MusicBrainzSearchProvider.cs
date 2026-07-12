@@ -136,24 +136,36 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
     private List<MusicBrainzSearchPlan> BuildSearchPlans(ParsedTrackMetadata parsedMetadata)
     {
         var plans = new List<MusicBrainzSearchPlan>();
+        IReadOnlyList<string> individualArtistFallbacks = [];
 
         // The original, complete credit is the most selective query and should always run first.
         var fullCredit = parsedMetadata.DisplayArtist ?? parsedMetadata.SearchArtist;
         AddPlan(plans, parsedMetadata.SearchTitle, fullCredit, "strict title-and-full-credit");
 
-        // MusicBrainz artist credits use several separator styles. Try only a small number of
-        // alternatives before widening the title search; otherwise collaborations multiply requests.
-        AddPlans(
-            plans,
-            parsedMetadata.SearchTitle,
-            BuildCollaboratorArtistVariants(fullCredit)
-                .Where(variant => !string.Equals(variant, fullCredit, StringComparison.OrdinalIgnoreCase))
+        var collaborators = SplitCollaborators(fullCredit ?? string.Empty);
+        if (collaborators.Count > 1)
+        {
+            AddArtistNamesPlan(plans, parsedMetadata.SearchTitle, collaborators, "title-and-each-artist-credit");
+            AddCompactTitleSpacingPlan(plans, parsedMetadata.SearchTitle, collaborators);
+
+            // Individual artist fallbacks are bounded. They help with incomplete MusicBrainz
+            // credits without spending requests on separator variants that repeat the same miss.
+            individualArtistFallbacks = collaborators
                 .Take(_options.MusicBrainzCollaboratorVariantLimit)
-                .ToList(),
-            "title-and-collaborator-credit");
+                .ToList();
+        }
+        else
+        {
+            AddCompactTitleSpacingPlan(plans, parsedMetadata.SearchTitle, collaborators);
+        }
 
         AddPlan(plans, parsedMetadata.SearchTitle, artist: null, "title-only");
         AddPlan(plans, parsedMetadata.DisplayTitle, artist: null, "cleaned title-only");
+        AddPlans(
+            plans,
+            parsedMetadata.SearchTitle,
+            individualArtistFallbacks,
+            "title-and-individual-artist");
 
         return plans
             .GroupBy(plan => plan.Query, StringComparer.OrdinalIgnoreCase)
@@ -165,7 +177,6 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
     {
         if (artists.Count == 0)
         {
-            AddPlan(plans, title, artist: null, description);
             return;
         }
 
@@ -195,28 +206,42 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         plans.Add(new MusicBrainzSearchPlan(string.Join(" AND ", queryParts), description));
     }
 
-    private static IReadOnlyList<string> BuildCollaboratorArtistVariants(string? artist)
+    private static void AddArtistNamesPlan(
+        List<MusicBrainzSearchPlan> plans,
+        string? title,
+        IReadOnlyList<string> artists,
+        string description)
     {
-        if (string.IsNullOrWhiteSpace(artist))
+        if (string.IsNullOrWhiteSpace(title) || artists.Count == 0)
         {
-            return [];
+            return;
         }
 
-        var normalizedArtist = NormalizeArtistWhitespace(artist);
-        var collaborators = SplitCollaborators(normalizedArtist);
-        var variants = new List<string>();
+        var queryParts = new List<string> { $"recording:\"{EscapeSearchTerm(title)}\"" };
+        queryParts.AddRange(artists.Select(artist => $"artistname:\"{EscapeSearchTerm(artist)}\""));
+        plans.Add(new MusicBrainzSearchPlan(string.Join(" AND ", queryParts), description));
+    }
 
-        if (collaborators.Count > 1)
+    private static void AddCompactTitleSpacingPlan(
+        List<MusicBrainzSearchPlan> plans,
+        string? title,
+        IReadOnlyList<string> artists)
+    {
+        if (string.IsNullOrWhiteSpace(title)
+            || title.Length < 6
+            || title.Any(char.IsWhiteSpace)
+            || artists.Count == 0)
         {
-            variants.Add(string.Join(" & ", collaborators));
-            variants.Add(string.Join(", ", collaborators));
-            variants.AddRange(collaborators);
+            return;
         }
 
-        return variants
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        var titleVariants = Enumerable.Range(2, title.Length - 3)
+            .Select(index => $"{title[..index]} {title[index..]}")
+            .Select(variant => $"\"{EscapeSearchTerm(variant)}\"")
             .ToList();
+        var queryParts = new List<string> { $"recording:({string.Join(" OR ", titleVariants)})" };
+        queryParts.AddRange(artists.Select(artist => $"artistname:\"{EscapeSearchTerm(artist)}\""));
+        plans.Add(new MusicBrainzSearchPlan(string.Join(" AND ", queryParts), "compact-title-spacing-and-artist-credit"));
     }
 
     private bool IsLocallyCredibleExactMatch(
@@ -243,10 +268,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
 
     private static bool HaveEqualNormalizedText(string? left, string? right)
     {
-        var normalizedLeft = TrackTextNormalizer.Normalize(left);
-        var normalizedRight = TrackTextNormalizer.Normalize(right);
-        return !string.IsNullOrWhiteSpace(normalizedLeft)
-            && string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal);
+        return TrackTextNormalizer.AreEquivalentTitles(left, right);
     }
 
     private static List<string> SplitCollaborators(string artist)

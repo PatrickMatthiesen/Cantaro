@@ -54,7 +54,7 @@ public class MusicBrainzSearchProviderTests
     }
 
     [Fact]
-    public async Task SearchAsync_QueriesIndividualCollaborationArtists_WhenCombinedArtistClauseMisses()
+    public async Task SearchAsync_QueriesEachCollaborationArtist_WhenCombinedArtistClauseMisses()
     {
         var fakeClient = new FakeMusicBrainzQueryClient();
         fakeClient.AddResult(
@@ -70,7 +70,7 @@ public class MusicBrainzSearchProviderTests
                 RawMetadata = "{}"
             });
         fakeClient.AddResult(
-            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM\"",
+            "recording:\"Good Things Fall Apart\" AND artistname:\"ILLENIUM\" AND artistname:\"Jon Bellion\"",
             new MusicBrainzRecordingMatch
             {
                 ExternalId = "recording-good-things",
@@ -98,12 +98,14 @@ public class MusicBrainzSearchProviderTests
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
         Assert.Contains("recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"", fakeClient.Queries);
-        Assert.Contains("recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM\"", fakeClient.Queries);
+        Assert.Contains(
+            "recording:\"Good Things Fall Apart\" AND artistname:\"ILLENIUM\" AND artistname:\"Jon Bellion\"",
+            fakeClient.Queries);
         Assert.Contains(candidates, candidate => candidate.ExternalId == "recording-good-things");
     }
 
     [Fact]
-    public async Task SearchAsync_QueriesSpacedXCollaborationVariant()
+    public async Task SearchAsync_QueriesSpacedXAsIndividualArtistNames()
     {
         var fakeClient = new FakeMusicBrainzQueryClient();
         var provider = CreateProvider(fakeClient);
@@ -122,8 +124,64 @@ public class MusicBrainzSearchProviderTests
         await provider.SearchAsync(observation, CancellationToken.None);
 
         Assert.Contains(
-            "recording:\"Lucid Eyes\" AND artist:\"Rival & Sabai & Jay Mason\"",
+            "recording:\"Lucid Eyes\" AND artistname:\"Rival\" AND artistname:\"Sabai\" AND artistname:\"Jay Mason\"",
             fakeClient.Queries);
+    }
+
+    [Fact]
+    public async Task SearchAsync_FindsCommonTitleThroughConjunctiveArtistNames()
+    {
+        const string exactCreditQuery = "recording:\"I See You\" AND artistname:\"Dabin\" AND artistname:\"Nurko\" AND artistname:\"Skylar Grey\"";
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        fakeClient.AddResult(
+            exactCreditQuery,
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "edfa2315-de39-4bc9-ad94-3a71c3bf8f5d",
+                Title = "I See You",
+                Artist = "Dabin, NURKO & Skylar Grey",
+                ArtistCredits = ["Dabin", "NURKO", "Skylar Grey"],
+                DurationSeconds = 210,
+                SearchScore = 100,
+                RawMetadata = "{}"
+            });
+        var provider = CreateProvider(fakeClient);
+
+        var candidates = await provider.SearchAsync(
+            CreateObservation("I See You", "Dabin x Nurko x Skylar Grey", durationSeconds: 210),
+            CancellationToken.None);
+
+        Assert.Equal(2, fakeClient.Queries.Count);
+        Assert.Contains(exactCreditQuery, fakeClient.Queries);
+        Assert.Contains(candidates, candidate => candidate.ExternalId == "edfa2315-de39-4bc9-ad94-3a71c3bf8f5d");
+    }
+
+    [Fact]
+    public async Task SearchAsync_RecoversCompactTitleWithInternalSpacing()
+    {
+        const string compactQuery = "recording:(\"Bo ohoo\" OR \"Boo hoo\" OR \"Booh oo\") AND artistname:\"Neoni\" AND artistname:\"RIELL\"";
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        fakeClient.AddResult(
+            compactQuery,
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "4720de19-32e8-4781-a25f-eecfc405b63d",
+                Title = "BOO HOO",
+                Artist = "Neoni & RIELL",
+                ArtistCredits = ["Neoni", "RIELL"],
+                DurationSeconds = 171,
+                SearchScore = 100,
+                RawMetadata = "{}"
+            });
+        var provider = CreateProvider(fakeClient);
+
+        var candidates = await provider.SearchAsync(
+            CreateObservation("Boohoo", "Neoni & RIELL", durationSeconds: 172),
+            CancellationToken.None);
+
+        Assert.Equal(3, fakeClient.Queries.Count);
+        Assert.Contains(compactQuery, fakeClient.Queries);
+        Assert.Contains(candidates, candidate => candidate.ExternalId == "4720de19-32e8-4781-a25f-eecfc405b63d");
     }
 
     [Fact]
@@ -229,9 +287,9 @@ public class MusicBrainzSearchProviderTests
         Assert.Equal(
         [
             "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"",
-            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM & Jon Bellion\"",
+            "recording:\"Good Things Fall Apart\" AND artistname:\"ILLENIUM\" AND artistname:\"Jon Bellion\"",
+            "recording:\"Good Things Fall Apart\"",
             "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM\"",
-            "recording:\"Good Things Fall Apart\""
         ],
         fakeClient.Queries);
     }
@@ -316,7 +374,7 @@ public class MusicBrainzSearchProviderTests
             "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"",
             fakeClient.Queries[0]);
         Assert.Equal(
-            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM & Jon Bellion\"",
+            "recording:\"Good Things Fall Apart\" AND artistname:\"ILLENIUM\" AND artistname:\"Jon Bellion\"",
             fakeClient.Queries[1]);
     }
 
