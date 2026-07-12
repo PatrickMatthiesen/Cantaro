@@ -439,7 +439,7 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
-    public async Task ProcessObservationAsync_CandidatesOutsideClusterToleranceRemainAmbiguous()
+    public async Task ProcessObservationAsync_MuchShorterCompetingCandidateDoesNotBlockExactDurationMatch()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -500,8 +500,8 @@ public class TrackMatchingServiceTests
 
         var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
-        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
-        Assert.Null(result.AcceptedCandidateId);
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
     }
 
     [Fact]
@@ -789,7 +789,7 @@ public class TrackMatchingServiceTests
                 Title = "All Time Low (Acoustic)",
                 Artist = "Jon Bellion",
                 MbidRecording = "custom-policy-candidate",
-                DurationSeconds = 224,
+                DurationSeconds = 217,
                 Explanation = "Suggested by test fixture.",
                 RawMetadata = "{}"
             });

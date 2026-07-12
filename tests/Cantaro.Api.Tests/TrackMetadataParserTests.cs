@@ -6,9 +6,9 @@ namespace Cantaro.Api.Tests;
 public class TrackMetadataParserTests
 {
     [Theory]
-    [InlineData("Kx5 - Escape (feat. Hayla) [Official Lyric Video]", "Kx5", "Escape (feat. Hayla)", "Kx5", "Escape", "Kx5")]
+    [InlineData("Kx5 - Escape (feat. Hayla) [Official Lyric Video]", "Kx5", "Escape (feat. Hayla)", "Kx5, Hayla", "Escape", "Kx5, Hayla")]
     [InlineData("Diamond Eyes - Flutter | Future Bass | NCS - Copyright Free Music", "NoCopyrightSounds", "Flutter", "Diamond Eyes", "Flutter", "Diamond Eyes")]
-    [InlineData("NURKO feat. Valerie Broussard - The Longest Night", "Proximity", "The Longest Night", "NURKO feat. Valerie Broussard", "The Longest Night", "NURKO")]
+    [InlineData("NURKO feat. Valerie Broussard - The Longest Night", "Proximity", "The Longest Night", "NURKO feat. Valerie Broussard", "The Longest Night", "NURKO feat. Valerie Broussard")]
     [InlineData("Superfruit - Guy.exe speed up", "Iztuwa", "Guy.exe", "Superfruit", "Guy.exe", "Superfruit")]
     [InlineData("Riptide | South Arcade - Topic", "South Arcade - Topic", "Riptide", "South Arcade", "Riptide", "South Arcade")]
     public void Parse_UsesRepresentativeQueueExamples(
@@ -64,6 +64,16 @@ public class TrackMetadataParserTests
 
         Assert.Contains("official-video", parsed.PresentationMarkers);
         Assert.Equal(["alessia cara", "khalid", "logic"], parsed.ArtistCredits);
+    }
+
+    [Fact]
+    public void Parse_AppendsParentheticalFeaturedArtistToDisplayAndSearchArtist()
+    {
+        var parsed = TrackMetadataParser.Parse("Love Me The Same (ft. GLNNA)", "Vaance, Deerock, Wyle");
+
+        Assert.Equal("Vaance, Deerock, Wyle, GLNNA", parsed.DisplayArtist);
+        Assert.Equal("Vaance, Deerock, Wyle, GLNNA", parsed.SearchArtist);
+        Assert.Contains("glnna", parsed.ArtistCredits);
     }
 
     [Theory]

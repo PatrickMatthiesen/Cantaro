@@ -26,14 +26,10 @@ internal static class TrackMatchScorer
         decimal durationScore = 0m;
         if (observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue)
         {
-            var difference = Math.Abs(observation.DurationSeconds.Value - candidate.DurationSeconds.Value);
-            durationScore = difference switch
-            {
-                <= 2 => 1m,
-                <= 5 => 0.7m,
-                <= 10 => 0.4m,
-                _ => 0m
-            };
+            durationScore = TrackDurationSimilarity.Calculate(
+                observation.DurationSeconds.Value,
+                candidate.DurationSeconds.Value,
+                options);
         }
 
         var semanticAdjustment = ComputeTitleSemanticAdjustment(parsedObservation, parsedCandidate, options);

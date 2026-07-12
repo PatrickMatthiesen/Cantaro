@@ -312,7 +312,9 @@ public class MatchingController(
                     Comparisons = BuildCandidateComparisons(observation, projection.Candidate, projection.Diagnostics),
                     TitleSimilarity = projection.Diagnostics.TitleSimilarity,
                     ArtistSimilarity = projection.Diagnostics.ArtistSimilarity,
-                    DurationScore = projection.Diagnostics.DurationScore,
+                    DurationScore = observation.DurationSeconds.HasValue && projection.Candidate.DurationSeconds.HasValue
+                        ? projection.Diagnostics.DurationScore
+                        : null,
                     SemanticAdjustment = projection.Diagnostics.SemanticAdjustment,
                     SemanticExplanation = projection.Diagnostics.SemanticExplanation,
                     ClusterId = projection.Diagnostics.ClusterId,
@@ -343,7 +345,9 @@ public class MatchingController(
                 "Duration",
                 FormatDuration(observation.DurationSeconds),
                 FormatDuration(candidate.DurationSeconds),
-                diagnostics.DurationScore),
+                observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue
+                    ? diagnostics.DurationScore
+                    : null),
             CreateMarkerComparison(
                 "Version",
                 diagnostics.ObservationVersionMarkers.Count > 0 ? diagnostics.ObservationVersionMarkers : observationMetadata.VersionMarkers,
