@@ -67,8 +67,17 @@ internal static class TrackMatchClusterer
         var representativeTitle = TrackTextNormalizer.Normalize(representative.Candidate.Title);
         var representativeArtist = TrackTextNormalizer.Normalize(representative.Candidate.Artist);
 
+        var candidateCredits = GetCandidateCredits(candidate);
+        var representativeCredits = GetCandidateCredits(representative);
+
+        var bothHaveStructuredCredits = candidate.Candidate.ArtistCredits.Count > 0
+            && representative.Candidate.ArtistCredits.Count > 0;
+        var artistsMatch = bothHaveStructuredCredits
+            ? candidateCredits.SequenceEqual(representativeCredits, StringComparer.Ordinal)
+            : normalizedArtist == representativeArtist;
+
         if (normalizedTitle == representativeTitle
-            && normalizedArtist == representativeArtist
+            && artistsMatch
             && HaveEquivalentTitleSemantics(candidate.CandidateMetadata, representative.CandidateMetadata)
             && AreDurationsClose(candidate.Candidate.DurationSeconds, representative.Candidate.DurationSeconds, clusterDurationToleranceSeconds))
         {
@@ -78,6 +87,13 @@ internal static class TrackMatchClusterer
 
         clusterReason = string.Empty;
         return false;
+    }
+
+    private static IReadOnlyList<string> GetCandidateCredits(TrackMatchScoredCandidate candidate)
+    {
+        return candidate.Candidate.ArtistCredits.Count > 0
+            ? TrackMetadataParser.NormalizeArtistCredits(candidate.Candidate.ArtistCredits)
+            : candidate.CandidateMetadata.ArtistCredits;
     }
 
     private static string CreateClusterId(TrackMatchScoredCandidate candidate)

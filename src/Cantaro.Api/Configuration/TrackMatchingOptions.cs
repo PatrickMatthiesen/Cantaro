@@ -12,6 +12,12 @@ public sealed class TrackMatchingOptions
     [Range(1, 100)]
     public int MusicBrainzMaxReturnedCandidates { get; set; } = 15;
 
+    [Range(1, 20)]
+    public int MusicBrainzMaxRequestsPerSearch { get; set; } = 5;
+
+    [Range(0, 10)]
+    public int MusicBrainzCollaboratorVariantLimit { get; set; } = 2;
+
     [Range(typeof(decimal), "0", "1")]
     public decimal AutoMatchThreshold { get; set; } = 0.85m;
 
@@ -25,7 +31,19 @@ public sealed class TrackMatchingOptions
     public decimal MinimumCandidateScore { get; set; } = 0.35m;
 
     [Range(0, 60)]
-    public int ClusterDurationToleranceSeconds { get; set; } = 5;
+    public int ClusterDurationToleranceSeconds { get; set; } = 8;
+
+    [Range(0, 60)]
+    public int AutoMatchDurationToleranceSeconds { get; set; } = 10;
+
+    [Range(0, 600)]
+    public int OfficialVideoPaddingMinSeconds { get; set; } = 30;
+
+    [Range(0, 600)]
+    public int OfficialVideoPaddingMaxSeconds { get; set; } = 300;
+
+    [Range(typeof(decimal), "0", "10")]
+    public decimal OfficialVideoPaddingMaxRatio { get; set; } = 2.0m;
 
     [Range(typeof(decimal), "-1", "1")]
     public decimal PlaybackModifierMismatchPenalty { get; set; } = -0.20m;

@@ -1,6 +1,8 @@
+using Cantaro.Api.Configuration;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -26,7 +28,7 @@ public class MusicBrainzSearchProviderTests
                 RawMetadata = "{}"
             });
 
-        var provider = new MusicBrainzSearchProvider(fakeClient, NullLogger<MusicBrainzSearchProvider>.Instance);
+        var provider = CreateProvider(fakeClient);
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
@@ -80,7 +82,7 @@ public class MusicBrainzSearchProviderTests
                 RawMetadata = "{}"
             });
 
-        var provider = new MusicBrainzSearchProvider(fakeClient, NullLogger<MusicBrainzSearchProvider>.Instance);
+        var provider = CreateProvider(fakeClient);
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
@@ -169,7 +171,7 @@ public class MusicBrainzSearchProviderTests
                 RawMetadata = "{}"
             });
 
-        var provider = new MusicBrainzSearchProvider(fakeClient, NullLogger<MusicBrainzSearchProvider>.Instance);
+        var provider = CreateProvider(fakeClient);
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
@@ -187,6 +189,136 @@ public class MusicBrainzSearchProviderTests
         Assert.True(candidates.Count > 5);
         Assert.Contains(candidates, candidate => candidate.ExternalId == "recording-good-things");
     }
+
+    [Fact]
+    public async Task SearchAsync_UsesPhasedBoundedQueriesInOrder()
+    {
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        var provider = CreateProvider(fakeClient, new TrackMatchingOptions
+        {
+            MusicBrainzMaxRequestsPerSearch = 4,
+            MusicBrainzCollaboratorVariantLimit = 2
+        });
+
+        await provider.SearchAsync(CreateObservation("Good Things Fall Apart", "ILLENIUM, Jon Bellion"), CancellationToken.None);
+
+        Assert.Equal(
+        [
+            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"",
+            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM & Jon Bellion\"",
+            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM\"",
+            "recording:\"Good Things Fall Apart\""
+        ],
+        fakeClient.Queries);
+    }
+
+    [Fact]
+    public async Task SearchAsync_StopsAfterCredibleStrictExactMatch()
+    {
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        fakeClient.AddResult(
+            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"",
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "recording-good-things",
+                Title = "Good Things Fall Apart",
+                Artist = "ILLENIUM & Jon Bellion",
+                DurationSeconds = 217,
+                SearchScore = 1,
+                RawMetadata = "{}"
+            });
+        var provider = CreateProvider(fakeClient);
+
+        var candidates = await provider.SearchAsync(
+            CreateObservation("Good Things Fall Apart", "ILLENIUM, Jon Bellion", durationSeconds: 217),
+            CancellationToken.None);
+
+        Assert.Single(fakeClient.Queries);
+        Assert.Single(candidates);
+    }
+
+    [Fact]
+    public async Task SearchAsync_DoesNotStopForHighMusicBrainzScoreWithoutLocalCredibility()
+    {
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        const string strictQuery = "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"";
+        const string titleOnlyQuery = "recording:\"Good Things Fall Apart\"";
+        fakeClient.AddResult(
+            strictQuery,
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "wrong-high-score",
+                Title = "Good Things Fall Apart vs. Sad Songs",
+                Artist = "ILLENIUM, Jon Bellion, Said the Sky",
+                DurationSeconds = 366,
+                SearchScore = 100,
+                RawMetadata = "{}"
+            });
+        fakeClient.AddResult(
+            titleOnlyQuery,
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "recording-good-things",
+                Title = "Good Things Fall Apart",
+                Artist = "ILLENIUM & Jon Bellion",
+                DurationSeconds = 217,
+                SearchScore = 1,
+                RawMetadata = "{}"
+            });
+        var provider = CreateProvider(fakeClient);
+
+        var candidates = await provider.SearchAsync(
+            CreateObservation("Good Things Fall Apart", "ILLENIUM, Jon Bellion", durationSeconds: 217),
+            CancellationToken.None);
+
+        Assert.Contains(titleOnlyQuery, fakeClient.Queries);
+        Assert.Contains(candidates, candidate => candidate.ExternalId == "recording-good-things");
+    }
+
+    [Fact]
+    public async Task SearchAsync_DoesNotExceedConfiguredRequestCap()
+    {
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        var provider = CreateProvider(fakeClient, new TrackMatchingOptions
+        {
+            MusicBrainzMaxRequestsPerSearch = 2,
+            MusicBrainzCollaboratorVariantLimit = 4
+        });
+
+        await provider.SearchAsync(CreateObservation("Good Things Fall Apart", "ILLENIUM, Jon Bellion"), CancellationToken.None);
+
+        Assert.Equal(2, fakeClient.Queries.Count);
+        Assert.Equal(
+            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM, Jon Bellion\"",
+            fakeClient.Queries[0]);
+        Assert.Equal(
+            "recording:\"Good Things Fall Apart\" AND artist:\"ILLENIUM & Jon Bellion\"",
+            fakeClient.Queries[1]);
+    }
+
+    private static MusicBrainzSearchProvider CreateProvider(
+        FakeMusicBrainzQueryClient fakeClient,
+        TrackMatchingOptions? options = null)
+    {
+        return new MusicBrainzSearchProvider(
+            fakeClient,
+            NullLogger<MusicBrainzSearchProvider>.Instance,
+            Options.Create(options ?? new TrackMatchingOptions()),
+            _ => Task.CompletedTask);
+    }
+
+    private static TrackObservation CreateObservation(string title, string? artist, int? durationSeconds = null) => new()
+    {
+        Id = Guid.NewGuid(),
+        SourceType = "youtube",
+        ExternalId = "video-1",
+        Title = title,
+        Artist = artist,
+        DurationSeconds = durationSeconds,
+        MatchStatus = TrackMatchingStatuses.Pending,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
 
     private sealed class FakeMusicBrainzQueryClient : IMusicBrainzQueryClient
     {
