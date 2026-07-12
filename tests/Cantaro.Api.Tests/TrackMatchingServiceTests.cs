@@ -1051,6 +1051,102 @@ public class TrackMatchingServiceTests
         Assert.Null(result.AcceptedCandidateId);
     }
 
+    [Theory]
+    [InlineData(
+        "Something Just Like This (Official Lyric Video)",
+        "The Chainsmokers & Coldplay",
+        "Something Just Like This",
+        "The Chainsmokers & Coldplay",
+        "The Chainsmokers|Coldplay")]
+    [InlineData(
+        "Lucid Eyes (ft. Jay Mason)",
+        "Rival x Sabai",
+        "Lucid Eyes",
+        "SABAI, Rival & Jay Mason",
+        "SABAI|Rival|Jay Mason")]
+    public async Task ProcessObservationAsync_AutoMatchesEquivalentCollaborationCreditFormats(
+        string observationTitle,
+        string observationArtist,
+        string candidateTitle,
+        string candidateArtist,
+        string candidateCredits)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = Guid.NewGuid().ToString(),
+            Title = observationTitle,
+            Artist = observationArtist,
+            DurationSeconds = 230,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+        var provider = new FakeTrackMetadataSearchProvider(new TrackMatchSearchCandidate
+        {
+            CandidateSource = "musicbrainz",
+            ExternalId = Guid.NewGuid().ToString(),
+            Title = candidateTitle,
+            Artist = candidateArtist,
+            ArtistCredits = candidateCredits.Split('|'),
+            DurationSeconds = 229
+        });
+
+        var result = await new TrackMatchingService(dbContext, [provider], NullLogger<TrackMatchingService>.Instance)
+            .ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_DoesNotAutoMatchMissingXCollaborator()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "missing-x-collaborator",
+            Title = "Shared Song",
+            Artist = "Artist x Guest",
+            DurationSeconds = 200,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+        var provider = new FakeTrackMetadataSearchProvider(new TrackMatchSearchCandidate
+        {
+            CandidateSource = "musicbrainz",
+            ExternalId = "missing-guest",
+            Title = "Shared Song",
+            Artist = "Artist",
+            ArtistCredits = ["Artist"],
+            DurationSeconds = 200
+        });
+
+        var result = await new TrackMatchingService(dbContext, [provider], NullLogger<TrackMatchingService>.Instance)
+            .ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
+        Assert.Null(result.AcceptedCandidateId);
+        Assert.Contains("exact artist credits", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task ProcessObservationAsync_DecisionIncludesDistinctRunnerUpBeyondFiveDuplicates()
     {

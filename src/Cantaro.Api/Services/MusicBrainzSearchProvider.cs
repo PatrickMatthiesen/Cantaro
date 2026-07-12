@@ -226,11 +226,10 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
     {
         var parsedCandidate = TrackMetadataParser.Parse(match.Title, match.Artist);
         var exactTitle = HaveEqualNormalizedText(parsedObservation.SearchTitle, parsedCandidate.SearchTitle);
-        var candidateCredits = match.ArtistCredits.Count > 0
-            ? TrackMetadataParser.NormalizeArtistCredits(match.ArtistCredits)
-            : parsedCandidate.ArtistCredits;
-        var exactArtistCredit = parsedObservation.ArtistCredits.Count > 0
-            && parsedObservation.ArtistCredits.SequenceEqual(candidateCredits, StringComparer.Ordinal);
+        var exactArtistCredit = TrackMetadataParser.HaveEquivalentArtistCredits(
+            parsedObservation,
+            parsedCandidate,
+            match.ArtistCredits);
         var semanticsAgree = !TrackMatchScorer.HaveDifferentMarkers(parsedObservation.VersionMarkers, parsedCandidate.VersionMarkers)
             && !TrackMatchScorer.HaveDifferentMarkers(parsedObservation.PlaybackModifiers, parsedCandidate.PlaybackModifiers);
         var durationIsConsistent = !observation.DurationSeconds.HasValue
@@ -252,6 +251,10 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
 
     private static List<string> SplitCollaborators(string artist)
     {
+        var segments = System.Text.RegularExpressions.Regex
+            .Split(artist, @"\s+[x×]\s+", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToList();
         var separators = new[]
         {
             " featuring ",
@@ -267,7 +270,6 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             ","
         };
 
-        var segments = new List<string> { artist };
         foreach (var separator in separators)
         {
             segments = segments

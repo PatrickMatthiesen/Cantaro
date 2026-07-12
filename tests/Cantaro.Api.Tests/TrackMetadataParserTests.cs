@@ -76,6 +76,27 @@ public class TrackMetadataParserTests
         Assert.Contains("glnna", parsed.ArtistCredits);
     }
 
+    [Fact]
+    public void Parse_SplitsSpacedXCollaboratorsIntoArtistCredits()
+    {
+        var parsed = TrackMetadataParser.Parse("Lucid Eyes (ft. Jay Mason)", "Rival x Sabai");
+
+        Assert.Equal("Rival x Sabai, Jay Mason", parsed.SearchArtist);
+        Assert.Equal(["jay mason", "rival", "sabai"], parsed.ArtistCredits);
+    }
+
+    [Theory]
+    [InlineData("Kx5")]
+    [InlineData("X Ambassadors")]
+    [InlineData("The xx")]
+    public void Parse_DoesNotSplitXInsideArtistNames(string artist)
+    {
+        var parsed = TrackMetadataParser.Parse("Song", artist);
+
+        Assert.Single(parsed.ArtistCredits);
+        Assert.Equal(TrackTextNormalizer.Normalize(artist), parsed.ArtistCredits[0]);
+    }
+
     [Theory]
     [InlineData("Song (radio version)", "radio-edit")]
     [InlineData("Song (remastered)", "remaster")]

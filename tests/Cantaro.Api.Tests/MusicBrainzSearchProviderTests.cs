@@ -103,6 +103,30 @@ public class MusicBrainzSearchProviderTests
     }
 
     [Fact]
+    public async Task SearchAsync_QueriesSpacedXCollaborationVariant()
+    {
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        var provider = CreateProvider(fakeClient);
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "lucid-eyes",
+            Title = "Lucid Eyes (ft. Jay Mason)",
+            Artist = "Rival x Sabai",
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        await provider.SearchAsync(observation, CancellationToken.None);
+
+        Assert.Contains(
+            "recording:\"Lucid Eyes\" AND artist:\"Rival & Sabai & Jay Mason\"",
+            fakeClient.Queries);
+    }
+
+    [Fact]
     public async Task SearchAsync_DoesNotDropLaterMatchesWhenEarlyQueriesAlreadyFilledFiveCandidates()
     {
         var fakeClient = new FakeMusicBrainzQueryClient();
