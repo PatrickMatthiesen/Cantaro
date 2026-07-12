@@ -14,6 +14,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     }
 
     public DbSet<ConnectedServiceAccount> ConnectedServiceAccounts => Set<ConnectedServiceAccount>();
+    public DbSet<Song> Songs => Set<Song>();
     public DbSet<Track> Tracks => Set<Track>();
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
@@ -159,6 +160,13 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<Song>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+
         modelBuilder.Entity<Track>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -168,6 +176,12 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.HasIndex(e => e.MbidRecording);
             entity.HasIndex(e => e.Isrc);
+
+            entity.HasIndex(e => e.SongId);
+            entity.HasOne(e => e.Song)
+                .WithMany(song => song.Tracks)
+                .HasForeignKey(e => e.SongId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Artist>(entity =>
