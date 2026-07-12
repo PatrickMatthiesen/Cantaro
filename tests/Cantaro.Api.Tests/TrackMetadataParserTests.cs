@@ -56,4 +56,26 @@ public class TrackMetadataParserTests
         Assert.Empty(parsed.VersionMarkers);
         Assert.Empty(parsed.PlaybackModifiers);
     }
+
+    [Fact]
+    public void Parse_RetainsOfficialVideoAndFeaturedCreditsAsEvidence()
+    {
+        var parsed = TrackMetadataParser.Parse("1-800-273-8255 ft. Alessia Cara, Khalid (Official Video)", "Logic");
+
+        Assert.Contains("official-video", parsed.PresentationMarkers);
+        Assert.Equal(["alessia cara", "khalid", "logic"], parsed.ArtistCredits);
+    }
+
+    [Theory]
+    [InlineData("Song (radio version)", "radio-edit")]
+    [InlineData("Song (remastered)", "remaster")]
+    [InlineData("Song (VIP mix)", "vip-mix")]
+    [InlineData("Song (extended mix)", "extended-mix")]
+    [InlineData("Song (cover)", "cover")]
+    public void Parse_CanonicalizesRecordingVersionFamilies(string title, string expectedMarker)
+    {
+        var parsed = TrackMetadataParser.Parse(title, "Artist");
+
+        Assert.Contains(expectedMarker, parsed.VersionMarkers);
+    }
 }

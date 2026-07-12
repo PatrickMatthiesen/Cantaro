@@ -12,6 +12,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
     private readonly IMusicBrainzQueryClient _musicBrainzQueryClient;
     private readonly ILogger<MusicBrainzSearchProvider> _logger;
     private readonly TrackMatchingOptions _options;
+    private readonly Func<CancellationToken, Task> _respectRateLimitAsync;
 
     public MusicBrainzSearchProvider(
         IMusicBrainzQueryClient musicBrainzQueryClient,
@@ -23,11 +24,13 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
     public MusicBrainzSearchProvider(
         IMusicBrainzQueryClient musicBrainzQueryClient,
         ILogger<MusicBrainzSearchProvider> logger,
-        IOptions<TrackMatchingOptions> options)
+        IOptions<TrackMatchingOptions> options,
+        Func<CancellationToken, Task>? respectRateLimitAsync = null)
     {
         _musicBrainzQueryClient = musicBrainzQueryClient;
         _logger = logger;
         _options = options.Value;
+        _respectRateLimitAsync = respectRateLimitAsync ?? RespectRateLimitAsync;
     }
 
     public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(TrackObservation observation, CancellationToken cancellationToken)
@@ -38,13 +41,15 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         }
 
         var parsedMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
-        var queryPlans = BuildSearchPlans(observation, parsedMetadata);
+        var queryPlans = BuildSearchPlans(parsedMetadata)
+            .Take(_options.MusicBrainzMaxRequestsPerSearch)
+            .ToList();
         var candidates = new Dictionary<string, RankedSearchCandidate>(StringComparer.OrdinalIgnoreCase);
 
         for (var queryIndex = 0; queryIndex < queryPlans.Count; queryIndex++)
         {
             var queryPlan = queryPlans[queryIndex];
-            await RespectRateLimitAsync(cancellationToken);
+            await _respectRateLimitAsync(cancellationToken);
 
             var matches = await _musicBrainzQueryClient.FindRecordingsAsync(queryPlan.Query, limit: _options.MusicBrainzPerQueryResultLimit, cancellationToken);
             for (var matchIndex = 0; matchIndex < matches.Count; matchIndex++)
@@ -57,6 +62,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
                         ExternalId = match.ExternalId,
                         Title = match.Title,
                         Artist = match.Artist,
+                        ArtistCredits = match.ArtistCredits,
                         ArtistMusicBrainzId = match.ArtistMusicBrainzId,
                         ArtistSortName = match.ArtistSortName,
                         MbidRecording = match.MbidRecording,
@@ -80,6 +86,15 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
                 }
 
                 candidates.Add(match.ExternalId, candidate);
+            }
+
+            if (matches.Any(match => IsLocallyCredibleExactMatch(observation, parsedMetadata, match)))
+            {
+                _logger.LogDebug(
+                    "Stopping MusicBrainz search after credible exact candidate from {Description} query for observation {ObservationId}",
+                    queryPlan.Description,
+                    observation.Id);
+                break;
             }
         }
 
@@ -118,14 +133,27 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         }
     }
 
-    private static List<MusicBrainzSearchPlan> BuildSearchPlans(TrackObservation observation, ParsedTrackMetadata parsedMetadata)
+    private List<MusicBrainzSearchPlan> BuildSearchPlans(ParsedTrackMetadata parsedMetadata)
     {
         var plans = new List<MusicBrainzSearchPlan>();
-        AddPlans(plans, parsedMetadata.SearchTitle, BuildArtistVariants(parsedMetadata.SearchArtist), "title-and-artist");
-        AddPlans(plans, parsedMetadata.DisplayTitle, BuildArtistVariants(parsedMetadata.DisplayArtist), "cleaned title-and-artist");
+
+        // The original, complete credit is the most selective query and should always run first.
+        var fullCredit = parsedMetadata.DisplayArtist ?? parsedMetadata.SearchArtist;
+        AddPlan(plans, parsedMetadata.SearchTitle, fullCredit, "strict title-and-full-credit");
+
+        // MusicBrainz artist credits use several separator styles. Try only a small number of
+        // alternatives before widening the title search; otherwise collaborations multiply requests.
+        AddPlans(
+            plans,
+            parsedMetadata.SearchTitle,
+            BuildCollaboratorArtistVariants(fullCredit)
+                .Where(variant => !string.Equals(variant, fullCredit, StringComparison.OrdinalIgnoreCase))
+                .Take(_options.MusicBrainzCollaboratorVariantLimit)
+                .ToList(),
+            "title-and-collaborator-credit");
+
         AddPlan(plans, parsedMetadata.SearchTitle, artist: null, "title-only");
         AddPlan(plans, parsedMetadata.DisplayTitle, artist: null, "cleaned title-only");
-        AddPlan(plans, observation.Title, artist: null, "raw title-only");
 
         return plans
             .GroupBy(plan => plan.Query, StringComparer.OrdinalIgnoreCase)
@@ -167,7 +195,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         plans.Add(new MusicBrainzSearchPlan(string.Join(" AND ", queryParts), description));
     }
 
-    private static IReadOnlyList<string> BuildArtistVariants(string? artist)
+    private static IReadOnlyList<string> BuildCollaboratorArtistVariants(string? artist)
     {
         if (string.IsNullOrWhiteSpace(artist))
         {
@@ -176,7 +204,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
 
         var normalizedArtist = NormalizeArtistWhitespace(artist);
         var collaborators = SplitCollaborators(normalizedArtist);
-        var variants = new List<string> { normalizedArtist };
+        var variants = new List<string>();
 
         if (collaborators.Count > 1)
         {
@@ -189,6 +217,37 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private bool IsLocallyCredibleExactMatch(
+        TrackObservation observation,
+        ParsedTrackMetadata parsedObservation,
+        MusicBrainzRecordingMatch match)
+    {
+        var parsedCandidate = TrackMetadataParser.Parse(match.Title, match.Artist);
+        var exactTitle = HaveEqualNormalizedText(parsedObservation.SearchTitle, parsedCandidate.SearchTitle);
+        var candidateCredits = match.ArtistCredits.Count > 0
+            ? TrackMetadataParser.NormalizeArtistCredits(match.ArtistCredits)
+            : parsedCandidate.ArtistCredits;
+        var exactArtistCredit = parsedObservation.ArtistCredits.Count > 0
+            && parsedObservation.ArtistCredits.SequenceEqual(candidateCredits, StringComparer.Ordinal);
+        var semanticsAgree = !TrackMatchScorer.HaveDifferentMarkers(parsedObservation.VersionMarkers, parsedCandidate.VersionMarkers)
+            && !TrackMatchScorer.HaveDifferentMarkers(parsedObservation.PlaybackModifiers, parsedCandidate.PlaybackModifiers);
+        var durationIsConsistent = !observation.DurationSeconds.HasValue
+            || !match.DurationSeconds.HasValue
+            || Math.Abs(observation.DurationSeconds.Value - match.DurationSeconds.Value) <= _options.AutoMatchDurationToleranceSeconds;
+
+        // SearchScore is deliberately excluded: it is a remote ranking signal, not enough evidence
+        // to stop the local fallback search safely.
+        return exactTitle && exactArtistCredit && semanticsAgree && durationIsConsistent;
+    }
+
+    private static bool HaveEqualNormalizedText(string? left, string? right)
+    {
+        var normalizedLeft = TrackTextNormalizer.Normalize(left);
+        var normalizedRight = TrackTextNormalizer.Normalize(right);
+        return !string.IsNullOrWhiteSpace(normalizedLeft)
+            && string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal);
     }
 
     private static List<string> SplitCollaborators(string artist)

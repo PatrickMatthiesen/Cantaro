@@ -170,7 +170,6 @@ public class TrackMatchingService
             var rankedCandidates = scoredCandidates
                 .Where(result => result.Score >= _options.MinimumCandidateScore)
                 .OrderByDescending(result => result.Score)
-                .Take(5)
                 .ToList();
 
             var clusters = TrackMatchClusterer.BuildClusters(rankedCandidates, _options.ClusterDurationToleranceSeconds);
@@ -181,8 +180,10 @@ public class TrackMatchingService
                 _options.AmbiguousThreshold,
                 _options.AutoMatchMargin);
 
-            var persistedCandidates = new List<TrackResolutionCandidate>(rankedCandidates.Count);
-            foreach (var result in rankedCandidates)
+            var displayedCandidates = SelectDisplayedCandidates(rankedCandidates, clusters, maximumCount: 5);
+
+            var persistedCandidates = new List<TrackResolutionCandidate>(displayedCandidates.Count);
+            foreach (var result in displayedCandidates)
             {
                 var cluster = clusters.FirstOrDefault(existingCluster => existingCluster.Members.Any(member => member.Candidate.ExternalId == result.Candidate.ExternalId));
                 var persistedCandidate = new TrackResolutionCandidate
@@ -280,6 +281,36 @@ public class TrackMatchingService
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
         }
+    }
+
+    private static IReadOnlyList<TrackMatchScoredCandidate> SelectDisplayedCandidates(
+        IReadOnlyList<TrackMatchScoredCandidate> rankedCandidates,
+        IReadOnlyList<TrackMatchCluster> clusters,
+        int maximumCount)
+    {
+        var selected = new List<TrackMatchScoredCandidate>(maximumCount);
+        foreach (var cluster in clusters.Take(maximumCount))
+        {
+            selected.Add(cluster.Representative);
+        }
+
+        foreach (var candidate in rankedCandidates)
+        {
+            if (selected.Count >= maximumCount)
+            {
+                break;
+            }
+
+            if (!selected.Any(existing => existing.Candidate.ExternalId == candidate.Candidate.ExternalId))
+            {
+                selected.Add(candidate);
+            }
+        }
+
+        return selected
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenBy(candidate => candidate.Candidate.Title, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private async Task ResolveObservationToTrackAsync(

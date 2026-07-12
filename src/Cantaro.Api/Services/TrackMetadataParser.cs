@@ -9,14 +9,17 @@ public sealed class ParsedTrackMetadata
     public required string SearchTitle { get; init; }
     public string? SearchArtist { get; init; }
     public bool ParsedArtistFromTitle { get; init; }
+    public IReadOnlyList<string> ArtistCredits { get; init; } = [];
     public IReadOnlyList<string> VersionMarkers { get; init; } = [];
     public IReadOnlyList<string> PlaybackModifiers { get; init; } = [];
+    public IReadOnlyList<string> PresentationMarkers { get; init; } = [];
 }
 
 internal sealed class ParsedTitleSemantics
 {
     public IReadOnlyList<string> VersionMarkers { get; init; } = [];
     public IReadOnlyList<string> PlaybackModifiers { get; init; } = [];
+    public IReadOnlyList<string> PresentationMarkers { get; init; } = [];
 }
 
 public static partial class TrackMetadataParser
@@ -73,6 +76,7 @@ public static partial class TrackMetadataParser
         }
 
         var searchArtist = CleanupArtist(StripFeaturedArtists(displayArtist));
+        var artistCredits = BuildObservationArtistCredits(displayArtist, rawTitle);
 
         return new ParsedTrackMetadata
         {
@@ -81,8 +85,10 @@ public static partial class TrackMetadataParser
             SearchTitle = searchTitle,
             SearchArtist = searchArtist,
             ParsedArtistFromTitle = parsedArtist != null,
+            ArtistCredits = artistCredits,
             VersionMarkers = titleSemantics.VersionMarkers,
-            PlaybackModifiers = titleSemantics.PlaybackModifiers
+            PlaybackModifiers = titleSemantics.PlaybackModifiers,
+            PresentationMarkers = titleSemantics.PresentationMarkers
         };
     }
 
@@ -97,8 +103,35 @@ public static partial class TrackMetadataParser
         return new ParsedTitleSemantics
         {
             VersionMarkers = ExtractMarkers(normalizedValue, VersionMarkerRegex()),
-            PlaybackModifiers = ExtractMarkers(normalizedValue, PlaybackModifierRegex())
+            PlaybackModifiers = ExtractMarkers(normalizedValue, PlaybackModifierRegex()),
+            PresentationMarkers = ExtractMarkers(normalizedValue, PresentationMarkerRegex())
         };
+    }
+
+    internal static IReadOnlyList<string> NormalizeArtistCredits(IEnumerable<string?> credits)
+    {
+        return credits
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => TrackTextNormalizer.Normalize(value))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildObservationArtistCredits(string? artist, string? title)
+    {
+        var credits = new List<string?> { StripFeaturedArtists(artist) };
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            foreach (Match match in FeaturedArtistCaptureRegex().Matches(title))
+            {
+                credits.AddRange(match.Groups["artists"].Value
+                    .Split([",", " & ", " and "], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+            }
+        }
+
+        return NormalizeArtistCredits(credits);
     }
 
     private static string CleanupTitle(string? value)
@@ -224,20 +257,36 @@ public static partial class TrackMetadataParser
 
     private static string NormalizeMarker(string value)
     {
-        return CleanupWhitespace(value.ToLowerInvariant());
+        var marker = CleanupWhitespace(value.ToLowerInvariant());
+        if (marker.Contains("remaster", StringComparison.Ordinal)) return "remaster";
+        if (marker.Contains("radio", StringComparison.Ordinal)) return "radio-edit";
+        if (marker.Contains("vip", StringComparison.Ordinal)) return "vip-mix";
+        if (marker.Contains("extended", StringComparison.Ordinal)) return "extended-mix";
+        if (marker.Contains("club", StringComparison.Ordinal)) return "club-mix";
+        if (marker.Contains("original", StringComparison.Ordinal)) return "original-mix";
+        if (marker.Contains("remix", StringComparison.Ordinal)) return "remix";
+        if (marker.Contains("official", StringComparison.Ordinal) && marker.Contains("video", StringComparison.Ordinal)) return "official-video";
+        if (marker.Contains("lyric", StringComparison.Ordinal) && marker.Contains("video", StringComparison.Ordinal)) return "lyric-video";
+        return marker;
     }
 
     [GeneratedRegex(@"[\[(](?<text>.*?)[\])]")]
     private static partial Regex BracketedSegmentRegex();
 
-    [GeneratedRegex(@"\b(official|video|audio|lyrics|lyric|visualizer|hq|hd|copyright\s*free|future\s*bass|ncs|cover)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(official|video|audio|lyrics|lyric|visualizer|hq|hd|copyright\s*free|future\s*bass|ncs)\b", RegexOptions.IgnoreCase)]
     private static partial Regex NoiseContentRegex();
 
     [GeneratedRegex(@"\b(speed\s*up|sped\s*up|nightcore|slowed(?:\s*\+\s*reverb)?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PlaybackModifierRegex();
 
-    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|live|remix|remixed|instrumental|karaoke|demo|dirty|clean|intro|outro|radio\s+edit|edit)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|live|remix(?:ed)?|remaster(?:ed)?|instrumental|karaoke|demo|dirty|clean|intro|outro|radio(?:\s+(?:edit|version))?|vip\s+mix|extended(?:\s+mix)?|club\s+mix|original\s+mix|acapella|stripped|cover|edit)\b", RegexOptions.IgnoreCase)]
     private static partial Regex VersionMarkerRegex();
+
+    [GeneratedRegex(@"\b(official\s+(?:music\s+)?video|lyric(?:s)?\s+video|visualizer)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex PresentationMarkerRegex();
+
+    [GeneratedRegex(@"(?:feat|ft|featuring)\.?\s+(?<artists>[^\]\)\|]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex FeaturedArtistCaptureRegex();
 
     [GeneratedRegex(@"[\[(]\s*(feat|ft|featuring)\.?\s+[^\])]*[\])]", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedParentheticalRegex();

@@ -52,6 +52,11 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
             ExternalId = recording.Id.ToString(),
             Title = recording.Title,
             Artist = string.IsNullOrWhiteSpace(artist) ? null : artist,
+            ArtistCredits = recording.ArtistCredit
+                .Select(credit => credit.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!)
+                .ToArray(),
             // An aggregate display string cannot safely inherit one member's
             // identity. Only propagate an artist MBID for a single credited
             // MusicBrainz artist.

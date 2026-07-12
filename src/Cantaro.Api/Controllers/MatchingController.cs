@@ -111,10 +111,10 @@ public class MatchingController(
     public async Task<ActionResult<MatchingSummaryResponse>> GetSummary(CancellationToken cancellationToken)
     {
         var userId = await GetCurrentUserIdAsync();
-        var observationIds = await GetUserObservationIdsAsync(userId, cancellationToken);
 
         var grouped = await _dbContext.TrackObservations
-            .Where(o => observationIds.Contains(o.Id) && o.MatchStatus != TrackMatchingStatuses.Matched)
+            .Where(o => o.MatchStatus != TrackMatchingStatuses.Matched
+                && o.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
             .GroupBy(o => o.MatchStatus)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
@@ -148,6 +148,7 @@ public class MatchingController(
             .Include(o => o.Candidates)
             .Include(o => o.PlaylistEntries)
                 .ThenInclude(entry => entry.Playlist)
+            .AsSplitQuery()
             .OrderByDescending(o => o.MatchStatus == TrackMatchingStatuses.Ambiguous)
             .ThenByDescending(o => o.LastMatchAttemptedAt)
             .ThenBy(o => o.Id)
@@ -226,6 +227,7 @@ public class MatchingController(
             .Include(o => o.Candidates)
             .Include(o => o.PlaylistEntries)
                 .ThenInclude(entry => entry.Playlist)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
@@ -490,15 +492,6 @@ public class MatchingController(
         }
 
         return accessible;
-    }
-
-    private async Task<List<Guid>> GetUserObservationIdsAsync(int userId, CancellationToken cancellationToken)
-    {
-        return await _dbContext.PlaylistEntries
-            .Where(entry => entry.TrackObservationId != null && entry.Playlist != null && entry.Playlist.UserId == userId)
-            .Select(entry => entry.TrackObservationId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
     }
 
     private async Task<int> GetCurrentUserIdAsync()

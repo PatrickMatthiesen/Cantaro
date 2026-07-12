@@ -13,6 +13,8 @@ internal sealed class TrackMatchScoredCandidate
     public decimal SemanticAdjustment { get; init; }
     public required string SemanticExplanation { get; init; }
     public decimal Score { get; init; }
+    public bool IsAutoMatchEligible { get; init; }
+    public required string AutoMatchEligibilityReason { get; init; }
 }
 
 internal sealed class TrackMatchCluster

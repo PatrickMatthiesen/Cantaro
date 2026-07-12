@@ -11,8 +11,17 @@ internal static class TrackMatchScorer
     {
         var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
         var parsedCandidate = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
+        var candidateCredits = candidate.ArtistCredits.Count > 0
+            ? TrackMetadataParser.NormalizeArtistCredits(candidate.ArtistCredits)
+            : parsedCandidate.ArtistCredits;
         var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedObservation.DisplayTitle, parsedObservation.SearchTitle);
         var artistSimilarity = BestSimilarity(candidate.Artist, observation.Artist, parsedObservation.DisplayArtist, parsedObservation.SearchArtist);
+        var exactCredits = parsedObservation.ArtistCredits.Count > 0
+            && parsedObservation.ArtistCredits.SequenceEqual(candidateCredits, StringComparer.Ordinal);
+        if (exactCredits)
+        {
+            artistSimilarity = 1m;
+        }
 
         decimal durationScore = 0m;
         if (observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue)
@@ -30,6 +39,23 @@ internal static class TrackMatchScorer
         var semanticAdjustment = ComputeTitleSemanticAdjustment(parsedObservation, parsedCandidate, options);
         var score = (titleSimilarity * 0.55m) + (artistSimilarity * 0.30m) + (durationScore * 0.15m) + semanticAdjustment;
         var semanticExplanation = BuildSemanticExplanation(parsedObservation, parsedCandidate);
+        var durationDifference = observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue
+            ? observation.DurationSeconds.Value - candidate.DurationSeconds.Value
+            : (int?)null;
+        var compatibleDuration = durationDifference.HasValue
+            && Math.Abs(durationDifference.Value) <= options.AutoMatchDurationToleranceSeconds;
+        var officialVideoPadding = string.Equals(observation.SourceType, "youtube", StringComparison.OrdinalIgnoreCase)
+            && parsedObservation.PresentationMarkers.Contains("official-video", StringComparer.Ordinal)
+            && titleSimilarity == 1m
+            && exactCredits
+            && semanticAdjustment >= 0m
+            && durationDifference >= options.OfficialVideoPaddingMinSeconds
+            && durationDifference <= options.OfficialVideoPaddingMaxSeconds
+            && observation.DurationSeconds.HasValue
+            && candidate.DurationSeconds.HasValue
+            && candidate.DurationSeconds.Value > 0
+            && (decimal)observation.DurationSeconds.Value / candidate.DurationSeconds.Value <= options.OfficialVideoPaddingMaxRatio;
+        var isAutoMatchEligible = exactCredits && (compatibleDuration || officialVideoPadding);
 
         return new TrackMatchScoredCandidate
         {
@@ -43,7 +69,11 @@ internal static class TrackMatchScorer
             DurationScore = durationScore,
             SemanticAdjustment = semanticAdjustment,
             SemanticExplanation = semanticExplanation,
-            Score = Math.Round(Math.Clamp(score, 0m, 1m), 3, MidpointRounding.AwayFromZero)
+            Score = Math.Round(Math.Clamp(score, 0m, 1m), 3, MidpointRounding.AwayFromZero),
+            IsAutoMatchEligible = isAutoMatchEligible,
+            AutoMatchEligibilityReason = isAutoMatchEligible
+                ? officialVideoPadding ? "Exact credited official-video match with bounded source padding." : "Exact artist credits and compatible duration."
+                : "Automated matching requires exact artist credits and compatible duration evidence."
         };
     }
 
