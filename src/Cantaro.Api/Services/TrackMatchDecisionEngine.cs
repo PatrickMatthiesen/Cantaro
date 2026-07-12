@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Cantaro.Api.Services;
 
 internal static class TrackMatchDecisionEngine
@@ -34,17 +36,17 @@ internal static class TrackMatchDecisionEngine
             return new TrackMatchDecision
             {
                 MatchStatus = TrackMatchingStatuses.Matched,
-                ResolutionNotes = $"Automatically resolved by the matcher. Top cluster scored {topCandidate.Score:P0} with a {margin:P0} lead over the next distinct cluster.",
+                ResolutionNotes = $"Automatically resolved by the matcher. Top cluster scored {FormatPercentage(topCandidate.Score)} with a {FormatPercentage(margin)} lead over the next distinct cluster.",
                 AcceptedCandidate = topCandidate,
                 TopScore = topCandidate.Score,
                 SecondDistinctScore = secondDistinctScore,
-                DecisionReason = $"Top cluster {topCandidate.Score:P0}; runner-up {secondDistinctScore:P0}; margin {margin:P0}."
+                DecisionReason = $"Top cluster {FormatPercentage(topCandidate.Score)}; runner-up {FormatPercentage(secondDistinctScore)}; margin {FormatPercentage(margin)}."
             };
         }
 
         if (meetsAutoMatchThreshold && meetsAutoMatchMargin && !topCandidate.IsAutoMatchEligible)
         {
-            var evidenceReason = $"Top cluster {topCandidate.Score:P0} meets the required {autoMatchThreshold:P0} score and its {margin:P0} lead meets the required {autoMatchMargin:P0} margin, but eligibility requirements are not met: {topCandidate.AutoMatchEligibilityReason.TrimEnd('.')}";
+            var evidenceReason = $"Top cluster {FormatPercentage(topCandidate.Score)} meets the required {FormatPercentage(autoMatchThreshold)} score and its {FormatPercentage(margin)} lead meets the required {FormatPercentage(autoMatchMargin)} margin, but eligibility requirements are not met: {topCandidate.AutoMatchEligibilityReason.TrimEnd('.')}";
 
             return new TrackMatchDecision
             {
@@ -64,16 +66,16 @@ internal static class TrackMatchDecisionEngine
         var autoMatchFailures = new List<string>();
         if (!meetsAutoMatchThreshold)
         {
-            autoMatchFailures.Add($"top cluster score {topCandidate.Score:P0} is below the required {autoMatchThreshold:P0}");
+            autoMatchFailures.Add($"top cluster score {FormatPercentage(topCandidate.Score)} is below the required {FormatPercentage(autoMatchThreshold)}");
         }
 
         if (!meetsAutoMatchMargin)
         {
-            autoMatchFailures.Add($"margin {margin:P0} is below the required {autoMatchMargin:P0}");
+            autoMatchFailures.Add($"margin {FormatPercentage(margin)} is below the required {FormatPercentage(autoMatchMargin)}");
         }
 
         var failureReason = string.Join("; ", autoMatchFailures) + ".";
-        var scoreSummary = $"Top cluster {topCandidate.Score:P0}; runner-up {secondDistinctScore:P0}; margin {margin:P0}.";
+        var scoreSummary = $"Top cluster {FormatPercentage(topCandidate.Score)}; runner-up {FormatPercentage(secondDistinctScore)}; margin {FormatPercentage(margin)}.";
         var statusReason = matchStatus == TrackMatchingStatuses.Ambiguous
             ? $"Multiple plausible candidates require review because {failureReason} {scoreSummary}"
             : $"Candidates were found, but automatic resolution was not possible because {failureReason} {scoreSummary}";
@@ -88,4 +90,7 @@ internal static class TrackMatchDecisionEngine
             DecisionReason = $"Distinct clusters: {clusters.Count}. {failureReason} {scoreSummary}"
         };
     }
+
+    private static string FormatPercentage(decimal value) =>
+        $"{(value * 100m).ToString("0", CultureInfo.InvariantCulture)}%";
 }

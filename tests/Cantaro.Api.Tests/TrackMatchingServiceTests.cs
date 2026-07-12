@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Globalization;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -815,8 +816,9 @@ public class TrackMatchingServiceTests
         Assert.Null(result.AcceptedCandidateId);
 
         var storedCandidate = await dbContext.TrackResolutionCandidates.SingleAsync();
-        Assert.Contains($"top cluster score {storedCandidate.Score:P0} is below the required 99%", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain($"margin {storedCandidate.Score:P0} is below the required 10%", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
+        var formattedScore = $"{(storedCandidate.Score * 100m).ToString("0", CultureInfo.InvariantCulture)}%";
+        Assert.Contains($"top cluster score {formattedScore} is below the required 99%", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain($"margin {formattedScore} is below the required 10%", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
