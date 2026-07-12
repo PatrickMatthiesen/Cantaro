@@ -724,8 +724,9 @@ public class TrackMatchingService
         observationMetadata.ExternalId = observation.ExternalId;
         observationMetadata.Title = observation.Title;
         observationMetadata.Artist = observation.Artist;
-        observationMetadata.SearchTitle ??= TrackMetadataParser.Parse(observation.Title, observation.Artist).SearchTitle;
-        observationMetadata.SearchArtist ??= TrackMetadataParser.Parse(observation.Title, observation.Artist).SearchArtist;
+        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        observationMetadata.SearchTitle = parsedObservation.SearchTitle;
+        observationMetadata.SearchArtist = parsedObservation.SearchArtist;
         observationMetadata.ThumbnailUrl = observation.ThumbnailUrl;
         observationMetadata.DurationSeconds = observation.DurationSeconds;
         observationMetadata.Matching = diagnostics;

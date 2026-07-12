@@ -44,7 +44,7 @@ public class MusicBrainzSearchProviderTests
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
         Assert.NotEmpty(fakeClient.Queries);
-        Assert.Equal("recording:\"Escape\" AND artist:\"Kx5\"", fakeClient.Queries[0]);
+        Assert.Equal("recording:\"Escape\" AND artist:\"Kx5, Hayla\"", fakeClient.Queries[0]);
         Assert.Contains("recording:\"Escape\"", fakeClient.Queries);
         Assert.Single(candidates);
         Assert.Equal("Escape", candidates[0].Title);

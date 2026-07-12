@@ -7,6 +7,31 @@ namespace Cantaro.Api.Tests;
 public class TrackObservationDisplayFormatterTests
 {
     [Fact]
+    public void GetQueueArtist_PrefersParsedFeaturedArtistsFromTitle()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "featured-artist",
+            Title = "Love Me The Same (ft. GLNNA)",
+            Artist = "Vaance, Deerock, Wyle",
+            MatchStatus = TrackMatchingStatuses.Ambiguous,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var metadata = new TrackObservationMetadata
+        {
+            Artist = observation.Artist,
+            SearchArtist = "Vaance, Deerock, Wyle, GLNNA"
+        };
+
+        var artist = TrackObservationDisplayFormatter.GetQueueArtist(observation, metadata);
+
+        Assert.Equal("Vaance, Deerock, Wyle, GLNNA", artist);
+    }
+
+    [Fact]
     public void GetQueueTitle_StripsArtistPrefixAndKeepsAcousticVideoContext()
     {
         var observation = new TrackObservation

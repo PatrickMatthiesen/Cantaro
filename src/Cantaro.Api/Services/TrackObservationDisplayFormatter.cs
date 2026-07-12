@@ -47,9 +47,9 @@ public static class TrackObservationDisplayFormatter
 
     public static string? GetQueueArtist(Models.TrackObservation observation, TrackObservationMetadata? metadata)
     {
-        return !string.IsNullOrWhiteSpace(observation.Artist)
-            ? observation.Artist
-            : metadata?.SearchArtist ?? metadata?.Artist;
+        return !string.IsNullOrWhiteSpace(metadata?.SearchArtist)
+            ? metadata.SearchArtist
+            : observation.Artist ?? metadata?.Artist;
     }
 
     private static string NormalizeComparisonValue(string value) => string.Join(

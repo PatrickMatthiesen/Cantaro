@@ -35,6 +35,7 @@ public static partial class TrackMetadataParser
 
         var displayTitle = cleanedTitle;
         string? parsedArtist = null;
+        var featuredArtists = ExtractFeaturedArtistNames(rawTitle);
 
         foreach (var separator in ArtistTitleSeparators)
         {
@@ -68,15 +69,16 @@ public static partial class TrackMetadataParser
             displayTitle = cleanedTitle;
         }
 
-        var displayArtist = parsedArtist ?? cleanedArtist;
+        var baseDisplayArtist = parsedArtist ?? cleanedArtist;
+        var displayArtist = AppendFeaturedArtists(baseDisplayArtist, featuredArtists);
         var searchTitle = CleanupWhitespace(StripFeaturedArtists(displayTitle) ?? displayTitle);
         if (string.IsNullOrWhiteSpace(searchTitle))
         {
             searchTitle = displayTitle;
         }
 
-        var searchArtist = CleanupArtist(StripFeaturedArtists(displayArtist));
-        var artistCredits = BuildObservationArtistCredits(displayArtist, rawTitle);
+        var searchArtist = CleanupArtist(displayArtist);
+        var artistCredits = BuildObservationArtistCredits(baseDisplayArtist, featuredArtists);
 
         return new ParsedTrackMetadata
         {
@@ -119,19 +121,54 @@ public static partial class TrackMetadataParser
             .ToArray();
     }
 
-    private static IReadOnlyList<string> BuildObservationArtistCredits(string? artist, string? title)
+    private static IReadOnlyList<string> BuildObservationArtistCredits(
+        string? artist,
+        IReadOnlyList<string> featuredArtists)
     {
         var credits = new List<string?> { StripFeaturedArtists(artist) };
-        if (!string.IsNullOrWhiteSpace(title))
-        {
-            foreach (Match match in FeaturedArtistCaptureRegex().Matches(title))
-            {
-                credits.AddRange(match.Groups["artists"].Value
-                    .Split([",", " & ", " and "], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
-            }
-        }
+        credits.AddRange(featuredArtists);
 
         return NormalizeArtistCredits(credits);
+    }
+
+    private static IReadOnlyList<string> ExtractFeaturedArtistNames(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return [];
+        }
+
+        return FeaturedArtistCaptureRegex().Matches(title)
+            .SelectMany(match => match.Groups["artists"].Value
+                .Split([",", " & ", " and "], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Select(CleanupArtist)
+            .Where(artist => !string.IsNullOrWhiteSpace(artist))
+            .Select(artist => artist!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string? AppendFeaturedArtists(string? artist, IReadOnlyList<string> featuredArtists)
+    {
+        if (featuredArtists.Count == 0)
+        {
+            return artist;
+        }
+
+        var additions = featuredArtists
+            .Where(featured => string.IsNullOrWhiteSpace(artist)
+                || !TrackTextNormalizer.Normalize(artist).Contains(
+                    TrackTextNormalizer.Normalize(featured),
+                    StringComparison.Ordinal))
+            .ToArray();
+        if (additions.Length == 0)
+        {
+            return artist;
+        }
+
+        return string.IsNullOrWhiteSpace(artist)
+            ? string.Join(", ", additions)
+            : $"{artist}, {string.Join(", ", additions)}";
     }
 
     private static string CleanupTitle(string? value)
@@ -285,7 +322,7 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"\b(official\s+(?:music\s+)?video|lyric(?:s)?\s+video|visualizer)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PresentationMarkerRegex();
 
-    [GeneratedRegex(@"(?:feat|ft|featuring)\.?\s+(?<artists>[^\]\)\|]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:feat|ft|featuring)\.?\s+(?<artists>.*?)(?=\s+-\s+|[\[\]\(\)\|]|$)", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedArtistCaptureRegex();
 
     [GeneratedRegex(@"[\[(]\s*(feat|ft|featuring)\.?\s+[^\])]*[\])]", RegexOptions.IgnoreCase)]
