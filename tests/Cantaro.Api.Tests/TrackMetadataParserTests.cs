@@ -97,6 +97,48 @@ public class TrackMetadataParserTests
         Assert.Equal(TrackTextNormalizer.Normalize(artist), parsed.ArtistCredits[0]);
     }
 
+    [Fact]
+    public void Parse_StripsTrailingOstContextIdempotently()
+    {
+        var first = TrackMetadataParser.Parse(
+            "Horizon Forbidden West - No Footfalls to Follow - OST",
+            "HeXenkingTV");
+        var second = TrackMetadataParser.Parse(first.DisplayTitle, first.DisplayArtist);
+
+        Assert.Equal("No Footfalls to Follow", first.DisplayTitle);
+        Assert.Equal("Horizon Forbidden West", first.DisplayArtist);
+        Assert.Equal(first.DisplayTitle, second.DisplayTitle);
+        Assert.Equal(first.DisplayArtist, second.DisplayArtist);
+    }
+
+    [Theory]
+    [InlineData("Song - OST", "Song")]
+    [InlineData("Song [OST]", "Song")]
+    [InlineData("Song - Original Soundtrack", "Song")]
+    [InlineData("Song | Video Game Soundtrack", "Song")]
+    public void Parse_StripsExactTrailingSoundtrackContext(string rawTitle, string expectedTitle)
+    {
+        var parsed = TrackMetadataParser.Parse(rawTitle, "Artist");
+
+        Assert.Equal(expectedTitle, parsed.DisplayTitle);
+        Assert.Equal(expectedTitle, parsed.SearchTitle);
+    }
+
+    [Theory]
+    [InlineData("OST - After Hours")]
+    [InlineData("Dabin - Soundtrack to the End")]
+    [InlineData("Ost")]
+    public void Parse_PreservesLegitimateOstAndSoundtrackText(string rawTitle)
+    {
+        var parsed = TrackMetadataParser.Parse(rawTitle, "Channel");
+
+        Assert.NotEqual(string.Empty, parsed.DisplayTitle);
+        Assert.Contains(
+            rawTitle.Contains(" - ", StringComparison.Ordinal) ? rawTitle.Split(" - ")[1] : rawTitle,
+            parsed.DisplayTitle,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("Song (radio version)", "radio-edit")]
     [InlineData("Song (remastered)", "remaster")]

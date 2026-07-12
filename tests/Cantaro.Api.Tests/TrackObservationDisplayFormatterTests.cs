@@ -7,6 +7,32 @@ namespace Cantaro.Api.Tests;
 public class TrackObservationDisplayFormatterTests
 {
     [Fact]
+    public void GetQueueTitle_StripsSoundtrackContextAfterOriginalArtistPrefix()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "soundtrack-video",
+            Title = "No Footfalls to Follow - OST",
+            Artist = "Horizon Forbidden West",
+            MatchStatus = TrackMatchingStatuses.Ambiguous,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var metadata = new TrackObservationMetadata
+        {
+            OriginalTitle = "Horizon Forbidden West - No Footfalls to Follow - OST",
+            Artist = "Horizon Forbidden West",
+            SearchArtist = "Horizon Forbidden West"
+        };
+
+        var title = TrackObservationDisplayFormatter.GetQueueTitle(observation, metadata);
+
+        Assert.Equal("No Footfalls to Follow", title);
+    }
+
+    [Fact]
     public void GetQueueArtist_PrefersParsedFeaturedArtistsFromTitle()
     {
         var observation = new TrackObservation

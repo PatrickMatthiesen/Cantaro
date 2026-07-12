@@ -38,11 +38,12 @@ public static class TrackObservationDisplayFormatter
                 continue;
             }
 
-            var titleSuffix = trimmedTitle[(separatorIndex + separator.Length)..].Trim();
+            var titleSuffix = TrackMetadataParser.StripTrailingSoundtrackContext(
+                trimmedTitle[(separatorIndex + separator.Length)..].Trim());
             return string.IsNullOrWhiteSpace(titleSuffix) ? observation.Title : titleSuffix;
         }
 
-        return trimmedTitle;
+        return TrackMetadataParser.StripTrailingSoundtrackContext(trimmedTitle);
     }
 
     public static string? GetQueueArtist(Models.TrackObservation observation, TrackObservationMetadata? metadata)

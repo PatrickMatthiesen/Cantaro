@@ -1064,6 +1064,12 @@ public class TrackMatchingServiceTests
         "Lucid Eyes",
         "SABAI, Rival & Jay Mason",
         "SABAI|Rival|Jay Mason")]
+    [InlineData(
+        "Boohoo",
+        "Neoni & RIELL",
+        "BOO HOO",
+        "Neoni & RIELL",
+        "Neoni|RIELL")]
     public async Task ProcessObservationAsync_AutoMatchesEquivalentCollaborationCreditFormats(
         string observationTitle,
         string observationArtist,
