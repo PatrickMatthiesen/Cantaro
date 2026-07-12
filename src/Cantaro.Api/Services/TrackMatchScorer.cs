@@ -11,13 +11,12 @@ internal static class TrackMatchScorer
     {
         var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
         var parsedCandidate = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
-        var candidateCredits = candidate.ArtistCredits.Count > 0
-            ? TrackMetadataParser.NormalizeArtistCredits(candidate.ArtistCredits)
-            : parsedCandidate.ArtistCredits;
         var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedObservation.DisplayTitle, parsedObservation.SearchTitle);
         var artistSimilarity = BestSimilarity(candidate.Artist, observation.Artist, parsedObservation.DisplayArtist, parsedObservation.SearchArtist);
-        var exactCredits = parsedObservation.ArtistCredits.Count > 0
-            && parsedObservation.ArtistCredits.SequenceEqual(candidateCredits, StringComparer.Ordinal);
+        var exactCredits = TrackMetadataParser.HaveEquivalentArtistCredits(
+            parsedObservation,
+            parsedCandidate,
+            candidate.ArtistCredits);
         if (exactCredits)
         {
             artistSimilarity = 1m;
@@ -69,7 +68,9 @@ internal static class TrackMatchScorer
             IsAutoMatchEligible = isAutoMatchEligible,
             AutoMatchEligibilityReason = isAutoMatchEligible
                 ? officialVideoPadding ? "Exact credited official-video match with bounded source padding." : "Exact artist credits and compatible duration."
-                : "Automated matching requires exact artist credits and compatible duration evidence."
+                : !exactCredits
+                    ? "Automated matching requires exact artist credits."
+                    : "Automated matching requires compatible duration evidence."
         };
     }
 

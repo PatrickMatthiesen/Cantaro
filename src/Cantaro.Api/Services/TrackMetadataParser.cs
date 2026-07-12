@@ -121,14 +121,51 @@ public static partial class TrackMetadataParser
             .ToArray();
     }
 
+    internal static bool HaveEquivalentArtistCredits(
+        ParsedTrackMetadata observation,
+        ParsedTrackMetadata candidate,
+        IEnumerable<string?> candidateCredits)
+    {
+        var normalizedCandidateCredits = NormalizeArtistCredits(candidateCredits);
+        if (normalizedCandidateCredits.Count == 0)
+        {
+            normalizedCandidateCredits = candidate.ArtistCredits;
+        }
+
+        if (observation.ArtistCredits.Count > 0
+            && observation.ArtistCredits.SequenceEqual(normalizedCandidateCredits, StringComparer.Ordinal))
+        {
+            return true;
+        }
+
+        var observationArtist = TrackTextNormalizer.Normalize(observation.DisplayArtist ?? observation.SearchArtist);
+        var candidateArtist = TrackTextNormalizer.Normalize(candidate.DisplayArtist ?? candidate.SearchArtist);
+        return !string.IsNullOrWhiteSpace(observationArtist)
+            && string.Equals(observationArtist, candidateArtist, StringComparison.Ordinal);
+    }
+
     private static IReadOnlyList<string> BuildObservationArtistCredits(
         string? artist,
         IReadOnlyList<string> featuredArtists)
     {
-        var credits = new List<string?> { StripFeaturedArtists(artist) };
+        var credits = SplitXCollaborators(StripFeaturedArtists(artist)).Cast<string?>().ToList();
         credits.AddRange(featuredArtists);
 
         return NormalizeArtistCredits(credits);
+    }
+
+    private static IReadOnlyList<string> SplitXCollaborators(string? artist)
+    {
+        if (string.IsNullOrWhiteSpace(artist))
+        {
+            return [];
+        }
+
+        return SpacedXCollaboratorRegex().Split(artist)
+            .Select(CleanupArtist)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .ToArray();
     }
 
     private static IReadOnlyList<string> ExtractFeaturedArtistNames(string? title)
@@ -324,6 +361,9 @@ public static partial class TrackMetadataParser
 
     [GeneratedRegex(@"(?:feat|ft|featuring)\.?\s+(?<artists>.*?)(?=\s+-\s+|[\[\]\(\)\|]|$)", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedArtistCaptureRegex();
+
+    [GeneratedRegex(@"\s+[x×]\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex SpacedXCollaboratorRegex();
 
     [GeneratedRegex(@"[\[(]\s*(feat|ft|featuring)\.?\s+[^\])]*[\])]", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedParentheticalRegex();
