@@ -47,6 +47,12 @@ public class Track
     /// display snapshot while clients migrate to this structured relationship.
     /// </summary>
     public ICollection<TrackArtistCredit> ArtistCredits { get; set; } = [];
+
+    /// <summary>
+    /// Auditable musical-version trait assertions. Provider presentation
+    /// metadata belongs to SourceIds, not this collection.
+    /// </summary>
+    public ICollection<TrackVersionTrait> VersionTraits { get; set; } = [];
     
     /// <summary>
     /// Navigation property to playlist entries

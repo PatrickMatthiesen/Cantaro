@@ -18,6 +18,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<Track> Tracks => Set<Track>();
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
+    public DbSet<TrackVersionTrait> TrackVersionTraits => Set<TrackVersionTrait>();
     public DbSet<TrackSourceId> TrackSourceIds => Set<TrackSourceId>();
     public DbSet<TrackObservation> TrackObservations => Set<TrackObservation>();
     public DbSet<TrackResolutionCandidate> TrackResolutionCandidates => Set<TrackResolutionCandidate>();
@@ -218,6 +219,62 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasOne(e => e.Artist)
                 .WithMany(a => a.TrackCredits)
                 .HasForeignKey(e => e.ArtistId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<TrackVersionTrait>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TraitKey).HasMaxLength(64);
+            entity.Property(e => e.Confidence).HasPrecision(5, 4);
+            entity.Property(e => e.EvidenceSource).HasMaxLength(64);
+            entity.Property(e => e.EvidenceIdentity).HasMaxLength(256);
+            entity.Property(e => e.EvidenceMethod).HasMaxLength(96);
+            entity.Property(e => e.MethodVersion).HasMaxLength(64);
+            entity.Property(e => e.AssertedByType).HasMaxLength(24);
+            entity.Property(e => e.AssertedById).HasMaxLength(128);
+            entity.Property(e => e.RevokedByType).HasMaxLength(24);
+            entity.Property(e => e.RevokedById).HasMaxLength(128);
+            entity.Property(e => e.RevocationReason).HasMaxLength(256);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_TrackVersionTraits_Confidence",
+                    "CAST(\"Confidence\" AS REAL) >= 0 AND CAST(\"Confidence\" AS REAL) <= 1");
+                table.HasCheckConstraint(
+                    "CK_TrackVersionTraits_Revocation",
+                    "\"RevokedAt\" IS NULL OR \"RevokedAt\" >= \"CreatedAt\"");
+                table.HasCheckConstraint(
+                    "CK_TrackVersionTraits_RevocationAudit",
+                    "(\"RevokedAt\" IS NULL AND \"RevokedByType\" IS NULL AND \"RevokedById\" IS NULL AND \"RevocationReason\" IS NULL) OR " +
+                    "(\"RevokedAt\" IS NOT NULL AND \"RevokedByType\" IS NOT NULL AND \"RevokedById\" IS NOT NULL AND \"RevocationReason\" IS NOT NULL)");
+            });
+
+            entity.HasIndex(e => new { e.TrackId, e.RevokedAt, e.TraitKey })
+                .HasDatabaseName("IX_TrackVersionTraits_Track_Active_Trait");
+            entity.HasIndex(e => e.SupersedesTraitId);
+            entity.HasIndex(e => new
+                {
+                    e.TrackId,
+                    e.TraitKey,
+                    e.EvidenceSource,
+                    e.EvidenceIdentity,
+                    e.EvidenceMethod
+                })
+                .IsUnique()
+                .HasFilter("\"RevokedAt\" IS NULL")
+                .HasDatabaseName("UX_TrackVersionTraits_ActiveEvidence");
+
+            entity.HasOne(e => e.Track)
+                .WithMany(track => track.VersionTraits)
+                .HasForeignKey(e => e.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SupersedesTrait)
+                .WithMany()
+                .HasForeignKey(e => e.SupersedesTraitId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -58,19 +58,23 @@ migration would turn uncertain evidence into canonical data.
 ISRC, artist credits, provider links, observations, and playlist entries. It
 gains nullable `SongId` plus a navigation to `Song`.
 
-### TrackVersionTrait (later phase)
+### TrackVersionTrait
 
-Each assertion associates a controlled trait key with a `Track`. Its eventual
-shape includes `Id`, `TrackId`, `TraitKey`, confidence constrained to `[0, 1]`,
-evidence source/method, model or rule version, optional evidence reference,
-`CreatedAt`, and `RevokedAt` or `SupersededBy`. A partial unique index prevents
-duplicate active assertions from the same evidence source and method. Initial
+Each assertion associates a controlled trait key with a `Track`. Its shape
+includes `Id`, `TrackId`, `TraitKey`, confidence constrained to `[0, 1]`,
+required evidence source, identity, and method, optional method version,
+asserting actor, `CreatedAt`, revocation actor/reason, and a link from a new
+assertion to the row it supersedes. A partial unique index prevents duplicate
+active assertions for the same exact evidence identity and method. Initial
 controlled keys should cover at least `original`,
 `acoustic`, `orchestral`, `live`, `instrumental`, `a-cappella`, `remix`,
 `cover`, `edit`, and `demo`. The schema must permit several distinct traits per
-track. The service layer, not a database enum, owns vocabulary evolution and
-explicit compatibility/conflict rules. `original` is an affirmative claim and
-must never be inferred merely from the absence of other markers.
+track. The service layer, not a database enum or database trait-key constraint,
+owns normalization, vocabulary evolution, and advisory compatibility/conflict
+rules. `original` is an affirmative claim and must never be inferred merely
+from the absence of other markers. Assertion history is retained for the life
+of its Track; permanent audit after Track deletion would require a separate
+tombstone or audit-ledger design.
 
 ### TrackSourceId presentation (later phase)
 
