@@ -408,6 +408,13 @@ public class TrackMatchingService
         string? artistSortName,
         CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
+        var song = new Song
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
         var track = new Track
         {
             Id = Guid.NewGuid(),
@@ -421,11 +428,18 @@ public class TrackMatchingService
                 ThumbnailUrl = thumbnailUrl,
                 DurationSeconds = durationSeconds
             }),
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var membership = new SongTrack
+        {
+            SongId = song.Id,
+            Song = song,
+            TrackId = track.Id,
+            Track = track
         };
 
-        _dbContext.Tracks.Add(track);
+        _dbContext.AddRange(song, track, membership);
         await EnsurePrimaryArtistCreditAsync(
             track,
             artist,

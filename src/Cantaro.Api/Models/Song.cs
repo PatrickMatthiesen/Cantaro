@@ -10,5 +10,6 @@ public sealed class Song
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
-    public ICollection<Track> Tracks { get; set; } = [];
+    public ICollection<SongTrack> TrackMemberships { get; set; } = [];
+    public ICollection<SongCredit> Credits { get; set; } = [];
 }

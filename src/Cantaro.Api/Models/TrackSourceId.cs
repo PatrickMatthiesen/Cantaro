@@ -37,6 +37,22 @@ public class TrackSourceId
     /// When this mapping was last verified (nullable)
     /// </summary>
     public DateTimeOffset? LastVerifiedAt { get; set; }
+
+    /// <summary>
+    /// Provider presentation of this exact recording, independent of uploader
+    /// authority.
+    /// </summary>
+    public TrackSourcePresentationKind PresentationKind { get; set; }
+
+    /// <summary>
+    /// Confidence in PresentationKind on a compact 0-100 scale.
+    /// </summary>
+    public byte? PresentationConfidence { get; set; }
+
+    /// <summary>
+    /// Whether the provider item is official. Null means unknown.
+    /// </summary>
+    public bool? IsOfficial { get; set; }
     
     /// <summary>
     /// Navigation property to Track

@@ -15,7 +15,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
     public DbSet<ConnectedServiceAccount> ConnectedServiceAccounts => Set<ConnectedServiceAccount>();
     public DbSet<Song> Songs => Set<Song>();
+    public DbSet<SongTrack> SongTracks => Set<SongTrack>();
+    public DbSet<SongCredit> SongCredits => Set<SongCredit>();
     public DbSet<Track> Tracks => Set<Track>();
+    public DbSet<TrackRelation> TrackRelations => Set<TrackRelation>();
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
     public DbSet<TrackSourceId> TrackSourceIds => Set<TrackSourceId>();
@@ -170,21 +173,33 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
         });
 
+        modelBuilder.Entity<SongTrack>(entity =>
+        {
+            entity.HasKey(e => new { e.SongId, e.TrackId });
+            entity.HasIndex(e => new { e.TrackId, e.SongId });
+
+            entity.HasOne(e => e.Song)
+                .WithMany(song => song.TrackMemberships)
+                .HasForeignKey(e => e.SongId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Track)
+                .WithMany(track => track.SongMemberships)
+                .HasForeignKey(e => e.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Track>(entity =>
         {
             entity.HasKey(e => e.Id);
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.VersionFlags).HasConversion<long>();
+            entity.Property(e => e.VersionEvidence).HasColumnType("jsonb");
 
             entity.HasIndex(e => e.MbidRecording);
             entity.HasIndex(e => e.Isrc);
-
-            entity.HasIndex(e => e.SongId);
-            entity.HasOne(e => e.Song)
-                .WithMany(song => song.Tracks)
-                .HasForeignKey(e => e.SongId)
-                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Artist>(entity =>
@@ -208,7 +223,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<TrackArtistCredit>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Role).HasConversion<string>().HasMaxLength(32);
+            entity.Property(e => e.Role).HasConversion<short>();
 
             entity.HasIndex(e => new { e.TrackId, e.Position }).IsUnique();
             entity.HasIndex(e => new { e.TrackId, e.ArtistId, e.Role }).IsUnique();
@@ -224,9 +239,52 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<SongCredit>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).HasConversion<short>();
+
+            entity.HasIndex(e => new { e.SongId, e.Position }).IsUnique();
+            entity.HasIndex(e => new { e.SongId, e.ArtistId, e.Role }).IsUnique();
+
+            entity.HasOne(e => e.Song)
+                .WithMany(song => song.Credits)
+                .HasForeignKey(e => e.SongId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Artist)
+                .WithMany(artist => artist.SongCredits)
+                .HasForeignKey(e => e.ArtistId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<TrackRelation>(entity =>
+        {
+            entity.HasKey(e => new { e.FromTrackId, e.ToTrackId, e.RelationType });
+            entity.Property(e => e.RelationType).HasConversion<short>();
+            entity.HasIndex(e => new { e.ToTrackId, e.RelationType, e.FromTrackId });
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_TrackRelations_NoSelfRelation",
+                "\"FromTrackId\" <> \"ToTrackId\""));
+
+            entity.HasOne(e => e.FromTrack)
+                .WithMany(track => track.OutgoingRelations)
+                .HasForeignKey(e => e.FromTrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ToTrack)
+                .WithMany(track => track.IncomingRelations)
+                .HasForeignKey(e => e.ToTrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<TrackSourceId>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.PresentationKind).HasConversion<short>();
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_TrackSourceIds_PresentationConfidence",
+                "\"PresentationConfidence\" IS NULL OR (\"PresentationConfidence\" >= 0 AND \"PresentationConfidence\" <= 100)"));
 
             // Unique index on (SourceType, ExternalId)
             entity.HasIndex(e => new { e.SourceType, e.ExternalId })

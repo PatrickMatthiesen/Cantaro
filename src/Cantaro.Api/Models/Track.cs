@@ -12,12 +12,6 @@ public class Track
     public Guid Id { get; set; }
 
     /// <summary>
-    /// The underlying Song this musical version belongs to. Nullable while
-    /// existing writers transition to creating Songs alongside Tracks.
-    /// </summary>
-    public Guid? SongId { get; set; }
-    
-    /// <summary>
     /// Canonical metadata stored as JSON (artist, title, duration, etc.)
     /// </summary>
     public string? CanonicalMetadata { get; set; }
@@ -31,11 +25,22 @@ public class Track
     /// International Standard Recording Code (nullable)
     /// </summary>
     public string? Isrc { get; set; }
+
+    /// <summary>
+    /// Compact, queryable classification of the recording/version.
+    /// </summary>
+    public TrackVersionFlags VersionFlags { get; set; }
+
+    /// <summary>
+    /// Optional current-state classifier evidence. Ordinary Track reads should
+    /// not project this JSON unless the matching/review workflow needs it.
+    /// </summary>
+    public string? VersionEvidence { get; set; }
     
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
-    public Song? Song { get; set; }
+    public ICollection<SongTrack> SongMemberships { get; set; } = [];
     
     /// <summary>
     /// Navigation property to source IDs
@@ -47,6 +52,9 @@ public class Track
     /// display snapshot while clients migrate to this structured relationship.
     /// </summary>
     public ICollection<TrackArtistCredit> ArtistCredits { get; set; } = [];
+
+    public ICollection<TrackRelation> OutgoingRelations { get; set; } = [];
+    public ICollection<TrackRelation> IncomingRelations { get; set; } = [];
     
     /// <summary>
     /// Navigation property to playlist entries

@@ -27,13 +27,13 @@ public sealed class ArtistDomainModelTests
         var primary = NewArtist("Alpha", "0d5f4b04-3be8-427a-8c24-23b1454b2f31");
         var featured = NewArtist("Beta", "82e3e1de-9243-4e58-b2d2-796c64f76c82");
         var remixer = NewArtist("Gamma");
-        var composer = NewArtist("Delta");
+        var producer = NewArtist("Delta");
         track.ArtistCredits =
         [
             Credit(track, remixer, TrackArtistRole.Remixer, 3, "Gamma Remix"),
             Credit(track, primary, TrackArtistRole.Primary, 0, "Alpha"),
             Credit(track, featured, TrackArtistRole.Featured, 1, "feat. Beta"),
-            Credit(track, composer, TrackArtistRole.Composer, 2, "Delta")
+            Credit(track, producer, TrackArtistRole.Producer, 2, "Delta")
         ];
 
         db.Tracks.Add(track);
@@ -59,7 +59,7 @@ public sealed class ArtistDomainModelTests
                 Assert.Equal(TrackArtistRole.Featured, credit.Role);
                 Assert.Equal("feat. Beta", credit.CreditedName);
             },
-            credit => Assert.Equal(TrackArtistRole.Composer, credit.Role),
+            credit => Assert.Equal(TrackArtistRole.Producer, credit.Role),
             credit => Assert.Equal(TrackArtistRole.Remixer, credit.Role));
     }
 

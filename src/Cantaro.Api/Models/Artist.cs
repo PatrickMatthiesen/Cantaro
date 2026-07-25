@@ -14,4 +14,5 @@ public sealed class Artist
     public DateTimeOffset UpdatedAt { get; set; }
 
     public ICollection<TrackArtistCredit> TrackCredits { get; set; } = [];
+    public ICollection<SongCredit> SongCredits { get; set; } = [];
 }

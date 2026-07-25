@@ -1,11 +1,11 @@
 namespace Cantaro.Api.Models;
 
-public enum TrackArtistRole
+public enum TrackArtistRole : short
 {
     Primary,
     Featured,
-    Composer,
-    Remixer
+    Remixer,
+    Producer
 }
 
 /// <summary>
