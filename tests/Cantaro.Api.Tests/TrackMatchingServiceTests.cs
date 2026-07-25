@@ -146,6 +146,9 @@ public class TrackMatchingServiceTests
         Assert.Equal("Lil Nas X", credit.CreditedName);
         Assert.Equal("151eeb9d-4e8c-4823-b2a0-4a9c9c0e2f2f", credit.Artist?.MusicBrainzArtistId);
         Assert.Single(await dbContext.Artists.ToListAsync());
+        Assert.Single(await dbContext.Songs.ToListAsync());
+        var membership = await dbContext.SongTracks.SingleAsync();
+        Assert.Equal(result.TrackId, membership.TrackId);
     }
 
     [Fact]

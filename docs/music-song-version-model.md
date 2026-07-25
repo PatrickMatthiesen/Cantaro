@@ -1,161 +1,177 @@
-# Version-aware song model
+# Music song/version relation model
 
-## Purpose
+## Entity meanings
 
-Cantaro currently treats each canonical `Track` as an isolated song. In the
-version-aware model, a `Song` is the underlying musical work as Cantaro
-understands it, while a `Track` is a particular musical version or recording of
-that song. A provider item remains a `TrackSourceId`: it is one provider's
-presentation of that version.
+- `Song` is the underlying composition/work. A cover by another artist still
+  realizes the same Song.
+- `Track` is one exact recording/version: studio recording, acoustic
+  re-recording, live performance, remix, remaster, cover, mashup, and so on.
+- `TrackSourceId` is one playable provider object for an exact Track: a Spotify
+  item, YouTube music video, YouTube lyrics video, cover-art upload, etc.
+- `PlaylistEntry` keeps referencing an exact Track. Song-level substitution is
+  sync policy and must not silently change the user's chosen version.
+- `Artist` is shared by composition credits and recording/performance credits.
 
-The model deliberately separates two decisions:
+```mermaid
+erDiagram
+    SONG {
+        uuid Id PK
+        timestamptz CreatedAt
+        timestamptz UpdatedAt
+    }
 
-1. Which musical version does this item represent?
-2. Which provider presentation should be used for that version?
+    TRACK {
+        uuid Id PK
+        jsonb CanonicalMetadata
+        string MbidRecording
+        string Isrc
+        bigint VersionFlags
+        jsonb VersionEvidence
+        timestamptz CreatedAt
+        timestamptz UpdatedAt
+    }
 
-This prevents a YouTube lyric video, visualizer, or music video from being
-mistaken for an acoustic, live, instrumental, remix, or other musical version.
+    SONG_TRACK {
+        uuid SongId PK,FK
+        uuid TrackId PK,FK
+    }
 
-## Invariants
+    SONG_CREDIT {
+        uuid Id PK
+        uuid SongId FK
+        uuid ArtistId FK
+        smallint Role
+        int Position
+        string CreditedName
+    }
 
-- Cantaro IDs are authoritative. MusicBrainz Work/Recording IDs, ISRCs,
-  provider metadata, parsers, and user decisions are evidence; none is a
-  mandatory identity.
-- A `Song` may temporarily have no `Track` versions. Database cardinality cannot
-  prevent removal of the final Track, so later domain operations must either
-  remove/tombstone the empty Song or retain it deliberately for audit history.
-  During rollout, `Track.SongId` remains nullable so old and new application
-  versions can coexist safely.
-- A `Track` belongs to at most one `Song`.
-- A `Track` may carry multiple controlled version traits. Traits are rows, not
-  one exclusive enum, because combinations such as live + acoustic are valid.
-- Every inferred trait or grouping retains confidence and provenance. Low or
-  conflicting confidence creates a review suggestion; it never silently
-  rewrites canonical identity.
-- `TrackSourceId` remains the unique provider/external-ID lookup and the
-  provider-link collection for a `Track`. Presentation metadata enriches that
-  entity rather than introducing a parallel provider hierarchy.
-- Playlist entries continue to reference exact `Track` versions. Song-level
-  substitution is a sync-time policy and must not rewrite the user's canonical
-  playlist entry.
-- No lineage edge is added until a concrete consumer needs it. Remix-of,
-  edit-of, samples, and mashup relationships can later use a flexible
-  `TrackRelation`; `DerivedFromTrackId` is intentionally excluded.
+    TRACK_ARTIST_CREDIT {
+        uuid Id PK
+        uuid TrackId FK
+        uuid ArtistId FK
+        smallint Role
+        int Position
+        string CreditedName
+    }
 
-## Target entities
+    TRACK_SOURCE_ID {
+        uuid Id PK
+        uuid TrackId FK
+        string SourceType
+        string ExternalId
+        decimal Confidence
+        jsonb OriginMetadata
+        timestamptz LastVerifiedAt
+        smallint PresentationKind
+        smallint PresentationConfidence
+        bool IsOfficial
+    }
 
-### Song
+    TRACK_RELATION {
+        uuid FromTrackId PK,FK
+        uuid ToTrackId PK,FK
+        smallint RelationType PK
+    }
 
-`Song` is a Cantaro-owned grouping identity. The first phase gives it only an
-ID and timestamps. Canonical title/credits and external-work evidence are
-deferred until grouping workflows define how conflicts, aliases, and manual
-overrides are represented; copying a title from an arbitrary version during
-migration would turn uncertain evidence into canonical data.
+    SONG ||--o{ SONG_TRACK : contains
+    TRACK ||--|{ SONG_TRACK : realizes
+    SONG ||--o{ SONG_CREDIT : credited
+    ARTIST ||--o{ SONG_CREDIT : receives
+    TRACK ||--o{ TRACK_ARTIST_CREDIT : credited
+    ARTIST ||--o{ TRACK_ARTIST_CREDIT : receives
+    TRACK ||--o{ TRACK_SOURCE_ID : playable_as
+    TRACK ||--o{ TRACK_RELATION : derived_recording
+    TRACK ||--o{ TRACK_RELATION : source_recording
+    TRACK ||--o{ PLAYLIST_ENTRY : selected_by
+```
 
-### Track
+## Composition membership
 
-`Track` keeps its current recording-level metadata, MusicBrainz Recording ID,
-ISRC, artist credits, provider links, observations, and playlist entries. It
-gains nullable `SongId` plus a navigation to `Song`.
+`SongTrack` is deliberately many-to-many. Almost every Track has one Song, but
+a mashup or medley can realize two or more Songs. It contains only `SongId` and
+`TrackId`: `Role` or `Position` would duplicate version meaning and do not serve
+a current query.
 
-### TrackVersionTrait (later phase)
+Membership means only "this recording realizes this composition." It does not
+mean that every member is a safe substitute. Samples do not create membership;
+they use `TrackRelation.Samples`. Automatic substitution must exclude
+multi-Song Tracks, covers, mashups, and medleys unless user policy permits them.
 
-Each assertion associates a controlled trait key with a `Track`. Its eventual
-shape includes `Id`, `TrackId`, `TraitKey`, confidence constrained to `[0, 1]`,
-evidence source/method, model or rule version, optional evidence reference,
-`CreatedAt`, and `RevokedAt` or `SupersededBy`. A partial unique index prevents
-duplicate active assertions from the same evidence source and method. Initial
-controlled keys should cover at least `original`,
-`acoustic`, `orchestral`, `live`, `instrumental`, `a-cappella`, `remix`,
-`cover`, `edit`, and `demo`. The schema must permit several distinct traits per
-track. The service layer, not a database enum, owns vocabulary evolution and
-explicit compatibility/conflict rules. `original` is an affirmative claim and
-must never be inferred merely from the absence of other markers.
+- Primary key: `SongTrack (SongId, TrackId)`.
+- Reverse covering index: `SongTrack (TrackId, SongId)`.
 
-### TrackSourceId presentation (later phase)
+Both membership directions are therefore served by narrow two-column indexes.
+Do not eagerly include memberships in provider identity or matching queries.
 
-Presentation metadata is nullable and provider-neutral where possible. Its
-orthogonal dimensions are stored separately: YouTube presentation kind can be
-music video, lyric video, cover-art audio, visualizer, or live video, while
-uploader authority can be official or user. This permits an official lyric
-video rather than forcing one exclusive label. Each inferred dimension retains
-confidence and provenance. Spotify usually remains audio. Existing uniqueness
-on `(SourceType, ExternalId)` and its indexed lookup path are preserved.
+## Version flags and evidence
 
-### Membership and compatibility
+`Track.VersionFlags` is a C# `[Flags] enum : long`, stored as PostgreSQL
+`bigint`. Initial flags are:
 
-`Song` is composition/work-level in Cantaro's own graph. Covers, remixes, and
-edits may be grouped with the composition when accepted evidence supports that
-membership, but membership alone never means two Tracks are substitutable.
-Version traits plus explicit user policy determine compatibility. Mashups are
-separate Songs and can later be connected through `TrackRelation` when a real
-consumer requires lineage.
+`Acoustic`, `Live`, `Instrumental`, `Orchestral`, `Remix`, `RadioEdit`,
+`Extended`, `Demo`, `ACappella`, `Karaoke`, `Cover`, `Remastered`,
+`ReRecorded`, `Clean`, `Explicit`, `Slowed`, `SpedUp`, `AlternateTake`,
+`Medley`, and `Mashup`.
 
-## Reviewable delivery phases
+There are no `Mono` or `Stereo` flags. `None` means no special version type is
+known; it does not assert that a Track is original or preferred. Do not add a
+bitwise index until a measured consumer needs one.
 
-1. **Identity foundation (this PR).** Add `Song`, nullable `Track.SongId`, an
-   index and restrictive foreign key, and an idempotent migration backfill that
-   creates exactly one deterministic Song for every existing unassigned Track.
-   It never groups two Tracks. Keep APIs, matching, playlists, recognition, and
-   sync behavior unchanged.
-2. **Trait evidence.** Add controlled `TrackVersionTrait` assertions with
-   confidence and provenance, parsing/classification services, and review-safe
-   read models. Do not group Tracks automatically.
-3. **Provider presentation.** Add nullable presentation classification and
-   provenance to `TrackSourceId`, retaining provider/external-ID uniqueness and
-   lookup indexes. Classify YouTube presentations without changing sync choice.
-4. **Grouping suggestions and review.** Build candidate Songs using
-   MusicBrainz Work/relationships, normalized title and artist credits, version
-   markers, ISRC, provider metadata, and manual evidence. Expose accept/reject
-   review and auditability before any automatic grouping.
-5. **Trustworthy grouping.** Apply accepted suggestions transactionally. A
-   merge keeps one immutable Song ID, moves Tracks, records redirects/tombstones
-   for retired IDs, and retains the decision evidence. A split creates a new
-   Song and records reversible reassignment provenance. Define this policy
-   before Song IDs become public contracts. Make `Track.SongId` required only
-   after production telemetry confirms no unassigned Tracks and all writers
-   assign Songs.
-6. **Version-aware sync.** Resolve in order: exact version with preferred
-   presentation; exact version with another presentation; preferred compatible
-   version within the Song; substitution only when the user's settings allow
-   it. Preserve the playlist's exact canonical `TrackId`.
-7. **Preferences and UI.** Add exact-version/substitution settings and YouTube
-   presentation preferences, then expose Song groups and their versions without
-   overloading today's track-shaped `MusicLibrarySongDto` contracts.
-8. **Optional relationships.** Add `TrackRelation` only when remix/edit/sample
-   lineage is required by sync or UI behavior.
+`VersionEvidence` is optional current-state JSON for matching/review workflows.
+It can retain per-flag confidence, rule version, source, and user override. It
+is not an append-only audit ledger and is not part of ordinary Track projections.
 
-## Phase 1 migration and compatibility
+## Credits
 
-The schema change is additive. The migration creates `Songs`, adds nullable
-`Tracks.SongId`, and backfills only rows where `SongId` is null in the
-migration's transaction snapshot. A namespaced,
-deterministic UUID derived from each Track ID makes the data operation safe to
-repeat without creating duplicate Songs. Song timestamps are copied from the
-Track so the migration does not invent lifecycle history.
+- `SongCredit` describes authorship of the composition: `Composer`, `Lyricist`,
+  or `Writer`.
+- `TrackArtistCredit` describes the exact recording/performance: `Primary`,
+  `Featured`, `Remixer`, or `Producer`.
+- `Position` exists on credit rows because display order is real data. It does
+  not exist on `SongTrack`.
 
-The foreign key uses `RESTRICT`: deleting a Song must be an explicit domain
-operation and must not cascade-delete recorded versions. Deleting a Track does
-not delete its Song, because later phases may group several versions under one
-Song. An index on `Tracks.SongId` supports version enumeration.
+## Exact recording lineage
 
-New or old writers remain allowed to create a Track without a Song during the
-transition; applying an EF migration again does not sweep those later rows. A
-separately rerunnable repair/backfill operation is therefore required before
-the column becomes non-nullable. That phase will first centralize Track creation
-and assign a Song in application code.
+`TrackRelation` is optional evidence. Flags can say a Track is a remix, edit, or
+remaster when its source recording is unknown; a relation is added only when
+the exact source Track is known.
 
-## Verification gates
+- Primary key: `(FromTrackId, ToTrackId, RelationType)`.
+- Reverse index: `(ToTrackId, RelationType, FromTrackId)`.
+- Initial types: `RemixOf`, `EditOf`, `RemasterOf`, `ReRecordingOf`,
+  `DerivedFrom`, and `Samples`.
+- Self-relations are rejected.
 
-- Model tests prove a Song can own multiple Track versions and deletion is
-  restrictive.
-- A PostgreSQL upgrade test migrates from the previous schema, seeds Tracks,
-  applies phase 1, executes the set-based backfill again, and verifies
-  deterministic one-per-Track IDs, timestamps, idempotence, 1:N cardinality,
-  and restrictive deletion. SQLite model tests supplement but do not replace
-  this provider-specific test.
-- The complete backend test suite runs with Aspire stopped.
-- Frontend `bun run check` and final `bun run check:fallow` remain clean even
-  though phase 1 intentionally changes no client contract.
-- Matching, playlist uniqueness, recognition, and source-ID lookup tests remain
-  unchanged and passing.
+There is no cover-of table. A cover and the original realize the same
+composition-level Song, have separate performance credits, and the cover Track
+has the `Cover` flag.
+
+## Provider presentation
+
+`TrackSourceId` remains Cantaro's provider-link entity; there is no parallel
+provider hierarchy. `PresentationKind` is `Unknown`, `Audio`, `CoverArtVideo`,
+`LyricsVideo`, `MusicVideo`, `Visualizer`, or `LiveVideo`.
+`PresentationConfidence` is 0-100, and nullable `IsOfficial` keeps uploader
+authority separate from format.
+
+Presentation is assigned only after an item resolves to the same exact
+recording. Materially changed audio is a separate Track. Existing uniqueness
+on `(SourceType, ExternalId)` remains the provider identity hot path.
+
+## Storage and delivery
+
+This graph-shaped model remains in PostgreSQL because current reads are indexed
+one-hop lookups and playlist synchronization benefits from one foreign-keyed
+transaction. Reconsider a graph database only after measuring deep,
+variable-length traversals that PostgreSQL cannot serve acceptably.
+
+The beta migration intentionally clears old canonical Tracks, Artists, source
+links, credits, candidates, and resolved observation links rather than guessing
+composition membership. Observations and playlist positions remain so matching
+can rebuild the graph.
+
+The sole production Track creation path creates one Song and one `SongTrack`
+membership in the same `SaveChanges` transaction. Future import paths must use
+the same invariant. Existing provider/matching reads continue to use explicit
+projections or narrowly scoped includes so credits, sources, and memberships do
+not create cartesian result multiplication.
