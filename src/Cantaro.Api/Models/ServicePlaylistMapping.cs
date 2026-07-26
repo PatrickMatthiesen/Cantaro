@@ -11,6 +11,11 @@ public class ServicePlaylistMapping
     /// Foreign key to Playlist
     /// </summary>
     public Guid PlaylistId { get; set; }
+
+    /// <summary>
+    /// Connected account that supplied this provider-derived mapping.
+    /// </summary>
+    public int? ConnectedServiceAccountId { get; set; }
     
     /// <summary>
     /// Service name (e.g., "youtube", "spotify")
@@ -41,4 +46,6 @@ public class ServicePlaylistMapping
     /// Navigation property to Playlist
     /// </summary>
     public Playlist? Playlist { get; set; }
+
+    public ConnectedServiceAccount? ConnectedServiceAccount { get; set; }
 }

@@ -31,6 +31,11 @@ public class ConnectedServiceAccount
     /// Encrypted refresh token for background sync
     /// </summary>
     public string? EncryptedRefreshToken { get; set; }
+
+    /// <summary>
+    /// Encrypted access token retained until shortly before its provider expiry.
+    /// </summary>
+    public string? EncryptedAccessToken { get; set; }
     
     /// <summary>
     /// OAuth scopes granted
@@ -41,6 +46,23 @@ public class ConnectedServiceAccount
     /// When the access token expires (if known)
     /// </summary>
     public DateTime? TokenExpiresAt { get; set; }
+
+    /// <summary>
+    /// Absolute provider refresh-token expiry, when the provider publishes one.
+    /// </summary>
+    public DateTime? RefreshTokenExpiresAt { get; set; }
+
+    /// <summary>
+    /// Provider-neutral connection state: connected or reconnect_required.
+    /// </summary>
+    public string ConnectionState { get; set; } = "connected";
+
+    public DateTime? ReconnectRequiredAt { get; set; }
+
+    /// <summary>
+    /// Safe machine-readable reason. Raw provider responses and credentials are never stored here.
+    /// </summary>
+    public string? ReconnectReason { get; set; }
     
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -58,4 +80,6 @@ public class ConnectedServiceAccount
     public ICollection<MediaLibraryEntry> MediaLibraryEntries { get; set; } = [];
 
     public ICollection<MediaProviderOperation> MediaProviderOperations { get; set; } = [];
+
+    public ICollection<ServicePlaylistMapping> ServicePlaylistMappings { get; set; } = [];
 }

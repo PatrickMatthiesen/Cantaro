@@ -9,6 +9,11 @@ var dockerEnv = builder.AddDockerComposeEnvironment("docker-compose");
 
 var youtubeClientId = builder.AddParameter("YouTubeClientId", secret: true);
 var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: true);
+// Spotify is optional for local development; empty secret defaults keep the rest of
+// Cantaro runnable while the API returns an actionable spotify_not_configured error.
+var spotifyClientId = builder.AddParameter("SpotifyClientId", string.Empty, secret: true);
+var spotifyClientSecret = builder.AddParameter("SpotifyClientSecret", string.Empty, secret: true);
+var spotifyRedirectUri = builder.AddParameter("SpotifyRedirectUri", string.Empty);
 var aniListClientId = builder.AddParameter("AniListClientId", secret: true);
 var aniListClientSecret = builder.AddParameter("AniListClientSecret", secret: true);
 var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
@@ -46,6 +51,9 @@ var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("mi
 var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("YouTube:ClientId", youtubeClientId)
     .WithEnvironment("YouTube:ClientSecret", youtubeClientSecret)
+    .WithEnvironment("Spotify:ClientId", spotifyClientId)
+    .WithEnvironment("Spotify:ClientSecret", spotifyClientSecret)
+    .WithEnvironment("Spotify:RedirectUri", spotifyRedirectUri)
     .WithEnvironment("AniList:ClientId", aniListClientId)
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
     .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey);

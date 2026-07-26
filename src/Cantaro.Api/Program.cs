@@ -3,6 +3,7 @@ using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Lyrics;
+using Cantaro.Api.Services.Spotify;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -33,6 +34,9 @@ builder.Services
 builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<FrontendUrlOptions>(builder.Configuration.GetSection(FrontendUrlOptions.SectionName));
 builder.Services
+    .AddOptions<SpotifyOptions>()
+    .Bind(builder.Configuration.GetSection(SpotifyOptions.SectionName));
+builder.Services
     .AddOptions<ExtensionAuthOptions>()
     .Bind(builder.Configuration.GetSection(ExtensionAuthOptions.SectionName))
     .ValidateDataAnnotations();
@@ -57,6 +61,18 @@ builder.Services.AddScoped<TokenEncryptionService>();
 builder.Services.AddScoped<YouTubeService>();
 builder.Services.AddScoped<YouTubePlaylistSyncService>();
 builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
+builder.Services.AddHttpClient<SpotifyApiClient>(client =>
+{
+    client.BaseAddress = new Uri("https://api.spotify.com");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
+});
+builder.Services.AddSingleton<ISpotifyRetryDelay, SpotifyRetryDelay>();
+builder.Services.AddSingleton<SpotifyTokenRefreshCoordinator>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<SpotifyTokenManager>();
+builder.Services.AddScoped<SpotifyService>();
+builder.Services.AddScoped<SpotifyPlaylistSyncService>();
+builder.Services.AddScoped<IPlatformService, SpotifyPlatformService>();
 builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
 builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();

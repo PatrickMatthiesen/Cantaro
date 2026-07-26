@@ -47,6 +47,9 @@ jobs:
         env:
           Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}
           Parameters__YouTubeClientSecret: ${{ secrets.CANTARO_YOUTUBE_CLIENT_SECRET }}
+          Parameters__SpotifyClientId: ${{ secrets.CANTARO_SPOTIFY_CLIENT_ID }}
+          Parameters__SpotifyClientSecret: ${{ secrets.CANTARO_SPOTIFY_CLIENT_SECRET }}
+          Parameters__SpotifyRedirectUri: ${{ vars.CANTARO_SPOTIFY_REDIRECT_URI }}
           Parameters__AniListClientId: ${{ secrets.CANTARO_ANILIST_CLIENT_ID }}
           Parameters__AniListClientSecret: ${{ secrets.CANTARO_ANILIST_CLIENT_SECRET }}
           Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}
@@ -88,6 +91,9 @@ jobs:
           DEPLOY_USER: ${{ secrets.SSH_USER }}
           Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}
           Parameters__YouTubeClientSecret: ${{ secrets.CANTARO_YOUTUBE_CLIENT_SECRET }}
+          Parameters__SpotifyClientId: ${{ secrets.CANTARO_SPOTIFY_CLIENT_ID }}
+          Parameters__SpotifyClientSecret: ${{ secrets.CANTARO_SPOTIFY_CLIENT_SECRET }}
+          Parameters__SpotifyRedirectUri: ${{ vars.CANTARO_SPOTIFY_REDIRECT_URI }}
           Parameters__AniListClientId: ${{ secrets.CANTARO_ANILIST_CLIENT_ID }}
           Parameters__AniListClientSecret: ${{ secrets.CANTARO_ANILIST_CLIENT_SECRET }}
           Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}

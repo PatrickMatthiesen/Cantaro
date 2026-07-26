@@ -211,6 +211,10 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                     Link("youtube", "Watch on YouTube", $"https://www.youtube.com/watch?v={Uri.EscapeDataString(identity.ExternalId)}"),
                     Link("youtube-music", "Open in YouTube Music", $"https://music.youtube.com/watch?v={Uri.EscapeDataString(identity.ExternalId)}")
                 },
+                "spotify" => new[]
+                {
+                    Link("spotify", "Listen on Spotify", $"https://open.spotify.com/track/{Uri.EscapeDataString(identity.ExternalId)}")
+                },
                 _ => Array.Empty<MusicLibrarySongPlatformLinkDto>()
             })
             .DistinctBy(link => link.Url, StringComparer.OrdinalIgnoreCase)

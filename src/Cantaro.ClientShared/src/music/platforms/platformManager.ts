@@ -1,4 +1,5 @@
 import { youtubePlatformClient } from './clients/youtubePlatformClient';
+import { spotifyPlatformClient } from './clients/spotifyPlatformClient';
 import type {
     PlatformAccountStatus,
     PlatformConnectCallbacks,
@@ -14,7 +15,10 @@ class PlatformManager {
     private readonly clients: Map<PlatformId, PlatformManagement>;
 
     constructor() {
-        this.clients = new Map<PlatformId, PlatformManagement>([['youtube', youtubePlatformClient]]);
+        this.clients = new Map<PlatformId, PlatformManagement>([
+            ['youtube', youtubePlatformClient],
+            ['spotify', spotifyPlatformClient],
+        ]);
     }
 
     public getClient(platformId: PlatformId): PlatformManagement {

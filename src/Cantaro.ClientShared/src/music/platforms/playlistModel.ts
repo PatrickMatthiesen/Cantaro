@@ -7,6 +7,8 @@ interface PlatformPlaylistModelInput {
     thumbnailUrl?: string;
     itemCount: number;
     publishedAt?: string;
+    externalUrl?: string;
+    ownerName?: string;
 }
 
 export class PlatformPlaylistModel implements PlatformPlaylist {
@@ -16,6 +18,8 @@ export class PlatformPlaylistModel implements PlatformPlaylist {
     public readonly thumbnailUrl?: string;
     public readonly itemCount: number;
     public readonly publishedAt?: string;
+    public readonly externalUrl?: string;
+    public readonly ownerName?: string;
 
     private songsCache: PlatformSong[] | null;
     private readonly loadSongs: (forceRefresh?: boolean) => Promise<PlatformSong[]>;
@@ -31,6 +35,8 @@ export class PlatformPlaylistModel implements PlatformPlaylist {
         this.thumbnailUrl = input.thumbnailUrl;
         this.itemCount = input.itemCount;
         this.publishedAt = input.publishedAt;
+        this.externalUrl = input.externalUrl;
+        this.ownerName = input.ownerName;
         this.loadSongs = loadSongs;
         this.songsCache = initialSongs ?? null;
     }
@@ -43,5 +49,14 @@ export class PlatformPlaylistModel implements PlatformPlaylist {
         const loadedSongs = await this.loadSongs(forceRefresh);
         this.songsCache = loadedSongs;
         return loadedSongs;
+    }
+}
+
+export async function preloadPlatformPlaylistSongs(
+    playlists: PlatformPlaylist[],
+    includeSongs: boolean,
+): Promise<void> {
+    if (includeSongs) {
+        await Promise.all(playlists.map((playlist) => playlist.songs()));
     }
 }

@@ -11,9 +11,13 @@ export interface MusicCollectionTrack {
   artist?: string;
   albums?: string[];
   artworkUrl?: string;
+  artworkExternalUrl?: string;
+  preserveArtworkAspectRatio?: boolean;
   durationSeconds?: number;
   addedLabel?: string;
   platformIds?: PlatformId[];
+  externalUrl?: string;
+  albumLinks?: Array<{ name: string; url: string }>;
   isPlaying?: boolean;
 }
 
@@ -32,6 +36,8 @@ interface MusicCollectionDetailPageProps {
   title: string;
   description?: string;
   artworkUrl?: string;
+  artworkExternalUrl?: string;
+  preserveArtworkAspectRatio?: boolean;
   backTo: '/music/playlists' | '/music/platforms/$platformId';
   backParams?: Record<string, string>;
   backLabel: string;
@@ -55,15 +61,39 @@ interface MusicCollectionDetailPageProps {
   onClearQueue?: () => void;
 }
 
-function CollectionArtwork({ artworkUrl, title }: { artworkUrl?: string; title: string }) {
+function CollectionArtwork({
+  artworkUrl,
+  artworkExternalUrl,
+  preserveArtworkAspectRatio,
+  title,
+}: {
+  artworkUrl?: string;
+  artworkExternalUrl?: string;
+  preserveArtworkAspectRatio?: boolean;
+  title: string;
+}) {
   if (artworkUrl) {
-    return (
+    const artwork = (
       <img
         src={artworkUrl}
         alt=""
-        className="aspect-square w-full rounded-[1.75rem] object-cover shadow-[0_24px_60px_rgba(17,24,39,0.18)]"
+        className={`aspect-square w-full rounded-[1.75rem] bg-white shadow-[0_24px_60px_rgba(17,24,39,0.18)] ${
+          preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'
+        }`}
       />
     );
+
+    return artworkExternalUrl ? (
+      <a
+        href={artworkExternalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="rounded-[1.75rem] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+        aria-label={`Open ${title} on its music platform`}
+      >
+        {artwork}
+      </a>
+    ) : artwork;
   }
 
   return (
@@ -146,7 +176,25 @@ function HeaderActions({
 
 function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: number }) {
   if (track.artworkUrl) {
-    return <img src={track.artworkUrl} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover" />;
+    const artwork = (
+      <img
+        src={track.artworkUrl}
+        alt=""
+        className={`h-10 w-10 shrink-0 rounded-xl bg-white ${track.preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'}`}
+      />
+    );
+
+    return track.artworkExternalUrl ? (
+      <a
+        href={track.artworkExternalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="shrink-0 rounded-xl focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+        aria-label={`Open artwork for ${track.title}`}
+      >
+        {artwork}
+      </a>
+    ) : artwork;
   }
 
   return (
@@ -239,10 +287,23 @@ function TrackIdentity({ track, index, artist }: { track: MusicCollectionTrack; 
     <>
       <TrackArtwork track={track} index={index} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-black text-slate-950">
-          {track.title}
-          <NowPlayingBadge isPlaying={track.isPlaying} />
-        </span>
+        {track.externalUrl && !track.detailSongId ? (
+          <a
+            href={track.externalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block truncate font-black text-slate-950 hover:text-violet-700 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+          >
+            {track.title}
+            <span className="sr-only"> — open on music platform</span>
+            <NowPlayingBadge isPlaying={track.isPlaying} />
+          </a>
+        ) : (
+          <span className="block truncate font-black text-slate-950">
+            {track.title}
+            <NowPlayingBadge isPlaying={track.isPlaying} />
+          </span>
+        )}
         <span className="block truncate text-xs font-semibold text-slate-500 xl:hidden">{artist}</span>
       </span>
     </>
@@ -285,6 +346,26 @@ function trackGridClassName(showAlbums: boolean) {
     : 'xl:grid-cols-[72px_minmax(0,2fr)_minmax(0,1.1fr)_110px_82px_54px]';
 }
 
+function TrackAlbums({ track, albums }: { track: MusicCollectionTrack; albums: string }) {
+  if (!track.albumLinks?.length) {
+    return <>{albums || '-'}</>;
+  }
+
+  return track.albumLinks.map((album, albumIndex) => (
+    <span key={`${album.url}-${album.name}`}>
+      {albumIndex > 0 ? ', ' : null}
+      <a
+        href={album.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-violet-700 hover:underline focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+      >
+        {album.name}
+      </a>
+    </span>
+  ));
+}
+
 function TrackRow({
   track,
   index,
@@ -309,7 +390,11 @@ function TrackRow({
       <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} />
       <TrackIdentity track={track} index={index} artist={artist} />
       <span className="truncate font-medium max-xl:hidden">{artist}</span>
-      {showAlbums ? <span className="truncate font-medium max-xl:hidden" title={albums}>{albums || '-'}</span> : null}
+      {showAlbums ? (
+        <span className="truncate font-medium max-xl:hidden" title={albums}>
+          <TrackAlbums track={track} albums={albums} />
+        </span>
+      ) : null}
       <span className="max-xl:hidden"><TrackPlatforms platformIds={track.platformIds} /></span>
       <span className="justify-self-start font-mono text-xs text-slate-600 sm:justify-self-auto">{formatDuration(track.durationSeconds)}</span>
       <MoreTrackActions title={track.title} track={track} onQueueTrack={onQueueTrack} />
@@ -541,7 +626,12 @@ function CollectionHero(props: CollectionHeroProps) {
     <section className="music-detail-hero relative overflow-hidden rounded-[1.5rem] bg-[#ece9ff] px-4 py-4 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:py-5 md:px-7">
       <div className="music-detail-hero__wash absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.95),transparent_32%),radial-gradient(circle_at_82%_26%,rgba(199,210,254,0.9),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.64),rgba(221,214,254,0.74))]" />
       <div className="relative grid grid-cols-[76px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[minmax(132px,180px)_1fr] sm:gap-5 md:grid-cols-[minmax(180px,270px)_1fr] md:items-end md:gap-6">
-        <CollectionArtwork artworkUrl={props.artworkUrl} title={props.title} />
+        <CollectionArtwork
+          artworkUrl={props.artworkUrl}
+          artworkExternalUrl={props.artworkExternalUrl}
+          preserveArtworkAspectRatio={props.preserveArtworkAspectRatio}
+          title={props.title}
+        />
         <div className="min-w-0 space-y-4 sm:space-y-5">
           <CollectionHeroTitle {...props} />
           <CollectionHeroChips chips={props.chips} />
@@ -596,6 +686,8 @@ export function MusicCollectionDetailPage(props: MusicCollectionDetailPageProps)
             title={props.title}
             description={props.description}
             artworkUrl={props.artworkUrl}
+            artworkExternalUrl={props.artworkExternalUrl}
+            preserveArtworkAspectRatio={props.preserveArtworkAspectRatio}
             ownerLabel={props.ownerLabel}
             updatedAt={props.updatedAt}
             songsLabel={props.songsLabel}

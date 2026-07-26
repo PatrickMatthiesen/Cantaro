@@ -78,7 +78,27 @@ public sealed class SyncJobsController(
         }
 
         var platform = _platformRegistry.GetRequired(service);
-        var available = await platform.GetPlaylistsAsync(userId);
+        IReadOnlyList<PlatformPlaylistDto> available;
+        try
+        {
+            available = await platform.GetPlaylistsAsync(userId, cancellationToken);
+        }
+        catch (PlatformApiException ex)
+        {
+            if (ex.RetryAfter is { } retryAfter)
+            {
+                Response.Headers.RetryAfter = Math.Max(0, (int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+            }
+
+            return StatusCode(ex.StatusCode, new
+            {
+                code = ex.Code,
+                error = ex.Message,
+                retryAfterSeconds = ex.RetryAfter is { } delay
+                    ? Math.Max(0, (int)Math.Ceiling(delay.TotalSeconds))
+                    : (int?)null
+            });
+        }
         var requestedIds = request.ServicePlaylistIds is { Count: > 0 }
             ? request.ServicePlaylistIds.Distinct(StringComparer.Ordinal).ToList()
             : available.Select(item => item.Id).ToList();
