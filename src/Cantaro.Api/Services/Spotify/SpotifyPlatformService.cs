@@ -16,8 +16,8 @@ public sealed class SpotifyPlatformService(
         CancellationToken cancellationToken)
         => spotifyService.GetConnectedAccountAsync(userId, cancellationToken);
 
-    public string ResolveRedirectUri(string suggestedRedirectUri)
-        => spotifyService.ResolveRedirectUri(suggestedRedirectUri);
+    public string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
+        => SpotifyService.ResolveRedirectUri(callbackUrls);
 
     public string GetAuthorizationUrl(string redirectUri, string state)
         => spotifyService.GetAuthorizationUrl(redirectUri, state);

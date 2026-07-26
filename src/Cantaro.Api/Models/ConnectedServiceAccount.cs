@@ -58,7 +58,8 @@ public class ConnectedServiceAccount
     public long TokenVersion { get; set; }
 
     /// <summary>
-    /// Identifies the process that currently owns the provider token refresh lease.
+    /// Opaque ownership token for the current provider refresh attempt. This is
+    /// not a machine identifier; it fences stale workers while the expiry changes.
     /// </summary>
     public Guid? TokenRefreshLeaseId { get; set; }
 

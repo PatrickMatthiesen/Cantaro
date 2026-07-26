@@ -35,19 +35,27 @@ public sealed class SpotifyService
         _timeProvider = timeProvider;
     }
 
-    public string ResolveRedirectUri(string suggestedRedirectUri)
+    public static string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
     {
-        var redirectUri = string.IsNullOrWhiteSpace(_options.RedirectUri)
-            ? suggestedRedirectUri
-            : _options.RedirectUri.Trim();
-        ValidateRedirectUri(redirectUri);
-        return redirectUri;
+        var preferredUri = new Uri(callbackUrls.Preferred);
+        if (!IsLocalhost(preferredUri))
+        {
+            return callbackUrls.Preferred;
+        }
+
+        var loopbackUri = callbackUrls.Http is null
+            ? preferredUri
+            : new Uri(callbackUrls.Http);
+        var builder = new UriBuilder(loopbackUri)
+        {
+            Host = "127.0.0.1"
+        };
+        return builder.Uri.AbsoluteUri;
     }
 
     public string GetAuthorizationUrl(string redirectUri, string state)
     {
         EnsureConfigured();
-        ValidateRedirectUri(redirectUri);
 
         var query = new Dictionary<string, string?>
         {
@@ -79,7 +87,6 @@ public sealed class SpotifyService
         CancellationToken cancellationToken)
     {
         EnsureConfigured();
-        ValidateRedirectUri(redirectUri);
 
         var token = await _apiClient.ExchangeCodeAsync(authorizationCode, redirectUri, cancellationToken);
         var profile = await _apiClient.GetProfileAsync(token.AccessToken, cancellationToken);
@@ -355,14 +362,10 @@ public sealed class SpotifyService
         }
     }
 
-    private static void ValidateRedirectUri(string redirectUri)
+    private static bool IsLocalhost(Uri uri)
     {
-        if (!SpotifyRedirectUriValidator.TryValidate(redirectUri, out var error))
-        {
-            throw new PlatformApiException(
-                "spotify_invalid_redirect_uri",
-                error ?? "Spotify redirect URI is invalid.",
-                StatusCodes.Status503ServiceUnavailable);
-        }
+        var host = uri.Host.TrimEnd('.');
+        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase);
     }
 }

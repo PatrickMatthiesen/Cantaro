@@ -123,13 +123,17 @@ Configure the OAuth applications with callback URLs based on the public HTTPS or
 - Spotify: `https://cantaro.example.com/api/platforms/spotify/callback`
 - AniList: `https://cantaro.example.com/api/media/providers/anilist/callback`
 
-The redirect URLs must match exactly, including the `https` scheme and path. The reverse proxy must preserve the original host and send `X-Forwarded-Host` and `X-Forwarded-Proto: https` so Cantaro generates the same public callback URLs during OAuth authorization.
+The redirect URLs must match exactly, including the `https` scheme and path.
+Set the `CANTARO_HTTPS_BASE_URL` GitHub environment variable to the public
+HTTPS origin, for example `https://cantaro.example.com`. Cantaro uses that
+global origin when generating OAuth callbacks behind the HTTP reverse proxy.
 
-For Spotify development, register and configure an explicit
-`http://127.0.0.1:<port>/api/platforms/spotify/callback` redirect URI through
-the `SpotifyRedirectUri` Aspire parameter. Spotify does not allow
-`http://localhost`, wildcards, or an unregistered callback. The integration
-uses the secure-backend Authorization Code flow and requests only
+For Spotify development, register
+`http://127.0.0.1:5173/api/platforms/spotify/callback` in the Spotify app.
+Cantaro normally runs the frontend at `http://localhost:5173`; the Spotify
+platform hook selects that HTTP callback and changes `localhost` to
+`127.0.0.1` automatically. The integration uses the secure-backend
+Authorization Code flow and requests only
 `playlist-read-private`, `playlist-read-collaborative`, and
 `user-read-private`; it never requests email access. Configure
 `SpotifyClientId` and `SpotifyClientSecret` as Aspire secrets.
@@ -158,9 +162,8 @@ Create a GitHub environment named `Production` and add these environment secrets
 - `CANTARO_ANILIST_CLIENT_ID` and `CANTARO_ANILIST_CLIENT_SECRET`
 - `CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY`
 
-Add the environment variable `CANTARO_SPOTIFY_REDIRECT_URI` with the exact
-registered public HTTPS callback, for example
-`https://cantaro.example.com/api/platforms/spotify/callback`.
+Add the environment variable `CANTARO_HTTPS_BASE_URL` with the public HTTPS
+origin, for example `https://cantaro.example.com`.
 
 Generate the JWT signing key from at least 32 bytes of cryptographically secure random data; do not use a password or memorable phrase. For example:
 

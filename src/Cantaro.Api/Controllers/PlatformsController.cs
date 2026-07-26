@@ -94,7 +94,7 @@ public class PlatformsController : ControllerBase
         try
         {
             var redirectUri = platform.ResolveRedirectUri(
-                _urlResolver.GetCallbackUrl($"api/platforms/{normalizedPlatformId}/callback"));
+                _urlResolver.GetCallbackUrls($"api/platforms/{normalizedPlatformId}/callback"));
 
             var authUrl = platform.GetAuthorizationUrl(redirectUri, state);
             return Redirect(authUrl);
@@ -162,7 +162,7 @@ public class PlatformsController : ControllerBase
 
             var returnUrl = SanitizeReturnUrl(payload.ReturnUrl, defaultPath: defaultPlatformPath);
             var redirectUri = platform.ResolveRedirectUri(
-                _urlResolver.GetCallbackUrl($"api/platforms/{normalizedPlatformId}/callback"));
+                _urlResolver.GetCallbackUrls($"api/platforms/{normalizedPlatformId}/callback"));
 
             await platform.ExchangeCodeAndSaveAsync(payload.UserId, code, redirectUri, cancellationToken);
 

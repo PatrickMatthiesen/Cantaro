@@ -13,6 +13,9 @@ public interface IPlatformService
 
     string ResolveRedirectUri(string suggestedRedirectUri) => suggestedRedirectUri;
 
+    string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
+        => ResolveRedirectUri(callbackUrls.Preferred);
+
     string GetAuthorizationUrl(string redirectUri, string state);
 
     Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(int userId, string authorizationCode, string redirectUri);

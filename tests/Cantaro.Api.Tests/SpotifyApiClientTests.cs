@@ -281,8 +281,7 @@ public sealed class SpotifyApiClientTests
         var options = Options.Create(new SpotifyOptions
         {
             ClientId = "test-client",
-            ClientSecret = "test-secret",
-            RedirectUri = "https://cantaro.example/api/platforms/spotify/callback"
+            ClientSecret = "test-secret"
         });
         return new ClientScope(new SpotifyApiClient(httpClient, options, retryDelay ?? new RecordingDelay()), httpClient);
     }

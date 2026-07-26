@@ -42,6 +42,34 @@ public sealed class SpotifyLifecycleTests
     }
 
     [Fact]
+    public void ResolveRedirectUri_UsesHttpLoopbackCandidateForLocalhost()
+    {
+        var callbackUrls = new CallbackUrlCandidates(
+            "https://localhost:7203/api/platforms/spotify/callback",
+            "http://localhost:5173/api/platforms/spotify/callback",
+            "https://localhost:7203/api/platforms/spotify/callback");
+
+        var redirectUri = SpotifyService.ResolveRedirectUri(callbackUrls);
+
+        Assert.Equal(
+            "http://127.0.0.1:5173/api/platforms/spotify/callback",
+            redirectUri);
+    }
+
+    [Fact]
+    public void ResolveRedirectUri_PreservesPublicHttpsCallback()
+    {
+        var callbackUrls = new CallbackUrlCandidates(
+            "https://cantaro.example/api/platforms/spotify/callback",
+            "http://cantaro.example/api/platforms/spotify/callback",
+            "https://cantaro.example/api/platforms/spotify/callback");
+
+        var redirectUri = SpotifyService.ResolveRedirectUri(callbackUrls);
+
+        Assert.Equal(callbackUrls.Preferred, redirectUri);
+    }
+
+    [Fact]
     public async Task ExchangeCodeAndSaveAsync_StoresStableProfileAndSixMonthRefreshExpiry()
     {
         await using var scope = await SpotifyTestScope.CreateAsync(
@@ -768,8 +796,7 @@ public sealed class SpotifyLifecycleTests
             var options = Microsoft.Extensions.Options.Options.Create(new SpotifyOptions
             {
                 ClientId = "test-client",
-                ClientSecret = "test-secret",
-                RedirectUri = "https://cantaro.example/api/platforms/spotify/callback"
+                ClientSecret = "test-secret"
             });
             var apiClient = new SpotifyApiClient(httpClient, options, new NoDelay());
             var encryption = new TokenEncryptionService(new EphemeralDataProtectionProvider());

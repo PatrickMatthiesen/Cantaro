@@ -63,8 +63,7 @@ public sealed class SpotifyPlaylistSyncServiceTests
         var options = Options.Create(new SpotifyOptions
         {
             ClientId = "client-id",
-            ClientSecret = "client-secret",
-            RedirectUri = "https://cantaro.example/api/platforms/spotify/callback"
+            ClientSecret = "client-secret"
         });
         var apiClient = new SpotifyApiClient(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.spotify.com") },
