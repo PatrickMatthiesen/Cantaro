@@ -60,6 +60,9 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
 
 if (builder.ExecutionContext.IsRunMode)
 {
+    // Spotify requires an exact registered redirect URI. Keep a stable local
+    // loopback endpoint while allowing Aspire to manage the other API endpoints.
+    api.WithHttpEndpoint(port: 5039, name: "spotify-callback");
     api.WithEnvironment("Frontend:TrustLoopbackOrigins", "true");
     api.WithEnvironment("Frontend:TrustedHostSuffixes:0", ".ts.net");
 }
