@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\src\Cantaro.Api\Cantaro.Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures\matching-evaluation.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

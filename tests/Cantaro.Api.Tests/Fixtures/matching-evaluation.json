@@ -1,0 +1,307 @@
+[
+  {
+    "id": "all-nighter-tiesto",
+    "originalUrl": "https://www.youtube.com/watch?v=hwoBK9OYG8I",
+    "observation": {
+      "title": "All Nighter",
+      "artist": "Tiësto",
+      "durationSeconds": 135
+    },
+    "candidates": [
+      {
+        "source": "spotify",
+        "externalId": "3jksOdXCaDXyGiZ7L4YZbp",
+        "sourceUrl": "https://open.spotify.com/track/3jksOdXCaDXyGiZ7L4YZbp",
+        "title": "All Nighter",
+        "artist": "Tiësto",
+        "artistCredits": ["Tiësto"],
+        "durationSeconds": 134,
+        "trusted": true
+      },
+      {
+        "source": "fixture",
+        "externalId": "all-nighter-decoy",
+        "sourceUrl": "https://example.invalid/all-nighter-decoy",
+        "title": "All Nighter",
+        "artist": "Another Artist",
+        "artistCredits": ["Another Artist"],
+        "durationSeconds": 136,
+        "trusted": false
+      }
+    ],
+    "expected": {
+      "outcome": "exact_recording",
+      "normalizedTitle": "All Nighter",
+      "artistCredits": ["tiesto"],
+      "acceptedExternalId": "3jksOdXCaDXyGiZ7L4YZbp"
+    }
+  },
+  {
+    "id": "love-me-the-same-feature-credit",
+    "originalUrl": "https://www.youtube.com/watch?v=z6fQ-Ofm6kM",
+    "observation": {
+      "title": "Love Me The Same (ft. GLNNA)",
+      "artist": "Vaance, Deerock, Wyle",
+      "durationSeconds": 198
+    },
+    "candidates": [
+      {
+        "source": "applemusic",
+        "externalId": "1663293198",
+        "sourceUrl": "https://music.apple.com/sg/album/love-me-the-same-feat-glnna-single/1663293197",
+        "title": "Love Me the Same (feat. GLNNA)",
+        "artist": "Vaance, Deerock, Wyle & GLNNA",
+        "artistCredits": ["Vaance", "Deerock", "Wyle", "GLNNA"],
+        "durationSeconds": 197,
+        "trusted": true
+      }
+    ],
+    "expected": {
+      "outcome": "exact_recording",
+      "normalizedTitle": "Love Me The Same",
+      "artistCredits": ["deerock", "glnna", "vaance", "wyle"],
+      "acceptedExternalId": "1663293198"
+    }
+  },
+  {
+    "id": "i-see-you-x-collaborators",
+    "originalUrl": "https://www.youtube.com/watch?v=G8cSlhD66QM",
+    "observation": {
+      "title": "I See You",
+      "artist": "Dabin x Nurko x Skylar Grey",
+      "durationSeconds": 210
+    },
+    "candidates": [
+      {
+        "source": "musicbrainz",
+        "externalId": "edfa2315-de39-4bc9-ad94-3a71c3bf8f5d",
+        "sourceUrl": "https://musicbrainz.org/recording/edfa2315-de39-4bc9-ad94-3a71c3bf8f5d",
+        "title": "I See You",
+        "artist": "Dabin, NURKO & Skylar Grey",
+        "artistCredits": ["Dabin", "NURKO", "Skylar Grey"],
+        "durationSeconds": 210,
+        "isrc": "CA5KR2511818",
+        "trusted": true
+      },
+      {
+        "source": "fixture",
+        "externalId": "i-see-you-decoy",
+        "sourceUrl": "https://example.invalid/i-see-you-decoy",
+        "title": "I See You",
+        "artist": "Patrick Porter",
+        "artistCredits": ["Patrick Porter"],
+        "durationSeconds": 203,
+        "trusted": false
+      }
+    ],
+    "expected": {
+      "outcome": "exact_recording",
+      "normalizedTitle": "I See You",
+      "artistCredits": ["dabin", "nurko", "skylar grey"],
+      "acceptedExternalId": "edfa2315-de39-4bc9-ad94-3a71c3bf8f5d"
+    }
+  },
+  {
+    "id": "boohoo-compact-title",
+    "originalUrl": "https://www.youtube.com/watch?v=cuDF0ovacGc",
+    "observation": {
+      "title": "Boohoo",
+      "artist": "Neoni & RIELL",
+      "durationSeconds": 172
+    },
+    "candidates": [
+      {
+        "source": "applemusic",
+        "externalId": "1607403887",
+        "sourceUrl": "https://music.apple.com/jm/song/1607403887",
+        "title": "Boo Hoo",
+        "artist": "Neoni & RIELL",
+        "artistCredits": ["Neoni", "RIELL"],
+        "durationSeconds": 170,
+        "trusted": true
+      },
+      {
+        "source": "fixture",
+        "externalId": "boohoo-decoy",
+        "sourceUrl": "https://example.invalid/boohoo-decoy",
+        "title": "Boohoo",
+        "artist": "Moka Only",
+        "artistCredits": ["Moka Only"],
+        "durationSeconds": 167,
+        "trusted": false
+      }
+    ],
+    "expected": {
+      "outcome": "exact_recording",
+      "normalizedTitle": "Boohoo",
+      "artistCredits": ["neoni", "riell"],
+      "acceptedExternalId": "1607403887"
+    }
+  },
+  {
+    "id": "miserable-all-the-time",
+    "originalUrl": "https://www.youtube.com/watch?v=9R3ICNMp7n0",
+    "observation": {
+      "title": "miserable all the time",
+      "artist": "Rad Cat",
+      "durationSeconds": 186
+    },
+    "candidates": [
+      {
+        "source": "applemusic",
+        "externalId": "1814957829",
+        "sourceUrl": "https://music.apple.com/au/song/1814957829",
+        "title": "miserable all the time",
+        "artist": "Rad Cat",
+        "artistCredits": ["Rad Cat"],
+        "durationSeconds": 185,
+        "trusted": true
+      }
+    ],
+    "expected": {
+      "outcome": "exact_recording",
+      "normalizedTitle": "miserable all the time",
+      "artistCredits": ["rad cat"],
+      "acceptedExternalId": "1814957829"
+    }
+  },
+  {
+    "id": "phoenix-worlds-2019",
+    "originalUrl": "https://www.youtube.com/watch?v=i1IKnWDecwA",
+    "observation": {
+      "title": "Phoenix (ft. Cailin Russo and Chrissy Costanza) | Worlds 2019",
+      "artist": "League of Legends",
+      "durationSeconds": 208
+    },
+    "candidates": [
+      {
+        "source": "spotify",
+        "externalId": "6zAiRKvAMlXHxEtyO4yxIO",
+        "sourceUrl": "https://open.spotify.com/track/6zAiRKvAMlXHxEtyO4yxIO",
+        "title": "Phoenix",
+        "artist": "League of Legends, Cailin Russo & Chrissy Costanza",
+        "artistCredits": ["League of Legends", "Cailin Russo", "Chrissy Costanza"],
+        "durationSeconds": 197,
+        "trusted": true
+      }
+    ],
+    "expected": {
+      "outcome": "manual_review",
+      "normalizedTitle": "Phoenix",
+      "artistCredits": ["cailin russo", "chrissy costanza", "league of legends"]
+    }
+  },
+  {
+    "id": "rather-be-official-video",
+    "originalUrl": "https://www.youtube.com/watch?v=m-M1AtrxztU",
+    "observation": {
+      "title": "Rather Be ft. Jess Glynne [Official Video]",
+      "artist": "Clean Bandit",
+      "durationSeconds": 269
+    },
+    "candidates": [
+      {
+        "source": "spotify",
+        "externalId": "5ydKdOKH8BERmrDLsQruDD",
+        "sourceUrl": "https://open.spotify.com/track/5ydKdOKH8BERmrDLsQruDD",
+        "title": "Rather Be (feat. Jess Glynne)",
+        "artist": "Clean Bandit & Jess Glynne",
+        "artistCredits": ["Clean Bandit", "Jess Glynne"],
+        "durationSeconds": 227,
+        "trusted": true
+      }
+    ],
+    "expected": {
+      "outcome": "exact_recording",
+      "normalizedTitle": "Rather Be",
+      "artistCredits": ["clean bandit", "jess glynne"],
+      "acceptedExternalId": "5ydKdOKH8BERmrDLsQruDD"
+    }
+  },
+  {
+    "id": "the-veldt-version-ambiguous",
+    "originalUrl": "https://www.youtube.com/watch?v=xvtNS6hbVy4",
+    "observation": {
+      "title": "The Veldt",
+      "artist": "deadmau5 feat. Chris James",
+      "durationSeconds": 187
+    },
+    "candidates": [
+      {
+        "source": "spotify",
+        "externalId": "6fDa1w859xBvpUuHB2y0Qq",
+        "sourceUrl": "https://open.spotify.com/track/6fDa1w859xBvpUuHB2y0Qq",
+        "title": "The Veldt (feat. Chris James) - Radio Edit",
+        "artist": "deadmau5 & Chris James",
+        "artistCredits": ["deadmau5", "Chris James"],
+        "durationSeconds": 170,
+        "trusted": true
+      },
+      {
+        "source": "spotify",
+        "externalId": "14HVpSRZSmH2T9p6Wba7EH",
+        "sourceUrl": "https://open.spotify.com/track/14HVpSRZSmH2T9p6Wba7EH",
+        "title": "The Veldt - Original Mix",
+        "artist": "deadmau5 & Chris James",
+        "artistCredits": ["deadmau5", "Chris James"],
+        "durationSeconds": 694,
+        "trusted": false
+      }
+    ],
+    "expected": {
+      "outcome": "manual_review",
+      "normalizedTitle": "The Veldt",
+      "artistCredits": ["deadmau5", "chris james"]
+    }
+  },
+  {
+    "id": "no-footfalls-soundtrack-context",
+    "originalUrl": "https://www.youtube.com/watch?v=As-QXEN37os",
+    "observation": {
+      "title": "No Footfalls to Follow - OST",
+      "artist": "Horizon Forbidden West",
+      "durationSeconds": 226
+    },
+    "candidates": [
+      {
+        "source": "applemusic",
+        "externalId": "no-footfalls-to-follow",
+        "sourceUrl": "https://classical.music.apple.com/us/album/1615443972",
+        "title": "No Footfalls to Follow",
+        "artist": "Oleksa Lozowchuk",
+        "artistCredits": ["Oleksa Lozowchuk"],
+        "durationSeconds": 193,
+        "trusted": true
+      }
+    ],
+    "expected": {
+      "outcome": "manual_review",
+      "normalizedTitle": "No Footfalls to Follow"
+    }
+  },
+  {
+    "id": "mortals-funk-remix-provider-only",
+    "originalUrl": "https://www.youtube.com/watch?v=dKmnejGmcjQ",
+    "observation": {
+      "title": "MORTALS FUNK REMIX // Victory Royale B**ch!",
+      "artist": "MrMoMMusic",
+      "durationSeconds": 147
+    },
+    "candidates": [],
+    "expected": {
+      "outcome": "no_match"
+    }
+  },
+  {
+    "id": "deleted-youtube-video",
+    "originalUrl": "https://www.youtube.com/watch?v=deleted",
+    "observation": {
+      "title": "Deleted video",
+      "durationSeconds": 0
+    },
+    "candidates": [],
+    "expected": {
+      "outcome": "no_match"
+    }
+  }
+]
