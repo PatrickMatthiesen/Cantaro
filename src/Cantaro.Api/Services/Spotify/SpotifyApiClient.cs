@@ -204,29 +204,42 @@ public sealed class SpotifyApiClient
                 StatusCodes.Status503ServiceUnavailable);
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://accounts.spotify.com/api/token");
         var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_options.ClientId}:{_options.ClientSecret}"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
-        request.Content = new FormUrlEncodedContent(values);
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        for (var attempt = 0; ; attempt++)
         {
-            var payload = await DeserializeAsync<SpotifyTokenErrorResponse>(response, cancellationToken);
-            var code = string.IsNullOrWhiteSpace(payload?.Error) ? "spotify_token_error" : payload.Error;
-            throw new PlatformApiException(
-                code,
-                payload?.Description ?? "Spotify rejected the authorization token request.",
-                (int)response.StatusCode);
-        }
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://accounts.spotify.com/api/token");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+            request.Content = new FormUrlEncodedContent(values);
 
-        var token = await DeserializeAsync<SpotifyTokenResponse>(response, cancellationToken);
-        return token is { AccessToken.Length: > 0 }
-            ? token
-            : throw new PlatformApiException(
-                "spotify_invalid_token_response",
-                "Spotify returned an invalid token response.",
-                StatusCodes.Status502BadGateway);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests && attempt < MaxRateLimitRetries)
+            {
+                await _retryDelay.DelayAsync(GetRetryAfter(response, attempt), cancellationToken);
+                continue;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var payload = await DeserializeAsync<SpotifyTokenErrorResponse>(response, cancellationToken);
+                var code = string.IsNullOrWhiteSpace(payload?.Error) ? "spotify_token_error" : payload.Error;
+                var retryAfter = response.StatusCode == HttpStatusCode.TooManyRequests
+                    ? GetRetryAfter(response, MaxRateLimitRetries)
+                    : (TimeSpan?)null;
+                throw new PlatformApiException(
+                    code,
+                    payload?.Description ?? "Spotify rejected the authorization token request.",
+                    (int)response.StatusCode,
+                    retryAfter);
+            }
+
+            var token = await DeserializeAsync<SpotifyTokenResponse>(response, cancellationToken);
+            return token is { AccessToken.Length: > 0 }
+                ? token
+                : throw new PlatformApiException(
+                    "spotify_invalid_token_response",
+                    "Spotify returned an invalid token response.",
+                    StatusCodes.Status502BadGateway);
+        }
     }
 
     private static async Task<PlatformApiException> CreateApiExceptionAsync(

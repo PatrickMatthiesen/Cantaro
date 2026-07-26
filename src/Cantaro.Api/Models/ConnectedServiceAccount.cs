@@ -53,6 +53,21 @@ public class ConnectedServiceAccount
     public DateTime? RefreshTokenExpiresAt { get; set; }
 
     /// <summary>
+    /// Fencing version incremented whenever provider tokens are replaced or invalidated.
+    /// </summary>
+    public long TokenVersion { get; set; }
+
+    /// <summary>
+    /// Identifies the process that currently owns the provider token refresh lease.
+    /// </summary>
+    public Guid? TokenRefreshLeaseId { get; set; }
+
+    /// <summary>
+    /// Short lease expiry that allows another process to recover a refresh abandoned by a crashed owner.
+    /// </summary>
+    public DateTime? TokenRefreshLeaseExpiresAt { get; set; }
+
+    /// <summary>
     /// Provider-neutral connection state: connected or reconnect_required.
     /// </summary>
     public string ConnectionState { get; set; } = "connected";

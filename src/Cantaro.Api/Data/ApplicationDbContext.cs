@@ -99,6 +99,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.ConnectionState).HasMaxLength(32).HasDefaultValue("connected");
             entity.Property(e => e.ReconnectReason).HasMaxLength(128);
+            entity.HasIndex(e => e.TokenRefreshLeaseExpiresAt);
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.ConnectedServiceAccounts)

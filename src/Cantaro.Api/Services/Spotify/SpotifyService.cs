@@ -93,38 +93,99 @@ public sealed class SpotifyService
         }
 
         var now = _timeProvider.GetUtcNow().UtcDateTime;
-        var account = await _dbContext.ConnectedServiceAccounts.SingleOrDefaultAsync(
-            candidate => candidate.UserId == userId && candidate.Service == ServiceName,
-            cancellationToken);
+        var displayName = string.IsNullOrWhiteSpace(profile.DisplayName)
+            ? "Spotify account"
+            : profile.DisplayName;
+        var encryptedAccessToken = _encryptionService.Encrypt(token.AccessToken);
+        var encryptedRefreshToken = string.IsNullOrWhiteSpace(token.RefreshToken)
+            ? null
+            : _encryptionService.Encrypt(token.RefreshToken);
+        var tokenExpiresAt = now.AddSeconds(Math.Max(1, token.ExpiresIn));
+        var refreshTokenExpiresAt = now.AddMonths(6);
+        var scopes = string.IsNullOrWhiteSpace(token.Scope) ? AuthorizationScopes : token.Scope;
 
-        if (account is null)
+        var replaced = await ReplaceExistingAccountAsync();
+        if (replaced == 0)
         {
-            account = new ConnectedServiceAccount
+            var newAccount = new ConnectedServiceAccount
             {
                 UserId = userId,
                 Service = ServiceName,
                 ExternalAccountId = externalAccountId,
+                DisplayName = displayName,
+                EncryptedAccessToken = encryptedAccessToken,
+                EncryptedRefreshToken = encryptedRefreshToken,
+                TokenExpiresAt = tokenExpiresAt,
+                RefreshTokenExpiresAt = refreshTokenExpiresAt,
+                Scopes = scopes,
+                ConnectionState = "connected",
+                TokenVersion = 1,
                 CreatedAt = now,
                 UpdatedAt = now
             };
-            _dbContext.ConnectedServiceAccounts.Add(account);
+            _dbContext.ConnectedServiceAccounts.Add(newAccount);
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                // A concurrent callback may have inserted the unique user/service
+                // row after our initial update. Fence that row instead of allowing
+                // either callback to persist tracked stale state.
+                _dbContext.Entry(newAccount).State = EntityState.Detached;
+                if (await ReplaceExistingAccountAsync() == 0)
+                {
+                    throw;
+                }
+            }
         }
 
-        account.ExternalAccountId = externalAccountId;
-        account.DisplayName = string.IsNullOrWhiteSpace(profile.DisplayName) ? "Spotify account" : profile.DisplayName;
-        account.EncryptedAccessToken = _encryptionService.Encrypt(token.AccessToken);
-        account.EncryptedRefreshToken = string.IsNullOrWhiteSpace(token.RefreshToken)
-            ? account.EncryptedRefreshToken
-            : _encryptionService.Encrypt(token.RefreshToken);
-        account.TokenExpiresAt = now.AddSeconds(Math.Max(1, token.ExpiresIn));
-        account.RefreshTokenExpiresAt = now.AddMonths(6);
-        account.Scopes = string.IsNullOrWhiteSpace(token.Scope) ? AuthorizationScopes : token.Scope;
-        account.ConnectionState = "connected";
-        account.ReconnectRequiredAt = null;
-        account.ReconnectReason = null;
-        account.UpdatedAt = now;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return account;
+        return await _dbContext.ConnectedServiceAccounts
+            .AsNoTracking()
+            .SingleAsync(
+                candidate => candidate.UserId == userId && candidate.Service == ServiceName,
+                cancellationToken);
+
+        Task<int> ReplaceExistingAccountAsync()
+        {
+            var query = _dbContext.ConnectedServiceAccounts
+                .Where(candidate => candidate.UserId == userId && candidate.Service == ServiceName);
+            return encryptedRefreshToken is null
+                ? query.ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(candidate => candidate.ExternalAccountId, externalAccountId)
+                        .SetProperty(candidate => candidate.DisplayName, displayName)
+                        .SetProperty(candidate => candidate.EncryptedAccessToken, encryptedAccessToken)
+                        .SetProperty(candidate => candidate.TokenExpiresAt, tokenExpiresAt)
+                        .SetProperty(candidate => candidate.RefreshTokenExpiresAt, refreshTokenExpiresAt)
+                        .SetProperty(candidate => candidate.Scopes, scopes)
+                        .SetProperty(candidate => candidate.ConnectionState, "connected")
+                        .SetProperty(candidate => candidate.ReconnectRequiredAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.ReconnectReason, (string?)null)
+                        .SetProperty(candidate => candidate.TokenVersion, candidate => candidate.TokenVersion + 1)
+                        .SetProperty(candidate => candidate.TokenRefreshLeaseId, (Guid?)null)
+                        .SetProperty(candidate => candidate.TokenRefreshLeaseExpiresAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.UpdatedAt, now),
+                    cancellationToken)
+                : query.ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(candidate => candidate.ExternalAccountId, externalAccountId)
+                        .SetProperty(candidate => candidate.DisplayName, displayName)
+                        .SetProperty(candidate => candidate.EncryptedAccessToken, encryptedAccessToken)
+                        .SetProperty(candidate => candidate.EncryptedRefreshToken, encryptedRefreshToken)
+                        .SetProperty(candidate => candidate.TokenExpiresAt, tokenExpiresAt)
+                        .SetProperty(candidate => candidate.RefreshTokenExpiresAt, refreshTokenExpiresAt)
+                        .SetProperty(candidate => candidate.Scopes, scopes)
+                        .SetProperty(candidate => candidate.ConnectionState, "connected")
+                        .SetProperty(candidate => candidate.ReconnectRequiredAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.ReconnectReason, (string?)null)
+                        .SetProperty(candidate => candidate.TokenVersion, candidate => candidate.TokenVersion + 1)
+                        .SetProperty(candidate => candidate.TokenRefreshLeaseId, (Guid?)null)
+                        .SetProperty(candidate => candidate.TokenRefreshLeaseExpiresAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.UpdatedAt, now),
+                    cancellationToken);
+        }
     }
 
     public async Task<IReadOnlyList<SpotifyPlaylistSnapshot>> GetPlaylistsAsync(
@@ -142,10 +203,23 @@ public sealed class SpotifyService
         string playlistId,
         CancellationToken cancellationToken)
     {
-        return await WithAuthorizedRetryAsync(
-            userId,
-            (accessToken, ct) => _apiClient.GetPlaylistItemsAsync(accessToken, playlistId, ct),
-            cancellationToken);
+        try
+        {
+            return await WithAuthorizedRetryAsync(
+                userId,
+                (accessToken, ct) => _apiClient.GetPlaylistItemsAsync(accessToken, playlistId, ct),
+                cancellationToken);
+        }
+        catch (PlatformApiException ex) when (
+            ex.StatusCode == StatusCodes.Status403Forbidden
+            && string.Equals(ex.Code, "spotify_forbidden", StringComparison.Ordinal))
+        {
+            throw new PlatformApiException(
+                "spotify_playlist_items_unavailable",
+                "Spotify denied access to this playlist's items. This can happen when the connected account follows a playlist but does not own or collaborate on it.",
+                StatusCodes.Status403Forbidden,
+                innerException: ex);
+        }
     }
 
     public async Task<SpotifyPlaylistImportSnapshot> GetPlaylistImportSnapshotAsync(
@@ -231,28 +305,41 @@ public sealed class SpotifyService
         Func<string, CancellationToken, Task<T>> operation,
         CancellationToken cancellationToken)
     {
-        var accessToken = await _tokenManager.GetAccessTokenAsync(userId, false, cancellationToken);
+        var accessToken = await _tokenManager.GetAccessTokenSnapshotAsync(userId, false, cancellationToken);
         try
         {
-            return await operation(accessToken, cancellationToken);
+            return await operation(accessToken.Value, cancellationToken);
         }
         catch (PlatformApiException ex) when (ex.StatusCode == StatusCodes.Status401Unauthorized)
         {
-            accessToken = await _tokenManager.GetAccessTokenAsync(userId, true, cancellationToken);
+            accessToken = await _tokenManager.GetAccessTokenSnapshotAsync(userId, true, cancellationToken);
             try
             {
-                return await operation(accessToken, cancellationToken);
+                return await operation(accessToken.Value, cancellationToken);
             }
             catch (PlatformApiException retryException) when (
                 retryException.StatusCode == StatusCodes.Status401Unauthorized)
             {
-                await _tokenManager.MarkReconnectRequiredAsync(
+                var invalidated = await _tokenManager.MarkReconnectRequiredAsync(
                     userId,
+                    accessToken.Version,
                     "access_token_rejected",
                     cancellationToken);
-                throw new PlatformReconnectRequiredException(
-                    "Spotify rejected the refreshed connection. Reconnect Spotify to continue.",
-                    retryException);
+                if (invalidated)
+                {
+                    throw new PlatformReconnectRequiredException(
+                        "Spotify rejected the refreshed connection. Reconnect Spotify to continue.",
+                        retryException);
+                }
+
+                // Reauthorization or another refresh replaced the rejected token
+                // before it could be invalidated. Give that newer generation one
+                // bounded attempt instead of deleting it.
+                var newest = await _tokenManager.GetAccessTokenSnapshotAsync(
+                    userId,
+                    false,
+                    cancellationToken);
+                return await operation(newest.Value, cancellationToken);
             }
         }
     }

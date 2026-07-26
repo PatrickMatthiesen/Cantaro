@@ -21,12 +21,13 @@ public sealed class SpotifyPlaylistSyncServiceTests
     [Fact]
     public async Task SyncPlaylistAsync_FetchesBeforeTransactionAndRefreshesProviderObservation()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
+        var connectionString = $"Data Source=spotify-sync-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
-        await using var dbContext = new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlite(connection)
-                .Options);
+        var dbContextOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(dbContextOptions);
         await dbContext.Database.EnsureCreatedAsync();
 
         const int userId = 73;
@@ -74,8 +75,8 @@ public sealed class SpotifyPlaylistSyncServiceTests
             dbContext,
             apiClient,
             encryption,
-            new SpotifyTokenRefreshCoordinator(),
-            timeProvider);
+            timeProvider,
+            new SpotifyTestServiceScopeFactory(dbContextOptions));
         var spotifyService = new SpotifyService(
             dbContext,
             apiClient,

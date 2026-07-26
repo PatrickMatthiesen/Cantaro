@@ -175,6 +175,103 @@ public sealed class SpotifyApiClientTests
         Assert.Equal("new-access-token", token.AccessToken);
     }
 
+    [Fact]
+    public async Task ExchangeCodeAsync_RetriesExplicitRateLimitAndRecreatesRequestContent()
+    {
+        var handler = new StubHandler(
+        [
+            Json(
+                HttpStatusCode.TooManyRequests,
+                """{ "error": "rate_limited", "error_description": "Slow down" }""",
+                retryAfterSeconds: 5),
+            Json(HttpStatusCode.OK, """{ "access_token": "new-access-token", "expires_in": 3600, "token_type": "Bearer" }""")
+        ]);
+        var delay = new RecordingDelay();
+        using var client = CreateClient(handler, delay);
+
+        var token = await client.Api.ExchangeCodeAsync(
+            "authorization-code",
+            "https://cantaro.example/api/platforms/spotify/callback",
+            CancellationToken.None);
+
+        Assert.Equal("new-access-token", token.AccessToken);
+        Assert.Equal([TimeSpan.FromSeconds(5)], delay.Delays);
+        Assert.Collection(
+            handler.Requests,
+            request => Assert.Equal(
+                "grant_type=authorization_code&code=authorization-code&redirect_uri=https%3A%2F%2Fcantaro.example%2Fapi%2Fplatforms%2Fspotify%2Fcallback",
+                request.Body),
+            request => Assert.Equal(
+                "grant_type=authorization_code&code=authorization-code&redirect_uri=https%3A%2F%2Fcantaro.example%2Fapi%2Fplatforms%2Fspotify%2Fcallback",
+                request.Body));
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_RetriesExplicitRateLimitWithExponentialFallback()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.TooManyRequests, """{ "error": "rate_limited" }"""),
+            Json(HttpStatusCode.TooManyRequests, """{ "error": "rate_limited" }"""),
+            Json(
+                HttpStatusCode.OK,
+                """{ "access_token": "refreshed-access-token", "refresh_token": "rotated-refresh-token", "expires_in": 3600, "token_type": "Bearer" }""")
+        ]);
+        var delay = new RecordingDelay();
+        using var client = CreateClient(handler, delay);
+
+        var token = await client.Api.RefreshTokenAsync("refresh-token", CancellationToken.None);
+
+        Assert.Equal("refreshed-access-token", token.AccessToken);
+        Assert.Equal("rotated-refresh-token", token.RefreshToken);
+        Assert.Equal([TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)], delay.Delays);
+        Assert.All(
+            handler.Requests,
+            request => Assert.Equal("grant_type=refresh_token&refresh_token=refresh-token", request.Body));
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_SurfacesActionableErrorAfterBoundedRateLimitRetries()
+    {
+        var handler = new StubHandler(
+            Enumerable.Range(0, 4)
+                .Select(_ => Json(
+                    HttpStatusCode.TooManyRequests,
+                    """{ "error": "rate_limited", "error_description": "Token requests are rate limited" }""",
+                    retryAfterSeconds: 7))
+                .ToArray());
+        var delay = new RecordingDelay();
+        using var client = CreateClient(handler, delay);
+
+        var exception = await Assert.ThrowsAsync<PlatformApiException>(
+            () => client.Api.RefreshTokenAsync("refresh-token", CancellationToken.None));
+
+        Assert.Equal("rate_limited", exception.Code);
+        Assert.Equal(429, exception.StatusCode);
+        Assert.Equal("Token requests are rate limited", exception.Message);
+        Assert.Equal(TimeSpan.FromSeconds(8), exception.RetryAfter);
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.Equal([TimeSpan.FromSeconds(7), TimeSpan.FromSeconds(7), TimeSpan.FromSeconds(7)], delay.Delays);
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_StopsRetryingWhenBackoffIsCancelled()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.TooManyRequests, """{ "error": "rate_limited" }"""),
+            Json(HttpStatusCode.OK, """{ "access_token": "unused", "expires_in": 3600, "token_type": "Bearer" }""")
+        ]);
+        using var cancellation = new CancellationTokenSource();
+        var delay = new CancellingDelay(cancellation);
+        using var client = CreateClient(handler, delay);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.Api.RefreshTokenAsync("refresh-token", cancellation.Token));
+
+        Assert.Single(handler.Requests);
+    }
+
     private static ClientScope CreateClient(StubHandler handler, ISpotifyRetryDelay? retryDelay = null)
     {
         var httpClient = new HttpClient(handler)
@@ -240,6 +337,15 @@ public sealed class SpotifyApiClientTests
         {
             Delays.Add(delay);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CancellingDelay(CancellationTokenSource cancellation) : ISpotifyRetryDelay
+    {
+        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled(cancellationToken);
         }
     }
 

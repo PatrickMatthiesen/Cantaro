@@ -5,6 +5,7 @@ using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Spotify;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -126,6 +127,345 @@ public sealed class SpotifyLifecycleTests
         Assert.Equal(Now.AddHours(1).UtcDateTime, account.TokenExpiresAt);
         Assert.Equal("playlist-read-private", account.Scopes);
         Assert.Equal("connected", account.ConnectionState);
+        Assert.Equal(1, account.TokenVersion);
+        Assert.Null(account.TokenRefreshLeaseId);
+        Assert.Null(account.TokenRefreshLeaseExpiresAt);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_AcquiresDistributedLeaseBeforeCallingSpotify()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "new-access",
+                  "expires_in": 3600,
+                  "refresh_token": "rotated-refresh"
+                }
+                """));
+        var account = await scope.AddAccountAsync(
+            accessToken: "expired-access",
+            accessTokenExpiresAt: Now.AddMinutes(-1).UtcDateTime,
+            refreshToken: "old-refresh");
+        Guid? observedLeaseId = null;
+        DateTime? observedLeaseExpiry = null;
+        DateTime? observedAt = null;
+
+        scope.Handler.BeforeResponseAsync = async (_, _) =>
+        {
+            scope.DbContext.ChangeTracker.Clear();
+            var refreshingAccount = await scope.DbContext.ConnectedServiceAccounts
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == account.Id);
+            observedLeaseId = refreshingAccount.TokenRefreshLeaseId;
+            observedLeaseExpiry = refreshingAccount.TokenRefreshLeaseExpiresAt;
+            observedAt = DateTime.UtcNow;
+        };
+
+        await scope.TokenManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            CancellationToken.None);
+
+        Assert.NotNull(observedLeaseId);
+        Assert.NotNull(observedLeaseExpiry);
+        Assert.NotNull(observedAt);
+        Assert.InRange(
+            observedLeaseExpiry.Value,
+            observedAt.Value.AddSeconds(28),
+            observedAt.Value.AddSeconds(32));
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_ExpiredLeaseOwnerCannotOverwriteWinner()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "stale-worker-access",
+                  "expires_in": 3600,
+                  "refresh_token": "stale-worker-refresh"
+                }
+                """));
+        var account = await scope.AddAccountAsync(
+            accessToken: "expired-access",
+            accessTokenExpiresAt: Now.AddMinutes(-1).UtcDateTime,
+            refreshToken: "old-refresh");
+
+        scope.Handler.BeforeResponseAsync = async (_, _) =>
+        {
+            var winnerAccess = scope.Encryption.Encrypt("winner-access");
+            var winnerRefresh = scope.Encryption.Encrypt("winner-refresh");
+            await scope.DbContext.ConnectedServiceAccounts
+                .Where(candidate => candidate.Id == account.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(candidate => candidate.EncryptedAccessToken, winnerAccess)
+                    .SetProperty(candidate => candidate.EncryptedRefreshToken, winnerRefresh)
+                    .SetProperty(candidate => candidate.TokenExpiresAt, Now.AddHours(1).UtcDateTime)
+                    .SetProperty(candidate => candidate.TokenVersion, 1L)
+                    .SetProperty(candidate => candidate.TokenRefreshLeaseId, (Guid?)null)
+                    .SetProperty(candidate => candidate.TokenRefreshLeaseExpiresAt, (DateTime?)null));
+        };
+
+        var accessToken = await scope.TokenManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            CancellationToken.None);
+
+        scope.DbContext.ChangeTracker.Clear();
+        var persisted = await scope.DbContext.ConnectedServiceAccounts.SingleAsync();
+        Assert.Equal("winner-access", accessToken);
+        Assert.Equal("winner-access", scope.Encryption.Decrypt(persisted.EncryptedAccessToken!));
+        Assert.Equal("winner-refresh", scope.Encryption.Decrypt(persisted.EncryptedRefreshToken!));
+        Assert.Equal(1, persisted.TokenVersion);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_ReauthorizationFencesInFlightRefresh()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "stale-refresh-access",
+                  "expires_in": 3600,
+                  "refresh_token": "stale-refresh-token"
+                }
+                """),
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "reauthorized-access",
+                  "expires_in": 3600,
+                  "refresh_token": "reauthorized-refresh"
+                }
+                """),
+            Json(HttpStatusCode.OK, """
+                {
+                  "account_id": "reauthorized-account",
+                  "display_name": "Reauthorized listener"
+                }
+                """));
+        await scope.AddAccountAsync(
+            accessToken: "expired-access",
+            accessTokenExpiresAt: Now.AddMinutes(-1).UtcDateTime,
+            refreshToken: "old-refresh");
+
+        scope.Handler.BeforeResponseAsync = async (_, _) =>
+        {
+            scope.Handler.BeforeResponseAsync = null;
+            await scope.Service.ExchangeCodeAndSaveAsync(
+                scope.UserId,
+                "new-authorization-code",
+                "https://cantaro.example/api/platforms/spotify/callback",
+                CancellationToken.None);
+        };
+
+        var accessToken = await scope.TokenManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            CancellationToken.None);
+
+        scope.DbContext.ChangeTracker.Clear();
+        var persisted = await scope.DbContext.ConnectedServiceAccounts.SingleAsync();
+        Assert.Equal("reauthorized-access", accessToken);
+        Assert.Equal("reauthorized-access", scope.Encryption.Decrypt(persisted.EncryptedAccessToken!));
+        Assert.Equal("reauthorized-refresh", scope.Encryption.Decrypt(persisted.EncryptedRefreshToken!));
+        Assert.Equal(1, persisted.TokenVersion);
+        Assert.Null(persisted.TokenRefreshLeaseId);
+        Assert.Null(persisted.TokenRefreshLeaseExpiresAt);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_CancellationReleasesLeaseImmediately()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "unused-access",
+                  "expires_in": 3600
+                }
+                """));
+        await scope.AddAccountAsync(
+            accessToken: "expired-access",
+            accessTokenExpiresAt: Now.AddMinutes(-1).UtcDateTime,
+            refreshToken: "old-refresh");
+        var requestStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        scope.Handler.BeforeResponseAsync = async (_, cancellationToken) =>
+        {
+            requestStarted.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        };
+        using var cancellation = new CancellationTokenSource();
+
+        var refresh = scope.TokenManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            cancellation.Token);
+        await requestStarted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refresh);
+        scope.DbContext.ChangeTracker.Clear();
+        var persisted = await scope.DbContext.ConnectedServiceAccounts.SingleAsync();
+        Assert.Null(persisted.TokenRefreshLeaseId);
+        Assert.Null(persisted.TokenRefreshLeaseExpiresAt);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_RenewsLeaseDuringLongProviderDelay()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "new-access",
+                  "expires_in": 3600,
+                  "refresh_token": "rotated-refresh"
+                }
+                """));
+        var account = await scope.AddAccountAsync(
+            accessToken: "expired-access",
+            accessTokenExpiresAt: Now.AddMinutes(-1).UtcDateTime,
+            refreshToken: "old-refresh");
+        DateTime? initialExpiry = null;
+        DateTime? renewedExpiry = null;
+        scope.Handler.BeforeResponseAsync = async (_, cancellationToken) =>
+        {
+            scope.DbContext.ChangeTracker.Clear();
+            initialExpiry = (await scope.DbContext.ConnectedServiceAccounts
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == account.Id, cancellationToken))
+                .TokenRefreshLeaseExpiresAt;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(2300), cancellationToken);
+
+            scope.DbContext.ChangeTracker.Clear();
+            renewedExpiry = (await scope.DbContext.ConnectedServiceAccounts
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == account.Id, cancellationToken))
+                .TokenRefreshLeaseExpiresAt;
+        };
+
+        await scope.TokenManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            CancellationToken.None);
+
+        Assert.NotNull(initialExpiry);
+        Assert.NotNull(renewedExpiry);
+        Assert.True(renewedExpiry > initialExpiry);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_TwoManagersOnlyRefreshOnce()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "winning-access",
+                  "expires_in": 3600,
+                  "refresh_token": "winning-refresh"
+                }
+                """));
+        await scope.AddAccountAsync(
+            accessToken: "expired-access",
+            accessTokenExpiresAt: Now.AddMinutes(-1).UtcDateTime,
+            refreshToken: "shared-refresh");
+        var firstRequestStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstResponse = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        scope.Handler.BeforeResponseAsync = async (_, cancellationToken) =>
+        {
+            firstRequestStarted.SetResult();
+            await releaseFirstResponse.Task.WaitAsync(cancellationToken);
+        };
+
+        await using var replicaDbContext = new ApplicationDbContext(scope.DbContextOptions);
+        var replicaHandler = new RecordingHandler(
+        [
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "losing-access",
+                  "expires_in": 3600,
+                  "refresh_token": "losing-refresh"
+                }
+                """)
+        ]);
+        using var replicaHttpClient = new HttpClient(replicaHandler)
+        {
+            BaseAddress = new Uri("https://api.spotify.com")
+        };
+        var replicaApiClient = new SpotifyApiClient(
+            replicaHttpClient,
+            scope.Options,
+            new NoDelay());
+        var replicaManager = new SpotifyTokenManager(
+            replicaDbContext,
+            replicaApiClient,
+            scope.Encryption,
+            scope.TimeProvider,
+            new SpotifyTestServiceScopeFactory(scope.DbContextOptions));
+
+        var firstRefresh = scope.TokenManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            CancellationToken.None);
+        await firstRequestStarted.Task;
+        var secondRefresh = replicaManager.GetAccessTokenAsync(
+            scope.UserId,
+            forceRefresh: false,
+            CancellationToken.None);
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+        Assert.Empty(replicaHandler.Requests);
+        releaseFirstResponse.SetResult();
+        var tokens = await Task.WhenAll(firstRefresh, secondRefresh);
+
+        Assert.All(tokens, token => Assert.Equal("winning-access", token));
+        Assert.Single(scope.Handler.Requests);
+        Assert.Empty(replicaHandler.Requests);
+    }
+
+    [Fact]
+    public async Task MarkReconnectRequiredAsync_DoesNotDeleteNewerAuthorization()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.OK, """
+                {
+                  "access_token": "reauthorized-access",
+                  "expires_in": 3600,
+                  "refresh_token": "reauthorized-refresh"
+                }
+                """),
+            Json(HttpStatusCode.OK, """
+                {
+                  "account_id": "reauthorized-account",
+                  "display_name": "Reauthorized listener"
+                }
+                """));
+        await scope.AddAccountAsync(
+            accessToken: "rejected-access",
+            accessTokenExpiresAt: Now.AddMinutes(10).UtcDateTime,
+            refreshToken: "old-refresh");
+
+        await scope.Service.ExchangeCodeAndSaveAsync(
+            scope.UserId,
+            "new-authorization-code",
+            "https://cantaro.example/api/platforms/spotify/callback",
+            CancellationToken.None);
+        var invalidated = await scope.TokenManager.MarkReconnectRequiredAsync(
+            scope.UserId,
+            expectedTokenVersion: 0,
+            "access_token_rejected",
+            CancellationToken.None);
+
+        scope.DbContext.ChangeTracker.Clear();
+        var persisted = await scope.DbContext.ConnectedServiceAccounts.SingleAsync();
+        Assert.False(invalidated);
+        Assert.Equal("connected", persisted.ConnectionState);
+        Assert.Equal("reauthorized-access", scope.Encryption.Decrypt(persisted.EncryptedAccessToken!));
+        Assert.Equal("reauthorized-refresh", scope.Encryption.Decrypt(persisted.EncryptedRefreshToken!));
+        Assert.Equal(1, persisted.TokenVersion);
     }
 
     [Fact]
@@ -214,6 +554,35 @@ public sealed class SpotifyLifecycleTests
         Assert.Null(account.EncryptedAccessToken);
         Assert.Null(account.EncryptedRefreshToken);
         Assert.Equal(3, scope.Handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task GetPlaylistItemsAsync_FollowedPlaylistForbiddenReturnsActionableError()
+    {
+        await using var scope = await SpotifyTestScope.CreateAsync(
+            Json(HttpStatusCode.Forbidden, """
+                {
+                  "error": {
+                    "status": 403,
+                    "message": "The current user is not an owner or collaborator"
+                  }
+                }
+                """));
+        await scope.AddAccountAsync(
+            accessToken: "cached-access",
+            accessTokenExpiresAt: Now.AddMinutes(10).UtcDateTime,
+            refreshToken: "unused-refresh");
+
+        var exception = await Assert.ThrowsAsync<PlatformApiException>(
+            () => scope.Service.GetPlaylistItemsAsync(
+                scope.UserId,
+                "followed-playlist",
+                CancellationToken.None));
+
+        Assert.Equal("spotify_playlist_items_unavailable", exception.Code);
+        Assert.Equal(StatusCodes.Status403Forbidden, exception.StatusCode);
+        Assert.Contains("own or collaborate", exception.Message, StringComparison.Ordinal);
+        Assert.Single(scope.Handler.Requests);
     }
 
     [Fact]
@@ -343,7 +712,10 @@ public sealed class SpotifyLifecycleTests
             RecordingHandler handler,
             TokenEncryptionService encryption,
             SpotifyTokenManager tokenManager,
-            SpotifyService service)
+            SpotifyService service,
+            DbContextOptions<ApplicationDbContext> dbContextOptions,
+            IOptions<SpotifyOptions> options,
+            TimeProvider timeProvider)
         {
             Connection = connection;
             DbContext = dbContext;
@@ -351,6 +723,9 @@ public sealed class SpotifyLifecycleTests
             Encryption = encryption;
             TokenManager = tokenManager;
             Service = service;
+            DbContextOptions = dbContextOptions;
+            Options = options;
+            TimeProvider = timeProvider;
         }
 
         private const int TestUserId = 42;
@@ -362,15 +737,19 @@ public sealed class SpotifyLifecycleTests
         public TokenEncryptionService Encryption { get; }
         public SpotifyTokenManager TokenManager { get; }
         public SpotifyService Service { get; }
+        public DbContextOptions<ApplicationDbContext> DbContextOptions { get; }
+        public IOptions<SpotifyOptions> Options { get; }
+        public TimeProvider TimeProvider { get; }
 
         public static async Task<SpotifyTestScope> CreateAsync(params HttpResponseMessage[] responses)
         {
-            var connection = new SqliteConnection("Data Source=:memory:");
+            var connectionString = $"Data Source=spotify-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+            var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync();
-            var dbContext = new ApplicationDbContext(
-                new DbContextOptionsBuilder<ApplicationDbContext>()
-                    .UseSqlite(connection)
-                    .Options);
+            var dbContextOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite(connectionString)
+                .Options;
+            var dbContext = new ApplicationDbContext(dbContextOptions);
             await dbContext.Database.EnsureCreatedAsync();
             dbContext.Users.Add(new User
             {
@@ -386,7 +765,7 @@ public sealed class SpotifyLifecycleTests
             {
                 BaseAddress = new Uri("https://api.spotify.com")
             };
-            var options = Options.Create(new SpotifyOptions
+            var options = Microsoft.Extensions.Options.Options.Create(new SpotifyOptions
             {
                 ClientId = "test-client",
                 ClientSecret = "test-secret",
@@ -399,8 +778,8 @@ public sealed class SpotifyLifecycleTests
                 dbContext,
                 apiClient,
                 encryption,
-                new SpotifyTokenRefreshCoordinator(),
-                timeProvider);
+                timeProvider,
+                new SpotifyTestServiceScopeFactory(dbContextOptions));
             var service = new SpotifyService(
                 dbContext,
                 apiClient,
@@ -408,7 +787,16 @@ public sealed class SpotifyLifecycleTests
                 encryption,
                 options,
                 timeProvider);
-            return new SpotifyTestScope(connection, dbContext, handler, encryption, tokenManager, service);
+            return new SpotifyTestScope(
+                connection,
+                dbContext,
+                handler,
+                encryption,
+                tokenManager,
+                service,
+                dbContextOptions,
+                options,
+                timeProvider);
         }
 
         public async Task<ConnectedServiceAccount> AddAccountAsync(
@@ -447,13 +835,20 @@ public sealed class SpotifyLifecycleTests
         private readonly Queue<HttpResponseMessage> _responses = new(responses);
 
         public List<Uri> Requests { get; } = [];
+        public Func<HttpRequestMessage, CancellationToken, Task>? BeforeResponseAsync { get; set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             Requests.Add(request.RequestUri!);
-            return Task.FromResult(_responses.Dequeue());
+            var response = _responses.Dequeue();
+            if (BeforeResponseAsync is not null)
+            {
+                await BeforeResponseAsync(request, cancellationToken);
+            }
+
+            return response;
         }
     }
 

@@ -67,7 +67,6 @@ builder.Services.AddHttpClient<SpotifyApiClient>(client =>
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
 });
 builder.Services.AddSingleton<ISpotifyRetryDelay, SpotifyRetryDelay>();
-builder.Services.AddSingleton<SpotifyTokenRefreshCoordinator>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SpotifyTokenManager>();
 builder.Services.AddScoped<SpotifyService>();
