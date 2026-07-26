@@ -26,6 +26,11 @@ public class Playlist
     /// Additional metadata stored as JSON (tags, visibility, custom fields)
     /// </summary>
     public string? Metadata { get; set; }
+
+    /// <summary>
+    /// Provider whose personal playlist data created this local import. Null means Cantaro-owned.
+    /// </summary>
+    public string? ImportedFromService { get; set; }
     
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

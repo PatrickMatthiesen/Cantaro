@@ -8,6 +8,9 @@ public interface IMediaProvider
 
     Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default);
 
+    string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
+        => callbackUrls.Preferred;
+
     string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge);
 
     Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(

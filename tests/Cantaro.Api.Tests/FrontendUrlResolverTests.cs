@@ -50,6 +50,61 @@ public class FrontendUrlResolverTests
     }
 
     [Fact]
+    public void GetCallbackUrls_ProvidesPreferredHttpAndHttpsCandidates()
+    {
+        var resolver = CreateResolver(
+            context =>
+            {
+                context.Request.Scheme = "https";
+                context.Request.Host = new HostString("localhost", 7203);
+            },
+            new Dictionary<string, string?>
+            {
+                ["Frontend:BaseUrl"] = "http://localhost:5173",
+                ["Frontend:HttpBaseUrl"] = "http://localhost:5174",
+                ["services:web:https:0"] = "https://localhost:5173"
+            });
+
+        var callbackUrls = resolver.GetCallbackUrls("api/platforms/spotify/callback");
+
+        Assert.Equal(
+            "http://localhost:5173/api/platforms/spotify/callback",
+            callbackUrls.Preferred);
+        Assert.Equal(
+            "http://localhost:5174/api/platforms/spotify/callback",
+            callbackUrls.Http);
+        Assert.Equal(
+            "https://localhost:7203/api/platforms/spotify/callback",
+            callbackUrls.Https);
+    }
+
+    [Fact]
+    public void GetCallbackUrls_UsesConfiguredHttpsOriginBehindHttpReverseProxy()
+    {
+        var resolver = CreateResolver(
+            context =>
+            {
+                context.Request.Scheme = "http";
+                context.Request.Host = new HostString("cantaro.example");
+                context.Request.Headers["X-Forwarded-Proto"] = "https";
+                context.Request.Headers["X-Forwarded-Host"] = "cantaro.example";
+            },
+            new Dictionary<string, string?>
+            {
+                ["Frontend:HttpsBaseUrl"] = "https://cantaro.example"
+            });
+
+        var callbackUrls = resolver.GetCallbackUrls("api/platforms/spotify/callback");
+
+        Assert.Equal(
+            "https://cantaro.example/api/platforms/spotify/callback",
+            callbackUrls.Preferred);
+        Assert.Equal(
+            "https://cantaro.example/api/platforms/spotify/callback",
+            callbackUrls.Https);
+    }
+
+    [Fact]
     public void GetFrontendUrl_KeepsConfiguredUrlForUntrustedOrigin()
     {
         var resolver = CreateResolver(

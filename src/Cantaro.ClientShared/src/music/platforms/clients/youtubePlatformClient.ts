@@ -1,4 +1,4 @@
-import { PlatformPlaylistModel } from '../playlistModel';
+import { PlatformPlaylistModel, preloadPlatformPlaylistSongs } from '../playlistModel';
 import type {
     PlatformAccountStatus,
     PlatformConnectCallbacks,
@@ -190,10 +190,7 @@ class YouTubePlatformClient implements PlatformManagement {
         );
 
         this.playlistCache = playlists;
-
-        if (includeSongs) {
-            await Promise.all(playlists.map((playlist) => playlist.songs()));
-        }
+        await preloadPlatformPlaylistSongs(playlists, includeSongs);
 
         return playlists;
     }

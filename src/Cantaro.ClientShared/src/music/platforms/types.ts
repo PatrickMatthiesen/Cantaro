@@ -22,6 +22,8 @@ export interface PlatformAccountStatus {
     displayName?: string;
     externalAccountId?: string;
     connectedAt?: string;
+    connectionState?: 'connected' | 'reconnect_required' | 'disconnected';
+    needsReconnect?: boolean;
 }
 
 export interface PlatformSong {
@@ -32,6 +34,11 @@ export interface PlatformSong {
     artistName?: string;
     index: number;
     publishedAt?: string;
+    durationSeconds?: number;
+    externalUrl?: string;
+    albumName?: string;
+    albumUrl?: string;
+    artistUrl?: string;
 }
 
 export interface PlatformPlaylist {
@@ -41,6 +48,8 @@ export interface PlatformPlaylist {
     thumbnailUrl?: string;
     itemCount: number;
     publishedAt?: string;
+    externalUrl?: string;
+    ownerName?: string;
     songs: (forceRefresh?: boolean) => Promise<PlatformSong[]>;
 }
 

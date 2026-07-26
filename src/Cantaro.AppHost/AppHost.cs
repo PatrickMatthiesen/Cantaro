@@ -9,6 +9,8 @@ var dockerEnv = builder.AddDockerComposeEnvironment("docker-compose");
 
 var youtubeClientId = builder.AddParameter("YouTubeClientId", secret: true);
 var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: true);
+var spotifyClientId = builder.AddParameter("SpotifyClientId", secret: true);
+var spotifyClientSecret = builder.AddParameter("SpotifyClientSecret", secret: true);
 var aniListClientId = builder.AddParameter("AniListClientId", secret: true);
 var aniListClientSecret = builder.AddParameter("AniListClientSecret", secret: true);
 var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
@@ -46,6 +48,8 @@ var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("mi
 var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("YouTube:ClientId", youtubeClientId)
     .WithEnvironment("YouTube:ClientSecret", youtubeClientSecret)
+    .WithEnvironment("Spotify:ClientId", spotifyClientId)
+    .WithEnvironment("Spotify:ClientSecret", spotifyClientSecret)
     .WithEnvironment("AniList:ClientId", aniListClientId)
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
     .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey);
@@ -58,6 +62,10 @@ if (builder.ExecutionContext.IsRunMode)
 
 if (builder.ExecutionContext.IsPublishMode)
 {
+    var frontendHttpsBaseUrl = builder.AddParameter("FrontendHttpsBaseUrl");
+    api.WithEnvironment("Frontend:HttpsBaseUrl", frontendHttpsBaseUrl);
+    api.WithEnvironment("Frontend:TrustedOrigins:0", frontendHttpsBaseUrl);
+
     api.PublishAsDockerComposeService((_, service) =>
     {
         service.Restart = "unless-stopped";

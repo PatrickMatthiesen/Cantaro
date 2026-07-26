@@ -42,6 +42,16 @@ public sealed class FrontendUrlResolver : IFrontendUrlResolver
             return _options.BaseUrl.TrimEnd('/');
         }
 
+        if (!string.IsNullOrWhiteSpace(_options.HttpsBaseUrl))
+        {
+            return _options.HttpsBaseUrl.TrimEnd('/');
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.HttpBaseUrl))
+        {
+            return _options.HttpBaseUrl.TrimEnd('/');
+        }
+
         return GetCurrentRequestBaseUrl();
     }
 
@@ -61,7 +71,48 @@ public sealed class FrontendUrlResolver : IFrontendUrlResolver
 
     public string GetCallbackUrl(string relativePath)
     {
-        return $"{GetCurrentRequestBaseUrl()}/{relativePath.TrimStart('/')}";
+        return GetCallbackUrls(relativePath).Preferred;
+    }
+
+    public CallbackUrlCandidates GetCallbackUrls(string relativePath)
+    {
+        var requestOrigin = GetCurrentRequestBaseUrl();
+        var trustedRequestOrigin = GetTrustedRequestOrigin(includeRequestBaseUrl: false);
+        var configuredBaseOrigin = NormalizeOrigin(_options.BaseUrl, nameof(_options.BaseUrl));
+        var configuredHttpOrigin = NormalizeOrigin(
+            _options.HttpBaseUrl,
+            nameof(_options.HttpBaseUrl),
+            Uri.UriSchemeHttp);
+        var configuredHttpsOrigin = NormalizeOrigin(
+            _options.HttpsBaseUrl,
+            nameof(_options.HttpsBaseUrl),
+            Uri.UriSchemeHttps);
+        var httpOrigin = configuredHttpOrigin
+            ?? GetOriginForScheme(trustedRequestOrigin, Uri.UriSchemeHttp)
+            ?? GetOriginForScheme(configuredBaseOrigin, Uri.UriSchemeHttp)
+            ?? GetOriginForScheme(requestOrigin, Uri.UriSchemeHttp)
+            ?? NormalizeOrigin(
+                _configuration["services:web:http:0"],
+                "services:web:http:0",
+                Uri.UriSchemeHttp);
+        var httpsOrigin = configuredHttpsOrigin
+            ?? GetOriginForScheme(trustedRequestOrigin, Uri.UriSchemeHttps)
+            ?? GetOriginForScheme(configuredBaseOrigin, Uri.UriSchemeHttps)
+            ?? GetOriginForScheme(requestOrigin, Uri.UriSchemeHttps)
+            ?? NormalizeOrigin(
+                _configuration["services:web:https:0"],
+                "services:web:https:0",
+                Uri.UriSchemeHttps);
+        var preferredOrigin = trustedRequestOrigin
+            ?? configuredBaseOrigin
+            ?? configuredHttpsOrigin
+            ?? configuredHttpOrigin
+            ?? requestOrigin;
+
+        return new CallbackUrlCandidates(
+            BuildCallbackUrl(preferredOrigin, relativePath)!,
+            BuildCallbackUrl(httpOrigin, relativePath),
+            BuildCallbackUrl(httpsOrigin, relativePath));
     }
 
     private string? GetTrustedRequestOrigin(bool includeRequestBaseUrl)
@@ -189,4 +240,46 @@ public sealed class FrontendUrlResolver : IFrontendUrlResolver
 
         return false;
     }
+
+    private static string? GetOriginForScheme(string? origin, string scheme)
+    {
+        if (string.IsNullOrWhiteSpace(origin)
+            || !Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, scheme, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    private static string? NormalizeOrigin(
+        string? value,
+        string settingName,
+        string? expectedScheme = null)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || (expectedScheme is not null
+                && !string.Equals(uri.Scheme, expectedScheme, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                expectedScheme is null
+                    ? $"{settingName} must be an absolute HTTP or HTTPS origin."
+                    : $"{settingName} must be an absolute {expectedScheme.ToUpperInvariant()} origin.");
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    private static string? BuildCallbackUrl(string? origin, string relativePath)
+        => string.IsNullOrWhiteSpace(origin)
+            ? null
+            : $"{origin.TrimEnd('/')}/{relativePath.TrimStart('/')}";
 }

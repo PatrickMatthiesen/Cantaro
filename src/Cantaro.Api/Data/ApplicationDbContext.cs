@@ -97,6 +97,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.ConnectionState).HasMaxLength(32).HasDefaultValue("connected");
+            entity.Property(e => e.ReconnectReason).HasMaxLength(128);
+            entity.HasIndex(e => e.TokenRefreshLeaseExpiresAt);
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.ConnectedServiceAccounts)
@@ -259,6 +262,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.ImportedFromService).HasMaxLength(64);
 
             entity.HasOne(e => e.User)
                 .WithMany()
@@ -304,6 +308,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasOne(e => e.Playlist)
                 .WithMany(p => p.ServiceMappings)
                 .HasForeignKey(e => e.PlaylistId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ConnectedServiceAccount)
+                .WithMany(a => a.ServicePlaylistMappings)
+                .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

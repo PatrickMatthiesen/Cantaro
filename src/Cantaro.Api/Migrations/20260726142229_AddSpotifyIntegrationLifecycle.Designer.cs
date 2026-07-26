@@ -3,6 +3,7 @@ using System;
 using Cantaro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cantaro.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260726142229_AddSpotifyIntegrationLifecycle")]
+    partial class AddSpotifyIntegrationLifecycle
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -111,15 +114,6 @@ namespace Cantaro.Api.Migrations
                     b.Property<DateTime?>("TokenExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime?>("TokenRefreshLeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("TokenRefreshLeaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<long>("TokenVersion")
-                        .HasColumnType("bigint");
-
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -131,8 +125,6 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ExternalAccountId");
-
-                    b.HasIndex("TokenRefreshLeaseExpiresAt");
 
                     b.HasIndex("UserId", "Service")
                         .IsUnique();

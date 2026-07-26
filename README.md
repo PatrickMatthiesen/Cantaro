@@ -120,9 +120,37 @@ In production, the frontend is built and copied into the API container, which se
 Configure the OAuth applications with callback URLs based on the public HTTPS origin served by that proxy (replace `cantaro.example.com` with the real hostname):
 
 - YouTube/Google: `https://cantaro.example.com/api/platforms/youtube/callback`
+- Spotify: `https://cantaro.example.com/api/platforms/spotify/callback`
 - AniList: `https://cantaro.example.com/api/media/providers/anilist/callback`
 
-The redirect URLs must match exactly, including the `https` scheme and path. The reverse proxy must preserve the original host and send `X-Forwarded-Host` and `X-Forwarded-Proto: https` so Cantaro generates the same public callback URLs during OAuth authorization.
+The redirect URLs must match exactly, including the `https` scheme and path.
+Set the `CANTARO_HTTPS_BASE_URL` GitHub environment variable to the public
+HTTPS origin, for example `https://cantaro.example.com`. Cantaro uses that
+global origin when generating OAuth callbacks behind the HTTP reverse proxy.
+
+For Spotify development, register
+`http://127.0.0.1:5173/api/platforms/spotify/callback` in the Spotify app.
+Cantaro normally runs the frontend at `http://localhost:5173`; the Spotify
+platform hook selects that HTTP callback and changes `localhost` to
+`127.0.0.1` automatically. The integration uses the secure-backend
+Authorization Code flow and requests only
+`playlist-read-private`, `playlist-read-collaborative`, and
+`user-read-private`; it never requests email access. Configure
+`SpotifyClientId` and `SpotifyClientSecret` as Aspire secrets.
+
+The current Spotify integration is deliberately import-only. It refreshes
+provider observations when a playlist is imported again, keeps canonical
+Cantaro tracks separate from temporary Spotify metadata, attributes linked
+Spotify artwork and content in the UI, and deletes the connected user's
+Spotify account, imported playlists, mappings, and orphaned Spotify provider
+data on disconnect. Pushing Spotify-derived content to another provider is
+out of scope until that workflow receives a separate policy review.
+
+Normal CI uses representative HTTP fixtures and does not require Spotify
+credentials. A live smoke test must use a Spotify Development Mode app whose
+owner has Premium and whose test users are allowlisted; current limits vary by
+quota mode, so consult Spotify's current migration and changelog documentation
+instead of assuming Premium is required for every end user.
 
 Create a GitHub environment named `Production` and add these environment secrets:
 
@@ -130,8 +158,12 @@ Create a GitHub environment named `Production` and add these environment secrets
 - `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET`
 - `CANTARO_POSTGRES_PASSWORD`
 - `CANTARO_YOUTUBE_CLIENT_ID` and `CANTARO_YOUTUBE_CLIENT_SECRET`
+- `CANTARO_SPOTIFY_CLIENT_ID` and `CANTARO_SPOTIFY_CLIENT_SECRET`
 - `CANTARO_ANILIST_CLIENT_ID` and `CANTARO_ANILIST_CLIENT_SECRET`
 - `CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY`
+
+Add the environment variable `CANTARO_HTTPS_BASE_URL` with the public HTTPS
+origin, for example `https://cantaro.example.com`.
 
 Generate the JWT signing key from at least 32 bytes of cryptographically secure random data; do not use a password or memorable phrase. For example:
 

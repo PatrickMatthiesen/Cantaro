@@ -23,8 +23,6 @@ internal sealed class PlatformOAuthState
 [Authorize]
 public class PlatformsController : ControllerBase
 {
-    private const string ReconnectRequiredCode = "youtube_reconnect_required";
-
     private readonly IPlatformRegistry _platformRegistry;
     private readonly UserManager<User> _userManager;
     private readonly ILogger<PlatformsController> _logger;
@@ -46,7 +44,7 @@ public class PlatformsController : ControllerBase
     }
 
     [HttpGet("status")]
-    public async Task<ActionResult<ConnectedAccountDto>> GetStatus(string platformId)
+    public async Task<ActionResult<ConnectedAccountDto>> GetStatus(string platformId, CancellationToken cancellationToken)
     {
         if (!_platformRegistry.IsSupported(platformId))
         {
@@ -55,7 +53,8 @@ public class PlatformsController : ControllerBase
 
         var platform = _platformRegistry.GetRequired(platformId);
         var userId = await GetCurrentUserIdAsync();
-        var account = await platform.GetConnectedAccountAsync(userId);
+        var account = await platform.GetConnectedAccountAsync(userId, cancellationToken);
+        var needsReconnect = string.Equals(account?.ConnectionState, "reconnect_required", StringComparison.Ordinal);
 
         return Ok(new ConnectedAccountDto
         {
@@ -63,7 +62,9 @@ public class PlatformsController : ControllerBase
             DisplayName = account?.DisplayName,
             ExternalAccountId = account?.ExternalAccountId,
             ConnectedAt = account?.CreatedAt,
-            PlatformId = platform.PlatformId
+            PlatformId = platform.PlatformId,
+            ConnectionState = account?.ConnectionState ?? "disconnected",
+            NeedsReconnect = needsReconnect
         });
     }
 
@@ -78,7 +79,7 @@ public class PlatformsController : ControllerBase
         var normalizedPlatformId = platformId.ToLowerInvariant();
         var platform = _platformRegistry.GetRequired(normalizedPlatformId);
         var userId = await GetCurrentUserIdAsync();
-        var safeReturnRoute = SanitizeReturnUrl(route, defaultPath: $"/{normalizedPlatformId}");
+        var safeReturnRoute = SanitizeReturnUrl(route, defaultPath: $"/music/platforms/{normalizedPlatformId}");
 
         var statePayload = new PlatformOAuthState
         {
@@ -90,19 +91,32 @@ public class PlatformsController : ControllerBase
         };
 
         var state = _stateProtector.Protect(JsonSerializer.Serialize(statePayload));
-        var redirectUri = _urlResolver.GetCallbackUrl($"api/platforms/{normalizedPlatformId}/callback");
+        try
+        {
+            var redirectUri = platform.ResolveRedirectUri(
+                _urlResolver.GetCallbackUrls($"api/platforms/{normalizedPlatformId}/callback"));
 
-        var authUrl = platform.GetAuthorizationUrl(redirectUri, state);
-        return Redirect(authUrl);
+            var authUrl = platform.GetAuthorizationUrl(redirectUri, state);
+            return Redirect(authUrl);
+        }
+        catch (PlatformApiException ex)
+        {
+            return PlatformError(ex);
+        }
     }
 
     [HttpGet("callback")]
     [AllowAnonymous]
-    public async Task<ActionResult> Callback(string platformId, [FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error)
+    public async Task<ActionResult> Callback(
+        string platformId,
+        [FromQuery] string? code,
+        [FromQuery] string? state,
+        [FromQuery] string? error,
+        CancellationToken cancellationToken)
     {
         var normalizedPlatformId = platformId.ToLowerInvariant();
         var frontendUrl = _urlResolver.GetFrontendUrl();
-        var defaultPlatformPath = $"/{normalizedPlatformId}";
+        var defaultPlatformPath = $"/music/platforms/{normalizedPlatformId}";
 
         if (!_platformRegistry.IsSupported(normalizedPlatformId))
         {
@@ -147,9 +161,10 @@ public class PlatformsController : ControllerBase
             }
 
             var returnUrl = SanitizeReturnUrl(payload.ReturnUrl, defaultPath: defaultPlatformPath);
-            var redirectUri = _urlResolver.GetCallbackUrl($"api/platforms/{normalizedPlatformId}/callback");
+            var redirectUri = platform.ResolveRedirectUri(
+                _urlResolver.GetCallbackUrls($"api/platforms/{normalizedPlatformId}/callback"));
 
-            await platform.ExchangeCodeAndSaveAsync(payload.UserId, code, redirectUri);
+            await platform.ExchangeCodeAndSaveAsync(payload.UserId, code, redirectUri, cancellationToken);
 
             _logger.LogInformation("Successfully connected {Platform} account for user {UserId}", normalizedPlatformId, payload.UserId);
 
@@ -161,6 +176,11 @@ public class PlatformsController : ControllerBase
             _logger.LogWarning(ex, "Invalid or tampered platform OAuth state");
             return Redirect($"{frontendUrl}{defaultPlatformPath}?error=invalid_state");
         }
+        catch (PlatformApiException ex)
+        {
+            _logger.LogWarning(ex, "{Platform} authorization failed with {Code}", normalizedPlatformId, ex.Code);
+            return Redirect($"{frontendUrl}{defaultPlatformPath}?error={Uri.EscapeDataString(ex.Code)}");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to exchange {Platform} authorization code", normalizedPlatformId);
@@ -169,7 +189,7 @@ public class PlatformsController : ControllerBase
     }
 
     [HttpPost("disconnect")]
-    public async Task<ActionResult> Disconnect(string platformId)
+    public async Task<ActionResult> Disconnect(string platformId, CancellationToken cancellationToken)
     {
         if (!_platformRegistry.IsSupported(platformId))
         {
@@ -178,7 +198,7 @@ public class PlatformsController : ControllerBase
 
         var platform = _platformRegistry.GetRequired(platformId);
         var userId = await GetCurrentUserIdAsync();
-        await platform.DisconnectAsync(userId);
+        await platform.DisconnectAsync(userId, cancellationToken);
 
         _logger.LogInformation("Disconnected {Platform} account for user {UserId}", platform.PlatformId, userId);
 
@@ -186,7 +206,9 @@ public class PlatformsController : ControllerBase
     }
 
     [HttpGet("playlists")]
-    public async Task<ActionResult<List<PlatformPlaylistDto>>> GetPlaylists(string platformId)
+    public async Task<ActionResult<List<PlatformPlaylistDto>>> GetPlaylists(
+        string platformId,
+        CancellationToken cancellationToken)
     {
         if (!_platformRegistry.IsSupported(platformId))
         {
@@ -197,8 +219,12 @@ public class PlatformsController : ControllerBase
         {
             var platform = _platformRegistry.GetRequired(platformId);
             var userId = await GetCurrentUserIdAsync();
-            var playlists = await platform.GetPlaylistsAsync(userId);
+            var playlists = await platform.GetPlaylistsAsync(userId, cancellationToken);
             return Ok(playlists);
+        }
+        catch (PlatformApiException ex)
+        {
+            return PlatformError(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -209,14 +235,17 @@ public class PlatformsController : ControllerBase
             _logger.LogWarning(ex, "{Platform} token is expired or revoked for playlist fetch", platformId);
             return Conflict(new
             {
-                code = ReconnectRequiredCode,
+                code = "platform_reconnect_required",
                 error = "Your YouTube connection expired. Reconnect YouTube to continue browsing playlists."
             });
         }
     }
 
     [HttpGet("playlists/{playlistId}/songs")]
-    public async Task<ActionResult<List<PlatformSongDto>>> GetPlaylistSongs(string platformId, string playlistId)
+    public async Task<ActionResult<List<PlatformSongDto>>> GetPlaylistSongs(
+        string platformId,
+        string playlistId,
+        CancellationToken cancellationToken)
     {
         if (!_platformRegistry.IsSupported(platformId))
         {
@@ -232,8 +261,12 @@ public class PlatformsController : ControllerBase
         try
         {
             var userId = await GetCurrentUserIdAsync();
-            var items = await platform.GetPlaylistSongsAsync(userId, playlistId);
+            var items = await platform.GetPlaylistSongsAsync(userId, playlistId, cancellationToken);
             return Ok(items);
+        }
+        catch (PlatformApiException ex)
+        {
+            return PlatformError(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -244,7 +277,7 @@ public class PlatformsController : ControllerBase
             _logger.LogWarning(ex, "{Platform} token is expired or revoked for playlist item fetch", platformId);
             return Conflict(new
             {
-                code = ReconnectRequiredCode,
+                code = "platform_reconnect_required",
                 error = "Your YouTube connection expired. Reconnect YouTube to continue browsing playlists."
             });
         }
@@ -279,5 +312,28 @@ public class PlatformsController : ControllerBase
     private static bool IsInvalidGrant(TokenResponseException exception)
     {
         return string.Equals(exception.Error?.Error, "invalid_grant", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private ObjectResult PlatformError(PlatformApiException exception)
+    {
+        _logger.LogWarning(
+            exception,
+            "Platform request failed with {Code} and HTTP {StatusCode}",
+            exception.Code,
+            exception.StatusCode);
+
+        if (exception.RetryAfter is { } retryAfter)
+        {
+            Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+        }
+
+        return StatusCode(exception.StatusCode, new
+        {
+            code = exception.Code,
+            error = exception.Message,
+            retryAfterSeconds = exception.RetryAfter is null
+                ? (int?)null
+                : Math.Max(1, (int)Math.Ceiling(exception.RetryAfter.Value.TotalSeconds))
+        });
     }
 }

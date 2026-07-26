@@ -7,6 +7,8 @@ public class ConnectedAccountDto
     public string? DisplayName { get; set; }
     public string? ExternalAccountId { get; set; }
     public DateTime? ConnectedAt { get; set; }
+    public string ConnectionState { get; set; } = "disconnected";
+    public bool NeedsReconnect { get; set; }
 }
 
 public class PlatformPlaylistDto
@@ -17,6 +19,8 @@ public class PlatformPlaylistDto
     public string? ThumbnailUrl { get; set; }
     public int ItemCount { get; set; }
     public DateTimeOffset? PublishedAt { get; set; }
+    public string? ExternalUrl { get; set; }
+    public string? OwnerName { get; set; }
 }
 
 public class PlatformSongDto
@@ -28,4 +32,9 @@ public class PlatformSongDto
     public string? ArtistName { get; set; }
     public int Index { get; set; }
     public DateTimeOffset? PublishedAt { get; set; }
+    public string? ExternalUrl { get; set; }
+    public string? AlbumName { get; set; }
+    public string? AlbumUrl { get; set; }
+    public string? ArtistUrl { get; set; }
+    public int? DurationSeconds { get; set; }
 }

@@ -90,12 +90,13 @@ public class MediaProvidersController(
             CreatedAtTicksUtc = DateTime.UtcNow.Ticks
         };
 
-        var redirectUri = _urlResolver.GetCallbackUrl($"api/media/providers/{normalizedProviderId}/callback");
         var protectedState = _stateProtector.Protect(JsonSerializer.Serialize(state));
 
         try
         {
             var provider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
+            var redirectUri = provider.ResolveRedirectUri(
+                _urlResolver.GetCallbackUrls($"api/media/providers/{normalizedProviderId}/callback"));
             var authorizationUrl = provider.GetAuthorizationUrl(redirectUri, protectedState, codeChallenge);
             return Redirect(authorizationUrl);
         }
@@ -145,8 +146,9 @@ public class MediaProvidersController(
                 return Redirect($"{frontendUrl}/?error=state_expired&provider={normalizedProviderId}");
             }
 
-            var redirectUri = _urlResolver.GetCallbackUrl($"api/media/providers/{normalizedProviderId}/callback");
             var provider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
+            var redirectUri = provider.ResolveRedirectUri(
+                _urlResolver.GetCallbackUrls($"api/media/providers/{normalizedProviderId}/callback"));
             await provider.ExchangeCodeAndSaveAsync(payload.UserId, code, redirectUri, payload.CodeVerifier, cancellationToken);
 
             var separator = payload.ReturnUrl.Contains('?') ? '&' : '?';
