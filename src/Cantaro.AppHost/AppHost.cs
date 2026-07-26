@@ -64,6 +64,7 @@ if (builder.ExecutionContext.IsPublishMode)
 {
     var frontendHttpsBaseUrl = builder.AddParameter("FrontendHttpsBaseUrl");
     api.WithEnvironment("Frontend:HttpsBaseUrl", frontendHttpsBaseUrl);
+    api.WithEnvironment("Frontend:TrustedOrigins:0", frontendHttpsBaseUrl);
 
     api.PublishAsDockerComposeService((_, service) =>
     {
