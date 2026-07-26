@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Cantaro.Api.Services;
@@ -11,7 +13,17 @@ public static partial class TrackTextNormalizer
             return string.Empty;
         }
 
-        var normalized = value.ToLowerInvariant();
+        var decomposed = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var lettersAndSpacingMarks = new StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            {
+                lettersAndSpacingMarks.Append(character);
+            }
+        }
+
+        var normalized = lettersAndSpacingMarks.ToString().Normalize(NormalizationForm.FormC);
         normalized = BracketedNoiseRegex().Replace(normalized, " ");
         normalized = NoiseTokenRegex().Replace(normalized, " ");
         normalized = NonAlphaNumericRegex().Replace(normalized, " ");

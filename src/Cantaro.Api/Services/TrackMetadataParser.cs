@@ -29,7 +29,8 @@ public static partial class TrackMetadataParser
     public static ParsedTrackMetadata Parse(string? rawTitle, string? rawArtist)
     {
         var titleSemantics = ExtractTitleSemantics(rawTitle);
-        var cleanedTitle = StripTrailingSoundtrackContext(CleanupTitle(rawTitle));
+        var cleanedTitle = StripTrailingSoundtrackContext(
+            StripTrailingContextSegments(CleanupTitle(rawTitle)));
         var isTopicChannel = IsTopicChannel(rawArtist);
         var cleanedArtist = CleanupArtist(rawArtist);
 
@@ -148,20 +149,21 @@ public static partial class TrackMetadataParser
         string? artist,
         IReadOnlyList<string> featuredArtists)
     {
-        var credits = SplitXCollaborators(StripFeaturedArtists(artist)).Cast<string?>().ToList();
+        var credits = SplitArtistCollaborators(StripFeaturedArtists(artist)).Cast<string?>().ToList();
+        credits.AddRange(ExtractFeaturedArtistNames(artist));
         credits.AddRange(featuredArtists);
 
         return NormalizeArtistCredits(credits);
     }
 
-    private static IReadOnlyList<string> SplitXCollaborators(string? artist)
+    private static IReadOnlyList<string> SplitArtistCollaborators(string? artist)
     {
         if (string.IsNullOrWhiteSpace(artist))
         {
             return [];
         }
 
-        return SpacedXCollaboratorRegex().Split(artist)
+        return ArtistCollaboratorSeparatorRegex().Split(artist)
             .Select(CleanupArtist)
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value!)
@@ -394,7 +396,7 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"^(?:OST|(?i:(?:original|official)(?:\s+motion\s+picture)?\s+soundtrack|video\s+game\s+soundtrack))$")]
     private static partial Regex SoundtrackContextRegex();
 
-    [GeneratedRegex(@"\b(official|video|audio|lyrics|lyric|visualizer|hq|hd|copyright\s*free|future\s*bass|ncs)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(official|video|audio|lyrics|lyric|visualizer|hq|hd|copyright\s*free|future\s*bass|ncs|worlds\s+\d{4})\b", RegexOptions.IgnoreCase)]
     private static partial Regex NoiseContentRegex();
 
     [GeneratedRegex(@"\b(speed\s*up|sped\s*up|nightcore|slowed(?:\s*\+\s*reverb)?)\b", RegexOptions.IgnoreCase)]
@@ -409,8 +411,8 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"(?:feat|ft|featuring)\.?\s+(?<artists>.*?)(?=\s+-\s+|[\[\]\(\)\|]|$)", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedArtistCaptureRegex();
 
-    [GeneratedRegex(@"\s+[x×]\s+", RegexOptions.IgnoreCase)]
-    private static partial Regex SpacedXCollaboratorRegex();
+    [GeneratedRegex(@"\s*(?:,|&|\band\b)\s*|\s+[x×]\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex ArtistCollaboratorSeparatorRegex();
 
     [GeneratedRegex(@"[\[(]\s*(feat|ft|featuring)\.?\s+[^\])]*[\])]", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedParentheticalRegex();
