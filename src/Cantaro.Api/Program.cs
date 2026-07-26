@@ -22,6 +22,7 @@ var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(e
 builder.AddServiceDefaults();
 
 // Add PostgreSQL database context via Aspire defaults.
+builder.Configuration.ConfigurePostgresConnection("cantaro-db");
 builder.AddNpgsqlDbContext<ApplicationDbContext>(connectionName: "cantaro-db");
 builder.AddS3ObjectStorage("avatars");
 

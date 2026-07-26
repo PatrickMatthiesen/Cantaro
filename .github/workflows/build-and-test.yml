@@ -31,9 +31,12 @@ jobs:
           filters: |
             backend:
               - '.github/workflows/build-and-test.yml'
+              - '.github/workflows/music-relation-benchmarks.yml'
               - 'Cantaro.slnx'
               - 'NuGet.config'
               - 'dotnet-tools.json'
+              - 'benchmarks/**/*.cs'
+              - 'benchmarks/**/*.csproj'
               - 'src/**/*.cs'
               - 'src/**/*.csproj'
               - 'tests/**/*.cs'
