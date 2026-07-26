@@ -1,0 +1,62 @@
+name: Music relation benchmarks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: PostgreSQL relation benchmarks
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cantaro_benchmark
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cantaro_benchmark"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore benchmark
+        run: dotnet restore benchmarks/Cantaro.Benchmarks/Cantaro.Benchmarks.csproj
+
+      - name: Build benchmark
+        run: dotnet build benchmarks/Cantaro.Benchmarks/Cantaro.Benchmarks.csproj --configuration Release --no-restore
+
+      - name: Run benchmark
+        env:
+          CANTARO_BENCHMARK_POSTGRES: Host=127.0.0.1;Port=5432;Database=cantaro_benchmark;Username=postgres;Password=postgres;GSS Encryption Mode=Disable
+        run: >-
+          dotnet run
+          --project benchmarks/Cantaro.Benchmarks/Cantaro.Benchmarks.csproj
+          --configuration Release
+          --no-build
+          --
+          --filter '*MusicRelationBenchmarks*'
+          --artifacts ./BenchmarkDotNet.Artifacts
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-relation-benchmarks
+          path: BenchmarkDotNet.Artifacts
+          if-no-files-found: warn

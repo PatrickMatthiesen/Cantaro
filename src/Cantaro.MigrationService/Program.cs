@@ -1,3 +1,4 @@
+using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.MigrationService;
@@ -11,6 +12,7 @@ builder.Services.AddHostedService<Worker>();
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing.AddSource(Worker.ActivitySourceName));
 
+builder.Configuration.ConfigurePostgresConnection("cantaro-db");
 builder.AddNpgsqlDbContext<ApplicationDbContext>("cantaro-db");
 builder.Services
     .AddIdentityCore<User>(options =>

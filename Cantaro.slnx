@@ -10,4 +10,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Cantaro.Api.Tests/Cantaro.Api.Tests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Cantaro.Benchmarks/Cantaro.Benchmarks.csproj" />
+  </Folder>
 </Solution>
