@@ -142,6 +142,31 @@ public class FrontendUrlResolverTests
     }
 
     [Fact]
+    public void GetCallbackUrls_TrustsConfiguredDevLocalhostOrigin()
+    {
+        var resolver = CreateResolver(
+            context =>
+            {
+                context.Request.Scheme = "https";
+                context.Request.Host = new HostString("localhost", 7203);
+                context.Request.Headers.Origin = "https://cantaro.dev.localhost:5173";
+            },
+            new Dictionary<string, string?>
+            {
+                ["Frontend:TrustedHostSuffixes:0"] = ".dev.localhost"
+            });
+
+        var callbackUrls = resolver.GetCallbackUrls("api/platforms/spotify/callback");
+
+        Assert.Equal(
+            "https://cantaro.dev.localhost:5173/api/platforms/spotify/callback",
+            callbackUrls.Preferred);
+        Assert.Equal(
+            "https://cantaro.dev.localhost:5173/api/platforms/spotify/callback",
+            callbackUrls.Https);
+    }
+
+    [Fact]
     public void GetFrontendUrl_DoesNotTrustLoopbackOriginUnlessConfigured()
     {
         var resolver = CreateResolver(

@@ -42,12 +42,25 @@ public class YouTubePlaylistSyncService
         string youtubePlaylistId,
         CancellationToken cancellationToken)
     {
+        return await SyncYouTubePlaylistAsync(
+            userId,
+            youtubePlaylistId,
+            reportProgressAsync: null,
+            cancellationToken);
+    }
+
+    public async Task<Guid> SyncYouTubePlaylistAsync(
+        int userId,
+        string youtubePlaylistId,
+        Func<PlatformSyncProgress, CancellationToken, Task>? reportProgressAsync,
+        CancellationToken cancellationToken)
+    {
         _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId}", youtubePlaylistId, userId);
 
         // Use execution strategy to handle retries with transactions
         var strategy = _dbContext.Database.CreateExecutionStrategy();
 
-        return await strategy.ExecuteAsync(async () =>
+        var importResult = await strategy.ExecuteAsync(async () =>
         {
             using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -110,7 +123,7 @@ public class YouTubePlaylistSyncService
                 // Step 4: Process each video into an observation and playlist entry
                 int failedTracks = 0;
                 var playlistEntries = new List<PlaylistEntry>();
-                var observationIdsToProcess = new HashSet<Guid>();
+                var observationsToProcess = new Dictionary<Guid, YouTubeObservationWorkItem>();
 
                 for (int i = 0; i < playlistItems.Count; i++)
                 {
@@ -119,7 +132,11 @@ public class YouTubePlaylistSyncService
                     try
                     {
                         var observation = await GetOrCreateObservationForVideoAsync(item, cancellationToken);
-                        observationIdsToProcess.Add(observation.Id);
+                        observationsToProcess[observation.Id] = observationsToProcess.TryGetValue(
+                            observation.Id,
+                            out var existingWorkItem)
+                            ? existingWorkItem with { OccurrenceCount = existingWorkItem.OccurrenceCount + 1 }
+                            : new YouTubeObservationWorkItem(observation.Id, observation.Title, 1);
 
                         var entry = new PlaylistEntry
                         {
@@ -147,11 +164,6 @@ public class YouTubePlaylistSyncService
 
                 await _dbContext.SaveChangesAsync(cancellationToken);
 
-                foreach (var observationId in observationIdsToProcess)
-                {
-                    await _trackMatchingService.ProcessObservationAsync(observationId, cancellationToken);
-                }
-
                 // Step 5: Create or update ServicePlaylistMapping
                 if (existingMapping != null)
                 {
@@ -177,12 +189,11 @@ public class YouTubePlaylistSyncService
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
 
-                _logger.LogInformation(
-                    "Successfully synced YouTube playlist {YouTubePlaylistId} to Cantaro playlist {PlaylistId}. " +
-                    "Total items: {TotalItems}, Failed: {FailedItems}",
-                    youtubePlaylistId, playlist.Id, playlistItems.Count, failedTracks);
-
-                return playlist.Id;
+                return new YouTubePlaylistImportResult(
+                    playlist.Id,
+                    playlistItems.Count,
+                    failedTracks,
+                    observationsToProcess.Values.ToArray());
             }
             catch (Exception ex)
             {
@@ -192,6 +203,37 @@ public class YouTubePlaylistSyncService
                 throw;
             }
         });
+
+        var processedSongCount = importResult.FailedTrackCount;
+        foreach (var observation in importResult.Observations)
+        {
+            if (reportProgressAsync != null)
+            {
+                await reportProgressAsync(
+                    new PlatformSyncProgress(processedSongCount, observation.Title),
+                    cancellationToken);
+            }
+
+            await _trackMatchingService.ProcessObservationAsync(observation.ObservationId, cancellationToken);
+            processedSongCount += observation.OccurrenceCount;
+        }
+
+        if (reportProgressAsync != null)
+        {
+            await reportProgressAsync(
+                new PlatformSyncProgress(processedSongCount, CurrentSongName: null),
+                cancellationToken);
+        }
+
+        _logger.LogInformation(
+            "Successfully synced YouTube playlist {YouTubePlaylistId} to Cantaro playlist {PlaylistId}. " +
+            "Total items: {TotalItems}, Failed: {FailedItems}",
+            youtubePlaylistId,
+            importResult.PlaylistId,
+            importResult.TotalItemCount,
+            importResult.FailedTrackCount);
+
+        return importResult.PlaylistId;
     }
 
     /// <summary>
@@ -297,4 +339,15 @@ public class YouTubePlaylistSyncService
 
         return ex.GetBaseException() is DbException;
     }
+
+    private sealed record YouTubePlaylistImportResult(
+        Guid PlaylistId,
+        int TotalItemCount,
+        int FailedTrackCount,
+        IReadOnlyList<YouTubeObservationWorkItem> Observations);
+
+    private sealed record YouTubeObservationWorkItem(
+        Guid ObservationId,
+        string Title,
+        int OccurrenceCount);
 }

@@ -61,6 +61,58 @@ public sealed class MusicSyncJobProcessorTests
     }
 
     [Fact]
+    public async Task ProcessNextAsync_PersistsSongProgressWhilePlaylistIsStillRunning()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(databaseName)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        dbContext.MusicSyncJobs.Add(new MusicSyncJob
+        {
+            Id = Guid.NewGuid(),
+            UserId = 42,
+            Service = "test",
+            PlaylistsJson = JsonSerializer.Serialize(
+                new[] { new MusicSyncJobPlaylist("one", "First", 3) }),
+            Status = MusicSyncJobStatuses.Queued,
+            PlaylistCount = 1,
+            SongCount = 3,
+            EstimatedNewSongCount = 3,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+
+        var platform = new BlockingProgressPlatformService();
+        var processor = new MusicSyncJobProcessor(
+            dbContext,
+            new PlatformRegistry([platform]),
+            new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance);
+
+        var processing = processor.ProcessNextAsync(CancellationToken.None);
+        await platform.ProgressPersisted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await using (var observer = new ApplicationDbContext(options))
+        {
+            var running = await observer.MusicSyncJobs.AsNoTracking().SingleAsync();
+            Assert.Equal(MusicSyncJobStatuses.Running, running.Status);
+            Assert.Equal(0, running.ProcessedPlaylistCount);
+            Assert.Equal(2, running.ProcessedSongCount);
+            Assert.Equal("First", running.CurrentPlaylistName);
+            Assert.Equal("Currently matching", running.CurrentSongName);
+        }
+
+        platform.AllowCompletion.TrySetResult();
+        Assert.True(await processing);
+        var completed = await dbContext.MusicSyncJobs.SingleAsync();
+        Assert.Equal(3, completed.ProcessedSongCount);
+        Assert.Null(completed.CurrentPlaylistName);
+        Assert.Null(completed.CurrentSongName);
+    }
+
+    [Fact]
     public void ThrottleService_ExpiresOldUsageAndReportsRemainingCapacity()
     {
         var throttle = new MusicSyncThrottleService();
@@ -191,6 +243,46 @@ public sealed class MusicSyncJobProcessorTests
             }
 
             return Task.FromResult(Guid.NewGuid());
+        }
+
+        public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId) => throw new NotSupportedException();
+        public string GetAuthorizationUrl(string redirectUri, string state) => throw new NotSupportedException();
+        public Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(int userId, string authorizationCode, string redirectUri) => throw new NotSupportedException();
+        public Task DisconnectAsync(int userId) => throw new NotSupportedException();
+        public Task<IReadOnlyList<PlatformPlaylistDto>> GetPlaylistsAsync(int userId) => throw new NotSupportedException();
+        public Task<IReadOnlyList<PlatformSongDto>> GetPlaylistSongsAsync(int userId, string playlistId) => throw new NotSupportedException();
+        public bool TryValidatePlaylistId(string playlistId, out string? error)
+        {
+            error = null;
+            return true;
+        }
+    }
+
+    private sealed class BlockingProgressPlatformService : IPlatformService
+    {
+        public string PlatformId => "test";
+        public TaskCompletionSource ProgressPersisted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource AllowCompletion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<Guid> SyncPlaylistAsync(
+            int userId,
+            string playlistId,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public async Task<Guid> SyncPlaylistAsync(
+            int userId,
+            string playlistId,
+            Func<PlatformSyncProgress, CancellationToken, Task> reportProgressAsync,
+            CancellationToken cancellationToken)
+        {
+            await reportProgressAsync(
+                new PlatformSyncProgress(2, "Currently matching"),
+                cancellationToken);
+            ProgressPersisted.TrySetResult();
+            await AllowCompletion.Task.WaitAsync(cancellationToken);
+            return Guid.NewGuid();
         }
 
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId) => throw new NotSupportedException();

@@ -11,6 +11,7 @@ public class TrackMetadataParserTests
     [InlineData("NURKO feat. Valerie Broussard - The Longest Night", "Proximity", "The Longest Night", "NURKO feat. Valerie Broussard", "The Longest Night", "NURKO feat. Valerie Broussard")]
     [InlineData("Superfruit - Guy.exe speed up", "Iztuwa", "Guy.exe", "Superfruit", "Guy.exe", "Superfruit")]
     [InlineData("Riptide | South Arcade - Topic", "South Arcade - Topic", "Riptide", "South Arcade", "Riptide", "South Arcade")]
+    [InlineData("Maybe IDK (Audio)", "Jon Bellion", "Maybe IDK", "Jon Bellion", "Maybe IDK", "Jon Bellion")]
     public void Parse_UsesRepresentativeQueueExamples(
         string rawTitle,
         string rawArtist,

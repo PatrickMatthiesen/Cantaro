@@ -23,19 +23,21 @@ export interface PlaylistSyncProgress {
   errorMessage?: string;
   processedPlaylistCount?: number;
   processedSongCount?: number;
+  currentPlaylistName?: string;
+  currentSongName?: string;
   focusActivity?: boolean;
 }
 
-export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = false): PlaylistSyncProgress {
-  const phase: PlaylistSyncProgressPhase = job.status === 'completed'
-    ? 'completed'
-    : job.status === 'failed'
-      ? 'failed'
-      : 'syncing';
+function progressPhase(status: MusicSyncJobResponse['status']): PlaylistSyncProgressPhase {
+  if (status === 'completed') return 'completed';
+  if (status === 'failed') return 'failed';
+  return 'syncing';
+}
 
+export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = false): PlaylistSyncProgress {
   return {
     jobId: job.id,
-    phase,
+    phase: progressPhase(job.status),
     sourcePlatformId: job.service as PlatformId,
     playlistCount: job.playlistCount,
     songCount: job.songCount,
@@ -48,6 +50,8 @@ export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = f
     errorMessage: job.errorMessage ?? undefined,
     processedPlaylistCount: job.processedPlaylistCount,
     processedSongCount: job.processedSongCount,
+    currentPlaylistName: job.currentPlaylistName ?? undefined,
+    currentSongName: job.currentSongName ?? undefined,
     focusActivity,
   };
 }

@@ -58,6 +58,7 @@ export interface MusicSyncJobResponse {
   failureCount: number;
   playlistNames: string[];
   currentPlaylistName?: string | null;
+  currentSongName?: string | null;
   errorMessage?: string | null;
   createdAt: string;
   updatedAt: string;

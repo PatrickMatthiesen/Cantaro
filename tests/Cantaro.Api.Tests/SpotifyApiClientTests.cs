@@ -61,7 +61,7 @@ public sealed class SpotifyApiClientTests
                         "id": "track-1",
                         "name": "Track one",
                         "duration_ms": 245000,
-                        "artists": [{ "name": "Artist one" }],
+                        "artists": [{ "name": "Artist one" }, { "name": "Artist two" }],
                         "album": {
                           "name": "Album one",
                           "images": [{ "url": "https://images.spotify.test/album.jpg" }],
@@ -92,7 +92,9 @@ public sealed class SpotifyApiClientTests
 
         var track = Assert.Single(tracks);
         Assert.Equal("track-1", track.Id);
-        Assert.Equal("Artist one", track.Artist);
+        Assert.Equal("Artist one, Artist two", track.Artist);
+        Assert.Equal(["Artist one", "Artist two"], track.ArtistNames);
+        Assert.Equal("TESTISRC1", track.Isrc);
         Assert.Equal(245, track.DurationSeconds);
         Assert.Equal(0, track.Position);
 

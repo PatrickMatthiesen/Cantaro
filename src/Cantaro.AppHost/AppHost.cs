@@ -58,6 +58,7 @@ if (builder.ExecutionContext.IsRunMode)
 {
     api.WithEnvironment("Frontend:TrustLoopbackOrigins", "true");
     api.WithEnvironment("Frontend:TrustedHostSuffixes:0", ".ts.net");
+    api.WithEnvironment("Frontend:TrustedHostSuffixes:1", ".dev.localhost");
 }
 
 if (builder.ExecutionContext.IsPublishMode)
@@ -80,7 +81,7 @@ api.WithReference(migrationService)
 
 if (builder.ExecutionContext.IsPublishMode)
 {
-    api.WithHttpsEndpoint(port: 7689, name: "http")
+    api.WithHttpsEndpoint(port: 7689, name: "https")
         .WithExternalHttpEndpoints();
 }
 
@@ -88,7 +89,7 @@ if (builder.ExecutionContext.IsPublishMode)
 #pragma warning disable ASPIRECERTIFICATES001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var frontend = builder.AddViteApp("web", "../Cantaro.Web")
     .WithBun()
-    .WithHttpEndpoint(port: 5173)
+    .WithHttpEndpoint(port: 5173, name: "http")
     .WithReference(api)
     .WaitFor(api)
     .WithHttpsDeveloperCertificate();
@@ -125,6 +126,7 @@ api.PublishWithContainerFiles(frontend, "/app/wwwroot");
 // Keep the Vite development endpoint available to the API only during local runs.
 if (builder.ExecutionContext.IsRunMode)
 {
+    frontend.WithEndpoint("http", endpoint => endpoint.TargetHost = "cantaro.dev.localhost");
     api.WithReference(frontend);
 }
 

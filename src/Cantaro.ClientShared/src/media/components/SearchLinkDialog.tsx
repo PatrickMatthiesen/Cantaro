@@ -236,7 +236,7 @@ function SearchResultPoster({ posterUrl, title }: Pick<MediaProviderSearchResult
                 />
             ) : (
                 <div className="flex h-full w-full items-center justify-center">
-                    <MediaProviderIcon providerId="anilist" className="h-6 w-6" aria-hidden />
+                    <MediaProviderIcon providerId="anilist" className="h-8 w-8" aria-hidden />
                 </div>
             )}
         </div>

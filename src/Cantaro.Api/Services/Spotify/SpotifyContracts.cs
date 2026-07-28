@@ -16,6 +16,7 @@ public sealed record SpotifyTrackSnapshot(
     string Id,
     string Name,
     string Artist,
+    IReadOnlyList<string> ArtistNames,
     string? AlbumName,
     string? ImageUrl,
     string ExternalUrl,
