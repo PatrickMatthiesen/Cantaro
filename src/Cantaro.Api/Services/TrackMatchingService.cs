@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
+using Cantaro.Api.Services.Spotify;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -152,6 +153,38 @@ public class TrackMatchingService
             return observation;
         }
 
+        var trustedSpotifyTrackId = await FindUniqueTrustedSpotifyTrackAsync(observation, cancellationToken);
+        if (trustedSpotifyTrackId != null)
+        {
+            if (observation.Candidates.Count > 0)
+            {
+                _dbContext.TrackResolutionCandidates.RemoveRange(observation.Candidates);
+                observation.Candidates.Clear();
+            }
+
+            await EnsureSourceMappingAsync(
+                trustedSpotifyTrackId.Value,
+                observation.SourceType,
+                observation.ExternalId,
+                cancellationToken);
+
+            observation.TrackId = trustedSpotifyTrackId;
+            observation.MatchStatus = TrackMatchingStatuses.Matched;
+            observation.ResolutionNotes = "Matched the unique trusted Spotify track by exact title and artist credits with compatible duration.";
+            observation.AcceptedCandidateId = null;
+            PersistObservationDiagnostics(
+                observation,
+                CreateObservationDiagnostics(
+                    TrackMetadataParser.Parse(observation.Title, observation.Artist),
+                    decisionReason: observation.ResolutionNotes,
+                    topScore: 1m,
+                    secondDistinctScore: null,
+                    distinctClusterCount: 1));
+            await UpdatePlaylistEntriesForObservationAsync(observation.Id, trustedSpotifyTrackId, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return observation;
+        }
+
         try
         {
             if (observation.Candidates.Count > 0)
@@ -281,6 +314,63 @@ public class TrackMatchingService
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
         }
+    }
+
+    private async Task<Guid?> FindUniqueTrustedSpotifyTrackAsync(
+        TrackObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.SourceType == SpotifyService.ServiceName)
+        {
+            return null;
+        }
+
+        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var normalizedTitle = TrackTextNormalizer.Normalize(parsedObservation.SearchTitle);
+        if (string.IsNullOrWhiteSpace(normalizedTitle) || observation.DurationSeconds == null)
+        {
+            return null;
+        }
+
+        var minimumDuration = Math.Max(
+            0,
+            observation.DurationSeconds.Value - _options.AutoMatchDurationToleranceSeconds);
+        var maximumDuration =
+            observation.DurationSeconds.Value + _options.AutoMatchDurationToleranceSeconds;
+        var candidates = await _dbContext.TrackObservations
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.SourceType == SpotifyService.ServiceName
+                && candidate.TrackId != null
+                && candidate.NormalizedTitle == normalizedTitle
+                && candidate.DurationSeconds >= minimumDuration
+                && candidate.DurationSeconds <= maximumDuration
+                && _dbContext.TrackSourceIds.Any(sourceId =>
+                    sourceId.SourceType == SpotifyService.ServiceName
+                    && sourceId.ExternalId == candidate.ExternalId
+                    && sourceId.TrackId == candidate.TrackId
+                    && sourceId.IsOfficial == true))
+            .Take(25)
+            .ToListAsync(cancellationToken);
+
+        var matchingTrackIds = candidates
+            .Where(candidate =>
+            {
+                var parsedCandidate = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
+                return TrackTextNormalizer.AreEquivalentTitles(
+                        parsedObservation.SearchTitle,
+                        parsedCandidate.SearchTitle)
+                    && TrackMetadataParser.HaveEquivalentArtistCredits(
+                        parsedObservation,
+                        parsedCandidate,
+                        parsedCandidate.ArtistCredits);
+            })
+            .Select(candidate => candidate.TrackId!.Value)
+            .Distinct()
+            .Take(2)
+            .ToArray();
+
+        return matchingTrackIds.Length == 1 ? matchingTrackIds[0] : null;
     }
 
     private static IReadOnlyList<TrackMatchScoredCandidate> SelectDisplayedCandidates(

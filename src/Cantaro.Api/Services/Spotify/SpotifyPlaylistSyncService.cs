@@ -8,13 +8,13 @@ namespace Cantaro.Api.Services.Spotify;
 public sealed class SpotifyPlaylistSyncService(
     ApplicationDbContext dbContext,
     SpotifyService spotifyService,
-    TrackMatchingQueue matchingQueue,
+    SpotifyTrackResolver trackResolver,
     TimeProvider timeProvider,
     ILogger<SpotifyPlaylistSyncService> logger)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly SpotifyService _spotifyService = spotifyService;
-    private readonly TrackMatchingQueue _matchingQueue = matchingQueue;
+    private readonly SpotifyTrackResolver _trackResolver = trackResolver;
     private readonly TimeProvider _timeProvider = timeProvider;
     private readonly ILogger<SpotifyPlaylistSyncService> _logger = logger;
 
@@ -32,10 +32,9 @@ public sealed class SpotifyPlaylistSyncService(
             .Where(account => account.UserId == userId && account.Service == SpotifyService.ServiceName)
             .Select(account => account.Id)
             .SingleAsync(cancellationToken);
-        var observationIds = new HashSet<Guid>();
         var strategy = _dbContext.Database.CreateExecutionStrategy();
 
-        var playlistId = await strategy.ExecuteAsync(async () =>
+        var importResult = await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
             try
@@ -106,19 +105,31 @@ public sealed class SpotifyPlaylistSyncService(
                     .Select(group => group.First())
                     .ToList();
                 var entries = new List<PlaylistEntry>(uniqueTracks.Count);
+                var resolvedTrackIds = new HashSet<Guid>();
 
-                for (var position = 0; position < uniqueTracks.Count; position++)
+                foreach (var track in uniqueTracks)
                 {
-                    var track = uniqueTracks[position];
                     var observation = await UpsertObservationAsync(track, now, cancellationToken);
-                    observationIds.Add(observation.Id);
+                    var canonicalTrack = await _trackResolver.ResolveAsync(track, now, cancellationToken);
+                    observation.TrackId = canonicalTrack.Id;
+                    observation.MatchStatus = TrackMatchingStatuses.Matched;
+                    observation.AcceptedCandidateId = null;
+                    observation.LastMatchError = null;
+                    observation.ResolutionNotes = "Resolved directly from authoritative Spotify catalog metadata.";
+                    observation.UpdatedAt = now;
+
+                    if (!resolvedTrackIds.Add(canonicalTrack.Id))
+                    {
+                        continue;
+                    }
+
                     entries.Add(new PlaylistEntry
                     {
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
                         TrackObservationId = observation.Id,
-                        TrackId = observation.TrackId,
-                        Position = position,
+                        TrackId = canonicalTrack.Id,
+                        Position = entries.Count,
                         AddedAt = track.AddedAt ?? now,
                         SourceService = SpotifyService.ServiceName
                     });
@@ -127,7 +138,7 @@ public sealed class SpotifyPlaylistSyncService(
                 _dbContext.PlaylistEntries.AddRange(entries);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
-                return playlist.Id;
+                return (PlaylistId: playlist.Id, TrackCount: entries.Count);
             }
             catch
             {
@@ -136,18 +147,12 @@ public sealed class SpotifyPlaylistSyncService(
             }
         });
 
-        // Matching can perform network work and is intentionally queued only after commit.
-        foreach (var observationId in observationIds)
-        {
-            _matchingQueue.Enqueue(observationId);
-        }
-
         _logger.LogInformation(
             "Imported Spotify playlist {SpotifyPlaylistId} into Cantaro playlist {PlaylistId} with {TrackCount} tracks.",
             spotifyPlaylistId,
-            playlistId,
-            observationIds.Count);
-        return playlistId;
+            importResult.PlaylistId,
+            importResult.TrackCount);
+        return importResult.PlaylistId;
     }
 
     private async Task<TrackObservation> UpsertObservationAsync(
@@ -164,8 +169,11 @@ public sealed class SpotifyPlaylistSyncService(
         {
             SourceType = SpotifyService.ServiceName,
             ExternalId = track.Id,
+            SourceUrl = track.ExternalUrl,
             Title = track.Name,
             Artist = track.Artist,
+            Album = track.AlbumName,
+            Isrc = track.Isrc,
             OriginalTitle = track.Name,
             OriginalArtist = track.Artist,
             SearchTitle = track.Name,
@@ -188,7 +196,7 @@ public sealed class SpotifyPlaylistSyncService(
                 NormalizedTitle = TrackTextNormalizer.Normalize(track.Name),
                 NormalizedArtist = TrackTextNormalizer.Normalize(track.Artist),
                 DurationSeconds = track.DurationSeconds,
-                MatchStatus = TrackMatchingStatuses.Pending,
+                MatchStatus = TrackMatchingStatuses.Matched,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -204,12 +212,6 @@ public sealed class SpotifyPlaylistSyncService(
         observation.NormalizedArtist = TrackTextNormalizer.Normalize(track.Artist);
         observation.DurationSeconds = track.DurationSeconds;
         observation.UpdatedAt = now;
-        if (observation.MatchStatus != TrackMatchingStatuses.Matched)
-        {
-            observation.MatchStatus = TrackMatchingStatuses.Pending;
-            observation.ResolutionNotes = null;
-            observation.AcceptedCandidateId = null;
-        }
 
         return observation;
     }

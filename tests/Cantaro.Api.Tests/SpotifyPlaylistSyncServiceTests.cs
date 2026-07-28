@@ -83,20 +83,19 @@ public sealed class SpotifyPlaylistSyncServiceTests
             encryption,
             options,
             timeProvider);
-        var matchingQueue = new TrackMatchingQueue();
+        var trackResolver = new SpotifyTrackResolver(dbContext);
         var syncService = new SpotifyPlaylistSyncService(
             dbContext,
             spotifyService,
-            matchingQueue,
+            trackResolver,
             timeProvider,
             NullLogger<SpotifyPlaylistSyncService>.Instance);
 
         var playlistId = await syncService.SyncPlaylistAsync(userId, "playlist1", CancellationToken.None);
-        var firstObservationId = await dbContext.PlaylistEntries
+        var firstResolution = await dbContext.PlaylistEntries
             .Where(entry => entry.PlaylistId == playlistId)
-            .Select(entry => entry.TrackObservationId)
+            .Select(entry => new { entry.TrackObservationId, entry.TrackId })
             .SingleAsync();
-        matchingQueue.Complete((await matchingQueue.DequeueAsync(CancellationToken.None)));
 
         var refreshedPlaylistId = await syncService.SyncPlaylistAsync(
             userId,
@@ -120,12 +119,29 @@ public sealed class SpotifyPlaylistSyncServiceTests
         Assert.Equal(SpotifyService.ServiceName, playlist.ImportedFromService);
         Assert.Equal("import_only", mapping.SyncMode);
         Assert.Equal("success", mapping.LastSyncStatus);
-        Assert.Equal(firstObservationId, observation.Id);
+        Assert.Equal(firstResolution.TrackObservationId, observation.Id);
+        Assert.Equal(firstResolution.TrackId, observation.TrackId);
         Assert.Equal("Refreshed provider title", observation.Title);
         Assert.Equal("Refreshed artist", observation.Artist);
         Assert.Null(observation.ThumbnailUrl);
-        Assert.Equal(TrackMatchingStatuses.Pending, observation.MatchStatus);
-        Assert.Null(entry.TrackId);
+        Assert.Equal(TrackMatchingStatuses.Matched, observation.MatchStatus);
+        Assert.NotNull(entry.TrackId);
+        Assert.Equal(observation.TrackId, entry.TrackId);
+        Assert.Contains("authoritative Spotify", observation.ResolutionNotes);
+        Assert.Equal(1, await dbContext.Tracks.CountAsync());
+        Assert.Equal(1, await dbContext.Songs.CountAsync());
+        var sourceIds = await dbContext.TrackSourceIds
+            .OrderBy(sourceId => sourceId.ExternalId)
+            .ToListAsync();
+        Assert.Equal(2, sourceIds.Count);
+        Assert.All(sourceIds, sourceId =>
+        {
+            Assert.Equal(SpotifyService.ServiceName, sourceId.SourceType);
+            Assert.Equal(entry.TrackId, sourceId.TrackId);
+        });
+        Assert.Equal(["track1", "track2"], sourceIds.Select(sourceId => sourceId.ExternalId).ToArray());
+        Assert.Equal(2, await dbContext.TrackObservations.CountAsync());
+        Assert.Equal("USSP02600001", await dbContext.Tracks.Select(track => track.Isrc).SingleAsync());
         Assert.Equal(4, handler.RequestCount);
         Assert.False(handler.SawOpenTransaction);
     }
@@ -158,12 +174,30 @@ public sealed class SpotifyPlaylistSyncServiceTests
                   "name": "{{title}}",
                   "duration_ms": 180000,
                   "artists": [{ "name": "{{artist}}" }],
+                  "external_ids": { "isrc": "USSP02600001" },
                   "album": {
                     "name": "Album",
                     "images": [{ "url": "https://i.scdn.co/image/temporary-album" }],
                     "external_urls": { "spotify": "https://open.spotify.com/album/album1" }
                   },
                   "external_urls": { "spotify": "https://open.spotify.com/track/track1" }
+                }
+              }, {
+                "added_at": "2026-07-26T12:31:00Z",
+                "is_local": false,
+                "item": {
+                  "type": "track",
+                  "id": "track2",
+                  "name": "Same recording on another release",
+                  "duration_ms": 180000,
+                  "artists": [{ "name": "Artist from another release" }],
+                  "external_ids": { "isrc": "USSP02600001" },
+                  "album": {
+                    "name": "Another album",
+                    "images": [],
+                    "external_urls": { "spotify": "https://open.spotify.com/album/album2" }
+                  },
+                  "external_urls": { "spotify": "https://open.spotify.com/track/track2" }
                 }
               }],
               "next": null

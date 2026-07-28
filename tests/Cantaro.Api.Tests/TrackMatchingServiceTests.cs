@@ -15,6 +15,94 @@ namespace Cantaro.Api.Tests;
 public class TrackMatchingServiceTests
 {
     [Fact]
+    public async Task ProcessObservationAsync_ReusesUniqueTrustedSpotifyTrackBeforeMetadataSearch()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var trackId = Guid.NewGuid();
+        var spotifyObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "spotify",
+            ExternalId = "spotify-maybe-idk",
+            Title = "Maybe IDK",
+            Artist = "Jon Bellion",
+            NormalizedTitle = "maybe idk",
+            NormalizedArtist = "jon bellion",
+            DurationSeconds = 233,
+            MatchStatus = TrackMatchingStatuses.Matched,
+            TrackId = trackId,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var youtubeObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "youtube-maybe-idk",
+            Title = "Maybe IDK",
+            Artist = "Jon Bellion",
+            NormalizedTitle = "maybe idk",
+            NormalizedArtist = "jon bellion",
+            DurationSeconds = 234,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var track = new Track
+        {
+            Id = trackId,
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                Title = "Maybe IDK",
+                Artist = "Jon Bellion",
+                DurationSeconds = 233
+            }),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var spotifySource = new TrackSourceId
+        {
+            Id = Guid.NewGuid(),
+            TrackId = trackId,
+            SourceType = "spotify",
+            ExternalId = spotifyObservation.ExternalId,
+            Confidence = 1m,
+            IsOfficial = true,
+            LastVerifiedAt = now
+        };
+
+        dbContext.AddRange(track, spotifySource, spotifyObservation, youtubeObservation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider();
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(youtubeObservation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Equal(trackId, result.TrackId);
+        Assert.Contains("trusted Spotify", result.ResolutionNotes, StringComparison.Ordinal);
+        Assert.Equal(0, provider.SearchCount);
+        Assert.True(await dbContext.TrackSourceIds.AnyAsync(source =>
+            source.SourceType == "youtube"
+            && source.ExternalId == youtubeObservation.ExternalId
+            && source.TrackId == trackId));
+    }
+
+    [Fact]
     public async Task ProcessObservationAsync_PersistsNewCandidatesAsInserts()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -1210,6 +1298,8 @@ public class TrackMatchingServiceTests
     {
         private readonly IReadOnlyList<TrackMatchSearchCandidate> _candidates;
 
+        public int SearchCount { get; private set; }
+
         public FakeTrackMetadataSearchProvider(params TrackMatchSearchCandidate[] candidates)
         {
             _candidates = candidates;
@@ -1217,6 +1307,7 @@ public class TrackMatchingServiceTests
 
         public Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(TrackObservation observation, CancellationToken cancellationToken)
         {
+            SearchCount++;
             return Task.FromResult(_candidates);
         }
     }

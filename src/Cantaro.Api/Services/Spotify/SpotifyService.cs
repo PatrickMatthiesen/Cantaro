@@ -38,7 +38,7 @@ public sealed class SpotifyService
     public static string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
     {
         var preferredUri = new Uri(callbackUrls.Preferred);
-        if (!IsLocalhost(preferredUri))
+        if (!IsBareLocalhost(preferredUri))
         {
             return callbackUrls.Preferred;
         }
@@ -362,10 +362,9 @@ public sealed class SpotifyService
         }
     }
 
-    private static bool IsLocalhost(Uri uri)
+    private static bool IsBareLocalhost(Uri uri)
     {
         var host = uri.Host.TrimEnd('.');
-        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
     }
 }

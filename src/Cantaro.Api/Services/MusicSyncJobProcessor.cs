@@ -48,14 +48,52 @@ public sealed class MusicSyncJobProcessor(
             foreach (var playlist in playlists.Skip(job.ProcessedPlaylistCount))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var processedBeforePlaylist = job.ProcessedSongCount;
+                var lastPersistedSongCount = -1;
+                string? lastPersistedSongName = null;
+                var lastProgressWriteAt = DateTimeOffset.MinValue;
                 job.CurrentPlaylistName = playlist.Name;
+                job.CurrentSongName = null;
                 job.UpdatedAt = DateTimeOffset.UtcNow;
                 await _dbContext.SaveChangesAsync(cancellationToken);
 
                 BatchSyncResult result;
                 try
                 {
-                    var cantaroPlaylistId = await platform.SyncPlaylistAsync(job.UserId, playlist.Id, cancellationToken);
+                    var cantaroPlaylistId = await platform.SyncPlaylistAsync(
+                        job.UserId,
+                        playlist.Id,
+                        async (progress, progressCancellationToken) =>
+                        {
+                            var boundedCount = Math.Clamp(progress.ProcessedSongCount, 0, playlist.SongCount);
+                            if (boundedCount == lastPersistedSongCount
+                                && string.Equals(
+                                    progress.CurrentSongName,
+                                    lastPersistedSongName,
+                                    StringComparison.Ordinal))
+                            {
+                                return;
+                            }
+
+                            var now = DateTimeOffset.UtcNow;
+                            var isFinalUpdate = boundedCount == playlist.SongCount
+                                && progress.CurrentSongName == null;
+                            if (!isFinalUpdate && now - lastProgressWriteAt < TimeSpan.FromSeconds(1))
+                            {
+                                return;
+                            }
+
+                            job.ProcessedSongCount = Math.Min(
+                                job.SongCount,
+                                processedBeforePlaylist + boundedCount);
+                            job.CurrentSongName = progress.CurrentSongName;
+                            job.UpdatedAt = now;
+                            lastPersistedSongCount = boundedCount;
+                            lastPersistedSongName = progress.CurrentSongName;
+                            lastProgressWriteAt = now;
+                            await _dbContext.SaveChangesAsync(progressCancellationToken);
+                        },
+                        cancellationToken);
                     result = new BatchSyncResult
                     {
                         ServicePlaylistId = playlist.Id,
@@ -94,7 +132,10 @@ public sealed class MusicSyncJobProcessor(
                     job.FailureCount++;
                 }
                 job.ProcessedPlaylistCount++;
-                job.ProcessedSongCount += playlist.SongCount;
+                job.ProcessedSongCount = Math.Min(
+                    job.SongCount,
+                    Math.Max(job.ProcessedSongCount, processedBeforePlaylist + playlist.SongCount));
+                job.CurrentSongName = null;
                 job.ResultsJson = JsonSerializer.Serialize(results);
                 job.UpdatedAt = DateTimeOffset.UtcNow;
                 await _dbContext.SaveChangesAsync(cancellationToken);
@@ -103,6 +144,7 @@ public sealed class MusicSyncJobProcessor(
             job.Status = job.FailureCount == 0 ? MusicSyncJobStatuses.Completed : MusicSyncJobStatuses.Failed;
             job.ErrorMessage = job.FailureCount == 0 ? null : $"{job.FailureCount} playlist sync failed.";
             job.CurrentPlaylistName = null;
+            job.CurrentSongName = null;
             job.CompletedAt = DateTimeOffset.UtcNow;
             job.UpdatedAt = job.CompletedAt.Value;
             _throttleService.AddUsage(job.UserId, job.Service, job.EstimatedNewSongCount, job.CompletedAt.Value);
@@ -119,6 +161,7 @@ public sealed class MusicSyncJobProcessor(
             job = await ReloadJobAsync(jobId, CancellationToken.None);
             job.Status = MusicSyncJobStatuses.Queued;
             job.CurrentPlaylistName = null;
+            job.CurrentSongName = null;
             job.UpdatedAt = DateTimeOffset.UtcNow;
             await _dbContext.SaveChangesAsync(CancellationToken.None);
             throw;
@@ -129,6 +172,7 @@ public sealed class MusicSyncJobProcessor(
             job.Status = MusicSyncJobStatuses.Failed;
             job.ErrorMessage = ex.Message;
             job.CurrentPlaylistName = null;
+            job.CurrentSongName = null;
             job.CompletedAt = DateTimeOffset.UtcNow;
             job.UpdatedAt = job.CompletedAt.Value;
             await _dbContext.SaveChangesAsync(CancellationToken.None);

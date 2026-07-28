@@ -251,7 +251,7 @@ function PlaylistArtworkThumbnail({ playlist, sourcePlatformId }: { playlist: Pl
 
   return (
     <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
-      <MusicPlatformIcon platformId={sourcePlatformId} className="h-6 w-6" />
+      <MusicPlatformIcon platformId={sourcePlatformId} className="h-8 w-8" />
     </span>
   );
 }

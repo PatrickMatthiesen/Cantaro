@@ -25,6 +25,7 @@ public sealed class MusicSyncJob
     public int SuccessCount { get; set; }
     public int FailureCount { get; set; }
     public string? CurrentPlaylistName { get; set; }
+    public string? CurrentSongName { get; set; }
     public string? ResultsJson { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

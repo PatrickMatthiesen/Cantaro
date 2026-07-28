@@ -129,10 +129,9 @@ HTTPS origin, for example `https://cantaro.example.com`. Cantaro uses that
 global origin when generating OAuth callbacks behind the HTTP reverse proxy.
 
 For Spotify development, register
-`http://127.0.0.1:5173/api/platforms/spotify/callback` in the Spotify app.
-Cantaro normally runs the frontend at `http://localhost:5173`; the Spotify
-platform hook selects that HTTP callback and changes `localhost` to
-`127.0.0.1` automatically. The integration uses the secure-backend
+`https://cantaro.dev.localhost:5173/api/platforms/spotify/callback` in the
+Spotify app. Aspire serves the frontend at the matching HTTPS origin using its
+trusted development certificate. The integration uses the secure-backend
 Authorization Code flow and requests only
 `playlist-read-private`, `playlist-read-collaborative`, and
 `user-read-private`; it never requests email access. Configure

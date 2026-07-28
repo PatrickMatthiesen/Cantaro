@@ -83,7 +83,7 @@ function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPl
                 onClick={() => onSelectPlatform(platform)}
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white shadow-sm">
-                  <MusicPlatformIcon platformId={platform.iconId} className="h-4 w-4" />
+                  <MusicPlatformIcon platformId={platform.iconId} className="" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{platform.name}</span>
@@ -271,7 +271,7 @@ function PlatformGroupedView({
           <GlassCard key={platform.id} className="flex min-h-[300px] flex-col p-4">
             <div className="mb-4 flex items-start gap-3">
               <span className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br ${platform.gradient} text-white`}>
-                <MusicPlatformIcon platformId={platform.iconId} className="h-6 w-6" />
+                <MusicPlatformIcon platformId={platform.iconId} className="h-8 w-8" />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
@@ -427,6 +427,22 @@ function ProgressPlaylistNames({ names }: { names: string[] }) {
   );
 }
 
+function ProgressCurrentSong({ progress }: { progress: PlaylistSyncProgress }) {
+  if (!progress.currentSongName) {
+    return <ProgressPlaylistNames names={progress.playlistNames} />;
+  }
+
+  const activity = progress.currentPlaylistName
+    ? `Matching ${progress.currentSongName} · ${progress.currentPlaylistName}`
+    : `Matching ${progress.currentSongName}`;
+
+  return (
+    <span className="mt-1 block truncate text-[11px] font-semibold text-slate-500" title={activity}>
+      {activity}
+    </span>
+  );
+}
+
 function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
   const sourcePlatformName = serviceName(progress.sourcePlatformId);
   const statusStyles = {
@@ -435,7 +451,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
   };
 
   return (
-    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl border border-violet-200 bg-violet-50/80 px-3 py-3 shadow-[0_14px_34px_rgba(88,74,150,0.08)]">
+    <div className="music-sync-progress grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl border border-violet-200 bg-violet-50/80 px-3 py-3 shadow-[0_14px_34px_rgba(88,74,150,0.08)]">
       <span className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm">
         <MusicPlatformIcon platformId={progress.sourcePlatformId} className="h-5 w-5" />
         <ProgressSpinner phase={progress.phase} />
@@ -447,7 +463,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
         <span className="block truncate text-xs font-semibold text-slate-600">
           {progressDetail(progress)}
         </span>
-        <ProgressPlaylistNames names={progress.playlistNames} />
+        <ProgressCurrentSong progress={progress} />
       </span>
       <span className={`rounded-full px-3 py-1.5 text-right text-xs font-black ${statusStyles.className}`}>{statusStyles.label}</span>
     </div>

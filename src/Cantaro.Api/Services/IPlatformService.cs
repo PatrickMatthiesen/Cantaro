@@ -2,6 +2,8 @@ using Cantaro.Api.Models;
 
 namespace Cantaro.Api.Services;
 
+public sealed record PlatformSyncProgress(int ProcessedSongCount, string? CurrentSongName);
+
 public interface IPlatformService
 {
     string PlatformId { get; }
@@ -46,6 +48,13 @@ public interface IPlatformService
         => GetPlaylistSongsAsync(userId, playlistId);
 
     Task<Guid> SyncPlaylistAsync(int userId, string playlistId, CancellationToken cancellationToken);
+
+    Task<Guid> SyncPlaylistAsync(
+        int userId,
+        string playlistId,
+        Func<PlatformSyncProgress, CancellationToken, Task> reportProgressAsync,
+        CancellationToken cancellationToken)
+        => SyncPlaylistAsync(userId, playlistId, cancellationToken);
 
     bool TryValidatePlaylistId(string playlistId, out string? error);
 }

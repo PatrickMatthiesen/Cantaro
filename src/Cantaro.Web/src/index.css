@@ -350,6 +350,12 @@
   color: #e2e8f0 !important;
 }
 
+:root[data-theme="dark"] .music-sync-progress {
+  border-color: rgba(167, 139, 250, 0.28) !important;
+  background-color: rgba(91, 33, 182, 0.18) !important;
+  box-shadow: none !important;
+}
+
 :root[data-theme="dark"] [class~="bg-[#f7f5ff]"],
 :root[data-theme="dark"] [class~="bg-[#f7f5ff]/82"] {
   background-color: var(--cantaro-canvas) !important;

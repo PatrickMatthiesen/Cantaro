@@ -70,6 +70,19 @@ public sealed class SpotifyLifecycleTests
     }
 
     [Fact]
+    public void ResolveRedirectUri_PreservesDevLocalhostHttpsCallback()
+    {
+        var callbackUrls = new CallbackUrlCandidates(
+            "https://cantaro.dev.localhost:5173/api/platforms/spotify/callback",
+            null,
+            "https://cantaro.dev.localhost:5173/api/platforms/spotify/callback");
+
+        var redirectUri = SpotifyService.ResolveRedirectUri(callbackUrls);
+
+        Assert.Equal(callbackUrls.Preferred, redirectUri);
+    }
+
+    [Fact]
     public async Task ExchangeCodeAndSaveAsync_StoresStableProfileAndSixMonthRefreshExpiry()
     {
         await using var scope = await SpotifyTestScope.CreateAsync(

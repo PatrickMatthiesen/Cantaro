@@ -20,8 +20,11 @@ public class TrackObservationMetadata
 {
     public string? SourceType { get; set; }
     public string? ExternalId { get; set; }
+    public string? SourceUrl { get; set; }
     public string? Title { get; set; }
     public string? Artist { get; set; }
+    public string? Album { get; set; }
+    public string? Isrc { get; set; }
     public string? OriginalTitle { get; set; }
     public string? OriginalArtist { get; set; }
     public string? ChannelTitle { get; set; }

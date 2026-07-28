@@ -72,11 +72,12 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SpotifyTokenManager>();
 builder.Services.AddScoped<SpotifyService>();
 builder.Services.AddScoped<SpotifyPlaylistSyncService>();
+builder.Services.AddScoped<SpotifyTrackResolver>();
 builder.Services.AddScoped<IPlatformService, SpotifyPlatformService>();
 builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
 builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
-builder.Services.AddHttpClient<IMusicBrainzQueryClient, MusicBrainzQueryClient>();
+builder.Services.AddMusicBrainzQueryClient();
 builder.Services.AddHttpClient<AniListApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {

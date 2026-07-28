@@ -25,6 +25,7 @@ public sealed class MusicSyncJobResponse
     public int FailureCount { get; init; }
     public required IReadOnlyList<string> PlaylistNames { get; init; }
     public string? CurrentPlaylistName { get; init; }
+    public string? CurrentSongName { get; init; }
     public string? ErrorMessage { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }
@@ -255,6 +256,7 @@ public sealed class SyncJobsController(
             FailureCount = job.FailureCount,
             PlaylistNames = playlists.Select(item => item.Name).Take(3).ToList(),
             CurrentPlaylistName = job.CurrentPlaylistName,
+            CurrentSongName = job.CurrentSongName,
             ErrorMessage = job.ErrorMessage,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,

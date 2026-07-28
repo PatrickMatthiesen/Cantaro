@@ -304,6 +304,13 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .IsUnique();
 
             entity.HasIndex(e => e.MatchStatus);
+            entity.HasIndex(e => new
+            {
+                e.SourceType,
+                e.NormalizedTitle,
+                e.DurationSeconds,
+                e.TrackId
+            });
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -397,6 +404,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .HasFilter("\"Status\" IN ('queued', 'running')");
             entity.Property(e => e.Service).HasMaxLength(64);
             entity.Property(e => e.Status).HasMaxLength(32);
+            entity.Property(e => e.CurrentSongName).HasMaxLength(512);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 

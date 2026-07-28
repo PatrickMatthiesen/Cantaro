@@ -73,6 +73,19 @@ public sealed class YouTubePlatformService : IPlatformService
         return _playlistSyncService.SyncYouTubePlaylistAsync(userId, playlistId, cancellationToken);
     }
 
+    public Task<Guid> SyncPlaylistAsync(
+        int userId,
+        string playlistId,
+        Func<PlatformSyncProgress, CancellationToken, Task> reportProgressAsync,
+        CancellationToken cancellationToken)
+    {
+        return _playlistSyncService.SyncYouTubePlaylistAsync(
+            userId,
+            playlistId,
+            reportProgressAsync,
+            cancellationToken);
+    }
+
     public bool TryValidatePlaylistId(string playlistId, out string? error)
     {
         error = null;

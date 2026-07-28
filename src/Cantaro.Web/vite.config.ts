@@ -43,6 +43,7 @@ export default defineConfig(({ command }) => ({
       'localhost',
       '127.0.0.1',
       '::1',
+      'cantaro.dev.localhost',
       '.ts.net',
     ],
     strictPort: true,

@@ -170,7 +170,7 @@ function SpotifyAttribution({ compact = false }: { compact?: boolean }) {
       } font-black`}
       aria-label="Open Spotify"
     >
-      <MusicPlatformIcon platformId="spotify" className="h-6 w-6 text-[#1ed760]" />
+      <MusicPlatformIcon platformId="spotify" className="h-8 w-8 text-[#1ed760]" />
       Spotify
     </a>
   );
@@ -388,7 +388,7 @@ function SpotifyPlaylistDetail({
           rel="noopener noreferrer"
           className="inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-black text-slate-900 transition hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
         >
-          <MusicPlatformIcon platformId="spotify" className="h-6 w-6 text-[#1ed760]" />
+          <MusicPlatformIcon platformId="spotify" className="h-8 w-8 text-[#1ed760]" />
           Open on Spotify
         </a>
       ) : <SpotifyAttribution />}

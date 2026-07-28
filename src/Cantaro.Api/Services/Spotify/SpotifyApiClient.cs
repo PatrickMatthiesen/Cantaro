@@ -136,14 +136,18 @@ public sealed class SpotifyApiClient
                     continue;
                 }
 
-                var artist = string.Join(
-                    ", ",
-                    item.Artists.Select(candidate => candidate.Name).Where(candidate => !string.IsNullOrWhiteSpace(candidate)));
+                var artistNames = item.Artists
+                    .Select(candidate => candidate.Name?.Trim())
+                    .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+                    .Select(candidate => candidate!)
+                    .ToArray();
+                var artist = string.Join(", ", artistNames);
 
                 tracks.Add(new SpotifyTrackSnapshot(
                     id,
                     name,
                     string.IsNullOrWhiteSpace(artist) ? "Unknown artist" : artist,
+                    artistNames,
                     item.Album?.Name,
                     item.Album?.Images.FirstOrDefault()?.Url,
                     item.ExternalUrls?.Spotify ?? $"https://open.spotify.com/track/{id}",
