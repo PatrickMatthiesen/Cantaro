@@ -178,6 +178,7 @@ public sealed class SpotifyPlaylistSyncService(
             OriginalArtist = track.Artist,
             SearchTitle = track.Name,
             SearchArtist = track.Artist,
+            ThumbnailUrl = track.ImageUrl,
             DurationSeconds = track.DurationSeconds
         });
 
@@ -190,8 +191,7 @@ public sealed class SpotifyPlaylistSyncService(
                 ExternalId = track.Id,
                 Title = track.Name,
                 Artist = track.Artist,
-                // Spotify artwork URLs are temporary and are not persisted in the canonical cache.
-                ThumbnailUrl = null,
+                ThumbnailUrl = track.ImageUrl,
                 RawMetadata = rawMetadata,
                 NormalizedTitle = TrackTextNormalizer.Normalize(track.Name),
                 NormalizedArtist = TrackTextNormalizer.Normalize(track.Artist),
@@ -206,7 +206,7 @@ public sealed class SpotifyPlaylistSyncService(
 
         observation.Title = track.Name;
         observation.Artist = track.Artist;
-        observation.ThumbnailUrl = null;
+        observation.ThumbnailUrl = track.ImageUrl;
         observation.RawMetadata = rawMetadata;
         observation.NormalizedTitle = TrackTextNormalizer.Normalize(track.Name);
         observation.NormalizedArtist = TrackTextNormalizer.Normalize(track.Artist);

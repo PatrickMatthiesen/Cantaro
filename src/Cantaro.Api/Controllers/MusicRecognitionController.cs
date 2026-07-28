@@ -59,14 +59,20 @@ public sealed class MusicRecognitionController(
             return Ok(new RecognizeYouTubeResponse(classification, "ignored", null, null, null, false, null));
 
         var now = DateTimeOffset.UtcNow;
+        var parsedMetadata = TrackMetadataParser.Parse(
+            metadata?.Title ?? request.PageTitle ?? videoId,
+            metadata?.ChannelTitle);
         var observation = existing ?? new TrackObservation
         {
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = videoId,
-            Title = metadata?.Title ?? request.PageTitle ?? videoId,
-            Artist = metadata?.ChannelTitle, ThumbnailUrl = metadata?.ThumbnailUrl,
+            Title = parsedMetadata.DisplayTitle,
+            Artist = parsedMetadata.DisplayArtist,
+            ThumbnailUrl = metadata?.ThumbnailUrl,
             DurationSeconds = metadata?.DurationSeconds, MatchStatus = TrackMatchingStatuses.Pending,
             CreatedAt = now, UpdatedAt = now
         };
+        observation.NormalizedTitle = TrackTextNormalizer.Normalize(parsedMetadata.DisplayTitle);
+        observation.NormalizedArtist = TrackTextNormalizer.Normalize(parsedMetadata.DisplayArtist);
         observation.RawMetadata = JsonSerializer.Serialize(metadata);
         if (existing is null)
         {

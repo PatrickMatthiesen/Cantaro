@@ -1,6 +1,8 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
+using Cantaro.Api.Services;
 using Cantaro.Api.Services.Spotify;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -34,6 +36,9 @@ public sealed class SpotifyTrackResolverTests
             .SingleAsync(candidate => candidate.Id == track.Id);
 
         Assert.Equal("USSP02600001", storedTrack.Isrc);
+        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
+            storedTrack.CanonicalMetadata!);
+        Assert.Equal("https://i.scdn.co/image/temporary", metadata?.ThumbnailUrl);
         Assert.Single(storedTrack.SongMemberships);
         var sourceId = Assert.Single(storedTrack.SourceIds);
         Assert.Equal(SpotifyService.ServiceName, sourceId.SourceType);
@@ -52,8 +57,9 @@ public sealed class SpotifyTrackResolverTests
     public async Task ResolveAsync_ReusesTheOnlyTrackWithTheSameIsrc()
     {
         await using var fixture = await ResolverFixture.CreateAsync();
-        var existing = fixture.AddTrackWithSong("USSP02600001");
+        var existing = fixture.AddTrackWithSong("us-sp0-26-00001");
         await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
 
         var resolved = await fixture.Resolver.ResolveAsync(
             Snapshot(id: "spotify-track", isrc: "USSP02600001"),
@@ -113,6 +119,135 @@ public sealed class SpotifyTrackResolverTests
             .SingleAsync());
     }
 
+    [Fact]
+    public async Task ResolveAsync_ReusesExistingYouTubeTrackByMetadataAndPreservesItsArtwork()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var existing = fixture.AddTrackWithSong(
+            isrc: null,
+            new TrackCanonicalMetadata
+            {
+                Title = "Track title",
+                Artist = "Artist",
+                DurationSeconds = 180,
+                ThumbnailUrl = "https://i.ytimg.com/vi/fun-art/mqdefault.jpg"
+            });
+        fixture.AddObservation(
+            existing.Id,
+            "youtube",
+            "video-1",
+            "Track title",
+            "Artist",
+            180,
+            normalize: false);
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: null),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(existing.Id, resolved.Id);
+        Assert.Equal(1, await fixture.DbContext.Tracks.CountAsync());
+        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
+            resolved.CanonicalMetadata!);
+        Assert.Equal(
+            "https://i.ytimg.com/vi/fun-art/mqdefault.jpg",
+            metadata?.ThumbnailUrl);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_FillsMissingArtworkOnExistingTrack()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var existing = fixture.AddTrackWithSong(
+            "USSP02600001",
+            new TrackCanonicalMetadata
+            {
+                Title = "Track title",
+                Artist = "Artist",
+                DurationSeconds = 180
+            });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: "USSP02600001"),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(existing.Id, resolved.Id);
+        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
+            resolved.CanonicalMetadata!);
+        Assert.Equal("https://i.scdn.co/image/temporary", metadata?.ThumbnailUrl);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DoesNotMergeDifferentVersionMarkers()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var existing = fixture.AddTrackWithSong(isrc: null);
+        fixture.AddObservation(
+            existing.Id,
+            "youtube",
+            "video-acoustic",
+            "Track title (Acoustic)",
+            "Artist",
+            180);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: null),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.NotEqual(existing.Id, resolved.Id);
+        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DoesNotGuessWhenMetadataMatchesSeveralTracks()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var first = fixture.AddTrackWithSong(isrc: null);
+        var second = fixture.AddTrackWithSong(isrc: null);
+        fixture.AddObservation(first.Id, "youtube", "video-1", "Track title", "Artist", 180);
+        fixture.AddObservation(second.Id, "youtube", "video-2", "Track title", "Artist", 180);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: null),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.NotEqual(first.Id, resolved.Id);
+        Assert.NotEqual(second.Id, resolved.Id);
+        Assert.Equal(3, await fixture.DbContext.Tracks.CountAsync());
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DoesNotMergeMetadataWhenStableIsrcConflicts()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var existing = fixture.AddTrackWithSong("USOLD2600001");
+        fixture.AddObservation(existing.Id, "youtube", "video-1", "Track title", "Artist", 180);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: "USNEW2600001"),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.NotEqual(existing.Id, resolved.Id);
+        Assert.Equal("USNEW2600001", resolved.Isrc);
+        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+    }
+
     private static SpotifyTrackSnapshot Snapshot(
         string id,
         string? isrc,
@@ -160,7 +295,9 @@ public sealed class SpotifyTrackResolverTests
             return new ResolverFixture(connection, dbContext);
         }
 
-        public Track AddTrackWithSong(string isrc)
+        public Track AddTrackWithSong(
+            string? isrc,
+            TrackCanonicalMetadata? canonicalMetadata = null)
         {
             var song = new Song
             {
@@ -172,6 +309,9 @@ public sealed class SpotifyTrackResolverTests
             {
                 Id = Guid.NewGuid(),
                 Isrc = isrc,
+                CanonicalMetadata = canonicalMetadata == null
+                    ? null
+                    : JsonSerializer.Serialize(canonicalMetadata),
                 CreatedAt = Now,
                 UpdatedAt = Now
             };
@@ -183,6 +323,32 @@ public sealed class SpotifyTrackResolverTests
                 Track = track
             });
             return track;
+        }
+
+        public void AddObservation(
+            Guid trackId,
+            string sourceType,
+            string externalId,
+            string title,
+            string artist,
+            int durationSeconds,
+            bool normalize = true)
+        {
+            DbContext.TrackObservations.Add(new TrackObservation
+            {
+                Id = Guid.NewGuid(),
+                SourceType = sourceType,
+                ExternalId = externalId,
+                Title = title,
+                Artist = artist,
+                NormalizedTitle = normalize ? TrackTextNormalizer.Normalize(title) : null,
+                NormalizedArtist = normalize ? TrackTextNormalizer.Normalize(artist) : null,
+                DurationSeconds = durationSeconds,
+                MatchStatus = TrackMatchingStatuses.Matched,
+                TrackId = trackId,
+                CreatedAt = Now,
+                UpdatedAt = Now
+            });
         }
 
         public async ValueTask DisposeAsync()

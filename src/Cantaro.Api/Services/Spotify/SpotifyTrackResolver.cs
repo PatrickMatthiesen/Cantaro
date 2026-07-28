@@ -9,32 +9,41 @@ namespace Cantaro.Api.Services.Spotify;
 /// Resolves Spotify catalog tracks directly to Cantaro identities without
 /// requiring a secondary metadata search.
 /// </summary>
-public sealed class SpotifyTrackResolver(ApplicationDbContext dbContext)
+public sealed class SpotifyTrackResolver
 {
-    private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly ApplicationDbContext _dbContext;
+    private readonly TrackIdentityResolver _identityResolver;
+
+    public SpotifyTrackResolver(
+        ApplicationDbContext dbContext,
+        TrackIdentityResolver identityResolver)
+    {
+        _dbContext = dbContext;
+        _identityResolver = identityResolver;
+    }
+
+    public SpotifyTrackResolver(ApplicationDbContext dbContext)
+        : this(dbContext, new TrackIdentityResolver(dbContext))
+    {
+    }
 
     public async Task<Track> ResolveAsync(
         SpotifyTrackSnapshot snapshot,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var sourceId = _dbContext.TrackSourceIds.Local.FirstOrDefault(IsSpotifySource)
-            ?? await _dbContext.TrackSourceIds.SingleOrDefaultAsync(
-                candidate => candidate.SourceType == SpotifyService.ServiceName
-                    && candidate.ExternalId == snapshot.Id,
-                cancellationToken);
-
-        Track? track = null;
-        if (sourceId != null)
-        {
-            track = await LoadTrackAsync(sourceId.TrackId, cancellationToken)
-                ?? throw new InvalidOperationException(
-                    $"Spotify source {snapshot.Id} references missing track {sourceId.TrackId}.");
-        }
-        else
-        {
-            track = await FindUniqueTrackByIsrcAsync(snapshot.Isrc, cancellationToken);
-        }
+        var identityMatch = await _identityResolver.ResolveExistingAsync(
+            new TrackIdentityQuery(
+                SpotifyService.ServiceName,
+                snapshot.Id,
+                snapshot.Name,
+                snapshot.Artist,
+                snapshot.DurationSeconds,
+                snapshot.Isrc,
+                ArtistCredits: snapshot.ArtistNames),
+            cancellationToken);
+        var sourceId = identityMatch?.ExactSourceMapping;
+        var track = identityMatch?.Track;
 
         if (track == null)
         {
@@ -48,62 +57,6 @@ public sealed class SpotifyTrackResolver(ApplicationDbContext dbContext)
         EnsureArtistCredits(track, snapshot, now);
         EnsureSourceMapping(track, sourceId, snapshot, now);
         return track;
-
-        bool IsSpotifySource(TrackSourceId candidate) =>
-            candidate.SourceType == SpotifyService.ServiceName
-            && candidate.ExternalId == snapshot.Id;
-    }
-
-    private async Task<Track?> FindUniqueTrackByIsrcAsync(
-        string? rawIsrc,
-        CancellationToken cancellationToken)
-    {
-        var isrc = NormalizeIsrc(rawIsrc);
-        if (isrc == null)
-        {
-            return null;
-        }
-
-        var candidateIds = _dbContext.Tracks.Local
-            .Where(track => NormalizeIsrc(track.Isrc) == isrc)
-            .Select(track => track.Id)
-            .ToHashSet();
-
-        if (candidateIds.Count < 2)
-        {
-            var storedIds = await _dbContext.Tracks
-                .Where(track => track.Isrc == isrc || track.Isrc == rawIsrc)
-                .Select(track => track.Id)
-                .Take(2)
-                .ToListAsync(cancellationToken);
-            candidateIds.UnionWith(storedIds);
-        }
-
-        return candidateIds.Count == 1
-            ? await LoadTrackAsync(candidateIds.Single(), cancellationToken)
-            : null;
-    }
-
-    private async Task<Track?> LoadTrackAsync(Guid trackId, CancellationToken cancellationToken)
-    {
-        var localTrack = _dbContext.Tracks.Local.FirstOrDefault(candidate => candidate.Id == trackId);
-        if (localTrack != null)
-        {
-            var credits = _dbContext.Entry(localTrack).Collection(track => track.ArtistCredits);
-            if (_dbContext.Entry(localTrack).State != EntityState.Added && !credits.IsLoaded)
-            {
-                await credits.Query()
-                    .Include(credit => credit.Artist)
-                    .LoadAsync(cancellationToken);
-            }
-
-            return localTrack;
-        }
-
-        return await _dbContext.Tracks
-            .Include(track => track.ArtistCredits)
-                .ThenInclude(credit => credit.Artist)
-            .SingleOrDefaultAsync(track => track.Id == trackId, cancellationToken);
     }
 
     private Track CreateTrack(SpotifyTrackSnapshot snapshot, DateTimeOffset now)
@@ -117,7 +70,7 @@ public sealed class SpotifyTrackResolver(ApplicationDbContext dbContext)
         var track = new Track
         {
             Id = Guid.NewGuid(),
-            Isrc = NormalizeIsrc(snapshot.Isrc),
+            Isrc = TrackIdentityResolver.NormalizeIsrc(snapshot.Isrc),
             CanonicalMetadata = CreateCanonicalMetadata(snapshot),
             CreatedAt = now,
             UpdatedAt = now
@@ -141,12 +94,18 @@ public sealed class SpotifyTrackResolver(ApplicationDbContext dbContext)
     {
         if (string.IsNullOrWhiteSpace(track.Isrc))
         {
-            track.Isrc = NormalizeIsrc(snapshot.Isrc);
+            track.Isrc = TrackIdentityResolver.NormalizeIsrc(snapshot.Isrc);
         }
 
         if (string.IsNullOrWhiteSpace(track.CanonicalMetadata))
         {
             track.CanonicalMetadata = CreateCanonicalMetadata(snapshot);
+        }
+        else if (!string.IsNullOrWhiteSpace(snapshot.ImageUrl))
+        {
+            TrackArtworkUpdater.FillMissingCanonicalThumbnail(
+                track,
+                snapshot.ImageUrl);
         }
 
         track.UpdatedAt = now;
@@ -221,7 +180,8 @@ public sealed class SpotifyTrackResolver(ApplicationDbContext dbContext)
         {
             externalUrl = snapshot.ExternalUrl,
             album = snapshot.AlbumName,
-            albumUrl = snapshot.AlbumUrl
+            albumUrl = snapshot.AlbumUrl,
+            imageUrl = snapshot.ImageUrl
         });
 
         if (_dbContext.Entry(sourceId).State == EntityState.Detached)
@@ -236,16 +196,8 @@ public sealed class SpotifyTrackResolver(ApplicationDbContext dbContext)
             Title = snapshot.Name,
             Artist = snapshot.Artist,
             Albums = string.IsNullOrWhiteSpace(snapshot.AlbumName) ? [] : [snapshot.AlbumName],
+            ThumbnailUrl = snapshot.ImageUrl,
             DurationSeconds = snapshot.DurationSeconds
         });
 
-    private static string? NormalizeIsrc(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return string.Concat(value.Where(char.IsLetterOrDigit)).ToUpperInvariant();
-    }
 }

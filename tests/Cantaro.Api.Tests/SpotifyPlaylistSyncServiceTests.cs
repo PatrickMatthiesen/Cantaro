@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -123,7 +124,12 @@ public sealed class SpotifyPlaylistSyncServiceTests
         Assert.Equal(firstResolution.TrackId, observation.TrackId);
         Assert.Equal("Refreshed provider title", observation.Title);
         Assert.Equal("Refreshed artist", observation.Artist);
-        Assert.Null(observation.ThumbnailUrl);
+        Assert.Equal("https://i.scdn.co/image/temporary-album", observation.ThumbnailUrl);
+        var observationMetadata = JsonSerializer.Deserialize<TrackObservationMetadata>(
+            observation.RawMetadata!);
+        Assert.Equal(
+            "https://i.scdn.co/image/temporary-album",
+            observationMetadata?.ThumbnailUrl);
         Assert.Equal(TrackMatchingStatuses.Matched, observation.MatchStatus);
         Assert.NotNull(entry.TrackId);
         Assert.Equal(observation.TrackId, entry.TrackId);
@@ -142,6 +148,12 @@ public sealed class SpotifyPlaylistSyncServiceTests
         Assert.Equal(["track1", "track2"], sourceIds.Select(sourceId => sourceId.ExternalId).ToArray());
         Assert.Equal(2, await dbContext.TrackObservations.CountAsync());
         Assert.Equal("USSP02600001", await dbContext.Tracks.Select(track => track.Isrc).SingleAsync());
+        var canonicalMetadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
+            await dbContext.Tracks.Select(track => track.CanonicalMetadata).SingleAsync()
+                ?? throw new InvalidOperationException("Expected canonical track metadata."));
+        Assert.Equal(
+            "https://i.scdn.co/image/temporary-album",
+            canonicalMetadata?.ThumbnailUrl);
         Assert.Equal(4, handler.RequestCount);
         Assert.False(handler.SawOpenTransaction);
     }
