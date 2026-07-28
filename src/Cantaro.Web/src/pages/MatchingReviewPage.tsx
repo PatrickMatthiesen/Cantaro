@@ -21,7 +21,7 @@ interface MatchingReviewState {
   activeObservationId: string | null;
   error: string | null;
   isLoading: boolean;
-  loadQueue: () => Promise<void>;
+  loadQueue: () => Promise<MatchingQueuePageResponse | null>;
   page: number;
   pageData: MatchingQueuePageResponse | null;
   queue: MatchingQueueItemResponse[];
@@ -34,6 +34,45 @@ function getErrorMessage(error: unknown, fallbackMessage: string): string {
   return error instanceof Error ? error.message : fallbackMessage;
 }
 
+interface MatchingActionPosition {
+  focusedElement: HTMLElement | null;
+  scrollY: number;
+}
+
+function findObservationElement(observationId: string): HTMLElement | null {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-matching-observation-id]'))
+    .find((element) => element.dataset.matchingObservationId === observationId) ?? null;
+}
+
+function captureMatchingActionPosition(): MatchingActionPosition | null {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return null;
+  }
+
+  return {
+    focusedElement: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    scrollY: window.scrollY,
+  };
+}
+
+function restoreMatchingActionPosition(
+  position: MatchingActionPosition | null,
+  fallbackObservationId: string | null,
+) {
+  if (!position || typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ behavior: 'auto', top: position.scrollY });
+    const fallbackElement = fallbackObservationId ? findObservationElement(fallbackObservationId) : null;
+    const focusTarget = position.focusedElement?.isConnected
+      ? position.focusedElement
+      : fallbackElement?.querySelector<HTMLElement>('button:not(:disabled)');
+    focusTarget?.focus({ preventScroll: true });
+  });
+}
+
 function useMatchingReviewQueue(): MatchingReviewState {
   const [summary, setSummary] = useState<MatchingSummaryResponse | null>(null);
   const [queue, setQueue] = useState<MatchingQueueItemResponse[]>([]);
@@ -44,7 +83,6 @@ function useMatchingReviewQueue(): MatchingReviewState {
   const [error, setError] = useState<string | null>(null);
 
   const loadQueue = useCallback(async () => {
-    setIsLoading(true);
     try {
       const [summaryResponse, queueResponse] = await Promise.all([
         matchingApi.getSummary(),
@@ -55,8 +93,10 @@ function useMatchingReviewQueue(): MatchingReviewState {
       setPageData(queueResponse);
       if (queueResponse.page !== page) setPage(queueResponse.page);
       setError(null);
+      return queueResponse;
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Failed to load matching queue'));
+      return null;
     } finally {
       setIsLoading(false);
     }
@@ -68,17 +108,27 @@ function useMatchingReviewQueue(): MatchingReviewState {
 
   const runObservationAction = useCallback(
     async (observationId: string, action: () => Promise<void>) => {
+      const position = captureMatchingActionPosition();
+      const observationIndex = queue.findIndex((item) => item.observationId === observationId);
+      let fallbackObservationId: string | null = null;
+
       setActiveObservationId(observationId);
       try {
         await action();
-        await loadQueue();
+        const queueResponse = await loadQueue();
+        if (queueResponse && queueResponse.items.length > 0 && observationIndex >= 0) {
+          fallbackObservationId = queueResponse.items[
+            Math.min(observationIndex, queueResponse.items.length - 1)
+          ].observationId;
+        }
       } catch (actionError) {
         setError(getErrorMessage(actionError, 'Matching action failed'));
       } finally {
         setActiveObservationId(null);
+        restoreMatchingActionPosition(position, fallbackObservationId);
       }
     },
-    [loadQueue],
+    [loadQueue, queue],
   );
 
   return { activeObservationId, error, isLoading, loadQueue, page, pageData, queue, runObservationAction, setPage, summary };
@@ -556,7 +606,7 @@ function QueueObservationItem({ item, activeObservationId, onAction }: QueueObse
   const isBusy = activeObservationId === item.observationId;
 
   return (
-    <GlassCard className="p-5">
+    <GlassCard className="p-5" data-matching-observation-id={item.observationId}>
       <div className="flex flex-col gap-4 lg:flex-row">
         <div className="flex min-w-0 flex-1 gap-4">
           <ObservationArtwork item={item} />

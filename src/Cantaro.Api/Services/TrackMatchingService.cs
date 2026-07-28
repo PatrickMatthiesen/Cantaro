@@ -646,9 +646,45 @@ public class TrackMatchingService
             .Where(entry => entry.TrackObservationId == observationId)
             .ToListAsync(cancellationToken);
 
-        foreach (var entry in entries)
+        if (trackId == null)
         {
-            entry.TrackId = trackId;
+            foreach (var entry in entries)
+            {
+                entry.TrackId = null;
+            }
+
+            return;
+        }
+
+        var entryIds = entries.Select(entry => entry.Id).ToArray();
+        var playlistIds = entries.Select(entry => entry.PlaylistId).Distinct().ToArray();
+        var playlistsAlreadyContainingTrack = playlistIds.Length == 0
+            ? []
+            : await _dbContext.PlaylistEntries
+                .Where(entry =>
+                    playlistIds.Contains(entry.PlaylistId)
+                    && entry.TrackId == trackId
+                    && !entryIds.Contains(entry.Id))
+                .Select(entry => entry.PlaylistId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+        var existingPlaylistIds = playlistsAlreadyContainingTrack.ToHashSet();
+
+        foreach (var playlistEntries in entries.GroupBy(entry => entry.PlaylistId))
+        {
+            if (existingPlaylistIds.Contains(playlistEntries.Key))
+            {
+                _dbContext.PlaylistEntries.RemoveRange(playlistEntries);
+                continue;
+            }
+
+            var retainedEntry = playlistEntries
+                .OrderBy(entry => entry.Position)
+                .ThenBy(entry => entry.Id)
+                .First();
+            retainedEntry.TrackId = trackId;
+            _dbContext.PlaylistEntries.RemoveRange(
+                playlistEntries.Where(entry => entry.Id != retainedEntry.Id));
         }
     }
 
