@@ -15,6 +15,110 @@ namespace Cantaro.Api.Tests;
 public class TrackMatchingServiceTests
 {
     [Fact]
+    public async Task AcceptCandidateAsync_RemovesDuplicatePlaylistEntryWhenTrackAlreadyExists()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(1001, "matching-duplicate@example.com");
+        var playlist = new Playlist
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Name = "Jon Bellion",
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var track = new Track
+        {
+            Id = Guid.NewGuid(),
+            MbidRecording = "why-recording",
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                Title = "WHY",
+                Artist = "Jon Bellion",
+                DurationSeconds = 177
+            }),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "why-video",
+            Title = "WHY",
+            Artist = "Jon Bellion",
+            DurationSeconds = 178,
+            MatchStatus = TrackMatchingStatuses.Ambiguous,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var candidate = new TrackResolutionCandidate
+        {
+            Id = Guid.NewGuid(),
+            TrackObservationId = observation.Id,
+            CandidateSource = "musicbrainz",
+            ExternalId = "why-recording",
+            Title = "WHY",
+            Artist = "Jon Bellion, Luke Combs",
+            MbidRecording = "why-recording",
+            DurationSeconds = 177,
+            Score = 0.97m,
+            CreatedAt = now
+        };
+        var existingEntry = new PlaylistEntry
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            TrackId = track.Id,
+            Position = 0,
+            AddedAt = now
+        };
+        var duplicateObservationEntry = new PlaylistEntry
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id,
+            Position = 1,
+            AddedAt = now
+        };
+
+        dbContext.AddRange(
+            user,
+            playlist,
+            track,
+            observation,
+            candidate,
+            existingEntry,
+            duplicateObservationEntry);
+        await dbContext.SaveChangesAsync();
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.AcceptCandidateAsync(
+            observation.Id,
+            candidate.Id,
+            CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Equal(track.Id, result.TrackId);
+        var storedEntry = Assert.Single(await dbContext.PlaylistEntries.ToListAsync());
+        Assert.Equal(existingEntry.Id, storedEntry.Id);
+        Assert.Equal(track.Id, storedEntry.TrackId);
+    }
+
+    [Fact]
     public async Task ProcessObservationAsync_ReusesUniqueTrustedSpotifyTrackBeforeMetadataSearch()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
