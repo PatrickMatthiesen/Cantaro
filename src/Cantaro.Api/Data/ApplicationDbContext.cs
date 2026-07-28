@@ -306,11 +306,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => e.MatchStatus);
             entity.HasIndex(e => new
             {
-                e.SourceType,
                 e.NormalizedTitle,
                 e.DurationSeconds,
-                e.TrackId
-            });
+                e.TrackId,
+                e.SourceType
+            }).HasDatabaseName("IX_TrackObservations_IdentityLookup");
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

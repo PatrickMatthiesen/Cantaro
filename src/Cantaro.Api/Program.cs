@@ -72,6 +72,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SpotifyTokenManager>();
 builder.Services.AddScoped<SpotifyService>();
 builder.Services.AddScoped<SpotifyPlaylistSyncService>();
+builder.Services.AddScoped<TrackIdentityResolver>();
 builder.Services.AddScoped<SpotifyTrackResolver>();
 builder.Services.AddScoped<IPlatformService, SpotifyPlatformService>();
 builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();

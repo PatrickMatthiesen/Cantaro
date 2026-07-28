@@ -53,6 +53,7 @@ public class TrackMatchingServiceTests
             Artist = "Jon Bellion",
             NormalizedTitle = "maybe idk",
             NormalizedArtist = "jon bellion",
+            ThumbnailUrl = "https://i.ytimg.com/vi/youtube-maybe-idk/mqdefault.jpg",
             DurationSeconds = 234,
             MatchStatus = TrackMatchingStatuses.Pending,
             CreatedAt = now,
@@ -94,8 +95,11 @@ public class TrackMatchingServiceTests
 
         Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
         Assert.Equal(trackId, result.TrackId);
-        Assert.Contains("trusted Spotify", result.ResolutionNotes, StringComparison.Ordinal);
+        Assert.Contains("existing Cantaro Track", result.ResolutionNotes, StringComparison.Ordinal);
         Assert.Equal(0, provider.SearchCount);
+        var canonicalMetadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
+            track.CanonicalMetadata!);
+        Assert.Equal(youtubeObservation.ThumbnailUrl, canonicalMetadata?.ThumbnailUrl);
         Assert.True(await dbContext.TrackSourceIds.AnyAsync(source =>
             source.SourceType == "youtube"
             && source.ExternalId == youtubeObservation.ExternalId
