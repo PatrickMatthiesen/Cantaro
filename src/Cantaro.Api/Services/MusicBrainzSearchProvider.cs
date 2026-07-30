@@ -40,7 +40,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             return [];
         }
 
-        var parsedMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var parsedMetadata = TrackObservationParser.Parse(observation);
         var queryPlans = BuildSearchPlans(parsedMetadata)
             .Take(_options.MusicBrainzMaxRequestsPerSearch)
             .ToList();

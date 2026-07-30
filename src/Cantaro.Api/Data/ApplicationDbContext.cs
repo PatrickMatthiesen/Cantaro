@@ -17,6 +17,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<Song> Songs => Set<Song>();
     public DbSet<SongTrack> SongTracks => Set<SongTrack>();
     public DbSet<SongCredit> SongCredits => Set<SongCredit>();
+    public DbSet<SongGroupingSuggestion> SongGroupingSuggestions => Set<SongGroupingSuggestion>();
     public DbSet<Track> Tracks => Set<Track>();
     public DbSet<TrackRelation> TrackRelations => Set<TrackRelation>();
     public DbSet<Artist> Artists => Set<Artist>();
@@ -187,6 +188,43 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(track => track.SongMemberships)
                 .HasForeignKey(e => e.TrackId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SongGroupingSuggestion>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).HasMaxLength(32);
+            entity.Property(e => e.Status).HasMaxLength(16);
+            entity.Property(e => e.Confidence).HasPrecision(5, 4);
+            entity.Property(e => e.EvidenceJson).HasColumnType("jsonb");
+            entity.HasIndex(e => new { e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.CandidateTrackId, e.TargetSongId })
+                .IsUnique();
+
+            entity.HasOne(e => e.CandidateTrack)
+                .WithMany()
+                .HasForeignKey(e => e.CandidateTrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.AnchorTrack)
+                .WithMany()
+                .HasForeignKey(e => e.AnchorTrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SourceSong)
+                .WithMany()
+                .HasForeignKey(e => e.SourceSongId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.TargetSong)
+                .WithMany()
+                .HasForeignKey(e => e.TargetSongId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ReviewedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.ReviewedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Track>(entity =>

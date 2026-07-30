@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GlassCard, GradientButton, GradientPageShell, PageLoadingState } from '@cantaro/client-shared/ui';
 import { matchingApi } from '@cantaro/client-shared/music';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import type {
   MatchingCandidateComparisonResponse,
   MatchingQueueCandidateResponse,
@@ -9,6 +9,9 @@ import type {
   MatchingQueuePageResponse,
   MatchingQueuePlaylistResponse,
   MatchingSummaryResponse,
+  SongGroupingSuggestionPageResponse,
+  SongGroupingSuggestionResponse,
+  SongGroupingTrackResponse,
 } from '@cantaro/client-shared/music';
 
 interface MatchingReviewPageProps {
@@ -16,6 +19,12 @@ interface MatchingReviewPageProps {
 }
 
 type MatchingActionHandler = (observationId: string, action: () => Promise<void>) => Promise<void>;
+type MatchingReviewTab = 'musicbrainz' | 'track-groupings';
+
+const matchingReviewTabs: ReadonlyArray<{ id: MatchingReviewTab; label: string }> = [
+  { id: 'musicbrainz', label: 'MusicBrainz matches' },
+  { id: 'track-groupings', label: 'Track groupings' },
+];
 
 interface MatchingReviewState {
   activeObservationId: string | null;
@@ -27,6 +36,18 @@ interface MatchingReviewState {
   queue: MatchingQueueItemResponse[];
   runObservationAction: MatchingActionHandler;
   summary: MatchingSummaryResponse | null;
+  setPage: (page: number) => void;
+}
+
+interface SongGroupingReviewState {
+  activeSuggestionId: string | null;
+  error: string | null;
+  isGenerating: boolean;
+  isLoading: boolean;
+  loadSuggestions: () => Promise<void>;
+  pageData: SongGroupingSuggestionPageResponse | null;
+  reviewSuggestion: (suggestionId: string, accept: boolean) => Promise<void>;
+  runGeneration: () => Promise<void>;
   setPage: (page: number) => void;
 }
 
@@ -132,6 +153,68 @@ function useMatchingReviewQueue(): MatchingReviewState {
   );
 
   return { activeObservationId, error, isLoading, loadQueue, page, pageData, queue, runObservationAction, setPage, summary };
+}
+
+function useSongGroupingReview(): SongGroupingReviewState {
+  const [page, setPage] = useState(1);
+  const [pageData, setPageData] = useState<SongGroupingSuggestionPageResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const response = await matchingApi.getSongGroupingSuggestions(page);
+      setPageData(response);
+      if (response.page !== page) setPage(response.page);
+      setError(null);
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Failed to load song grouping suggestions'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page]);
+
+  useEffect(() => {
+    void loadSuggestions();
+  }, [loadSuggestions]);
+
+  const runGeneration = useCallback(async () => {
+    setIsGenerating(true);
+    try {
+      await matchingApi.generateSongGroupingSuggestions();
+      await loadSuggestions();
+    } catch (generationError) {
+      setError(getErrorMessage(generationError, 'Failed to find song grouping candidates'));
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [loadSuggestions]);
+
+  const reviewSuggestion = useCallback(async (suggestionId: string, accept: boolean) => {
+    setActiveSuggestionId(suggestionId);
+    try {
+      await matchingApi.reviewSongGroupingSuggestion(suggestionId, accept);
+      await loadSuggestions();
+    } catch (reviewError) {
+      setError(getErrorMessage(reviewError, 'Song grouping review failed'));
+    } finally {
+      setActiveSuggestionId(null);
+    }
+  }, [loadSuggestions]);
+
+  return {
+    activeSuggestionId,
+    error,
+    isGenerating,
+    isLoading,
+    loadSuggestions,
+    pageData,
+    reviewSuggestion,
+    runGeneration,
+    setPage,
+  };
 }
 
 function formatDuration(durationSeconds?: number): string | null {
@@ -283,6 +366,148 @@ function MatchingReviewHeader({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
+function groupingReason(suggestion: SongGroupingSuggestionResponse): string {
+  try {
+    const evidence = JSON.parse(suggestion.evidenceJson) as { reason?: string };
+    return evidence.reason ?? 'The recordings have matching composition evidence.';
+  } catch {
+    return 'The recordings have matching composition evidence.';
+  }
+}
+
+function SongGroupingTrack({
+  label,
+  track,
+}: {
+  label: string;
+  track: SongGroupingTrackResponse;
+}) {
+  return (
+    <div className="min-w-0 flex-1 px-4 py-3">
+      <p className="text-xs font-black text-violet-700">{label}</p>
+      <h3 className="mt-1 truncate text-base font-black text-slate-950">
+        {track.title ?? 'Untitled recording'}
+      </h3>
+      <p className="mt-1 truncate text-sm font-semibold text-slate-600">
+        {track.artist ?? 'Unknown artist'}
+      </p>
+      <p className="mt-2 font-mono text-xs text-slate-500">
+        {track.isrc ? `ISRC ${track.isrc}` : track.musicBrainzRecordingId ? `MBID ${track.musicBrainzRecordingId}` : 'No stable recording ID'}
+      </p>
+    </div>
+  );
+}
+
+function SongGroupingSuggestionRow({
+  review,
+  suggestion,
+}: {
+  review: SongGroupingReviewState;
+  suggestion: SongGroupingSuggestionResponse;
+}) {
+  const busy = review.activeSuggestionId === suggestion.suggestionId;
+  return (
+    <article className="px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-700">{groupingReason(suggestion)}</p>
+        <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">
+          {Math.round(suggestion.confidence * 100)}% confidence
+        </span>
+      </div>
+      <div className="mt-3 flex flex-col rounded-xl bg-violet-50/70 sm:flex-row sm:divide-x sm:divide-violet-100">
+        <SongGroupingTrack label="Move this recording" track={suggestion.candidate} />
+        <SongGroupingTrack label="Into this song" track={suggestion.anchor} />
+      </div>
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void review.reviewSuggestion(suggestion.suggestionId, false)}
+          className="rounded-xl px-4 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none disabled:opacity-50"
+        >
+          Keep separate
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void review.reviewSuggestion(suggestion.suggestionId, true)}
+          className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-800 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-50"
+        >
+          {busy ? 'Applying…' : 'Group versions'}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function SongGroupingReviewBody({ review }: { review: SongGroupingReviewState }) {
+  const items = review.pageData?.items ?? [];
+  if (review.isLoading) {
+    return <p className="px-5 py-6 text-sm font-semibold text-slate-600">Loading song grouping review…</p>;
+  }
+  if (items.length === 0) {
+    return (
+      <div className="px-5 py-6">
+        <p className="font-black text-slate-900">No grouping decisions waiting</p>
+        <p className="mt-1 text-sm font-semibold text-slate-600">
+          Run the candidate finder after importing new playlists or resolving Track matches.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="divide-y divide-violet-100">
+      {items.map((suggestion) => (
+        <SongGroupingSuggestionRow
+          key={suggestion.suggestionId}
+          review={review}
+          suggestion={suggestion}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SongGroupingReviewPanel({ review }: { review: SongGroupingReviewState }) {
+  return (
+    <section aria-labelledby="song-grouping-heading">
+      <GlassCard className="overflow-hidden p-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100 px-5 py-4">
+          <div>
+            <h2 id="song-grouping-heading" className="text-xl font-black text-slate-950">
+              Group recordings into songs
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm font-semibold text-slate-600">
+              Review distinct recordings that may be versions of the same composition. Identical recording IDs stay in the separate Track-reconciliation workflow.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void review.runGeneration()}
+            disabled={review.isGenerating}
+            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-violet-700 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {review.isGenerating ? 'Finding candidates…' : 'Find candidates'}
+          </button>
+        </div>
+
+        {review.error ? (
+          <p className="bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-800" role="alert">
+            {review.error}
+          </p>
+        ) : null}
+
+        <SongGroupingReviewBody review={review} />
+      </GlassCard>
+      <MatchingQueuePagination
+        pageData={review.pageData}
+        onPageChange={review.setPage}
+        label="Song grouping review"
+      />
+    </section>
+  );
+}
+
 function getMatchingSummaryStats(summary: MatchingSummaryResponse) {
   return [
     { label: 'Unresolved', value: summary.totalUnresolved, tint: 'from-indigo-500 to-purple-500' },
@@ -361,32 +586,135 @@ function MatchingQueueList({
   );
 }
 
-function MatchingQueuePagination({ pageData, onPageChange }: { pageData: MatchingQueuePageResponse | null; onPageChange: (page: number) => void }) {
+function MatchingQueuePagination({
+  pageData,
+  onPageChange,
+  label = 'Matching queue',
+}: {
+  pageData: Pick<MatchingQueuePageResponse, 'page' | 'pageSize' | 'totalCount' | 'totalPages'> | null;
+  onPageChange: (page: number) => void;
+  label?: string;
+}) {
   if (!pageData || pageData.totalPages <= 1) return null;
   const firstItem = (pageData.page - 1) * pageData.pageSize + 1;
   const lastItem = Math.min(pageData.page * pageData.pageSize, pageData.totalCount);
-  return <nav className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3" aria-label="Matching queue pages"><p className="text-sm font-medium text-gray-600">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-gray-600">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
+  return <nav className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3" aria-label={`${label} pages`}><p className="text-sm font-medium text-gray-600">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-gray-600">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
 }
 
-function MatchingReviewContent({ review }: { review: MatchingReviewState }) {
+function MatchingReviewTabs({
+  activeTab,
+  onTabChange,
+}: {
+  activeTab: MatchingReviewTab;
+  onTabChange: (tab: MatchingReviewTab) => void;
+}) {
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const selectTab = (tab: MatchingReviewTab, focus = false) => {
+    onTabChange(tab);
+    if (focus) {
+      tabRefs.current[matchingReviewTabs.findIndex((item) => item.id === tab)]?.focus();
+    }
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const currentIndex = matchingReviewTabs.findIndex((tab) => tab.id === activeTab);
+    let nextIndex: number | null = null;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % matchingReviewTabs.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + matchingReviewTabs.length) % matchingReviewTabs.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = matchingReviewTabs.length - 1;
+    }
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      selectTab(matchingReviewTabs[nextIndex].id, true);
+    }
+  };
+
+  return (
+    <div className="overflow-x-auto pb-1">
+      <div
+        role="tablist"
+        aria-label="Matching review type"
+        className="inline-flex min-w-full rounded-2xl border border-violet-100 bg-white/70 p-1 sm:min-w-0"
+      >
+        {matchingReviewTabs.map((tab, index) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              ref={(element) => {
+                tabRefs.current[index] = element;
+              }}
+              type="button"
+              role="tab"
+              id={`${tab.id}-tab`}
+              aria-controls={`${tab.id}-panel`}
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => selectTab(tab.id)}
+              onKeyDown={handleKeyDown}
+              className={`min-h-11 flex-1 rounded-xl px-4 py-2.5 text-sm font-black whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none ${
+                isActive
+                  ? 'bg-violet-700 text-white shadow-sm'
+                  : 'text-slate-700 hover:bg-violet-50 hover:text-violet-800'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MatchingReviewContent({
+  groupingReview,
+  review,
+}: {
+  groupingReview: SongGroupingReviewState;
+  review: MatchingReviewState;
+}) {
+  const [activeTab, setActiveTab] = useState<MatchingReviewTab>('musicbrainz');
+
   return (
     <>
-      <MatchingReviewHeader onRefresh={() => void review.loadQueue()} />
-      <MatchingSummaryStats summary={review.summary} />
-      <MatchingReviewError error={review.error} />
-      <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} />
-      <MatchingQueueList
-        activeObservationId={review.activeObservationId}
-        onAction={review.runObservationAction}
-        queue={review.queue}
-      />
-      <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} />
+      <MatchingReviewHeader onRefresh={() => {
+        void review.loadQueue();
+        void groupingReview.loadSuggestions();
+      }} />
+      <MatchingReviewTabs activeTab={activeTab} onTabChange={setActiveTab} />
+      {activeTab === 'musicbrainz' ? (
+        <section id="musicbrainz-panel" role="tabpanel" aria-labelledby="musicbrainz-tab" className="space-y-5">
+          <MatchingSummaryStats summary={review.summary} />
+          <MatchingReviewError error={review.error} />
+          <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} label="MusicBrainz matches" />
+          <MatchingQueueList
+            activeObservationId={review.activeObservationId}
+            onAction={review.runObservationAction}
+            queue={review.queue}
+          />
+          <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} label="MusicBrainz matches" />
+        </section>
+      ) : (
+        <section id="track-groupings-panel" role="tabpanel" aria-labelledby="track-groupings-tab">
+          <SongGroupingReviewPanel review={groupingReview} />
+        </section>
+      )}
     </>
   );
 }
 
 export function MatchingReviewPage({ embedded = false }: MatchingReviewPageProps) {
   const review = useMatchingReviewQueue();
+  const groupingReview = useSongGroupingReview();
 
   if (review.isLoading) {
     return <MatchingReviewLoading embedded={embedded} />;
@@ -394,7 +722,7 @@ export function MatchingReviewPage({ embedded = false }: MatchingReviewPageProps
 
   return (
     <MatchingReviewLayout embedded={embedded}>
-      <MatchingReviewContent review={review} />
+      <MatchingReviewContent groupingReview={groupingReview} review={review} />
     </MatchingReviewLayout>
   );
 }
@@ -533,11 +861,13 @@ function CandidateSection({
   disabled,
   observationId,
   onAction,
+  suggestedVersionFlags,
 }: {
   candidates: MatchingQueueCandidateResponse[];
   disabled: boolean;
   observationId: string;
   onAction: MatchingActionHandler;
+  suggestedVersionFlags: number;
 }) {
   return (
     <div className="rounded-2xl bg-white/70 p-4">
@@ -552,9 +882,56 @@ function CandidateSection({
         disabled={disabled}
         observationId={observationId}
         onAction={onAction}
+        suggestedVersionFlags={suggestedVersionFlags}
       />
     </div>
   );
+}
+
+interface TrackVersionOption {
+  label: string;
+  value: number;
+}
+
+interface SuggestedTrackVersion {
+  label: string;
+  value: number;
+}
+
+const trackVersionOptions: readonly TrackVersionOption[] = [
+  { label: 'Acoustic', value: 1 },
+  { label: 'Live', value: 2 },
+  { label: 'Instrumental', value: 4 },
+  { label: 'Orchestral', value: 8 },
+  { label: 'Remix', value: 16 },
+  { label: 'Radio edit', value: 32 },
+  { label: 'Extended', value: 64 },
+  { label: 'Demo', value: 128 },
+  { label: 'A cappella', value: 256 },
+  { label: 'Karaoke', value: 512 },
+  { label: 'Cover', value: 1024 },
+  { label: 'Remastered', value: 2048 },
+  { label: 'Re-recorded', value: 4096 },
+  { label: 'Clean', value: 8192 },
+  { label: 'Explicit', value: 16384 },
+  { label: 'Slowed', value: 32768 },
+  { label: 'Sped up', value: 65536 },
+  { label: 'Alternate take', value: 131072 },
+];
+
+function getSuggestedTrackVersion(versionFlags: number): SuggestedTrackVersion | undefined {
+  if (versionFlags === 0) {
+    return undefined;
+  }
+
+  const labels = trackVersionOptions
+    .filter((option) => (versionFlags & option.value) === option.value)
+    .map((option) => option.label);
+
+  return {
+    label: labels.length > 0 ? labels.join(' + ') : 'Inferred',
+    value: versionFlags,
+  };
 }
 
 function CandidateList({
@@ -562,17 +939,20 @@ function CandidateList({
   disabled,
   observationId,
   onAction,
+  suggestedVersionFlags,
 }: {
   candidates: MatchingQueueCandidateResponse[];
   disabled: boolean;
   observationId: string;
   onAction: MatchingActionHandler;
+  suggestedVersionFlags: number;
 }) {
   if (candidates.length === 0) {
     return <p className="mt-3 text-sm text-gray-600">No candidates were stored for this observation yet.</p>;
   }
 
   const candidateRows: MatchingQueueCandidateResponse[][] = [];
+  const detectedVersion = getSuggestedTrackVersion(suggestedVersionFlags);
   for (let index = 0; index < candidates.length; index += 2) {
     candidateRows.push(candidates.slice(index, index + 2));
   }
@@ -583,16 +963,26 @@ function CandidateList({
         <div key={row.map((candidate) => candidate.candidateId).join('-')} className="matching-candidate-row">
           <CandidateCard
             candidate={row[0]}
+            detectedVersion={detectedVersion}
             disabled={disabled}
-            onUse={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, row[0].candidateId))}
+            onUseExact={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, row[0].candidateId))}
+            onUseAsVersion={(versionFlags) => void onAction(
+              observationId,
+              () => matchingApi.selectCandidateAsVersion(observationId, row[0].candidateId, versionFlags),
+            )}
           />
           {row[1] ? (
             <>
               <div className="matching-candidate-column-divider" aria-hidden="true" />
               <CandidateCard
                 candidate={row[1]}
+                detectedVersion={detectedVersion}
                 disabled={disabled}
-                onUse={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, row[1].candidateId))}
+                onUseExact={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, row[1].candidateId))}
+                onUseAsVersion={(versionFlags) => void onAction(
+                  observationId,
+                  () => matchingApi.selectCandidateAsVersion(observationId, row[1].candidateId, versionFlags),
+                )}
               />
             </>
           ) : null}
@@ -622,6 +1012,7 @@ function QueueObservationItem({ item, activeObservationId, onAction }: QueueObse
           disabled={isBusy}
           observationId={item.observationId}
           onAction={onAction}
+          suggestedVersionFlags={item.suggestedVersionFlags}
         />
       </div>
     </GlassCard>
@@ -819,14 +1210,114 @@ function CandidateDiffTable({ comparisons }: { comparisons: MatchingCandidateCom
   );
 }
 
+interface CandidateSelectionActionProps {
+  candidateId: string;
+  detectedVersion?: SuggestedTrackVersion;
+  disabled: boolean;
+  onUseAsVersion: (versionFlags: number) => void;
+  onUseExact: () => void;
+}
+
+function CandidatePrimaryAction({
+  detectedVersion,
+  disabled,
+  onUseAsVersion,
+  onUseExact,
+}: Omit<CandidateSelectionActionProps, 'candidateId'>) {
+  if (!detectedVersion) {
+    return (
+      <button
+        type="button"
+        className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+        onClick={onUseExact}
+        disabled={disabled}
+      >
+        Use match
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+      onClick={() => onUseAsVersion(detectedVersion.value)}
+      disabled={disabled}
+    >
+      Add as {detectedVersion.label.toLowerCase()} version
+    </button>
+  );
+}
+
+function CandidateAdditionalOptions({
+  candidateId,
+  detectedVersion,
+  disabled,
+  onUseAsVersion,
+  onUseExact,
+}: CandidateSelectionActionProps) {
+  const [selectedVersionFlag, setSelectedVersionFlag] = useState(
+    trackVersionOptions.some((option) => option.value === detectedVersion?.value)
+      ? detectedVersion?.value ?? 0
+      : 0,
+  );
+  const selectedVersion = trackVersionOptions.find((option) => option.value === selectedVersionFlag);
+  const selectId = `candidate-version-${candidateId}`;
+
+  return (
+    <details className="rounded-xl border border-violet-100 bg-white/75 p-2">
+      <summary className="cursor-pointer list-none rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+        Additional options
+      </summary>
+      <div className="mt-2 space-y-2 px-2 pb-1">
+        <label htmlFor={selectId} className="block text-xs font-semibold text-slate-600">Version type</label>
+        <select
+          id={selectId}
+          value={selectedVersionFlag}
+          onChange={(event) => setSelectedVersionFlag(Number(event.target.value))}
+          disabled={disabled}
+          className="min-h-10 w-full rounded-lg border border-violet-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-violet-500 focus:ring-2 focus:ring-violet-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value={0}>Choose a version type</option>
+          {trackVersionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <button
+          type="button"
+          className="w-full rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onUseAsVersion(selectedVersionFlag)}
+          disabled={disabled || !selectedVersion}
+        >
+          {selectedVersion ? `Add as ${selectedVersion.label.toLowerCase()} version` : 'Choose a version type'}
+        </button>
+        <button type="button" className="w-full rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" onClick={onUseExact} disabled={disabled}>
+          Use as exact recording
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function CandidateSelectionActions(props: CandidateSelectionActionProps) {
+  return (
+    <div className="flex w-full shrink-0 flex-col gap-2 sm:w-56">
+      <CandidatePrimaryAction {...props} />
+      <CandidateAdditionalOptions {...props} />
+    </div>
+  );
+}
+
 function CandidateCard({
   candidate,
+  detectedVersion,
   disabled,
-  onUse,
+  onUseAsVersion,
+  onUseExact,
 }: {
   candidate: MatchingQueueCandidateResponse;
+  detectedVersion?: SuggestedTrackVersion;
   disabled: boolean;
-  onUse: () => void;
+  onUseAsVersion: (versionFlags: number) => void;
+  onUseExact: () => void;
 }) {
   return (
     <div className="matching-candidate-card">
@@ -840,14 +1331,13 @@ function CandidateCard({
             <CandidateMeta candidate={candidate} />
           </div>
 
-          <button
-            type="button"
-            className="matching-candidate-action"
-            onClick={onUse}
+          <CandidateSelectionActions
+            candidateId={candidate.candidateId}
+            detectedVersion={detectedVersion}
             disabled={disabled}
-          >
-            Use match
-          </button>
+            onUseAsVersion={onUseAsVersion}
+            onUseExact={onUseExact}
+          />
         </div>
 
         <CandidateMarkers candidate={candidate} />
