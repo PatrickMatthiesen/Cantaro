@@ -76,6 +76,169 @@ public class TrackMatchingService
         return observation;
     }
 
+    public async Task<TrackObservation> AcceptCandidateAsVersionAsync(
+        Guid observationId,
+        Guid candidateId,
+        TrackVersionFlags versionFlags,
+        CancellationToken cancellationToken)
+    {
+        ValidateVersionFlags(versionFlags);
+
+        var observation = await _dbContext.TrackObservations
+            .Include(item => item.Candidates)
+            .FirstOrDefaultAsync(item => item.Id == observationId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"Track observation {observationId} was not found.");
+        var candidate = observation.Candidates.FirstOrDefault(item => item.Id == candidateId)
+            ?? throw new InvalidOperationException(
+                $"Candidate {candidateId} does not belong to observation {observationId}.");
+
+        if (observation.TrackId != null
+            || observation.MatchStatus == TrackMatchingStatuses.Matched)
+        {
+            if (await IsAcceptedCandidateVersionResolutionAsync(
+                    observation,
+                    candidateId,
+                    versionFlags,
+                    cancellationToken))
+            {
+                return observation;
+            }
+
+            throw new InvalidOperationException(
+                "This observation has already been resolved to a Track.");
+        }
+
+        var originalUpdatedAt = observation.UpdatedAt;
+        var claimedAt = DateTimeOffset.UtcNow;
+        var claimed = await _dbContext.TrackObservations
+            .Where(item =>
+                item.Id == observationId
+                && item.TrackId == null
+                && item.MatchStatus != TrackMatchingStatuses.Matched
+                && item.UpdatedAt == originalUpdatedAt)
+            .ExecuteUpdateAsync(
+                updates => updates.SetProperty(
+                    item => item.UpdatedAt,
+                    claimedAt),
+                cancellationToken);
+        if (claimed == 0)
+        {
+            _dbContext.ChangeTracker.Clear();
+            var current = await _dbContext.TrackObservations
+                .Include(item => item.Candidates)
+                .SingleAsync(item => item.Id == observationId, cancellationToken);
+            if (await IsAcceptedCandidateVersionResolutionAsync(
+                    current,
+                    candidateId,
+                    versionFlags,
+                    cancellationToken))
+            {
+                return current;
+            }
+
+            throw new InvalidOperationException(
+                "This observation is already being resolved or has been resolved to another Track.");
+        }
+        observation.UpdatedAt = claimedAt;
+
+        var anchorTrack = await ResolveCandidateAnchorTrackAsync(
+            candidate,
+            cancellationToken);
+        var targetSongId = await GetSingleSongIdAsync(
+            anchorTrack.Id,
+            cancellationToken);
+        var parsedObservation = TrackObservationParser.Parse(observation);
+        var artistIdentity = ReadCandidateArtistIdentity(candidate.RawMetadata);
+        var versionEvidence = CreateVersionEvidence(
+            observation,
+            candidate,
+            parsedObservation,
+            versionFlags,
+            "manual-candidate-version");
+        var versionTrack = await CreateTrackAsync(
+            mbidRecording: null,
+            isrc: null,
+            title: candidate.Title,
+            artist: candidate.Artist ?? parsedObservation.DisplayArtist,
+            durationSeconds: observation.DurationSeconds,
+            description: null,
+            thumbnailUrl: observation.ThumbnailUrl,
+            artistMusicBrainzId: artistIdentity.MusicBrainzId,
+            artistSortName: artistIdentity.SortName,
+            targetSongId,
+            versionFlags,
+            versionEvidence,
+            cancellationToken);
+
+        await EnsureSourceMappingAsync(
+            versionTrack.Id,
+            observation.SourceType,
+            observation.ExternalId,
+            cancellationToken);
+
+        candidate.IsAccepted = true;
+        observation.TrackId = versionTrack.Id;
+        observation.MatchStatus = TrackMatchingStatuses.Matched;
+        observation.AcceptedCandidateId = candidate.Id;
+        observation.ResolutionNotes =
+            $"Created a {DescribeVersion(versionFlags)} version Track under the selected candidate's Song.";
+        observation.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await UpdatePlaylistEntriesForObservationAsync(
+            observation.Id,
+            versionTrack.Id,
+            cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return observation;
+    }
+
+    private async Task<bool> IsAcceptedCandidateVersionResolutionAsync(
+        TrackObservation observation,
+        Guid candidateId,
+        TrackVersionFlags versionFlags,
+        CancellationToken cancellationToken)
+    {
+        if (observation.TrackId == null
+            || observation.AcceptedCandidateId != candidateId
+            || observation.MatchStatus != TrackMatchingStatuses.Matched)
+        {
+            return false;
+        }
+
+        var track = await _dbContext.Tracks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == observation.TrackId,
+                cancellationToken);
+        if (track?.VersionFlags != versionFlags
+            || string.IsNullOrWhiteSpace(track.VersionEvidence))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var evidence = JsonDocument.Parse(track.VersionEvidence);
+            var root = evidence.RootElement;
+            return root.TryGetProperty("origin", out var origin)
+                && string.Equals(
+                    origin.GetString(),
+                    "manual-candidate-version",
+                    StringComparison.Ordinal)
+                && root.TryGetProperty("observationId", out var observationId)
+                && observationId.TryGetGuid(out var evidenceObservationId)
+                && evidenceObservationId == observation.Id
+                && root.TryGetProperty("candidateId", out var acceptedCandidateId)
+                && acceptedCandidateId.TryGetGuid(out var evidenceCandidateId)
+                && evidenceCandidateId == candidateId;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public async Task<TrackObservation> MarkNoMatchAsync(Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
@@ -99,16 +262,26 @@ public class TrackMatchingService
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
+        var parsedObservation = TrackObservationParser.Parse(observation);
+        var inferredFlags = TrackVersionClassifier.Infer(parsedObservation);
         var track = await CreateTrackAsync(
             mbidRecording: null,
             isrc: null,
-            title: observation.Title,
-            artist: observation.Artist,
+            title: parsedObservation.DisplayTitle,
+            artist: parsedObservation.DisplayArtist,
             durationSeconds: observation.DurationSeconds,
             description: null,
             thumbnailUrl: observation.ThumbnailUrl,
             artistMusicBrainzId: null,
             artistSortName: null,
+            targetSongId: null,
+            inferredFlags,
+            CreateVersionEvidence(
+                observation,
+                candidate: null,
+                parsedObservation,
+                inferredFlags,
+                "manual-observation-track"),
             cancellationToken);
 
         await EnsureSourceMappingAsync(track.Id, observation.SourceType, observation.ExternalId, cancellationToken);
@@ -133,7 +306,7 @@ public class TrackMatchingService
         observation.LastMatchError = null;
         observation.UpdatedAt = now;
 
-        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var parsedObservation = TrackObservationParser.Parse(observation);
         var localIdentityMatch = await _identityResolver.ResolveExistingAsync(
             new TrackIdentityQuery(
                 observation.SourceType,
@@ -253,7 +426,7 @@ public class TrackMatchingService
                 observation.ResolutionNotes = decision.ResolutionNotes;
                 observation.AcceptedCandidateId = null;
                 PersistObservationDiagnostics(observation, CreateObservationDiagnostics(
-                    rankedCandidates.FirstOrDefault()?.ObservationMetadata ?? TrackMetadataParser.Parse(observation.Title, observation.Artist),
+                    rankedCandidates.FirstOrDefault()?.ObservationMetadata ?? TrackObservationParser.Parse(observation),
                     decision.DecisionReason,
                     decision.TopScore,
                     decision.SecondDistinctScore,
@@ -311,7 +484,7 @@ public class TrackMatchingService
             PersistObservationDiagnostics(
                 observation,
                 CreateObservationDiagnostics(
-                    TrackMetadataParser.Parse(observation.Title, observation.Artist),
+                    TrackObservationParser.Parse(observation),
                     $"Matching failed: {ex.Message}",
                     topScore: null,
                     secondDistinctScore: null,
@@ -413,6 +586,127 @@ public class TrackMatchingService
         await UpdatePlaylistEntriesForObservationAsync(observation.Id, track.Id, cancellationToken);
     }
 
+    private async Task<Track> ResolveCandidateAnchorTrackAsync(
+        TrackResolutionCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        var parsedCandidate = TrackMetadataParser.Parse(
+            candidate.Title,
+            candidate.Artist);
+        var identityMatch = await _identityResolver.ResolveExistingAsync(
+            new TrackIdentityQuery(
+                candidate.CandidateSource,
+                candidate.ExternalId,
+                candidate.Title,
+                candidate.Artist,
+                candidate.DurationSeconds,
+                candidate.Isrc,
+                candidate.MbidRecording,
+                parsedCandidate.ArtistCredits),
+            cancellationToken);
+        var artistIdentity = ReadCandidateArtistIdentity(candidate.RawMetadata);
+        var anchorTrack = identityMatch?.Track ?? await CreateTrackAsync(
+            candidate.MbidRecording,
+            candidate.Isrc,
+            candidate.Title,
+            candidate.Artist,
+            candidate.DurationSeconds,
+            description: null,
+            thumbnailUrl: null,
+            artistMusicBrainzId: artistIdentity.MusicBrainzId,
+            artistSortName: artistIdentity.SortName,
+            cancellationToken);
+
+        if (identityMatch != null)
+        {
+            if (string.IsNullOrWhiteSpace(anchorTrack.MbidRecording)
+                && !string.IsNullOrWhiteSpace(candidate.MbidRecording))
+            {
+                anchorTrack.MbidRecording = candidate.MbidRecording.Trim().ToLowerInvariant();
+            }
+
+            if (string.IsNullOrWhiteSpace(anchorTrack.Isrc)
+                && !string.IsNullOrWhiteSpace(candidate.Isrc))
+            {
+                anchorTrack.Isrc = TrackIdentityResolver.NormalizeIsrc(candidate.Isrc);
+            }
+
+            anchorTrack.UpdatedAt = DateTimeOffset.UtcNow;
+            await EnsurePrimaryArtistCreditAsync(
+                anchorTrack,
+                candidate.Artist,
+                artistIdentity.MusicBrainzId,
+                artistIdentity.SortName,
+                cancellationToken);
+        }
+
+        await EnsureSourceMappingAsync(
+            anchorTrack.Id,
+            candidate.CandidateSource,
+            candidate.ExternalId,
+            cancellationToken);
+        if (!string.IsNullOrWhiteSpace(candidate.MbidRecording)
+            && (!string.Equals(
+                    candidate.CandidateSource,
+                    "musicbrainz",
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    candidate.ExternalId,
+                    candidate.MbidRecording,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            await EnsureSourceMappingAsync(
+                anchorTrack.Id,
+                "musicbrainz",
+                candidate.MbidRecording,
+                cancellationToken);
+        }
+
+        return anchorTrack;
+    }
+
+    private async Task<Guid> GetSingleSongIdAsync(
+        Guid trackId,
+        CancellationToken cancellationToken)
+    {
+        var songIds = _dbContext.SongTracks.Local
+            .Where(membership => membership.TrackId == trackId)
+            .Select(membership => membership.SongId)
+            .Concat(await _dbContext.SongTracks
+                .Where(membership => membership.TrackId == trackId)
+                .Select(membership => membership.SongId)
+                .Take(2)
+                .ToListAsync(cancellationToken))
+            .Distinct()
+            .Take(2)
+            .ToArray();
+        if (songIds.Length == 1)
+        {
+            return songIds[0];
+        }
+
+        if (songIds.Length > 1)
+        {
+            throw new InvalidOperationException(
+                "The selected candidate Track belongs to multiple Songs and requires separate review.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var song = new Song
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        _dbContext.AddRange(song, new SongTrack
+        {
+            SongId = song.Id,
+            Song = song,
+            TrackId = trackId
+        });
+        return song.Id;
+    }
+
     private async Task<Track> CreateTrackAsync(
         string? mbidRecording,
         string? isrc,
@@ -424,19 +718,53 @@ public class TrackMatchingService
         string? artistMusicBrainzId,
         string? artistSortName,
         CancellationToken cancellationToken)
+        => await CreateTrackAsync(
+            mbidRecording,
+            isrc,
+            title,
+            artist,
+            durationSeconds,
+            description,
+            thumbnailUrl,
+            artistMusicBrainzId,
+            artistSortName,
+            targetSongId: null,
+            TrackVersionFlags.None,
+            versionEvidence: null,
+            cancellationToken);
+
+    private async Task<Track> CreateTrackAsync(
+        string? mbidRecording,
+        string? isrc,
+        string title,
+        string? artist,
+        int? durationSeconds,
+        string? description,
+        string? thumbnailUrl,
+        string? artistMusicBrainzId,
+        string? artistSortName,
+        Guid? targetSongId,
+        TrackVersionFlags versionFlags,
+        string? versionEvidence,
+        CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var song = new Song
-        {
-            Id = Guid.NewGuid(),
-            CreatedAt = now,
-            UpdatedAt = now
-        };
+        var song = targetSongId == null
+            ? new Song
+            {
+                Id = Guid.NewGuid(),
+                CreatedAt = now,
+                UpdatedAt = now
+            }
+            : null;
+        var songId = targetSongId ?? song!.Id;
         var track = new Track
         {
             Id = Guid.NewGuid(),
             MbidRecording = mbidRecording,
             Isrc = TrackIdentityResolver.NormalizeIsrc(isrc),
+            VersionFlags = versionFlags,
+            VersionEvidence = versionEvidence,
             CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
             {
                 Title = title,
@@ -450,13 +778,20 @@ public class TrackMatchingService
         };
         var membership = new SongTrack
         {
-            SongId = song.Id,
+            SongId = songId,
             Song = song,
             TrackId = track.Id,
             Track = track
         };
 
-        _dbContext.AddRange(song, track, membership);
+        if (song == null)
+        {
+            _dbContext.AddRange(track, membership);
+        }
+        else
+        {
+            _dbContext.AddRange(song, track, membership);
+        }
         await EnsurePrimaryArtistCreditAsync(
             track,
             artist,
@@ -465,6 +800,47 @@ public class TrackMatchingService
             cancellationToken);
         return track;
     }
+
+    private static string CreateVersionEvidence(
+        TrackObservation observation,
+        TrackResolutionCandidate? candidate,
+        ParsedTrackMetadata parsedObservation,
+        TrackVersionFlags selectedFlags,
+        string origin) =>
+        JsonSerializer.Serialize(new
+        {
+            origin,
+            selectedFlags = selectedFlags.ToString(),
+            observationId = observation.Id,
+            observationTitle = observation.Title,
+            observationArtist = observation.Artist,
+            detectedVersionMarkers = parsedObservation.VersionMarkers,
+            detectedPlaybackModifiers = parsedObservation.PlaybackModifiers,
+            candidateId = candidate?.Id,
+            candidateExternalId = candidate?.ExternalId
+        });
+
+    private static void ValidateVersionFlags(TrackVersionFlags versionFlags)
+    {
+        var knownFlags = Enum.GetValues<TrackVersionFlags>()
+            .Aggregate(TrackVersionFlags.None, (current, value) => current | value);
+        if (versionFlags == TrackVersionFlags.None
+            || (versionFlags & ~knownFlags) != TrackVersionFlags.None)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(versionFlags),
+                versionFlags,
+                "A known non-empty Track version classification is required.");
+        }
+    }
+
+    private static string DescribeVersion(TrackVersionFlags versionFlags) =>
+        versionFlags.ToString().Replace(",", " +", StringComparison.Ordinal)
+            .Replace("SpedUp", "sped-up", StringComparison.Ordinal)
+            .Replace("RadioEdit", "radio edit", StringComparison.Ordinal)
+            .Replace("ACappella", "a cappella", StringComparison.Ordinal)
+            .Replace("AlternateTake", "alternate take", StringComparison.Ordinal)
+            .ToLowerInvariant();
 
     private async Task EnsurePrimaryArtistCreditAsync(
         Track track,
@@ -785,7 +1161,7 @@ public class TrackMatchingService
         observationMetadata.ExternalId = observation.ExternalId;
         observationMetadata.Title = observation.Title;
         observationMetadata.Artist = observation.Artist;
-        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var parsedObservation = TrackObservationParser.Parse(observation, observationMetadata);
         observationMetadata.SearchTitle = parsedObservation.SearchTitle;
         observationMetadata.SearchArtist = parsedObservation.SearchArtist;
         observationMetadata.ThumbnailUrl = observation.ThumbnailUrl;

@@ -69,8 +69,36 @@ public sealed class TrackIdentityResolver
 
         if (exactSource != null)
         {
+            var exactTrack = await LoadRequiredTrackAsync(
+                exactSource.TrackId,
+                cancellationToken);
+            var incomingIsrc = NormalizeIsrc(query.Isrc);
+            var mappedIsrc = NormalizeIsrc(exactTrack.Isrc);
+            if (incomingIsrc != null
+                && !string.Equals(incomingIsrc, mappedIsrc, StringComparison.Ordinal))
+            {
+                var corroboratedTrackId = await FindUniqueIsrcTrackIdAsync(
+                    incomingIsrc,
+                    cancellationToken);
+                if (corroboratedTrackId != null
+                    && corroboratedTrackId != exactTrack.Id
+                    && await MetadataCorroboratesTrackAsync(
+                        query,
+                        corroboratedTrackId.Value,
+                        cancellationToken))
+                {
+                    return new TrackIdentityMatch(
+                        await LoadRequiredTrackAsync(
+                            corroboratedTrackId.Value,
+                            cancellationToken),
+                        TrackIdentityMatchKind.Isrc,
+                        "Corrected a stale source mapping using a unique ISRC and corroborating metadata.",
+                        exactSource);
+                }
+            }
+
             return new TrackIdentityMatch(
-                await LoadRequiredTrackAsync(exactSource.TrackId, cancellationToken),
+                exactTrack,
                 TrackIdentityMatchKind.ExactSource,
                 "Matched existing source mapping.",
                 exactSource);
@@ -252,6 +280,43 @@ public sealed class TrackIdentityResolver
             .ToArray();
 
         return compatibleTrackIds.Length == 1 ? compatibleTrackIds[0] : null;
+    }
+
+    private async Task<bool> MetadataCorroboratesTrackAsync(
+        TrackIdentityQuery query,
+        Guid trackId,
+        CancellationToken cancellationToken)
+    {
+        if (query.DurationSeconds == null)
+        {
+            return false;
+        }
+
+        var parsedQuery = TrackMetadataParser.Parse(query.Title, query.Artist);
+        var incomingCredits = TrackMetadataParser.NormalizeArtistCredits(
+            query.ArtistCredits is { Count: > 0 }
+                ? query.ArtistCredits
+                : parsedQuery.ArtistCredits);
+        var minimumDuration = Math.Max(
+            0,
+            query.DurationSeconds.Value - _options.AutoMatchDurationToleranceSeconds);
+        var maximumDuration =
+            query.DurationSeconds.Value + _options.AutoMatchDurationToleranceSeconds;
+
+        var observations = _dbContext.TrackObservations.Local
+            .Where(observation => observation.TrackId == trackId
+                && observation.DurationSeconds >= minimumDuration
+                && observation.DurationSeconds <= maximumDuration)
+            .Concat(await _dbContext.TrackObservations
+                .AsNoTracking()
+                .Where(observation => observation.TrackId == trackId
+                    && observation.DurationSeconds >= minimumDuration
+                    && observation.DurationSeconds <= maximumDuration)
+                .ToListAsync(cancellationToken))
+            .DistinctBy(observation => observation.Id);
+
+        return observations.Any(observation =>
+            MetadataMatches(parsedQuery, incomingCredits, observation));
     }
 
     private static bool MetadataMatches(

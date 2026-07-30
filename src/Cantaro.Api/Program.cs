@@ -100,6 +100,7 @@ builder.Services.AddScoped<MediaObservationMatchingService>();
 builder.Services.AddScoped<MediaObservationProgressService>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
+builder.Services.AddScoped<SongGroupingSuggestionService>();
 builder.Services.AddSingleton<TrackMatchingQueue>();
 builder.Services.AddSingleton<MusicSyncThrottleService>();
 builder.Services.AddScoped<MusicSyncJobProcessor>();

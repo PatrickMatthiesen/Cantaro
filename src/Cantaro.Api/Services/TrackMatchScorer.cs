@@ -9,7 +9,7 @@ internal static class TrackMatchScorer
         TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options)
     {
-        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var parsedObservation = TrackObservationParser.Parse(observation);
         var parsedCandidate = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
         var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedObservation.DisplayTitle, parsedObservation.SearchTitle);
         var artistSimilarity = BestSimilarity(candidate.Artist, observation.Artist, parsedObservation.DisplayArtist, parsedObservation.SearchArtist);

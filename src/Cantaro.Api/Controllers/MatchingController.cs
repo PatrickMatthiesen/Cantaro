@@ -74,6 +74,7 @@ public class MatchingQueueItemResponse
     public DateTimeOffset? LastMatchAttemptedAt { get; set; }
     public string? LastMatchError { get; set; }
     public string? ResolutionNotes { get; set; }
+    public TrackVersionFlags SuggestedVersionFlags { get; set; }
     public TrackMatchObservationDiagnostics Diagnostics { get; set; } = new();
     public List<MatchingQueuePlaylistResponse> Playlists { get; set; } = [];
     public List<MatchingQueueCandidateResponse> Candidates { get; set; } = [];
@@ -93,6 +94,37 @@ public class SelectMatchingCandidateRequest
     public required Guid CandidateId { get; set; }
 }
 
+public class SelectMatchingCandidateAsVersionRequest
+{
+    public required Guid CandidateId { get; set; }
+    public TrackVersionFlags VersionFlags { get; set; }
+}
+
+public sealed record SongGroupingTrackResponse(
+    Guid TrackId,
+    string? Title,
+    string? Artist,
+    string? Isrc,
+    string? MusicBrainzRecordingId,
+    TrackVersionFlags VersionFlags);
+
+public sealed record SongGroupingSuggestionResponse(
+    Guid SuggestionId,
+    decimal Confidence,
+    string EvidenceJson,
+    DateTimeOffset CreatedAt,
+    SongGroupingTrackResponse Candidate,
+    SongGroupingTrackResponse Anchor);
+
+public sealed record SongGroupingSuggestionPageResponse(
+    IReadOnlyList<SongGroupingSuggestionResponse> Items,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages);
+
+public sealed record GenerateSongGroupingSuggestionsResponse(int CreatedCount);
+
 [ApiController]
 [Route("api/matching")]
 [Authorize]
@@ -100,11 +132,14 @@ public class MatchingController(
     ApplicationDbContext dbContext,
     UserManager<User> userManager,
     TrackMatchingService trackMatchingService,
+    SongGroupingSuggestionService songGroupingSuggestionService,
     ILogger<MatchingController> logger) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly TrackMatchingService _trackMatchingService = trackMatchingService;
+    private readonly SongGroupingSuggestionService _songGroupingSuggestionService =
+        songGroupingSuggestionService;
     private readonly ILogger<MatchingController> _logger = logger;
 
     [HttpGet("summary")]
@@ -166,6 +201,61 @@ public class MatchingController(
         });
     }
 
+    [HttpGet("song-grouping")]
+    public async Task<ActionResult<SongGroupingSuggestionPageResponse>> GetSongGroupingSuggestions(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 5,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        pageSize = Math.Clamp(pageSize, 1, 20);
+        var pending = _dbContext.SongGroupingSuggestions
+            .Where(suggestion =>
+                suggestion.Status == SongGroupingSuggestionStatuses.Pending
+                && suggestion.CandidateTrack != null
+                && suggestion.CandidateTrack.PlaylistEntries.Any(entry =>
+                    entry.Playlist != null && entry.Playlist.UserId == userId));
+        var totalCount = await pending.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+        page = Math.Clamp(page, 1, totalPages);
+        var suggestions = await pending
+            .Include(suggestion => suggestion.CandidateTrack)
+            .Include(suggestion => suggestion.AnchorTrack)
+            .OrderByDescending(suggestion => suggestion.Confidence)
+            .ThenBy(suggestion => suggestion.CreatedAt)
+            .ThenBy(suggestion => suggestion.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new SongGroupingSuggestionPageResponse(
+            suggestions.Select(MapSongGroupingSuggestion).ToList(),
+            page,
+            pageSize,
+            totalCount,
+            totalPages));
+    }
+
+    [HttpPost("song-grouping/generate")]
+    public async Task<ActionResult<GenerateSongGroupingSuggestionsResponse>>
+        GenerateSongGroupingSuggestions(CancellationToken cancellationToken)
+    {
+        var created = await _songGroupingSuggestionService.GenerateAsync(cancellationToken);
+        return Ok(new GenerateSongGroupingSuggestionsResponse(created.Count));
+    }
+
+    [HttpPost("song-grouping/{suggestionId:guid}/accept")]
+    public Task<ActionResult<SongGroupingSuggestionResponse>> AcceptSongGroupingSuggestion(
+        Guid suggestionId,
+        CancellationToken cancellationToken) =>
+        ReviewSongGroupingSuggestion(suggestionId, accept: true, cancellationToken);
+
+    [HttpPost("song-grouping/{suggestionId:guid}/reject")]
+    public Task<ActionResult<SongGroupingSuggestionResponse>> RejectSongGroupingSuggestion(
+        Guid suggestionId,
+        CancellationToken cancellationToken) =>
+        ReviewSongGroupingSuggestion(suggestionId, accept: false, cancellationToken);
+
     [HttpPost("queue/{observationId:guid}/retry")]
     public async Task<ActionResult<MatchingQueueItemResponse>> Retry(Guid observationId, CancellationToken cancellationToken)
     {
@@ -193,6 +283,52 @@ public class MatchingController(
 
         var observation = await _trackMatchingService.AcceptCandidateAsync(observationId, request.CandidateId, cancellationToken);
         return Ok(await LoadQueueItemAsync(observation.Id, userId, cancellationToken));
+    }
+
+    [HttpPost("queue/{observationId:guid}/select-candidate-as-version")]
+    public async Task<ActionResult<MatchingQueueItemResponse>> SelectCandidateAsVersion(
+        Guid observationId,
+        [FromBody] SelectMatchingCandidateAsVersionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        if (!await ObservationAccessibleAsync(
+                observationId,
+                userId,
+                cancellationToken))
+        {
+            return NotFound(new { error = "Track observation not found." });
+        }
+
+        if (request.VersionFlags == TrackVersionFlags.None)
+        {
+            return BadRequest(new
+            {
+                error = "A Track version classification is required."
+            });
+        }
+
+        try
+        {
+            var observation =
+                await _trackMatchingService.AcceptCandidateAsVersionAsync(
+                    observationId,
+                    request.CandidateId,
+                    request.VersionFlags,
+                    cancellationToken);
+            return Ok(await LoadQueueItemAsync(
+                observation.Id,
+                userId,
+                cancellationToken));
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { error = exception.Message });
+        }
     }
 
     [HttpPost("queue/{observationId:guid}/mark-no-match")]
@@ -234,10 +370,84 @@ public class MatchingController(
         return MapQueueItem(observation, userId);
     }
 
+    private async Task<ActionResult<SongGroupingSuggestionResponse>>
+        ReviewSongGroupingSuggestion(
+            Guid suggestionId,
+            bool accept,
+            CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        var accessible = await _dbContext.SongGroupingSuggestions.AnyAsync(
+            suggestion => suggestion.Id == suggestionId
+                && suggestion.CandidateTrack != null
+                && suggestion.CandidateTrack.PlaylistEntries.Any(entry =>
+                    entry.Playlist != null && entry.Playlist.UserId == userId),
+            cancellationToken);
+        if (!accessible)
+        {
+            return NotFound(new { error = "Song grouping suggestion not found." });
+        }
+
+        try
+        {
+            await _songGroupingSuggestionService.ReviewAsync(
+                suggestionId,
+                userId,
+                accept,
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { error = exception.Message });
+        }
+
+        var reviewed = await _dbContext.SongGroupingSuggestions
+            .AsNoTracking()
+            .Include(suggestion => suggestion.CandidateTrack)
+            .Include(suggestion => suggestion.AnchorTrack)
+            .SingleAsync(suggestion => suggestion.Id == suggestionId, cancellationToken);
+        return Ok(MapSongGroupingSuggestion(reviewed));
+    }
+
+    private static SongGroupingSuggestionResponse MapSongGroupingSuggestion(
+        SongGroupingSuggestion suggestion) => new(
+        suggestion.Id,
+        suggestion.Confidence,
+        suggestion.EvidenceJson,
+        suggestion.CreatedAt,
+        MapSongGroupingTrack(suggestion.CandidateTrack!),
+        MapSongGroupingTrack(suggestion.AnchorTrack!));
+
+    private static SongGroupingTrackResponse MapSongGroupingTrack(Track track)
+    {
+        TrackCanonicalMetadata? metadata = null;
+        if (!string.IsNullOrWhiteSpace(track.CanonicalMetadata))
+        {
+            try
+            {
+                metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
+                    track.CanonicalMetadata);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return new SongGroupingTrackResponse(
+            track.Id,
+            metadata?.Title,
+            metadata?.Artist,
+            track.Isrc,
+            track.MbidRecording,
+            track.VersionFlags);
+    }
+
     private static MatchingQueueItemResponse MapQueueItem(TrackObservation observation, int userId)
     {
-        var parsedObservation = TrackMetadataParser.Parse(observation.Title, observation.Artist);
-        var storedObservationMetadata = ExtractObservationMetadata(observation);
+        var storedObservationMetadata = TrackObservationParser.ReadMetadata(observation);
+        var parsedObservation = TrackObservationParser.Parse(
+            observation,
+            storedObservationMetadata);
         var displayTitle = TrackObservationDisplayFormatter.GetQueueTitle(observation, storedObservationMetadata);
         var displayArtist = TrackObservationDisplayFormatter.GetQueueArtist(observation, storedObservationMetadata);
         var candidateProjections = observation.Candidates
@@ -258,6 +468,29 @@ public class MatchingController(
             .Select(group => group.Max(projection => projection.Candidate.Score))
             .OrderByDescending(score => score)
             .ToList();
+        var storedDiagnostics = storedObservationMetadata?.Matching;
+        var effectiveDiagnostics = new TrackMatchObservationDiagnostics
+        {
+            VersionMarkers =
+            [
+                .. parsedObservation.VersionMarkers
+                    .Concat(storedDiagnostics?.VersionMarkers ?? [])
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+            ],
+            PlaybackModifiers =
+            [
+                .. parsedObservation.PlaybackModifiers
+                    .Concat(storedDiagnostics?.PlaybackModifiers ?? [])
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+            ],
+            DecisionReason = storedDiagnostics?.DecisionReason ?? observation.ResolutionNotes,
+            TopScore = storedDiagnostics?.TopScore
+                ?? (distinctClusterScores.Count > 0 ? distinctClusterScores[0] : null),
+            SecondDistinctScore = storedDiagnostics?.SecondDistinctScore
+                ?? (distinctClusterScores.Count > 1 ? distinctClusterScores[1] : null),
+            DistinctClusterCount = storedDiagnostics?.DistinctClusterCount
+                ?? distinctClusterScores.Count
+        };
 
         return new MatchingQueueItemResponse
         {
@@ -273,15 +506,8 @@ public class MatchingController(
             LastMatchAttemptedAt = observation.LastMatchAttemptedAt,
             LastMatchError = observation.LastMatchError,
             ResolutionNotes = observation.ResolutionNotes,
-            Diagnostics = storedObservationMetadata?.Matching ?? new TrackMatchObservationDiagnostics
-            {
-                VersionMarkers = [.. parsedObservation.VersionMarkers],
-                PlaybackModifiers = [.. parsedObservation.PlaybackModifiers],
-                DecisionReason = observation.ResolutionNotes,
-                TopScore = distinctClusterScores.Count > 0 ? distinctClusterScores[0] : null,
-                SecondDistinctScore = distinctClusterScores.Count > 1 ? distinctClusterScores[1] : null,
-                DistinctClusterCount = distinctClusterScores.Count
-            },
+            SuggestedVersionFlags = TrackVersionClassifier.Infer(parsedObservation),
+            Diagnostics = effectiveDiagnostics,
             Playlists = observation.PlaylistEntries
                 .Where(entry => entry.Playlist?.UserId == userId)
                 .OrderBy(entry => entry.Playlist!.Name)
@@ -330,7 +556,7 @@ public class MatchingController(
         TrackResolutionCandidate candidate,
         TrackMatchCandidateDiagnostics diagnostics)
     {
-        var observationMetadata = TrackMetadataParser.Parse(observation.Title, observation.Artist);
+        var observationMetadata = TrackObservationParser.Parse(observation);
         var candidateMetadata = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
         var observationTitle = PreferValue(diagnostics.ObservationSearchTitle, observationMetadata.SearchTitle, observation.Title);
         var observationArtist = PreferValue(diagnostics.ObservationSearchArtist, observationMetadata.SearchArtist, observation.Artist);

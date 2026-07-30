@@ -144,13 +144,14 @@ public sealed class SpotifyTrackResolverTests
         fixture.DbContext.ChangeTracker.Clear();
 
         var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: null),
+            Snapshot(id: "spotify-track", isrc: "USSP02600001"),
             Now,
             CancellationToken.None);
         await fixture.DbContext.SaveChangesAsync();
 
         Assert.Equal(existing.Id, resolved.Id);
         Assert.Equal(1, await fixture.DbContext.Tracks.CountAsync());
+        Assert.Equal("USSP02600001", resolved.Isrc);
         var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
             resolved.CanonicalMetadata!);
         Assert.Equal(
@@ -246,6 +247,94 @@ public sealed class SpotifyTrackResolverTests
         Assert.NotEqual(existing.Id, resolved.Id);
         Assert.Equal("USNEW2600001", resolved.Isrc);
         Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("USOLD2600001")]
+    public async Task ResolveAsync_RepointsStaleExactSpotifyMappingWhenIsrcAndMetadataCorroborateAnotherTrack(
+        string? mappedIsrc)
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var staleTrack = fixture.AddTrackWithSong(mappedIsrc);
+        var correctTrack = fixture.AddTrackWithSong("USNEW2600001");
+        fixture.AddObservation(
+            correctTrack.Id,
+            "youtube",
+            "video-1",
+            "Track title",
+            "Artist",
+            180);
+        fixture.DbContext.TrackSourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(),
+            TrackId = staleTrack.Id,
+            SourceType = SpotifyService.ServiceName,
+            ExternalId = "spotify-track"
+        });
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: "USNEW2600001"),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(correctTrack.Id, resolved.Id);
+        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+        Assert.Equal(correctTrack.Id, await fixture.DbContext.TrackSourceIds
+            .Where(sourceId => sourceId.SourceType == SpotifyService.ServiceName
+                && sourceId.ExternalId == "spotify-track")
+            .Select(sourceId => sourceId.TrackId)
+            .SingleAsync());
+        Assert.Equal(mappedIsrc, await fixture.DbContext.Tracks
+            .Where(track => track.Id == staleTrack.Id)
+            .Select(track => track.Isrc)
+            .SingleAsync());
+        Assert.Equal(
+            1,
+            await fixture.DbContext.Tracks.CountAsync(
+                track => track.Isrc == "USNEW2600001"));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_KeepsExactSpotifyMappingWhenStableIdConflictLacksMetadataCorroboration()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var mappedTrack = fixture.AddTrackWithSong("USOLD2600001");
+        var unrelatedTrack = fixture.AddTrackWithSong("USNEW2600001");
+        fixture.AddObservation(
+            unrelatedTrack.Id,
+            "youtube",
+            "video-1",
+            "Different title",
+            "Different artist",
+            240);
+        fixture.DbContext.TrackSourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(),
+            TrackId = mappedTrack.Id,
+            SourceType = SpotifyService.ServiceName,
+            ExternalId = "spotify-track"
+        });
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+
+        var resolved = await fixture.Resolver.ResolveAsync(
+            Snapshot(id: "spotify-track", isrc: "USNEW2600001"),
+            Now,
+            CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(mappedTrack.Id, resolved.Id);
+        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+        Assert.Equal(mappedTrack.Id, await fixture.DbContext.TrackSourceIds
+            .Where(sourceId => sourceId.SourceType == SpotifyService.ServiceName
+                && sourceId.ExternalId == "spotify-track")
+            .Select(sourceId => sourceId.TrackId)
+            .SingleAsync());
+        Assert.Equal("USOLD2600001", resolved.Isrc);
     }
 
     private static SpotifyTrackSnapshot Snapshot(

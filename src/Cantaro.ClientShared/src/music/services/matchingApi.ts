@@ -67,6 +67,7 @@ export interface MatchingQueueItemResponse {
   lastMatchAttemptedAt?: string;
   lastMatchError?: string;
   resolutionNotes?: string;
+  suggestedVersionFlags: number;
   diagnostics: TrackMatchObservationDiagnostics;
   playlists: MatchingQueuePlaylistResponse[];
   candidates: MatchingQueueCandidateResponse[];
@@ -74,6 +75,32 @@ export interface MatchingQueueItemResponse {
 
 export interface MatchingQueuePageResponse {
   items: MatchingQueueItemResponse[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export interface SongGroupingTrackResponse {
+  trackId: string;
+  title?: string;
+  artist?: string;
+  isrc?: string;
+  musicBrainzRecordingId?: string;
+  versionFlags: number;
+}
+
+export interface SongGroupingSuggestionResponse {
+  suggestionId: string;
+  confidence: number;
+  evidenceJson: string;
+  createdAt: string;
+  candidate: SongGroupingTrackResponse;
+  anchor: SongGroupingTrackResponse;
+}
+
+export interface SongGroupingSuggestionPageResponse {
+  items: SongGroupingSuggestionResponse[];
   page: number;
   pageSize: number;
   totalCount: number;
@@ -96,6 +123,25 @@ class MatchingApiClient {
     throw new Error(error.error || fallbackMessage);
   }
 
+  private async getPage<T>(
+    path: string,
+    page: number,
+    pageSize: number,
+    fallbackMessage: string,
+  ): Promise<T> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      pageSize: pageSize.toString(),
+    });
+    const response = await fetch(`${path}?${params}`, {
+      credentials: 'include',
+      headers: this.getHeaders(),
+    });
+
+    await this.ensureOk(response, fallbackMessage);
+    return response.json();
+  }
+
   async getSummary(): Promise<MatchingSummaryResponse> {
     const response = await fetch('/api/matching/summary', {
       credentials: 'include',
@@ -107,14 +153,12 @@ class MatchingApiClient {
   }
 
   async getQueue(page = 1, pageSize = 5): Promise<MatchingQueuePageResponse> {
-    const params = new URLSearchParams({ page: page.toString(), pageSize: pageSize.toString() });
-    const response = await fetch(`/api/matching/queue?${params}`, {
-      credentials: 'include',
-      headers: this.getHeaders(),
-    });
-
-    await this.ensureOk(response, 'Failed to load matching queue');
-    return response.json();
+    return this.getPage(
+      '/api/matching/queue',
+      page,
+      pageSize,
+      'Failed to load matching queue',
+    );
   }
 
   async retry(observationId: string): Promise<void> {
@@ -138,6 +182,24 @@ class MatchingApiClient {
     await this.ensureOk(response, 'Failed to select matching candidate');
   }
 
+  async selectCandidateAsVersion(
+    observationId: string,
+    candidateId: string,
+    versionFlags: number,
+  ): Promise<void> {
+    const response = await fetch(
+      `/api/matching/queue/${encodeURIComponent(observationId)}/select-candidate-as-version`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ candidateId, versionFlags }),
+      },
+    );
+
+    await this.ensureOk(response, 'Failed to add matching candidate as a version');
+  }
+
   async markNoMatch(observationId: string): Promise<void> {
     const response = await fetch(`/api/matching/queue/${encodeURIComponent(observationId)}/mark-no-match`, {
       method: 'POST',
@@ -156,6 +218,48 @@ class MatchingApiClient {
     });
 
     await this.ensureOk(response, 'Failed to create canonical track');
+  }
+
+  async getSongGroupingSuggestions(
+    page = 1,
+    pageSize = 5,
+  ): Promise<SongGroupingSuggestionPageResponse> {
+    return this.getPage(
+      '/api/matching/song-grouping',
+      page,
+      pageSize,
+      'Failed to load song grouping suggestions',
+    );
+  }
+
+  async generateSongGroupingSuggestions(): Promise<number> {
+    const response = await fetch('/api/matching/song-grouping/generate', {
+      method: 'POST',
+      credentials: 'include',
+      headers: this.getHeaders(),
+    });
+
+    await this.ensureOk(response, 'Failed to generate song grouping suggestions');
+    const result = await response.json() as { createdCount: number };
+    return result.createdCount;
+  }
+
+  async reviewSongGroupingSuggestion(
+    suggestionId: string,
+    accept: boolean,
+  ): Promise<SongGroupingSuggestionResponse> {
+    const action = accept ? 'accept' : 'reject';
+    const response = await fetch(
+      `/api/matching/song-grouping/${encodeURIComponent(suggestionId)}/${action}`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: this.getHeaders(),
+      },
+    );
+
+    await this.ensureOk(response, `Failed to ${action} song grouping suggestion`);
+    return response.json();
   }
 }
 

@@ -1,4 +1,6 @@
 using Cantaro.Api.Services;
+using Cantaro.Api.Models;
+using System.Text.Json;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -39,6 +41,17 @@ public class TrackMetadataParserTests
     }
 
     [Fact]
+    public void Parse_TreatsTrailingDashVersionAsContextWhenArtistIsSupplied()
+    {
+        var parsed = TrackMetadataParser.Parse("Signal - Live", "The Artist");
+
+        Assert.Equal("Signal", parsed.DisplayTitle);
+        Assert.Equal("Signal", parsed.SearchTitle);
+        Assert.Equal("The Artist", parsed.DisplayArtist);
+        Assert.Contains("live", parsed.VersionMarkers);
+    }
+
+    [Fact]
     public void Parse_ExtractsPlaybackModifiersEvenWhenTheyAreRemovedFromSearchTitle()
     {
         var parsed = TrackMetadataParser.Parse("Nightcore | Crop Circles", "Jon Bellion");
@@ -46,6 +59,34 @@ public class TrackMetadataParserTests
         Assert.Equal("Crop Circles", parsed.DisplayTitle);
         Assert.Equal("Crop Circles", parsed.SearchTitle);
         Assert.Contains("nightcore", parsed.PlaybackModifiers);
+    }
+
+    [Fact]
+    public void ParseObservation_UsesOriginalProviderTitleForVersionSemantics()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "CH_oVqS6iss",
+            Title = "Guy.exe",
+            Artist = "Superfruit",
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            {
+                OriginalTitle = "Superfruit - Guy.exe speed up",
+                Artist = "Superfruit",
+                SearchArtist = "Superfruit"
+            }),
+            MatchStatus = TrackMatchingStatuses.Ambiguous,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        var parsed = TrackObservationParser.Parse(observation);
+
+        Assert.Equal("Guy.exe", parsed.DisplayTitle);
+        Assert.Equal("Superfruit", parsed.DisplayArtist);
+        Assert.Contains("speed up", parsed.PlaybackModifiers);
     }
 
     [Fact]

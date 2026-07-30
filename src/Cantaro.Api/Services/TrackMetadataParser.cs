@@ -31,6 +31,7 @@ public static partial class TrackMetadataParser
         var titleSemantics = ExtractTitleSemantics(rawTitle);
         var cleanedTitle = StripTrailingSoundtrackContext(
             StripTrailingContextSegments(CleanupTitle(rawTitle)));
+        cleanedTitle = StripTrailingDashVersionContext(cleanedTitle, rawArtist);
         var isTopicChannel = IsTopicChannel(rawArtist);
         var cleanedArtist = CleanupArtist(rawArtist);
 
@@ -314,6 +315,28 @@ public static partial class TrackMetadataParser
         }
 
         return CleanupWhitespace(cleaned.Trim(' ', '-', '|'));
+    }
+
+    private static string StripTrailingDashVersionContext(
+        string value,
+        string? suppliedArtist)
+    {
+        if (string.IsNullOrWhiteSpace(suppliedArtist))
+        {
+            return value;
+        }
+
+        var separatorIndex = value.LastIndexOf(" - ", StringComparison.Ordinal);
+        if (separatorIndex <= 0)
+        {
+            return value;
+        }
+
+        var suffix = value[(separatorIndex + 3)..].Trim();
+        var marker = VersionMarkerRegex().Match(suffix);
+        return marker.Success && marker.Index == 0 && marker.Length == suffix.Length
+            ? value[..separatorIndex].Trim()
+            : value;
     }
 
     private static string StripPlaybackModifiers(string value)

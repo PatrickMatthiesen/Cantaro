@@ -175,6 +175,19 @@ public class TrackMatchingServiceTests
             CreatedAt = now,
             UpdatedAt = now
         };
+        var song = new Song
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var membership = new SongTrack
+        {
+            SongId = song.Id,
+            Song = song,
+            TrackId = track.Id,
+            Track = track
+        };
         var spotifySource = new TrackSourceId
         {
             Id = Guid.NewGuid(),
@@ -186,7 +199,13 @@ public class TrackMatchingServiceTests
             LastVerifiedAt = now
         };
 
-        dbContext.AddRange(track, spotifySource, spotifyObservation, youtubeObservation);
+        dbContext.AddRange(
+            song,
+            track,
+            membership,
+            spotifySource,
+            spotifyObservation,
+            youtubeObservation);
         await dbContext.SaveChangesAsync();
 
         var provider = new FakeTrackMetadataSearchProvider();
@@ -204,10 +223,20 @@ public class TrackMatchingServiceTests
         var canonicalMetadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
             track.CanonicalMetadata!);
         Assert.Equal(youtubeObservation.ThumbnailUrl, canonicalMetadata?.ThumbnailUrl);
+        Assert.Equal(1, await dbContext.Tracks.CountAsync());
+        Assert.Equal(1, await dbContext.Songs.CountAsync());
+        Assert.Equal(1, await dbContext.SongTracks.CountAsync());
         Assert.True(await dbContext.TrackSourceIds.AnyAsync(source =>
             source.SourceType == "youtube"
             && source.ExternalId == youtubeObservation.ExternalId
             && source.TrackId == trackId));
+        Assert.Equal(
+            ["spotify", "youtube"],
+            await dbContext.TrackSourceIds
+                .Where(source => source.TrackId == trackId)
+                .OrderBy(source => source.SourceType)
+                .Select(source => source.SourceType)
+                .ToArrayAsync());
     }
 
     [Fact]
