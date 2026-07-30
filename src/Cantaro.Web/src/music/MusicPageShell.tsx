@@ -206,17 +206,11 @@ export function MusicPageShell({
   library,
   activeSong,
   onStopActiveSong,
-  searchValue,
-  onSearchChange,
-  onSearchSubmit,
 }: {
   children: ReactNode;
   library?: MusicLibraryResponse;
   activeSong?: MusicLibrarySong;
   onStopActiveSong?: () => void;
-  searchValue?: string;
-  onSearchChange?: (value: string) => void;
-  onSearchSubmit?: () => void;
 }) {
   const { library: sharedLibrary } = useMusicLibraryContext();
   const featuredSong = getFeaturedSong(activeSong);
@@ -226,10 +220,6 @@ export function MusicPageShell({
     <PageShell
       sidebar={<MusicSidebar library={sidebarLibrary} />}
       bottomSlot={featuredSong ? <BottomPlayer song={featuredSong} onStop={onStopActiveSong} /> : null}
-      searchPlaceholder="Search songs, artists, playlists..."
-      searchValue={searchValue}
-      onSearchChange={onSearchChange}
-      onSearchSubmit={onSearchSubmit}
       contentClassName="music-page-content"
     >
       {children}

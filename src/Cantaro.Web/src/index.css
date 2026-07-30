@@ -18,6 +18,22 @@
   --color-brand-900: oklch(42% 0.09 21);
 }
 
+@theme inline {
+  --color-canvas: var(--cantaro-canvas);
+  --color-panel: var(--cantaro-panel);
+  --color-panel-solid: var(--cantaro-panel-solid);
+  --color-line: var(--cantaro-border);
+  --color-ink: var(--cantaro-text);
+  --color-muted: var(--cantaro-muted);
+  --color-soft: var(--cantaro-soft);
+  --color-error-surface: var(--cantaro-error-surface);
+  --color-error-content: var(--cantaro-error-content);
+  --color-action: var(--cantaro-action);
+  --color-action-hover: var(--cantaro-action-hover);
+  --color-action-content: var(--cantaro-action-content);
+  --color-accent-content: var(--cantaro-accent-content);
+}
+
 :root {
   font-family: var(--font-display);
   background-color: rgb(2 6 23);
@@ -28,6 +44,13 @@
   --cantaro-border: #e7e2f7;
   --cantaro-text: #0f172a;
   --cantaro-muted: #64748b;
+  --cantaro-soft: #eeeaff;
+  --cantaro-error-surface: #fff1f2;
+  --cantaro-error-content: #be123c;
+  --cantaro-action: #0f172a;
+  --cantaro-action-hover: #6d28d9;
+  --cantaro-action-content: #ffffff;
+  --cantaro-accent-content: #6d28d9;
 }
 
 :root[data-theme="dark"] {
@@ -37,6 +60,13 @@
   --cantaro-border: rgba(148, 163, 184, 0.13);
   --cantaro-text: #f1f5f9;
   --cantaro-muted: #9aa8bf;
+  --cantaro-soft: rgba(124, 92, 255, 0.12);
+  --cantaro-error-surface: rgba(244, 63, 94, 0.14);
+  --cantaro-error-content: #fda4af;
+  --cantaro-action: #7c3aed;
+  --cantaro-action-hover: #6d28d9;
+  --cantaro-action-content: #ffffff;
+  --cantaro-accent-content: #c4b5fd;
 }
 
 :root[data-theme="dark"] body {

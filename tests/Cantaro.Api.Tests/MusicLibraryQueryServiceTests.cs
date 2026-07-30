@@ -241,6 +241,35 @@ public class MusicLibraryQueryServiceTests
         Assert.DoesNotContain(entries, x => x.TrackId == removed.Id);
     }
 
+    [Fact]
+    public async Task GetCanonicalSongAsync_DoesNotExposeTrackOutsideUsersLibrary()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(707, "song-owner@example.com");
+        var other = TestUserFactory.Create(708, "song-other@example.com");
+        var ownerPlaylist = MakePlaylist(owner.Id, "Private", now);
+        var track = new Track
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(
+                new TrackCanonicalMetadata { Title = "Private song" }),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.AddRange(owner, other, ownerPlaylist, track);
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.Add(MakeEntry(ownerPlaylist.Id, track.Id, null, 0, "cantaro", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var service = new MusicLibraryQueryService(db);
+
+        Assert.Null(await service.GetCanonicalSongAsync(track.Id, other.Id, default));
+        Assert.NotNull(await service.GetCanonicalSongAsync(track.Id, owner.Id, default));
+    }
+
     private static Playlist MakePlaylist(int userId, string name, DateTimeOffset now)
     {
         return new Playlist

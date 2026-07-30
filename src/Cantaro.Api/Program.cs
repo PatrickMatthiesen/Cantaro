@@ -95,6 +95,7 @@ builder.Services.AddSingleton<MediaLibraryImportQueue>();
 builder.Services.AddScoped<MediaLibraryQueryService>();
 builder.Services.AddScoped<MediaLibraryLinkService>();
 builder.Services.AddScoped<MusicLibraryQueryService>();
+builder.Services.AddScoped<CantaroSearchService>();
 builder.Services.AddScoped<MediaProviderOperationProcessor>();
 builder.Services.AddScoped<MediaObservationMatchingService>();
 builder.Services.AddScoped<MediaObservationProgressService>();
