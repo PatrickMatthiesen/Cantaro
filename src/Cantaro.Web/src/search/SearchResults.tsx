@@ -20,6 +20,7 @@ import type {
   SearchResultItem,
 } from './searchApi';
 import { searchGroups, type SearchGroupPresentation } from './searchGroups';
+import { rankSearchResults } from './searchRanking';
 import { searchResultDomId, trustedCanonicalRoute } from './searchRouting';
 
 type SearchNavigateHandler = (route: string) => boolean | void;
@@ -72,14 +73,28 @@ function ResultArtwork({ item, compact }: { item: SearchResultItem; compact: boo
   );
 }
 
-function ResultContent({ item, compact, showArrow }: { item: SearchResultItem; compact: boolean; showArrow: boolean }) {
+function ResultContent({
+  item,
+  compact,
+  showArrow,
+  showEntityType = false,
+}: {
+  item: SearchResultItem;
+  compact: boolean;
+  showArrow: boolean;
+  showEntityType?: boolean;
+}) {
+  const metadata = resultMetadata(item, showEntityType);
+  const titleClassName = compact ? 'text-sm' : 'text-sm sm:text-base';
+  const metadataClassName = compact ? 'text-xs' : 'text-xs sm:text-sm';
+
   return (
     <>
       <ResultArtwork item={item} compact={compact} />
       <span className="min-w-0 flex-1">
-        <span className={`text-ink block truncate font-black ${compact ? 'text-sm' : 'text-sm sm:text-base'}`}>{item.title}</span>
-        <span className={`text-muted mt-0.5 block truncate font-semibold ${compact ? 'text-xs' : 'text-xs sm:text-sm'}`}>
-          {[item.subtitle, item.detail].filter(Boolean).join(' · ') || item.entityType}
+        <span className={`text-ink block truncate font-black ${titleClassName}`}>{item.title}</span>
+        <span className={`text-muted mt-0.5 block truncate font-semibold ${metadataClassName}`}>
+          {metadata || item.entityType}
         </span>
       </span>
       {!compact ? (
@@ -92,23 +107,30 @@ function ResultContent({ item, compact, showArrow }: { item: SearchResultItem; c
   );
 }
 
+function resultMetadata(item: SearchResultItem, showEntityType: boolean): string {
+  const entityType = showEntityType ? item.entityType : undefined;
+  return [entityType, item.subtitle, item.detail].filter(Boolean).join(' · ');
+}
+
 function SearchResultRow({
   item,
   compact = false,
   onNavigate,
   asOption = false,
+  showEntityType = false,
 }: {
   item: SearchResultItem;
   compact?: boolean;
   onNavigate?: SearchNavigateHandler;
   asOption?: boolean;
+  showEntityType?: boolean;
 }) {
   const canonicalRoute = trustedCanonicalRoute(item.canonicalRoute);
 
   if (!canonicalRoute) {
     return (
       <div className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 opacity-70" title="This result does not have a safe Cantaro destination yet">
-        <ResultContent item={item} compact={compact} showArrow={false} />
+        <ResultContent item={item} compact={compact} showArrow={false} showEntityType={showEntityType} />
       </div>
     );
   }
@@ -125,7 +147,7 @@ function SearchResultRow({
         if (onNavigate?.(canonicalRoute)) event.preventDefault();
       }}
     >
-      <ResultContent item={item} compact={compact} showArrow />
+      <ResultContent item={item} compact={compact} showArrow showEntityType={showEntityType} />
     </Link>
   );
 }
@@ -451,6 +473,117 @@ function WholeSearchError({ message, onRetry, compact }: { message: string; onRe
         </button>
       )}
     />
+  );
+}
+
+function searchWarnings(response: SearchResponse | null, groupIds: SearchResultGroupId[]): string[] {
+  if (!response) return [];
+  return Array.from(new Set(groupIds.flatMap((groupId) => {
+    const group = response.groups[groupId];
+    if (group.status === 'unavailable') return [];
+    return group.message ? [group.message] : [];
+  })));
+}
+
+function RankedResultsBody({
+  query,
+  results,
+  error,
+  loading,
+  onRetry,
+  onNavigate,
+  asListbox,
+}: {
+  query: string;
+  results: SearchResultItem[];
+  error: string | null;
+  loading: boolean;
+  onRetry: () => void;
+  onNavigate?: SearchNavigateHandler;
+  asListbox: boolean;
+}) {
+  if (error) return <WholeSearchError message={error} onRetry={onRetry} compact />;
+  if (loading) return <SearchLoadingRows compact />;
+  if (results.length === 0) {
+    return (
+      <SearchStatusMessage
+        icon={Search}
+        title="No matching results"
+        detail={`Nothing matched “${query}”.`}
+        compact
+      />
+    );
+  }
+
+  return (
+    <div className="divide-line divide-y">
+      {results.map((item) => (
+        <SearchResultRow
+          key={`${item.entityType}-${item.id}`}
+          item={item}
+          compact
+          onNavigate={onNavigate}
+          asOption={asListbox}
+          showEntityType
+        />
+      ))}
+    </div>
+  );
+}
+
+function RankedResultsWarning({ warnings, hasResults }: { warnings: string[]; hasResults: boolean }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className={hasResults ? 'mt-2' : ''}>
+      <SearchStatusMessage
+        icon={AlertTriangle}
+        title="Some results may be missing"
+        detail={warnings.join(' ')}
+        compact
+      />
+    </div>
+  );
+}
+
+export function SearchRankedResults({
+  query,
+  response,
+  error,
+  loading,
+  groupIds,
+  onRetry,
+  onNavigate,
+  asListbox = false,
+  listboxId,
+}: {
+  query: string;
+  response: SearchResponse | null;
+  error: string | null;
+  loading: boolean;
+  groupIds: SearchResultGroupId[];
+  onRetry: () => void;
+  onNavigate?: SearchNavigateHandler;
+  asListbox?: boolean;
+  listboxId?: string;
+}) {
+  const results = rankSearchResults(response, groupIds, query)
+    .filter(({ item }) => trustedCanonicalRoute(item.canonicalRoute));
+  const resultItems = results.map(({ item }) => item);
+  const warnings = searchWarnings(response, groupIds);
+
+  return (
+    <div id={listboxId} role={asListbox ? 'listbox' : undefined} className="py-2">
+      <RankedResultsBody
+        query={query}
+        results={resultItems}
+        error={error}
+        loading={loading}
+        onRetry={onRetry}
+        onNavigate={onNavigate}
+        asListbox={asListbox}
+      />
+      {!error && !loading ? <RankedResultsWarning warnings={warnings} hasResults={resultItems.length > 0} /> : null}
+    </div>
   );
 }
 

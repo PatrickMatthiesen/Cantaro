@@ -11,9 +11,10 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { SearchGroupedResults } from './SearchResults';
+import { SearchGroupedResults, SearchRankedResults } from './SearchResults';
 import type { SearchResultGroupId } from './searchApi';
 import { searchGroups, searchTabs } from './searchGroups';
+import { rankSearchResults } from './searchRanking';
 import { searchResultDomId, trustedCanonicalRoute } from './searchRouting';
 import {
   createGlobalSearchState,
@@ -112,7 +113,7 @@ function SearchComboboxInput({
       <Search className="text-muted pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2" aria-hidden />
       <input
         ref={inputRef}
-        className="app-top-search-input h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-10 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
+        className="app-top-search-input h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-10 pl-11 text-base font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white md:text-sm"
         placeholder="Search music and media..."
         type="search"
         role="combobox"
@@ -171,6 +172,22 @@ function GlobalResultContent({
       <div id={previewListboxId} role="listbox" className="text-muted px-4 py-8 text-center text-sm font-semibold">
         Start typing to search songs, artists, playlists, and media.
       </div>
+    );
+  }
+
+  if (groupIds.length > 1) {
+    return (
+      <SearchRankedResults
+        query={query}
+        response={results.response}
+        error={results.error}
+        loading={results.loading}
+        groupIds={groupIds}
+        onRetry={results.retry}
+        onNavigate={onNavigate}
+        asListbox
+        listboxId={previewListboxId}
+      />
     );
   }
 
@@ -263,9 +280,10 @@ export function GlobalSearch() {
   const groupIds = activeGroup === 'all'
     ? searchGroups.map((group) => group.id)
     : [activeGroup];
-  const optionItems = groupIds.flatMap((groupId) => (
-    results.response?.groups[groupId].items.filter((item) => trustedCanonicalRoute(item.canonicalRoute)) ?? []
-  ));
+  const optionItems = (groupIds.length > 1
+    ? rankSearchResults(results.response, groupIds, normalizedDraft).map(({ item }) => item)
+    : groupIds.flatMap((groupId) => results.response?.groups[groupId].items ?? []))
+    .filter((item) => trustedCanonicalRoute(item.canonicalRoute));
   const activeOptionId = activeIndex >= 0 && optionItems[activeIndex]
     ? searchResultDomId(optionItems[activeIndex])
     : undefined;
