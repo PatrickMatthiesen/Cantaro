@@ -66,7 +66,7 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
 
     if (!posterUrl || failed) {
         return (
-            <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-indigo-100 to-purple-100">
+            <div className="flex h-full w-full items-center justify-center bg-surface-subtle">
                 <MediaProviderIcon providerId="anilist" className="h-8 w-8" aria-hidden />
                 <span className="sr-only">{title} — no artwork available</span>
             </div>
@@ -99,7 +99,7 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: Li
         <button
             type="button"
             onClick={onClick}
-            className="group h-full w-full text-left transition-transform duration-300 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+            className="group h-full w-full text-left transition-transform duration-300 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
             <div className={`relative aspect-[0.72] overflow-hidden bg-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.22)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}>
                 <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />

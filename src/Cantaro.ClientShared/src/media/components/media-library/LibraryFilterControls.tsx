@@ -48,9 +48,9 @@ export interface LibraryRefreshActionProps {
 function FilterSelect({ label, value, options, onChange, disabled = false }: FilterSelectProps) {
     return (
         <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</label>
+            <label className="text-xs font-medium tracking-wide text-content-muted uppercase">{label}</label>
             <select
-                className="h-9 rounded-xl border border-gray-200 bg-white/80 px-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-9 rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm text-content focus:ring-2 focus:ring-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 value={value}
                 onChange={(event) => onChange(event.target.value || undefined)}
                 disabled={disabled}
@@ -66,10 +66,10 @@ function FilterSelect({ label, value, options, onChange, disabled = false }: Fil
 function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: SortControlsProps) {
     return (
         <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium tracking-wide text-gray-500 uppercase">Sort by</label>
+            <label className="text-xs font-medium tracking-wide text-content-muted uppercase">Sort by</label>
             <div className="flex gap-1">
                 <select
-                    className="h-9 rounded-xl border border-gray-200 bg-white/80 px-3 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                    className="h-9 rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm text-content focus:ring-2 focus:ring-focus focus:outline-none"
                     value={sortBy}
                     onChange={(event) => onSortByChange(event.target.value)}
                 >
@@ -80,7 +80,7 @@ function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: Sort
                 </select>
                 <button
                     type="button"
-                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white/80 text-sm text-gray-600 transition hover:bg-white"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-border-subtle bg-surface-translucent text-sm text-content-muted transition hover:bg-surface-hover"
                     onClick={onToggleSortDir}
                     title={sortDir === 'asc' ? 'Ascending - click to switch' : 'Descending - click to switch'}
                 >
@@ -130,12 +130,12 @@ export function LibraryFilterFields({
 export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onNavigateProviders }: LibraryRefreshActionProps) {
     return (
         <div className="ml-auto flex flex-col gap-1">
-            <span className="text-xs font-medium tracking-wide text-gray-500 uppercase">Providers</span>
+            <span className="text-xs font-medium tracking-wide text-content-muted uppercase">Providers</span>
             <div className="flex gap-1.5">
                 {onNavigateProviders ? (
                     <button
                         type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-3 text-sm font-medium text-gray-700 transition hover:bg-white"
+                        className="inline-flex h-9 items-center justify-center rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm font-medium text-content transition hover:bg-surface-hover"
                         onClick={onNavigateProviders}
                     >
                         Manage
@@ -144,7 +144,7 @@ export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onN
                 {isConnected ? (
                     <button
                         type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-xl border border-gray-200 bg-white/80 px-3 text-sm font-medium text-gray-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-9 items-center justify-center rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm font-medium text-content transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
                         onClick={() => void onRefresh()}
                         disabled={isRefreshing}
                         aria-busy={isRefreshing}

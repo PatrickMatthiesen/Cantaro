@@ -57,7 +57,7 @@ export function LibrarySearchBar({
     const isProviderMode = mode !== 'library';
 
     return (
-        <section className="rounded-3xl border border-white/70 bg-white/80 p-3 shadow-sm shadow-indigo-100/50 backdrop-blur">
+        <section className="rounded-3xl border border-border-subtle bg-surface-translucent p-3 shadow-sm backdrop-blur">
             <form
                 className="flex flex-wrap gap-2 justify-between"
                 onSubmit={(event) => {
@@ -66,7 +66,7 @@ export function LibrarySearchBar({
                 }}
             >
                 {navigation ? <div className="shrink-0">{navigation}</div> : null}
-                {navigation ? <div className="h-px w-full shrink-0 bg-gray-200/80 sm:h-8 sm:w-px" aria-hidden /> : null}
+                {navigation ? <div className="h-px w-full shrink-0 bg-border-subtle sm:h-8 sm:w-px" aria-hidden /> : null}
                 <SearchModeTabs mode={mode} connectedProviderIds={connectedProviderIds} onModeChange={onModeChange} />
                 <label className="min-w-48 flex-1">
                     <span className="sr-only">Search {modeLabel(mode)}</span>
@@ -75,10 +75,10 @@ export function LibrarySearchBar({
                         value={query}
                         onChange={(event) => onQueryChange(event.target.value)}
                         placeholder={isProviderMode ? `Search ${modeLabel(mode)}…` : 'Search your library…'}
-                        className="h-11 w-full rounded-xl border border-violet-100 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                        className="h-11 w-full rounded-xl border border-border-subtle bg-surface px-4 text-sm text-content outline-none transition focus:border-focus focus:ring-2 focus:ring-focus/20"
                     />
                 </label>
-                <span className="self-center px-1 text-xs text-slate-500" aria-live="polite">
+                <span className="self-center px-1 text-xs text-content-muted" aria-live="polite">
                     {isSearchingProvider ? 'Searching…' : query.trim() ? 'Updates automatically' : ''}
                 </span>
             </form>

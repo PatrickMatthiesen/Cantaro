@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
 
 const glassSurfaceClass =
-  'glass-surface rounded-[1.5rem] border border-white/80 bg-white/70 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur';
+  'glass-surface rounded-[1.5rem] border border-border-subtle bg-surface-translucent shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur';
 
 interface GlassCardProps extends HTMLAttributes<HTMLDivElement> {
   interactive?: boolean;
@@ -46,16 +46,16 @@ export function GradientButton({
 }: GradientButtonProps) {
   const toneClass =
     tone === 'dark'
-      ? 'bg-slate-950 text-white hover:bg-violet-700'
+      ? 'bg-action text-action-content hover:bg-action-hover'
       : tone === 'soft'
-        ? 'border border-[#e3def8] bg-white/70 text-slate-800 hover:bg-violet-50 hover:text-violet-800'
+        ? 'border border-border-subtle bg-surface-translucent text-content hover:bg-surface-hover hover:text-accent-strong'
         : gradient
           ? `bg-linear-to-r ${gradient} text-white hover:brightness-105`
-          : 'bg-slate-950 text-white hover:bg-violet-700';
+          : 'bg-action text-action-content hover:bg-action-hover';
 
   return (
     <button
-      className={`rounded-2xl px-5 py-3 text-sm font-black transition-colors ${toneClass} disabled:cursor-not-allowed disabled:bg-none disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none disabled:hover:bg-slate-200 disabled:hover:brightness-100 ${className}`}
+      className={`rounded-2xl px-5 py-3 text-sm font-black transition-colors ${toneClass} disabled:cursor-not-allowed disabled:bg-none disabled:bg-surface-subtle disabled:text-content-subtle disabled:shadow-none disabled:hover:bg-surface-subtle disabled:hover:brightness-100 ${className}`}
       {...rest}
     >
       {children}
@@ -105,7 +105,7 @@ interface GradientPageShellProps {
 
 export function GradientPageShell({ children, contentClassName = '', className = '' }: GradientPageShellProps) {
   return (
-    <div className={`relative min-h-screen overflow-hidden bg-[#f7f5ff] ${className}`}>
+    <div className={`relative min-h-screen overflow-hidden bg-canvas ${className}`}>
       <div className={`relative z-10 mx-auto max-w-6xl space-y-5 px-6 pt-8 pb-16 ${contentClassName}`}>
         {children}
       </div>
@@ -119,9 +119,9 @@ interface PageLoadingStateProps {
 
 export function PageLoadingState({ message }: PageLoadingStateProps) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f7f5ff]">
+    <div className="flex min-h-screen items-center justify-center bg-canvas">
       <GlassCard className="px-6 py-4">
-        <p className="text-sm font-semibold text-slate-700">{message}</p>
+        <p className="text-sm font-semibold text-content">{message}</p>
       </GlassCard>
     </div>
   );

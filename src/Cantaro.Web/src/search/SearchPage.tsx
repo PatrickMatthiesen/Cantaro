@@ -32,7 +32,7 @@ function SearchSidebar() {
       subtitle="Search"
       sections={searchNavigationSections}
       footer={(
-        <div className="bg-panel text-muted rounded-2xl p-4 text-sm leading-6">
+        <div className="rounded-2xl bg-surface-translucent p-4 text-sm leading-6 text-content-muted">
           Search spans your personal archive and can discover media to add when you open the full results page.
         </div>
       )}
@@ -43,7 +43,7 @@ function SearchSidebar() {
 function SearchTabs({ activeGroup, query }: { activeGroup: SearchGroupId; query: string }) {
   return (
     <nav className="-mx-1 overflow-x-auto px-1 pb-1" aria-label="Search result groups">
-      <div className="bg-soft flex min-w-max gap-1 rounded-2xl p-1">
+      <div className="flex min-w-max gap-1 rounded-2xl bg-surface-subtle p-1">
         {searchTabs.map((tab) => {
           const active = tab.id === activeGroup;
           return (
@@ -51,8 +51,8 @@ function SearchTabs({ activeGroup, query }: { activeGroup: SearchGroupId; query:
               key={tab.id}
               to="/search"
               search={{ q: query || undefined, group: tab.id }}
-              className={`rounded-xl px-3.5 py-2 text-sm font-black transition focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none ${
-                active ? 'bg-action text-action-content' : 'text-muted hover:bg-panel hover:text-ink'
+              className={`rounded-xl px-3.5 py-2 text-sm font-black transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none ${
+                active ? 'bg-action text-action-content' : 'text-content-muted hover:bg-surface hover:text-content'
               }`}
               aria-current={active ? 'page' : undefined}
             >
@@ -67,12 +67,12 @@ function SearchTabs({ activeGroup, query }: { activeGroup: SearchGroupId; query:
 
 function EmptyQueryState() {
   return (
-    <div className="bg-panel rounded-2xl px-5 py-12 text-center sm:px-8 sm:py-16">
-      <span className="bg-soft text-accent-content mx-auto flex h-12 w-12 items-center justify-center rounded-2xl">
+    <div className="rounded-2xl bg-surface-translucent px-5 py-12 text-center sm:px-8 sm:py-16">
+      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent-strong">
         <Search className="h-5 w-5" aria-hidden />
       </span>
-      <h2 className="text-ink mt-4 text-xl font-black">Search your personal archive</h2>
-      <p className="text-muted mx-auto mt-2 max-w-lg text-sm leading-6 font-medium">
+      <h2 className="mt-4 text-xl font-black text-content">Search your personal archive</h2>
+      <p className="mx-auto mt-2 max-w-lg text-sm leading-6 font-medium text-content-muted">
         Use the search field above to find songs, playlists, artists, and media across Cantaro.
       </p>
     </div>
@@ -94,8 +94,8 @@ export function SearchPage({ query, activeGroup, preview = false }: SearchPagePr
     <PageShell sidebar={<SearchSidebar />} contentClassName="search-page-content">
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-5">
-          <h1 className="text-ink text-2xl font-black tracking-[-0.02em] sm:text-3xl">Search Cantaro</h1>
-          <p className="text-muted mt-1 max-w-2xl text-sm leading-6 font-medium">
+          <h1 className="text-2xl font-black tracking-[-0.02em] text-content sm:text-3xl">Search Cantaro</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-6 font-medium text-content-muted">
             {normalizedQuery ? `Results for “${normalizedQuery}”, including media you can add.` : 'Find something you saved or discover media to add.'}
           </p>
         </header>

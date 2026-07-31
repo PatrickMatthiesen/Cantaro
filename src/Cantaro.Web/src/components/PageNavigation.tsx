@@ -82,7 +82,7 @@ function getNavigationItemClassName(item: PageNavigationItem, isActive: boolean)
   const itemTone = item.tone ?? 'violet';
 
   return `app-side-nav-item app-side-nav-item--${itemTone} group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-    isActive ? 'app-side-nav-item--active text-slate-950' : 'text-slate-700'
+    isActive ? 'app-side-nav-item--active text-content' : 'text-content-muted'
   }`;
 }
 
@@ -134,7 +134,7 @@ export function PageSideNavigation({
   footer,
 }: PageSideNavigationProps) {
   return (
-    <aside className="app-sidebar hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-[#e8e4fb] bg-white/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
+    <aside className="app-sidebar hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-border-subtle bg-surface/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
       <div className="min-h-full pb-32">
         <Link to="/" className="flex items-center gap-3">
           <img
@@ -143,8 +143,8 @@ export function PageSideNavigation({
             className="h-12 w-12 rounded-2xl shadow-[0_12px_30px_rgba(124,92,255,0.24)]"
           />
           <div>
-            <p className="text-lg font-black tracking-[0.04em] text-slate-950">CANTARO</p>
-            <p className="text-xs font-bold tracking-[0.32em] text-slate-500 uppercase">{subtitle}</p>
+            <p className="text-lg font-black tracking-[0.04em] text-content">CANTARO</p>
+            <p className="text-xs font-bold tracking-[0.32em] text-content-muted uppercase">{subtitle}</p>
           </div>
         </Link>
 
@@ -152,7 +152,7 @@ export function PageSideNavigation({
           {sections.map((section) => (
             <section key={section.title}>
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-xs font-black tracking-[0.22em] text-slate-500 uppercase">
+                <h2 className="text-xs font-black tracking-[0.22em] text-content-muted uppercase">
                   {section.title}
                 </h2>
                 {section.titleAction ? (
@@ -160,7 +160,7 @@ export function PageSideNavigation({
                     to={section.titleAction.to}
                     params={section.titleAction.params as never}
                     search={section.titleAction.search as never}
-                    className="flex h-7 items-center justify-center gap-1.5 rounded-xl px-2.5 text-[11px] leading-none font-black text-violet-600 transition hover:bg-white hover:text-violet-500"
+                    className="flex h-7 items-center justify-center gap-1.5 rounded-xl px-2.5 text-[11px] leading-none font-black text-accent transition hover:bg-surface hover:text-accent-strong"
                     aria-label={section.titleAction.ariaLabel ?? section.titleAction.label}
                   >
                     {section.titleAction.icon ? <span className="shrink-0">{section.titleAction.icon}</span> : null}

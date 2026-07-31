@@ -11,7 +11,7 @@ export function MediaLibraryHeader({
     return (
         <header className="flex flex-wrap items-center justify-between gap-3">
             <div>
-                <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
+                <p className="text-xs tracking-[0.32em] text-content-muted uppercase">Cantaro · Media</p>
                 <h1 className="mt-1 text-3xl font-bold">My Library</h1>
             </div>
 
@@ -31,7 +31,7 @@ export function MediaLibraryRefreshErrorNotice({ error }: { error: string | null
 
     return (
         <GlassCard className="p-4">
-            <p className="text-sm text-rose-700">{error}</p>
+            <p className="text-sm text-danger-content">{error}</p>
         </GlassCard>
     );
 }

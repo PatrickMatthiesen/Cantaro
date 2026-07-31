@@ -51,9 +51,9 @@ function MediaSidebar() {
       subtitle="Media"
       sections={createMediaNavigationSections()}
       footer={
-        <div className="rounded-3xl bg-white/70 p-5 shadow-[0_20px_60px_rgba(88,74,150,0.08)]">
+        <div className="rounded-3xl bg-surface-translucent p-5 shadow-[0_20px_60px_rgba(88,74,150,0.08)]">
           <p className="text-lg font-black">Review queue</p>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Resolve new media observations and keep the library tidy.</p>
+          <p className="mt-2 text-sm leading-6 text-content-muted">Resolve new media observations and keep the library tidy.</p>
         </div>
       }
     />

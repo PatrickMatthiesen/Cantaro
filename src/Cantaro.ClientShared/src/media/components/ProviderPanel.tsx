@@ -34,7 +34,6 @@ export function ProviderPanel({ providerId, name, icon, gradient, description }:
             <ProviderPanelHeader
                 name={name}
                 icon={icon}
-                gradient={gradient}
                 description={description}
                 status={status}
                 isLoadingStatus={isLoadingStatus}

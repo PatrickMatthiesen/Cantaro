@@ -165,7 +165,7 @@ function SpotifyAttribution({ compact = false }: { compact?: boolean }) {
       href="https://open.spotify.com/"
       target="_blank"
       rel="noopener noreferrer"
-      className={`inline-flex items-center gap-2 rounded-full bg-slate-950 text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none ${
+      className={`inline-flex items-center gap-2 rounded-full bg-action text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none ${
         compact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
       } font-black`}
       aria-label="Open Spotify"
@@ -196,17 +196,15 @@ function SpotifyHeader({
   const description = getSpotifyHeaderDescription({ accountName, isConnected, needsReconnect, playlistCount });
 
   return (
-    <section className="rounded-3xl bg-[#ece9ff] p-6 shadow-[0_28px_90px_rgba(88,74,150,0.12)]">
+    <section className="rounded-3xl bg-surface-subtle p-6 shadow-[0_28px_90px_rgba(88,74,150,0.12)]">
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div className="max-w-2xl">
           <div className="flex items-center gap-3">
-            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-[#1ed760]">
-              <MusicPlatformIcon platformId="spotify" className="h-7 w-7" title="Spotify" />
-            </span>
-            <h1 className="text-4xl leading-tight font-black text-slate-950 sm:text-5xl">Spotify</h1>
+            <MusicPlatformIcon platformId="spotify" className="h-12 w-12 shrink-0 text-[#1ed760]" title="Spotify" />
+            <h1 className="text-4xl leading-tight font-black text-content sm:text-5xl">Spotify</h1>
           </div>
-          <p className="mt-3 text-sm leading-6 font-semibold text-slate-600">{description}</p>
-          <p className="mt-2 text-xs font-semibold text-slate-500">Spotify content is shown with links back to Spotify.</p>
+          <p className="mt-3 text-sm leading-6 font-semibold text-content-muted">{description}</p>
+          <p className="mt-2 text-xs font-semibold text-content-muted">Spotify content is shown with links back to Spotify.</p>
         </div>
         <SpotifyHeaderActions
           isConnected={isConnected}
@@ -256,16 +254,16 @@ function SpotifyHeaderActions({
   return (
     <div className="flex flex-wrap gap-2">
       {isConnected && !needsReconnect ? (
-        <button type="button" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-800 transition hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none" onClick={onRefresh}>
+        <button type="button" className="rounded-2xl bg-surface px-5 py-3 text-sm font-black text-content transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none" onClick={onRefresh}>
           Refresh
         </button>
       ) : (
-        <button type="button" className="rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white transition hover:bg-violet-500 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onConnect}>
+        <button type="button" className="rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onConnect}>
           {needsReconnect ? 'Reconnect Spotify' : 'Connect Spotify'}
         </button>
       )}
       {isConnected ? (
-        <button type="button" className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onDisconnect}>
+        <button type="button" className="rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onDisconnect}>
           Disconnect
         </button>
       ) : null}
@@ -281,34 +279,34 @@ function SpotifyPlaylistCard({
   onSelect: (playlist: PlatformPlaylist) => void;
 }) {
   return (
-    <article className="overflow-hidden rounded-3xl bg-white/70 shadow-[0_16px_45px_rgba(88,74,150,0.08)]">
+    <article className="overflow-hidden rounded-3xl bg-surface-translucent shadow-[0_16px_45px_rgba(88,74,150,0.08)]">
       <button
         type="button"
         onClick={() => onSelect(playlist)}
-        className="group block w-full text-left focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none focus-visible:ring-inset"
+        className="group block w-full text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
         {playlist.thumbnailUrl ? (
-          <img src={playlist.thumbnailUrl} alt="" className="aspect-square w-full bg-white object-contain" />
+          <img src={playlist.thumbnailUrl} alt="" className="aspect-square w-full bg-surface object-contain" />
         ) : (
-          <span className="flex aspect-square w-full items-center justify-center bg-[#eeeaff] text-slate-500">
+          <span className="flex aspect-square w-full items-center justify-center bg-surface-subtle text-content-muted">
             <MusicPlatformIcon platformId="spotify" className="h-10 w-10" />
           </span>
         )}
         <span className="block p-4">
-          <span className="block truncate font-black text-slate-950">{playlist.title}</span>
-          <span className="mt-1 block text-xs font-semibold text-slate-500">
+          <span className="block truncate font-black text-content">{playlist.title}</span>
+          <span className="mt-1 block text-xs font-semibold text-content-muted">
             {playlist.itemCount.toLocaleString()} tracks{playlist.ownerName ? ` · ${playlist.ownerName}` : ''}
           </span>
         </span>
       </button>
-      <div className="flex items-center justify-between gap-3 border-t border-[#ece8fa] px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-t border-border-subtle px-4 py-3">
         <SpotifyAttribution compact />
         {playlist.externalUrl ? (
           <a
             href={playlist.externalUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs font-black text-violet-700 hover:underline focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+            className="text-xs font-black text-accent-strong hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
           >
             Open playlist
           </a>
@@ -386,7 +384,7 @@ function SpotifyPlaylistDetail({
           href={playlist.externalUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-black text-slate-900 transition hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-surface px-4 text-sm font-black text-content transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
         >
           <MusicPlatformIcon platformId="spotify" className="h-8 w-8 text-[#1ed760]" />
           Open on Spotify
@@ -410,9 +408,9 @@ function SpotifyPlaylistGrid({
 }) {
   if (playlists.length === 0) {
     return (
-      <section className="rounded-2xl bg-white/70 p-6">
-        <h2 className="text-xl font-black text-slate-950">No playlists available</h2>
-        <p className="mt-2 text-sm font-semibold text-slate-600">Spotify did not return any playlists for this account.</p>
+      <section className="rounded-2xl bg-surface-translucent p-6">
+        <h2 className="text-xl font-black text-content">No playlists available</h2>
+        <p className="mt-2 text-sm font-semibold text-content-muted">Spotify did not return any playlists for this account.</p>
       </section>
     );
   }
@@ -436,7 +434,7 @@ function SpotifyPageBody({
   onSelectPlaylist: (playlist: PlatformPlaylist) => void;
 }) {
   if (browser.isLoading) {
-    return <section className="rounded-2xl bg-white/70 p-6 text-sm font-semibold text-slate-600">Loading Spotify connection…</section>;
+    return <section className="rounded-2xl bg-surface-translucent p-6 text-sm font-semibold text-content-muted">Loading Spotify connection…</section>;
   }
 
   if (browser.selectedPlaylist) {

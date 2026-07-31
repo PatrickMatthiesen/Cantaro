@@ -195,9 +195,9 @@ function useSearchLinkDialogState({
 
 function SearchDialogConflictBanner({ conflict, linkingId, onForceRelink, onCancel }: SearchDialogConflictBannerProps) {
     return (
-        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm">
-            <p className="font-semibold text-amber-800">This entry is already linked to another title</p>
-            <p className="mt-1 text-amber-700">
+        <div className="rounded-xl bg-warning-surface px-4 py-3 text-sm">
+            <p className="font-semibold text-warning-content">This entry is already linked to another title</p>
+            <p className="mt-1 text-warning-content">
                 Currently linked to: <span className="font-medium">{conflict.conflictInfo.conflictingCanonicalTitle}</span>
             </p>
             <div className="mt-2 flex gap-2">
@@ -226,7 +226,7 @@ function resultMetadata(result: MediaProviderSearchResultDto): string[] {
 
 function SearchResultPoster({ posterUrl, title }: Pick<MediaProviderSearchResultDto, 'posterUrl' | 'title'>) {
     return (
-        <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-gray-100">
+        <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-subtle">
             {posterUrl ? (
                 <img
                     src={posterUrl}
@@ -255,7 +255,7 @@ function SearchResultAction({
     onLink: (providerMediaId: string) => void;
 }) {
     if (isLinked) {
-        return <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">Linked</span>;
+        return <span className="rounded-full bg-success-surface px-3 py-1 text-xs font-semibold text-success-content">Linked</span>;
     }
 
     const isLinking = linkingId === providerMediaId;
@@ -276,7 +276,7 @@ function SearchResultAction({
 function SearchResultsList({ results, query, linkingId, alreadyLinkedIds, onLink }: SearchResultsListProps) {
     if (results.length === 0) {
         return (
-            <p className="py-8 text-center text-sm text-gray-400">
+            <p className="py-8 text-center text-sm text-content-subtle">
                 {query.trim() ? 'No results found.' : 'Enter a title to search.'}
             </p>
         );
@@ -291,22 +291,22 @@ function SearchResultsList({ results, query, linkingId, alreadyLinkedIds, onLink
                 return (
                     <div
                         key={result.providerMediaId}
-                        className="flex items-start gap-3 rounded-2xl border border-gray-100 bg-white/70 p-3"
+                        className="flex items-start gap-3 rounded-2xl border border-border-subtle bg-surface-translucent p-3"
                     >
                         <SearchResultPoster posterUrl={result.posterUrl} title={result.title} />
                         <div className="min-w-0 flex-1">
-                            <p className="leading-tight font-medium text-gray-900">{result.title}</p>
-                            {result.nativeTitle ? <p className="truncate text-xs text-gray-500">{result.nativeTitle}</p> : null}
+                            <p className="leading-tight font-medium text-content">{result.title}</p>
+                            {result.nativeTitle ? <p className="truncate text-xs text-content-muted">{result.nativeTitle}</p> : null}
                             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                                <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+                                <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent-strong">
                                     {mediaKindLabel(result.mediaKind)}
                                 </span>
-                                {metadata.map((value) => <span key={value} className="text-xs text-gray-400">{value}</span>)}
+                                {metadata.map((value) => <span key={value} className="text-xs text-content-subtle">{value}</span>)}
                             </div>
                             {result.synopsis ? (
                                 <SanitizedSynopsis
                                     html={result.synopsis}
-                                    className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500"
+                                    className="mt-1 line-clamp-2 text-xs leading-relaxed text-content-muted"
                                 />
                             ) : null}
                         </div>
@@ -350,12 +350,12 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
             onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
         >
-            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-3xl border border-white/80 bg-white/90 shadow-2xl backdrop-blur">
-                <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-                    <h2 className="text-lg font-semibold text-gray-900">Search &amp; link a provider entry</h2>
+            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-3xl border border-border-subtle bg-surface shadow-2xl backdrop-blur">
+                <div className="flex items-center justify-between border-b border-border-subtle px-6 py-4">
+                    <h2 className="text-lg font-semibold text-content">Search &amp; link a provider entry</h2>
                     <button
                         type="button"
-                        className="rounded-xl px-3 py-1.5 text-sm text-gray-500 transition hover:bg-gray-100"
+                        className="rounded-xl px-3 py-1.5 text-sm text-content-muted transition hover:bg-surface-hover"
                         onClick={onClose}
                         aria-label="Close dialog"
                     >
@@ -372,8 +372,8 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                                     type="button"
                                     onClick={() => selectProvider(provider.id)}
                                     className={`rounded-xl px-4 py-2 text-sm font-medium transition ${providerId === provider.id
-                                        ? 'bg-indigo-500 text-white'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'bg-action text-action-content'
+                                        : 'bg-surface-subtle text-content hover:bg-surface-hover'
                                         }`}
                                 >
                                     <MediaProviderIcon providerId={provider.iconId} className="mr-1 inline h-4 w-4" aria-hidden /> {provider.name}
@@ -390,7 +390,7 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={(event) => { if (event.key === 'Enter') void handleSearch(); }}
                             placeholder="Search by title…"
-                            className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                            className="flex-1 rounded-xl border border-border-subtle bg-surface px-4 py-2 text-sm text-content placeholder:text-content-subtle focus:ring-2 focus:ring-focus focus:outline-none"
                         />
                         <GradientButton
                             gradient="from-indigo-500 to-purple-500"
@@ -402,8 +402,8 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                         </GradientButton>
                     </div>
 
-                    {searchError ? <p className="rounded-xl bg-rose-50 px-4 py-2 text-sm text-rose-700">{searchError}</p> : null}
-                    {linkError ? <p className="rounded-xl bg-rose-50 px-4 py-2 text-sm text-rose-700">{linkError}</p> : null}
+                    {searchError ? <p className="rounded-xl bg-danger-surface px-4 py-2 text-sm text-danger-content">{searchError}</p> : null}
+                    {linkError ? <p className="rounded-xl bg-danger-surface px-4 py-2 text-sm text-danger-content">{linkError}</p> : null}
                     {conflict ? (
                         <SearchDialogConflictBanner
                             conflict={conflict}
@@ -424,7 +424,7 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                             onLink={(providerMediaId) => void handleLink(providerMediaId)}
                         />
                     ) : (
-                        <p className="py-8 text-center text-sm text-gray-400">Searching…</p>
+                        <p className="py-8 text-center text-sm text-content-subtle">Searching…</p>
                     )}
                 </div>
             </div>

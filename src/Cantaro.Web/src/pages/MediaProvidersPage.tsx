@@ -19,7 +19,7 @@ function MediaProvidersHeader({
   return (
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Cantaro · Media</p>
+        <p className="text-xs tracking-[0.32em] text-content-muted uppercase">Cantaro · Media</p>
         <h1 className="mt-1 text-3xl font-bold">Media providers</h1>
       </div>
       <div className="flex flex-wrap items-center gap-3">
@@ -46,7 +46,7 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
       ) : null}
 
       <GlassCard className="p-5">
-        <p className="text-sm text-gray-700">
+        <p className="text-sm text-content-muted">
           Connect media tracking services to import your anime and manga library into Cantaro. Once
           connected, you can import your list and track progress across providers.
         </p>
@@ -58,7 +58,7 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
             key={provider.id}
             providerId={provider.id}
             name={provider.name}
-            icon={<MediaProviderIcon providerId={provider.iconId} variant="mono" className="h-8 w-8 text-white" aria-hidden />}
+            icon={<MediaProviderIcon providerId={provider.iconId} className="h-12 w-12" aria-hidden />}
             gradient={provider.gradient}
             description={provider.description}
           />
@@ -72,7 +72,7 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-gray-900">
+    <div className="app-gradient-shell relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-content">
       <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
       <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
 

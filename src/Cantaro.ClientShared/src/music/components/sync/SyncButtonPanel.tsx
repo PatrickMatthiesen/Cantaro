@@ -70,7 +70,7 @@ export interface SyncButtonPanelProps {
 
 export function SyncLoadingState() {
     return (
-        <section className="rounded-[1.5rem] border border-white/80 bg-white/70 p-6 text-slate-700 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+        <section className="rounded-[1.5rem] border border-border-subtle bg-surface-translucent p-6 text-content shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
             <p className="text-sm font-semibold">Loading sync controls…</p>
         </section>
     );
@@ -78,28 +78,28 @@ export function SyncLoadingState() {
 
 export function SyncEmptyState() {
     return (
-        <section className="rounded-[1.5rem] border border-white/80 bg-white/70 p-6 text-slate-900 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
-            <p className="text-xs font-black tracking-[0.18em] text-violet-700 uppercase">Playlist sync</p>
+        <section className="rounded-[1.5rem] border border-border-subtle bg-surface-translucent p-6 text-content shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+            <p className="text-xs font-black tracking-[0.18em] text-accent-strong uppercase">Playlist sync</p>
             <h3 className="mt-2 text-xl font-black">Ready when you are</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-600">Connect a music platform to import playlists into Cantaro's archive.</p>
+            <p className="mt-1 text-sm font-semibold text-content-muted">Connect a music platform to import playlists into Cantaro's archive.</p>
         </section>
     );
 }
 
 function SyncUsageSummary({ syncStatus, windowUsagePercent, songSyncLimit, songsSyncedInWindow, remainingSongs }: SyncUsageSummaryProps) {
     return (
-        <div className="mt-4 rounded-2xl bg-white/75 p-4">
-            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
+        <div className="mt-4 rounded-2xl bg-surface-translucent p-4">
+            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-content-muted">
                 <span>Current window usage</span>
                 <span>
                     {songsSyncedInWindow.toLocaleString()} / {songSyncLimit.toLocaleString()} songs
                 </span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                <div className="h-full bg-violet-600" style={{ width: `${windowUsagePercent}%` }} />
+            <div className="h-2 overflow-hidden rounded-full bg-surface-subtle">
+                <div className="h-full bg-accent" style={{ width: `${windowUsagePercent}%` }} />
             </div>
-            <p className="mt-2 text-xs font-semibold text-slate-500">{remainingSongs.toLocaleString()} songs remaining in current window.</p>
-            {syncStatus.overall.message ? <p className="mt-2 text-xs font-medium text-amber-700">{syncStatus.overall.message}</p> : null}
+            <p className="mt-2 text-xs font-semibold text-content-muted">{remainingSongs.toLocaleString()} songs remaining in current window.</p>
+            {syncStatus.overall.message ? <p className="mt-2 text-xs font-medium text-warning-content">{syncStatus.overall.message}</p> : null}
         </div>
     );
 }
@@ -119,20 +119,20 @@ function SyncActionBar({
             <button
                 onClick={onSyncAll}
                 disabled={!canSync}
-                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                className="rounded-xl bg-action px-4 py-2 text-sm font-black text-action-content transition hover:bg-action-hover disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-content-subtle"
             >
                 {isSyncing ? `Syncing… ${syncProgress}%` : 'Sync everything'}
             </button>
             <button
                 onClick={onTogglePlaylistSelector}
                 disabled={!canSync}
-                className="rounded-xl border border-violet-200 bg-white px-4 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                className="rounded-xl border border-border-subtle bg-surface px-4 py-2 text-sm font-black text-accent-strong transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:border-border-subtle disabled:text-content-subtle"
             >
                 {showPlaylistSelector ? 'Hide playlists' : 'Choose playlists'}
             </button>
             <button
                 onClick={onToggleStatusDrawer}
-                className="rounded-xl bg-white px-4 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-100"
+                className="rounded-xl bg-surface px-4 py-2 text-sm font-black text-content transition hover:bg-surface-hover"
             >
                 {showStatusDrawer ? 'Hide status' : 'Show status'}
             </button>
@@ -147,13 +147,13 @@ function SyncProgressPanel({ isSyncing, syncProgress }: SyncProgressPanelProps) 
 
     return (
         <div className="mt-4">
-            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
+            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-content-muted">
                 <span>Sync progress</span>
                 <span>{syncProgress}%</span>
             </div>
-            <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-3 overflow-hidden rounded-full bg-surface-subtle">
                 <div
-                    className="h-full bg-violet-600 transition-all duration-300"
+                    className="h-full bg-accent transition-all duration-300"
                     style={{ width: `${syncProgress}%` }}
                 />
             </div>
@@ -163,11 +163,11 @@ function SyncProgressPanel({ isSyncing, syncProgress }: SyncProgressPanelProps) 
 
 function SyncStatusDrawer({ statusUpdates }: SyncStatusDrawerProps) {
     return (
-        <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
-            <p className="text-xs font-black tracking-[0.18em] text-slate-500 uppercase">Sync status updates</p>
-            <ul className="mt-3 max-h-44 space-y-2 overflow-y-auto text-sm text-slate-700">
+        <div className="mt-4 rounded-2xl border border-border-subtle bg-surface-translucent p-4">
+            <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">Sync status updates</p>
+            <ul className="mt-3 max-h-44 space-y-2 overflow-y-auto text-sm text-content">
                 {statusUpdates.map((update, index) => (
-                    <li key={`${update}-${index}`} className="rounded-xl bg-white px-3 py-2">
+                    <li key={`${update}-${index}`} className="rounded-xl bg-surface px-3 py-2">
                         {update}
                     </li>
                 ))}
@@ -180,7 +180,7 @@ function SyncResultPanel({ syncResult }: SyncResultPanelProps) {
     const failedResults = syncResult.results.filter((result) => !result.success);
 
     return (
-        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <div className="mt-4 rounded-xl border border-success-border bg-success-surface px-4 py-3 text-sm text-success-content">
             Processed {syncResult.songsSynced}/{syncResult.songsRequested} requested songs.
             {failedResults.length > 0 ? (
                 <ul className="mt-2 list-disc space-y-1 pl-4">
@@ -204,23 +204,23 @@ function PlaylistSelector({
     onClose,
 }: PlaylistSelectorProps) {
     return (
-        <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4">
-            <p className="text-sm font-black text-slate-800">Choose playlists</p>
+        <div className="mt-4 rounded-2xl border border-border-subtle bg-surface-translucent p-4">
+            <p className="text-sm font-black text-content">Choose playlists</p>
             <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
                 {availablePlaylists.map((playlist) => (
                     <label
                         key={playlist.id}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 transition hover:border-gray-300"
+                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-border-subtle bg-surface p-3 transition hover:border-border-strong"
                     >
                         <input
                             type="checkbox"
                             checked={selectedPlaylists.has(playlist.id)}
                             onChange={() => onTogglePlaylistSelection(playlist.id)}
-                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-2 focus:ring-violet-500"
+                            className="h-4 w-4 rounded border-border-strong text-accent focus:ring-2 focus:ring-focus"
                         />
                         <div className="flex-1">
-                            <p className="text-sm font-semibold text-slate-800">{playlist.title}</p>
-                            <p className="text-xs text-slate-500">{playlist.itemCount} songs</p>
+                            <p className="text-sm font-semibold text-content">{playlist.title}</p>
+                            <p className="text-xs text-content-muted">{playlist.itemCount} songs</p>
                         </div>
                     </label>
                 ))}
@@ -229,13 +229,13 @@ function PlaylistSelector({
                 <button
                     onClick={onSyncSelected}
                     disabled={selectedPlaylists.size === 0 || isSyncing}
-                    className="flex-1 rounded-xl bg-slate-950 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                    className="flex-1 rounded-xl bg-action px-4 py-2 text-sm font-black text-action-content transition hover:bg-action-hover disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-content-subtle"
                 >
                     Sync selected
                 </button>
                 <button
                     onClick={onClose}
-                    className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-200"
+                    className="rounded-xl bg-surface-subtle px-4 py-2 text-sm font-black text-content transition hover:bg-surface-hover"
                 >
                     Cancel
                 </button>
@@ -269,7 +269,7 @@ function SyncButtonFeedback({
     return (
         <>
             {error ? (
-                <div className="mt-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <div className="mt-4 rounded-xl border border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-content">
                     {error}
                 </div>
             ) : null}
@@ -310,9 +310,9 @@ function SyncButtonHeader({
 >) {
     return (
         <>
-            <p className="text-xs font-black tracking-[0.18em] text-violet-700 uppercase">Playlist sync</p>
+            <p className="text-xs font-black tracking-[0.18em] text-accent-strong uppercase">Playlist sync</p>
             <h3 className="mt-2 text-xl font-black">Keep your playlists aligned</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-600">
+            <p className="mt-1 text-sm font-semibold text-content-muted">
                 {platformName} limit: {songSyncLimit.toLocaleString()} songs per {windowMinutes} minutes.
             </p>
             <SyncUsageSummary
@@ -387,7 +387,7 @@ function SyncButtonPanelContent(props: SyncButtonPanelProps) {
 
 export function SyncButtonPanel(props: SyncButtonPanelProps) {
     return (
-        <section className="rounded-[1.5rem] border border-white/80 bg-white/70 p-6 text-slate-900 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+        <section className="rounded-[1.5rem] border border-border-subtle bg-surface-translucent p-6 text-content shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
             <SyncButtonPanelContent {...props} />
         </section>
     );

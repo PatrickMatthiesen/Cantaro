@@ -334,7 +334,7 @@ function formatSource(sourceType: string, externalId: string): string | ReactNod
 function MatchingReviewLoading({ embedded }: { embedded: boolean }) {
   return embedded ? (
     <GlassCard className="p-6">
-      <p className="text-sm text-gray-600">Loading matching review queue...</p>
+      <p className="text-sm text-content-muted">Loading matching review queue...</p>
     </GlassCard>
   ) : (
     <PageLoadingState message="Loading matching review queue..." />
@@ -345,7 +345,7 @@ function MatchingReviewLayout({ children, embedded }: { children: ReactNode; emb
   return embedded ? (
     <div className="space-y-5">{children}</div>
   ) : (
-    <GradientPageShell className="text-gray-900">{children}</GradientPageShell>
+    <GradientPageShell className="text-content">{children}</GradientPageShell>
   );
 }
 
@@ -353,9 +353,9 @@ function MatchingReviewHeader({ onRefresh }: { onRefresh: () => void }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p className="text-xs tracking-[0.32em] text-gray-500 uppercase">Matching review</p>
+        <p className="text-xs tracking-[0.32em] text-content-muted uppercase">Matching review</p>
         <h1 className="mt-1 text-3xl font-bold">Resolve track identity</h1>
-        <p className="mt-2 text-sm text-gray-600">
+        <p className="mt-2 text-sm text-content-muted">
           Review ambiguous and unmatched imports before they become canonical Cantaro tracks.
         </p>
       </div>
@@ -384,14 +384,14 @@ function SongGroupingTrack({
 }) {
   return (
     <div className="min-w-0 flex-1 px-4 py-3">
-      <p className="text-xs font-black text-violet-700">{label}</p>
-      <h3 className="mt-1 truncate text-base font-black text-slate-950">
+      <p className="text-xs font-black text-accent-strong">{label}</p>
+      <h3 className="mt-1 truncate text-base font-black text-content">
         {track.title ?? 'Untitled recording'}
       </h3>
-      <p className="mt-1 truncate text-sm font-semibold text-slate-600">
+      <p className="mt-1 truncate text-sm font-semibold text-content-muted">
         {track.artist ?? 'Unknown artist'}
       </p>
-      <p className="mt-2 font-mono text-xs text-slate-500">
+      <p className="mt-2 font-mono text-xs text-content-muted">
         {track.isrc ? `ISRC ${track.isrc}` : track.musicBrainzRecordingId ? `MBID ${track.musicBrainzRecordingId}` : 'No stable recording ID'}
       </p>
     </div>
@@ -409,12 +409,12 @@ function SongGroupingSuggestionRow({
   return (
     <article className="px-5 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-700">{groupingReason(suggestion)}</p>
-        <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">
+        <p className="text-sm font-semibold text-content">{groupingReason(suggestion)}</p>
+        <span className="rounded-full bg-accent-soft px-3 py-1 text-xs font-black text-accent-strong">
           {Math.round(suggestion.confidence * 100)}% confidence
         </span>
       </div>
-      <div className="mt-3 flex flex-col rounded-xl bg-violet-50/70 sm:flex-row sm:divide-x sm:divide-violet-100">
+      <div className="mt-3 flex flex-col rounded-xl bg-accent-soft sm:flex-row sm:divide-x sm:divide-border-subtle">
         <SongGroupingTrack label="Move this recording" track={suggestion.candidate} />
         <SongGroupingTrack label="Into this song" track={suggestion.anchor} />
       </div>
@@ -423,7 +423,7 @@ function SongGroupingSuggestionRow({
           type="button"
           disabled={busy}
           onClick={() => void review.reviewSuggestion(suggestion.suggestionId, false)}
-          className="rounded-xl px-4 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none disabled:opacity-50"
+          className="rounded-xl px-4 py-2 text-sm font-black text-content transition hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:opacity-50"
         >
           Keep separate
         </button>
@@ -431,7 +431,7 @@ function SongGroupingSuggestionRow({
           type="button"
           disabled={busy}
           onClick={() => void review.reviewSuggestion(suggestion.suggestionId, true)}
-          className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-black text-white transition hover:bg-violet-800 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-50"
+          className="rounded-xl bg-action px-4 py-2 text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-50"
         >
           {busy ? 'Applying…' : 'Group versions'}
         </button>
@@ -443,20 +443,20 @@ function SongGroupingSuggestionRow({
 function SongGroupingReviewBody({ review }: { review: SongGroupingReviewState }) {
   const items = review.pageData?.items ?? [];
   if (review.isLoading) {
-    return <p className="px-5 py-6 text-sm font-semibold text-slate-600">Loading song grouping review…</p>;
+    return <p className="px-5 py-6 text-sm font-semibold text-content-muted">Loading song grouping review…</p>;
   }
   if (items.length === 0) {
     return (
       <div className="px-5 py-6">
-        <p className="font-black text-slate-900">No grouping decisions waiting</p>
-        <p className="mt-1 text-sm font-semibold text-slate-600">
+        <p className="font-black text-content">No grouping decisions waiting</p>
+        <p className="mt-1 text-sm font-semibold text-content-muted">
           Run the candidate finder after importing new playlists or resolving Track matches.
         </p>
       </div>
     );
   }
   return (
-    <div className="divide-y divide-violet-100">
+    <div className="divide-y divide-border-subtle">
       {items.map((suggestion) => (
         <SongGroupingSuggestionRow
           key={suggestion.suggestionId}
@@ -472,12 +472,12 @@ function SongGroupingReviewPanel({ review }: { review: SongGroupingReviewState }
   return (
     <section aria-labelledby="song-grouping-heading">
       <GlassCard className="overflow-hidden p-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-5 py-4">
           <div>
-            <h2 id="song-grouping-heading" className="text-xl font-black text-slate-950">
+            <h2 id="song-grouping-heading" className="text-xl font-black text-content">
               Group recordings into songs
             </h2>
-            <p className="mt-1 max-w-2xl text-sm font-semibold text-slate-600">
+            <p className="mt-1 max-w-2xl text-sm font-semibold text-content-muted">
               Review distinct recordings that may be versions of the same composition. Identical recording IDs stay in the separate Track-reconciliation workflow.
             </p>
           </div>
@@ -485,7 +485,7 @@ function SongGroupingReviewPanel({ review }: { review: SongGroupingReviewState }
             type="button"
             onClick={() => void review.runGeneration()}
             disabled={review.isGenerating}
-            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white transition hover:bg-violet-700 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl bg-action px-4 py-2.5 text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           >
             {review.isGenerating ? 'Finding candidates…' : 'Find candidates'}
           </button>
@@ -526,7 +526,7 @@ function MatchingSummaryStats({ summary }: { summary: MatchingSummaryResponse | 
     <section className="grid gap-4 md:grid-cols-4">
       {getMatchingSummaryStats(summary).map((stat) => (
         <GlassCard key={stat.label} className="p-5">
-          <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">{stat.label}</p>
+          <p className="text-xs tracking-[0.2em] text-content-muted uppercase">{stat.label}</p>
           <p className={`mt-3 bg-linear-to-r ${stat.tint} bg-clip-text text-3xl font-bold text-transparent`}>
             {stat.value}
           </p>
@@ -552,7 +552,7 @@ function MatchingQueueEmptyState() {
   return (
     <GlassCard className="p-8">
       <h2 className="text-2xl font-semibold">Queue is clear</h2>
-      <p className="mt-2 text-sm text-gray-600">
+      <p className="mt-2 text-sm text-content-muted">
         Imported songs are either matched already or there are no playlists waiting for review.
       </p>
     </GlassCard>
@@ -598,7 +598,7 @@ function MatchingQueuePagination({
   if (!pageData || pageData.totalPages <= 1) return null;
   const firstItem = (pageData.page - 1) * pageData.pageSize + 1;
   const lastItem = Math.min(pageData.page * pageData.pageSize, pageData.totalCount);
-  return <nav className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3" aria-label={`${label} pages`}><p className="text-sm font-medium text-gray-600">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-gray-600">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
+  return <nav className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-translucent px-4 py-3" aria-label={`${label} pages`}><p className="text-sm font-medium text-content-muted">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm font-semibold text-accent-strong transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-content-muted">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="rounded-lg bg-action px-3 py-2 text-sm font-semibold text-action-content transition hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
 }
 
 function MatchingReviewTabs({
@@ -642,7 +642,7 @@ function MatchingReviewTabs({
       <div
         role="tablist"
         aria-label="Matching review type"
-        className="inline-flex min-w-full rounded-2xl border border-violet-100 bg-white/70 p-1 sm:min-w-0"
+        className="inline-flex min-w-full rounded-2xl border border-border-subtle bg-surface-translucent p-1 sm:min-w-0"
       >
         {matchingReviewTabs.map((tab, index) => {
           const isActive = activeTab === tab.id;
@@ -660,10 +660,10 @@ function MatchingReviewTabs({
               tabIndex={isActive ? 0 : -1}
               onClick={() => selectTab(tab.id)}
               onKeyDown={handleKeyDown}
-              className={`min-h-11 flex-1 rounded-xl px-4 py-2.5 text-sm font-black whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none ${
+              className={`min-h-11 flex-1 rounded-xl px-4 py-2.5 text-sm font-black whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none ${
                 isActive
-                  ? 'bg-violet-700 text-white shadow-sm'
-                  : 'text-slate-700 hover:bg-violet-50 hover:text-violet-800'
+                  ? 'bg-action text-action-content shadow-sm'
+                  : 'text-content hover:bg-accent-soft hover:text-accent-strong'
               }`}
             >
               {tab.label}
@@ -739,7 +739,7 @@ function ObservationArtwork({ item }: { item: MatchingQueueItemResponse }) {
   }
 
   return (
-    <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-sm text-gray-500">
+    <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-surface-translucent text-sm text-content-muted">
       No art
     </div>
   );
@@ -751,7 +751,7 @@ function ObservationAttemptMeta({ item }: { item: MatchingQueueItemResponse }) {
     : '';
 
   return (
-    <p className="mt-2 text-xs text-gray-500">
+    <p className="mt-2 text-xs text-content-muted">
       Attempts: {item.matchAttemptCount}
       {lastAttempt}
     </p>
@@ -770,9 +770,9 @@ function ObservationDiagnostics({ item }: { item: MatchingQueueItemResponse }) {
 
 function DiagnosticTile({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-2">
-      <p className="text-[11px] tracking-[0.2em] text-gray-500 uppercase">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-gray-900">{value}</p>
+    <div className="rounded-2xl border border-border-subtle bg-surface-translucent px-3 py-2">
+      <p className="text-[11px] tracking-[0.2em] text-content-muted uppercase">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-content">{value}</p>
     </div>
   );
 }
@@ -783,16 +783,16 @@ function ObservationSummary({ item }: { item: MatchingQueueItemResponse }) {
   return (
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-xl font-semibold text-gray-900">{item.title}</h2>
+        <h2 className="text-xl font-semibold text-content">{item.title}</h2>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(item.matchStatus)}`}>
           {formatStatus(item.matchStatus)}
         </span>
       </div>
-      <p className="mt-2 text-sm text-gray-600">
+      <p className="mt-2 text-sm text-content-muted">
         {item.artist ?? 'Unknown artist'} {duration ? `- ${duration}` : ''}
       </p>
-      <p className="mt-2 text-xs text-gray-500">Source: {formatSource(item.sourceType, item.externalId)}</p>
-      <p className="mt-2 text-sm text-gray-700">{item.resolutionNotes ?? 'Waiting for a matching decision.'}</p>
+      <p className="mt-2 text-xs text-content-muted">Source: {formatSource(item.sourceType, item.externalId)}</p>
+      <p className="mt-2 text-sm text-content">{item.resolutionNotes ?? 'Waiting for a matching decision.'}</p>
       <MarkerList markers={item.diagnostics.versionMarkers} tone="version" />
       <MarkerList markers={item.diagnostics.playbackModifiers} tone="playback" />
       {item.lastMatchError ? <p className="mt-2 text-sm text-rose-700">Last error: {item.lastMatchError}</p> : null}
@@ -830,7 +830,7 @@ function ObservationActions({
       </GradientButton>
       <button
         type="button"
-        className="flex-1 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 lg:flex-none"
+        className="flex-1 rounded-2xl bg-surface px-5 py-3 text-sm font-semibold text-content transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-60 lg:flex-none"
         onClick={() => void onAction(item.observationId, () => matchingApi.markNoMatch(item.observationId))}
         disabled={isBusy}
       >
@@ -870,10 +870,10 @@ function CandidateSection({
   suggestedVersionFlags: number;
 }) {
   return (
-    <div className="rounded-2xl bg-white/70 p-4">
+    <div className="rounded-2xl bg-surface-translucent p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs tracking-[0.2em] text-gray-500 uppercase">Suggested candidates</p>
-        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-500">
+        <p className="text-xs tracking-[0.2em] text-content-muted uppercase">Suggested candidates</p>
+        <span className="rounded-full bg-surface px-2 py-1 text-[11px] font-semibold text-content-muted">
           {candidates.length} stored
         </span>
       </div>
@@ -948,7 +948,7 @@ function CandidateList({
   suggestedVersionFlags: number;
 }) {
   if (candidates.length === 0) {
-    return <p className="mt-3 text-sm text-gray-600">No candidates were stored for this observation yet.</p>;
+    return <p className="mt-3 text-sm text-content-muted">No candidates were stored for this observation yet.</p>;
   }
 
   const candidateRows: MatchingQueueCandidateResponse[][] = [];
@@ -1228,7 +1228,7 @@ function CandidatePrimaryAction({
     return (
       <button
         type="button"
-        className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+        className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none"
         onClick={onUseExact}
         disabled={disabled}
       >
@@ -1240,7 +1240,7 @@ function CandidatePrimaryAction({
   return (
     <button
       type="button"
-      className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none"
+      className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none"
       onClick={() => onUseAsVersion(detectedVersion.value)}
       disabled={disabled}
     >
@@ -1265,31 +1265,31 @@ function CandidateAdditionalOptions({
   const selectId = `candidate-version-${candidateId}`;
 
   return (
-    <details className="rounded-xl border border-violet-100 bg-white/75 p-2">
-      <summary className="cursor-pointer list-none rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-violet-50 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+    <details className="rounded-xl border border-border-subtle bg-surface-translucent p-2">
+      <summary className="cursor-pointer list-none rounded-lg px-2 py-1.5 text-sm font-semibold text-content transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&::-webkit-details-marker]:hidden">
         Additional options
       </summary>
       <div className="mt-2 space-y-2 px-2 pb-1">
-        <label htmlFor={selectId} className="block text-xs font-semibold text-slate-600">Version type</label>
+        <label htmlFor={selectId} className="block text-xs font-semibold text-content-muted">Version type</label>
         <select
           id={selectId}
           value={selectedVersionFlag}
           onChange={(event) => setSelectedVersionFlag(Number(event.target.value))}
           disabled={disabled}
-          className="min-h-10 w-full rounded-lg border border-violet-200 bg-white px-3 text-sm font-semibold text-slate-800 focus:border-violet-500 focus:ring-2 focus:ring-violet-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-10 w-full rounded-lg border border-border-subtle bg-surface px-3 text-sm font-semibold text-content focus:border-accent focus:ring-2 focus:ring-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value={0}>Choose a version type</option>
           {trackVersionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
         <button
           type="button"
-          className="w-full rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 transition hover:bg-violet-100 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-lg border border-border-subtle bg-accent-soft px-3 py-2 text-sm font-semibold text-accent-strong transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => onUseAsVersion(selectedVersionFlag)}
           disabled={disabled || !selectedVersion}
         >
           {selectedVersion ? `Add as ${selectedVersion.label.toLowerCase()} version` : 'Choose a version type'}
         </button>
-        <button type="button" className="w-full rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" onClick={onUseExact} disabled={disabled}>
+        <button type="button" className="w-full rounded-lg px-3 py-2 text-sm font-semibold text-content transition hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" onClick={onUseExact} disabled={disabled}>
           Use as exact recording
         </button>
       </div>

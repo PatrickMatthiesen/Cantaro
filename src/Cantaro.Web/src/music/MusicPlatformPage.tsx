@@ -18,9 +18,9 @@ export function MusicPlatformSurface({ platformId, playlistId = null }: { platfo
   return (
     <MusicPageShell>
       <GlassCard className="p-6">
-        <p className="text-xs tracking-[0.24em] text-gray-500 uppercase">Platform</p>
-        <h2 className="mt-2 text-2xl font-semibold text-gray-900">{platform?.name ?? platformId}</h2>
-        <p className="mt-2 text-sm text-gray-600">This platform is not available yet.</p>
+        <p className="text-xs tracking-[0.24em] text-content-muted uppercase">Platform</p>
+        <h2 className="mt-2 text-2xl font-semibold text-content">{platform?.name ?? platformId}</h2>
+        <p className="mt-2 text-sm text-content-muted">This platform is not available yet.</p>
       </GlassCard>
     </MusicPageShell>
   );
