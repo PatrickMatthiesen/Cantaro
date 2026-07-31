@@ -1,10 +1,10 @@
-import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Bell, LogOut, Menu, Search, Settings, X } from 'lucide-react';
+import { Link, useRouterState } from '@tanstack/react-router';
+import { Bell, LogOut, Menu, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
 import { rememberActiveArea } from '../appAreaRouting';
 import { useAuth } from '../contexts/AuthContext';
-import { createGlobalSearchState, normalizeSearchQuery, searchMaxQueryLength } from '../search/searchState';
+import { GlobalSearch } from '../search/GlobalSearch';
 
 interface PageShellProps {
   children: ReactNode;
@@ -50,41 +50,6 @@ function handleDrawerKeyboard(event: KeyboardEvent, drawer: HTMLDivElement | nul
   if (event.key === 'Tab') {
     trapDrawerFocus(event, drawer);
   }
-}
-
-function TopSearchInput({
-  value,
-  onChange,
-  onSubmit,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <form
-      className="min-w-0 flex-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit?.();
-      }}
-    >
-      <label className="relative block">
-        <span className="sr-only">Search all music and media</span>
-        <span id="global-search-help" className="sr-only">Enter up to {searchMaxQueryLength} characters.</span>
-        <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
-        <input
-          className="app-top-search-input h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-4 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
-          placeholder="Search music and media..."
-          type="search"
-          maxLength={searchMaxQueryLength}
-          aria-describedby="global-search-help"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-    </form>
-  );
 }
 
 function NotificationButton() {
@@ -202,9 +167,6 @@ function AccountMenu({
 
 function PageTopBar({
   pathname,
-  searchValue,
-  onSearchChange,
-  onSearchSubmit,
   displayName,
   avatarUrl,
   onLogout,
@@ -212,9 +174,6 @@ function PageTopBar({
   navigationButtonRef,
 }: {
   pathname: string;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  onSearchSubmit: () => void;
   displayName?: string;
   avatarUrl?: string;
   onLogout: () => void;
@@ -234,11 +193,7 @@ function PageTopBar({
             <AccountMenu displayName={displayName} avatarUrl={avatarUrl} onLogout={onLogout} />
           </div>
         </div>
-        <TopSearchInput
-          value={searchValue}
-          onChange={onSearchChange}
-          onSubmit={onSearchSubmit}
-        />
+        <GlobalSearch />
       </div>
     </header>
   );
@@ -303,14 +258,9 @@ export function PageShell({
   bottomSlot,
   contentClassName = '',
 }: PageShellProps) {
-  const navigate = useNavigate();
-  const location = useRouterState({ select: (state) => state.location });
-  const pathname = location.pathname;
-  const routeSearch = location.search as Record<string, unknown>;
-  const activeGlobalQuery = pathname === '/search' ? normalizeSearchQuery(routeSearch.q) ?? '' : '';
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { user, logout } = useAuth();
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
-  const [globalSearchDraft, setGlobalSearchDraft] = useState(activeGlobalQuery);
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const closeMobileNavigation = useCallback(() => {
@@ -325,17 +275,6 @@ export function PageShell({
     rememberActiveArea(pathname);
   }, [pathname]);
 
-  useEffect(() => {
-    setGlobalSearchDraft(activeGlobalQuery);
-  }, [activeGlobalQuery]);
-
-  const submitGlobalSearch = () => {
-    void navigate({
-      to: '/search',
-      search: createGlobalSearchState(globalSearchDraft),
-    });
-  };
-
   return (
     <div className="min-h-screen bg-[#f7f5ff] text-slate-950">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[272px_1fr]">
@@ -344,9 +283,6 @@ export function PageShell({
         <div className="flex min-w-0 flex-col pb-28">
           <PageTopBar
             pathname={pathname}
-            searchValue={globalSearchDraft}
-            onSearchChange={setGlobalSearchDraft}
-            onSearchSubmit={submitGlobalSearch}
             displayName={user?.displayName}
             avatarUrl={user?.avatarUrl}
             onLogout={() => void logout()}

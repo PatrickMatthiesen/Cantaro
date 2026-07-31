@@ -17,6 +17,7 @@ public sealed class SearchController(
     public async Task<ActionResult<SearchResponseDto>> Search(
         [FromQuery] string? q,
         [FromQuery] int limitPerGroup = CantaroSearchService.DefaultLimitPerGroup,
+        [FromQuery] bool includeDiscovery = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(q))
@@ -42,6 +43,7 @@ public sealed class SearchController(
             user.Id,
             q,
             limitPerGroup,
+            includeDiscovery,
             cancellationToken));
     }
 }

@@ -37,7 +37,7 @@ function readErrorMessage(value: unknown): string | undefined {
 
 export async function searchCantaro(
   query: string,
-  options: { limitPerGroup?: number; signal?: AbortSignal } = {},
+  options: { limitPerGroup?: number; includeDiscovery?: boolean; signal?: AbortSignal } = {},
 ): Promise<SearchResponse> {
   const normalizedQuery = normalizeSearchQuery(query);
   if (!normalizedQuery) {
@@ -48,6 +48,7 @@ export async function searchCantaro(
     q: normalizedQuery,
     limitPerGroup: String(Math.min(Math.max(options.limitPerGroup ?? 6, 1), 20)),
   });
+  if (options.includeDiscovery) params.set('includeDiscovery', 'true');
   const response = await fetch(`/api/search?${params.toString()}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },

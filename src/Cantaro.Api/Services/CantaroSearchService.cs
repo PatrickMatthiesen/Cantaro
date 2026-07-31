@@ -8,6 +8,8 @@ namespace Cantaro.Api.Services;
 
 public sealed class CantaroSearchService(
     ApplicationDbContext dbContext,
+    IMediaProviderRegistry mediaProviderRegistry,
+    MediaProviderSearchCache mediaProviderSearchCache,
     ILogger<CantaroSearchService> logger)
 {
     public const int DefaultLimitPerGroup = 6;
@@ -15,12 +17,15 @@ public sealed class CantaroSearchService(
     public const int MaximumQueryLength = 200;
 
     private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
+    private readonly MediaProviderSearchCache _mediaProviderSearchCache = mediaProviderSearchCache;
     private readonly ILogger<CantaroSearchService> _logger = logger;
 
     public async Task<SearchResponseDto> SearchAsync(
         int userId,
         string query,
         int limitPerGroup,
+        bool includeDiscovery,
         CancellationToken cancellationToken)
     {
         var normalizedQuery = query.Trim();
@@ -37,7 +42,13 @@ public sealed class CantaroSearchService(
             cancellationToken);
         var media = await ExecuteGroupAsync(
             "media",
-            () => SearchMediaAsync(userId, normalizedLower, limit, cancellationToken),
+            () => SearchMediaAsync(
+                userId,
+                normalizedQuery,
+                normalizedLower,
+                limit,
+                includeDiscovery,
+                cancellationToken),
             cancellationToken);
 
         return new SearchResponseDto
@@ -153,56 +164,364 @@ public sealed class CantaroSearchService(
 
     private async Task<SearchGroupDto> SearchMediaAsync(
         int userId,
+        string displayQuery,
         string query,
         int limit,
+        bool includeDiscovery,
         CancellationToken cancellationToken)
     {
-        var candidates = await _dbContext.MediaLibraryEntries
+        var connectedProviderIds = await GetConnectedProviderIdsAsync(userId, cancellationToken);
+        var canonicalCandidates = await _dbContext.MediaTitles
             .AsNoTracking()
-            .Where(entry => entry.UserId == userId && entry.MediaTitle != null)
-            .Where(entry =>
-                entry.MediaTitle!.CanonicalTitle.ToLower().Contains(query)
-                || (entry.MediaTitle.OriginalTitle != null
-                    && entry.MediaTitle.OriginalTitle.ToLower().Contains(query))
-                || (entry.MediaTitle.SortTitle != null
-                    && entry.MediaTitle.SortTitle.ToLower().Contains(query)))
-            .OrderBy(entry =>
-                entry.MediaTitle!.CanonicalTitle.ToLower() == query ? 0 :
-                entry.MediaTitle.CanonicalTitle.ToLower().StartsWith(query) ? 1 :
-                entry.MediaTitle.CanonicalTitle.ToLower().Contains(query) ? 2 :
-                entry.MediaTitle.OriginalTitle != null
-                    && entry.MediaTitle.OriginalTitle.ToLower() == query ? 3 :
-                entry.MediaTitle.OriginalTitle != null
-                    && entry.MediaTitle.OriginalTitle.ToLower().StartsWith(query) ? 4 : 5)
-            .ThenBy(entry => entry.MediaTitle!.CanonicalTitle)
-            .ThenBy(entry => entry.Id)
-            .Select(entry => new
-            {
-                entry.Id,
-                entry.MediaTitle!.CanonicalTitle,
-                entry.MediaTitle.OriginalTitle,
-                entry.MediaTitle.MediaKind,
-                entry.MediaTitle.StartYear,
-                entry.MediaTitle.CanonicalMetadata,
-                entry.NormalizedStatus
-            })
+            .Where(title =>
+                title.LibraryEntries.Any(entry => entry.UserId == userId)
+                || title.ProviderLinks.Any(link => connectedProviderIds.Contains(link.Provider)))
+            .Where(title =>
+                title.CanonicalTitle.ToLower().Contains(query)
+                || (title.OriginalTitle != null && title.OriginalTitle.ToLower().Contains(query))
+                || (title.SortTitle != null && title.SortTitle.ToLower().Contains(query)))
+            .OrderBy(title =>
+                title.CanonicalTitle.ToLower() == query ? 0 :
+                title.CanonicalTitle.ToLower().StartsWith(query) ? 1 :
+                title.CanonicalTitle.ToLower().Contains(query) ? 2 :
+                title.OriginalTitle != null && title.OriginalTitle.ToLower() == query ? 3 :
+                title.OriginalTitle != null && title.OriginalTitle.ToLower().StartsWith(query) ? 4 : 5)
+            .ThenBy(title => title.CanonicalTitle)
+            .ThenBy(title => title.Id)
+            .Select(title => new CanonicalMediaCandidate(
+                title.Id,
+                title.CanonicalTitle,
+                title.MediaKind,
+                title.StartYear,
+                title.CanonicalMetadata))
             .Take(limit + 1)
             .ToListAsync(cancellationToken);
 
-        var hasMore = candidates.Count > limit;
-        var items = candidates.Take(limit).Select(entry => new SearchResultDto
+        var hasMore = canonicalCandidates.Count > limit;
+        var items = await BuildCanonicalMediaItemsAsync(
+            userId,
+            canonicalCandidates.Take(limit).ToList(),
+            connectedProviderIds,
+            cancellationToken);
+
+        if (!includeDiscovery || items.Count >= limit)
+        {
+            return Successful(items, hasMore);
+        }
+
+        var discovery = await DiscoverProviderMediaAsync(
+            userId,
+            displayQuery,
+            limit,
+            connectedProviderIds,
+            cancellationToken);
+        var mergedCandidates = new List<SearchResultDto>(items);
+        var seenCanonicalIds = items
+            .Select(item => item.Id)
+            .Where(id => id.StartsWith("media-title:", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+        var seenProviderIdentities = new HashSet<string>(StringComparer.Ordinal);
+
+        var providerIds = discovery.Results
+            .Select(result => result.ProviderId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var externalIds = discovery.Results
+            .Select(result => result.Result.ProviderMediaId)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var exactLinks = providerIds.Count == 0 || externalIds.Count == 0
+            ? []
+            : await _dbContext.MediaProviderLinks
+                .AsNoTracking()
+                .Where(link =>
+                    providerIds.Contains(link.Provider)
+                    && externalIds.Contains(link.ExternalId))
+                .Select(link => new ProviderIdentityLink(
+                    link.Provider,
+                    link.ExternalId,
+                    link.MediaTitleId))
+                .ToListAsync(cancellationToken);
+        var linksByIdentity = exactLinks.ToDictionary(
+            link => BuildProviderIdentity(link.ProviderId, link.ProviderMediaId),
+            StringComparer.Ordinal);
+
+        var linkedTitleIds = discovery.Results
+            .Select(result => linksByIdentity.GetValueOrDefault(
+                BuildProviderIdentity(result.ProviderId, result.Result.ProviderMediaId)))
+            .Where(link => link is not null)
+            .Select(link => link!.MediaTitleId)
+            .Distinct()
+            .ToList();
+        var linkedTitles = linkedTitleIds.Count == 0
+            ? []
+            : await _dbContext.MediaTitles
+                .AsNoTracking()
+                .Where(title => linkedTitleIds.Contains(title.Id))
+                .Select(title => new CanonicalMediaCandidate(
+                    title.Id,
+                    title.CanonicalTitle,
+                    title.MediaKind,
+                    title.StartYear,
+                    title.CanonicalMetadata))
+                .ToListAsync(cancellationToken);
+        var linkedItems = await BuildCanonicalMediaItemsAsync(
+            userId,
+            linkedTitles,
+            connectedProviderIds,
+            cancellationToken);
+        var linkedItemsById = linkedItems.ToDictionary(item => item.Id, StringComparer.Ordinal);
+
+        foreach (var providerResult in discovery.Results)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var identity = BuildProviderIdentity(
+                providerResult.ProviderId,
+                providerResult.Result.ProviderMediaId);
+            if (!seenProviderIdentities.Add(identity))
+            {
+                continue;
+            }
+
+            if (linksByIdentity.TryGetValue(identity, out var link))
+            {
+                var canonicalId = $"media-title:{link.MediaTitleId}";
+                if (!seenCanonicalIds.Add(canonicalId))
+                {
+                    continue;
+                }
+
+                if (linkedItemsById.TryGetValue(canonicalId, out var linkedItem))
+                {
+                    mergedCandidates.Add(linkedItem);
+                }
+            }
+            else
+            {
+                mergedCandidates.Add(MapProviderResult(providerResult));
+            }
+        }
+
+        hasMore = hasMore || mergedCandidates.Count > limit || discovery.HasMore;
+        var allProvidersFailed = discovery.ConnectedProviderCount > 0
+            && discovery.FailedProviderCount == discovery.ConnectedProviderCount;
+        if (mergedCandidates.Count == 0 && allProvidersFailed)
+        {
+            return new SearchGroupDto
+            {
+                Status = SearchGroupStatuses.Failed,
+                Items = [],
+                Message = "Connected media providers could not be searched."
+            };
+        }
+
+        var result = Successful(mergedCandidates.Take(limit).ToList(), hasMore);
+        if (discovery.FailedProviderCount > 0)
+        {
+            result = new SearchGroupDto
+            {
+                Status = result.Status,
+                Items = result.Items,
+                HasMore = result.HasMore,
+                Message = discovery.FailedProviderCount == 1
+                    ? "One connected media provider could not be searched."
+                    : $"{discovery.FailedProviderCount} connected media providers could not be searched."
+            };
+        }
+
+        return result;
+    }
+
+    private async Task<List<SearchResultDto>> BuildCanonicalMediaItemsAsync(
+        int userId,
+        IReadOnlyList<CanonicalMediaCandidate> candidates,
+        IReadOnlyCollection<string> connectedProviderIds,
+        CancellationToken cancellationToken)
+    {
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        var titleIds = candidates.Select(candidate => candidate.Id).Distinct().ToList();
+        var libraryEntries = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .Where(entry => entry.UserId == userId && titleIds.Contains(entry.MediaTitleId))
+            .Select(entry => new MediaLibrarySearchState(
+                entry.MediaTitleId,
+                entry.Id,
+                entry.NormalizedStatus,
+                entry.ConnectedServiceAccountId != null,
+                entry.UpdatedAt))
+            .ToListAsync(cancellationToken);
+        var libraryStateByTitle = libraryEntries
+            .GroupBy(entry => entry.MediaTitleId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(entry => entry.IsConnected)
+                    .ThenByDescending(entry => entry.UpdatedAt)
+                    .ThenBy(entry => entry.LibraryEntryId)
+                    .First());
+
+        var providerLinks = await _dbContext.MediaProviderLinks
+            .AsNoTracking()
+            .Where(link =>
+                titleIds.Contains(link.MediaTitleId)
+                && connectedProviderIds.Contains(link.Provider))
+            .Select(link => new ProviderIdentityLink(
+                link.Provider,
+                link.ExternalId,
+                link.MediaTitleId))
+            .ToListAsync(cancellationToken);
+        var providerLinkByTitle = providerLinks
+            .GroupBy(link => link.MediaTitleId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderBy(link => link.ProviderId)
+                    .ThenBy(link => link.ProviderMediaId)
+                    .First());
+
+        return candidates.Select(candidate =>
+        {
+            libraryStateByTitle.TryGetValue(candidate.Id, out var libraryState);
+            providerLinkByTitle.TryGetValue(candidate.Id, out var providerLink);
+            var route = libraryState is not null
+                ? $"/media/library/{libraryState.LibraryEntryId}"
+                : providerLink is not null
+                    ? BuildCatalogRoute(providerLink.ProviderId, providerLink.ProviderMediaId)
+                    : throw new InvalidOperationException(
+                        "Canonical media candidates must have an actionable user route.");
+
+            return new SearchResultDto
+            {
+                EntityType = "media",
+                Id = $"media-title:{candidate.Id}",
+                Title = candidate.CanonicalTitle,
+                Subtitle = BuildMediaSubtitle(candidate.MediaKind, candidate.StartYear),
+                Detail = libraryState?.NormalizedStatus,
+                ArtworkUrl = GetMediaArtworkUrl(candidate.CanonicalMetadata),
+                CanonicalRoute = route,
+                IsInLibrary = libraryState is not null,
+                LibraryStatus = libraryState?.NormalizedStatus
+            };
+        }).ToList();
+    }
+
+    private async Task<ProviderDiscoveryResult> DiscoverProviderMediaAsync(
+        int userId,
+        string query,
+        int limit,
+        IReadOnlyList<string> connectedProviderIds,
+        CancellationToken cancellationToken)
+    {
+        var providerLimit = Math.Min(limit + 1, MaximumLimitPerGroup + 1);
+        var results = new List<ProviderDiscoveryItem>();
+        var failedProviderCount = 0;
+        var hasMore = false;
+
+        foreach (var providerId in connectedProviderIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                IReadOnlyList<CachedMediaProviderSearchResult> providerResults;
+                if (!_mediaProviderSearchCache.TryGet(
+                    userId,
+                    providerId,
+                    query,
+                    providerLimit,
+                    out providerResults))
+                {
+                    var provider = _mediaProviderRegistry.GetRequired(providerId);
+                    var rawProviderResults = await provider.SearchAsync(
+                        userId,
+                        new MediaCatalogSearchRequest
+                        {
+                            Query = query,
+                            Limit = providerLimit
+                        },
+                        cancellationToken);
+                    providerResults = MediaProviderSearchCache.CreatePublicProjection(rawProviderResults);
+                    _mediaProviderSearchCache.Set(
+                        userId,
+                        providerId,
+                        query,
+                        providerLimit,
+                        providerResults);
+                }
+
+                hasMore |= providerResults.Count > limit;
+                results.AddRange(providerResults.Select(result =>
+                    new ProviderDiscoveryItem(providerId, result)));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failedProviderCount++;
+                _logger.LogWarning(
+                    exception,
+                    "Connected media provider {ProviderId} search failed.",
+                    providerId);
+            }
+        }
+
+        return new ProviderDiscoveryResult(
+            results,
+            connectedProviderIds.Count,
+            failedProviderCount,
+            hasMore);
+    }
+
+    private async Task<List<string>> GetConnectedProviderIdsAsync(
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        var supportedProviderIds = _mediaProviderRegistry
+            .GetSupportedProviderIds()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var connectedServices = await _dbContext.ConnectedServiceAccounts
+            .AsNoTracking()
+            .Where(account =>
+                account.UserId == userId
+                && account.ConnectionState == "connected")
+            .Select(account => account.Service)
+            .ToListAsync(cancellationToken);
+
+        return connectedServices
+            .Where(supportedProviderIds.Contains)
+            .Select(service => _mediaProviderRegistry.GetRequired(service).ProviderId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(providerId => providerId)
+            .ToList();
+    }
+
+    private static SearchResultDto MapProviderResult(ProviderDiscoveryItem discovery)
+    {
+        var result = discovery.Result;
+        return new SearchResultDto
         {
             EntityType = "media",
-            Id = entry.Id.ToString(),
-            Title = entry.CanonicalTitle,
-            Subtitle = BuildMediaSubtitle(entry.MediaKind, entry.StartYear),
-            Detail = entry.NormalizedStatus,
-            ArtworkUrl = GetMediaArtworkUrl(entry.CanonicalMetadata),
-            CanonicalRoute = $"/media/library/{entry.Id}"
-        }).ToList();
-
-        return Successful(items, hasMore);
+            Id = $"provider:{discovery.ProviderId}:{result.ProviderMediaId}",
+            Title = result.Title,
+            Subtitle = BuildMediaSubtitle(result.MediaKind, result.StartYear),
+            Detail = null,
+            ArtworkUrl = result.PosterUrl,
+            CanonicalRoute = BuildCatalogRoute(discovery.ProviderId, result.ProviderMediaId),
+            IsInLibrary = false
+        };
     }
+
+    private static string BuildCatalogRoute(string providerId, string providerMediaId) =>
+        $"/media/catalog/{Uri.EscapeDataString(providerId)}/{Uri.EscapeDataString(providerMediaId)}";
+
+    private static string BuildProviderIdentity(string providerId, string providerMediaId) =>
+        $"{providerId.Trim().ToLowerInvariant()}\0{providerMediaId}";
 
     private async Task<SearchGroupDto> ExecuteGroupAsync(
         string groupName,
@@ -287,4 +606,33 @@ public sealed class CantaroSearchService(
 
     private static string BuildMediaSubtitle(string mediaKind, int? startYear) =>
         startYear is null ? mediaKind : $"{mediaKind} · {startYear}";
+
+    private sealed record CanonicalMediaCandidate(
+        Guid Id,
+        string CanonicalTitle,
+        string MediaKind,
+        int? StartYear,
+        string? CanonicalMetadata);
+
+    private sealed record MediaLibrarySearchState(
+        Guid MediaTitleId,
+        Guid LibraryEntryId,
+        string NormalizedStatus,
+        bool IsConnected,
+        DateTimeOffset UpdatedAt);
+
+    private sealed record ProviderIdentityLink(
+        string ProviderId,
+        string ProviderMediaId,
+        Guid MediaTitleId);
+
+    private sealed record ProviderDiscoveryItem(
+        string ProviderId,
+        CachedMediaProviderSearchResult Result);
+
+    private sealed record ProviderDiscoveryResult(
+        IReadOnlyList<ProviderDiscoveryItem> Results,
+        int ConnectedProviderCount,
+        int FailedProviderCount,
+        bool HasMore);
 }

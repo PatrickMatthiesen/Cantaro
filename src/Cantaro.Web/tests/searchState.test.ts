@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createGlobalSearchState,
+  getMobileSearchCloseAction,
   getSearchResultLimit,
+  getSearchSurfaceKind,
   readSearchRouteState,
   searchMaxQueryLength,
 } from '../src/search/searchState';
@@ -33,5 +35,19 @@ describe('search URL state', () => {
   test('selected groups request the expanded result limit', () => {
     expect(getSearchResultLimit('all')).toBe(6);
     expect(getSearchResultLimit('media')).toBe(20);
+  });
+
+  test('mobile search becomes the expanded surface only on the search route', () => {
+    expect(getSearchSurfaceKind(false, '/music')).toBe('desktop-preview');
+    expect(getSearchSurfaceKind(true, '/music')).toBe('mobile-preview');
+    expect(getSearchSurfaceKind(true, '/search')).toBe('mobile-expanded');
+  });
+
+  test('mobile preview state is explicit and close uses route history or a safe fallback', () => {
+    expect(readSearchRouteState({ q: 'teardrop', group: 'all', preview: 'true' }).preview).toBe(true);
+    expect(readSearchRouteState({ q: 'teardrop', group: 'all', preview: 'false' }).preview).toBeUndefined();
+    expect(getMobileSearchCloseAction('/search', true)).toBe('back');
+    expect(getMobileSearchCloseAction('/search', false)).toBe('fallback');
+    expect(getMobileSearchCloseAction('/music', false)).toBe('hide');
   });
 });
