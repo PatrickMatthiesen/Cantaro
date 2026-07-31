@@ -555,6 +555,7 @@ export function SearchRankedResults({
   onNavigate,
   asListbox = false,
   listboxId,
+  maxResults,
 }: {
   query: string;
   response: SearchResponse | null;
@@ -565,8 +566,9 @@ export function SearchRankedResults({
   onNavigate?: SearchNavigateHandler;
   asListbox?: boolean;
   listboxId?: string;
+  maxResults?: number;
 }) {
-  const results = rankSearchResults(response, groupIds, query)
+  const results = rankSearchResults(response, groupIds, query, maxResults)
     .filter(({ item }) => trustedCanonicalRoute(item.canonicalRoute));
   const resultItems = results.map(({ item }) => item);
   const warnings = searchWarnings(response, groupIds);

@@ -30,15 +30,18 @@ public sealed class CantaroSearchService(
     {
         var normalizedQuery = query.Trim();
         var normalizedLower = normalizedQuery.ToLowerInvariant();
+        var queryTokens = normalizedLower.Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var limit = Math.Clamp(limitPerGroup, 1, MaximumLimitPerGroup);
 
         var songs = await ExecuteGroupAsync(
             "songs",
-            () => SearchSongsAsync(userId, normalizedLower, limit, cancellationToken),
+            () => SearchSongsAsync(userId, normalizedLower, queryTokens, limit, cancellationToken),
             cancellationToken);
         var playlists = await ExecuteGroupAsync(
             "playlists",
-            () => SearchPlaylistsAsync(userId, normalizedLower, limit, cancellationToken),
+            () => SearchPlaylistsAsync(userId, normalizedLower, queryTokens, limit, cancellationToken),
             cancellationToken);
         var media = await ExecuteGroupAsync(
             "media",
@@ -46,6 +49,7 @@ public sealed class CantaroSearchService(
                 userId,
                 normalizedQuery,
                 normalizedLower,
+                queryTokens,
                 limit,
                 includeDiscovery,
                 cancellationToken),
@@ -72,6 +76,7 @@ public sealed class CantaroSearchService(
     private async Task<SearchGroupDto> SearchSongsAsync(
         int userId,
         string query,
+        string[] queryTokens,
         int limit,
         CancellationToken cancellationToken)
     {
@@ -81,7 +86,10 @@ public sealed class CantaroSearchService(
                 entry.Playlist != null && entry.Playlist.UserId == userId))
             .Where(track =>
                 (track.SearchTitle != null && track.SearchTitle.ToLower().Contains(query))
-                || (track.SearchArtist != null && track.SearchArtist.ToLower().Contains(query)))
+                || (track.SearchArtist != null && track.SearchArtist.ToLower().Contains(query))
+                || queryTokens.All(token =>
+                    (track.SearchTitle != null && track.SearchTitle.ToLower().Contains(token))
+                    || (track.SearchArtist != null && track.SearchArtist.ToLower().Contains(token))))
             .OrderBy(track =>
                 track.SearchTitle != null && track.SearchTitle.ToLower() == query ? 0 :
                 track.SearchTitle != null && track.SearchTitle.ToLower().StartsWith(query) ? 1 :
@@ -123,6 +131,7 @@ public sealed class CantaroSearchService(
     private async Task<SearchGroupDto> SearchPlaylistsAsync(
         int userId,
         string query,
+        string[] queryTokens,
         int limit,
         CancellationToken cancellationToken)
     {
@@ -131,7 +140,10 @@ public sealed class CantaroSearchService(
             .Where(playlist => playlist.UserId == userId)
             .Where(playlist =>
                 playlist.Name.ToLower().Contains(query)
-                || (playlist.Description != null && playlist.Description.ToLower().Contains(query)))
+                || (playlist.Description != null && playlist.Description.ToLower().Contains(query))
+                || queryTokens.All(token =>
+                    playlist.Name.ToLower().Contains(token)
+                    || (playlist.Description != null && playlist.Description.ToLower().Contains(token))))
             .OrderBy(playlist =>
                 playlist.Name.ToLower() == query ? 0 :
                 playlist.Name.ToLower().StartsWith(query) ? 1 :
@@ -166,6 +178,7 @@ public sealed class CantaroSearchService(
         int userId,
         string displayQuery,
         string query,
+        string[] queryTokens,
         int limit,
         bool includeDiscovery,
         CancellationToken cancellationToken)
@@ -179,7 +192,11 @@ public sealed class CantaroSearchService(
             .Where(title =>
                 title.CanonicalTitle.ToLower().Contains(query)
                 || (title.OriginalTitle != null && title.OriginalTitle.ToLower().Contains(query))
-                || (title.SortTitle != null && title.SortTitle.ToLower().Contains(query)))
+                || (title.SortTitle != null && title.SortTitle.ToLower().Contains(query))
+                || queryTokens.All(token =>
+                    title.CanonicalTitle.ToLower().Contains(token)
+                    || (title.OriginalTitle != null && title.OriginalTitle.ToLower().Contains(token))
+                    || (title.SortTitle != null && title.SortTitle.ToLower().Contains(token))))
             .OrderBy(title =>
                 title.CanonicalTitle.ToLower() == query ? 0 :
                 title.CanonicalTitle.ToLower().StartsWith(query) ? 1 :

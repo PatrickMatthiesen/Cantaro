@@ -98,6 +98,33 @@ public sealed class CantaroSearchServiceTests
     }
 
     [Fact]
+    public async Task SearchAsync_MatchesOrderedTermsAcrossMediaTitleWords()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(812, "search-media-terms@example.com");
+        var seasonThree = MakeMediaTitle(
+            "That Time I Got Reincarnated as a Slime Season 3",
+            "anime",
+            2024,
+            now);
+        db.AddRange(owner, seasonThree);
+        await db.SaveChangesAsync();
+        db.MediaLibraryEntries.Add(MakeMediaEntry(owner.Id, seasonThree.Id, "planned", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var result = await CreateService(db).SearchAsync(owner.Id, "that time i 3", 8, false, default);
+
+        var media = Assert.Single(result.Groups.Media.Items);
+        Assert.Equal($"media-title:{seasonThree.Id}", media.Id);
+        Assert.Equal("That Time I Got Reincarnated as a Slime Season 3", media.Title);
+    }
+
+    [Fact]
     public async Task SearchAsync_ClampsLimitAndUsesDeterministicTies()
     {
         var (db, connection) = await CreateDbAsync();

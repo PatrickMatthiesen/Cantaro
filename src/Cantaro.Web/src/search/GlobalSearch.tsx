@@ -31,6 +31,11 @@ import type { SearchResultsState } from './useSearchResults';
 import { useMobileSearchViewport } from './useSearchViewport';
 
 const previewListboxId = 'global-search-results';
+const previewResultLimit = 8;
+
+function visibleResultLimit(isExpandedSurface: boolean): number | undefined {
+  return isExpandedSurface ? undefined : previewResultLimit;
+}
 
 function resultCount(response: ReturnType<typeof useSearchResults>['response']): number {
   return response
@@ -159,12 +164,14 @@ function GlobalResultContent({
   results,
   groupIds,
   isMobile,
+  maxResults,
   onNavigate,
 }: {
   query: string;
   results: SearchResultsState;
   groupIds: SearchResultGroupId[];
   isMobile: boolean;
+  maxResults?: number;
   onNavigate: (route: string) => boolean | void;
 }) {
   if (!query) {
@@ -187,6 +194,7 @@ function GlobalResultContent({
         onNavigate={onNavigate}
         asListbox
         listboxId={previewListboxId}
+        maxResults={maxResults}
       />
     );
   }
@@ -271,17 +279,23 @@ export function GlobalSearch() {
   const previewActive = (desktopOpen && !isMobile) || (mobileOpen && isMobile);
   const isExpandedSurface = surfaceKind === 'mobile-expanded' && routeState.preview !== true;
   const activeGroup = isExpandedSurface ? routeState.group : 'all';
+  const maxVisibleResults = visibleResultLimit(isExpandedSurface);
   const results = useSearchResults(normalizedDraft, {
     debounceMs: 220,
     enabled: previewActive,
     includeDiscovery: isExpandedSurface,
-    limitPerGroup: isExpandedSurface ? getSearchResultLimit(activeGroup) : isMobile ? 4 : 3,
+    limitPerGroup: isExpandedSurface ? getSearchResultLimit(activeGroup) : previewResultLimit,
   });
   const groupIds = activeGroup === 'all'
     ? searchGroups.map((group) => group.id)
     : [activeGroup];
   const optionItems = (groupIds.length > 1
-    ? rankSearchResults(results.response, groupIds, normalizedDraft).map(({ item }) => item)
+    ? rankSearchResults(
+        results.response,
+        groupIds,
+        normalizedDraft,
+        maxVisibleResults,
+      ).map(({ item }) => item)
     : groupIds.flatMap((groupId) => results.response?.groups[groupId].items ?? []))
     .filter((item) => trustedCanonicalRoute(item.canonicalRoute));
   const activeOptionId = activeIndex >= 0 && optionItems[activeIndex]
@@ -471,6 +485,7 @@ export function GlobalSearch() {
         results={results}
         groupIds={groupIds}
         isMobile={isMobile}
+        maxResults={maxVisibleResults}
         onNavigate={handleResultNavigate}
       />
       <p className="sr-only" aria-live="polite">{statusMessage}</p>

@@ -64,4 +64,33 @@ describe('mixed search result ranking', () => {
     expect(rankSearchResults(searchResponse, ['media'], 'that time i').map(({ item: result }) => result.id))
       .toEqual(['first', 'second']);
   });
+
+  test('lets one result type fill the shared preview budget', () => {
+    const searchResponse = response({
+      media: {
+        status: 'ok',
+        items: Array.from({ length: 8 }, (_, index) => (
+          item('media', `season-${index + 1}`, `That Time I Season ${index + 1}`)
+        )),
+        hasMore: true,
+      },
+    });
+
+    expect(rankSearchResults(
+      searchResponse,
+      ['songs', 'artists', 'playlists', 'media'],
+      'that time i',
+      8,
+    )).toHaveLength(8);
+  });
+
+  test('recognizes query terms separated by words in the title', () => {
+    const seasonThree = item('media', 'season-3', 'That Time I Got Reincarnated as a Slime Season 3');
+    const searchResponse = response({
+      media: { status: 'ok', items: [seasonThree], hasMore: false },
+    });
+
+    expect(rankSearchResults(searchResponse, ['media'], 'that time i 3')[0]?.item)
+      .toEqual(seasonThree);
+  });
 });
