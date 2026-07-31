@@ -82,9 +82,7 @@ function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPl
                 disabled={!platform.implemented}
                 onClick={() => onSelectPlatform(platform)}
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface shadow-sm">
-                  <MusicPlatformIcon platformId={platform.iconId} className="" />
-                </span>
+                <MusicPlatformIcon platformId={platform.iconId} className="h-8 w-8 shrink-0 text-content" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{platform.name}</span>
                   <span className="block text-xs font-semibold text-content-subtle">{platform.implemented ? 'Available' : 'Coming soon'}</span>
@@ -270,9 +268,7 @@ function PlatformGroupedView({
         return (
           <GlassCard key={platform.id} className="flex min-h-[300px] flex-col p-4">
             <div className="mb-4 flex items-start gap-3">
-              <span className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br ${platform.gradient} text-content-inverse`}>
-                <MusicPlatformIcon platformId={platform.iconId} className="h-8 w-8" />
-              </span>
+              <MusicPlatformIcon platformId={platform.iconId} className="h-12 w-12 shrink-0 text-content" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="truncate font-black text-content">{platform.name}</h3>
@@ -359,9 +355,9 @@ function SyncGroupView({ library }: { library: MusicLibraryResponse }) {
                 const platformId = asPlatformId(service.service);
                 return (
                   <div key={`${playlist.id}-${service.service}-${service.servicePlaylistId}`} className="flex items-center gap-3 rounded-2xl bg-surface-translucent px-3 py-2.5">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface shadow-sm">
-                      {platformId ? <MusicPlatformIcon platformId={platformId} className="h-5 w-5" /> : <MusicUiIcon name="cable" className="h-5 w-5 text-content-muted" />}
-                    </span>
+                    {platformId
+                      ? <MusicPlatformIcon platformId={platformId} className="h-8 w-8 shrink-0 text-content" />
+                      : <MusicUiIcon name="cable" className="h-8 w-8 shrink-0 p-1.5 text-content-muted" />}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-black text-content">{serviceName(service.service)}</span>
                       <span className="block truncate text-xs font-semibold text-content-muted">{statusLabel(service.lastSyncStatus)} · {formatRelativeTime(service.lastSyncedAt)}</span>
@@ -452,8 +448,8 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
 
   return (
     <div className="music-sync-progress grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl border border-border-subtle bg-accent-soft px-3 py-3 shadow-[0_14px_34px_rgba(88,74,150,0.08)] dark:border-[rgba(167,139,250,0.28)] dark:bg-[rgba(91,33,182,0.18)] dark:shadow-none">
-      <span className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-surface shadow-sm">
-        <MusicPlatformIcon platformId={progress.sourcePlatformId} className="h-5 w-5" />
+      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center">
+        <MusicPlatformIcon platformId={progress.sourcePlatformId} className="h-8 w-8 text-content" />
         <ProgressSpinner phase={progress.phase} />
       </span>
       <span className="min-w-0">
@@ -512,9 +508,9 @@ function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLi
           const platformId = asPlatformId(activity.service);
           return (
             <div key={activity.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl bg-surface-translucent px-3 py-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface shadow-sm">
-                {platformId ? <MusicPlatformIcon platformId={platformId} className="h-5 w-5" /> : <MusicUiIcon name="cable" className="h-5 w-5 text-content-muted" />}
-              </span>
+              {platformId
+                ? <MusicPlatformIcon platformId={platformId} className="h-8 w-8 shrink-0 text-content" />
+                : <MusicUiIcon name="cable" className="h-8 w-8 shrink-0 p-1.5 text-content-muted" />}
               <span className="min-w-0">
                 <span className="block truncate text-sm font-black text-content">{activity.playlistName}</span>
                 <span className="block truncate text-xs font-semibold text-content-muted">

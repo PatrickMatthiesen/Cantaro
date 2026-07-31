@@ -5,7 +5,6 @@ import type { MediaImportDto, MediaImportRequestDto, MediaProviderAccountStatusD
 interface ProviderPanelHeaderProps {
     name: string;
     icon: ReactNode;
-    gradient: string;
     description: string;
     status: MediaProviderAccountStatusDto | null;
     isLoadingStatus: boolean;
@@ -27,19 +26,13 @@ interface ProviderPanelActionsProps {
 export function ProviderPanelHeader({
     name,
     icon,
-    gradient,
     description,
     status,
     isLoadingStatus,
 }: ProviderPanelHeaderProps) {
     return (
         <div className="flex items-start gap-4">
-            <div
-                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br ${gradient} text-2xl text-white shadow-sm`}
-                aria-hidden
-            >
-                {icon}
-            </div>
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center" aria-hidden>{icon}</div>
 
             <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-3">

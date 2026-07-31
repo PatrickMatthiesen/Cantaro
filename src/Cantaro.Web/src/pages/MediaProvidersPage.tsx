@@ -58,7 +58,7 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
             key={provider.id}
             providerId={provider.id}
             name={provider.name}
-            icon={<MediaProviderIcon providerId={provider.iconId} variant="mono" className="h-8 w-8 text-white" aria-hidden />}
+            icon={<MediaProviderIcon providerId={provider.iconId} className="h-12 w-12" aria-hidden />}
             gradient={provider.gradient}
             description={provider.description}
           />

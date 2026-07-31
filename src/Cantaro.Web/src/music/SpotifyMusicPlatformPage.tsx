@@ -200,9 +200,7 @@ function SpotifyHeader({
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div className="max-w-2xl">
           <div className="flex items-center gap-3">
-            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-[#1ed760]">
-              <MusicPlatformIcon platformId="spotify" className="h-7 w-7" title="Spotify" />
-            </span>
+            <MusicPlatformIcon platformId="spotify" className="h-12 w-12 shrink-0 text-[#1ed760]" title="Spotify" />
             <h1 className="text-4xl leading-tight font-black text-content sm:text-5xl">Spotify</h1>
           </div>
           <p className="mt-3 text-sm leading-6 font-semibold text-content-muted">{description}</p>

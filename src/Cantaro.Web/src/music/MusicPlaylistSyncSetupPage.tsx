@@ -120,9 +120,7 @@ function SourcePlatformSelector({
                   }`}
                   onClick={() => onChange(platform.id)}
                 >
-                  <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-content-inverse`}>
-                    <MusicPlatformIcon platformId={platform.iconId} className="h-5 w-5" />
-                  </span>
+                  <MusicPlatformIcon platformId={platform.iconId} className="h-10 w-10 shrink-0 text-content" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-black text-content">{platform.name}</span>
                     <span className="block text-xs font-semibold text-emerald-600">Connected</span>
@@ -250,8 +248,8 @@ function PlaylistArtworkThumbnail({ playlist, sourcePlatformId }: { playlist: Pl
   }
 
   return (
-    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface shadow-sm">
-      <MusicPlatformIcon platformId={sourcePlatformId} className="h-8 w-8" />
+    <span className="flex h-11 w-11 items-center justify-center">
+      <MusicPlatformIcon platformId={sourcePlatformId} className="h-9 w-9 text-content" />
     </span>
   );
 }
@@ -451,9 +449,7 @@ function SyncPreview({
 
       <div className="mt-4 rounded-2xl bg-surface-translucent p-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface shadow-sm">
-            <MusicPlatformIcon platformId={sourcePlatformId} className="h-5 w-5" />
-          </span>
+          <MusicPlatformIcon platformId={sourcePlatformId} className="h-10 w-10 shrink-0 text-content" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-black text-content">{platformById.get(sourcePlatformId)?.name} -&gt; Cantaro</p>
             <p className="text-xs font-semibold text-content-muted">{selectedPlaylists.length.toLocaleString()} playlists · {totalSongs.toLocaleString()} songs selected</p>
