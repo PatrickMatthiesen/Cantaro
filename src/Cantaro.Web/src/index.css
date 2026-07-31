@@ -15,13 +15,6 @@
   --cantaro-border: var(--color-border-subtle);
   --cantaro-text: var(--color-content);
   --cantaro-muted: var(--color-content-muted);
-  --cantaro-soft: var(--color-surface-subtle);
-  --cantaro-error-surface: var(--color-danger-surface);
-  --cantaro-error-content: var(--color-danger-content);
-  --cantaro-action: var(--color-action);
-  --cantaro-action-hover: var(--color-action-hover);
-  --cantaro-action-content: var(--color-action-content);
-  --cantaro-accent-content: var(--color-accent-strong);
 }
 
 :root[data-theme="dark"] body {

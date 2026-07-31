@@ -144,7 +144,7 @@ function AccountMenu({
             className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-content-muted transition hover:bg-canvas hover:text-content focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             onClick={() => setIsOpen(false)}
           >
-            <Settings className="h-4 w-4 text-violet-600" aria-hidden />
+            <Settings className="h-4 w-4 text-accent" aria-hidden />
             Settings
           </Link>
           <button

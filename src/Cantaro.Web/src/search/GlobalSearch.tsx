@@ -64,15 +64,15 @@ function trapDialogFocus(event: ReactKeyboardEvent<HTMLDivElement>, dialog: HTML
 function MobileSearchTabs({ activeGroup, query }: { activeGroup: SearchGroupId; query: string }) {
   return (
     <nav className="overflow-x-auto px-4 py-2" aria-label="Search result groups">
-      <div className="bg-soft flex min-w-max gap-1 rounded-2xl p-1">
+      <div className="flex min-w-max gap-1 rounded-2xl bg-surface-subtle p-1">
         {searchTabs.map((tab) => (
           <Link
             key={tab.id}
             to="/search"
             search={{ q: normalizeSearchQuery(query), group: tab.id }}
             replace
-            className={`rounded-xl px-3 py-2 text-sm font-black ${
-              activeGroup === tab.id ? 'bg-action text-action-content' : 'text-muted'
+            className={`rounded-xl px-3 py-2 text-sm font-black transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none ${
+              activeGroup === tab.id ? 'bg-action text-action-content' : 'text-content-muted hover:bg-surface-hover'
             }`}
             aria-current={activeGroup === tab.id ? 'page' : undefined}
           >
@@ -115,10 +115,10 @@ function SearchComboboxInput({
     <label className="relative block">
       <span className="sr-only">Search all music and media</span>
       <span id={helpId} className="sr-only">Enter up to {searchMaxQueryLength} characters.</span>
-      <Search className="text-muted pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2" aria-hidden />
+      <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-content-muted" aria-hidden />
       <input
         ref={inputRef}
-        className="app-top-search-input h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-10 pl-11 text-base font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white md:text-sm"
+        className="app-top-search-input h-12 w-full rounded-2xl border border-border-subtle bg-surface-translucent pr-10 pl-11 text-base font-medium text-content transition outline-none placeholder:text-content-subtle focus:border-focus focus:bg-surface focus:ring-2 focus:ring-focus/20 md:text-sm"
         placeholder="Search music and media..."
         type="search"
         role="combobox"
@@ -148,7 +148,7 @@ function SearchComboboxInput({
       {draft ? (
         <button
           type="button"
-          className="text-muted hover:text-ink absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl"
+          className="absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl text-content-muted hover:text-content"
           aria-label="Clear search"
           onClick={onClear}
         >
@@ -232,7 +232,7 @@ function DesktopSearchSurface({
     <div
       ref={panelRef}
       style={panelStyle}
-      className="global-search-surface bg-panel-solid border-line fixed z-50 max-h-[min(70vh,42rem)] overflow-y-auto rounded-2xl border p-2 shadow-[0_8px_24px_rgba(15,23,42,0.16)]"
+      className="global-search-surface fixed z-50 max-h-[min(70vh,42rem)] overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-2 shadow-[0_8px_24px_rgba(15,23,42,0.16)]"
     >
       {children}
       {query ? (
@@ -240,7 +240,7 @@ function DesktopSearchSurface({
           to="/search"
           search={createGlobalSearchState(query)}
           data-search-result
-          className="bg-soft text-accent-content mt-2 flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-black focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+          className="mt-2 flex w-full items-center justify-center rounded-xl bg-accent-soft px-4 py-3 text-sm font-black text-accent-strong focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
           onClick={onClose}
         >
           See all results
@@ -520,16 +520,16 @@ export function GlobalSearch() {
       {mobileOpen && isMobile ? createPortal(
         <div
           ref={mobileDialogRef}
-          className="global-search-surface bg-canvas text-ink fixed inset-0 z-60 flex h-[100dvh] flex-col"
+          className="global-search-surface fixed inset-0 z-60 flex h-[100dvh] flex-col bg-canvas text-content"
           role="dialog"
           aria-modal="true"
           aria-label="Search Cantaro"
           onKeyDown={handleDialogKeyDown}
         >
-          <header className="border-line bg-canvas sticky top-0 z-10 flex items-center gap-2 border-b px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
+          <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-subtle bg-canvas px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
             <button
               type="button"
-              className="text-ink flex h-11 w-11 shrink-0 items-center justify-center rounded-xl focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-content focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
               aria-label="Close search"
               onClick={closeMobile}
             >
@@ -557,12 +557,12 @@ export function GlobalSearch() {
             {resultContent}
           </div>
           {!isExpandedSurface && normalizedDraft ? (
-            <div className="border-line bg-canvas border-t px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <div className="border-t border-border-subtle bg-canvas px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <Link
                 to="/search"
                 search={createGlobalSearchState(normalizedDraft)}
                 replace
-                className="bg-action text-action-content flex h-12 w-full items-center justify-center rounded-xl text-sm font-black"
+                className="flex h-12 w-full items-center justify-center rounded-xl bg-action text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
               >
                 See all results
               </Link>
