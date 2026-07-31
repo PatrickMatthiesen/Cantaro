@@ -1,19 +1,16 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Bell, LogOut, Menu, Search, Settings, X } from 'lucide-react';
+import { Bell, LogOut, Menu, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { AppNavigation } from './AppNavigation';
 import { rememberActiveArea } from '../appAreaRouting';
 import { useAuth } from '../contexts/AuthContext';
+import { GlobalSearch } from '../search/GlobalSearch';
 
 interface PageShellProps {
   children: ReactNode;
   sidebar: ReactNode;
   bottomSlot?: ReactNode;
   contentClassName?: string;
-  searchPlaceholder?: string;
-  searchValue?: string;
-  onSearchChange?: (value: string) => void;
-  onSearchSubmit?: () => void;
 }
 
 const drawerFocusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -53,39 +50,6 @@ function handleDrawerKeyboard(event: KeyboardEvent, drawer: HTMLDivElement | nul
   if (event.key === 'Tab') {
     trapDrawerFocus(event, drawer);
   }
-}
-
-function TopSearchInput({
-  placeholder,
-  value,
-  onChange,
-  onSubmit,
-}: {
-  placeholder: string;
-  value?: string;
-  onChange?: (value: string) => void;
-  onSubmit?: () => void;
-}) {
-  return (
-    <form
-      className="min-w-0 flex-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit?.();
-      }}
-    >
-      <label className="relative block">
-        <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
-        <input
-          className="app-top-search-input h-12 w-full rounded-2xl border border-[#e3def8] bg-white/70 pr-4 pl-11 text-sm font-medium text-slate-800 transition outline-none placeholder:text-slate-400 focus:border-violet-300 focus:bg-white"
-          placeholder={placeholder}
-          type="search"
-          value={onChange ? value ?? '' : undefined}
-          onChange={(event) => onChange?.(event.target.value)}
-        />
-      </label>
-    </form>
-  );
 }
 
 function NotificationButton() {
@@ -203,10 +167,6 @@ function AccountMenu({
 
 function PageTopBar({
   pathname,
-  searchPlaceholder,
-  searchValue,
-  onSearchChange,
-  onSearchSubmit,
   displayName,
   avatarUrl,
   onLogout,
@@ -214,10 +174,6 @@ function PageTopBar({
   navigationButtonRef,
 }: {
   pathname: string;
-  searchPlaceholder: string;
-  searchValue?: string;
-  onSearchChange?: (value: string) => void;
-  onSearchSubmit?: () => void;
   displayName?: string;
   avatarUrl?: string;
   onLogout: () => void;
@@ -237,12 +193,7 @@ function PageTopBar({
             <AccountMenu displayName={displayName} avatarUrl={avatarUrl} onLogout={onLogout} />
           </div>
         </div>
-        <TopSearchInput
-          placeholder={searchPlaceholder}
-          value={searchValue}
-          onChange={onSearchChange}
-          onSubmit={onSearchSubmit}
-        />
+        <GlobalSearch />
       </div>
     </header>
   );
@@ -306,10 +257,6 @@ export function PageShell({
   sidebar,
   bottomSlot,
   contentClassName = '',
-  searchPlaceholder = 'Search Cantaro...',
-  searchValue,
-  onSearchChange,
-  onSearchSubmit,
 }: PageShellProps) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { user, logout } = useAuth();
@@ -336,10 +283,6 @@ export function PageShell({
         <div className="flex min-w-0 flex-col pb-28">
           <PageTopBar
             pathname={pathname}
-            searchPlaceholder={searchPlaceholder}
-            searchValue={searchValue}
-            onSearchChange={onSearchChange}
-            onSearchSubmit={onSearchSubmit}
             displayName={user?.displayName}
             avatarUrl={user?.avatarUrl}
             onLogout={() => void logout()}

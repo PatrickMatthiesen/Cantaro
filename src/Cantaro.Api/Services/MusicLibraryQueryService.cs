@@ -119,7 +119,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var track = await _dbContext.Tracks.AsNoTracking()
             .Include(x => x.SourceIds)
             .Include(x => x.ArtistCredits).ThenInclude(x => x.Artist)
-            .FirstOrDefaultAsync(x => x.Id == trackId, cancellationToken);
+            .FirstOrDefaultAsync(
+                x => x.Id == trackId
+                    && x.PlaylistEntries.Any(entry =>
+                        entry.Playlist != null && entry.Playlist.UserId == userId),
+                cancellationToken);
         if (track is null) return null;
         var metadata = ParseJson<TrackCanonicalMetadata>(track.CanonicalMetadata);
         var memberships = await _dbContext.PlaylistEntries.AsNoTracking()

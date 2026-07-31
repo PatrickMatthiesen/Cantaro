@@ -1,4 +1,3 @@
-import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
   MusicPlatformIcon,
@@ -347,10 +346,8 @@ function SongTable({
   tracks,
   onPlayTrack,
   onQueueTrack,
-  query,
 }: {
   tracks: MusicCollectionTrack[];
-  query: string;
   onPlayTrack: (track: MusicCollectionTrack) => void;
   onQueueTrack: (track: MusicCollectionTrack) => void;
 }) {
@@ -358,9 +355,9 @@ function SongTable({
     <section className="music-panel rounded-[1.75rem] border border-white/80 bg-white/62 p-4 shadow-[0_16px_48px_rgba(88,74,150,0.06)] backdrop-blur">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-black text-slate-950">{query.trim() ? 'Matching songs' : 'Songs in the archive'}</h2>
+          <h2 className="text-lg font-black text-slate-950">Songs in the archive</h2>
           <p className="mt-1 text-sm font-semibold text-slate-500">
-            {query.trim() ? 'Filtered by the global music search.' : 'Use the top search to inspect songs, artists, or source playlists.'}
+            Open the full song library to browse and filter this collection.
           </p>
         </div>
         <Link to="/music/songs" className="rounded-2xl bg-white px-4 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-50">Open songs</Link>
@@ -446,7 +443,7 @@ function RediscoveryPanel() {
   );
 }
 
-function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLibrarySong[]) {
+function useMusicHomePlayback(songs: MusicLibrarySong[]) {
   const allTracks = songs.map(mapSongToTrack);
   const queue = useMusicQueue(allTracks);
   const activeSong = songs.find((song) => song.id === queue.activeTrackId);
@@ -455,7 +452,7 @@ function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLib
     activeSong,
     activeTrack: queue.activeTrack,
     queuedTracks: queue.queuedTracks,
-    tracks: filteredSongs.map((song, index) => ({
+    tracks: songs.map((song, index) => ({
       ...mapSongToTrack(song, index),
       isPlaying: song.id === queue.activeTrackId,
     })),
@@ -471,29 +468,14 @@ function useMusicHomePlayback(songs: MusicLibrarySong[], filteredSongs: MusicLib
 }
 
 export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse }) {
-  const [query, setQuery] = useState('');
   const songs = library.songs;
-  const filteredSongs = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return songs;
-
-    return songs.filter((song) => {
-      const haystack = [song.title, song.artist, ...song.playlists.map((playlist) => playlist.playlistName)]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(normalizedQuery);
-    });
-  }, [query, songs]);
-  const playback = useMusicHomePlayback(songs, filteredSongs);
+  const playback = useMusicHomePlayback(songs);
 
   return (
     <MusicPageShell
       library={library}
       activeSong={playback.activeSong}
       onStopActiveSong={playback.stopTrack}
-      searchValue={query}
-      onSearchChange={setQuery}
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
@@ -502,7 +484,6 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
           <PlaylistBrowser playlists={library.playlists} />
           <SongTable
             tracks={playback.tracks}
-            query={query}
             onPlayTrack={playback.playTrack}
             onQueueTrack={playback.queueTrack}
           />

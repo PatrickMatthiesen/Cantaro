@@ -15,6 +15,18 @@ public class Track
     /// Canonical metadata stored as JSON (artist, title, duration, etc.)
     /// </summary>
     public string? CanonicalMetadata { get; set; }
+
+    /// <summary>
+    /// Queryable display projection derived from CanonicalMetadata.Title.
+    /// This is not a separate canonical identity field.
+    /// </summary>
+    public string? SearchTitle { get; set; }
+
+    /// <summary>
+    /// Queryable legacy display projection derived from CanonicalMetadata.Artist.
+    /// Artist identity continues to live in the structured artist-credit model.
+    /// </summary>
+    public string? SearchArtist { get; set; }
     
     /// <summary>
     /// MusicBrainz Recording ID (nullable - may not always be available)

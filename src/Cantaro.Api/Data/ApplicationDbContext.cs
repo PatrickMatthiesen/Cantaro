@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Cantaro.Api.Data;
 
@@ -43,25 +44,25 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
     public override int SaveChanges()
     {
-        UpdateUserTimestamps();
+        PrepareChanges();
         return base.SaveChanges();
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        UpdateUserTimestamps();
+        PrepareChanges();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        UpdateUserTimestamps();
+        PrepareChanges();
         return base.SaveChangesAsync(cancellationToken);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        UpdateUserTimestamps();
+        PrepareChanges();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -235,6 +236,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.VersionFlags).HasConversion<long>();
             entity.Property(e => e.VersionEvidence).HasColumnType("jsonb");
+            entity.Property(e => e.SearchTitle).HasMaxLength(512);
+            entity.Property(e => e.SearchArtist).HasMaxLength(1024);
 
             entity.HasIndex(e => e.MbidRecording);
             entity.HasIndex(e => e.Isrc);
@@ -620,5 +623,78 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 entry.Entity.UpdatedAt = now;
             }
         }
+    }
+
+    private void PrepareChanges()
+    {
+        UpdateUserTimestamps();
+        UpdateTrackSearchProjections();
+    }
+
+    private void UpdateTrackSearchProjections()
+    {
+        foreach (var entry in ChangeTracker.Entries<Track>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified)
+                || (entry.State == EntityState.Modified
+                    && !entry.Property(track => track.CanonicalMetadata).IsModified))
+            {
+                continue;
+            }
+
+            var metadata = ParseTrackSearchMetadata(entry.Entity.CanonicalMetadata);
+            entry.Entity.SearchTitle = TrimToLength(metadata.Title, 512);
+            entry.Entity.SearchArtist = TrimToLength(metadata.Artist, 1024);
+        }
+    }
+
+    private static (string? Title, string? Artist) ParseTrackSearchMetadata(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return default;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return default;
+            }
+
+            return (
+                ReadString(document.RootElement, "Title", "title"),
+                ReadString(document.RootElement, "Artist", "artist"));
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+    }
+
+    private static string? ReadString(
+        JsonElement element,
+        string propertyName,
+        string fallbackPropertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property)
+            && !element.TryGetProperty(fallbackPropertyName, out property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String ? property.GetString() : null;
+    }
+
+    private static string? TrimToLength(string? value, int maxLength)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
     }
 }
