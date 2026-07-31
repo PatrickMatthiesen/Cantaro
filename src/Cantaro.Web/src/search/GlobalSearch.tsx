@@ -175,11 +175,7 @@ function GlobalResultContent({
   onNavigate: (route: string) => boolean | void;
 }) {
   if (!query) {
-    return (
-      <div id={previewListboxId} role="listbox" className="text-muted px-4 py-8 text-center text-sm font-semibold">
-        Start typing to search songs, artists, playlists, and media.
-      </div>
-    );
+    return <div id={previewListboxId} role="listbox" className="sr-only" aria-label="Search results" />;
   }
 
   if (groupIds.length > 1) {
@@ -460,7 +456,7 @@ export function GlobalSearch() {
   };
 
   const statusMessage = !normalizedDraft
-    ? 'Start typing to search.'
+    ? ''
     : results.loading
       ? 'Searching.'
       : `${resultCount(results.response)} results available.`;
@@ -499,7 +495,7 @@ export function GlobalSearch() {
           inputRef={desktopInputRef}
           helpId="global-search-help"
           mobileSurface={false}
-          expanded={desktopOpen}
+          expanded={desktopOpen && Boolean(normalizedDraft)}
           activeOptionId={activeOptionId}
           draft={draft}
           isMobileViewport={isMobile}
@@ -512,7 +508,7 @@ export function GlobalSearch() {
       </form>
 
       <DesktopSearchSurface
-        visible={desktopOpen && !isMobile}
+        visible={desktopOpen && !isMobile && Boolean(normalizedDraft)}
         panelRef={desktopPanelRef}
         panelStyle={panelStyle}
         query={normalizedDraft}
