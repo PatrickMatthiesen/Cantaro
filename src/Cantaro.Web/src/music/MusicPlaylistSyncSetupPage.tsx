@@ -74,15 +74,15 @@ function ToggleRow({
   return (
     <button
       type="button"
-      className="flex w-full items-center justify-between gap-4 border-b border-slate-200/70 px-4 py-3 text-left last:border-b-0"
+      className="flex w-full items-center justify-between gap-4 border-b border-border-subtle/70 px-4 py-3 text-left last:border-b-0"
       onClick={onToggle}
     >
       <span className="min-w-0">
-        <span className="block text-sm font-black text-slate-800">{title}</span>
-        <span className="block text-xs font-semibold text-slate-500">{detail}</span>
+        <span className="block text-sm font-black text-content">{title}</span>
+        <span className="block text-xs font-semibold text-content-muted">{detail}</span>
       </span>
-      <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? 'bg-violet-600' : 'bg-slate-300'}`}>
-        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-6' : 'left-1'}`} />
+      <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? 'bg-accent' : 'bg-surface-subtle'}`}>
+        <span className={`absolute top-1 h-4 w-4 rounded-full bg-surface shadow-sm transition ${enabled ? 'left-6' : 'left-1'}`} />
       </span>
     </button>
   );
@@ -107,7 +107,7 @@ function SourcePlatformSelector({
     <GlassCard className="p-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div>
-          <p className="text-xs font-black tracking-[0.18em] text-slate-500 uppercase">Source platform</p>
+          <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">Source platform</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 2xl:grid-cols-4">
             {connectedSourcePlatforms.map((platform) => {
               const isSelected = sourcePlatformId === platform.id;
@@ -116,29 +116,29 @@ function SourcePlatformSelector({
                   key={platform.id}
                   type="button"
                   className={`flex items-center gap-3 rounded-2xl border px-3 py-3 text-left transition ${
-                    isSelected ? 'border-violet-300 bg-white shadow-[0_14px_34px_rgba(88,74,150,0.12)]' : 'border-white/70 bg-white/55 hover:bg-white'
+                    isSelected ? 'border-border-strong bg-surface shadow-[0_14px_34px_rgba(88,74,150,0.12)]' : 'border-border-subtle bg-surface/55 hover:bg-surface'
                   }`}
                   onClick={() => onChange(platform.id)}
                 >
-                  <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-white`}>
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br ${platform.gradient} text-content-inverse`}>
                     <MusicPlatformIcon platformId={platform.iconId} className="h-5 w-5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-black text-slate-900">{platform.name}</span>
+                    <span className="block truncate text-sm font-black text-content">{platform.name}</span>
                     <span className="block text-xs font-semibold text-emerald-600">Connected</span>
                   </span>
-                  {isSelected ? <MusicUiIcon name="squareCheck" className="h-5 w-5 text-violet-600" /> : null}
+                  {isSelected ? <MusicUiIcon name="squareCheck" className="h-5 w-5 text-accent" /> : null}
                 </button>
               );
             })}
           </div>
         </div>
-        <div className="border-t border-[#e3def8] pt-4 xl:border-t-0 xl:border-l xl:pt-0 xl:pl-4">
+        <div className="border-t border-border-subtle pt-4 xl:border-t-0 xl:border-l xl:pt-0 xl:pl-4">
           <SyncSetupMetrics selectedPlaylists={selectedPlaylists} targetPlatformIds={targetPlatformIds} />
         </div>
       </div>
       {connectedSourcePlatforms.length === 0 ? (
-        <div className="mt-3 rounded-2xl bg-white/70 p-4 text-sm font-semibold text-slate-500">
+        <div className="mt-3 rounded-2xl bg-surface-translucent p-4 text-sm font-semibold text-content-muted">
           Connect YouTube Music first, then return here to choose source playlists.
         </div>
       ) : null}
@@ -156,11 +156,11 @@ function SyncSetupMetric({
   label: string;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 rounded-2xl bg-white/64 px-3 py-2.5 shadow-[0_10px_28px_rgba(88,74,150,0.06)]">
-      <MusicUiIcon name={icon} className="h-4 w-4 shrink-0 text-violet-600" />
+    <div className="flex min-w-0 items-center gap-2 rounded-2xl bg-surface-translucent px-3 py-2.5 shadow-[0_10px_28px_rgba(88,74,150,0.06)]">
+      <MusicUiIcon name={icon} className="h-4 w-4 shrink-0 text-accent" />
       <div className="min-w-0">
-        <p className="truncate text-sm font-black text-slate-900">{value}</p>
-        <p className="truncate text-[11px] font-semibold text-slate-500">{label}</p>
+        <p className="truncate text-sm font-black text-content">{value}</p>
+        <p className="truncate text-[11px] font-semibold text-content-muted">{label}</p>
       </div>
     </div>
   );
@@ -177,7 +177,7 @@ function SyncSetupMetrics({
 
   return (
     <div>
-      <p className="text-xs font-black tracking-[0.18em] text-slate-500 uppercase">Sync summary</p>
+      <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">Sync summary</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <SyncSetupMetric icon="refresh" value={selectedPlaylists.length.toLocaleString()} label="Source playlists" />
         <SyncSetupMetric icon="cable" value={targetPlatformIds.length.toLocaleString()} label="Other platforms" />
@@ -206,12 +206,12 @@ function PlaylistPickerHeader({
   return (
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0 flex-1">
-        <h2 className="text-lg font-black text-slate-950">1. Source playlists</h2>
-        <p className="mt-1 text-sm font-semibold text-slate-500">Choose playlists to sync from {platformById.get(sourcePlatformId)?.name}.</p>
+        <h2 className="text-lg font-black text-content">1. Source playlists</h2>
+        <p className="mt-1 text-sm font-semibold text-content-muted">Choose playlists to sync from {platformById.get(sourcePlatformId)?.name}.</p>
       </div>
       <button
         type="button"
-        className="shrink-0 rounded-2xl bg-white px-4 py-2 text-sm font-black whitespace-nowrap text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:text-slate-400"
+        className="shrink-0 rounded-2xl bg-surface px-4 py-2 text-sm font-black whitespace-nowrap text-accent-strong transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:text-content-subtle"
         disabled={isLoading || playlists.length === 0}
         onClick={onSelectAll}
       >
@@ -223,8 +223,8 @@ function PlaylistPickerHeader({
 
 function LoadingPlaylistsState() {
   return (
-    <div className="flex min-h-56 items-center justify-center rounded-2xl bg-white/60">
-      <div className="flex items-center gap-2 text-sm font-semibold text-slate-500">
+    <div className="flex min-h-56 items-center justify-center rounded-2xl bg-surface-translucent">
+      <div className="flex items-center gap-2 text-sm font-semibold text-content-muted">
         <MusicUiIcon name="loader" className="h-4 w-4 animate-spin" />
         Loading playlists
       </div>
@@ -234,10 +234,10 @@ function LoadingPlaylistsState() {
 
 function EmptyPlaylistsState() {
   return (
-    <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl bg-white/60 text-center">
-      <MusicUiIcon name="listMusic" className="h-9 w-9 text-slate-300" />
-      <p className="mt-2 text-sm font-black text-slate-800">No playlists found</p>
-      <p className="mt-1 text-xs font-semibold text-slate-500">Refresh the platform connection and try again.</p>
+    <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl bg-surface-translucent text-center">
+      <MusicUiIcon name="listMusic" className="h-9 w-9 text-content-subtle" />
+      <p className="mt-2 text-sm font-black text-content">No playlists found</p>
+      <p className="mt-1 text-xs font-semibold text-content-muted">Refresh the platform connection and try again.</p>
     </div>
   );
 }
@@ -250,7 +250,7 @@ function PlaylistArtworkThumbnail({ playlist, sourcePlatformId }: { playlist: Pl
   }
 
   return (
-    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
+    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface shadow-sm">
       <MusicPlatformIcon platformId={sourcePlatformId} className="h-8 w-8" />
     </span>
   );
@@ -271,17 +271,17 @@ function PlaylistPickerRow({
     <button
       type="button"
       className={`grid w-full grid-cols-[auto_44px_1fr] items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition ${
-        isSelected ? 'border-violet-300 bg-white shadow-[0_12px_30px_rgba(88,74,150,0.1)]' : 'border-white/70 bg-white/58 hover:bg-white'
+        isSelected ? 'border-border-strong bg-surface shadow-[0_12px_30px_rgba(88,74,150,0.1)]' : 'border-border-subtle bg-surface-translucent hover:bg-surface'
       }`}
       onClick={() => onTogglePlaylist(playlist.id)}
     >
-      <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${isSelected ? 'border-violet-600 bg-violet-600 text-white' : 'border-slate-300 bg-white text-transparent'}`}>
+      <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${isSelected ? 'border-action bg-action text-action-content' : 'border-border-strong bg-surface text-transparent'}`}>
         <MusicUiIcon name="squareCheck" className="h-3.5 w-3.5" />
       </span>
       <PlaylistArtworkThumbnail playlist={playlist} sourcePlatformId={sourcePlatformId} />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-black text-slate-900">{playlist.title}</span>
-        <span className="block text-xs font-semibold text-slate-500">{playlist.itemCount.toLocaleString()} songs</span>
+        <span className="block truncate text-sm font-black text-content">{playlist.title}</span>
+        <span className="block text-xs font-semibold text-content-muted">{playlist.itemCount.toLocaleString()} songs</span>
       </span>
     </button>
   );
@@ -356,29 +356,29 @@ function RulesPanel({
 }) {
   return (
     <GlassCard className="p-4">
-      <h2 className="text-lg font-black text-slate-950">2. Sync rules</h2>
-      <p className="mt-1 text-sm font-semibold text-slate-500">This run imports the selected source playlists into Cantaro. These rules describe how Cantaro should preserve them for later platform updates.</p>
+      <h2 className="text-lg font-black text-content">2. Sync rules</h2>
+      <p className="mt-1 text-sm font-semibold text-content-muted">This run imports the selected source playlists into Cantaro. These rules describe how Cantaro should preserve them for later platform updates.</p>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <div className="rounded-2xl border border-violet-300 bg-white p-4 text-left shadow-[0_12px_30px_rgba(88,74,150,0.08)]">
+        <div className="rounded-2xl border border-border-strong bg-surface p-4 text-left shadow-[0_12px_30px_rgba(88,74,150,0.08)]">
           <div className="flex items-center justify-between gap-3">
-            <MusicUiIcon name="repeat" className="h-5 w-5 text-violet-600" />
-            <MusicUiIcon name="squareCheck" className="h-5 w-5 text-violet-600" />
+            <MusicUiIcon name="repeat" className="h-5 w-5 text-accent" />
+            <MusicUiIcon name="squareCheck" className="h-5 w-5 text-accent" />
           </div>
-          <p className="mt-3 text-sm font-black text-slate-900">Mirror sync</p>
-          <p className="mt-1 text-xs leading-5 font-semibold text-slate-500">Keep selected playlists aligned through Cantaro.</p>
+          <p className="mt-3 text-sm font-black text-content">Mirror sync</p>
+          <p className="mt-1 text-xs leading-5 font-semibold text-content-muted">Keep selected playlists aligned through Cantaro.</p>
         </div>
-        <div className="rounded-2xl border border-white/80 bg-white/52 p-4 text-left opacity-65">
+        <div className="rounded-2xl border border-border-subtle bg-surface-translucent p-4 text-left opacity-65">
           <div className="flex items-center justify-between gap-3">
-            <MusicUiIcon name="library" className="h-5 w-5 text-slate-500" />
-            <span className="text-xs font-black text-slate-400">Later</span>
+            <MusicUiIcon name="library" className="h-5 w-5 text-content-muted" />
+            <span className="text-xs font-black text-content-subtle">Later</span>
           </div>
-          <p className="mt-3 text-sm font-black text-slate-900">Update library</p>
-          <p className="mt-1 text-xs leading-5 font-semibold text-slate-500">Add tracks without removing existing entries.</p>
+          <p className="mt-3 text-sm font-black text-content">Update library</p>
+          <p className="mt-1 text-xs leading-5 font-semibold text-content-muted">Add tracks without removing existing entries.</p>
         </div>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl bg-white/70">
+      <div className="mt-4 overflow-hidden rounded-2xl bg-surface-translucent">
         <ToggleRow title="Keep song order" detail="Preserve source playlist order in Cantaro." enabled={keepOrder} onToggle={onToggleKeepOrder} />
         <ToggleRow title="Keep playlist metadata" detail="Sync title, description, and artwork where available." enabled={keepMetadata} onToggle={onToggleKeepMetadata} />
         <ToggleRow title="Hide unavailable tracks" detail="Exclude missing or region-blocked songs from previews." enabled={hideUnavailable} onToggle={onToggleHideUnavailable} />
@@ -394,7 +394,7 @@ function PreviewTargets({ targetPlatformIds }: { targetPlatformIds: PlatformId[]
   }
 
   return targetPlatformIds.map((platformId) => (
-    <span key={platformId} className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-slate-700 shadow-sm">
+    <span key={platformId} className="inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1.5 text-content shadow-sm">
       <MusicPlatformIcon platformId={platformId} className="h-4 w-4" />
       {platformById.get(platformId)?.name}
     </span>
@@ -403,22 +403,22 @@ function PreviewTargets({ targetPlatformIds }: { targetPlatformIds: PlatformId[]
 
 function PreviewPlaylistList({ selectedPlaylists }: { selectedPlaylists: PlatformPlaylist[] }) {
   if (selectedPlaylists.length === 0) {
-    return <div className="rounded-2xl bg-white/60 p-4 text-sm font-semibold text-slate-500">Pick at least one playlist to preview the sync.</div>;
+    return <div className="rounded-2xl bg-surface-translucent p-4 text-sm font-semibold text-content-muted">Pick at least one playlist to preview the sync.</div>;
   }
 
   return (
     <>
       {selectedPlaylists.slice(0, 4).map((playlist) => (
-        <div key={playlist.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/60 px-3 py-2">
+        <div key={playlist.id} className="flex items-center justify-between gap-3 rounded-2xl bg-surface-translucent px-3 py-2">
           <span className="min-w-0">
-            <span className="block truncate text-sm font-black text-slate-800">{playlist.title}</span>
-            <span className="block text-xs font-semibold text-slate-500">{playlist.itemCount.toLocaleString()} songs</span>
+            <span className="block truncate text-sm font-black text-content">{playlist.title}</span>
+            <span className="block text-xs font-semibold text-content-muted">{playlist.itemCount.toLocaleString()} songs</span>
           </span>
-          <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">Add</span>
+          <span className="rounded-full bg-accent-soft px-3 py-1 text-xs font-black text-accent-strong">Add</span>
         </div>
       ))}
       {selectedPlaylists.length > 4 ? (
-        <p className="text-center text-xs font-black text-violet-600">+ {selectedPlaylists.length - 4} more playlists</p>
+        <p className="text-center text-xs font-black text-accent">+ {selectedPlaylists.length - 4} more playlists</p>
       ) : null}
     </>
   );
@@ -443,24 +443,24 @@ function SyncPreview({
     <GlassCard className="p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-black text-slate-950">3. Sync preview</h2>
-          <p className="mt-1 text-sm font-semibold text-slate-500">Review what Cantaro will import now and which connected platforms can receive this playlist later.</p>
+          <h2 className="text-lg font-black text-content">3. Sync preview</h2>
+          <p className="mt-1 text-sm font-semibold text-content-muted">Review what Cantaro will import now and which connected platforms can receive this playlist later.</p>
         </div>
-        <MusicUiIcon name="cloudSync" className="h-5 w-5 text-violet-500" />
+        <MusicUiIcon name="cloudSync" className="h-5 w-5 text-accent" />
       </div>
 
-      <div className="mt-4 rounded-2xl bg-white/72 p-4">
+      <div className="mt-4 rounded-2xl bg-surface-translucent p-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface shadow-sm">
             <MusicPlatformIcon platformId={sourcePlatformId} className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-black text-slate-900">{platformById.get(sourcePlatformId)?.name} -&gt; Cantaro</p>
-            <p className="text-xs font-semibold text-slate-500">{selectedPlaylists.length.toLocaleString()} playlists · {totalSongs.toLocaleString()} songs selected</p>
+            <p className="text-sm font-black text-content">{platformById.get(sourcePlatformId)?.name} -&gt; Cantaro</p>
+            <p className="text-xs font-semibold text-content-muted">{selectedPlaylists.length.toLocaleString()} playlists · {totalSongs.toLocaleString()} songs selected</p>
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-black text-slate-500">
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-black text-content-muted">
           <span>Cantaro can map to</span>
           <PreviewTargets targetPlatformIds={targetPlatformIds} />
         </div>
@@ -680,12 +680,12 @@ function SyncSetupHeader({
   return (
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <Link to="/music/platforms" className="inline-flex items-center gap-2 text-sm font-black text-violet-700 transition hover:text-violet-500">
+        <Link to="/music/platforms" className="inline-flex items-center gap-2 text-sm font-black text-accent-strong transition hover:text-accent">
           <MusicUiIcon name="arrowRight" className="h-5 w-5 rotate-180" />
           Back to sync overview
         </Link>
-        <h1 className="mt-3 text-4xl font-black text-slate-950">Create playlist sync</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 font-semibold text-slate-500">
+        <h1 className="mt-3 text-4xl font-black text-content">Create playlist sync</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 font-semibold text-content-muted">
           Pick a source platform and the playlists Cantaro should import into the canonical archive. Other connected platforms become available as mapped destinations after Cantaro knows the songs.
         </p>
       </div>
@@ -694,7 +694,7 @@ function SyncSetupHeader({
           type="button"
           disabled={!canSync}
           onClick={onSync}
-          className="inline-flex h-12 items-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+          className="inline-flex h-12 items-center gap-2 rounded-2xl bg-action px-5 text-sm font-black text-action-content transition hover:bg-action-hover disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-content-muted"
         >
           <MusicUiIcon name={isSyncing ? 'loader' : 'refresh'} className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
           {isSyncing ? 'Syncing' : 'Sync playlists'}
@@ -749,8 +749,8 @@ function ConnectFirstNotice({
     <GlassCard className="p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-black text-slate-950">Connect a platform first</h2>
-          <p className="mt-1 text-sm font-semibold text-slate-500">Playlist sync needs at least one connected source service.</p>
+          <h2 className="text-lg font-black text-content">Connect a platform first</h2>
+          <p className="mt-1 text-sm font-semibold text-content-muted">Playlist sync needs at least one connected source service.</p>
         </div>
         <StatusBadge status="warning" />
       </div>

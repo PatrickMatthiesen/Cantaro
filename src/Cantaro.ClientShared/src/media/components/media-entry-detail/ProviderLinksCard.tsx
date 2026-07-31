@@ -16,7 +16,7 @@ function ProviderAvailabilityLinkChip({
     url?: string | null;
     title?: string;
 }){
-    const chipClasses = 'inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100';
+    const chipClasses = 'inline-flex items-center rounded-full bg-info-surface px-2.5 py-1 text-xs font-medium text-info-content hover:bg-surface-hover';
 
     if (url) {
         return (
@@ -37,12 +37,12 @@ function ProviderAvailabilityLinkChip({
 
 function ProviderAvailabilityMessage({ availability }: { availability?: ProviderAvailabilityState }) {
     if (availability?.status === 'loading') {
-        return <p className="mt-1 text-xs text-gray-400">Loading availability…</p>;
+        return <p className="mt-1 text-xs text-content-subtle">Loading availability…</p>;
     }
 
     if (availability?.status === 'error') {
         return (
-            <p className="mt-1 text-xs text-gray-400" title={availability.error}>
+            <p className="mt-1 text-xs text-content-subtle" title={availability.error}>
                 Availability unavailable
             </p>
         );
@@ -92,8 +92,8 @@ function ProviderLinkIdentity({ link }: { link: MediaProviderLinkSummaryDto }) {
         <>
             {catalog ? <MediaProviderIcon providerId={catalog.iconId} className="h-5 w-5 shrink-0" aria-hidden /> : null}
             <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-800">{catalog?.name ?? link.provider}</p>
-                <p className="text-xs text-gray-500">
+                <p className="text-sm font-medium text-content">{catalog?.name ?? link.provider}</p>
+                <p className="text-xs text-content-muted">
                     ID: {link.externalId}
                     {link.linkSource !== 'manual' ? null : ' · manual'}
                 </p>
@@ -118,14 +118,14 @@ function ProviderLinkActions({
                     href={externalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-indigo-500 hover:underline"
+                    className="text-xs text-accent hover:underline"
                 >
                     Open ↗
                 </a>
             ) : null}
             <button
                 type="button"
-                className="rounded-lg px-3 py-1.5 text-xs text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
+                className="rounded-lg px-3 py-1.5 text-xs text-danger-content transition hover:bg-danger-surface disabled:opacity-50"
                 disabled={isUnlinking}
                 onClick={onUnlink}
             >
@@ -147,7 +147,7 @@ function ProviderLinkRow({
     onUnlink: (providerId: string) => void;
 }) {
     return (
-        <li className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-4 py-3">
+        <li className="flex items-center justify-between gap-3 rounded-xl bg-surface-translucent px-4 py-3">
             <div className="flex min-w-0 items-center gap-3">
                 <div className="flex min-w-0 items-center gap-3">
                     <ProviderLinkIdentity link={link} />
@@ -179,14 +179,14 @@ export function ProviderLinksCard({
     return (
         <GlassCard className="p-6">
             <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold tracking-wide text-gray-500 uppercase">Provider links</h2>
+                <h2 className="text-sm font-semibold tracking-wide text-content-muted uppercase">Provider links</h2>
                 <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onLinkProvider}>
                     + Link provider
                 </GradientButton>
             </div>
 
             {providerLinks.length === 0 ? (
-                <p className="mt-4 text-sm text-gray-400 italic">
+                <p className="mt-4 text-sm text-content-subtle italic">
                     No provider links. Use "Link provider" to connect this entry to an external service.
                 </p>
             ) : (
@@ -203,7 +203,7 @@ export function ProviderLinksCard({
                 </ul>
             )}
 
-            {lastSyncedAt ? <p className="mt-3 text-xs text-gray-400">Last synced {new Date(lastSyncedAt).toLocaleString()}</p> : null}
+            {lastSyncedAt ? <p className="mt-3 text-xs text-content-subtle">Last synced {new Date(lastSyncedAt).toLocaleString()}</p> : null}
         </GlassCard>
     );
 }

@@ -6,9 +6,9 @@ export interface SnackbarNotification {
 export type ShowSnackbar = (notification: SnackbarNotification) => void;
 
 const variantClass: Record<SnackbarNotification['variant'], string> = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-900',
-  error: 'border-rose-200 bg-rose-50 text-rose-900',
-  info: 'border-sky-200 bg-sky-50 text-sky-900',
+  success: 'border-success-border bg-success-surface text-success-content',
+  error: 'border-danger-border bg-danger-surface text-danger-content',
+  info: 'border-info-border bg-info-surface text-info-content',
 };
 
 export function Snackbar({ notification }: { notification: SnackbarNotification | null }) {

@@ -44,7 +44,7 @@ function YouTubePlaylistThumbnail({ thumbnailUrl, title }: { thumbnailUrl?: stri
     }
 
     return (
-        <div className="flex h-44 w-full items-center justify-center bg-white text-gray-500" aria-hidden>
+        <div className="flex h-44 w-full items-center justify-center bg-surface text-content-muted" aria-hidden>
             <YouTubeIcon />
         </div>
     );
@@ -54,12 +54,12 @@ function YouTubePlaylistCard({ playlist, onSelect }: { playlist: PlatformPlaylis
     return (
         <button
             onClick={() => onSelect(playlist)}
-            className="group overflow-hidden rounded-3xl border border-white/80 bg-white/70 text-left shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[20px] transition-transform hover:scale-[1.01]"
+            className="group overflow-hidden rounded-3xl border border-border-subtle bg-surface-translucent text-left shadow-[0_8px_32px_rgba(0,0,0,0.06)] backdrop-blur-[20px] transition-transform hover:scale-[1.01]"
         >
             <YouTubePlaylistThumbnail thumbnailUrl={playlist.thumbnailUrl} title={playlist.title} />
             <div className="p-4">
-                <h3 className="line-clamp-1 text-lg font-semibold text-gray-900">{playlist.title}</h3>
-                {playlist.description ? <p className="mt-2 line-clamp-2 text-sm text-gray-600">{playlist.description}</p> : null}
+                <h3 className="line-clamp-1 text-lg font-semibold text-content">{playlist.title}</h3>
+                {playlist.description ? <p className="mt-2 line-clamp-2 text-sm text-content-muted">{playlist.description}</p> : null}
             </div>
         </button>
     );
@@ -67,22 +67,22 @@ function YouTubePlaylistCard({ playlist, onSelect }: { playlist: PlatformPlaylis
 
 function YouTubeSongList({ playlistItems }: { playlistItems: PlatformSong[] }) {
     if (playlistItems.length === 0) {
-        return <p className="p-6 text-sm text-gray-600">This playlist has no items yet.</p>;
+        return <p className="p-6 text-sm text-content-muted">This playlist has no items yet.</p>;
     }
 
     return (
         <ol className="space-y-2">
             {playlistItems.map((item, index) => (
-                <li key={item.id} className="flex items-center gap-3 rounded-xl bg-white/70 p-3">
-                    <span className="w-6 text-xs font-semibold text-gray-500">{index + 1}</span>
+                <li key={item.id} className="flex items-center gap-3 rounded-xl bg-surface-translucent p-3">
+                    <span className="w-6 text-xs font-semibold text-content-muted">{index + 1}</span>
                     {item.thumbnailUrl ? (
                         <img src={item.thumbnailUrl} alt="" className="h-14 w-24 rounded-lg object-cover" />
                     ) : (
-                        <div className="h-14 w-24 rounded-lg bg-white" aria-hidden />
+                        <div className="h-14 w-24 rounded-lg bg-surface" aria-hidden />
                     )}
                     <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-sm font-medium text-gray-800">{item.title}</p>
-                        {item.artistName ? <p className="text-xs text-gray-500">{item.artistName}</p> : null}
+                        <p className="line-clamp-2 text-sm font-medium text-content">{item.title}</p>
+                        {item.artistName ? <p className="text-xs text-content-muted">{item.artistName}</p> : null}
                     </div>
                 </li>
             ))}
@@ -93,11 +93,11 @@ function YouTubeSongList({ playlistItems }: { playlistItems: PlatformSong[] }) {
 export function YouTubeDisconnectedState({ onConnect }: YouTubeDisconnectedStateProps) {
     return (
         <GlassCard className="p-8">
-            <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 uppercase">
+            <div className="inline-flex items-center gap-2 rounded-full bg-danger-surface px-3 py-1 text-xs font-semibold text-danger-content uppercase">
                 <YouTubeIcon /> Not connected
             </div>
             <h2 className="mt-4 text-2xl font-semibold">Connect YouTube to begin</h2>
-            <p className="mt-2 text-sm text-gray-600">
+            <p className="mt-2 text-sm text-content-muted">
                 Once connected, you can browse playlists and sync them through Cantaro.
             </p>
             <div className="mt-5">
@@ -116,7 +116,7 @@ export function YouTubePlaylistDetailView({ playlist, playlistItems, isLoadingIt
                 <button
                     type="button"
                     onClick={onBack}
-                    className="mb-4 text-sm font-semibold text-indigo-700 hover:text-indigo-500"
+                    className="mb-4 text-sm font-semibold text-accent-strong hover:text-accent"
                 >
                     ← All playlists
                 </button>
@@ -127,16 +127,16 @@ export function YouTubePlaylistDetailView({ playlist, playlistItems, isLoadingIt
                         className="h-52 w-full rounded-2xl object-cover"
                     />
                 ) : (
-                    <div className="flex h-52 w-full items-center justify-center rounded-2xl bg-white/70 text-gray-500">
+                    <div className="flex h-52 w-full items-center justify-center rounded-2xl bg-surface-translucent text-content-muted">
                         <YouTubeIcon ariaLabel="Playlist thumbnail not available" />
                     </div>
                 )}
                 <h2 className="mt-4 text-xl font-semibold">{playlist.title}</h2>
-                {playlist.description ? <p className="mt-2 text-sm text-gray-600">{playlist.description}</p> : null}
+                {playlist.description ? <p className="mt-2 text-sm text-content-muted">{playlist.description}</p> : null}
             </GlassCard>
 
             <GlassCard className="p-4">
-                {isLoadingItems ? <p className="p-6 text-sm text-gray-600">Loading playlist items…</p> : <YouTubeSongList playlistItems={playlistItems} />}
+                {isLoadingItems ? <p className="p-6 text-sm text-content-muted">Loading playlist items…</p> : <YouTubeSongList playlistItems={playlistItems} />}
             </GlassCard>
         </div>
     );
@@ -148,9 +148,9 @@ export function YouTubePlaylistBrowser({ status, playlists, onRefresh, onDisconn
             <GlassCard className="p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">Account</p>
-                        <p className="mt-1 text-sm text-gray-600">
-                            Connected as <span className="font-semibold text-gray-900">{status.displayName ?? 'YouTube account'}</span>
+                        <p className="text-xs font-medium tracking-wide text-content-muted uppercase">Account</p>
+                        <p className="mt-1 text-sm text-content-muted">
+                            Connected as <span className="font-semibold text-content">{status.displayName ?? 'YouTube account'}</span>
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -166,7 +166,7 @@ export function YouTubePlaylistBrowser({ status, playlists, onRefresh, onDisconn
 
             {playlists.length === 0 ? (
                 <GlassCard className="p-6">
-                    <p className="text-sm text-gray-600">No playlists found in this account.</p>
+                    <p className="text-sm text-content-muted">No playlists found in this account.</p>
                 </GlassCard>
             ) : (
                 <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

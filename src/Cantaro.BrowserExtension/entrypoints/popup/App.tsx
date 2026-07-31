@@ -343,9 +343,9 @@ function App() {
   );
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f7f5ff] text-slate-900">
+    <div className="h-screen overflow-hidden bg-canvas text-content">
       <div className="flex h-full flex-col p-3">
-        <header className="flex min-h-12 items-center gap-2 rounded-xl border border-[#e7e2f7] bg-white p-1.5">
+        <header className="flex min-h-12 items-center gap-2 rounded-xl border border-border-subtle bg-surface p-1.5">
           <nav className="flex rounded-xl bg-slate-950 p-0.5" aria-label="Popup section">
             {(['music', 'media'] as const).map((tab) => {
               const active = tab === activeTab;
@@ -354,8 +354,8 @@ function App() {
                   key={tab}
                   type="button"
                   onClick={() => selectTab(tab)}
-                  className={`min-h-9 rounded-[0.625rem] px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${active
-                    ? 'bg-white text-slate-950'
+                  className={`min-h-9 rounded-[0.625rem] px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${active
+                    ? 'bg-surface text-content'
                     : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
                   aria-current={active ? 'page' : undefined}
                 >
@@ -365,16 +365,16 @@ function App() {
             })}
           </nav>
 
-          <span className="min-w-0 flex-1 truncate pl-1 text-sm font-semibold text-slate-700">
+          <span className="min-w-0 flex-1 truncate pl-1 text-sm font-semibold text-content">
             Cantaro
           </span>
 
           {mediaConfigured ? (
             <button
               type="button"
-              className={`inline-flex min-h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${trackingControlsOpen
-                ? 'bg-violet-100 text-violet-800'
-                : 'text-slate-700 hover:bg-slate-100'}`}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${trackingControlsOpen
+                ? 'bg-accent-soft text-accent-strong'
+                : 'text-content-muted hover:bg-surface-hover'}`}
               aria-expanded={trackingControlsOpen}
               aria-controls="episode-tracking-controls"
               onClick={() => setTrackingControlsOpen((current) => !current)}
@@ -383,14 +383,14 @@ function App() {
               {trackingPaused ? 'Paused' : 'Tracking'}
             </button>
           ) : (
-            <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+            <span className="rounded-lg bg-warning-surface px-2 py-1 text-xs font-semibold text-warning-content">
               Setup needed
             </span>
           )}
 
           <button
             type="button"
-            className="inline-flex size-9 items-center justify-center rounded-xl text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+            className="inline-flex size-9 items-center justify-center rounded-xl text-content-muted transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             onClick={() => setSettingsOpen(true)}
             aria-label="Open extension settings"
             title="Settings"
@@ -424,7 +424,7 @@ function App() {
           </div>
         ) : null}
 
-        <main className="relative mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-xl bg-white/55" aria-label={`${activeTab === 'music' ? 'Music' : 'Media'} content`}>
+        <main className="relative mt-2 min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-xl bg-surface-translucent" aria-label={`${activeTab === 'music' ? 'Music' : 'Media'} content`}>
           {settingsOpen ? (
             <SettingsPanel
               apiBaseUrl={draftApiBaseUrl} loading={loading} isSigningIn={isSigningIn} isDisconnecting={isDisconnecting}
@@ -469,8 +469,8 @@ function App() {
         <div className="pointer-events-none absolute right-4 bottom-4 z-50">
           <div
             className={`rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${status.type === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : 'border-rose-200 bg-rose-50 text-rose-700'}`}
+              ? 'border-success-border bg-success-surface text-success-content'
+              : 'border-danger-border bg-danger-surface text-danger-content'}`}
             role="status"
             aria-live="polite"
           >
@@ -500,18 +500,18 @@ function EpisodeTrackingTimeoutPanel({
     <GlassCard className="p-2.5">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-800">Episode tracking</p>
-          <p className="truncate text-xs text-slate-600">
+          <p className="text-sm font-semibold text-content">Episode tracking</p>
+          <p className="truncate text-xs text-content-muted">
             {active ? `Paused until ${disabledUntil.toLocaleString()}` : 'Active · pause observations for'}
           </p>
         </div>
-        <button className="min-h-9 rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" type="button" onClick={() => onPause('30m')}>
+        <button className="min-h-9 rounded-lg bg-surface-subtle px-2.5 text-xs font-semibold text-content transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus" type="button" onClick={() => onPause('30m')}>
           30 min
         </button>
-        <button className="min-h-9 rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" type="button" onClick={() => onPause('2h')}>
+        <button className="min-h-9 rounded-lg bg-surface-subtle px-2.5 text-xs font-semibold text-content transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus" type="button" onClick={() => onPause('2h')}>
           2 hours
         </button>
-        <button className="min-h-9 rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" type="button" onClick={() => onPause('tomorrow')}>
+        <button className="min-h-9 rounded-lg bg-surface-subtle px-2.5 text-xs font-semibold text-content transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus" type="button" onClick={() => onPause('tomorrow')}>
           Tomorrow
         </button>
         {active ? (

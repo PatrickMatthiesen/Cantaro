@@ -133,13 +133,13 @@ function YouTubePageHeader({
   const description = getYouTubeHeaderDescription({ accountName, isConnected, needsReconnect, playlistCount });
 
   return (
-    <section className="relative overflow-hidden rounded-3xl bg-[#ef4444] p-6 text-white shadow-[0_28px_90px_rgba(185,28,28,0.18)]">
+    <section className="relative overflow-hidden rounded-3xl bg-[#ef4444] p-6 text-content-inverse shadow-[0_28px_90px_rgba(185,28,28,0.18)]">
       <div className="absolute inset-0 bg-linear-to-r from-[#3b0b16]/92 via-[#dc2626]/78 to-[#f9a8d4]/35" />
       <div className="relative flex flex-wrap items-end justify-between gap-5">
         <div>
-          <p className="text-xs font-black tracking-[0.22em] text-white/75 uppercase">Music platform</p>
+          <p className="text-xs font-black tracking-[0.22em] text-content-inverse/75 uppercase">Music platform</p>
           <h1 className="mt-2 text-4xl leading-tight font-black sm:text-5xl">YouTube</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-white/82">{description}</p>
+          <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-content-inverse/82">{description}</p>
         </div>
         <YouTubeHeaderActions
           isConnected={isConnected}
@@ -193,15 +193,15 @@ function YouTubeHeaderActions({
   return (
     <div className="flex flex-wrap gap-2">
       {needsReconnect ? (
-        <button type="button" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-rose-50" onClick={onConnect}>
+        <button type="button" className="rounded-2xl bg-surface px-5 py-3 text-sm font-black text-content transition hover:bg-rose-50" onClick={onConnect}>
           Reconnect
         </button>
       ) : (
-        <button type="button" className="rounded-2xl bg-white/18 px-5 py-3 text-sm font-black backdrop-blur transition hover:bg-white/25" onClick={onRefresh}>
+        <button type="button" className="rounded-2xl bg-surface/18 px-5 py-3 text-sm font-black backdrop-blur transition hover:bg-surface/25" onClick={onRefresh}>
           Refresh
         </button>
       )}
-      <button type="button" className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800" onClick={onDisconnect}>
+      <button type="button" className="rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover" onClick={onDisconnect}>
         Disconnect
       </button>
     </div>
@@ -212,13 +212,13 @@ function YouTubeReconnectPanel({ accountName, onConnect }: { accountName?: strin
   return (
     <section className="rounded-3xl border border-amber-200 bg-amber-50/80 p-6 text-amber-950 shadow-[0_20px_60px_rgba(146,64,14,0.08)]">
       <p className="text-xs font-black tracking-[0.18em] uppercase">Connection expired</p>
-      <h2 className="mt-2 text-2xl font-black text-slate-950">Reconnect YouTube</h2>
+      <h2 className="mt-2 text-2xl font-black text-content">Reconnect YouTube</h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 font-semibold text-amber-900">
         Google no longer accepts the saved token for {accountName ?? 'this YouTube account'}. Reconnect once and Cantaro will store a fresh permission grant.
       </p>
       <button
         type="button"
-        className="mt-5 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800"
+        className="mt-5 rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover"
         onClick={onConnect}
       >
         Reconnect YouTube
@@ -229,15 +229,15 @@ function YouTubeReconnectPanel({ accountName, onConnect }: { accountName?: strin
 
 function YouTubeDisconnectedPanel({ onConnect }: { onConnect: () => void }) {
   return (
-    <section className="rounded-3xl bg-white/70 p-6 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
+    <section className="rounded-3xl bg-surface-translucent p-6 shadow-[0_24px_80px_rgba(88,74,150,0.08)] backdrop-blur-xl">
       <p className="text-xs font-black tracking-[0.22em] text-rose-600 uppercase">Not connected</p>
-      <h2 className="mt-2 text-2xl font-black text-slate-950">Connect YouTube to begin</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 font-medium text-slate-500">
+      <h2 className="mt-2 text-2xl font-black text-content">Connect YouTube to begin</h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 font-medium text-content-muted">
         Once connected, your YouTube playlists show up here as part of the same music browsing surface as the rest of your library.
       </p>
       <button
         type="button"
-        className="mt-5 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800"
+        className="mt-5 rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover"
         onClick={onConnect}
       >
         Connect YouTube
@@ -251,7 +251,7 @@ function YouTubePlaylistCard({ playlist, onSelect }: { playlist: PlatformPlaylis
     <button
       type="button"
       onClick={() => onSelect(playlist)}
-      className="group overflow-hidden rounded-3xl bg-white/70 text-left shadow-[0_24px_80px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-white"
+      className="group overflow-hidden rounded-3xl bg-surface-translucent text-left shadow-[0_24px_80px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-surface"
     >
       {playlist.thumbnailUrl ? (
         <img src={playlist.thumbnailUrl} alt="" className="h-44 w-full object-cover transition group-hover:scale-105" />
@@ -259,8 +259,8 @@ function YouTubePlaylistCard({ playlist, onSelect }: { playlist: PlatformPlaylis
         <div className="flex h-44 w-full items-center justify-center bg-rose-50 text-sm font-black text-rose-600">YouTube</div>
       )}
       <div className="p-4">
-        <h3 className="line-clamp-2 text-base font-black text-slate-950">{playlist.title}</h3>
-        {playlist.description ? <p className="mt-2 line-clamp-2 text-sm font-medium text-slate-500">{playlist.description}</p> : null}
+        <h3 className="line-clamp-2 text-base font-black text-content">{playlist.title}</h3>
+        {playlist.description ? <p className="mt-2 line-clamp-2 text-sm font-medium text-content-muted">{playlist.description}</p> : null}
       </div>
     </button>
   );
@@ -275,9 +275,9 @@ function YouTubePlaylistGrid({
 }) {
   if (playlists.length === 0) {
     return (
-      <section className="rounded-3xl border border-dashed border-[#ded8f2] bg-white/54 p-6">
-        <p className="font-black text-slate-950">No playlists found</p>
-        <p className="mt-1 text-sm font-medium text-slate-500">This account has no YouTube playlists available to Cantaro.</p>
+      <section className="rounded-3xl border border-dashed border-border-subtle bg-surface-translucent p-6">
+        <p className="font-black text-content">No playlists found</p>
+        <p className="mt-1 text-sm font-medium text-content-muted">This account has no YouTube playlists available to Cantaro.</p>
       </section>
     );
   }
@@ -375,10 +375,10 @@ function YouTubePlaylistMissingState({
         Cantaro could not find playlist <span className="font-black">{playlistId}</span> in the connected account.
       </p>
       <div className="mt-5 flex flex-wrap gap-2">
-        <button type="button" className="rounded-2xl bg-rose-900 px-5 py-3 text-sm font-black text-white transition hover:bg-rose-800" onClick={onBack}>
+        <button type="button" className="rounded-2xl bg-rose-900 px-5 py-3 text-sm font-black text-content-inverse transition hover:bg-rose-800" onClick={onBack}>
           All playlists
         </button>
-        <button type="button" className="rounded-2xl bg-white/80 px-5 py-3 text-sm font-black text-rose-800 transition hover:bg-white" onClick={onRefresh}>
+        <button type="button" className="rounded-2xl bg-surface-translucent px-5 py-3 text-sm font-black text-rose-800 transition hover:bg-surface" onClick={onRefresh}>
           Refresh playlists
         </button>
       </div>
@@ -398,7 +398,7 @@ function YouTubeError({ error }: { error: string | null }) {
 
 function YouTubeLoadingState() {
   return (
-    <section className="rounded-3xl bg-white/70 p-6 text-sm font-semibold text-slate-500 shadow-[0_24px_80px_rgba(88,74,150,0.08)]">
+    <section className="rounded-3xl bg-surface-translucent p-6 text-sm font-semibold text-content-muted shadow-[0_24px_80px_rgba(88,74,150,0.08)]">
       Loading YouTube playlists...
     </section>
   );

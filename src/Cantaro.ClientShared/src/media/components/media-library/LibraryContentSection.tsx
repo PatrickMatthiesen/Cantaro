@@ -32,9 +32,9 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
             {Array.from({ length: skeletonCount }).map((_, index) => (
                 <div
                     key={index}
-                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-slate-200/55 shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}
+                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-surface-subtle shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}
                 >
-                    <div className="h-full w-full bg-linear-to-br from-white/70 via-slate-200/70 to-slate-300/60" />
+                    <div className="h-full w-full bg-surface-hover" />
                 </div>
             ))}
         </div>
@@ -44,7 +44,7 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
 function LibraryErrorState({ error, onRetry }: { error: string; onRetry: () => Promise<void> }) {
     return (
         <GlassCard className="p-6">
-            <p className="text-sm text-rose-700">{error}</p>
+            <p className="text-sm text-danger-content">{error}</p>
             <div className="mt-3">
                 <GradientButton tone="soft" onClick={() => void onRetry()}>Retry</GradientButton>
             </div>
@@ -55,8 +55,8 @@ function LibraryErrorState({ error, onRetry }: { error: string; onRetry: () => P
 function LibraryEmptyState({ hasActiveFilters, onNavigateProviders }: { hasActiveFilters: boolean; onNavigateProviders?: () => void }) {
     return (
         <GlassCard className="p-8 text-center">
-            <p className="text-gray-500">No library entries found.</p>
-            <p className="mt-1 text-sm text-gray-400">
+            <p className="text-content-muted">No library entries found.</p>
+            <p className="mt-1 text-sm text-content-subtle">
                 {hasActiveFilters
                     ? 'Try removing some filters.'
                     : 'Import your library from a provider to get started.'}
@@ -82,7 +82,7 @@ function LibraryPagination({ filters, totalPages, onPreviousPage, onNextPage }: 
             <GradientButton tone="soft" disabled={filters.page === 1} onClick={onPreviousPage}>
                 ← Previous
             </GradientButton>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-content-muted">
                 Page {filters.page ?? 1} of {totalPages}
             </span>
             <GradientButton tone="soft" disabled={(filters.page ?? 1) >= totalPages} onClick={onNextPage}>

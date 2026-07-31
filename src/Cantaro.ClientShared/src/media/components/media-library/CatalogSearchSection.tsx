@@ -22,7 +22,7 @@ function CatalogPoster({ posterUrl, title }: { posterUrl?: string; title: string
 
     if (!posterUrl || failed) {
         return (
-            <div className="flex h-full w-full items-center justify-center bg-gray-100 text-xs font-semibold text-gray-400">
+            <div className="flex h-full w-full items-center justify-center bg-surface-subtle text-xs font-semibold text-content-subtle">
                 No art
             </div>
         );
@@ -50,11 +50,11 @@ function catalogResultMetadata(result: MediaProviderSearchResultDto): string[] {
 function CatalogResultBadges({ mediaKind, isInLibrary }: { mediaKind: string; isInLibrary: boolean }) {
     return (
         <div className="absolute top-3 left-3 flex flex-wrap gap-2">
-            <span className="rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-gray-800">
+            <span className="rounded-full bg-surface-translucent px-2.5 py-1 text-xs font-semibold text-content">
                 {mediaKindLabel(mediaKind)}
             </span>
             {isInLibrary ? (
-                <span className="rounded-full bg-emerald-100/95 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                <span className="rounded-full bg-success-surface px-2.5 py-1 text-xs font-semibold text-success-content">
                     In library
                 </span>
             ) : null}
@@ -84,7 +84,7 @@ function CatalogLibraryAction({
     if (!libraryEntryId) return null;
 
     return (
-        <div className="border-t border-white/70 bg-white/85 p-3">
+        <div className="border-t border-border-subtle bg-surface-translucent p-3">
             <GradientButton
                 tone="soft"
                 className="w-full justify-center"
@@ -142,7 +142,7 @@ export function CatalogSearchSection({
     if (error) {
         return (
             <GlassCard className="p-6">
-                <p className="text-sm text-rose-700">{error}</p>
+                <p className="text-sm text-danger-content">{error}</p>
                 <div className="mt-3">
                     <GradientButton tone="soft" onClick={onRetry}>Retry</GradientButton>
                 </div>
@@ -154,7 +154,7 @@ export function CatalogSearchSection({
         return (
             <div className={CATALOG_RESULTS_GRID_CLASS_NAME}>
                 {Array.from({ length: 10 }).map((_, index) => (
-                    <GlassCard key={index} className="aspect-[0.72] animate-pulse bg-white/50" />
+                    <GlassCard key={index} className="aspect-[0.72] animate-pulse bg-surface-translucent" />
                 ))}
             </div>
         );
@@ -163,7 +163,7 @@ export function CatalogSearchSection({
     if (!hasSearched) {
         return (
             <GlassCard className="p-8 text-center">
-                <p className="font-medium text-gray-600">Search {providerName} for something new to watch or read.</p>
+                <p className="font-medium text-content-muted">Search {providerName} for something new to watch or read.</p>
             </GlassCard>
         );
     }
@@ -171,7 +171,7 @@ export function CatalogSearchSection({
     if (results.length === 0) {
         return (
             <GlassCard className="p-8 text-center">
-                <p className="text-gray-500">No {providerName} results found for "{query}".</p>
+                <p className="text-content-muted">No {providerName} results found for "{query}".</p>
             </GlassCard>
         );
     }

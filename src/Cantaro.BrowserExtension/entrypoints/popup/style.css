@@ -1,13 +1,9 @@
 @import "tailwindcss";
+@import "@cantaro/client-shared/theme.css";
 
 @source "./**/*.{ts,tsx,js,jsx}";
 @source "../../lib/**/*.{ts,tsx,js,jsx}";
 @source "../../../Cantaro.ClientShared/src/**/*.{ts,tsx,js,jsx}";
-
-@theme {
-  --font-display:
-    "Space Grotesk", "Segoe UI Variable Display", "Segoe UI", sans-serif;
-}
 
 :root {
   font-family: var(--font-display);
@@ -18,12 +14,12 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
-  background-color: #f7f5ff;
-  color: #0f172a;
-  --cantaro-canvas: #f7f5ff;
-  --cantaro-panel: #ffffff;
-  --cantaro-border: #e7e2f7;
-  --cantaro-muted: #64748b;
+  background-color: var(--color-canvas);
+  color: var(--color-content);
+  --cantaro-canvas: var(--color-canvas);
+  --cantaro-panel: var(--color-surface);
+  --cantaro-border: var(--color-border-subtle);
+  --cantaro-muted: var(--color-content-muted);
 }
 
 * {
@@ -47,63 +43,6 @@ body {
   background: var(--cantaro-canvas);
 }
 
-:root[data-theme="dark"] {
-  --cantaro-canvas: #090d18;
-  --cantaro-panel: #161d2e;
-  --cantaro-border: rgba(148, 163, 184, 0.16);
-  --cantaro-muted: #9aa8bf;
-  color: #f1f5f9;
-}
-
-:root[data-theme="dark"] body,
-:root[data-theme="dark"] #root > div {
-  background: var(--cantaro-canvas) !important;
-}
-
-:root[data-theme="dark"] header,
-:root[data-theme="dark"] main,
-:root[data-theme="dark"] main > div,
-:root[data-theme="dark"] main section,
-:root[data-theme="dark"] main article {
-  border-color: var(--cantaro-border) !important;
-  background-color: var(--cantaro-panel) !important;
-  color: #f1f5f9;
-}
-
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] select {
-  border-color: var(--cantaro-border) !important;
-  background: #0f1524 !important;
-  color: #f1f5f9 !important;
-}
-
-:root[data-theme="dark"] main .text-slate-950,
-:root[data-theme="dark"] main .text-slate-900,
-:root[data-theme="dark"] main .text-slate-800,
-:root[data-theme="dark"] main .text-gray-900,
-:root[data-theme="dark"] main .text-gray-800 {
-  color: #f1f5f9 !important;
-}
-
-:root[data-theme="dark"] main .text-slate-700,
-:root[data-theme="dark"] main .text-slate-600,
-:root[data-theme="dark"] main .text-slate-500,
-:root[data-theme="dark"] main .text-gray-700,
-:root[data-theme="dark"] main .text-gray-500 {
-  color: #a8b7cf !important;
-}
-
-:root[data-theme="dark"] main .bg-white,
-:root[data-theme="dark"] main .bg-white\/80,
-:root[data-theme="dark"] main .bg-white\/65 {
-  background-color: #161d2e !important;
-}
-
-:root[data-theme="dark"] main .hover\:bg-violet-50:hover,
-:root[data-theme="dark"] main .hover\:bg-white:hover {
-  background-color: #202a40 !important;
-}
-
 button,
 input,
 select,
@@ -112,12 +51,8 @@ textarea {
 }
 
 .cantaro-lyrics-loading-line {
-  background: #e2e8f0;
+  background: var(--color-border-strong);
   animation: cantaro-lyrics-pulse 1.4s ease-in-out infinite;
-}
-
-:root[data-theme="dark"] .cantaro-lyrics-loading-line {
-  background: #263249;
 }
 
 @keyframes cantaro-lyrics-pulse {

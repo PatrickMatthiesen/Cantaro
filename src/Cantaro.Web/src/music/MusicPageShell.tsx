@@ -22,10 +22,10 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-xs font-black tracking-[0.22em] text-slate-500 uppercase">Playlists</h2>
+        <h2 className="text-xs font-black tracking-[0.22em] text-content-muted uppercase">Playlists</h2>
         <Link
           to="/music/platforms/sync"
-          className="flex h-7 w-7 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white hover:text-violet-600"
+          className="flex h-7 w-7 items-center justify-center rounded-xl text-content-muted transition hover:bg-surface hover:text-accent"
           aria-label="Create playlist sync"
         >
           <MusicUiIcon name="refresh" className="h-3.5 w-3.5" />
@@ -37,7 +37,7 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
             key={playlist.id}
             to="/music/playlists/$playlistId"
             params={{ playlistId: playlist.id }}
-            className="group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
+            className="group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold text-content transition hover:bg-surface"
           >
             <img src={playlistArtwork(playlist, index)} alt="" className="h-7 w-7 rounded-lg object-cover" />
             <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
@@ -45,7 +45,7 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
           </Link>
         ))}
         {playlists.length === 0 ? (
-          <p className="rounded-2xl bg-white/70 px-3 py-3 text-sm font-medium text-slate-500">No playlists yet</p>
+          <p className="rounded-2xl bg-surface-translucent px-3 py-3 text-sm font-medium text-content-muted">No playlists yet</p>
         ) : null}
       </div>
     </section>
@@ -54,12 +54,12 @@ function SidebarPlaylists({ playlists }: { playlists: MusicLibraryPlaylist[] }) 
 
 function SidebarMixtapeCard() {
   return (
-    <div className="rounded-[1.5rem] border border-white/80 bg-white/68 p-5 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
+    <div className="rounded-[1.5rem] border border-border-subtle bg-surface-translucent p-5 shadow-[0_12px_34px_rgba(88,74,150,0.06)] backdrop-blur">
       <p className="text-lg font-black">Archive overview</p>
-      <p className="mt-2 text-sm leading-6 font-semibold text-slate-600">Inspect playlists before deciding what Cantaro should keep aligned.</p>
+      <p className="mt-2 text-sm leading-6 font-semibold text-content-muted">Inspect playlists before deciding what Cantaro should keep aligned.</p>
       <Link
         to="/music/playlists"
-        className="mt-5 flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-violet-700"
+        className="mt-5 flex w-full items-center justify-center rounded-2xl bg-action px-4 py-3 text-center text-sm font-black text-action-content transition hover:bg-action-hover"
       >
         Browse playlists
       </Link>
@@ -149,19 +149,19 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
   if (!isVisible) return null;
 
   return (
-    <div className="fixed right-4 bottom-4 left-4 z-30 rounded-[1.5rem] border border-white/80 bg-white/82 px-5 py-4 shadow-[0_18px_54px_rgba(55,45,120,0.14)] backdrop-blur lg:left-[292px]">
+    <div className="fixed right-4 bottom-4 left-4 z-30 rounded-[1.5rem] border border-border-subtle bg-surface-translucent px-5 py-4 shadow-[0_18px_54px_rgba(55,45,120,0.14)] backdrop-blur lg:left-[292px]">
       <div className="grid items-center gap-4 md:grid-cols-[260px_1fr_220px]">
         <div className="flex min-w-0 items-center gap-3">
           <img src={songArtwork(song)} alt="" className="h-14 w-14 rounded-2xl object-cover" />
           <div className="min-w-0">
-            <p className="truncate font-black text-slate-950">{song.title}</p>
-            <p className="truncate text-sm font-semibold text-slate-500">{songArtist(song)}</p>
+            <p className="truncate font-black text-content">{song.title}</p>
+            <p className="truncate text-sm font-semibold text-content-muted">{songArtist(song)}</p>
           </div>
         </div>
         <div className="hidden items-center justify-center gap-5 md:flex">
           <button
             type="button"
-            className={`flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)] transition ${
+            className={`flex h-12 w-12 items-center justify-center rounded-full bg-action text-action-content shadow-[0_14px_30px_rgba(15,23,42,0.18)] transition ${
               isPaused ? 'hover:bg-emerald-600' : 'hover:bg-amber-500'
             }`}
             aria-label={isPaused ? 'Play' : 'Pause'}
@@ -171,23 +171,23 @@ function BottomPlayer({ song, onStop }: { song: MusicLibrarySong; onStop?: () =>
           </button>
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-red-50 hover:text-red-600"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-content-muted transition hover:bg-red-50 hover:text-red-600"
             aria-label="Stop and close player"
             onClick={closePlayer}
           >
             <StopIcon />
           </button>
           <div className="flex w-full max-w-sm items-center gap-3">
-            <span className="font-mono text-xs text-slate-500">1:24</span>
-            <div className="h-1.5 flex-1 rounded-full bg-slate-200">
-              <div className="h-full w-2/5 rounded-full bg-violet-500" />
+            <span className="font-mono text-xs text-content-muted">1:24</span>
+            <div className="h-1.5 flex-1 rounded-full bg-surface-subtle">
+              <div className="h-full w-2/5 rounded-full bg-accent" />
             </div>
-            <span className="font-mono text-xs text-slate-500">{formatDuration(song.durationSeconds)}</span>
+            <span className="font-mono text-xs text-content-muted">{formatDuration(song.durationSeconds)}</span>
           </div>
         </div>
         <div className="hidden justify-end gap-2 md:flex">
           {visiblePlatformNames(song).slice(0, 2).map((source) => (
-            <span key={source} className="rounded-full bg-[#eeeaff] px-3 py-1.5 text-xs font-black text-violet-700">
+            <span key={source} className="rounded-full bg-surface-subtle px-3 py-1.5 text-xs font-black text-accent-strong">
               {source}
             </span>
           ))}

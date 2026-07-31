@@ -66,11 +66,11 @@ export function platformName(platformId: string): string {
   return platformCatalog.find((platform) => platform.id === platformId)?.name ?? platformId;
 }
 
-export function platformHoverClass(platformId?: PlatformId | null, fallback = 'hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'): string {
+export function platformHoverClass(platformId?: PlatformId | null, fallback = 'hover:border-border-subtle hover:bg-accent-soft hover:text-accent-strong'): string {
   if (platformId === 'youtube') return 'hover:border-red-300 hover:bg-red-50 hover:text-red-700';
   if (platformId === 'spotify') return 'hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700';
   if (platformId === 'apple') return 'hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700';
-  if (platformId === 'tidal') return 'hover:border-slate-400 hover:bg-slate-100 hover:text-slate-950';
+  if (platformId === 'tidal') return 'hover:border-slate-400 hover:bg-surface-subtle hover:text-content';
   return fallback;
 }
 

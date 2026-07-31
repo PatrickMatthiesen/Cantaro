@@ -248,3 +248,19 @@ Media cards are artwork-led with poster aspect ratios, dark gradient overlays, p
 - **Don't** hide complexity behind vague polish; sync, matching, provider state, and review differences must stay understandable.
 - **Don't** add glassmorphism as decoration. Glass is allowed only when it clarifies layers.
 - **Don't** pair 1px borders with huge decorative shadows on routine cards. Pick a restrained layer treatment that matches the component's importance.
+
+## 7. Semantic Theme API
+
+The shared Tailwind theme contract lives in `src/Cantaro.ClientShared/src/theme.css` and is imported by both the web app and browser-extension popup. Theme selection continues to set `data-theme="light"` or `data-theme="dark"` on the document root; the shared stylesheet registers that selector as Tailwind's `dark` custom variant and sets the matching native `color-scheme`.
+
+Use the same utility names in every theme:
+
+- **Surfaces:** `bg-canvas`, `bg-surface`, `bg-surface-translucent`, `bg-surface-raised`, `bg-surface-subtle`, and `bg-surface-hover`.
+- **Content:** `text-content`, `text-content-muted`, `text-content-subtle`, and `text-content-inverse`.
+- **Borders and focus:** `border-border-subtle`, `border-border-strong`, and `ring-focus`/`outline-focus`.
+- **Selection and emphasis:** `bg-accent`, `bg-accent-soft`, `text-accent`, and `text-accent-strong`.
+- **Primary actions:** `bg-action`, `hover:bg-action-hover`, and `text-action-content`. These remain a deliberately high-contrast pair in both themes; do not derive button backgrounds from `content`.
+- **Statuses:** use the `*-surface`, `*-content`, and `*-border` roles for `info`, `success`, `warning`, and `danger`.
+- **Destructive actions:** `bg-danger-action`, `hover:bg-danger-action-hover`, and `text-danger-action-content`. Filled controls must not use a status text color as their background.
+
+Provider brand colors, album/poster artwork, chart or visualization palettes, image scrims, and intentionally theme-specific optical treatments remain bespoke. Authored dark CSS is acceptable for those cases, but it must target the component directly; broad selectors that reinterpret arbitrary Tailwind palette classes are prohibited.

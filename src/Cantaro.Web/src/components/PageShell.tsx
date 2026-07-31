@@ -56,7 +56,7 @@ function NotificationButton() {
   return (
     <button
       type="button"
-      className="flex h-10 w-10 items-center justify-center rounded-full text-slate-700 transition hover:bg-white/70 sm:h-11 sm:w-11"
+      className="flex h-10 w-10 items-center justify-center rounded-full text-content-muted transition hover:bg-surface-translucent sm:h-11 sm:w-11"
       aria-label="Notifications"
     >
       <Bell className="h-5 w-5" aria-hidden />
@@ -69,7 +69,7 @@ function MobileMenuButton({ buttonRef, onClick }: { buttonRef: RefObject<HTMLBut
     <button
       ref={buttonRef}
       type="button"
-      className="app-mobile-menu-button flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/70 text-slate-800 shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none sm:h-11 sm:w-11 lg:hidden"
+      className="app-mobile-menu-button flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-border-subtle bg-surface-translucent text-content shadow-[0_12px_34px_rgba(88,74,150,0.08)] transition hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none sm:h-11 sm:w-11 lg:hidden"
       aria-label="Open navigation menu"
       onClick={onClick}
     >
@@ -119,7 +119,7 @@ function AccountMenu({
     <div ref={menuRef} className="relative">
       <button
         type="button"
-        className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-white shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-violet-400 focus-visible:outline-none sm:h-12 sm:w-12"
+        className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-linear-to-br from-violet-500 to-slate-950 text-sm font-black text-content-inverse shadow-[0_14px_34px_rgba(88,74,150,0.22)] ring-2 ring-transparent transition hover:ring-violet-300 focus-visible:ring-focus focus-visible:outline-none sm:h-12 sm:w-12"
         aria-label={`Open account menu for ${accountLabel}`}
         aria-haspopup="menu"
         aria-expanded={isOpen}
@@ -131,17 +131,17 @@ function AccountMenu({
       {isOpen ? (
         <div
           role="menu"
-          className="absolute top-full right-0 z-40 mt-3 w-64 overflow-hidden rounded-2xl border border-[#e3def8] bg-white/96 p-2 text-slate-900 shadow-[0_20px_70px_rgba(88,74,150,0.18)] backdrop-blur-xl"
+          className="absolute top-full right-0 z-40 mt-3 w-64 overflow-hidden rounded-2xl border border-border-subtle bg-surface/96 p-2 text-content shadow-[0_20px_70px_rgba(88,74,150,0.18)] backdrop-blur-xl"
         >
           <div className="px-3 py-3">
-            <p className="truncate text-sm font-black text-slate-950">{displayName || 'Cantaro account'}</p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-500">Personal archive controls</p>
+            <p className="truncate text-sm font-black text-content">{displayName || 'Cantaro account'}</p>
+            <p className="mt-0.5 text-xs font-semibold text-content-muted">Personal archive controls</p>
           </div>
-          <div className="h-px bg-[#eeeaff]" />
+          <div className="h-px bg-border-subtle" />
           <Link
             to="/settings"
             role="menuitem"
-            className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-[#f7f5ff] hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none"
+            className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-content-muted transition hover:bg-canvas hover:text-content focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             onClick={() => setIsOpen(false)}
           >
             <Settings className="h-4 w-4 text-violet-600" aria-hidden />
@@ -150,7 +150,7 @@ function AccountMenu({
           <button
             type="button"
             role="menuitem"
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 transition hover:bg-rose-50 hover:text-rose-700 focus-visible:ring-2 focus-visible:ring-violet-400 focus-visible:outline-none"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-content-muted transition hover:bg-danger-surface hover:text-danger-content focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             onClick={() => {
               setIsOpen(false);
               onLogout();
@@ -181,7 +181,7 @@ function PageTopBar({
   navigationButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   return (
-    <header className="app-top-bar sticky top-0 z-20 border-b border-white/80 bg-[#f7f5ff]/82 px-4 py-3 backdrop-blur-xl sm:px-8 sm:py-4 lg:px-10">
+    <header className="app-top-bar sticky top-0 z-20 border-b border-border-subtle bg-canvas/82 px-4 py-3 backdrop-blur-xl sm:px-8 sm:py-4 lg:px-10">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
         <div className="flex min-w-0 items-center justify-between gap-3 lg:contents">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
@@ -236,11 +236,11 @@ function MobileNavigationDrawer({
         aria-label="Close navigation menu"
         onClick={onClose}
       />
-      <div ref={drawerRef} className="relative h-full w-[min(86vw,22rem)] overflow-hidden rounded-r-[2rem] bg-[#f7f5ff] shadow-[24px_0_80px_rgba(15,23,42,0.24)]">
+      <div ref={drawerRef} className="relative h-full w-[min(86vw,22rem)] overflow-hidden rounded-r-[2rem] bg-canvas shadow-[24px_0_80px_rgba(15,23,42,0.24)]">
         <button
           ref={closeButtonRef}
           type="button"
-          className="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e3def8] bg-white/80 text-slate-700 shadow-[0_12px_34px_rgba(88,74,150,0.08)]"
+          className="absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-2xl border border-border-subtle bg-surface/80 text-content-muted shadow-[0_12px_34px_rgba(88,74,150,0.08)]"
           aria-label="Close navigation menu"
           onClick={onClose}
         >
@@ -276,7 +276,7 @@ export function PageShell({
   }, [pathname]);
 
   return (
-    <div className="min-h-screen bg-[#f7f5ff] text-slate-950">
+    <div className="min-h-screen bg-canvas text-content">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[272px_1fr]">
         <div className="hidden lg:block">{sidebar}</div>
 

@@ -14,13 +14,13 @@ function QueueRow({ track, label, active }: { track: MusicQueueTrack; label: str
     <div className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3">
       <QueueArtwork track={track} />
       <div className="min-w-0">
-        <p className={`text-[0.66rem] font-black tracking-[0.14em] uppercase ${active ? 'text-violet-600' : 'text-slate-500'}`}>
+        <p className={`text-[0.66rem] font-black tracking-[0.14em] uppercase ${active ? 'text-accent' : 'text-content-muted'}`}>
           {label}
         </p>
-        <p className="mt-0.5 truncate text-sm font-black text-slate-950">{track.title}</p>
-        <p className="truncate text-xs font-semibold text-slate-500">{track.artist ?? 'Unknown artist'}</p>
+        <p className="mt-0.5 truncate text-sm font-black text-content">{track.title}</p>
+        <p className="truncate text-xs font-semibold text-content-muted">{track.artist ?? 'Unknown artist'}</p>
       </div>
-      <span className="font-mono text-xs text-slate-500">{formatDuration(track.durationSeconds)}</span>
+      <span className="font-mono text-xs text-content-muted">{formatDuration(track.durationSeconds)}</span>
     </div>
   );
 }
@@ -39,13 +39,13 @@ export function MusicUpNextPanel({
   const hasContent = Boolean(activeTrack || queuedTracks.length > 0);
 
   return (
-    <section className="rounded-[1.5rem] border border-white/80 bg-white/58 p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur">
+    <section className="rounded-[1.5rem] border border-border-subtle bg-surface-translucent p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="font-black text-slate-950">{title}</h2>
+        <h2 className="font-black text-content">{title}</h2>
         {onClearQueue ? (
           <button
             type="button"
-            className="text-xs font-black text-violet-600 transition hover:text-violet-500 disabled:cursor-not-allowed disabled:opacity-45"
+            className="text-xs font-black text-accent transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
             disabled={queuedTracks.length === 0}
             onClick={onClearQueue}
           >
@@ -58,7 +58,7 @@ export function MusicUpNextPanel({
         {queuedTracks.map((track, index) => (
           <QueueRow key={track.id} track={track} label={index === 0 ? 'Up next' : `Later ${index + 1}`} />
         ))}
-        {!hasContent ? <p className="text-sm font-medium text-slate-500">Play a track or add one to the queue.</p> : null}
+        {!hasContent ? <p className="text-sm font-medium text-content-muted">Play a track or add one to the queue.</p> : null}
       </div>
     </section>
   );

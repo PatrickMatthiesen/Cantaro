@@ -47,8 +47,8 @@ export function MusicRootPage() {
   if (isCheckingConnectedAccounts) {
     return (
       <MusicPageShell>
-        <div className="flex min-h-[360px] items-center justify-center rounded-[1.5rem] border border-white/80 bg-white/65 shadow-[0_12px_34px_rgba(82,70,140,0.06)] backdrop-blur">
-          <div className="flex items-center gap-3 text-sm font-semibold text-slate-600">
+        <div className="flex min-h-[360px] items-center justify-center rounded-[1.5rem] border border-border-subtle bg-surface-translucent shadow-[0_12px_34px_rgba(82,70,140,0.06)] backdrop-blur">
+          <div className="flex items-center gap-3 text-sm font-semibold text-content-muted">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-violet-500" aria-hidden />
             Checking connected platforms
           </div>
@@ -81,7 +81,7 @@ export function MusicMatchingPage() {
     <MusicPageShell>
       <div className="mb-5 flex items-center gap-2">
         <StatusBadge status="warning" />
-        <h1 className="text-2xl font-black text-gray-900">Library attention</h1>
+        <h1 className="text-2xl font-black text-content">Library attention</h1>
       </div>
       <MatchingReviewPage embedded />
     </MusicPageShell>
