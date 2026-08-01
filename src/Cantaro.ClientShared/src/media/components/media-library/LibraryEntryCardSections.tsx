@@ -14,14 +14,14 @@ const DETAILS_CLASS_NAMES: Record<MediaLibraryDensity, {
     originalTitle: string;
 }> = {
     comfortable: {
-        container: 'p-3 sm:p-4',
-        panel: 'rounded-2xl p-3 sm:rounded-3xl sm:p-4 md:p-4',
+        container: '',
+        panel: 'px-3 py-2.5 sm:px-4 sm:py-3',
         title: 'text-base sm:text-lg md:text-xl',
-        originalTitle: 'mt-0.5 text-xs sm:mt-1 sm:text-sm',
+        originalTitle: 'mt-0.5 text-xs sm:text-sm',
     },
     compact: {
-        container: 'p-2',
-        panel: 'rounded-2xl p-2',
+        container: '',
+        panel: 'px-2 py-1.5',
         title: 'text-xs',
         originalTitle: 'text-[0.65rem]',
     },
@@ -36,8 +36,16 @@ export interface LibraryEntryCardBadgesProps {
 
 export interface LibraryEntryCardDetailsProps {
     entry: MediaLibraryListItemDto;
-    completion: number | null;
+    progress: LibraryEntryProgressSegments | null;
     density: MediaLibraryDensity;
+}
+
+export interface LibraryEntryProgressSegments {
+    watched: number;
+    releasedUnwatched: number;
+    remaining: number | null;
+    total: number | null;
+    visualTotal: number;
 }
 
 function LibraryEntryReleaseBadge({ badge, density }: { badge: TopLeftBadge | null; density: MediaLibraryDensity }) {
@@ -85,37 +93,75 @@ export function LibraryEntryCardBadges({ topLeftBadge, progress, isConnected, de
     );
 }
 
-function LibraryEntryCompletionBar({ completion, density }: { completion: number | null; density: MediaLibraryDensity }) {
-    const className = density === 'compact' ? 'mt-2 h-1' : 'mt-3 h-1.5 sm:mt-4 sm:h-2';
+function LibraryEntryCompletionBar({ progress, density }: { progress: LibraryEntryProgressSegments | null; density: MediaLibraryDensity }) {
+    const className = density === 'compact' ? 'mt-1.5 h-1.5' : 'mt-2 h-2 sm:mt-2.5 sm:h-2.5';
 
-    if (completion !== null) {
-        return (
-            <div className={`${className} overflow-hidden rounded-full bg-white/18`}>
+    if (!progress) {
+        return null;
+    }
+
+    const watchedPercent = (progress.watched / progress.visualTotal) * 100;
+    const releasedPercent = ((progress.watched + progress.releasedUnwatched) / progress.visualTotal) * 100;
+    const description = progress.total === null
+        ? `${progress.watched} watched, ${progress.releasedUnwatched} released and unwatched, total unknown`
+        : `${progress.watched} watched, ${progress.releasedUnwatched} released and unwatched, ${progress.remaining} not yet released, ${progress.total} total`;
+    const segments = (
+        <>
+            {progress.releasedUnwatched > 0 ? (
                 <div
-                    className="h-full rounded-full bg-linear-to-r from-cyan-300 via-sky-400 to-rose-400 transition-all duration-500"
-                    style={{ width: `${completion}%` }}
+                    className="absolute inset-y-0 left-0 rounded-full bg-rose-400 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                    style={{ width: `${releasedPercent}%` }}
                 />
+            ) : null}
+            <div
+                className="absolute inset-y-0 left-0 rounded-full bg-linear-to-r from-cyan-300 to-sky-300 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                style={{ width: `${watchedPercent}%` }}
+            />
+        </>
+    );
+
+    if (progress.total === null) {
+        const fadeMask = 'linear-gradient(to right, black 0%, black 90%, transparent 100%)';
+
+        return (
+            <div
+                role="img"
+                aria-label={`Episode progress: ${description}`}
+                title={description}
+                className={`${className} relative overflow-hidden rounded-l-full bg-slate-700/65 shadow-[inset_0_1px_2px_rgba(15,23,42,0.24)]`}
+                style={{ maskImage: fadeMask, WebkitMaskImage: fadeMask }}
+            >
+                {segments}
             </div>
         );
     }
 
     return (
-        <div className={`${className} overflow-hidden rounded-full bg-white/10`}>
-            <div className="h-full w-1/3 rounded-full bg-linear-to-r from-white/55 to-white/15" />
+        <div
+            role="progressbar"
+            aria-label="Episode progress"
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+            aria-valuenow={progress.watched}
+            aria-valuetext={description}
+            title={description}
+            className={`${className} relative overflow-hidden rounded-full bg-slate-700/65 shadow-[inset_0_1px_2px_rgba(15,23,42,0.24)]`}
+        >
+            {segments}
         </div>
     );
 }
 
 export function LibraryEntryCardDetails({
     entry,
-    completion,
+    progress,
     density,
 }: LibraryEntryCardDetailsProps) {
     const classNames = DETAILS_CLASS_NAMES[density];
 
     return (
         <div className={`absolute inset-x-0 bottom-0 ${classNames.container}`}>
-            <div className={`${classNames.panel} border border-white/16 bg-white/14 shadow-[0_18px_50px_rgba(15,23,42,0.38)] backdrop-blur-xl`}>
+            <div className={`${classNames.panel} bg-black/30 backdrop-blur-md`}>
                 <p className={`${classNames.title} line-clamp-2 leading-tight font-semibold text-white transition-colors group-hover:text-cyan-100`}>
                     {entry.canonicalTitle}
                 </p>
@@ -126,7 +172,7 @@ export function LibraryEntryCardDetails({
                     <p className={`${classNames.originalTitle} line-clamp-1 text-white/64`}>{entry.originalTitle}</p>
                 ) : null}
 
-                <LibraryEntryCompletionBar completion={completion} density={density} />
+                <LibraryEntryCompletionBar progress={progress} density={density} />
             </div>
         </div>
     );

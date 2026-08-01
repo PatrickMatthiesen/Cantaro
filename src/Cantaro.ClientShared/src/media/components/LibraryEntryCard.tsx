@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+    type LibraryEntryProgressSegments,
     LibraryEntryCardBadges,
     LibraryEntryCardDetails,
 } from './media-library/LibraryEntryCardSections';
@@ -32,6 +33,8 @@ const PROGRESS_DIMENSION_CONFIG = {
     },
 } as const;
 
+const OPEN_ENDED_PROGRESS_FRACTION = 0.9;
+
 function progressConfig(entry: MediaLibraryListItemDto) {
     if (!entry.primaryProgressDimension) {
         return null;
@@ -51,14 +54,64 @@ function progressText(entry: MediaLibraryListItemDto): string {
     return total ? `${config.label} ${current} / ${total}` : `${config.label} ${current} / ?`;
 }
 
-function progressPercent(entry: MediaLibraryListItemDto): number | null {
+function unknownProgressVisualTotal(released: number, dimension: string): number {
+    if (dimension !== 'episode') {
+        return released / OPEN_ENDED_PROGRESS_FRACTION;
+    }
+
+    if (released < 12) {
+        return 12;
+    }
+
+    if (released < 13) {
+        return 13;
+    }
+
+    if (released < 24) {
+        return 24;
+    }
+
+    return released / OPEN_ENDED_PROGRESS_FRACTION;
+}
+
+export function progressSegments(entry: MediaLibraryListItemDto): LibraryEntryProgressSegments | null {
     const config = progressConfig(entry);
     const total = config?.getTotal(entry);
-    if (!config || !total || total <= 0) {
+    if (!config) {
         return null;
     }
 
-    return Math.max(0, Math.min(100, (config.getCurrent(entry) / total) * 100));
+    const current = Math.max(0, config.getCurrent(entry));
+    const reportedReleased = entry.primaryProgressDimension === 'episode' ? entry.releasedCount : undefined;
+
+    if (total && total > 0) {
+        const watched = Math.min(total, current);
+        const released = reportedReleased === undefined
+            ? watched
+            : Math.max(watched, Math.min(total, reportedReleased));
+
+        return {
+            watched,
+            releasedUnwatched: released - watched,
+            remaining: total - released,
+            total,
+            visualTotal: total,
+        };
+    }
+
+    const watched = current;
+    const released = reportedReleased === undefined ? watched : Math.max(watched, reportedReleased);
+    if (released <= 0) {
+        return null;
+    }
+
+    return {
+        watched,
+        releasedUnwatched: released - watched,
+        remaining: null,
+        total: null,
+        visualTotal: unknownProgressVisualTotal(released, entry.primaryProgressDimension),
+    };
 }
 
 function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: string }) {
@@ -85,7 +138,7 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
 
 export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: LibraryEntryCardProps) {
     const progress = progressText(entry);
-    const completion = progressPercent(entry);
+    const progressBar = progressSegments(entry);
     const nextReleaseRelative = formatRelativeReleaseTime(entry.nextReleaseAt);
     const releaseBadgeLabel = entry.nextReleaseLabel ?? 'Next release';
     const topLeftBadge = nextReleaseRelative
@@ -103,7 +156,7 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: Li
         >
             <div className={`relative aspect-[0.72] overflow-hidden bg-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.22)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}>
                 <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />
-                <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-slate-900/10" aria-hidden />
+                <div className="absolute inset-0 bg-linear-to-t from-slate-950/55 via-slate-900/20 to-transparent" aria-hidden />
 
                 <LibraryEntryCardBadges
                     topLeftBadge={topLeftBadge}
@@ -114,7 +167,7 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: Li
 
                 <LibraryEntryCardDetails
                     entry={entry}
-                    completion={completion}
+                    progress={progressBar}
                     density={density}
                 />
             </div>

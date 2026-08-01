@@ -25,6 +25,7 @@ public class MediaLibraryListItemDto
     public int? EpisodeCount { get; set; }
     public int? ChapterCount { get; set; }
     public int? VolumeCount { get; set; }
+    public int? ReleasedCount { get; set; }
     public required string PrimaryProgressDimension { get; set; }
     public required string Provider { get; set; }
     public required string ProviderMediaId { get; set; }

@@ -296,9 +296,43 @@ public class MediaLibraryQueryServiceTests
         Assert.Single(page.Items);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(nextReleaseAt), page.Items[0].NextReleaseAt);
         Assert.Equal("Ep 18", page.Items[0].NextReleaseLabel);
+        Assert.Equal(17, page.Items[0].ReleasedCount);
         Assert.NotNull(detail);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(nextReleaseAt), detail!.NextReleaseAt);
         Assert.Equal("Ep 18", detail.NextReleaseLabel);
+    }
+
+    [Fact]
+    public async Task GetLibraryAsync_SurfacesReleasedCountFromNormalizedReleaseMetadata()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(312, "released-count@example.com");
+        db.Users.Add(user);
+
+        var title = MakeTitle("Airing Series", MediaKinds.Anime, now);
+        title.EpisodeCount = 24;
+        db.MediaTitles.Add(title);
+        await db.SaveChangesAsync();
+
+        var entry = MakeEntry(user.Id, title, MediaLibraryStatuses.Current, now);
+        entry.ProgressEpisodes = 12;
+        entry.RawMetadata = """
+            {"releasedCount":16,"totalKnownCount":24,"nextReleaseLabel":"Episode 17"}
+            """;
+        db.MediaLibraryEntries.Add(entry);
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+        var page = await service.GetLibraryAsync(user.Id, new MediaLibraryQueryOptions(), CancellationToken.None);
+
+        Assert.Single(page.Items);
+        Assert.Equal(12, page.Items[0].ProgressEpisodes);
+        Assert.Equal(16, page.Items[0].ReleasedCount);
+        Assert.Equal(24, page.Items[0].EpisodeCount);
     }
 
     [Fact]
