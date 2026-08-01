@@ -23,6 +23,7 @@ export interface MediaLibraryListItemDto {
     episodeCount?: number;
     chapterCount?: number;
     volumeCount?: number;
+    releasedCount?: number;
     primaryProgressDimension: string;
     provider: string;
     providerMediaId: string;

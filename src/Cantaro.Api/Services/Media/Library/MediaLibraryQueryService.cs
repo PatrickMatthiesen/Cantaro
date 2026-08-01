@@ -201,6 +201,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             EpisodeCount = entry.MediaTitle?.EpisodeCount,
             ChapterCount = entry.MediaTitle?.ChapterCount,
             VolumeCount = entry.MediaTitle?.VolumeCount,
+            ReleasedCount = releaseMetadata.ReleasedCount,
             PrimaryProgressDimension = entry.MediaTitle?.PrimaryProgressDimension ?? string.Empty,
             Provider = entry.Provider,
             ProviderMediaId = entry.ProviderMediaId,
@@ -266,7 +267,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         };
     }
 
-    private static (DateTimeOffset? NextReleaseAt, string? NextReleaseLabel) ReadNextReleaseMetadata(string? rawMetadata)
+    private static (int? ReleasedCount, DateTimeOffset? NextReleaseAt, string? NextReleaseLabel) ReadNextReleaseMetadata(string? rawMetadata)
     {
         if (string.IsNullOrWhiteSpace(rawMetadata))
         {
@@ -277,10 +278,14 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         {
             using var document = JsonDocument.Parse(rawMetadata);
             var root = document.RootElement;
+            var releasedCount = TryReadInt32(root, "releasedCount");
 
-            if (TryReadDateTimeOffset(root, "nextReleaseAt", out var nextReleaseAt))
+            if (root.TryGetProperty("releasedCount", out _)
+                || root.TryGetProperty("nextReleaseAt", out _)
+                || root.TryGetProperty("nextReleaseLabel", out _))
             {
-                return (nextReleaseAt, TryReadString(root, "nextReleaseLabel"));
+                _ = TryReadDateTimeOffset(root, "nextReleaseAt", out var nextReleaseAt);
+                return (releasedCount, nextReleaseAt, TryReadString(root, "nextReleaseLabel"));
             }
 
             if (root.TryGetProperty("nextAiringEpisode", out var nextAiringEpisode)
@@ -298,10 +303,18 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                     && episodeElement.TryGetInt32(out var episode))
                 {
                     label = $"Ep {episode}";
+                    releasedCount = Math.Max(0, episode - 1);
                 }
 
-                return (airingAt, label);
+                return (releasedCount, airingAt, label);
             }
+
+            if (string.Equals(TryReadString(root, "status"), "FINISHED", StringComparison.OrdinalIgnoreCase))
+            {
+                releasedCount = TryReadInt32(root, "episodes") ?? TryReadInt32(root, "chapters");
+            }
+
+            return (releasedCount, null, null);
         }
         catch (JsonException)
         {
@@ -352,6 +365,13 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
     {
         return root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
+            : null;
+    }
+
+    private static int? TryReadInt32(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value)
+            ? value
             : null;
     }
 }
