@@ -65,6 +65,20 @@ export interface MusicLibraryResponse {
   playlists: MusicLibraryPlaylist[];
 }
 
+export type LyricsState = 'available' | 'instrumental' | 'unavailable' | 'ambiguous' | 'disabled' | 'provider_error';
+
+export interface LyricsResult {
+  state: LyricsState;
+  matchStatus: string;
+  provider: string;
+  providerRecordId?: string;
+  plainLyrics?: string;
+  syncedLyrics?: string;
+  confidence?: number;
+  attribution: string;
+  explanation?: string;
+}
+
 class MusicLibraryApiClient {
   async getLibrary(): Promise<MusicLibraryResponse> {
     const response = await fetch('/api/music/library', {
@@ -87,6 +101,18 @@ class MusicLibraryApiClient {
     const response = await fetch(`/api/music/library/songs/${encodeURIComponent(trackId)}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to load song details');
     return response.json() as Promise<MusicLibrarySong>;
+  }
+
+  async getLyrics(songId: string, signal?: AbortSignal): Promise<LyricsResult> {
+    const trackId = songId.startsWith('track:') ? songId.slice(6) : songId;
+    const response = await fetch(`/api/music/tracks/${encodeURIComponent(trackId)}/lyrics`, {
+      credentials: 'include',
+      signal,
+    });
+
+    if (response.status === 404) throw new Error('This song is not available in Cantaro.');
+    if (!response.ok) throw new Error('Lyrics could not be loaded right now.');
+    return response.json() as Promise<LyricsResult>;
   }
 
   async addSongToPlaylist(songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {

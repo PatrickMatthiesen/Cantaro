@@ -1,15 +1,17 @@
 import { Link } from '@tanstack/react-router';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   MusicPlatformIcon,
   MusicUiIcon,
   musicLibraryApi,
+  type LyricsResult,
   type MusicLibraryResponse,
   type MusicLibrarySong,
   type PlatformId,
 } from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
+import { lyricsForDisplay } from './musicLyrics';
 import { formatDuration, isPlatformId, platformName, songArtist, songArtwork } from './musicPresentation';
 
 
@@ -221,6 +223,140 @@ function PlatformAvailabilityCard({ song }: { song: MusicLibrarySong }) {
   );
 }
 
+type LyricsView =
+  | { kind: 'closed' }
+  | { kind: 'loading' }
+  | { kind: 'ready'; result: LyricsResult }
+  | { kind: 'error'; message: string };
+
+const lyricsNotices = {
+  available: { title: 'Lyrics unavailable', fallback: 'No lyrics were found for this song.' },
+  instrumental: { title: 'Instrumental track', fallback: 'This recording is marked as instrumental.' },
+  ambiguous: { title: 'Lyrics need review', fallback: 'Cantaro found more than one possible match, so it did not choose one.' },
+  provider_error: { title: 'Lyrics provider unavailable', fallback: 'The lyrics source could not be reached. Try again in a moment.' },
+  disabled: { title: 'Lyrics lookup is disabled', fallback: 'Lyrics lookup is disabled for this Cantaro server.' },
+  unavailable: { title: 'Lyrics unavailable', fallback: 'No lyrics were found for this song.' },
+} satisfies Record<LyricsResult['state'], { title: string; fallback: string }>;
+
+function LyricsLoading() {
+  return (
+    <div className="mt-5 space-y-3" aria-label="Loading lyrics" role="status">
+      <div className="bg-surface-hover h-3 w-11/12 rounded motion-safe:animate-pulse" />
+      <div className="bg-surface-hover h-3 w-4/5 rounded motion-safe:animate-pulse" />
+      <div className="bg-surface-hover h-3 w-9/12 rounded motion-safe:animate-pulse" />
+    </div>
+  );
+}
+
+function LyricsNotice({ result }: { result: LyricsResult }) {
+  const notice = lyricsNotices[result.state];
+  return (
+    <div className="bg-surface-subtle mt-5 rounded-2xl p-4">
+      <p className="text-content text-sm font-black">{notice.title}</p>
+      <p className="text-content-muted mt-1 max-w-[70ch] text-sm leading-6 font-semibold">{result.explanation || notice.fallback}</p>
+      {result.attribution ? <p className="text-content-subtle mt-3 text-xs font-semibold">{result.attribution}</p> : null}
+    </div>
+  );
+}
+
+function lyricsMatchLabel(matchStatus: string) {
+  const knownLabels: Record<string, string> = { exact: 'Exact match', fallback: 'Best match' };
+  return knownLabels[matchStatus] ?? matchStatus.replace(/[-_]/g, ' ');
+}
+
+function AvailableLyrics({ result, text, synchronized }: { result: LyricsResult; text: string; synchronized: boolean }) {
+  const confidence = result.confidence === undefined ? undefined : `${Math.round(result.confidence * 100)}% confidence`;
+
+  return (
+    <div className="mt-5">
+      <div className="text-content-muted flex flex-wrap items-center gap-2 text-xs font-black">
+        <span className="bg-accent-soft text-accent-strong rounded-full px-3 py-1">{synchronized ? 'Timed lyrics' : 'Plain lyrics'}</span>
+        <span className="bg-surface-subtle rounded-full px-3 py-1 capitalize">{lyricsMatchLabel(result.matchStatus)}</span>
+        {confidence ? <span>{confidence}</span> : null}
+      </div>
+      <pre className="text-content mt-4 max-w-[70ch] font-sans text-[0.95rem] leading-7 font-medium break-words whitespace-pre-wrap">{text}</pre>
+      <p className="border-border-subtle text-content-subtle mt-5 border-t pt-3 text-xs font-semibold">{result.attribution}</p>
+    </div>
+  );
+}
+
+function LyricsResultContent({ result }: { result: LyricsResult }) {
+  const selected = result.state === 'available' ? lyricsForDisplay(result) : null;
+  return selected ? <AvailableLyrics result={result} {...selected} /> : <LyricsNotice result={result} />;
+}
+
+function LyricsCard({ song }: { song: MusicLibrarySong }) {
+  const [view, setView] = useState<LyricsView>({ kind: 'closed' });
+  const requestId = useRef(0);
+  const requestController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    requestId.current += 1;
+    requestController.current?.abort();
+    requestController.current = null;
+    setView({ kind: 'closed' });
+    return () => requestController.current?.abort();
+  }, [song.id]);
+
+  const load = () => {
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
+    const currentRequest = ++requestId.current;
+    setView({ kind: 'loading' });
+
+    void musicLibraryApi.getLyrics(song.id, controller.signal)
+      .then((result) => {
+        if (requestId.current === currentRequest && !controller.signal.aborted) setView({ kind: 'ready', result });
+      })
+      .catch((error: unknown) => {
+        if (requestId.current === currentRequest && !controller.signal.aborted) {
+          setView({ kind: 'error', message: error instanceof Error ? error.message : 'Lyrics could not be loaded right now.' });
+        }
+      });
+  };
+
+  const close = () => {
+    requestId.current += 1;
+    requestController.current?.abort();
+    requestController.current = null;
+    setView({ kind: 'closed' });
+  };
+
+  const action = view.kind === 'closed' ? (
+    <button type="button" onClick={load} className="bg-action text-action-content hover:bg-action-hover focus-visible:ring-focus inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-black transition focus-visible:ring-2 focus-visible:outline-none">
+      <MusicUiIcon name="listMusic" className="h-4 w-4" />
+      Show lyrics
+    </button>
+  ) : (
+    <button type="button" onClick={close} className="border-border-subtle bg-surface text-content hover:bg-surface-hover focus-visible:ring-focus inline-flex h-10 items-center gap-2 rounded-2xl border px-4 text-sm font-black transition focus-visible:ring-2 focus-visible:outline-none">
+      Hide lyrics
+    </button>
+  );
+
+  return (
+    <section className={panelClassName('p-5')}>
+      <SectionHeader title="Lyrics" detail="Words, match status, and source attribution for this recording." action={action} />
+      {view.kind === 'closed' ? (
+        <p className="text-content-muted mt-4 max-w-[65ch] text-sm leading-6 font-semibold">Lyrics are loaded only when you ask for them.</p>
+      ) : view.kind === 'loading' ? (
+        <LyricsLoading />
+      ) : view.kind === 'error' ? (
+        <div className="bg-danger-surface mt-5 rounded-2xl p-4">
+          <p className="text-danger-content text-sm font-black">Lyrics could not be loaded</p>
+          <p className="text-danger-content mt-1 text-sm leading-6 font-semibold">{view.message}</p>
+          <button type="button" onClick={load} className="bg-surface text-content hover:bg-surface-hover focus-visible:ring-focus mt-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition focus-visible:ring-2 focus-visible:outline-none">
+            <MusicUiIcon name="refresh" className="h-3.5 w-3.5" />
+            Try again
+          </button>
+        </div>
+      ) : (
+        <LyricsResultContent result={view.result} />
+      )}
+    </section>
+  );
+}
+
 function PlaylistAppearancesCard({ song, library }: { song: MusicLibrarySong; library: MusicLibraryResponse }) {
   const [memberships, setMemberships] = useState(song.playlists);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -289,7 +425,6 @@ function MetadataReadinessCard({ song }: { song: MusicLibrarySong }) {
   const rows = [
     ...(song.albums.length > 0 ? [{ label: 'Albums', value: song.albums.join(', ') }] : []),
     ...song.sourceIdentities.map((identity) => ({ label: identity.source === 'musicbrainz' ? 'MusicBrainz recording' : identity.source.toUpperCase(), value: identity.externalId })),
-    { label: 'Lyrics', value: 'Ready for a future lyrics provider' },
     { label: 'Credits', value: 'Waiting on richer metadata' },
     { label: 'Platform links', value: song.platformLinks.length > 0 ? `${song.platformLinks.length} available` : 'No platform link yet' },
   ];
@@ -439,6 +574,7 @@ export function MusicSongDetailPage({ library, songId }: { library: MusicLibrary
 
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div className="min-w-0 space-y-5">
+              <LyricsCard song={song} />
               <PlatformAvailabilityCard song={song} />
               <VersionsCard song={song} />
               <PlaylistAppearancesCard song={song} library={library} />
