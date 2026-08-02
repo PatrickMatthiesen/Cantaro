@@ -130,9 +130,15 @@ if (builder.ExecutionContext.IsRunMode)
     api.WithReference(frontend);
 }
 
-builder.AddBunApp("browser-extension", "../Cantaro.BrowserExtension", entryPoint: "dev")
+#pragma warning disable ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+builder.AddJavaScriptApp("browser-extension", "../Cantaro.BrowserExtension")
+    .WithBun()
+    // no need for terminal if we get the fix merged:
+    // https://github.com/wxt-dev/wxt/pull/2563
+    .WithTerminal()
     .WithReference(api)
     .WithReference(frontend)
     .WithExplicitStart();
+#pragma warning restore ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 builder.Build().Run();
