@@ -112,29 +112,37 @@ function readSeasonLabel(element: Element | null): string | undefined {
 }
 
 function readRenderedEpisodes(doc: Document, pageUrl: URL): ObservedProviderEpisode[] {
+  const cardEpisodes = Array.from(doc.querySelectorAll(EPISODE_CARD_SELECTOR))
+    .map(card => readEpisodeCard(card, pageUrl));
+  const candidates = cardEpisodes.some(Boolean)
+    ? cardEpisodes
+    : readLabelledEpisodeLinks(doc, pageUrl);
+
+  return uniqueEpisodes(candidates).slice(0, 100);
+}
+
+function readLabelledEpisodeLinks(
+  doc: Document,
+  pageUrl: URL,
+): Array<ObservedProviderEpisode | null> {
+  return Array.from(doc.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR))
+    .filter(link => EPISODE_LINK_LABEL_RE.test(normalizeText(link.getAttribute('aria-label')) ?? ''))
+    .map(link => readEpisodeLink(link, pageUrl));
+}
+
+function uniqueEpisodes(
+  candidates: Array<ObservedProviderEpisode | null>,
+): ObservedProviderEpisode[] {
   const episodes: ObservedProviderEpisode[] = [];
   const seenProviderIds = new Set<string>();
 
-  for (const card of Array.from(doc.querySelectorAll(EPISODE_CARD_SELECTOR))) {
-    const episode = readEpisodeCard(card, pageUrl);
+  for (const episode of candidates) {
     if (!episode || seenProviderIds.has(episode.providerEpisodeId)) continue;
     seenProviderIds.add(episode.providerEpisodeId);
     episodes.push(episode);
   }
 
-  if (episodes.length === 0) {
-    for (const link of Array.from(doc.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR))) {
-      const label = normalizeText(link.getAttribute('aria-label'));
-      if (!label || !EPISODE_LINK_LABEL_RE.test(label)) continue;
-
-      const episode = readEpisodeLink(link, pageUrl);
-      if (!episode || seenProviderIds.has(episode.providerEpisodeId)) continue;
-      seenProviderIds.add(episode.providerEpisodeId);
-      episodes.push(episode);
-    }
-  }
-
-  return episodes.slice(0, 100);
+  return episodes;
 }
 
 function readEpisodeCard(card: Element, pageUrl: URL): ObservedProviderEpisode | null {

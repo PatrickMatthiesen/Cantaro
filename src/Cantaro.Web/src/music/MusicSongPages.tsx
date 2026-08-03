@@ -22,6 +22,21 @@ interface SongDerivedMetadata {
   matchTone: 'ready' | 'warning' | 'neutral';
 }
 
+type SongPlaylistMembership = MusicLibrarySong['playlists'][number];
+type LibraryPlaylist = MusicLibraryResponse['playlists'][number];
+
+function mutationErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function selectedSourceId(value: string): string | undefined {
+  return value || undefined;
+}
+
+function ensureYouTubeVersionSelected(youtubeIds: string[], selectedYouTubeId: string) {
+  if (youtubeIds.length > 1 && !selectedYouTubeId) throw new Error('Choose which YouTube version to sync.');
+}
+
 function getMatchTone(matchStatus?: string): SongDerivedMetadata['matchTone'] {
   const normalizedStatus = matchStatus?.toLowerCase() ?? '';
 
@@ -372,53 +387,63 @@ function PlaylistAppearancesCard({ song, library }: { song: MusicLibrarySong; li
     if (!playlist) return;
     setBusy(playlistId); setMessage(undefined);
     try {
-      if (youtubeIds.length > 1 && !selectedYouTubeId) throw new Error('Choose which YouTube version to sync.');
-      await musicLibraryApi.addSongToPlaylist(song.id, playlistId, selectedYouTubeId || undefined);
+      ensureYouTubeVersionSelected(youtubeIds, selectedYouTubeId);
+      await musicLibraryApi.addSongToPlaylist(song.id, playlistId, selectedSourceId(selectedYouTubeId));
       setMemberships((current) => [...current, { playlistId, playlistName: playlist.name, position: playlist.entryCount }]);
       setMessage(`Added to ${playlist.name} and synced.`); setPickerOpen(false);
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not add this song.'); }
+    } catch (error) { setMessage(mutationErrorMessage(error, 'Could not add this song.')); }
     finally { setBusy(undefined); }
   };
   const remove = async (playlistId: string) => {
     const playlist = memberships.find((item) => item.playlistId === playlistId);
     setBusy(playlistId); setMessage(undefined);
     try {
-      await musicLibraryApi.removeSongFromPlaylist(song.id, playlistId, selectedYouTubeId || undefined);
+      await musicLibraryApi.removeSongFromPlaylist(song.id, playlistId, selectedSourceId(selectedYouTubeId));
       setMemberships((current) => current.filter((item) => item.playlistId !== playlistId));
       setMessage(`Removed from ${playlist?.playlistName ?? 'playlist'} and synced.`); setConfirming(undefined);
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not remove this song.'); }
+    } catch (error) { setMessage(mutationErrorMessage(error, 'Could not remove this song.')); }
     finally { setBusy(undefined); }
   };
   return (
     <section className={panelClassName('p-5')}>
-      <SectionHeader title="Playlist appearances" detail="The tracked playlists that contain this song." action={available.length > 0 ? <button type="button" onClick={() => setPickerOpen((value) => !value)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-xl font-black text-accent-strong transition hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none" aria-expanded={pickerOpen} aria-label="Add to another playlist">+</button> : undefined} />
-      {youtubeIds.length > 1 ? <label className="mt-4 block text-xs font-black text-content-muted">YouTube version<select value={selectedYouTubeId} onChange={(event) => setSelectedYouTubeId(event.target.value)} className="mt-1 block w-full rounded-xl border border-border-subtle bg-surface px-3 py-2 text-sm"><option value="">Choose a version to sync…</option>{youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}</select></label> : null}
-      {pickerOpen ? <div className="mt-4 flex flex-wrap gap-2 rounded-xl bg-accent-soft p-3">{available.map((playlist) => <button key={playlist.id} type="button" disabled={Boolean(busy)} onClick={() => void add(playlist.id)} className="rounded-lg bg-surface px-3 py-2 text-xs font-black text-accent-strong transition hover:bg-accent-soft disabled:opacity-50">{busy === playlist.id ? 'Adding…' : playlist.name}</button>)}</div> : null}
-      <div className="mt-4 space-y-2">
-        {memberships.length > 0 ? memberships.map((playlist) => (
-          <div key={`${playlist.playlistId}-${playlist.position}`} className="group flex items-center gap-2 rounded-2xl bg-surface-translucent p-2 transition hover:bg-surface">
-          <Link
-            to="/music/playlists/$playlistId"
-            params={{ playlistId: playlist.playlistId }}
-            className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl p-1 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-          >
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-black text-content">{playlist.playlistName}</span>
-              <span className="block text-xs font-semibold text-content-muted">Position {playlist.position.toLocaleString()}</span>
-            </span>
-            <MusicUiIcon name="arrowRight" className="h-4 w-4 text-content-subtle" />
-          </Link>
-          {confirming === playlist.playlistId ? <div className="flex items-center gap-1"><span className="text-xs font-bold text-rose-700">Remove?</span><button type="button" disabled={Boolean(busy)} onClick={() => void remove(playlist.playlistId)} className="rounded-lg bg-rose-700 px-2 py-1 text-xs font-black text-content-inverse disabled:opacity-50">{busy === playlist.playlistId ? 'Removing…' : 'Confirm'}</button><button type="button" onClick={() => setConfirming(undefined)} className="rounded-lg px-2 py-1 text-xs font-black text-content-muted">Cancel</button></div> : <button type="button" onClick={() => setConfirming(playlist.playlistId)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-rose-700 opacity-0 transition group-hover:opacity-100 hover:bg-rose-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none" aria-label={`Remove from ${playlist.playlistName}`}><MusicUiIcon name="trash" className="h-4 w-4" /></button>}
-          </div>
-        )) : (
-          <p className="rounded-2xl border border-dashed border-border-strong bg-surface-translucent p-4 text-sm font-semibold text-content-muted">
-            This song is not attached to a synced playlist yet.
-          </p>
-        )}
-      </div>
+      <PlaylistAppearancesHeader available={available} pickerOpen={pickerOpen} onToggle={() => setPickerOpen((value) => !value)} />
+      <YouTubeVersionPicker youtubeIds={youtubeIds} selected={selectedYouTubeId} onSelect={setSelectedYouTubeId} />
+      <PlaylistPicker playlists={available} visible={pickerOpen} busy={busy} onAdd={add} />
+      <PlaylistMembershipList memberships={memberships} confirming={confirming} busy={busy} onConfirm={setConfirming} onRemove={remove} />
       {message ? <p className="mt-3 text-sm font-semibold text-content-muted" role="status">{message}</p> : null}
     </section>
   );
+}
+
+function PlaylistAppearancesHeader({ available, pickerOpen, onToggle }: { available: LibraryPlaylist[]; pickerOpen: boolean; onToggle: () => void }) {
+  const action = available.length > 0
+    ? <button type="button" onClick={onToggle} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-xl font-black text-accent-strong transition hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none" aria-expanded={pickerOpen} aria-label="Add to another playlist">+</button>
+    : undefined;
+  return <SectionHeader title="Playlist appearances" detail="The tracked playlists that contain this song." action={action} />;
+}
+
+function YouTubeVersionPicker({ youtubeIds, selected, onSelect }: { youtubeIds: string[]; selected: string; onSelect: (value: string) => void }) {
+  if (youtubeIds.length <= 1) return null;
+  return <label className="mt-4 block text-xs font-black text-content-muted">YouTube version<select value={selected} onChange={(event) => onSelect(event.target.value)} className="mt-1 block w-full rounded-xl border border-border-subtle bg-surface px-3 py-2 text-sm"><option value="">Choose a version to sync…</option>{youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>;
+}
+
+function PlaylistPicker({ playlists, visible, busy, onAdd }: { playlists: LibraryPlaylist[]; visible: boolean; busy?: string; onAdd: (playlistId: string) => Promise<void> }) {
+  if (!visible) return null;
+  return <div className="mt-4 flex flex-wrap gap-2 rounded-xl bg-accent-soft p-3">{playlists.map((playlist) => <button key={playlist.id} type="button" disabled={Boolean(busy)} onClick={() => void onAdd(playlist.id)} className="rounded-lg bg-surface px-3 py-2 text-xs font-black text-accent-strong transition hover:bg-accent-soft disabled:opacity-50">{busy === playlist.id ? 'Adding…' : playlist.name}</button>)}</div>;
+}
+
+function PlaylistMembershipList({ memberships, confirming, busy, onConfirm, onRemove }: { memberships: SongPlaylistMembership[]; confirming?: string; busy?: string; onConfirm: (playlistId?: string) => void; onRemove: (playlistId: string) => Promise<void> }) {
+  if (memberships.length === 0) {
+    return <div className="mt-4 space-y-2"><p className="rounded-2xl border border-dashed border-border-strong bg-surface-translucent p-4 text-sm font-semibold text-content-muted">This song is not attached to a synced playlist yet.</p></div>;
+  }
+  return <div className="mt-4 space-y-2">{memberships.map((playlist) => <PlaylistMembershipRow key={`${playlist.playlistId}-${playlist.position}`} playlist={playlist} confirming={confirming === playlist.playlistId} busy={busy} onConfirm={onConfirm} onRemove={onRemove} />)}</div>;
+}
+
+function PlaylistMembershipRow({ playlist, confirming, busy, onConfirm, onRemove }: { playlist: SongPlaylistMembership; confirming: boolean; busy?: string; onConfirm: (playlistId?: string) => void; onRemove: (playlistId: string) => Promise<void> }) {
+  return <div className="group flex items-center gap-2 rounded-2xl bg-surface-translucent p-2 transition hover:bg-surface">
+    <Link to="/music/playlists/$playlistId" params={{ playlistId: playlist.playlistId }} className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl p-1 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"><span className="min-w-0"><span className="block truncate text-sm font-black text-content">{playlist.playlistName}</span><span className="block text-xs font-semibold text-content-muted">Position {playlist.position.toLocaleString()}</span></span><MusicUiIcon name="arrowRight" className="h-4 w-4 text-content-subtle" /></Link>
+    {confirming ? <div className="flex items-center gap-1"><span className="text-xs font-bold text-rose-700">Remove?</span><button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(playlist.playlistId)} className="rounded-lg bg-rose-700 px-2 py-1 text-xs font-black text-content-inverse disabled:opacity-50">{busy === playlist.playlistId ? 'Removing…' : 'Confirm'}</button><button type="button" onClick={() => onConfirm(undefined)} className="rounded-lg px-2 py-1 text-xs font-black text-content-muted">Cancel</button></div> : <button type="button" onClick={() => onConfirm(playlist.playlistId)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-rose-700 opacity-0 transition group-hover:opacity-100 hover:bg-rose-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none" aria-label={`Remove from ${playlist.playlistName}`}><MusicUiIcon name="trash" className="h-4 w-4" /></button>}
+  </div>;
 }
 
 function MetadataReadinessCard({ song }: { song: MusicLibrarySong }) {

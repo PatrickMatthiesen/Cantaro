@@ -51,33 +51,17 @@ export function trustedCanonicalRoute(route: string): string | null {
   const decoded = segments.slice(1).map(decodeRouteSegment);
   if (decoded.some((segment) => segment === null)) return null;
 
-  if (segments.length === 4 && decoded[0] === 'music' && decoded[1] === 'songs' && isSongId(decoded[2]!)) {
-    return route;
-  }
+  return isTrustedDecodedRoute(segments.length, decoded) ? route : null;
+}
 
-  if (
-    segments.length === 4
-    && decoded[0] === 'music'
-    && decoded[1] === 'playlists'
-    && guidPattern.test(decoded[2]!)
-  ) {
-    return route;
-  }
+function isTrustedDecodedRoute(segmentCount: number, decoded: Array<string | null>): boolean {
+  if (segmentCount === 5) return decoded[0] === 'media' && decoded[1] === 'catalog';
+  if (segmentCount !== 4) return false;
 
-  if (
-    segments.length === 4
-    && decoded[0] === 'media'
-    && decoded[1] === 'library'
-    && guidPattern.test(decoded[2]!)
-  ) {
-    return route;
-  }
-
-  if (segments.length === 5 && decoded[0] === 'media' && decoded[1] === 'catalog') {
-    return route;
-  }
-
-  return null;
+  const [area, collection, id] = decoded;
+  if (area === 'music' && collection === 'songs') return isSongId(id!);
+  if (area === 'music' && collection === 'playlists') return guidPattern.test(id!);
+  return area === 'media' && collection === 'library' && guidPattern.test(id!);
 }
 
 export function searchResultDomId(item: SearchResultItem): string {
