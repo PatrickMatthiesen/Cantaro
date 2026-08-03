@@ -291,9 +291,17 @@ public class MediaLibraryApiTests
 
             var queryService = new MediaLibraryQueryService(db);
             var linkService = new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance);
+            var episodeIdentityService = new MediaEpisodeIdentityService(
+                db,
+                NullLogger<MediaEpisodeIdentityService>.Instance);
             var userManager = CreateUserManager(db);
 
-            var controller = new MediaLibraryController(db, queryService, linkService, userManager);
+            var controller = new MediaLibraryController(
+                db,
+                queryService,
+                linkService,
+                episodeIdentityService,
+                userManager);
             controller.ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext

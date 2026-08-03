@@ -1,6 +1,6 @@
 # Cantaro
 
-Cantaro is an open-source, self-hostable "music identity and playlist brain" that unifies your playlists and track mappings across multiple streaming services.
+Cantaro is an open-source, self-hostable media and music library that unifies playlists and track mappings, tracks watched episodes, and helps users return to the right provider page.
 
 ## Overview
 
@@ -232,7 +232,7 @@ The browser automatically includes the authentication cookie in all API requests
 
 ### Browser Extension Development
 
-The optional browser extension accelerates playlist sync by detecting changes in real-time:
+The optional browser extension accelerates playlist sync and observes supported media pages in real time:
 
 ```bash
 cd src/Cantaro.BrowserExtension
@@ -241,7 +241,13 @@ bun run dev              # For Chrome/Edge/Brave
 bun run dev:firefox      # For Firefox
 ```
 
-See [Cantaro.BrowserExtension/README.md](src/Cantaro.BrowserExtension/README.md) for detailed instructions on loading and using the extension.
+#### Crunchyroll episode URL collection
+
+When the extension is enabled, connected to a Cantaro instance, and the user visits Crunchyroll, it collects episode destination URLs from the page that the user is already viewing. On a watch page this includes the current episode and a rendered next-episode link. On a series page it collects the episode ID, URL, number, and title for every episode card rendered in the currently selected season. If the user changes seasons, the newly rendered season can be collected as another batch.
+
+This is passive page observation: Cantaro does not click through the season selector, crawl Crunchyroll in the background, call private Crunchyroll APIs, download video or subtitle content, or read Crunchyroll credentials or cookies. It sends only the rendered provider identifiers, destination URLs, titles/numbers, and normal watch-progress observation data to the user's configured Cantaro server.
+
+After an observation has been matched or explicitly resolved to the correct Cantaro media title, its validated episode destinations become shared catalog data inside that Cantaro instance. Other users of the same instance can therefore receive a direct **Continue watching** link without storing duplicate copies of the URL. Cantaro accepts only HTTPS URLs on the exact `crunchyroll.com` or `www.crunchyroll.com` hosts, records how many times a destination has been seen, and marks conflicting mappings instead of silently redirecting them.
 
 ## Contributing
 

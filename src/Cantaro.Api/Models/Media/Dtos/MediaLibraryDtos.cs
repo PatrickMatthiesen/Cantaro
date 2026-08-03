@@ -104,3 +104,33 @@ public class MediaLinkConflictDto
     public required string ConflictingCanonicalTitle { get; set; }
 }
 
+public class MediaContinueWatchingDto
+{
+    /// <summary>
+    /// direct | series_fallback | completed | unavailable | conflict
+    /// </summary>
+    public required string Outcome { get; set; }
+
+    public int? EpisodeNumber { get; set; }
+
+    public string? Provider { get; set; }
+
+    public string? Url { get; set; }
+}
+
+public class MediaEpisodeCatalogDto
+{
+    public string? SeriesProvider { get; set; }
+    public string? SeriesUrl { get; set; }
+    public required IReadOnlyList<MediaEpisodeDestinationDto> Episodes { get; set; }
+}
+
+public class MediaEpisodeDestinationDto
+{
+    public int EpisodeNumber { get; set; }
+    public string? Title { get; set; }
+    public string? Provider { get; set; }
+    public string? Url { get; set; }
+    public int SeenCount { get; set; }
+    public bool HasConflict { get; set; }
+}

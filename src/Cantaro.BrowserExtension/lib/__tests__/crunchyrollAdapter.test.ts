@@ -12,6 +12,7 @@ import {
   type VideoElementLike,
 } from '../crunchyrollAdapter';
 import { EXTENSION_VERSION, SiteIds } from '../mediaObservation';
+import type { MediaObservation } from '../mediaObservation';
 
 function makeDoc(
   title: string,
@@ -160,6 +161,39 @@ describe('Crunchyroll metadata extraction', () => {
     });
   });
 
+  it('captures rendered series and next-episode links without another request', () => {
+    const doc: DocumentLike = {
+      title: 'Episode 7 - Frieren - Crunchyroll',
+      querySelector(selector: string) {
+        if (selector === 'a[href*="/series/"]') {
+          return {
+            textContent: 'Frieren',
+            getAttribute: (name: string) => name === 'href' ? '/series/GYEXQKJG6/frieren' : null,
+          };
+        }
+        if (selector === '[data-t="next-episode"] a[href*="/watch/"]') {
+          return {
+            textContent: 'Episode 8 - The Hero of the Village',
+            getAttribute: (name: string) => name === 'href' ? '/watch/G31UXQ9K2/episode-8' : null,
+          };
+        }
+        return null;
+      },
+    };
+
+    const metadata = extractCrunchyrollEpisodeMetadata(
+      doc,
+      'https://www.crunchyroll.com/da/watch/CURRENT7/episode-7',
+    );
+
+    expect(metadata).toMatchObject({
+      providerSeriesId: 'GYEXQKJG6',
+      nextEpisodeProviderId: 'G31UXQ9K2',
+      nextEpisodeUrl: 'https://www.crunchyroll.com/watch/G31UXQ9K2/episode-8',
+      nextEpisodeNumber: 8,
+    });
+  });
+
   it('falls back gracefully when season and episode number are missing', () => {
     const doc = makeDoc('Prologue - My Anime - Crunchyroll');
     const metadata = extractCrunchyrollEpisodeMetadata(
@@ -177,6 +211,7 @@ describe('Crunchyroll metadata extraction', () => {
     const doc = makeDoc('My Anime - Crunchyroll');
     expect(extractCrunchyrollEpisodeMetadata(doc, 'not-a-url')).toBeNull();
     expect(extractCrunchyrollEpisodeMetadata(doc, 'https://www.crunchyroll.com/series/GY79EN15Y/my-anime')).toBeNull();
+    expect(extractCrunchyrollEpisodeMetadata(doc, 'https://evilcrunchyroll.com/watch/GYVNM7N6Y/episode-1')).toBeNull();
   });
 
   it('returns null for Crunchyroll non-episode page states on watch URLs', () => {
@@ -251,6 +286,39 @@ describe('trackVideoProgress', () => {
     video.emit('timeupdate');
 
     expect(observations).toHaveLength(1);
+  });
+
+  it('refreshes a next link that rendered after tracking was armed', () => {
+    const video = new FakeVideo();
+    let nextHref: string | null = null;
+    const doc: DocumentLike = {
+      title: 'Episode 7 - Frieren - Crunchyroll',
+      querySelector(selector: string) {
+        if (selector === 'video') return video;
+        if (selector === '[data-t="next-episode"] a[href*="/watch/"]' && nextHref) {
+          return {
+            textContent: 'Episode 8',
+            getAttribute: (name: string) => name === 'href' ? nextHref : null,
+          };
+        }
+        return null;
+      },
+      querySelectorAll(selector: string) {
+        return selector === 'video' ? [video] : [];
+      },
+    };
+    const observations: MediaObservation[] = [];
+    trackVideoProgress(doc, metadata, (observation) => observations.push(observation));
+
+    nextHref = '/watch/NEXT8/episode-8';
+    video.currentTime = 90;
+    video.emit('timeupdate');
+
+    expect(observations[0]).toMatchObject({
+      nextEpisodeProviderId: 'NEXT8',
+      nextEpisodeUrl: 'https://www.crunchyroll.com/watch/NEXT8/episode-8',
+      nextEpisodeNumber: 8,
+    });
   });
 
   it('ignores invalid or zero-duration videos', () => {

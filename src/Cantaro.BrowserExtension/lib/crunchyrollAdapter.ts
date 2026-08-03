@@ -6,6 +6,7 @@ const WATCH_PROGRESS_THRESHOLD = 0.85;
 export interface TextElementLike {
   textContent: string | null;
   getBoundingClientRect?(): { height: number; width: number };
+  getAttribute?(name: string): string | null;
 }
 
 export interface VideoElementLike {
@@ -28,19 +29,10 @@ export interface LocationLike {
   pathname: string;
 }
 
-export interface CrunchyrollEpisodeMetadata {
-  siteId: typeof SiteIds.Crunchyroll;
-  observedUrl: string;
-  siteMediaId?: string;
-  titleText: string;
-  seriesTitle?: string;
-  episodeTitle?: string;
-  episodeNumber?: number;
-  seasonTitle?: string;
-  seasonNumber?: number;
-  progressHint?: number | null;
-  extensionVersion: string;
-}
+export type CrunchyrollEpisodeMetadata = Omit<
+  MediaObservation,
+  'observedAt' | 'watchProgressPercent' | 'durationSeconds' | 'positionSeconds'
+> & { siteId: typeof SiteIds.Crunchyroll };
 
 interface WatchProgressSnapshot {
   watchProgressPercent: number;
@@ -64,6 +56,7 @@ export type VideoProgressTrackerStatus =
   | { type: 'threshold-reached'; watchProgressPercent: number; positionSeconds: number; durationSeconds: number };
 
 const WATCH_ID_RE = /\/watch\/([A-Z0-9]+)(?:\/|$)/i;
+const SERIES_ID_RE = /\/series\/([A-Z0-9]+)(?:\/|$)/i;
 const EPISODE_NUMBER_RE = /\b(?:episode|ep|e)[- _]?(\d+)\b/i;
 const SEASON_NUMBER_RE = /season\s*(\d+)/i;
 const BLOCKED_PAGE_TITLE_RE = /(?:please verify your email address|watch popular anime|play games|shop online)/i;
@@ -89,8 +82,18 @@ const SEASON_SELECTORS = [
   '[class*="season"]',
 ];
 
+const NEXT_EPISODE_SELECTORS = [
+  '[data-t="next-episode"] a[href*="/watch/"]',
+  'a[data-t="next-episode"][href*="/watch/"]',
+  '[data-testid="next-episode"] a[href*="/watch/"]',
+];
+
 export function extractEpisodeId(pathname: string): string | undefined {
   return WATCH_ID_RE.exec(pathname)?.[1];
+}
+
+export function extractSeriesId(pathname: string): string | undefined {
+  return SERIES_ID_RE.exec(pathname)?.[1];
 }
 
 export function extractEpisodeNumber(text: string): number | null {
@@ -154,46 +157,68 @@ export function extractCrunchyrollEpisodeMetadata(
   locationLike: LocationLike | string,
 ): CrunchyrollEpisodeMetadata | null {
   const parsed = parseLocation(locationLike);
-  if (!parsed) return null;
-  if (!parsed.hostname.endsWith('crunchyroll.com')) return null;
-  if (!parsed.pathname.startsWith('/watch/')) return null;
+  if (!parsed || !isCrunchyrollHost(parsed.hostname)) return null;
 
   const siteMediaId = extractEpisodeId(parsed.pathname);
+  if (!siteMediaId) return null;
+  const metadata = buildCrunchyrollEpisodeMetadata(doc, parsed, siteMediaId);
+  if (isBlockedPageTitle(metadata.titleFallback, metadata.titleText, metadata.episodeTitle)) return null;
+
+  console.debug('Extracted Crunchyroll episode metadata:', metadata.observation);
+  return metadata.observation;
+}
+
+function buildCrunchyrollEpisodeMetadata(
+  doc: DocumentLike,
+  parsed: LocationLike,
+  siteMediaId: string,
+): {
+  titleFallback: string;
+  titleText: string;
+  episodeTitle?: string;
+  observation: CrunchyrollEpisodeMetadata;
+} {
   const titleFallback = parseTitleFromPageTitle(doc.title);
-  const episodeTitle = extractTextFromDom(doc, EPISODE_SELECTORS) ?? parseEpisodeTitleFromPageTitle(titleFallback);
-  const seriesTitle = extractTextFromDom(doc, SERIES_SELECTORS) ?? parseSeriesTitleFromPageTitle(titleFallback);
+  const episodeTitle = extractEpisodeTitle(doc, titleFallback);
+  const seriesTitle = extractSeriesTitle(doc, titleFallback);
   const seasonTitle = extractTextFromDom(doc, SEASON_SELECTORS) ?? undefined;
   const episodeNumber = extractEpisodeNumber(`${episodeTitle ?? ''} ${parsed.pathname}`);
-  const seasonNumber = seasonTitle ? extractSeasonNumber(seasonTitle) : undefined;
+  const seasonNumber = extractSeasonNumber(seasonTitle ?? '');
   const titleText = buildTitleText(seriesTitle, episodeTitle, titleFallback, parsed.href);
-
-  if (!siteMediaId || isBlockedPageTitle(titleFallback, titleText, episodeTitle)) {
-    return null;
-  }
-
-  console.debug('Extracted Crunchyroll episode metadata:', {
-    siteMediaId,
-    titleText,
-    seriesTitle,
-    episodeTitle,
-    episodeNumber,
-    seasonTitle,
-    seasonNumber,
-  });
+  const providerSeriesId = extractProviderSeriesId(doc, parsed.href);
+  const nextEpisode = extractNextEpisode(doc, parsed.href);
 
   return {
-    siteId: SiteIds.Crunchyroll,
-    observedUrl: parsed.href,
-    siteMediaId,
+    titleFallback,
     titleText,
-    seriesTitle,
     episodeTitle,
-    episodeNumber: episodeNumber ?? undefined,
-    seasonTitle,
-    seasonNumber,
-    progressHint: episodeNumber,
-    extensionVersion: EXTENSION_VERSION,
+    observation: {
+      siteId: SiteIds.Crunchyroll,
+      observedUrl: parsed.href,
+      siteMediaId,
+      titleText,
+      seriesTitle,
+      episodeTitle,
+      episodeNumber: episodeNumber ?? undefined,
+      seasonTitle,
+      seasonNumber,
+      providerSeriesId,
+      nextEpisodeProviderId: nextEpisode?.providerId,
+      nextEpisodeUrl: nextEpisode?.url,
+      nextEpisodeTitle: nextEpisode?.title,
+      nextEpisodeNumber: nextEpisode?.episodeNumber,
+      progressHint: episodeNumber,
+      extensionVersion: EXTENSION_VERSION,
+    },
   };
+}
+
+function extractEpisodeTitle(doc: DocumentLike, fallback: string): string | undefined {
+  return extractTextFromDom(doc, EPISODE_SELECTORS) ?? parseEpisodeTitleFromPageTitle(fallback);
+}
+
+function extractSeriesTitle(doc: DocumentLike, fallback: string): string | undefined {
+  return extractTextFromDom(doc, SERIES_SELECTORS) ?? parseSeriesTitleFromPageTitle(fallback);
 }
 
 function isBlockedPageTitle(
@@ -232,6 +257,25 @@ function createMediaObservationFromMetadata(
   };
 }
 
+function refreshDestinationMetadata(
+  doc: DocumentLike,
+  metadata: CrunchyrollEpisodeMetadata,
+): CrunchyrollEpisodeMetadata {
+  const refreshed = extractCrunchyrollEpisodeMetadata(doc, metadata.observedUrl);
+  if (!refreshed || refreshed.siteMediaId !== metadata.siteMediaId) return metadata;
+
+  return {
+    ...metadata,
+    providerSeriesId: refreshed.providerSeriesId ?? metadata.providerSeriesId,
+    providerSeasonId: refreshed.providerSeasonId ?? metadata.providerSeasonId,
+    providerSequenceNumber: refreshed.providerSequenceNumber ?? metadata.providerSequenceNumber,
+    nextEpisodeProviderId: refreshed.nextEpisodeProviderId,
+    nextEpisodeUrl: refreshed.nextEpisodeUrl,
+    nextEpisodeTitle: refreshed.nextEpisodeTitle,
+    nextEpisodeNumber: refreshed.nextEpisodeNumber,
+  };
+}
+
 export function trackVideoProgress(
   doc: DocumentLike,
   metadata: CrunchyrollEpisodeMetadata,
@@ -267,7 +311,7 @@ export function trackVideoProgress(
     if (snapshot.watchProgressPercent / 100 >= threshold) {
       fired = true;
       onStatus?.({ type: 'threshold-reached', ...snapshot });
-      onThresholdReached(createMediaObservationFromMetadata(metadata, snapshot));
+      onThresholdReached(createMediaObservationFromMetadata(refreshDestinationMetadata(doc, metadata), snapshot));
     }
   };
 
@@ -295,6 +339,55 @@ function parseLocation(locationLike: LocationLike | string): LocationLike | null
       hostname: url.hostname,
       pathname: url.pathname,
     };
+  } catch {
+    return null;
+  }
+}
+
+function isCrunchyrollHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === 'crunchyroll.com' || normalized === 'www.crunchyroll.com';
+}
+
+function extractProviderSeriesId(doc: DocumentLike, baseUrl: string): string | undefined {
+  const link = findLink(doc, ['a[href*="/series/"]']);
+  const href = link?.getAttribute?.('href');
+  if (!href) return undefined;
+
+  const parsed = parseProviderUrl(href, baseUrl);
+  return parsed ? extractSeriesId(parsed.pathname) : undefined;
+}
+
+function extractNextEpisode(
+  doc: DocumentLike,
+  baseUrl: string,
+): { providerId: string; url: string; title?: string; episodeNumber?: number } | null {
+  const link = findLink(doc, NEXT_EPISODE_SELECTORS);
+  const href = link?.getAttribute?.('href');
+  if (!href) return null;
+
+  const parsed = parseProviderUrl(href, baseUrl);
+  const providerId = parsed ? extractEpisodeId(parsed.pathname) : undefined;
+  if (!parsed || !providerId) return null;
+
+  const title = link?.textContent?.trim() || undefined;
+  const episodeNumber = extractEpisodeNumber(`${title ?? ''} ${parsed.pathname}`) ?? undefined;
+  return { providerId, url: parsed.href, title, episodeNumber };
+}
+
+function findLink(doc: DocumentLike, selectors: string[]): TextElementLike | null {
+  for (const selector of selectors) {
+    const element = doc.querySelector(selector);
+    if (isTextElementLike(element) && typeof element.getAttribute === 'function') return element;
+  }
+
+  return null;
+}
+
+function parseProviderUrl(value: string, baseUrl: string): URL | null {
+  try {
+    const url = new URL(value, baseUrl);
+    return url.protocol === 'https:' && isCrunchyrollHost(url.hostname) ? url : null;
   } catch {
     return null;
   }

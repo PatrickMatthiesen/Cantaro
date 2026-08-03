@@ -8,12 +8,35 @@ export const SiteIds = {
 
 export type SiteId = (typeof SiteIds)[keyof typeof SiteIds];
 
+export interface ObservedProviderEpisode {
+  providerEpisodeId: string;
+  providerUrl: string;
+  episodeNumber: number;
+  episodeTitle?: string;
+}
+
+interface MediaEpisodeMetadataFields {
+  seriesTitle?: string;
+  episodeTitle?: string;
+  episodeNumber?: number;
+  seasonTitle?: string;
+  seasonNumber?: number;
+  providerSeriesId?: string;
+  providerSeasonId?: string;
+  providerSequenceNumber?: number;
+  nextEpisodeProviderId?: string;
+  nextEpisodeUrl?: string;
+  nextEpisodeTitle?: string;
+  nextEpisodeNumber?: number;
+  observedEpisodes?: ObservedProviderEpisode[];
+}
+
 /**
  * Structured observation emitted by a content-script adapter.
  * The backend owns all write decisions; the extension only observes and
  * forwards this payload — it never directly mutates provider progress.
  */
-export interface MediaObservation {
+export interface MediaObservation extends MediaEpisodeMetadataFields {
   /** Stable site identifier, e.g. "crunchyroll". */
   siteId: SiteId;
   /** Full URL of the observed page at the time of observation. */
@@ -22,16 +45,6 @@ export interface MediaObservation {
   siteMediaId?: string;
   /** Human-readable title text of the observed content (series + episode if available). */
   titleText: string;
-  /** Series title extracted from the media page when available. */
-  seriesTitle?: string;
-  /** Episode title extracted from the media page when available. */
-  episodeTitle?: string;
-  /** Episode number extracted from the media page when available. */
-  episodeNumber?: number;
-  /** Season title or label extracted from the media page when available. */
-  seasonTitle?: string;
-  /** Season number extracted from the media page when available. */
-  seasonNumber?: number;
   /** Progress hint extracted from the page, e.g. episode number. null when not determinable. */
   progressHint?: number | null;
   /** Watched percentage in the range 0-100 at the time the observation was emitted. */
@@ -47,16 +60,11 @@ export interface MediaObservation {
 }
 
 /** Backend DTO posted to Cantaro's media observations API. */
-export interface SubmitMediaObservationRequest {
+export interface SubmitMediaObservationRequest extends MediaEpisodeMetadataFields {
   siteIdentifier: SiteId;
   observedUrl: string;
   siteMediaId?: string;
   observedTitle: string;
-  seriesTitle?: string;
-  episodeTitle?: string;
-  episodeNumber?: number;
-  seasonTitle?: string;
-  seasonNumber?: number;
   progressHint?: string;
   watchProgressPercent?: number;
   durationSeconds?: number;
@@ -153,6 +161,14 @@ export function toSubmitMediaObservationRequest(
     episodeNumber: observation.episodeNumber,
     seasonTitle: observation.seasonTitle,
     seasonNumber: observation.seasonNumber,
+    providerSeriesId: observation.providerSeriesId,
+    providerSeasonId: observation.providerSeasonId,
+    providerSequenceNumber: observation.providerSequenceNumber,
+    nextEpisodeProviderId: observation.nextEpisodeProviderId,
+    nextEpisodeUrl: observation.nextEpisodeUrl,
+    nextEpisodeTitle: observation.nextEpisodeTitle,
+    nextEpisodeNumber: observation.nextEpisodeNumber,
+    observedEpisodes: observation.observedEpisodes,
     progressHint:
       observation.progressHint === null || observation.progressHint === undefined
         ? undefined

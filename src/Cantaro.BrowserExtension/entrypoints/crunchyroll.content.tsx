@@ -31,7 +31,10 @@ declare global {
 }
 
 export default defineContentScript({
-  matches: ['https://www.crunchyroll.com/watch/*'],
+  matches: [
+    'https://www.crunchyroll.com/watch/*',
+    'https://www.crunchyroll.com/*/watch/*',
+  ],
 
   main() {
     console.log('Cantaro: Crunchyroll watch-state tracker loaded');
@@ -357,7 +360,7 @@ function observePageChanges(onChange: () => void): () => void {
         lastHref = location.href;
       }
 
-      if (location.pathname.startsWith('/watch/')) {
+      if (extractEpisodeId(location.pathname)) {
         onChange();
       }
     }, 500);

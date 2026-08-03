@@ -20,6 +20,32 @@ namespace Cantaro.Api.Tests;
 public class MediaObservationsApiTests
 {
     [Fact]
+    public async Task Submit_RejectsUnboundedSeriesPageBatches()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var episodes = Enumerable.Range(1, 101)
+            .Select(number => new ObservedProviderEpisodeDto
+            {
+                ProviderEpisodeId = $"EPISODE{number}",
+                ProviderUrl = $"https://www.crunchyroll.com/watch/EPISODE{number}",
+                EpisodeNumber = number
+            })
+            .ToList();
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/series/SERIES1/show",
+            SiteMediaId = "SERIES1:season-1",
+            ObservedTitle = "Show Season 1",
+            ObservedEpisodes = episodes
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(fixture.Db.MediaObservations);
+    }
+
+    [Fact]
     public async Task Submit_PreservesStructuredPlaybackMetadataInRawPayload()
     {
         await using var fixture = await MediaObservationFixture.CreateAsync();
@@ -35,6 +61,20 @@ public class MediaObservationsApiTests
             EpisodeNumber = 7,
             SeasonTitle = "Season 1",
             SeasonNumber = 1,
+            ProviderSeriesId = "GYEXQKJG6",
+            NextEpisodeProviderId = "G31UXQ9K2",
+            NextEpisodeUrl = "https://www.crunchyroll.com/watch/G31UXQ9K2/episode-8",
+            NextEpisodeNumber = 8,
+            ObservedEpisodes =
+            [
+                new ObservedProviderEpisodeDto
+                {
+                    ProviderEpisodeId = "GYVNM7N6Y",
+                    ProviderUrl = "https://www.crunchyroll.com/watch/GYVNM7N6Y/episode-7",
+                    EpisodeNumber = 7,
+                    EpisodeTitle = "Like a Fairy Tale"
+                }
+            ],
             WatchProgressPercent = 85.5m,
             DurationSeconds = 1440m,
             PositionSeconds = 1231.2m,
@@ -55,6 +95,12 @@ public class MediaObservationsApiTests
         Assert.Equal(7, root.GetProperty("episodeNumber").GetInt32());
         Assert.Equal("Season 1", root.GetProperty("seasonTitle").GetString());
         Assert.Equal(1, root.GetProperty("seasonNumber").GetInt32());
+        Assert.Equal("GYEXQKJG6", root.GetProperty("providerSeriesId").GetString());
+        Assert.Equal("G31UXQ9K2", root.GetProperty("nextEpisodeProviderId").GetString());
+        Assert.Equal(8, root.GetProperty("nextEpisodeNumber").GetInt32());
+        var observedEpisode = root.GetProperty("observedEpisodes")[0];
+        Assert.Equal("GYVNM7N6Y", observedEpisode.GetProperty("providerEpisodeId").GetString());
+        Assert.Equal(7, observedEpisode.GetProperty("episodeNumber").GetInt32());
         Assert.Equal(85.5m, root.GetProperty("watchProgressPercent").GetDecimal());
         Assert.Equal(1440m, root.GetProperty("durationSeconds").GetDecimal());
         Assert.Equal(1231.2m, root.GetProperty("positionSeconds").GetDecimal());
@@ -188,6 +234,10 @@ public class MediaObservationsApiTests
             SiteMediaId = "GWDU8WDNQ",
             ObservedTitle = "The Genius Prince's Guide to Raising a Nation Out of Debt - E5 - A Diabolical Scheme",
             EpisodeNumber = 5,
+            ProviderSeriesId = "GYGENIUS1",
+            NextEpisodeProviderId = "NEXTGEN6",
+            NextEpisodeUrl = "https://www.crunchyroll.com/watch/NEXTGEN6/episode-6",
+            NextEpisodeNumber = 6,
             WatchProgressPercent = 85.01m,
             DurationSeconds = 1446.03m,
             PositionSeconds = 1229.25m,
@@ -208,6 +258,14 @@ public class MediaObservationsApiTests
         var persistedObservation = await fixture.Db.MediaObservations.SingleAsync(item => item.Id == existingObservation.Id);
         Assert.Equal("5", persistedObservation.ProgressHint);
         Assert.Equal(5, persistedObservation.ResolvedProgress);
+
+        var recordedEpisodes = await fixture.Db.MediaEpisodes
+            .Include(item => item.ProviderIdentities)
+            .OrderBy(item => item.EpisodeNumber)
+            .ToListAsync();
+        Assert.Equal([5, 6], recordedEpisodes.Select(item => item.EpisodeNumber));
+        Assert.Equal("GWDU8WDNQ", recordedEpisodes[0].ProviderIdentities.Single().ProviderEpisodeId);
+        Assert.Equal("NEXTGEN6", recordedEpisodes[1].ProviderIdentities.Single().ProviderEpisodeId);
     }
 
     [Fact]
@@ -313,6 +371,9 @@ public class MediaObservationsApiTests
                 db,
                 operationProcessor,
                 NullLogger<MediaObservationProgressService>.Instance);
+            var episodeIdentityService = new MediaEpisodeIdentityService(
+                db,
+                NullLogger<MediaEpisodeIdentityService>.Instance);
             var userManager = CreateUserManager(db);
 
             var controller = new MediaObservationsController(
@@ -320,6 +381,7 @@ public class MediaObservationsApiTests
                 userManager,
                 matchingService,
                 progressService,
+                episodeIdentityService,
                 registry ?? new EmptyMediaProviderRegistry(),
                 NullLogger<MediaObservationsController>.Instance);
 

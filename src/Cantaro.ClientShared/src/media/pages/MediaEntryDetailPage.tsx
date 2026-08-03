@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   CircleCheck,
   Clock3,
+  ExternalLink,
   Flame,
   Heart,
   Minus,
@@ -32,6 +33,9 @@ import {
 import type {
   MediaLibraryEntryDetailDto,
   MediaLibraryImportEventDto,
+  MediaContinueWatchingDto,
+  MediaEpisodeCatalogDto,
+  MediaEpisodeDestinationDto,
   MediaProviderCharacterCreditDto,
   MediaProviderLinkSummaryDto,
 } from '../services/mediaApi';
@@ -45,7 +49,17 @@ const NORMALIZED_STATUSES = [
   { value: 'repeating', label: 'Rewatching / Rereading' },
 ];
 
-const DETAIL_TABS = ['Overview', 'Progress', 'Providers', 'Franchise', 'Characters', 'Details'];
+const DETAIL_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'episodes', label: 'Episodes' },
+  { id: 'progress', label: 'Progress' },
+  { id: 'providers', label: 'Providers' },
+  { id: 'franchise', label: 'Franchise' },
+  { id: 'characters', label: 'Characters' },
+  { id: 'details', label: 'Details' },
+] as const;
+
+type DetailTabId = (typeof DETAIL_TABS)[number]['id'];
 
 interface StatusDraft {
   selectedStatus: string;
@@ -61,6 +75,16 @@ interface ProgressSummary {
   total?: number;
   nextLabel: string;
 }
+
+type ContinueWatchingState =
+  | { status: 'loading' }
+  | { status: 'loaded'; value: MediaContinueWatchingDto }
+  | { status: 'error' };
+
+type EpisodeCatalogState =
+  | { status: 'loading' }
+  | { status: 'loaded'; value: MediaEpisodeCatalogDto }
+  | { status: 'error' };
 
 interface MediaEntryDetailPageProps {
   libraryEntryId: string;
@@ -82,6 +106,8 @@ interface MediaEntryDetailContentProps {
   progressChapters: number | undefined;
   progressVolumes: number | undefined;
   selectedStatus: string;
+  continueWatching: ContinueWatchingState;
+  episodeCatalog: EpisodeCatalogState;
   onNavigateBack: () => void;
   onLoadEntry: () => Promise<void>;
   onSetShowLinkDialog: (visible: boolean) => void;
@@ -92,6 +118,7 @@ interface MediaEntryDetailContentProps {
   onRefreshProgress: () => void;
   onSaveStatus: () => void;
   onUnlink: (providerId: string) => void;
+  onReloadEpisodes: () => void;
 }
 
 interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProps, 'entry'> {
@@ -269,6 +296,70 @@ function useProviderAvailability(entry: MediaLibraryEntryDetailDto | null) {
   }, [entry]);
 
   return availabilityByProviderLink;
+}
+
+function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
+  if (state.status !== 'loaded') return state.status;
+  return state.value.episodes
+    .map((episode) => `${episode.episodeNumber}:${episode.url ?? ''}:${episode.hasConflict}`)
+    .join('|');
+}
+
+function useContinueWatching(
+  entry: MediaLibraryEntryDetailDto | null,
+  episodeCatalog: EpisodeCatalogState,
+): ContinueWatchingState {
+  const [state, setState] = useState<ContinueWatchingState>({ status: 'loading' });
+  const entryId = entry?.id;
+  const persistedProgress = entry?.progressEpisodes;
+  const episodeCatalogRevision = getEpisodeCatalogRevision(episodeCatalog);
+
+  useEffect(() => {
+    if (!entryId || episodeCatalog.status === 'loading') {
+      setState({ status: 'loading' });
+      return;
+    }
+
+    let isCancelled = false;
+    setState({ status: 'loading' });
+
+    void mediaApi.getContinueWatching(entryId)
+      .then((value) => {
+        if (!isCancelled) setState({ status: 'loaded', value });
+      })
+      .catch(() => {
+        if (!isCancelled) setState({ status: 'error' });
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [entryId, persistedProgress, episodeCatalog.status, episodeCatalogRevision]);
+
+  return state;
+}
+
+function useEpisodeCatalog(entry: MediaLibraryEntryDetailDto | null) {
+  const [state, setState] = useState<EpisodeCatalogState>({ status: 'loading' });
+  const entryId = entry?.id;
+
+  const reload = useCallback(() => {
+    if (!entryId) {
+      setState({ status: 'loading' });
+      return;
+    }
+
+    setState({ status: 'loading' });
+    void mediaApi.getEpisodes(entryId)
+      .then((value) => setState({ status: 'loaded', value }))
+      .catch(() => setState({ status: 'error' }));
+  }, [entryId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { state, reload };
 }
 
 function useRemoteEntryRefresh(
@@ -639,14 +730,6 @@ function getStatusSaveLabel(isSavingStatus: boolean) {
   return isSavingStatus ? 'Saving...' : 'Save progress';
 }
 
-function isStatusSaveDisabled(
-  hasStatusChanged: boolean,
-  isSavingStatus: boolean,
-  isRefreshingProgress: boolean,
-) {
-  return [!hasStatusChanged, isSavingStatus, isRefreshingProgress].some(Boolean);
-}
-
 function isStatusRefreshDisabled(
   canRefreshProgress: boolean,
   isSavingStatus: boolean,
@@ -969,31 +1052,214 @@ function ProgressCockpit(props: Pick<
   );
 }
 
+function SaveProgressAction({
+  isSavingStatus,
+  isRefreshingProgress,
+  onSaveStatus,
+}: {
+  isSavingStatus: boolean;
+  isRefreshingProgress: boolean;
+  onSaveStatus: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="media-detail-primary-action"
+      onClick={onSaveStatus}
+      disabled={isSavingStatus || isRefreshingProgress}
+      aria-busy={isSavingStatus}
+    >
+      <Save aria-hidden />
+      <span>{getStatusSaveLabel(isSavingStatus)}</span>
+    </button>
+  );
+}
+
+function getContinueWatchingLabel(state: ContinueWatchingState): string {
+  if (state.status === 'loading') return 'Finding episode...';
+  if (state.status === 'error') return "Couldn't load Crunchyroll link";
+
+  const labels: Record<Exclude<MediaContinueWatchingDto['outcome'], 'direct'>, string> = {
+    series_fallback: 'Open series on Crunchyroll',
+    completed: 'Completed',
+    conflict: 'Episode link needs review',
+    unavailable: 'Crunchyroll link not observed yet',
+  };
+  return state.value.outcome === 'direct'
+    ? `Continue episode ${state.value.episodeNumber ?? ''}`.trim()
+    : labels[state.value.outcome];
+}
+
+function getContinueDestination(state: ContinueWatchingState): MediaContinueWatchingDto | null {
+  if (state.status !== 'loaded') return null;
+  if (state.value.outcome === 'direct') return state.value;
+  if (state.value.outcome === 'series_fallback') return state.value;
+  return null;
+}
+
+function normalizeCrunchyrollSeriesUrl(value?: string): string | null {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    const isCrunchyroll = url.hostname === 'crunchyroll.com' || url.hostname === 'www.crunchyroll.com';
+    const isSeriesPath = /^\/series\/[A-Z0-9]+(?:\/[^/?#]+)?\/?$/i.test(url.pathname);
+    if (url.protocol !== 'https:' || !isCrunchyroll || !isSeriesPath) return null;
+    return `https://www.crunchyroll.com${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+function getCrunchyrollSeriesUrl(availabilityByProviderLink: ProviderAvailabilityMap): string | null {
+  for (const state of Object.values(availabilityByProviderLink)) {
+    if (state.status !== 'loaded') continue;
+    const link = state.links.find((candidate) => candidate.serviceId.toLowerCase() === 'crunchyroll');
+    const url = link ? normalizeCrunchyrollSeriesUrl(link.url) : null;
+    if (url) return url;
+  }
+
+  return null;
+}
+
+function selectContinueUrl(destination: MediaContinueWatchingDto | null, seriesUrl: string | null) {
+  if (destination?.url) return destination.url;
+  return destination?.outcome === 'series_fallback' ? seriesUrl : null;
+}
+
+function ContinueDestinationLink({
+  state,
+  destination,
+  url,
+}: {
+  state: ContinueWatchingState;
+  destination: MediaContinueWatchingDto | null;
+  url: string;
+}) {
+  const isEpisodeLink = destination?.outcome === 'direct';
+  const label = isEpisodeLink ? getContinueWatchingLabel(state) : 'Open series on Crunchyroll';
+
+  return (
+    <a
+      className="media-detail-primary-action"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {isEpisodeLink ? <Play aria-hidden /> : <ExternalLink aria-hidden />}
+      <span>{label}</span>
+    </a>
+  );
+}
+
+function ContinueUnavailableAction({ state }: { state: ContinueWatchingState }) {
+  return (
+    <button type="button" className="media-detail-primary-action" disabled>
+      <Play aria-hidden />
+      <span>{getContinueWatchingLabel(state)}</span>
+    </button>
+  );
+}
+
+const UPCOMING_RELEASE_OUTCOMES = new Set<MediaContinueWatchingDto['outcome']>([
+  'series_fallback',
+  'unavailable',
+]);
+
+function isFutureRelease(timestamp?: string): timestamp is string {
+  return Boolean(timestamp && Date.parse(timestamp) > Date.now());
+}
+
+function readReleaseEpisodeNumber(label?: string): number | null {
+  const value = /\b(?:episode|ep|e)\s*(\d+)\b/i.exec(label ?? '')?.[1];
+  return value ? Number(value) : null;
+}
+
+function getUpcomingRelease(
+  state: ContinueWatchingState,
+  nextReleaseAt?: string,
+  nextReleaseLabel?: string,
+) {
+  if (state.status !== 'loaded') return null;
+  if (!UPCOMING_RELEASE_OUTCOMES.has(state.value.outcome)) return null;
+  if (!isFutureRelease(nextReleaseAt)) return null;
+
+  const releaseEpisodeNumber = readReleaseEpisodeNumber(nextReleaseLabel);
+  if (releaseEpisodeNumber !== null && releaseEpisodeNumber !== state.value.episodeNumber) return null;
+
+  return formatNextReleaseDisplay(nextReleaseAt);
+}
+
+function ContinueWatchingAction({
+  state,
+  seriesUrl,
+  nextReleaseAt,
+  nextReleaseLabel,
+}: {
+  state: ContinueWatchingState;
+  seriesUrl: string | null;
+  nextReleaseAt?: string;
+  nextReleaseLabel?: string;
+}) {
+  const upcomingRelease = getUpcomingRelease(state, nextReleaseAt, nextReleaseLabel);
+  if (upcomingRelease) {
+    return (
+      <button
+        type="button"
+        className="media-detail-primary-action"
+        disabled
+        title={`${nextReleaseLabel ?? 'Next episode'} expected ${upcomingRelease.absolute}`}
+      >
+        <Clock3 aria-hidden />
+        <span>Come back {upcomingRelease.relative}</span>
+      </button>
+    );
+  }
+
+  const destination = getContinueDestination(state);
+  const url = selectContinueUrl(destination, seriesUrl);
+  if (url) return <ContinueDestinationLink state={state} destination={destination} url={url} />;
+
+  return <ContinueUnavailableAction state={state} />;
+}
+
 function ActionRail({
   hasStatusChanged,
   isSavingStatus,
   isRefreshingProgress,
   onSaveStatus,
   onLinkProvider,
+  continueWatching,
+  crunchyrollSeriesUrl,
+  nextReleaseAt,
+  nextReleaseLabel,
 }: {
   hasStatusChanged: boolean;
   isSavingStatus: boolean;
   isRefreshingProgress: boolean;
   onSaveStatus: () => void;
   onLinkProvider: () => void;
+  continueWatching: ContinueWatchingState;
+  crunchyrollSeriesUrl: string | null;
+  nextReleaseAt?: string;
+  nextReleaseLabel?: string;
 }) {
   return (
     <div className="media-detail-action-rail">
-      <button
-        type="button"
-        className="media-detail-primary-action"
-        onClick={onSaveStatus}
-        disabled={isStatusSaveDisabled(hasStatusChanged, isSavingStatus, isRefreshingProgress)}
-        aria-busy={isSavingStatus}
-      >
-        {hasStatusChanged ? <Save aria-hidden /> : <Play aria-hidden />}
-        <span>{hasStatusChanged ? getStatusSaveLabel(isSavingStatus) : 'Continue Watching'}</span>
-      </button>
+      {hasStatusChanged ? (
+        <SaveProgressAction
+          isSavingStatus={isSavingStatus}
+          isRefreshingProgress={isRefreshingProgress}
+          onSaveStatus={onSaveStatus}
+        />
+      ) : (
+        <ContinueWatchingAction
+          state={continueWatching}
+          seriesUrl={crunchyrollSeriesUrl}
+          nextReleaseAt={nextReleaseAt}
+          nextReleaseLabel={nextReleaseLabel}
+        />
+      )}
       <button type="button" className="media-detail-secondary-action" onClick={onLinkProvider}>
         <Plus aria-hidden />
         Add to Library
@@ -1005,15 +1271,230 @@ function ActionRail({
   );
 }
 
-function DetailTabs() {
+function DetailTabs({ activeTab, onChange }: { activeTab: DetailTabId; onChange: (tab: DetailTabId) => void }) {
   return (
-    <nav className="media-detail-tabs" aria-label="Media detail sections">
-      {DETAIL_TABS.map((tab, index) => (
-        <button key={tab} type="button" className={index === 0 ? 'is-active' : undefined}>
-          {tab}
+    <nav className="media-detail-tabs" aria-label="Media detail sections" role="tablist">
+      {DETAIL_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          id={`media-detail-tab-${tab.id}`}
+          aria-controls={`media-detail-panel-${tab.id}`}
+          aria-selected={activeTab === tab.id}
+          className={activeTab === tab.id ? 'is-active' : undefined}
+          onClick={() => onChange(tab.id)}
+        >
+          {tab.label}
         </button>
       ))}
     </nav>
+  );
+}
+
+function getEpisodeRows(entry: MediaLibraryEntryDetailDto, episodes: MediaEpisodeDestinationDto[]) {
+  const knownNumbers = episodes.map((episode) => episode.episodeNumber);
+  const episodeCount = entry.title.episodeCount ?? Math.max(0, ...knownNumbers);
+  const numbers = episodeCount > 0 && episodeCount <= 100
+    ? Array.from({ length: episodeCount }, (_, index) => index + 1)
+    : [...new Set([...knownNumbers, (entry.progressEpisodes ?? 0) + 1])].sort((left, right) => left - right);
+  const episodesByNumber = new Map(episodes.map((episode) => [episode.episodeNumber, episode]));
+
+  return numbers.map((episodeNumber) => ({
+    episodeNumber,
+    destination: episodesByNumber.get(episodeNumber),
+  }));
+}
+
+function getEpisodeDestinationLabel(destination?: MediaEpisodeDestinationDto) {
+  if (destination?.hasConflict) return 'Needs review';
+  if (destination?.url) return 'Link available';
+  return 'Not observed yet';
+}
+
+function getEpisodeProgressLabel(episodeNumber: number, watchedThrough: number, fallback: string) {
+  if (episodeNumber <= watchedThrough) return 'Watched';
+  if (episodeNumber === watchedThrough + 1) return 'Up next';
+  return fallback;
+}
+
+function EpisodeDestinationAction({
+  episodeNumber,
+  destination,
+  stateLabel,
+}: {
+  episodeNumber: number;
+  destination?: MediaEpisodeDestinationDto;
+  stateLabel: string;
+}) {
+  if (!destination?.url || destination.hasConflict) {
+    return <span className="media-detail-episode-state">{stateLabel}</span>;
+  }
+
+  return (
+    <a href={destination.url} target="_blank" rel="noopener noreferrer" aria-label={`Open episode ${episodeNumber} on Crunchyroll`}>
+      <Play aria-hidden />
+      Watch
+    </a>
+  );
+}
+
+function EpisodeRow({
+  episodeNumber,
+  destination,
+  watchedThrough,
+}: {
+  episodeNumber: number;
+  destination?: MediaEpisodeDestinationDto;
+  watchedThrough: number;
+}) {
+  const isNext = episodeNumber === watchedThrough + 1;
+  const stateLabel = getEpisodeDestinationLabel(destination);
+  const progressLabel = getEpisodeProgressLabel(episodeNumber, watchedThrough, stateLabel);
+
+  return (
+    <li className={`media-detail-episode-row ${isNext ? 'is-next' : ''}`}>
+      <div className="media-detail-episode-number" aria-hidden>{episodeNumber}</div>
+      <div className="media-detail-episode-copy">
+        <strong>{destination?.title || `Episode ${episodeNumber}`}</strong>
+        <span>{progressLabel}</span>
+      </div>
+      <EpisodeDestinationAction episodeNumber={episodeNumber} destination={destination} stateLabel={stateLabel} />
+    </li>
+  );
+}
+
+function EpisodeSectionHeading({
+  state,
+  catalog,
+  availableCount,
+  onRefresh,
+}: {
+  state: EpisodeCatalogState;
+  catalog: MediaEpisodeCatalogDto | null;
+  availableCount: number;
+  onRefresh: () => void;
+}) {
+  const isLoading = state.status === 'loading';
+  const summary = state.status === 'loaded'
+    ? `${availableCount} episode links collected`
+    : 'Loading collected episode links…';
+
+  return (
+    <div className="media-detail-episodes-heading">
+      <div>
+        <h3>Episodes</h3>
+        <p>{summary}</p>
+      </div>
+      <div className="media-detail-episodes-actions">
+        <button type="button" onClick={onRefresh} disabled={isLoading}>
+          <RefreshCcw className={isLoading ? 'media-detail-spin' : ''} aria-hidden />
+          Refresh links
+        </button>
+        {catalog?.seriesUrl ? (
+          <a href={catalog.seriesUrl} target="_blank" rel="noopener noreferrer">
+            <ExternalLink aria-hidden />
+            Open series on Crunchyroll
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function EpisodeSectionContent({
+  entry,
+  state,
+  rows,
+  onRefresh,
+}: {
+  entry: MediaLibraryEntryDetailDto;
+  state: EpisodeCatalogState;
+  rows: ReturnType<typeof getEpisodeRows>;
+  onRefresh: () => void;
+}) {
+  if (state.status === 'error') {
+    return (
+      <div className="media-detail-episode-empty" role="alert">
+        <p>Episode links could not be loaded.</p>
+        <button type="button" onClick={onRefresh}>Try again</button>
+      </div>
+    );
+  }
+
+  if (state.status === 'loaded' && rows.length === 0) {
+    return (
+      <div className="media-detail-episode-empty">
+        <p>No episode URLs have been observed for this title yet.</p>
+        <span>Visit its Crunchyroll series page with the Cantaro extension enabled, then refresh this tab.</span>
+      </div>
+    );
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <ol className="media-detail-episode-list">
+      {rows.map((row) => (
+        <EpisodeRow
+          key={row.episodeNumber}
+          episodeNumber={row.episodeNumber}
+          destination={row.destination}
+          watchedThrough={entry.progressEpisodes ?? 0}
+        />
+      ))}
+    </ol>
+  );
+}
+
+function getEpisodeSectionData(
+  entry: MediaLibraryEntryDetailDto,
+  state: EpisodeCatalogState,
+  fallbackSeriesUrl: string | null,
+) {
+  if (state.status !== 'loaded') {
+    return { catalog: null, rows: [], availableCount: 0 };
+  }
+
+  const catalog = {
+    ...state.value,
+    seriesUrl: state.value.seriesUrl ?? fallbackSeriesUrl ?? undefined,
+  };
+  return {
+    catalog,
+    rows: getEpisodeRows(entry, catalog.episodes),
+    availableCount: catalog.episodes.filter((episode) => episode.url && !episode.hasConflict).length,
+  };
+}
+
+function EpisodesSection({
+  entry,
+  state,
+  seriesUrl,
+  onRefresh,
+}: {
+  entry: MediaLibraryEntryDetailDto;
+  state: EpisodeCatalogState;
+  seriesUrl: string | null;
+  onRefresh: () => void;
+}) {
+  const { catalog, rows, availableCount } = getEpisodeSectionData(entry, state, seriesUrl);
+
+  return (
+    <section
+      className="media-detail-section media-detail-episodes"
+      role="tabpanel"
+      id="media-detail-panel-episodes"
+      aria-labelledby="media-detail-tab-episodes"
+    >
+      <EpisodeSectionHeading
+        state={state}
+        catalog={catalog}
+        availableCount={availableCount}
+        onRefresh={onRefresh}
+      />
+      <EpisodeSectionContent entry={entry} state={state} rows={rows} onRefresh={onRefresh} />
+    </section>
   );
 }
 
@@ -1053,7 +1534,7 @@ function ProviderSection({
 
   return (
     <section className="media-detail-section">
-      <SectionHeading title="Where to Watch" action={providerLinks.length > 3 ? `More ${hiddenCount}+` : undefined} />
+      <SectionHeading title="Linked providers" action={providerLinks.length > 3 ? `More ${hiddenCount}+` : undefined} />
       {providerLinks.length === 0 ? (
         <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
           <Plus aria-hidden />
@@ -1264,7 +1745,75 @@ function MetricCard({ icon, label, value, detail }: { icon: ReactNode; label: st
   );
 }
 
+function MediaDetailTabPanel({
+  activeTab,
+  props,
+  progressSummary,
+  crunchyrollSeriesUrl,
+}: {
+  activeTab: DetailTabId;
+  props: MediaEntryDetailContentProps;
+  progressSummary: ProgressSummary;
+  crunchyrollSeriesUrl: string | null;
+}) {
+  const panels: Record<DetailTabId, ReactNode> = {
+    overview: (
+      <div role="tabpanel" id="media-detail-panel-overview" aria-labelledby="media-detail-tab-overview">
+        <FranchiseSection entry={props.entry} />
+        <CharactersSection entry={props.entry} availabilityByProviderLink={props.availabilityByProviderLink} />
+        <div className="media-detail-overview-meta-grid">
+          <InformationSection entry={props.entry} />
+          <CommunitySection entry={props.entry} progressSummary={progressSummary} />
+        </div>
+      </div>
+    ),
+    episodes: (
+      <EpisodesSection
+        entry={props.entry}
+        state={props.episodeCatalog}
+        seriesUrl={crunchyrollSeriesUrl}
+        onRefresh={props.onReloadEpisodes}
+      />
+    ),
+    progress: (
+      <div role="tabpanel" id="media-detail-panel-progress" aria-labelledby="media-detail-tab-progress">
+        <CommunitySection entry={props.entry} progressSummary={progressSummary} />
+      </div>
+    ),
+    providers: (
+      <div role="tabpanel" id="media-detail-panel-providers" aria-labelledby="media-detail-tab-providers">
+        <ProviderSection
+          providerLinks={props.entry.providerLinks}
+          availabilityByProviderLink={props.availabilityByProviderLink}
+          unlinkingId={props.unlinkingId}
+          lastSyncedAt={props.entry.lastSyncedAt}
+          onLinkProvider={() => props.onSetShowLinkDialog(true)}
+          onUnlink={props.onUnlink}
+        />
+      </div>
+    ),
+    franchise: (
+      <div role="tabpanel" id="media-detail-panel-franchise" aria-labelledby="media-detail-tab-franchise">
+        <FranchiseSection entry={props.entry} />
+      </div>
+    ),
+    characters: (
+      <div role="tabpanel" id="media-detail-panel-characters" aria-labelledby="media-detail-tab-characters">
+        <CharactersSection entry={props.entry} availabilityByProviderLink={props.availabilityByProviderLink} />
+      </div>
+    ),
+    details: (
+      <div role="tabpanel" id="media-detail-panel-details" aria-labelledby="media-detail-tab-details">
+        <InformationSection entry={props.entry} />
+      </div>
+    ),
+  };
+
+  return panels[activeTab];
+}
+
 function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
+  const [activeTab, setActiveTab] = useState<DetailTabId>('overview');
   const mediaKind = props.entry.title.mediaKind;
   const progressSummary = getPrimaryProgressSummary(
     props.entry.title,
@@ -1273,6 +1822,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.progressVolumes,
   );
   const hasStatusChanged = getEntryStatusChanged(props);
+  const crunchyrollSeriesUrl = getCrunchyrollSeriesUrl(props.availabilityByProviderLink);
 
   return (
     <>
@@ -1294,23 +1844,19 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               isRefreshingProgress={props.isRefreshingProgress}
               onSaveStatus={props.onSaveStatus}
               onLinkProvider={() => props.onSetShowLinkDialog(true)}
+              continueWatching={props.continueWatching}
+              crunchyrollSeriesUrl={crunchyrollSeriesUrl}
+              nextReleaseAt={props.entry.nextReleaseAt}
+              nextReleaseLabel={props.entry.nextReleaseLabel}
             />
             <section className="media-detail-overview-card">
-              <DetailTabs />
-              <ProviderSection
-                providerLinks={props.entry.providerLinks}
-                availabilityByProviderLink={props.availabilityByProviderLink}
-                unlinkingId={props.unlinkingId}
-                lastSyncedAt={props.entry.lastSyncedAt}
-                onLinkProvider={() => props.onSetShowLinkDialog(true)}
-                onUnlink={props.onUnlink}
+              <DetailTabs activeTab={activeTab} onChange={setActiveTab} />
+              <MediaDetailTabPanel
+                activeTab={activeTab}
+                props={props}
+                progressSummary={progressSummary}
+                crunchyrollSeriesUrl={crunchyrollSeriesUrl}
               />
-              <FranchiseSection entry={props.entry} />
-              <CharactersSection entry={props.entry} availabilityByProviderLink={props.availabilityByProviderLink} />
-              <div className="media-detail-overview-meta-grid">
-                <InformationSection entry={props.entry} />
-                <CommunitySection entry={props.entry} progressSummary={progressSummary} />
-              </div>
             </section>
           </div>
         </div>
@@ -1381,6 +1927,8 @@ export function MediaEntryDetailPage({
     setSelectedStatus,
   } = useEntryDetailState(libraryEntryId);
   const availabilityByProviderLink = useProviderAvailability(entry);
+  const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
+  const continueWatching = useContinueWatching(entry, episodeCatalog);
   const { snackbar, showSnackbar } = useTimedSnackbar();
   useRemoteEntryRefresh(entry, reloadEntry, showSnackbar);
   const {
@@ -1432,6 +1980,8 @@ export function MediaEntryDetailPage({
       progressChapters={progressChapters}
       progressVolumes={progressVolumes}
       selectedStatus={selectedStatus}
+      continueWatching={continueWatching}
+      episodeCatalog={episodeCatalog}
       onSetShowLinkDialog={setShowLinkDialog}
       onSetProgressEpisodes={setProgressEpisodes}
       onSetProgressChapters={setProgressChapters}
@@ -1440,6 +1990,7 @@ export function MediaEntryDetailPage({
       onRefreshProgress={() => void handleRefreshFromProvider()}
       onSaveStatus={() => void handleSaveStatus()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
+      onReloadEpisodes={reloadEpisodes}
     />
   );
 }

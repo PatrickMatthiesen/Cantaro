@@ -53,6 +53,31 @@ public class SubmitMediaObservationRequest
 
     public int? SeasonNumber { get; set; }
 
+    [MaxLength(256)]
+    public string? ProviderSeriesId { get; set; }
+
+    [MaxLength(256)]
+    public string? ProviderSeasonId { get; set; }
+
+    public int? ProviderSequenceNumber { get; set; }
+
+    [MaxLength(256)]
+    public string? NextEpisodeProviderId { get; set; }
+
+    [MaxLength(2048)]
+    public string? NextEpisodeUrl { get; set; }
+
+    [MaxLength(512)]
+    public string? NextEpisodeTitle { get; set; }
+
+    public int? NextEpisodeNumber { get; set; }
+
+    /// <summary>
+    /// Episode destinations already rendered on a provider series page. The
+    /// extension submits one bounded batch for the season the user is viewing.
+    /// </summary>
+    public List<ObservedProviderEpisodeDto> ObservedEpisodes { get; set; } = [];
+
     /// <summary>
     /// Opaque progress hint extracted from the page (e.g., "Episode 5").
     /// </summary>
@@ -76,6 +101,23 @@ public class SubmitMediaObservationRequest
     /// </summary>
     [MaxLength(32)]
     public string? ExtensionVersion { get; set; }
+}
+
+public class ObservedProviderEpisodeDto
+{
+    [Required]
+    [MaxLength(256)]
+    public required string ProviderEpisodeId { get; set; }
+
+    [Required]
+    [MaxLength(2048)]
+    public required string ProviderUrl { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int EpisodeNumber { get; set; }
+
+    [MaxLength(512)]
+    public string? EpisodeTitle { get; set; }
 }
 
 /// <summary>

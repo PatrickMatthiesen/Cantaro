@@ -15,11 +15,13 @@ public class MediaLibraryController(
     ApplicationDbContext dbContext,
     MediaLibraryQueryService queryService,
     MediaLibraryLinkService linkService,
+    MediaEpisodeIdentityService episodeIdentityService,
     UserManager<User> userManager) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaLibraryQueryService _queryService = queryService;
     private readonly MediaLibraryLinkService _linkService = linkService;
+    private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
     private readonly UserManager<User> _userManager = userManager;
 
     /// <summary>
@@ -80,6 +82,44 @@ public class MediaLibraryController(
         return detail is null
             ? NotFound(new { error = "Media library entry not found." })
             : Ok(detail);
+    }
+
+    /// <summary>
+    /// Resolve the user's next canonical episode to a validated direct provider destination.
+    /// </summary>
+    [HttpGet("{libraryEntryId:guid}/continue-watching")]
+    public async Task<ActionResult<MediaContinueWatchingDto>> GetContinueWatching(
+        Guid libraryEntryId,
+        CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        var result = await _episodeIdentityService.ResolveContinueWatchingAsync(
+            userId,
+            libraryEntryId,
+            cancellationToken);
+
+        return result is null
+            ? NotFound(new { error = "Media library entry not found." })
+            : Ok(result);
+    }
+
+    /// <summary>
+    /// List the canonical episodes and validated provider destinations known for this library entry.
+    /// </summary>
+    [HttpGet("{libraryEntryId:guid}/episodes")]
+    public async Task<ActionResult<MediaEpisodeCatalogDto>> GetEpisodes(
+        Guid libraryEntryId,
+        CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        var result = await _episodeIdentityService.GetEpisodeCatalogAsync(
+            userId,
+            libraryEntryId,
+            cancellationToken);
+
+        return result is null
+            ? NotFound(new { error = "Media library entry not found." })
+            : Ok(result);
     }
 
     /// <summary>

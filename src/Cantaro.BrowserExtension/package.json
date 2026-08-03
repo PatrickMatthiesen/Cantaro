@@ -1,7 +1,7 @@
 {
   "name": "cantaro-browser-extension",
   "version": "0.1.0",
-  "description": "Cantaro browser extension for accelerating playlist sync",
+  "description": "Cantaro extension for music sync and rendered episode URL collection",
   "private": true,
   "type": "module",
   "scripts": {

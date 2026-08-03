@@ -74,7 +74,7 @@ function unknownProgressVisualTotal(released: number, dimension: string): number
     return released / OPEN_ENDED_PROGRESS_FRACTION;
 }
 
-export function progressSegments(entry: MediaLibraryListItemDto): LibraryEntryProgressSegments | null {
+function progressSegments(entry: MediaLibraryListItemDto): LibraryEntryProgressSegments | null {
     const config = progressConfig(entry);
     const total = config?.getTotal(entry);
     if (!config) {

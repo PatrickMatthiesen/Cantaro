@@ -12,6 +12,8 @@ import type {
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
     MediaLinkRequestDto,
+    MediaContinueWatchingDto,
+    MediaEpisodeCatalogDto,
     MediaObservationDto,
     MediaObservationSummaryDto,
     MediaProgressUpdateDto,
@@ -85,6 +87,22 @@ export class MediaApiClient {
         const response = await this.request(`/api/media/library/${encodeURIComponent(libraryEntryId)}`);
         await this.ensureOk(response, 'Failed to load media library entry');
         return response.json() as Promise<MediaLibraryEntryDetailDto>;
+    }
+
+    async getContinueWatching(libraryEntryId: string): Promise<MediaContinueWatchingDto> {
+        const response = await this.request(
+            `/api/media/library/${encodeURIComponent(libraryEntryId)}/continue-watching`,
+        );
+        await this.ensureOk(response, 'Failed to resolve the next episode');
+        return response.json() as Promise<MediaContinueWatchingDto>;
+    }
+
+    async getEpisodes(libraryEntryId: string): Promise<MediaEpisodeCatalogDto> {
+        const response = await this.request(
+            `/api/media/library/${encodeURIComponent(libraryEntryId)}/episodes`,
+        );
+        await this.ensureOk(response, 'Failed to load episode links');
+        return response.json() as Promise<MediaEpisodeCatalogDto>;
     }
 
     async linkProvider(libraryEntryId: string, request: MediaLinkRequestDto): Promise<void> {

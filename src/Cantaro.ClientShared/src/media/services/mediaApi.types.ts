@@ -92,6 +92,28 @@ export interface MediaLinkConflictDto {
     conflictingCanonicalTitle: string;
 }
 
+export interface MediaContinueWatchingDto {
+    outcome: 'direct' | 'series_fallback' | 'completed' | 'unavailable' | 'conflict';
+    episodeNumber?: number;
+    provider?: string;
+    url?: string;
+}
+
+export interface MediaEpisodeCatalogDto {
+    seriesProvider?: string;
+    seriesUrl?: string;
+    episodes: MediaEpisodeDestinationDto[];
+}
+
+export interface MediaEpisodeDestinationDto {
+    episodeNumber: number;
+    title?: string;
+    provider?: string;
+    url?: string;
+    seenCount: number;
+    hasConflict: boolean;
+}
+
 export interface MediaProviderAccountStatusDto {
     providerId: string;
     isConnected: boolean;

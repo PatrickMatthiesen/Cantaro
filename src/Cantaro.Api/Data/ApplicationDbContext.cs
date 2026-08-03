@@ -32,6 +32,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
     public DbSet<MediaTitle> MediaTitles => Set<MediaTitle>();
     public DbSet<MediaProviderLink> MediaProviderLinks => Set<MediaProviderLink>();
+    public DbSet<MediaEpisode> MediaEpisodes => Set<MediaEpisode>();
+    public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
     public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
@@ -487,6 +489,53 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany()
                 .HasForeignKey(e => e.LinkedByUserId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MediaEpisode>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new { e.MediaTitleId, e.EpisodeNumber })
+                .IsUnique();
+
+            entity.Property(e => e.Title).HasMaxLength(512);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_MediaEpisodes_EpisodeNumber",
+                "\"EpisodeNumber\" > 0"));
+
+            entity.HasOne(e => e.MediaTitle)
+                .WithMany(t => t.Episodes)
+                .HasForeignKey(e => e.MediaTitleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaEpisodeProviderIdentity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new { e.Provider, e.ProviderEpisodeId })
+                .IsUnique();
+
+            entity.HasIndex(e => new { e.MediaEpisodeId, e.Provider, e.HasConflict });
+
+            entity.Property(e => e.Provider).HasMaxLength(64);
+            entity.Property(e => e.ProviderSeriesId).HasMaxLength(256);
+            entity.Property(e => e.ProviderSeasonId).HasMaxLength(256);
+            entity.Property(e => e.ProviderEpisodeId).HasMaxLength(256);
+            entity.Property(e => e.ProviderUrlPath).HasMaxLength(1024);
+            entity.Property(e => e.SeenCount).HasDefaultValue(1);
+
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_MediaEpisodeProviderIdentities_SeenCount",
+                "\"SeenCount\" > 0"));
+
+            entity.HasOne(e => e.MediaEpisode)
+                .WithMany(e => e.ProviderIdentities)
+                .HasForeignKey(e => e.MediaEpisodeId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MediaLibraryEntry>(entity =>
