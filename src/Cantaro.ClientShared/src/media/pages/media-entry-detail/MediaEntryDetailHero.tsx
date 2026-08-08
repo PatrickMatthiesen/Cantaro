@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { CalendarDays, Clock3, Star, Tv } from 'lucide-react';
 import { DetailArtwork, SanitizedSynopsis } from '../../components/media-entry-detail/EntryDisplayPrimitives';
 import { SearchLinkDialog } from '../../components/SearchLinkDialog';
@@ -216,17 +216,5 @@ export function MediaHero({
         </div>
       </div>
     </section>
-  );
-}
-
-export function ProgressRing({ percent }: { percent: number }) {
-  return (
-    <div
-      className="media-detail-progress-ring"
-      style={{ '--media-detail-progress': `${percent * 3.6}deg` } as CSSProperties}
-      aria-label={`${percent}% complete`}
-    >
-      <span>{percent}%</span>
-    </div>
   );
 }

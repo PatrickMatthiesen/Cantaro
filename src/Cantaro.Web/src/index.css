@@ -1377,10 +1377,7 @@
 }
 
 .media-detail-progress-main {
-  display: grid;
-  grid-template-columns: 7.6rem minmax(0, 1fr);
-  align-items: center;
-  gap: 1.3rem;
+  min-width: 0;
 }
 
 .media-detail-progress-ring {
@@ -1454,6 +1451,7 @@
 .media-detail-progress-next-head {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 1rem;
 }
@@ -1545,7 +1543,7 @@
 .media-detail-score-row {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(12rem, 1fr) minmax(12rem, 0.8fr) auto;
+  grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 0.8fr);
   align-items: center;
   gap: 1rem;
   border-top: 1px solid rgba(226, 232, 240, 0.1);
@@ -1564,6 +1562,7 @@
 }
 
 .media-detail-score-row select {
+  min-width: 0;
   min-height: 2.8rem;
   border: 1px solid rgba(226, 232, 240, 0.14);
   border-radius: 14px;
@@ -1591,6 +1590,31 @@
   height: 1rem;
   color: #a78bfa;
   fill: none;
+}
+
+.media-detail-status-control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.media-detail-status-control select {
+  min-width: 0;
+  flex: 1;
+}
+
+.media-detail-score-row .media-detail-refresh-status {
+  width: 2.8rem;
+  min-width: 2.8rem;
+  justify-content: center;
+  padding: 0;
+}
+
+.media-detail-score-row .media-detail-refresh-status:not(:disabled):hover {
+  border-color: rgba(139, 92, 246, 0.42);
+  color: #7c3aed;
+  background: rgba(139, 92, 246, 0.1);
 }
 
 .media-detail-action-rail {
@@ -2385,20 +2409,18 @@
     text-align: left;
   }
 
-  .media-detail-progress-main,
   .media-detail-score-row,
   .media-detail-action-rail {
     grid-template-columns: 1fr;
   }
 
-  .media-detail-progress-ring {
-    margin: 0 auto;
-  }
-
-  .media-detail-score-row button,
   .media-detail-action-rail button,
   .media-detail-action-rail a {
     width: 100%;
+  }
+
+  .media-detail-score-row .media-detail-refresh-status {
+    width: 2.8rem;
   }
 }
 
@@ -2427,6 +2449,11 @@
   align-items: start;
 }
 
+.media-detail-progress {
+  min-width: 0;
+  margin-top: 1rem;
+}
+
 .media-detail-top-area {
   position: relative;
   min-width: 0;
@@ -2438,24 +2465,6 @@
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 1.25rem;
-}
-
-.media-detail-mobile-progress {
-  display: none;
-}
-
-.media-detail-desktop-progress {
-  display: block;
-}
-
-@media (width >= 64rem) {
-  .media-detail-desktop-progress {
-    position: absolute;
-    z-index: 3;
-    top: 1.25rem;
-    right: 1.25rem;
-    width: min(22rem, 32%);
-  }
 }
 
 .media-detail-shell {
@@ -2556,6 +2565,9 @@
 
 .media-detail-progress-card {
   display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   grid-template-columns: 1fr;
   gap: 1.15rem;
   margin: 0;
@@ -2571,7 +2583,7 @@
 }
 
 .media-detail-score-row {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 0.8fr);
   gap: 0.85rem;
 }
 
@@ -2837,12 +2849,8 @@
     grid-template-columns: 1fr;
   }
 
-  .media-detail-desktop-progress {
-    display: none;
-  }
-
-  .media-detail-mobile-progress {
-    display: block;
+  .media-detail-score-row {
+    grid-template-columns: 1fr;
   }
 
   .media-detail-side-column {
@@ -2898,27 +2906,12 @@
   .media-detail-progress-card {
     grid-template-columns: 1fr;
     gap: 1rem;
-    margin: -0.8rem 0.2rem 0;
+    margin: 0;
     padding: 1rem;
   }
 
   .media-detail-progress-main {
-    grid-template-columns: 5.4rem minmax(0, 1fr);
-    gap: 0.75rem;
-  }
-
-  .media-detail-progress-ring {
-    width: 5.4rem;
-    height: 5.4rem;
-  }
-
-  .media-detail-progress-ring::before {
-    width: 4.15rem;
-    height: 4.15rem;
-  }
-
-  .media-detail-progress-ring span {
-    font-size: 1.2rem;
+    min-width: 0;
   }
 
   .media-detail-progress-main strong {
@@ -2942,10 +2935,15 @@
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) 3.5rem;
   }
 
-  .media-detail-score-row button,
   .media-detail-action-rail button,
   .media-detail-action-rail a {
     width: auto;
+  }
+}
+
+@media (width < 42rem) {
+  .media-detail-score-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

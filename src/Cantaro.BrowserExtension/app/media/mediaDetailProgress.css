@@ -10,17 +10,15 @@
 
 .cantaro-extension-media .media-detail-progress-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
   margin: 0.75rem;
   padding: 0.85rem;
 }
 
 .cantaro-extension-media .media-detail-progress-main {
-  display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr);
-  align-items: center;
-  gap: 0.65rem;
+  min-width: 0;
 }
 
 .cantaro-extension-media .media-detail-progress-ring {
@@ -133,7 +131,7 @@
   flex-wrap: wrap;
 }
 
-.cantaro-extension-media .media-detail-score-row > div {
+.cantaro-extension-media .media-detail-score-row > .media-detail-score {
   margin-right: auto;
 }
 
@@ -145,6 +143,25 @@
 .cantaro-extension-media .media-detail-score-row select,
 .cantaro-extension-media .media-detail-score-row button {
   padding: 0 0.65rem;
+}
+
+.cantaro-extension-media .media-detail-status-control {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.cantaro-extension-media .media-detail-status-control select {
+  min-width: 0;
+  flex: 1;
+}
+
+.cantaro-extension-media .media-detail-score-row .media-detail-refresh-status {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  padding: 0;
 }
 
 .cantaro-extension-media .media-detail-score-row button,

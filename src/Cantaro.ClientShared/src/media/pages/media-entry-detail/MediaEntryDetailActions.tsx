@@ -19,13 +19,11 @@ import {
   clampProgressValue,
   getEntryStatusChanged,
   getProgressCapabilities,
-  getProgressPercent,
   getPrimaryProgressSummary,
   getRemainingLabel,
   getStatusSaveLabel,
   isStatusRefreshDisabled,
 } from './mediaEntryDetailModel';
-import { ProgressRing } from './MediaEntryDetailHero';
 import { getContinueLinkActions, type ContinueLinkAction } from './continueWatchingAction';
 import type {
   ContinueWatchingState,
@@ -87,7 +85,6 @@ function ProgressStepper({
           <Plus aria-hidden />
         </button>
       </div>
-      <p>{currentValue}{max ? ` / ${max}` : ''}</p>
     </div>
   );
 }
@@ -111,14 +108,11 @@ type ProgressCockpitProps = Pick<
 
 function ProgressSummaryBlock({
   progressSummary,
-  percent,
 }: {
   progressSummary: ReturnType<typeof getPrimaryProgressSummary>;
-  percent: number;
 }) {
   return (
     <div className="media-detail-progress-main">
-      <ProgressRing percent={percent} />
       <div>
         <p>{progressSummary.label}</p>
         <strong>{progressSummary.value ?? 0}{progressSummary.total ? ` / ${progressSummary.total}` : ''}</strong>
@@ -162,26 +156,30 @@ function ProgressControls({
 function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
   return (
     <div className="media-detail-score-row">
-      <div>
+      <div className="media-detail-score">
         <p>Your score</p>
         <div aria-label="User score unavailable">
           {[1, 2, 3, 4, 5].map((star) => <Star key={star} aria-hidden />)}
         </div>
       </div>
-      <select value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
-        {NORMALIZED_STATUSES.map((status) => (
-          <option key={status.value} value={status.value}>{status.label}</option>
-        ))}
-      </select>
-      <button
-        type="button"
-        onClick={props.onRefreshProgress}
-        disabled={isStatusRefreshDisabled(props.entry.isConnected, props.isSavingStatus, props.isRefreshingProgress)}
-        aria-busy={props.isRefreshingProgress}
-      >
-        <RefreshCcw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
-        Refresh
-      </button>
+      <div className="media-detail-status-control">
+        <select value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
+          {NORMALIZED_STATUSES.map((status) => (
+            <option key={status.value} value={status.value}>{status.label}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="media-detail-refresh-status"
+          onClick={props.onRefreshProgress}
+          disabled={isStatusRefreshDisabled(props.entry.isConnected, props.isSavingStatus, props.isRefreshingProgress)}
+          aria-busy={props.isRefreshingProgress}
+          aria-label="Refresh progress from provider"
+          title="Refresh progress from provider"
+        >
+          <RefreshCcw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
+        </button>
+      </div>
     </div>
   );
 }
@@ -194,17 +192,15 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
     props.progressChapters,
     props.progressVolumes,
   );
-  const percent = getProgressPercent(progressSummary);
   const hasStatusChanged = getEntryStatusChanged(props);
 
   return (
     <section className="media-detail-progress-card">
-      <ProgressSummaryBlock progressSummary={progressSummary} percent={percent} />
+      <ProgressSummaryBlock progressSummary={progressSummary} />
       <div className="media-detail-progress-next">
         <div className="media-detail-progress-next-head">
           <div>
-            <p>{progressSummary.nextLabel}</p>
-            <span>Update progress and sync when the change is ready.</span>
+            <p>{progressSummary.progressLabel}</p>
           </div>
           <ProgressSyncStatus hasStatusChanged={hasStatusChanged} />
         </div>

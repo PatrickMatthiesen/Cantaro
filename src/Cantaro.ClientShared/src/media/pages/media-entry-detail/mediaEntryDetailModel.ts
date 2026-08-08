@@ -47,7 +47,7 @@ export function getPrimaryProgressSummary(
       noun: 'chapters',
       value: progressChapters,
       total: title.chapterCount,
-      nextLabel: `Next chapter ${clampProgressValue((progressChapters ?? 0) + 1, title.chapterCount)}`,
+      progressLabel: `Read: Chapter ${progressChapters ?? 0}`,
     };
   }
 
@@ -57,7 +57,7 @@ export function getPrimaryProgressSummary(
       noun: 'volumes',
       value: progressVolumes,
       total: title.volumeCount,
-      nextLabel: `Next volume ${clampProgressValue((progressVolumes ?? 0) + 1, title.volumeCount)}`,
+      progressLabel: `Read: Volume ${progressVolumes ?? 0}`,
     };
   }
 
@@ -66,7 +66,7 @@ export function getPrimaryProgressSummary(
     noun: 'episodes',
     value: progressEpisodes,
     total: title.episodeCount,
-    nextLabel: `Next up: Episode ${clampProgressValue((progressEpisodes ?? 0) + 1, title.episodeCount)}`,
+    progressLabel: `Watched: Episode ${progressEpisodes ?? 0}`,
   };
 }
 

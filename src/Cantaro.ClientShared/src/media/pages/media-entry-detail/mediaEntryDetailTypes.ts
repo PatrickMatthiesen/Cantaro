@@ -29,7 +29,7 @@ export interface ProgressSummary {
   noun: string;
   value: number | undefined;
   total?: number;
-  nextLabel: string;
+  progressLabel: string;
 }
 
 export type ContinueWatchingState =
