@@ -13,6 +13,7 @@ interface SettingsPanelProps {
   sessionEmail: string | null;
   blurEmailAddress: boolean;
   injectLyricsOnYouTube: boolean;
+  verboseLogging: boolean;
   defaultApiBaseUrl: string;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
@@ -21,6 +22,7 @@ interface SettingsPanelProps {
   onApiBaseUrlChange: (value: string) => void;
   onWebBaseUrlChange: (value: string) => void;
   onInjectLyricsOnYouTubeChange: (value: boolean) => void;
+  onVerboseLoggingChange: (value: boolean) => void;
 }
 
 // fallow-ignore-next-line complexity
@@ -35,6 +37,7 @@ export function SettingsPanel({
   sessionEmail,
   blurEmailAddress,
   injectLyricsOnYouTube,
+  verboseLogging,
   defaultApiBaseUrl,
   onClose,
   onSubmit,
@@ -43,6 +46,7 @@ export function SettingsPanel({
   onApiBaseUrlChange,
   onWebBaseUrlChange,
   onInjectLyricsOnYouTubeChange,
+  onVerboseLoggingChange,
 }: SettingsPanelProps) {
   return (
     <div className="p-3">
@@ -72,6 +76,27 @@ export function SettingsPanel({
             <p className="mt-1 text-xs leading-5 text-content-muted">
               The extension follows your Cantaro theme preference, including system, light, and dark mode. Change it on Cantaro’s main settings page.
             </p>
+          </section>
+          <section className="rounded-xl border border-border-subtle bg-surface-subtle p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-content">Verbose logging</h3>
+                <p className="mt-1 text-xs leading-5 text-content-muted">
+                  Log Crunchyroll collector scans, DOM counts, extracted episode URLs, duplicate suppression, and delivery results. Warnings and errors are always logged.
+                </p>
+              </div>
+              <label className="relative mt-0.5 inline-flex shrink-0 cursor-pointer items-center">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={verboseLogging}
+                  onChange={(event) => onVerboseLoggingChange(event.target.checked)}
+                  disabled={loading}
+                />
+                <span className="h-6 w-11 rounded-full bg-border-strong transition peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus peer-disabled:cursor-not-allowed peer-disabled:opacity-60 after:absolute after:top-0.5 after:left-0.5 after:size-5 after:rounded-full after:bg-surface after:transition peer-checked:after:translate-x-5" aria-hidden />
+                <span className="sr-only">Enable verbose logging</span>
+              </label>
+            </div>
           </section>
           <section className="rounded-xl border border-border-subtle bg-surface-subtle p-4">
             <div className="flex items-start justify-between gap-4">

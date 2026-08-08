@@ -15,6 +15,7 @@ export interface ExtensionConfig {
     accessTokenExpiresAt: string;
     sessionEmail: string;
     injectLyricsOnYouTube: boolean;
+    verboseLogging: boolean;
 }
 
 export function normalizeApiBaseUrl(value: string | null | undefined): string {
@@ -69,6 +70,7 @@ export const emptyExtensionConfig: ExtensionConfig = {
     accessTokenExpiresAt: '',
     sessionEmail: '',
     injectLyricsOnYouTube: false,
+    verboseLogging: false,
 };
 
 export async function readExtensionConfig(): Promise<ExtensionConfig> {
@@ -80,6 +82,7 @@ export async function readExtensionConfig(): Promise<ExtensionConfig> {
         'accessTokenExpiresAt',
         'sessionEmail',
         'injectLyricsOnYouTube',
+        'verboseLogging',
     ]);
 
     return {
@@ -92,6 +95,7 @@ export async function readExtensionConfig(): Promise<ExtensionConfig> {
         accessTokenExpiresAt: typeof stored.accessTokenExpiresAt === 'string' ? stored.accessTokenExpiresAt : '',
         sessionEmail: typeof stored.sessionEmail === 'string' ? stored.sessionEmail : '',
         injectLyricsOnYouTube: stored.injectLyricsOnYouTube === true,
+        verboseLogging: stored.verboseLogging === true,
     };
 }
 
@@ -104,6 +108,7 @@ export async function saveExtensionConfig(config: ExtensionConfig): Promise<Exte
         accessTokenExpiresAt: config.accessTokenExpiresAt.trim(),
         sessionEmail: config.sessionEmail.trim(),
         injectLyricsOnYouTube: config.injectLyricsOnYouTube === true,
+        verboseLogging: config.verboseLogging === true,
     };
 
     await browser.storage.local.set({
@@ -114,19 +119,22 @@ export async function saveExtensionConfig(config: ExtensionConfig): Promise<Exte
         accessTokenExpiresAt: persistedConfig.accessTokenExpiresAt || null,
         sessionEmail: persistedConfig.sessionEmail || null,
         injectLyricsOnYouTube: persistedConfig.injectLyricsOnYouTube,
+        verboseLogging: persistedConfig.verboseLogging,
     });
 
     return persistedConfig;
 }
 
 export async function clearExtensionSession(apiBaseUrl?: string): Promise<ExtensionConfig> {
+    const currentConfig = await readExtensionConfig();
     return saveExtensionConfig({
         apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl) || DEFAULT_API_BASE_URL,
-        webBaseUrl: (await readExtensionConfig()).webBaseUrl,
+        webBaseUrl: currentConfig.webBaseUrl,
         accessToken: '',
         refreshToken: '',
         accessTokenExpiresAt: '',
         sessionEmail: '',
-        injectLyricsOnYouTube: (await readExtensionConfig()).injectLyricsOnYouTube,
+        injectLyricsOnYouTube: currentConfig.injectLyricsOnYouTube,
+        verboseLogging: currentConfig.verboseLogging,
     });
 }

@@ -65,6 +65,7 @@ export function createConfigUpdate(
   draftApiBaseUrl: string,
   draftWebBaseUrl: string,
   injectLyricsOnYouTube: boolean,
+  verboseLogging: boolean,
 ): { config: ExtensionConfig; apiBaseUrlChanged: boolean } {
   const apiBaseUrl = normalizeApiBaseUrl(draftApiBaseUrl) || DEFAULT_API_BASE_URL;
   const config = {
@@ -72,6 +73,7 @@ export function createConfigUpdate(
     apiBaseUrl,
     webBaseUrl: normalizeApiBaseUrl(draftWebBaseUrl) || emptyExtensionConfig.webBaseUrl,
     injectLyricsOnYouTube,
+    verboseLogging,
   } satisfies ExtensionConfig;
   const apiBaseUrlChanged = apiBaseUrl !== normalizeApiBaseUrl(savedConfig.apiBaseUrl);
   if (!apiBaseUrlChanged) return { config, apiBaseUrlChanged };
@@ -232,6 +234,7 @@ export function usePopupConfigState() {
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
   const [draftWebBaseUrl, setDraftWebBaseUrl] = useState(emptyExtensionConfig.webBaseUrl);
   const [draftInjectLyricsOnYouTube, setDraftInjectLyricsOnYouTube] = useState(false);
+  const [draftVerboseLogging, setDraftVerboseLogging] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [blurEmailAddress, setBlurEmailAddress] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -244,6 +247,7 @@ export function usePopupConfigState() {
     setDraftApiBaseUrl(config.apiBaseUrl);
     setDraftWebBaseUrl(config.webBaseUrl);
     setDraftInjectLyricsOnYouTube(config.injectLyricsOnYouTube);
+    setDraftVerboseLogging(config.verboseLogging);
     setSessionEmail(config.sessionEmail || null);
   }, []);
   return {
@@ -251,6 +255,7 @@ export function usePopupConfigState() {
     draftApiBaseUrl, setDraftApiBaseUrl,
     draftWebBaseUrl, setDraftWebBaseUrl,
     draftInjectLyricsOnYouTube, setDraftInjectLyricsOnYouTube,
+    draftVerboseLogging, setDraftVerboseLogging,
     sessionEmail, setSessionEmail,
     blurEmailAddress, setBlurEmailAddress,
     loading, setLoading,

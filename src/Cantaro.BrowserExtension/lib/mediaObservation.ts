@@ -140,6 +140,20 @@ export interface SubmitMediaObservationResponse {
   providerChoicesUnavailableReason?: string;
 }
 
+export type MediaObservationDelivery =
+  | 'submitted'
+  | 'queued_no_session'
+  | 'queued_send_failed';
+
+export interface MediaObservationDeliveryResult {
+  success: true;
+  delivery: MediaObservationDelivery;
+  observationId?: string;
+  matchStatus?: string;
+  wasDeduplicated?: boolean;
+  requiresResolution?: boolean;
+}
+
 export interface ResolveMediaObservationRequest {
   candidateId?: string;
   providerId?: string;

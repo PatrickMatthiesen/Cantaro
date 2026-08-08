@@ -41,16 +41,17 @@ function App() {
   const { activeTab, setActiveTab, hasSelectedTab, selectTab } = usePopupTabState();
   const {
     savedConfig, setSavedConfig,
-    draftApiBaseUrl, setDraftApiBaseUrl,
-    draftWebBaseUrl, setDraftWebBaseUrl,
-    draftInjectLyricsOnYouTube, setDraftInjectLyricsOnYouTube,
     sessionEmail, setSessionEmail,
     blurEmailAddress, setBlurEmailAddress,
     loading, setLoading,
+    settingsOpen, setSettingsOpen,
+    draftApiBaseUrl, setDraftApiBaseUrl,
+    draftWebBaseUrl, setDraftWebBaseUrl,
+    draftInjectLyricsOnYouTube, setDraftInjectLyricsOnYouTube,
+    draftVerboseLogging, setDraftVerboseLogging,
     isSigningIn, setIsSigningIn,
     isCheckingSession, setIsCheckingSession,
     isDisconnecting, setIsDisconnecting,
-    settingsOpen, setSettingsOpen,
     applyLoadedConfig,
   } = usePopupConfigState();
   const {
@@ -76,6 +77,7 @@ function App() {
     setDraftApiBaseUrl(persistedConfig.apiBaseUrl);
     setDraftWebBaseUrl(persistedConfig.webBaseUrl);
     setDraftInjectLyricsOnYouTube(persistedConfig.injectLyricsOnYouTube);
+    setDraftVerboseLogging(persistedConfig.verboseLogging);
     setSessionEmail(persistedConfig.sessionEmail || null);
     setMediaSessionKey((current) => current + 1);
     setSettingsOpen(false);
@@ -86,7 +88,13 @@ function App() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     try {
-      const update = createConfigUpdate(savedConfig, draftApiBaseUrl, draftWebBaseUrl, draftInjectLyricsOnYouTube);
+      const update = createConfigUpdate(
+        savedConfig,
+        draftApiBaseUrl,
+        draftWebBaseUrl,
+        draftInjectLyricsOnYouTube,
+        draftVerboseLogging,
+      );
       await ensureApiBaseUrlPermission(update.config.apiBaseUrl);
       await persistConfig(update.config, update.apiBaseUrlChanged
         ? 'API origin updated. Stored Cantaro session was cleared.'
@@ -167,7 +175,8 @@ function App() {
 
   const hasUnsavedChanges = draftApiBaseUrl !== savedConfig.apiBaseUrl
     || draftWebBaseUrl !== savedConfig.webBaseUrl
-    || draftInjectLyricsOnYouTube !== savedConfig.injectLyricsOnYouTube;
+    || draftInjectLyricsOnYouTube !== savedConfig.injectLyricsOnYouTube
+    || draftVerboseLogging !== savedConfig.verboseLogging;
   const mediaConfigured = isMediaConfigured(savedConfig);
   const trackingPaused = Boolean(trackingTimeout.disabledUntil && new Date(trackingTimeout.disabledUntil) > new Date());
 
@@ -198,6 +207,7 @@ function App() {
       sessionEmail,
       blurEmailAddress,
       injectLyricsOnYouTube: draftInjectLyricsOnYouTube,
+      verboseLogging: draftVerboseLogging,
       defaultApiBaseUrl: DEFAULT_API_BASE_URL,
       onClose: () => setSettingsOpen(false),
       onSubmit: handleSubmit,
@@ -206,6 +216,7 @@ function App() {
       onApiBaseUrlChange: setDraftApiBaseUrl,
       onWebBaseUrlChange: setDraftWebBaseUrl,
       onInjectLyricsOnYouTubeChange: setDraftInjectLyricsOnYouTube,
+      onVerboseLoggingChange: setDraftVerboseLogging,
     }}
     musicLibraryProps={{ configured: mediaConfigured, onSignIn: handleSignIn, isSigningIn }}
     setupCardProps={{ onOpenSettings: () => setSettingsOpen(true), onSignIn: handleSignIn, isSigningIn }}

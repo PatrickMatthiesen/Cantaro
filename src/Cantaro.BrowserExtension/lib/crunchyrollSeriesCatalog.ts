@@ -16,22 +16,80 @@ const WATCH_LINK_SELECTOR = 'a[href*="/watch/"]';
 const EPISODE_LINK_LABEL_RE = /^(?:play|watch again)\s+episode\s+\d+\b/i;
 const SEASON_LABEL_RE = /^(?:(?:ova|special)\s+)?season\s+\d+$/i;
 
+export type CrunchyrollSeriesExtractionIssue =
+  | 'invalid_series_url'
+  | 'missing_series_title'
+  | 'missing_season_title'
+  | 'no_rendered_episodes';
+
+export interface CrunchyrollSeriesExtractionDiagnostics {
+  issue?: CrunchyrollSeriesExtractionIssue;
+  pageUrl: string;
+  providerSeriesId?: string;
+  seriesTitle?: string;
+  seasonTitle?: string;
+  episodeCardCount: number;
+  watchLinkCount: number;
+  labelledWatchLinkCount: number;
+  observedEpisodeCount: number;
+}
+
+export interface CrunchyrollSeriesExtractionResult {
+  observation: MediaObservation | null;
+  diagnostics: CrunchyrollSeriesExtractionDiagnostics;
+}
+
+interface CrunchyrollSeriesPageState {
+  pageUrl: URL | null;
+  fallbackPageUrl: string;
+  providerSeriesId?: string;
+  seriesTitle?: string;
+  seasonTitle?: string;
+  observedEpisodes: ObservedProviderEpisode[];
+  episodeCardCount: number;
+  watchLinkCount: number;
+  labelledWatchLinkCount: number;
+}
+
 export function buildCrunchyrollSeriesObservation(
   doc: Document,
   locationLike: Location | URL | string,
 ): MediaObservation | null {
-  const pageUrl = parseSeriesPageUrl(locationLike);
-  if (!pageUrl) return null;
+  return inspectCrunchyrollSeriesPage(doc, locationLike).observation;
+}
 
-  const providerSeriesId = extractSeriesId(pageUrl.pathname);
-  const seriesTitle = readSeriesTitle(doc);
-  const seasonTitle = readSelectedSeasonTitle(doc);
-  const observedEpisodes = readRenderedEpisodes(doc, pageUrl);
-  if (!providerSeriesId || !seriesTitle || !seasonTitle || observedEpisodes.length === 0) return null;
+export function inspectCrunchyrollSeriesPage(
+  doc: Document,
+  locationLike: Location | URL | string,
+): CrunchyrollSeriesExtractionResult {
+  const state = readSeriesPageState(doc, locationLike);
+  const diagnostics = toExtractionDiagnostics(state);
+  const issue = getExtractionIssue(state);
+  if (issue) {
+    diagnostics.issue = issue;
+    return { observation: null, diagnostics };
+  }
 
+  return {
+    diagnostics,
+    observation: buildSeriesObservation(
+      state.pageUrl!,
+      state.providerSeriesId!,
+      state.seriesTitle!,
+      state.seasonTitle!,
+      state.observedEpisodes,
+    ),
+  };
+}
+
+function buildSeriesObservation(
+  pageUrl: URL,
+  providerSeriesId: string,
+  seriesTitle: string,
+  seasonTitle: string,
+  observedEpisodes: ObservedProviderEpisode[],
+): MediaObservation {
   const qualifiedTitle = qualifySeriesTitle(seriesTitle, seasonTitle);
-  const seasonNumber = seasonTitle ? extractSeasonNumber(seasonTitle) : undefined;
-
   return {
     siteId: SiteIds.Crunchyroll,
     observedUrl: pageUrl.href,
@@ -39,13 +97,61 @@ export function buildCrunchyrollSeriesObservation(
     titleText: qualifiedTitle,
     seriesTitle: qualifiedTitle,
     seasonTitle,
-    seasonNumber,
+    seasonNumber: extractSeasonNumber(seasonTitle),
     providerSeriesId,
     observedEpisodes,
     progressHint: null,
     observedAt: new Date().toISOString(),
     extensionVersion: EXTENSION_VERSION,
   };
+}
+
+function readSeriesPageState(
+  doc: Document,
+  locationLike: Location | URL | string,
+): CrunchyrollSeriesPageState {
+  const pageUrl = parseSeriesPageUrl(locationLike);
+  const links = Array.from(doc.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR));
+  return {
+    pageUrl,
+    fallbackPageUrl: readLocationHref(locationLike),
+    providerSeriesId: pageUrl ? extractSeriesId(pageUrl.pathname) ?? undefined : undefined,
+    seriesTitle: readSeriesTitle(doc),
+    seasonTitle: readSelectedSeasonTitle(doc),
+    observedEpisodes: pageUrl ? readRenderedEpisodes(doc, pageUrl) : [],
+    episodeCardCount: doc.querySelectorAll(EPISODE_CARD_SELECTOR).length,
+    watchLinkCount: links.length,
+    labelledWatchLinkCount: links.filter(isLabelledEpisodeLink).length,
+  };
+}
+
+function isLabelledEpisodeLink(link: HTMLAnchorElement): boolean {
+  return EPISODE_LINK_LABEL_RE.test(normalizeText(link.getAttribute('aria-label')) ?? '');
+}
+
+function toExtractionDiagnostics(state: CrunchyrollSeriesPageState): CrunchyrollSeriesExtractionDiagnostics {
+  return {
+    pageUrl: state.pageUrl?.href ?? state.fallbackPageUrl,
+    providerSeriesId: state.providerSeriesId,
+    seriesTitle: state.seriesTitle,
+    seasonTitle: state.seasonTitle,
+    episodeCardCount: state.episodeCardCount,
+    watchLinkCount: state.watchLinkCount,
+    labelledWatchLinkCount: state.labelledWatchLinkCount,
+    observedEpisodeCount: state.observedEpisodes.length,
+  };
+}
+
+function getExtractionIssue(state: CrunchyrollSeriesPageState): CrunchyrollSeriesExtractionIssue | undefined {
+  if (!state.pageUrl || !state.providerSeriesId) return 'invalid_series_url';
+  if (!state.seriesTitle) return 'missing_series_title';
+  if (!state.seasonTitle) return 'missing_season_title';
+  if (state.observedEpisodes.length === 0) return 'no_rendered_episodes';
+  return undefined;
+}
+
+function readLocationHref(locationLike: Location | URL | string): string {
+  return typeof locationLike === 'string' ? locationLike : locationLike.href;
 }
 
 export function seriesObservationFingerprint(observation: MediaObservation): string {

@@ -31,23 +31,53 @@ function getEpisodeProgressLabel(episodeNumber: number, watchedThrough: number) 
   return 'Not watched';
 }
 
+function getEpisodeDestinationAction(
+  episodeNumber: number,
+  destination?: MediaEpisodeDestinationDto,
+  fallbackUrl?: string,
+) {
+  if (destination?.url && !destination.hasConflict) {
+    return {
+      url: destination.url,
+      label: 'Watch',
+      ariaLabel: `Open episode ${episodeNumber} on Crunchyroll`,
+      icon: <Play aria-hidden />,
+    };
+  }
+  if (!fallbackUrl) return null;
+  return {
+    url: fallbackUrl,
+    label: 'Open',
+    ariaLabel: `Open the Crunchyroll series page for episode ${episodeNumber}`,
+    icon: <ExternalLink aria-hidden />,
+  };
+}
+
 function EpisodeDestinationAction({
   episodeNumber,
   destination,
   stateLabel,
+  fallbackUrl,
 }: {
   episodeNumber: number;
   destination?: MediaEpisodeDestinationDto;
   stateLabel: string;
+  fallbackUrl?: string;
 }) {
-  if (!destination?.url || destination.hasConflict) {
+  const action = getEpisodeDestinationAction(episodeNumber, destination, fallbackUrl);
+  if (!action) {
     return <span className="media-detail-episode-state">{stateLabel}</span>;
   }
 
   return (
-    <a href={destination.url} target="_blank" rel="noopener noreferrer" aria-label={`Open episode ${episodeNumber} on Crunchyroll`}>
-      <Play aria-hidden />
-      Watch
+    <a
+      href={action.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={action.ariaLabel}
+    >
+      {action.icon}
+      {action.label}
     </a>
   );
 }
@@ -56,10 +86,12 @@ function EpisodeRow({
   episodeNumber,
   destination,
   watchedThrough,
+  fallbackUrl,
 }: {
   episodeNumber: number;
   destination?: MediaEpisodeDestinationDto;
   watchedThrough: number;
+  fallbackUrl?: string;
 }) {
   const isNext = episodeNumber === watchedThrough + 1;
   const stateLabel = getEpisodeDestinationLabel(destination);
@@ -72,7 +104,12 @@ function EpisodeRow({
         <strong>{destination?.title || `Episode ${episodeNumber}`}</strong>
         <span>{progressLabel}</span>
       </div>
-      <EpisodeDestinationAction episodeNumber={episodeNumber} destination={destination} stateLabel={stateLabel} />
+      <EpisodeDestinationAction
+        episodeNumber={episodeNumber}
+        destination={destination}
+        stateLabel={stateLabel}
+        fallbackUrl={fallbackUrl}
+      />
     </li>
   );
 }
@@ -119,11 +156,13 @@ function EpisodeSectionContent({
   entry,
   state,
   rows,
+  fallbackUrl,
   onRefresh,
 }: {
   entry: MediaLibraryEntryDetailDto;
   state: EpisodeCatalogState;
   rows: ReturnType<typeof getEpisodeRows>;
+  fallbackUrl?: string;
   onRefresh: () => void;
 }) {
   if (state.status === 'error') {
@@ -154,6 +193,7 @@ function EpisodeSectionContent({
           episodeNumber={row.episodeNumber}
           destination={row.destination}
           watchedThrough={entry.progressEpisodes ?? 0}
+          fallbackUrl={fallbackUrl}
         />
       ))}
     </ol>
@@ -206,7 +246,13 @@ export function EpisodesSection({
         availableCount={availableCount}
         onRefresh={onRefresh}
       />
-      <EpisodeSectionContent entry={entry} state={state} rows={rows} onRefresh={onRefresh} />
+      <EpisodeSectionContent
+        entry={entry}
+        state={state}
+        rows={rows}
+        fallbackUrl={catalog?.seriesUrl}
+        onRefresh={onRefresh}
+      />
     </section>
   );
 }

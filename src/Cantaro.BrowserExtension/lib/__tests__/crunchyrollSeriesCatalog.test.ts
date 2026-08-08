@@ -2,6 +2,7 @@ import { parseHTML } from 'linkedom';
 import { describe, expect, it } from 'vitest';
 import {
   buildCrunchyrollSeriesObservation,
+  inspectCrunchyrollSeriesPage,
   seriesObservationFingerprint,
 } from '../crunchyrollSeriesCatalog';
 
@@ -119,6 +120,42 @@ describe('Crunchyroll series catalog extraction', () => {
       document,
       'https://crunchyrollx.com/series/SERIES1/my-show',
     )).toBeNull();
+  });
+
+  it('explains when rendered episode cards cannot produce safe destinations', () => {
+    const { document } = parseHTML(`
+      <h1>My Show</h1>
+      <div class="season-info"><span>Season 1</span><span>12 Episodes</span></div>
+      <article data-t="episode-card "><h3>E1 - Missing link</h3></article>
+      <a href="https://crunchyrollx.com/watch/UNSAFE/redirect" aria-label="Play Episode 2 - Redirect"></a>
+    `);
+
+    expect(inspectCrunchyrollSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/SERIES1/my-show',
+    ).diagnostics).toEqual({
+      issue: 'no_rendered_episodes',
+      pageUrl: 'https://www.crunchyroll.com/series/SERIES1/my-show',
+      providerSeriesId: 'SERIES1',
+      seriesTitle: 'My Show',
+      seasonTitle: 'Season 1',
+      episodeCardCount: 1,
+      watchLinkCount: 1,
+      labelledWatchLinkCount: 1,
+      observedEpisodeCount: 0,
+    });
+  });
+
+  it('distinguishes missing season metadata from missing episode links', () => {
+    const { document } = parseHTML(`
+      <h1>My Show</h1>
+      <a href="/watch/EP1/one" aria-label="Play Episode 1 - One"></a>
+    `);
+
+    expect(inspectCrunchyrollSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/SERIES1/my-show',
+    ).diagnostics.issue).toBe('missing_season_title');
   });
 
   it('fingerprints the season and rendered provider IDs', () => {

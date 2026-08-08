@@ -4,6 +4,7 @@ import { ensureExtensionAccessToken } from '../lib/cantaroAuthSession';
 import {
   toSubmitMediaObservationRequest,
   type MediaObservation,
+  type MediaObservationDeliveryResult,
   type MediaObservationDto,
   type MediaObservationMessage,
   type ResolveMediaObservationRequest,
@@ -51,8 +52,10 @@ const runtimeMessageHandlers: Record<string, RuntimeMessageHandler> = {
     return { success: true };
   },
   MEDIA_OBSERVATION: async (message, sender) => {
-    await handleMediaObservation((message as Extract<MediaObservationMessage, { type: 'MEDIA_OBSERVATION' }>).payload, sender.tab?.id);
-    return { success: true };
+    return await handleMediaObservation(
+      (message as Extract<MediaObservationMessage, { type: 'MEDIA_OBSERVATION' }>).payload,
+      sender.tab?.id,
+    );
   },
   DRAIN_MEDIA_OBSERVATION_QUEUE: async () => {
     await drainObservationQueue();
@@ -89,7 +92,10 @@ async function initialize() {
 // Media observation handling
 // ---------------------------------------------------------------------------
 
-async function handleMediaObservation(observation: MediaObservation, tabId?: number): Promise<void> {
+async function handleMediaObservation(
+  observation: MediaObservation,
+  tabId?: number,
+): Promise<MediaObservationDeliveryResult> {
   const config = await readExtensionConfig();
   console.log('Cantaro: preparing media observation for API', summarizeObservation(observation));
   const accessToken = await ensureExtensionAccessToken(config.apiBaseUrl);
@@ -98,7 +104,7 @@ async function handleMediaObservation(observation: MediaObservation, tabId?: num
     // Not authenticated yet — queue for later replay
     await observationQueue.enqueue(observation);
     console.log('Cantaro: queued media observation (no auth token)');
-    return;
+    return { success: true, delivery: 'queued_no_session' };
   }
 
   const response = await sendObservation(
@@ -110,10 +116,18 @@ async function handleMediaObservation(observation: MediaObservation, tabId?: num
   if (!response) {
     await observationQueue.enqueue(observation);
     console.log('Cantaro: queued media observation (send failed)');
-    return;
+    return { success: true, delivery: 'queued_send_failed' };
   }
 
   await handleObservationResponse(response, tabId);
+  return {
+    success: true,
+    delivery: 'submitted',
+    observationId: response.observationId,
+    matchStatus: response.matchStatus,
+    wasDeduplicated: response.wasDeduplicated,
+    requiresResolution: response.requiresResolution,
+  };
 }
 
 async function handleObservationResponse(response: SubmitMediaObservationResponse, tabId?: number): Promise<void> {
