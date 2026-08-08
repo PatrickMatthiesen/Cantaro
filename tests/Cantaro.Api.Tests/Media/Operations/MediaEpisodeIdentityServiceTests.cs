@@ -184,6 +184,56 @@ public class MediaEpisodeIdentityServiceTests
     }
 
     [Fact]
+    public async Task RecordCatalogObservation_RejectsEpisodesPastTrustedTitleCount()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(episodeCount: 12);
+        var payload = new SubmitMediaCatalogObservationRequest
+        {
+            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+            SeriesUrl = "https://www.crunchyroll.com/series/SERIES1/destination-test",
+            ProviderSeriesId = "SERIES1",
+            SeriesTitle = "Destination Test",
+            ProviderSeasonId = "SEASON1",
+            SeasonTitle = "Season 1",
+            SeasonNumber = 1,
+            Episodes = Enumerable.Range(1, 15)
+                .Select(number => new MediaCatalogEpisodeObservationDto
+                {
+                    ProviderEpisodeId = $"EPISODE{number}",
+                    ProviderUrl = $"https://www.crunchyroll.com/watch/EPISODE{number}/episode-{number}",
+                    EpisodeNumber = number
+                })
+                .ToList()
+        };
+        var now = DateTimeOffset.UtcNow;
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            SiteMediaId = "catalog:trusted-bound",
+            ObservedUrl = payload.SeriesUrl,
+            ObservedTitle = payload.SeriesTitle,
+            ObservedAt = now,
+            MatchStatus = MediaObservationStatuses.Matched,
+            MediaTitleId = fixture.TitleId,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        var recorded = await fixture.Service.RecordCatalogObservationAsync(
+            observation,
+            payload,
+            CancellationToken.None);
+
+        Assert.Equal(12, recorded);
+        Assert.Equal(12, await fixture.Db.MediaEpisodeProviderIdentities.CountAsync());
+        Assert.DoesNotContain(
+            fixture.Db.MediaEpisodeProviderIdentities,
+            identity => identity.ProviderEpisodeNumber > 12);
+    }
+
+    [Fact]
     public async Task RecordObservation_AppliesConfirmedOffsetAndRejectsUnsafeRenderedUrls()
     {
         await using var fixture = await EpisodeIdentityFixture.CreateAsync(episodeCount: 24);

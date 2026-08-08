@@ -228,17 +228,57 @@ public class MediaObservationMatchingService(
         string source)
     {
         var result = new List<MediaObservationCandidate>();
+        var candidateTitles = titles.DistinctBy(title => title.Id).ToList();
         var normalizedQueries = queryTitles
             .Select(NormalizeTitle)
             .Where(query => !string.IsNullOrWhiteSpace(query))
             .ToList();
+        var catalogEvidence = ReadCatalogEvidence(observation);
+        var ordinalSeasonTargetId = FindOrdinalSeasonTarget(
+            candidateTitles,
+            catalogEvidence,
+            TryReadRawSeriesTitle(observation.RawPayload));
 
-        foreach (var title in titles)
+        foreach (var title in candidateTitles)
         {
+            if (catalogEvidence?.HighestEpisodeNumber is int highestEpisodeNumber
+                && title.EpisodeCount is int episodeCount
+                && episodeCount < highestEpisodeNumber)
+            {
+                // A rendered provider episode is direct evidence that this
+                // observation cannot belong to a shorter AniList split title.
+                continue;
+            }
+
             var score = normalizedQueries
                 .Select(query => ComputeTitleScore(query, title))
                 .DefaultIfEmpty(0m)
                 .Max();
+
+            if (ordinalSeasonTargetId is not null)
+            {
+                // The provider's explicit season ordinal is stronger than the
+                // aggregate series title, which otherwise makes season one an
+                // exact-title winner for every Crunchyroll season.
+                score = title.Id == ordinalSeasonTargetId
+                    ? 0.98m
+                    : Math.Min(score, 0.94m);
+            }
+
+            if (catalogEvidence?.HighestEpisodeNumber is int observedEpisodeNumber
+                && title.EpisodeCount is int candidateEpisodeCount
+                && candidateEpisodeCount >= observedEpisodeNumber
+                && ordinalSeasonTargetId is null
+                && score >= LowConfidenceThreshold)
+            {
+                // Crunchyroll commonly groups several seasons under one series
+                // title while AniList stores each cour/season separately. Once
+                // the observed episode number rules out the exact base-title
+                // match, a related title that can actually contain the episode
+                // is materially stronger than title similarity alone.
+                score = Math.Max(score, Math.Min(0.94m, score + 0.45m));
+            }
+
             if (score < 0.01m)
             {
                 continue;
@@ -284,6 +324,79 @@ public class MediaObservationMatchingService(
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    private static CatalogEvidence? ReadCatalogEvidence(MediaObservation observation)
+    {
+        if (string.IsNullOrWhiteSpace(observation.RawPayload)
+            || observation.SiteMediaId?.StartsWith("catalog:", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return null;
+        }
+
+        try
+        {
+            var payload = JsonSerializer.Deserialize<ObservationRawPayload>(
+                observation.RawPayload,
+                RawPayloadJsonOptions);
+            var highestEpisodeNumber = payload?.Episodes?
+                .Where(episode => episode.EpisodeNumber > 0)
+                .Select(episode => episode.EpisodeNumber)
+                .DefaultIfEmpty()
+                .Max();
+            return highestEpisodeNumber > 0 || payload?.SeasonNumber is > 0
+                ? new CatalogEvidence(payload?.SeasonNumber, highestEpisodeNumber > 0 ? highestEpisodeNumber : null)
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static Guid? FindOrdinalSeasonTarget(
+        IReadOnlyCollection<MediaTitle> titles,
+        CatalogEvidence? evidence,
+        string? seriesTitle)
+    {
+        if (evidence?.SeasonNumber is not > 0 || string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return null;
+        }
+
+        var normalizedSeriesTitle = NormalizeTitle(seriesTitle);
+        var relatedTvTitles = titles
+            .Where(title => title.MediaKind == MediaKinds.Anime
+                && title.StartYear is not null
+                && IsTvSeries(title.CanonicalMetadata)
+                && ComputeTitleScore(normalizedSeriesTitle, title) >= LowConfidenceThreshold)
+            .OrderBy(title => title.StartYear)
+            .ThenBy(title => title.CanonicalTitle, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var seasonIndex = evidence.SeasonNumber.Value - 1;
+        return seasonIndex < relatedTvTitles.Count
+            ? relatedTvTitles[seasonIndex].Id
+            : null;
+    }
+
+    private static bool IsTvSeries(string? canonicalMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalMetadata))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(canonicalMetadata);
+            return !document.RootElement.TryGetProperty("format", out var format)
+                || string.Equals(format.GetString(), "TV", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return true;
         }
     }
 
@@ -439,5 +552,16 @@ public class MediaObservationMatchingService(
     private sealed class ObservationRawPayload
     {
         public string? SeriesTitle { get; set; }
+
+        public int? SeasonNumber { get; set; }
+
+        public List<ObservationRawEpisode>? Episodes { get; set; }
     }
+
+    private sealed class ObservationRawEpisode
+    {
+        public int EpisodeNumber { get; set; }
+    }
+
+    private sealed record CatalogEvidence(int? SeasonNumber, int? HighestEpisodeNumber);
 }

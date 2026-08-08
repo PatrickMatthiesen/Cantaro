@@ -9,13 +9,14 @@
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
-    "check": "bun run test:run && bun run build",
+    "check": "bun run typecheck && bun run test:run && bun run build",
     "check:fallow": "bunx fallow",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "postinstall": "wxt prepare",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@cantaro/client-shared": "workspace:*",

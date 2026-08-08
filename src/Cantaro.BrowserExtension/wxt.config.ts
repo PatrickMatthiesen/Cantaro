@@ -69,12 +69,6 @@ export default defineConfig({
       'https://*/*',
     ],
   },
-  webExt: {
-    // Avoid automation signals from WXT's Chromium dev runner on sites with bot checks.
-    chromiumArgs: [
-      '--disable-blink-features=AutomationControlled',
-    ],
-  },
   dev: {
     server: {
       port: 5174,

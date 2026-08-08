@@ -11,6 +11,9 @@ public static partial class MediaDestinationUrlPolicy
     [GeneratedRegex(@"^[A-Z0-9]+$", RegexOptions.IgnoreCase)]
     private static partial Regex CrunchyrollSeriesIdRegex();
 
+    [GeneratedRegex(@"^/(?:[a-z]{2}(?:-[a-z]{2})?/)?series/([A-Z0-9]+)(?:/.*)?$", RegexOptions.IgnoreCase)]
+    private static partial Regex CrunchyrollSeriesPathRegex();
+
     public static bool TryNormalizePath(
         string provider,
         string? observedUrl,
@@ -66,6 +69,36 @@ public static partial class MediaDestinationUrlPolicy
         }
 
         return $"https://www.crunchyroll.com/series/{providerSeriesId.Trim().ToUpperInvariant()}";
+    }
+
+    public static bool TryNormalizeSeriesUrl(
+        string provider,
+        string? observedUrl,
+        string? expectedSeriesId,
+        out string normalizedUrl)
+    {
+        normalizedUrl = string.Empty;
+        if (!string.Equals(provider, MediaObservationSiteIdentifiers.Crunchyroll, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(observedUrl)
+            || string.IsNullOrWhiteSpace(expectedSeriesId)
+            || !Uri.TryCreate(observedUrl, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !uri.IsDefaultPort
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !IsCrunchyrollHost(uri.DnsSafeHost))
+        {
+            return false;
+        }
+
+        var match = CrunchyrollSeriesPathRegex().Match(uri.AbsolutePath);
+        if (!match.Success
+            || !string.Equals(match.Groups[1].Value, expectedSeriesId.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        normalizedUrl = $"https://www.crunchyroll.com/series/{match.Groups[1].Value.ToUpperInvariant()}";
+        return true;
     }
 
     private static string? ExtractCrunchyrollEpisodeId(string path)

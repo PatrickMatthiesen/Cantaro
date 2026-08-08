@@ -48,9 +48,12 @@ public class MediaObservationsController(
         CancellationToken cancellationToken)
     {
         request.ObservedEpisodes ??= [];
-        if (request.ObservedEpisodes.Count > 100)
+        if (request.ObservedEpisodes.Count > MediaCatalogObservationLimits.MaximumEpisodesPerObservation)
         {
-            return BadRequest(new { error = "A series-page observation may contain at most 100 episodes." });
+            return BadRequest(new
+            {
+                error = $"A series-page observation may contain at most {MediaCatalogObservationLimits.MaximumEpisodesPerObservation} episodes."
+            });
         }
 
         var userId = await GetCurrentUserIdAsync();

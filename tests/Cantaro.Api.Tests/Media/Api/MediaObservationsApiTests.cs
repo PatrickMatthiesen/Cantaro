@@ -23,7 +23,7 @@ public class MediaObservationsApiTests
     public async Task Submit_RejectsUnboundedSeriesPageBatches()
     {
         await using var fixture = await MediaObservationFixture.CreateAsync();
-        var episodes = Enumerable.Range(1, 101)
+        var episodes = Enumerable.Range(1, MediaCatalogObservationLimits.MaximumEpisodesPerObservation + 1)
             .Select(number => new ObservedProviderEpisodeDto
             {
                 ProviderEpisodeId = $"EPISODE{number}",
