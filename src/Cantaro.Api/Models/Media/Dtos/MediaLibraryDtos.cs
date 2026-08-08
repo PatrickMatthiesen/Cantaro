@@ -91,17 +91,19 @@ public class MediaLinkRequestDto
     public required string ProviderMediaId { get; set; }
 
     /// <summary>
-    /// When true, allows stealing a provider link that is already associated with a
-    /// different canonical title. Without this flag a 409 Conflict is returned.
+    /// Confirms replacement of this title's existing identity for the same provider.
+    /// This never permits taking an identity from another canonical title.
     /// </summary>
-    public bool ForceRelink { get; set; }
+    public bool ConfirmReplacement { get; set; }
 }
 
 public class MediaLinkConflictDto
 {
     public required string Error { get; set; }
-    public Guid ConflictingMediaTitleId { get; set; }
-    public required string ConflictingCanonicalTitle { get; set; }
+    public required string Code { get; set; }
+    public Guid? ConflictingMediaTitleId { get; set; }
+    public string? ConflictingCanonicalTitle { get; set; }
+    public string? CurrentProviderMediaId { get; set; }
 }
 
 public class MediaContinueWatchingDto

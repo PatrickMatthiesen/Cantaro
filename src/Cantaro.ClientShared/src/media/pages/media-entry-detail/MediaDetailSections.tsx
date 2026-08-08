@@ -58,7 +58,7 @@ export function ProviderSection({
 
   return (
     <section className="media-detail-section">
-      <SectionHeading title="Linked providers" action={providerLinks.length > 3 ? `More ${hiddenCount}+` : undefined} />
+      <SectionHeading title="Linked providers" action="Manage links" onAction={onLinkProvider} />
       {providerLinks.length === 0 ? (
         <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
           <Plus aria-hidden />
@@ -98,11 +98,11 @@ export function ProviderSection({
   );
 }
 
-function SectionHeading({ title, action }: { title: string; action?: string }) {
+function SectionHeading({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
   return (
     <div className="media-detail-section-heading">
       <h3>{title}</h3>
-      {action ? <button type="button">{action}</button> : null}
+      {action ? <button type="button" onClick={onAction}>{action}</button> : null}
     </div>
   );
 }

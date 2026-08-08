@@ -13,6 +13,7 @@ import type {
 
 export interface SearchLinkDialogProps {
     libraryEntryId: string;
+    currentTitle: string;
     mediaKind: string;
     existingLinks: MediaProviderLinkSummaryDto[];
     onClose: () => void;
@@ -20,9 +21,8 @@ export interface SearchLinkDialogProps {
 }
 
 interface SearchDialogConflictBannerProps {
-    conflict: { providerMediaId: string; conflictInfo: MediaLinkConflictDto };
-    linkingId: string | null;
-    onForceRelink: (providerMediaId: string) => void;
+    conflict: { result: MediaProviderSearchResultDto; conflictInfo: MediaLinkConflictDto };
+    providerName: string;
     onCancel: () => void;
 }
 
@@ -31,15 +31,15 @@ interface SearchResultsListProps {
     query: string;
     linkingId: string | null;
     alreadyLinkedIds: Set<string>;
-    onLink: (providerMediaId: string) => void;
+    onLink: (result: MediaProviderSearchResultDto) => void;
 }
 
 interface LinkFeedbackState {
     linkingId: string | null;
-    conflict: { providerMediaId: string; conflictInfo: MediaLinkConflictDto } | null;
+    conflict: { result: MediaProviderSearchResultDto; conflictInfo: MediaLinkConflictDto } | null;
     linkError: string | null;
     setLinkingId: (linkingId: string | null) => void;
-    setConflict: (conflict: { providerMediaId: string; conflictInfo: MediaLinkConflictDto } | null) => void;
+    setConflict: (conflict: { result: MediaProviderSearchResultDto; conflictInfo: MediaLinkConflictDto } | null) => void;
     setLinkError: (linkError: string | null) => void;
     resetLinkState: () => void;
 }
@@ -48,21 +48,26 @@ function getErrorMessage(error: unknown, fallbackMessage: string): string {
     return error instanceof Error ? error.message : fallbackMessage;
 }
 
+function providerDisplayName(providerId: string): string {
+    return mediaProviderCatalog.find((provider) => provider.id === providerId)?.name ?? providerId;
+}
+
 function parseLinkConflict(error: unknown): MediaLinkConflictDto | null {
     if (!(error instanceof Error)) {
         return null;
     }
 
-    try {
-        return JSON.parse(error.message) as MediaLinkConflictDto;
-    } catch {
-        return null;
+    const responseBody = 'responseBody' in error ? error.responseBody : undefined;
+    if (responseBody && typeof responseBody === 'object' && 'code' in responseBody) {
+        return responseBody as MediaLinkConflictDto;
     }
+
+    return null;
 }
 
 function useLinkFeedbackState(): LinkFeedbackState {
     const [linkingId, setLinkingId] = useState<string | null>(null);
-    const [conflict, setConflict] = useState<{ providerMediaId: string; conflictInfo: MediaLinkConflictDto } | null>(null);
+    const [conflict, setConflict] = useState<{ result: MediaProviderSearchResultDto; conflictInfo: MediaLinkConflictDto } | null>(null);
     const [linkError, setLinkError] = useState<string | null>(null);
 
     const resetLinkState = useCallback(() => {
@@ -137,25 +142,32 @@ function useProviderLink(
     providerId: string,
     onLinked: () => void,
     feedback: LinkFeedbackState,
+    onReplacementRequired: (result: MediaProviderSearchResultDto) => void,
 ) {
-    const handleLink = useCallback(async (providerMediaId: string, forceRelink = false) => {
-        feedback.setLinkingId(providerMediaId);
+    const handleLink = useCallback(async (result: MediaProviderSearchResultDto, replaceExisting = false) => {
+        feedback.setLinkingId(result.providerMediaId);
         feedback.resetLinkState();
 
         try {
-            await mediaApi.linkProvider(libraryEntryId, { providerId, providerMediaId, forceRelink });
+            await mediaApi.linkProvider(libraryEntryId, {
+                providerId,
+                providerMediaId: result.providerMediaId,
+                confirmReplacement: replaceExisting,
+            });
             onLinked();
         } catch (linkFailure) {
             const parsedConflict = parseLinkConflict(linkFailure);
-            if (parsedConflict) {
-                feedback.setConflict({ providerMediaId, conflictInfo: parsedConflict });
+            if (parsedConflict?.code === 'replacement_confirmation_required') {
+                onReplacementRequired(result);
+            } else if (parsedConflict) {
+                feedback.setConflict({ result, conflictInfo: parsedConflict });
             } else {
                 feedback.setLinkError(getErrorMessage(linkFailure, 'Failed to link provider'));
             }
         } finally {
             feedback.setLinkingId(null);
         }
-    }, [feedback, libraryEntryId, onLinked, providerId]);
+    }, [feedback, libraryEntryId, onLinked, onReplacementRequired, providerId]);
 
     return handleLink;
 }
@@ -164,11 +176,12 @@ function useSearchLinkDialogState({
     libraryEntryId,
     mediaKind,
     onLinked,
-}: Pick<SearchLinkDialogProps, 'libraryEntryId' | 'mediaKind' | 'onLinked'>) {
+}: Pick<SearchLinkDialogProps, 'libraryEntryId' | 'mediaKind' | 'onLinked'>,
+onReplacementRequired: (result: MediaProviderSearchResultDto) => void) {
     const feedback = useLinkFeedbackState();
     const fields = useSearchFields(feedback.resetLinkState);
     const search = useProviderSearch(mediaKind, fields.providerId, fields.query, feedback.resetLinkState);
-    const handleLink = useProviderLink(libraryEntryId, fields.providerId, onLinked, feedback);
+    const handleLink = useProviderLink(libraryEntryId, fields.providerId, onLinked, feedback, onReplacementRequired);
 
     const selectProvider = useCallback((nextProviderId: string) => {
         fields.selectProvider(nextProviderId);
@@ -193,23 +206,18 @@ function useSearchLinkDialogState({
     };
 }
 
-function SearchDialogConflictBanner({ conflict, linkingId, onForceRelink, onCancel }: SearchDialogConflictBannerProps) {
+function SearchDialogConflictBanner({ conflict, providerName, onCancel }: SearchDialogConflictBannerProps) {
     return (
         <div className="rounded-xl bg-warning-surface px-4 py-3 text-sm">
-            <p className="font-semibold text-warning-content">This entry is already linked to another title</p>
+            <p className="font-semibold text-warning-content">This {providerName} title is already used elsewhere</p>
             <p className="mt-1 text-warning-content">
-                Currently linked to: <span className="font-medium">{conflict.conflictInfo.conflictingCanonicalTitle}</span>
+                <span className="font-medium">{conflict.result.title}</span> is currently linked to{' '}
+                <span className="font-medium">{conflict.conflictInfo.conflictingCanonicalTitle ?? 'another title'}</span> in Cantaro.
+                Cantaro will not move a provider identity away from another title here.
             </p>
             <div className="mt-2 flex gap-2">
-                <GradientButton
-                    gradient="from-amber-500 to-orange-500"
-                    onClick={() => onForceRelink(conflict.providerMediaId)}
-                    disabled={!!linkingId}
-                >
-                    Force relink
-                </GradientButton>
                 <GradientButton tone="soft" onClick={onCancel}>
-                    Cancel
+                    Keep existing links
                 </GradientButton>
             </div>
         </div>
@@ -244,21 +252,21 @@ function SearchResultPoster({ posterUrl, title }: Pick<MediaProviderSearchResult
 }
 
 function SearchResultAction({
-    providerMediaId,
+    result,
     linkingId,
     isLinked,
     onLink,
 }: {
-    providerMediaId: string;
     linkingId: string | null;
     isLinked: boolean;
-    onLink: (providerMediaId: string) => void;
+    onLink: (result: MediaProviderSearchResultDto) => void;
+    result: MediaProviderSearchResultDto;
 }) {
     if (isLinked) {
         return <span className="rounded-full bg-success-surface px-3 py-1 text-xs font-semibold text-success-content">Linked</span>;
     }
 
-    const isLinking = linkingId === providerMediaId;
+    const isLinking = linkingId === result.providerMediaId;
 
     return (
         <GradientButton
@@ -266,10 +274,49 @@ function SearchResultAction({
             className="px-3 py-2 text-xs"
             disabled={!!linkingId}
             aria-busy={isLinking}
-            onClick={() => onLink(providerMediaId)}
+            onClick={() => onLink(result)}
         >
             {isLinking ? '…' : 'Link'}
         </GradientButton>
+    );
+}
+
+function ReplacementConfirmation({
+    currentTitle,
+    currentExternalId,
+    providerName,
+    result,
+    linkingId,
+    onConfirm,
+    onCancel,
+}: {
+    currentTitle: string;
+    currentExternalId: string;
+    providerName: string;
+    result: MediaProviderSearchResultDto;
+    linkingId: string | null;
+    onConfirm: () => void;
+    onCancel: () => void;
+}) {
+    return (
+        <div className="rounded-xl bg-warning-surface px-4 py-3 text-sm text-warning-content">
+            <p className="font-semibold">Replace the current {providerName} link?</p>
+            <dl className="mt-2 grid gap-1">
+                <div><dt className="inline font-medium">Current:</dt> <dd className="inline">{currentTitle} ({currentExternalId})</dd></div>
+                <div><dt className="inline font-medium">New:</dt> <dd className="inline">{result.title} ({result.providerMediaId})</dd></div>
+            </dl>
+            <p className="mt-2">This changes which {providerName} identity Cantaro uses for this title and for future synchronization.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+                <GradientButton
+                    gradient="from-amber-500 to-orange-500"
+                    onClick={onConfirm}
+                    disabled={!!linkingId}
+                >
+                    Replace {providerName} link
+                </GradientButton>
+                <GradientButton tone="soft" onClick={onCancel}>Keep current link</GradientButton>
+            </div>
+        </div>
     );
 }
 
@@ -312,7 +359,7 @@ function SearchResultsList({ results, query, linkingId, alreadyLinkedIds, onLink
                         </div>
                         <div className="shrink-0">
                             <SearchResultAction
-                                providerMediaId={result.providerMediaId}
+                                result={result}
                                 linkingId={linkingId}
                                 isLinked={isLinked}
                                 onLink={onLink}
@@ -326,7 +373,8 @@ function SearchResultsList({ results, query, linkingId, alreadyLinkedIds, onLink
 }
 
 // fallow-ignore-next-line complexity
-export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onClose, onLinked }: SearchLinkDialogProps) {
+export function SearchLinkDialog({ libraryEntryId, currentTitle, mediaKind, existingLinks, onClose, onLinked }: SearchLinkDialogProps) {
+    const [replacement, setReplacement] = useState<MediaProviderSearchResultDto | null>(null);
     const {
         providerId,
         query,
@@ -342,8 +390,10 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
         handleSearch,
         handleLink,
         clearConflict,
-    } = useSearchLinkDialogState({ libraryEntryId, mediaKind, onLinked });
+    } = useSearchLinkDialogState({ libraryEntryId, mediaKind, onLinked }, setReplacement);
     const alreadyLinkedIds = new Set(existingLinks.filter((link) => link.provider === providerId).map((link) => link.externalId));
+    const currentProviderLink = existingLinks.find((link) => link.provider === providerId);
+    const providerName = providerDisplayName(providerId);
 
     return (
         <div
@@ -407,9 +457,23 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                     {conflict ? (
                         <SearchDialogConflictBanner
                             conflict={conflict}
-                            linkingId={linkingId}
-                            onForceRelink={(providerMediaId) => void handleLink(providerMediaId, true)}
+                            providerName={providerName}
                             onCancel={clearConflict}
+                        />
+                    ) : null}
+                    {replacement ? (
+                        <ReplacementConfirmation
+                            currentTitle={currentTitle}
+                            currentExternalId={currentProviderLink?.externalId ?? ''}
+                            providerName={providerName}
+                            result={replacement}
+                            linkingId={linkingId}
+                            onConfirm={() => {
+                                const selectedResult = replacement;
+                                setReplacement(null);
+                                void handleLink(selectedResult, true);
+                            }}
+                            onCancel={() => setReplacement(null)}
                         />
                     ) : null}
                 </div>
@@ -421,7 +485,7 @@ export function SearchLinkDialog({ libraryEntryId, mediaKind, existingLinks, onC
                             query={query}
                             linkingId={linkingId}
                             alreadyLinkedIds={alreadyLinkedIds}
-                            onLink={(providerMediaId) => void handleLink(providerMediaId)}
+                            onLink={(result) => void handleLink(result)}
                         />
                     ) : (
                         <p className="py-8 text-center text-sm text-content-subtle">Searching…</p>

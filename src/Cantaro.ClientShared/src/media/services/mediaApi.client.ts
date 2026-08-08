@@ -67,7 +67,10 @@ export class MediaApiClient {
     private async ensureOk(response: Response, fallbackMessage: string): Promise<void> {
         if (response.ok) return;
         const body = await response.json().catch(() => ({ error: fallbackMessage }));
-        throw new Error(body.error || fallbackMessage);
+        throw Object.assign(new Error(body.error || fallbackMessage), {
+            status: response.status,
+            responseBody: body,
+        });
     }
 
     async getLibrary(params: MediaLibraryQueryParams = {}): Promise<MediaLibraryPageDto> {

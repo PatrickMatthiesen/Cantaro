@@ -21,6 +21,7 @@ import {
   ProviderSection,
 } from './MediaDetailSections';
 import { getEntryStatusChanged, getPrimaryProgressSummary } from './mediaEntryDetailModel';
+import { DetailTabs } from './DetailTabs';
 import {
   DETAIL_TABS,
   type DetailTabId,
@@ -29,26 +30,6 @@ import {
   type ProgressSummary,
 } from './mediaEntryDetailTypes';
 
-function DetailTabs({ activeTab, onChange }: { activeTab: DetailTabId; onChange: (tab: DetailTabId) => void }) {
-  return (
-    <nav className="media-detail-tabs" aria-label="Media detail sections" role="tablist">
-      {DETAIL_TABS.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          id={`media-detail-tab-${tab.id}`}
-          aria-controls={`media-detail-panel-${tab.id}`}
-          aria-selected={activeTab === tab.id}
-          className={activeTab === tab.id ? 'is-active' : undefined}
-          onClick={() => onChange(tab.id)}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </nav>
-  );
-}
 function MediaDetailTabPanel({
   activeTab,
   props,
@@ -147,7 +128,6 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               isSavingStatus={props.isSavingStatus}
               isRefreshingProgress={props.isRefreshingProgress}
               onSaveStatus={props.onSaveStatus}
-              onLinkProvider={() => props.onSetShowLinkDialog(true)}
               continueWatching={props.continueWatching}
               crunchyrollSeriesUrl={crunchyrollSeriesUrl}
               canonicalTitle={props.entry.title.canonicalTitle}
@@ -155,7 +135,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               nextReleaseLabel={props.entry.nextReleaseLabel}
             />
             <section className="media-detail-overview-card">
-              <DetailTabs activeTab={activeTab} onChange={setActiveTab} />
+              <DetailTabs tabs={DETAIL_TABS} activeTab={activeTab} idPrefix="media-detail" onChange={setActiveTab} />
               <MediaDetailTabPanel
                 activeTab={activeTab}
                 props={props}
@@ -170,6 +150,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
         showLinkDialog={props.showLinkDialog}
         libraryEntryId={props.libraryEntryId}
         mediaKind={mediaKind}
+        currentTitle={props.entry.title.canonicalTitle}
         existingLinks={props.entry.providerLinks}
         onClose={() => props.onSetShowLinkDialog(false)}
         onLinked={() => {

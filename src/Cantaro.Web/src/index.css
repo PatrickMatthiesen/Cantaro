@@ -1261,6 +1261,121 @@
   box-shadow: 0 20px 60px rgba(2, 6, 23, 0.28);
 }
 
+.media-detail-add-card {
+  align-content: start;
+}
+
+.media-detail-add-card h2 {
+  margin: 0.25rem 0 0;
+  color: #0f172a;
+  font-size: 1.2rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.media-detail-add-card > div > p:last-child {
+  margin: 0.45rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.media-detail-add-kicker,
+.media-detail-add-field span {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.media-detail-add-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.media-detail-add-field select {
+  min-height: 2.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  padding: 0 0.9rem;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.9);
+  font-weight: 850;
+}
+
+.media-detail-add-card .media-detail-primary-action {
+  min-height: 3rem;
+  border-radius: 14px;
+  font-weight: 900;
+}
+
+.media-detail-add-card .media-detail-primary-action svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.media-detail-add-error {
+  margin: 0;
+  color: var(--color-danger-content);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.media-detail-provider-id {
+  display: block;
+  margin-top: 0.25rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.media-detail-availability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.media-detail-availability-list a,
+.media-detail-availability-list span {
+  display: inline-flex;
+  min-height: 2.7rem;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  padding: 0 0.9rem;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.74);
+  font-size: 0.85rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.media-detail-availability-list a:hover {
+  border-color: rgba(124, 58, 237, 0.44);
+  color: #6d28d9;
+}
+
+:root[data-theme="dark"] .media-detail-add-card h2,
+:root[data-theme="dark"] .media-detail-add-field select {
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .media-detail-add-card > div > p:last-child,
+:root[data-theme="dark"] .media-detail-add-kicker,
+:root[data-theme="dark"] .media-detail-add-field span,
+:root[data-theme="dark"] .media-detail-provider-id {
+  color: rgba(226, 232, 240, 0.68);
+}
+
+:root[data-theme="dark"] .media-detail-add-field select,
+:root[data-theme="dark"] .media-detail-availability-list a,
+:root[data-theme="dark"] .media-detail-availability-list span {
+  border-color: rgba(226, 232, 240, 0.14);
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.72);
+}
+
 .media-detail-progress-main {
   display: grid;
   grid-template-columns: 7.6rem minmax(0, 1fr);
@@ -1480,7 +1595,7 @@
 
 .media-detail-action-rail {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.92fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
   margin-top: 1rem;
 }

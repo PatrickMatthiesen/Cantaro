@@ -33,7 +33,7 @@ public class MediaLibraryLinkServiceTests
 
         var service = MakeService(db);
         var result = await service.LinkProviderAsync(
-            user.Id, entry.Id, "anilist", "99999", forceRelink: false, CancellationToken.None);
+            user.Id, entry.Id, "anilist", "99999", confirmReplacement: true, CancellationToken.None);
 
         Assert.Equal(MediaLinkResultKind.Success, result.Kind);
 
@@ -70,7 +70,7 @@ public class MediaLibraryLinkServiceTests
 
         var service = MakeService(db);
         var result = await service.LinkProviderAsync(
-            user.Id, entry.Id, "anilist", "77777", forceRelink: false, CancellationToken.None);
+            user.Id, entry.Id, "anilist", "77777", confirmReplacement: true, CancellationToken.None);
 
         Assert.Equal(MediaLinkResultKind.AlreadyLinked, result.Kind);
         // Verification timestamp refreshed
@@ -111,7 +111,7 @@ public class MediaLibraryLinkServiceTests
 
         var service = MakeService(db);
         var result = await service.LinkProviderAsync(
-            user.Id, entryB.Id, "anilist", "55555", forceRelink: false, CancellationToken.None);
+            user.Id, entryB.Id, "anilist", "55555", confirmReplacement: false, CancellationToken.None);
 
         Assert.Equal(MediaLinkResultKind.ConflictingTitle, result.Kind);
         Assert.Equal(titleA.Id, result.ConflictingMediaTitleId);
@@ -123,7 +123,7 @@ public class MediaLibraryLinkServiceTests
     }
 
     [Fact]
-    public async Task LinkProviderAsync_ForceRelinkOverridesConflict()
+    public async Task LinkProviderAsync_ConfirmationCannotTakeIdentityFromAnotherTitle()
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -155,18 +155,18 @@ public class MediaLibraryLinkServiceTests
 
         var service = MakeService(db);
         var result = await service.LinkProviderAsync(
-            user.Id, entryB.Id, "anilist", "55555", forceRelink: true, CancellationToken.None);
+            user.Id, entryB.Id, "anilist", "55555", confirmReplacement: true, CancellationToken.None);
 
-        Assert.Equal(MediaLinkResultKind.Success, result.Kind);
+        Assert.Equal(MediaLinkResultKind.ConflictingTitle, result.Kind);
 
-        // Link now points to titleB
+        // Cross-title identities are never moved by the user-facing link operation.
         var link = await db.MediaProviderLinks.SingleAsync();
-        Assert.Equal(titleB.Id, link.MediaTitleId);
-        Assert.Equal(MediaMappingSources.UserConfirmed, link.LinkSource);
+        Assert.Equal(titleA.Id, link.MediaTitleId);
+        Assert.Equal(MediaMappingSources.Imported, link.LinkSource);
     }
 
     [Fact]
-    public async Task LinkProviderAsync_ForceRelinkReplacesExistingProviderLinkForTitle()
+    public async Task LinkProviderAsync_ConfirmedReplacementUpdatesSameTitleAndInitiatingEntry()
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -177,46 +177,66 @@ public class MediaLibraryLinkServiceTests
         db.Users.Add(user);
 
         var titleA = MakeTitle("Title A", now);
-        var titleB = MakeTitle("Title B", now);
-        db.MediaTitles.AddRange(titleA, titleB);
+        db.MediaTitles.Add(titleA);
         await db.SaveChangesAsync();
 
         var entryA = MakeEntry(user.Id, titleA, now);
+        entryA.ProviderMediaId = "11111";
         db.MediaLibraryEntries.Add(entryA);
-        db.MediaProviderLinks.AddRange(
-            new MediaProviderLink
-            {
-                Id = Guid.NewGuid(),
-                MediaTitleId = titleA.Id,
-                Provider = "anilist",
-                ExternalId = "11111",
-                LinkSource = MediaMappingSources.Imported,
-                CreatedAt = now,
-                UpdatedAt = now
-            },
-            new MediaProviderLink
-            {
-                Id = Guid.NewGuid(),
-                MediaTitleId = titleB.Id,
-                Provider = "anilist",
-                ExternalId = "55555",
-                LinkSource = MediaMappingSources.Imported,
-                MediaTitle = titleB,
-                CreatedAt = now,
-                UpdatedAt = now
-            });
+        db.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = titleA.Id,
+            Provider = "anilist",
+            ExternalId = "11111",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
         await db.SaveChangesAsync();
 
         var service = MakeService(db);
         var result = await service.LinkProviderAsync(
-            user.Id, entryA.Id, "anilist", "55555", forceRelink: true, CancellationToken.None);
+            user.Id, entryA.Id, "anilist", "55555", confirmReplacement: true, CancellationToken.None);
 
         Assert.Equal(MediaLinkResultKind.Success, result.Kind);
 
-        var links = await db.MediaProviderLinks.OrderBy(l => l.ExternalId).ToListAsync();
-        Assert.Single(links);
-        Assert.Equal(titleA.Id, links[0].MediaTitleId);
-        Assert.Equal("55555", links[0].ExternalId);
+        var link = await db.MediaProviderLinks.SingleAsync();
+        Assert.Equal(titleA.Id, link.MediaTitleId);
+        Assert.Equal("55555", link.ExternalId);
+        Assert.Equal("55555", entryA.ProviderMediaId);
+        Assert.Equal(MediaMutationSources.UserProviderIdentityCorrection, entryA.LastMutationSource);
+    }
+
+    [Fact]
+    public async Task LinkProviderAsync_SameProviderReplacementRequiresConfirmation()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var (user, title, entry) = await SeedAsync(db, 409);
+        entry.ProviderMediaId = "11111";
+        db.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "11111",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+
+        var result = await MakeService(db).LinkProviderAsync(
+            user.Id, entry.Id, "anilist", "55555", confirmReplacement: false, CancellationToken.None);
+
+        Assert.Equal(MediaLinkResultKind.ReplacementConfirmationRequired, result.Kind);
+        Assert.Equal("11111", result.CurrentProviderMediaId);
+        Assert.Equal("11111", (await db.MediaProviderLinks.SingleAsync()).ExternalId);
+        Assert.Equal("11111", entry.ProviderMediaId);
     }
 
     [Fact]
@@ -230,7 +250,7 @@ public class MediaLibraryLinkServiceTests
 
         var service = MakeService(db);
         var result = await service.LinkProviderAsync(
-            userId: 9999, entry.Id, "anilist", "12345", forceRelink: false, CancellationToken.None);
+            userId: 9999, entry.Id, "anilist", "12345", confirmReplacement: false, CancellationToken.None);
 
         Assert.Equal(MediaLinkResultKind.EntryNotFound, result.Kind);
     }
@@ -244,6 +264,7 @@ public class MediaLibraryLinkServiceTests
 
         var now = DateTimeOffset.UtcNow;
         var (user, title, entry) = await SeedAsync(db, 406);
+        entry.ProviderMediaId = "33333";
 
         db.MediaProviderLinks.Add(new MediaProviderLink
         {
@@ -260,8 +281,8 @@ public class MediaLibraryLinkServiceTests
         var service = MakeService(db);
         var result = await service.UnlinkProviderAsync(user.Id, entry.Id, "anilist", CancellationToken.None);
 
-        Assert.Equal(MediaLinkResultKind.Success, result.Kind);
-        Assert.Equal(0, await db.MediaProviderLinks.CountAsync());
+        Assert.Equal(MediaLinkResultKind.LinkInUse, result.Kind);
+        Assert.Equal(1, await db.MediaProviderLinks.CountAsync());
     }
 
     [Fact]

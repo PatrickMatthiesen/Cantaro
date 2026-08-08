@@ -64,6 +64,7 @@ export function EntryLinkDialog({
   libraryEntryId,
   mediaKind,
   existingLinks,
+  currentTitle,
   onClose,
   onLinked,
 }: {
@@ -71,6 +72,7 @@ export function EntryLinkDialog({
   libraryEntryId: string;
   mediaKind: string;
   existingLinks: MediaProviderLinkSummaryDto[];
+  currentTitle: string;
   onClose: () => void;
   onLinked: () => void;
 }) {
@@ -81,6 +83,7 @@ export function EntryLinkDialog({
   return (
     <SearchLinkDialog
       libraryEntryId={libraryEntryId}
+      currentTitle={currentTitle}
       mediaKind={mediaKind}
       existingLinks={existingLinks}
       onClose={onClose}
@@ -92,10 +95,12 @@ export function EntryLinkDialog({
 function DetailTopBar({
   mediaKind,
   isConnected,
+  membershipLabel,
   onNavigateBack,
 }: {
   mediaKind: string;
   isConnected: boolean;
+  membershipLabel?: string;
   onNavigateBack: () => void;
 }) {
   return (
@@ -105,8 +110,8 @@ function DetailTopBar({
       </button>
       <div className="media-detail-topbar-pills">
         <span className="media-detail-pill media-detail-pill--violet">{mediaKindLabel(mediaKind)}</span>
-        <span className={`media-detail-pill ${isConnected ? 'media-detail-pill--success' : 'media-detail-pill--warning'}`}>
-          {isConnected ? 'Synced' : 'Not synced'}
+        <span className={`media-detail-pill ${isConnected && !membershipLabel ? 'media-detail-pill--success' : 'media-detail-pill--warning'}`}>
+          {membershipLabel ?? (isConnected ? 'Synced' : 'Not synced')}
         </span>
       </div>
     </header>
@@ -170,10 +175,14 @@ export function MediaHero({
   entry,
   progressSummary,
   onNavigateBack,
+  membershipLabel,
+  showProgress = true,
 }: {
   entry: MediaLibraryEntryDetailDto;
   progressSummary: ProgressSummary;
   onNavigateBack: () => void;
+  membershipLabel?: string;
+  showProgress?: boolean;
 }) {
   const { title } = entry;
 
@@ -182,7 +191,7 @@ export function MediaHero({
       <HeroBackdrop posterUrl={title.posterUrl} />
       <div className="media-detail-hero-scrim" aria-hidden />
       <div className="media-detail-hero-content">
-        <DetailTopBar mediaKind={title.mediaKind} isConnected={entry.isConnected} onNavigateBack={onNavigateBack} />
+        <DetailTopBar mediaKind={title.mediaKind} isConnected={entry.isConnected} membershipLabel={membershipLabel} onNavigateBack={onNavigateBack} />
         <div className="media-detail-hero-grid">
           <div className="media-detail-poster">
             <DetailArtwork posterUrl={title.posterUrl} title={title.canonicalTitle} />
@@ -196,10 +205,12 @@ export function MediaHero({
             </div>
             <h2>{title.canonicalTitle}</h2>
             <HeroTitleMeta entry={entry} />
-            <div className="media-detail-rating-pill">
-              <Star aria-hidden />
-              <span>Library progress {getProgressPercent(progressSummary)}%</span>
-            </div>
+            {showProgress ? (
+              <div className="media-detail-rating-pill">
+                <Star aria-hidden />
+                <span>Library progress {getProgressPercent(progressSummary)}%</span>
+              </div>
+            ) : null}
             <HeroDescription entry={entry} />
           </div>
         </div>

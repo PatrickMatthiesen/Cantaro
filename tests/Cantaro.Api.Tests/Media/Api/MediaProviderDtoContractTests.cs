@@ -114,6 +114,7 @@ public class MediaProviderDtoContractTests
         var payload = Assert.IsType<MediaProviderTitleDetailsDto>(ok.Value);
 
         Assert.Equal("Spy x Family", payload.Title);
+        Assert.NotEqual(Guid.Empty, payload.MediaTitleId);
         Assert.Equal("SPY x FAMILY", payload.NativeTitle);
         var availability = Assert.Single(payload.AvailabilityLinks);
         Assert.Equal("crunchyroll", availability.ServiceId);
@@ -128,6 +129,78 @@ public class MediaProviderDtoContractTests
         Assert.Equal("https://anilist.co/character/170732/Anya-Forger", character.ProviderUrl);
         Assert.Equal(0, character.Order);
         Assert.Null(typeof(MediaProviderTitleDetailsDto).GetProperty(nameof(MediaProviderTitleDetails.RawMetadata)));
+
+        var canonicalTitle = await fixture.DbContext.MediaTitles.SingleAsync();
+        Assert.Equal(canonicalTitle.Id, payload.MediaTitleId);
+        var providerLink = await fixture.DbContext.MediaProviderLinks.SingleAsync();
+        Assert.Equal(canonicalTitle.Id, providerLink.MediaTitleId);
+        Assert.Equal("140960", providerLink.ExternalId);
+        Assert.Equal(MediaMappingSources.Imported, providerLink.LinkSource);
+    }
+
+    [Fact]
+    public async Task Search_ResolvesLibraryStateThroughCanonicalProviderLink()
+    {
+        var provider = new StubMediaProvider
+        {
+            SearchResults =
+            [
+                new MediaProviderSearchResult
+                {
+                    ProviderId = "anilist",
+                    ProviderMediaId = "140960",
+                    Title = "Spy x Family",
+                    MediaKind = MediaKinds.Anime,
+                    PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                    ReleaseStatusDimension = MediaProgressDimensions.Episode
+                }
+            ]
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Spy x Family",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.DbContext.MediaTitles.Add(title);
+        fixture.DbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "140960",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        fixture.DbContext.MediaLibraryEntries.Add(new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ProviderAccountId = "legacy-account",
+            ProviderMediaId = "stale-provider-id",
+            NormalizedStatus = MediaLibraryStatuses.Planned,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var result = await fixture.Controller.Search("anilist", "spy", null, 25, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsAssignableFrom<IReadOnlyList<MediaProviderSearchResultDto>>(ok.Value);
+        var state = Assert.Single(payload).LibraryState;
+        Assert.NotNull(state);
+        Assert.True(state.IsInLibrary);
+        Assert.Equal(title.Id, state.MediaTitleId);
     }
 
     [Fact]
@@ -222,6 +295,61 @@ public class MediaProviderDtoContractTests
         var link = await fixture.DbContext.MediaProviderLinks.SingleAsync();
         Assert.Equal(entry.MediaTitleId, link.MediaTitleId);
         Assert.Equal("154587", link.ExternalId);
+    }
+
+    [Fact]
+    public async Task AddTitleToLibrary_IsIdempotentByCanonicalTitleWithoutProviderWrite()
+    {
+        var provider = new StubMediaProvider { ThrowOnStatusUpdate = true };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Existing title",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ProviderAccountId = "disconnected-account",
+            ProviderMediaId = "stale-id",
+            NormalizedStatus = MediaLibraryStatuses.Planned,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.DbContext.MediaTitles.Add(title);
+        fixture.DbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "154587",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        fixture.DbContext.MediaLibraryEntries.Add(entry);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var result = await fixture.Controller.AddTitleToLibrary(
+            "anilist",
+            "154587",
+            new MediaCatalogAddRequestDto(),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<MediaCatalogAddResultDto>(ok.Value);
+        Assert.Equal(entry.Id, payload.LibraryEntryId);
+        Assert.Equal(MediaLibraryStatuses.Planned, payload.Status);
+        Assert.Single(await fixture.DbContext.MediaLibraryEntries.ToListAsync());
     }
 
     [Fact]

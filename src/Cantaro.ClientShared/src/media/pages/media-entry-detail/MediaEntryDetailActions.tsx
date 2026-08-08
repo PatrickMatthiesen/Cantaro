@@ -393,7 +393,6 @@ export function ActionRail({
   isSavingStatus,
   isRefreshingProgress,
   onSaveStatus,
-  onLinkProvider,
   continueWatching,
   crunchyrollSeriesUrl,
   canonicalTitle,
@@ -404,7 +403,6 @@ export function ActionRail({
   isSavingStatus: boolean;
   isRefreshingProgress: boolean;
   onSaveStatus: () => void;
-  onLinkProvider: () => void;
   continueWatching: ContinueWatchingState;
   crunchyrollSeriesUrl: string | null;
   canonicalTitle: string;
@@ -428,10 +426,6 @@ export function ActionRail({
           nextReleaseLabel={nextReleaseLabel}
         />
       )}
-      <button type="button" className="media-detail-secondary-action" onClick={onLinkProvider}>
-        <Plus aria-hidden />
-        Add to Library
-      </button>
       <button type="button" className="media-detail-more-action" aria-label="More actions">
         <MoreVertical aria-hidden />
       </button>

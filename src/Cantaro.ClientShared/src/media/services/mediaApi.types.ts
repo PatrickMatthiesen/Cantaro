@@ -83,13 +83,15 @@ export interface MediaProviderLinkSummaryDto {
 export interface MediaLinkRequestDto {
     providerId: string;
     providerMediaId: string;
-    forceRelink?: boolean;
+    confirmReplacement?: boolean;
 }
 
 export interface MediaLinkConflictDto {
     error: string;
-    conflictingMediaTitleId: string;
-    conflictingCanonicalTitle: string;
+    code: string;
+    conflictingMediaTitleId?: string;
+    conflictingCanonicalTitle?: string;
+    currentProviderMediaId?: string;
 }
 
 export interface MediaContinueWatchingDto {
@@ -245,6 +247,7 @@ export interface MediaProviderSearchResultDto extends MediaProviderMetadataDto {
 }
 
 export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
+    mediaTitleId: string;
     providerId: string;
     providerMediaId: string;
     availabilityLinks: MediaProviderAvailabilityLinkDto[];
