@@ -4,21 +4,8 @@ import type {
   MediaEpisodeDestinationDto,
   MediaLibraryEntryDetailDto,
 } from '../../services/mediaApi';
+import { getEpisodeRows } from './episodeRows';
 import type { EpisodeCatalogState } from './mediaEntryDetailTypes';
-
-function getEpisodeRows(entry: MediaLibraryEntryDetailDto, episodes: MediaEpisodeDestinationDto[]) {
-  const knownNumbers = episodes.map((episode) => episode.episodeNumber);
-  const episodeCount = entry.title.episodeCount ?? Math.max(0, ...knownNumbers);
-  const numbers = episodeCount > 0 && episodeCount <= 100
-    ? Array.from({ length: episodeCount }, (_, index) => index + 1)
-    : [...new Set([...knownNumbers, (entry.progressEpisodes ?? 0) + 1])].sort((left, right) => left - right);
-  const episodesByNumber = new Map(episodes.map((episode) => [episode.episodeNumber, episode]));
-
-  return numbers.map((episodeNumber) => ({
-    episodeNumber,
-    destination: episodesByNumber.get(episodeNumber),
-  }));
-}
 function getEpisodeDestinationLabel(destination?: MediaEpisodeDestinationDto) {
   if (destination?.hasConflict) return 'Needs review';
   if (destination?.url) return 'Link available';
