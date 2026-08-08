@@ -65,7 +65,11 @@ function EpisodeDestinationActions({
             style={{ '--streaming-service-color': service.brandColor } as CSSProperties}
             onClick={() => onSelectStreamingService(destination.serviceId)}
           >
-            <StreamingServiceIcon serviceId={destination.serviceId} aria-hidden />
+            <StreamingServiceIcon
+              serviceId={destination.serviceId}
+              style={{ color: 'currentColor', fill: 'currentColor' }}
+              aria-hidden
+            />
             <span>{service.displayName}</span>
             {opensEpisode ? <Play aria-hidden /> : <ExternalLink aria-hidden />}
           </a>

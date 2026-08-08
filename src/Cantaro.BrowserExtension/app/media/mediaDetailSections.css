@@ -307,14 +307,22 @@
   min-height: 2.1rem;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid color-mix(in srgb, var(--streaming-service-color) 68%, var(--color-border-strong));
+  border: 0;
   border-radius: 0.65rem;
   padding: 0 0.55rem;
-  color: var(--color-content);
-  background: color-mix(in srgb, var(--streaming-service-color) 12%, var(--color-surface-raised));
+  color: #fff;
+  background: color-mix(in srgb, var(--streaming-service-color) 50%, #000);
   font-size: 0.68rem;
   font-weight: 750;
   text-decoration: none;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination:hover {
+  background: color-mix(in srgb, var(--streaming-service-color) 44%, #000);
+}
+
+.cantaro-extension-media .media-detail-streaming-destination > svg:last-child {
+  color: currentColor;
 }
 
 .cantaro-extension-media .media-detail-streaming-destination svg,
