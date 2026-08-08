@@ -7,8 +7,14 @@ export interface ContinueLinkAction {
   isEpisodeLink: boolean;
 }
 
+const MAX_CRUNCHYROLL_SEARCH_QUERY_CHARACTERS = 32;
+
 function getCrunchyrollSearchUrl(title: string): string {
-  return `https://www.crunchyroll.com/search?q=${encodeURIComponent(title.trim())}`;
+  const query = Array.from(title.trim())
+    .slice(0, MAX_CRUNCHYROLL_SEARCH_QUERY_CHARACTERS)
+    .join('')
+    .trimEnd();
+  return `https://www.crunchyroll.com/search?q=${encodeURIComponent(query)}`;
 }
 
 function getDirectEpisodeAction(value: MediaContinueWatchingDto): ContinueLinkAction | null {

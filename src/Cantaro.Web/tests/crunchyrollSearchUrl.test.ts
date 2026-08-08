@@ -14,13 +14,21 @@ describe('getContinueLinkAction', () => {
     });
   });
 
-  it('searches Crunchyroll when neither an episode nor series URL is known', () => {
+  it('limits fallback searches to Crunchyrolls working query length', () => {
     expect(getContinueLinkAction(
       { status: 'loaded', value: { outcome: 'unavailable', episodeNumber: 4 } },
       null,
-      '  That Time I Got Reincarnated as a Slime  ',
+      "STEEL BALL RUN JoJo's Bizarre Adventure 1st STAGE",
     )?.url).toBe(
-      'https://www.crunchyroll.com/search?q=That%20Time%20I%20Got%20Reincarnated%20as%20a%20Slime',
+      "https://www.crunchyroll.com/search?q=STEEL%20BALL%20RUN%20JoJo's%20Bizarre%20Ad",
     );
+  });
+
+  it('does not modify a query already within the limit', () => {
+    expect(getContinueLinkAction(
+      { status: 'loaded', value: { outcome: 'unavailable', episodeNumber: 4 } },
+      null,
+      'Black Clover',
+    )?.url).toBe('https://www.crunchyroll.com/search?q=Black%20Clover');
   });
 });
