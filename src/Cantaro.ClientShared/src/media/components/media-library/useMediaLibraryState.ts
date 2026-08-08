@@ -231,62 +231,57 @@ function useProviderRefresh(
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastRemoteCheckAt, setLastRemoteCheckAt] = useState<string | null>(() => readStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID)));
+  const activeImportEventsRef = useRef<EventSource | null>(null);
+
+  useEffect(() => () => {
+    activeImportEventsRef.current?.close();
+  }, []);
 
   const refreshFromRemote = useCallback(async () => {
+    activeImportEventsRef.current?.close();
+    activeImportEventsRef.current = null;
     setIsRefreshing(true);
     setRefreshError(null);
 
     try {
-      await mediaApi.importLibrary(PRIMARY_PROVIDER_ID);
+      const request = await mediaApi.importLibrary(PRIMARY_PROVIDER_ID);
+      const eventSource = await mediaApi.subscribeToImportEvents(
+        PRIMARY_PROVIDER_ID,
+        request.importId,
+        (event: MediaLibraryImportEventDto) => {
+          if (event.status === 'queued' || event.status === 'running') {
+            setIsRefreshing(true);
+            return;
+          }
+
+          activeImportEventsRef.current?.close();
+          activeImportEventsRef.current = null;
+
+          if (event.status === 'completed') {
+            writeStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID), event.occurredAt);
+            setLastRemoteCheckAt(event.occurredAt);
+            setIsRefreshing(false);
+            void loadLibrary(filtersRef.current);
+            return;
+          }
+
+          if (event.status === 'failed') {
+            setRefreshError(event.errorMessage || 'Failed to refresh from AniList');
+            setIsRefreshing(false);
+          }
+        },
+        () => {
+          activeImportEventsRef.current?.close();
+          activeImportEventsRef.current = null;
+          setRefreshError('Lost the AniList reload connection');
+          setIsRefreshing(false);
+        },
+      );
+      activeImportEventsRef.current = eventSource;
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : 'Failed to refresh from AniList');
       setIsRefreshing(false);
     }
-  }, []);
-
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    let isMounted = true;
-
-    void mediaApi.subscribeToImportEvents(
-      PRIMARY_PROVIDER_ID,
-      undefined,
-      (event: MediaLibraryImportEventDto) => {
-        if (!isMounted) {
-          return;
-        }
-
-        if (event.status === 'running') {
-          setIsRefreshing(true);
-          return;
-        }
-
-        if (event.status === 'completed') {
-          writeStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID), event.occurredAt);
-          setLastRemoteCheckAt(event.occurredAt);
-          setIsRefreshing(false);
-          void loadLibrary(filtersRef.current);
-          return;
-        }
-
-        if (event.status === 'failed') {
-          setRefreshError(event.errorMessage || 'Failed to refresh from AniList');
-          setIsRefreshing(false);
-        }
-      },
-      () => {
-        if (isMounted) {
-          setIsRefreshing(false);
-        }
-      },
-    ).then((source) => {
-      eventSource = source;
-    });
-
-    return () => {
-      isMounted = false;
-      eventSource?.close();
-    };
   }, [filtersRef, loadLibrary]);
 
   useEffect(() => {

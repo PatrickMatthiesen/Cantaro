@@ -202,18 +202,27 @@ public class MediaProvidersController(
     }
 
     [HttpGet("providers/{providerId}/import/events")]
-    [Produces("text/event-stream")]
-    public async IAsyncEnumerable<SseItem<MediaLibraryImportEventDto>> StreamImportEvents(
+    public async Task<IResult> StreamImportEvents(
         string providerId,
         [FromQuery] Guid? importId,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         if (!_mediaProviderRegistry.IsSupported(providerId))
         {
-            yield break;
+            return TypedResults.NotFound();
         }
 
         var userId = await GetCurrentUserIdAsync();
+        return TypedResults.ServerSentEvents(
+            ReadImportEvents(providerId, userId, importId, cancellationToken));
+    }
+
+    private async IAsyncEnumerable<SseItem<MediaLibraryImportEventDto>> ReadImportEvents(
+        string providerId,
+        int userId,
+        Guid? importId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         var reader = _mediaLibraryImportQueue.Subscribe(userId, out var subscriptionId);
 
         try
@@ -224,6 +233,10 @@ public class MediaProvidersController(
                 && string.Equals(latestEvent.ProviderId, providerId, StringComparison.OrdinalIgnoreCase))
             {
                 yield return new SseItem<MediaLibraryImportEventDto>(latestEvent);
+                if (IsTerminalImportStatus(latestEvent.Status))
+                {
+                    yield break;
+                }
             }
 
             await foreach (var importEvent in reader.ReadAllAsync(cancellationToken))
@@ -239,12 +252,21 @@ public class MediaProvidersController(
                 }
 
                 yield return new SseItem<MediaLibraryImportEventDto>(importEvent);
+                if (importId.HasValue && IsTerminalImportStatus(importEvent.Status))
+                {
+                    yield break;
+                }
             }
         }
         finally
         {
             _mediaLibraryImportQueue.Unsubscribe(userId, subscriptionId);
         }
+    }
+
+    private static bool IsTerminalImportStatus(string status)
+    {
+        return status is "completed" or "failed";
     }
 
     [HttpGet("providers/{providerId}/search")]

@@ -1576,23 +1576,14 @@
 }
 
 .media-detail-episode-row.is-next {
-  border-radius: 10px;
-  padding-right: 0.7rem;
-  padding-left: 0.7rem;
   background: var(--color-accent-soft);
 }
 
 .media-detail-episode-number {
-  display: inline-flex;
-  width: 2.35rem;
-  height: 2.35rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
   color: var(--color-accent-strong);
-  background: var(--color-surface-subtle);
   font-size: 0.85rem;
   font-weight: 900;
+  text-align: center;
 }
 
 .media-detail-episode-copy {

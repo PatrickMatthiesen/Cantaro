@@ -25,10 +25,10 @@ function getEpisodeDestinationLabel(destination?: MediaEpisodeDestinationDto) {
   return 'Not observed yet';
 }
 
-function getEpisodeProgressLabel(episodeNumber: number, watchedThrough: number, fallback: string) {
+function getEpisodeProgressLabel(episodeNumber: number, watchedThrough: number) {
   if (episodeNumber <= watchedThrough) return 'Watched';
   if (episodeNumber === watchedThrough + 1) return 'Up next';
-  return fallback;
+  return 'Not watched';
 }
 
 function EpisodeDestinationAction({
@@ -63,11 +63,11 @@ function EpisodeRow({
 }) {
   const isNext = episodeNumber === watchedThrough + 1;
   const stateLabel = getEpisodeDestinationLabel(destination);
-  const progressLabel = getEpisodeProgressLabel(episodeNumber, watchedThrough, stateLabel);
+  const progressLabel = getEpisodeProgressLabel(episodeNumber, watchedThrough);
 
   return (
     <li className={`media-detail-episode-row ${isNext ? 'is-next' : ''}`}>
-      <div className="media-detail-episode-number" aria-hidden>{episodeNumber}</div>
+      <span className="media-detail-episode-number" aria-hidden>{episodeNumber}</span>
       <div className="media-detail-episode-copy">
         <strong>{destination?.title || `Episode ${episodeNumber}`}</strong>
         <span>{progressLabel}</span>
