@@ -150,6 +150,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               onLinkProvider={() => props.onSetShowLinkDialog(true)}
               continueWatching={props.continueWatching}
               crunchyrollSeriesUrl={crunchyrollSeriesUrl}
+              canonicalTitle={props.entry.title.canonicalTitle}
               nextReleaseAt={props.entry.nextReleaseAt}
               nextReleaseLabel={props.entry.nextReleaseLabel}
             />

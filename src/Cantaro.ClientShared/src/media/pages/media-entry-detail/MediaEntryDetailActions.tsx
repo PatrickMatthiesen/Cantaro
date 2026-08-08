@@ -24,6 +24,7 @@ import {
   isStatusRefreshDisabled,
 } from './mediaEntryDetailModel';
 import { ProgressRing } from './MediaEntryDetailHero';
+import { getContinueLinkAction } from './continueWatchingAction';
 import type {
   ContinueWatchingState,
   MediaEntryDetailContentProps,
@@ -243,18 +244,11 @@ function getContinueWatchingLabel(state: ContinueWatchingState): string {
     series_fallback: 'Open series on Crunchyroll',
     completed: 'Completed',
     conflict: 'Episode link needs review',
-    unavailable: 'Crunchyroll link not observed yet',
+    unavailable: 'Search Crunchyroll',
   };
   return state.value.outcome === 'direct'
     ? `Continue episode ${state.value.episodeNumber ?? ''}`.trim()
     : labels[state.value.outcome];
-}
-
-function getContinueDestination(state: ContinueWatchingState): MediaContinueWatchingDto | null {
-  if (state.status !== 'loaded') return null;
-  if (state.value.outcome === 'direct') return state.value;
-  if (state.value.outcome === 'series_fallback') return state.value;
-  return null;
 }
 
 function parseAbsoluteUrl(value: string): URL | null {
@@ -292,23 +286,15 @@ export function getCrunchyrollSeriesUrl(availabilityByProviderLink: ProviderAvai
   return null;
 }
 
-function selectContinueUrl(destination: MediaContinueWatchingDto | null, seriesUrl: string | null) {
-  if (destination?.url) return destination.url;
-  return destination?.outcome === 'series_fallback' ? seriesUrl : null;
-}
-
 function ContinueDestinationLink({
-  state,
-  destination,
+  label,
+  isEpisodeLink,
   url,
 }: {
-  state: ContinueWatchingState;
-  destination: MediaContinueWatchingDto | null;
+  label: string;
+  isEpisodeLink: boolean;
   url: string;
 }) {
-  const isEpisodeLink = destination?.outcome === 'direct';
-  const label = isEpisodeLink ? getContinueWatchingLabel(state) : 'Open series on Crunchyroll';
-
   return (
     <a
       className="media-detail-primary-action"
@@ -363,11 +349,13 @@ function getUpcomingRelease(
 function ContinueWatchingAction({
   state,
   seriesUrl,
+  canonicalTitle,
   nextReleaseAt,
   nextReleaseLabel,
 }: {
   state: ContinueWatchingState;
   seriesUrl: string | null;
+  canonicalTitle: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
 }) {
@@ -386,9 +374,16 @@ function ContinueWatchingAction({
     );
   }
 
-  const destination = getContinueDestination(state);
-  const url = selectContinueUrl(destination, seriesUrl);
-  if (url) return <ContinueDestinationLink state={state} destination={destination} url={url} />;
+  const linkAction = getContinueLinkAction(state, seriesUrl, canonicalTitle);
+  if (linkAction) {
+    return (
+      <ContinueDestinationLink
+        label={linkAction.label}
+        isEpisodeLink={linkAction.isEpisodeLink}
+        url={linkAction.url}
+      />
+    );
+  }
 
   return <ContinueUnavailableAction state={state} />;
 }
@@ -401,6 +396,7 @@ export function ActionRail({
   onLinkProvider,
   continueWatching,
   crunchyrollSeriesUrl,
+  canonicalTitle,
   nextReleaseAt,
   nextReleaseLabel,
 }: {
@@ -411,6 +407,7 @@ export function ActionRail({
   onLinkProvider: () => void;
   continueWatching: ContinueWatchingState;
   crunchyrollSeriesUrl: string | null;
+  canonicalTitle: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
 }) {
@@ -426,6 +423,7 @@ export function ActionRail({
         <ContinueWatchingAction
           state={continueWatching}
           seriesUrl={crunchyrollSeriesUrl}
+          canonicalTitle={canonicalTitle}
           nextReleaseAt={nextReleaseAt}
           nextReleaseLabel={nextReleaseLabel}
         />
