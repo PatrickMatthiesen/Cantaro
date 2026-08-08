@@ -1,7 +1,7 @@
 import {
   CheckCircle2,
+  ChevronDown,
   Clock3,
-  ExternalLink,
   Minus,
   MoreVertical,
   Play,
@@ -10,9 +10,11 @@ import {
   Save,
   Star,
 } from 'lucide-react';
-import { type ProviderAvailabilityMap } from '../../components/media-entry-detail/providerAvailability';
 import { formatNextReleaseDisplay } from '../../services/mediaFormatting';
 import type { MediaContinueWatchingDto } from '../../services/mediaApi';
+import type { StreamingDestination } from '../../services/streamingDestinations';
+import type { StreamingServiceId } from '../../services/streamingServices';
+import { StreamingServiceIcon } from '../../components/StreamingServiceIcon';
 import {
   clampProgressValue,
   getEntryStatusChanged,
@@ -24,7 +26,7 @@ import {
   isStatusRefreshDisabled,
 } from './mediaEntryDetailModel';
 import { ProgressRing } from './MediaEntryDetailHero';
-import { getContinueLinkAction } from './continueWatchingAction';
+import { getContinueLinkActions, type ContinueLinkAction } from './continueWatchingAction';
 import type {
   ContinueWatchingState,
   MediaEntryDetailContentProps,
@@ -238,73 +240,85 @@ function SaveProgressAction({
 
 function getContinueWatchingLabel(state: ContinueWatchingState): string {
   if (state.status === 'loading') return 'Finding episode...';
-  if (state.status === 'error') return "Couldn't load Crunchyroll link";
+  if (state.status === 'error') return "Couldn't load streaming links";
 
   const labels: Record<Exclude<MediaContinueWatchingDto['outcome'], 'direct'>, string> = {
-    series_fallback: 'Open series on Crunchyroll',
+    series_fallback: 'Open streaming service',
     completed: 'Completed',
     conflict: 'Episode link needs review',
-    unavailable: 'Search Crunchyroll',
+    unavailable: 'Streaming link not available',
   };
   return state.value.outcome === 'direct'
     ? `Continue episode ${state.value.episodeNumber ?? ''}`.trim()
     : labels[state.value.outcome];
 }
 
-function parseAbsoluteUrl(value: string): URL | null {
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
-}
-
-const CRUNCHYROLL_HOSTS = new Set(['crunchyroll.com', 'www.crunchyroll.com']);
-const CRUNCHYROLL_SERIES_PATH = /^\/series\/[A-Z0-9]+(?:\/[^/?#]+)?\/?$/i;
-
-function isCrunchyrollSeriesUrl(url: URL): boolean {
-  return url.protocol === 'https:'
-    && CRUNCHYROLL_HOSTS.has(url.hostname)
-    && CRUNCHYROLL_SERIES_PATH.test(url.pathname);
-}
-
-function normalizeCrunchyrollSeriesUrl(value?: string): string | null {
-  const url = value ? parseAbsoluteUrl(value) : null;
-  return url && isCrunchyrollSeriesUrl(url)
-    ? `https://www.crunchyroll.com${url.pathname}`
-    : null;
-}
-
-export function getCrunchyrollSeriesUrl(availabilityByProviderLink: ProviderAvailabilityMap): string | null {
-  for (const state of Object.values(availabilityByProviderLink)) {
-    if (state.status !== 'loaded') continue;
-    const link = state.links.find((candidate) => candidate.serviceId.toLowerCase() === 'crunchyroll');
-    const url = link ? normalizeCrunchyrollSeriesUrl(link.url) : null;
-    if (url) return url;
-  }
-
-  return null;
-}
-
 function ContinueDestinationLink({
-  label,
-  isEpisodeLink,
-  url,
+  action,
+  className,
+  onSelect,
+  menuItem = false,
 }: {
-  label: string;
-  isEpisodeLink: boolean;
-  url: string;
+  action: ContinueLinkAction;
+  className?: string;
+  onSelect: (serviceId: StreamingServiceId) => void;
+  menuItem?: boolean;
 }) {
   return (
     <a
-      className="media-detail-primary-action"
-      href={url}
+      className={className}
+      href={action.url}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={(event) => {
+        onSelect(action.serviceId);
+        if (menuItem) event.currentTarget.closest('details')?.removeAttribute('open');
+      }}
     >
-      {isEpisodeLink ? <Play aria-hidden /> : <ExternalLink aria-hidden />}
-      <span>{label}</span>
+      <StreamingServiceIcon
+        serviceId={action.serviceId}
+        style={{ color: 'currentColor', fill: 'currentColor' }}
+        aria-hidden
+      />
+      <span>{action.label}</span>
     </a>
+  );
+}
+
+function ContinueDestinationMenu({
+  actions,
+  onSelect,
+}: {
+  actions: ContinueLinkAction[];
+  onSelect: (serviceId: StreamingServiceId) => void;
+}) {
+  const primary = actions[0];
+  if (!primary) return null;
+  return (
+    <div className="media-detail-streaming-action">
+      <ContinueDestinationLink
+        action={primary}
+        className="media-detail-primary-action media-detail-streaming-primary"
+        onSelect={onSelect}
+      />
+      {actions.length > 1 ? (
+        <details className="media-detail-streaming-menu">
+          <summary aria-label="Choose streaming service">
+            <ChevronDown aria-hidden />
+          </summary>
+          <div>
+            {actions.map(action => (
+              <ContinueDestinationLink
+                key={`${action.serviceId}:${action.kind}`}
+                action={action}
+                onSelect={onSelect}
+                menuItem
+              />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -348,13 +362,19 @@ function getUpcomingRelease(
 
 function ContinueWatchingAction({
   state,
-  seriesUrl,
+  seriesDestinations,
+  episodeDestinations,
+  preferredServiceId,
+  onSelectStreamingService,
   canonicalTitle,
   nextReleaseAt,
   nextReleaseLabel,
 }: {
   state: ContinueWatchingState;
-  seriesUrl: string | null;
+  seriesDestinations: readonly StreamingDestination[];
+  episodeDestinations: readonly StreamingDestination[];
+  preferredServiceId: StreamingServiceId | null;
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   canonicalTitle: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
@@ -374,15 +394,15 @@ function ContinueWatchingAction({
     );
   }
 
-  const linkAction = getContinueLinkAction(state, seriesUrl, canonicalTitle);
-  if (linkAction) {
-    return (
-      <ContinueDestinationLink
-        label={linkAction.label}
-        isEpisodeLink={linkAction.isEpisodeLink}
-        url={linkAction.url}
-      />
-    );
+  const linkActions = getContinueLinkActions(
+    state,
+    seriesDestinations,
+    episodeDestinations,
+    preferredServiceId,
+    canonicalTitle,
+  );
+  if (linkActions.length > 0) {
+    return <ContinueDestinationMenu actions={linkActions} onSelect={onSelectStreamingService} />;
   }
 
   return <ContinueUnavailableAction state={state} />;
@@ -394,7 +414,10 @@ export function ActionRail({
   isRefreshingProgress,
   onSaveStatus,
   continueWatching,
-  crunchyrollSeriesUrl,
+  seriesDestinations,
+  episodeDestinations,
+  preferredServiceId,
+  onSelectStreamingService,
   canonicalTitle,
   nextReleaseAt,
   nextReleaseLabel,
@@ -404,7 +427,10 @@ export function ActionRail({
   isRefreshingProgress: boolean;
   onSaveStatus: () => void;
   continueWatching: ContinueWatchingState;
-  crunchyrollSeriesUrl: string | null;
+  seriesDestinations: readonly StreamingDestination[];
+  episodeDestinations: readonly StreamingDestination[];
+  preferredServiceId: StreamingServiceId | null;
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   canonicalTitle: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
@@ -420,7 +446,10 @@ export function ActionRail({
       ) : (
         <ContinueWatchingAction
           state={continueWatching}
-          seriesUrl={crunchyrollSeriesUrl}
+          seriesDestinations={seriesDestinations}
+          episodeDestinations={episodeDestinations}
+          preferredServiceId={preferredServiceId}
+          onSelectStreamingService={onSelectStreamingService}
           canonicalTitle={canonicalTitle}
           nextReleaseAt={nextReleaseAt}
           nextReleaseLabel={nextReleaseLabel}

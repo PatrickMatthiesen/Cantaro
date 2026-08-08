@@ -1,7 +1,7 @@
 import type {
-  MediaEpisodeDestinationDto,
   MediaLibraryEntryDetailDto,
 } from '../../services/mediaApi';
+import type { EpisodeStreamingDestinations } from '../../services/streamingDestinations';
 
 function getKnownEpisodeCount(episodeCount: number | undefined, knownNumbers: number[]) {
   return episodeCount ?? Math.max(0, ...knownNumbers);
@@ -33,7 +33,7 @@ function getEpisodeNumbers(entry: MediaLibraryEntryDetailDto, knownNumbers: numb
 
 export function getEpisodeRows(
   entry: MediaLibraryEntryDetailDto,
-  episodes: MediaEpisodeDestinationDto[],
+  episodes: EpisodeStreamingDestinations[],
 ) {
   const knownNumbers = episodes.map((episode) => episode.episodeNumber);
   const episodesByNumber = new Map(episodes.map((episode) => [episode.episodeNumber, episode]));

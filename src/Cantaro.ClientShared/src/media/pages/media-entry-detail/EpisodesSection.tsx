@@ -1,71 +1,77 @@
 import { ExternalLink, Play, RefreshCcw } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import type {
-  MediaEpisodeCatalogDto,
-  MediaEpisodeDestinationDto,
   MediaLibraryEntryDetailDto,
 } from '../../services/mediaApi';
+import {
+  type MediaStreamingDestinations,
+  type StreamingDestination,
+} from '../../services/streamingDestinations';
+import {
+  STREAMING_SERVICES,
+  type StreamingServiceId,
+} from '../../services/streamingServices';
+import { StreamingServiceIcon } from '../../components/StreamingServiceIcon';
 import { getEpisodeRows } from './episodeRows';
 import type { EpisodeCatalogState } from './mediaEntryDetailTypes';
-function getEpisodeDestinationLabel(destination?: MediaEpisodeDestinationDto) {
-  if (destination?.hasConflict) return 'Needs review';
-  if (destination?.url) return 'Link available';
-  return 'Not observed yet';
-}
-
 function getEpisodeProgressLabel(episodeNumber: number, watchedThrough: number) {
   if (episodeNumber <= watchedThrough) return 'Watched';
   if (episodeNumber === watchedThrough + 1) return 'Up next';
   return 'Not watched';
 }
 
-function getEpisodeDestinationAction(
-  episodeNumber: number,
-  destination?: MediaEpisodeDestinationDto,
-  fallbackUrl?: string,
+function getEpisodeServiceDestinations(
+  episodeDestinations: readonly StreamingDestination[],
+  seriesDestinations: readonly StreamingDestination[],
 ) {
-  if (destination?.url && !destination.hasConflict) {
-    return {
-      url: destination.url,
-      label: 'Watch',
-      ariaLabel: `Open episode ${episodeNumber} on Crunchyroll`,
-      icon: <Play aria-hidden />,
-    };
-  }
-  if (!fallbackUrl) return null;
-  return {
-    url: fallbackUrl,
-    label: 'Open',
-    ariaLabel: `Open the Crunchyroll series page for episode ${episodeNumber}`,
-    icon: <ExternalLink aria-hidden />,
-  };
+  const serviceIds = new Set([
+    ...episodeDestinations.map(destination => destination.serviceId),
+    ...seriesDestinations.map(destination => destination.serviceId),
+  ]);
+  return [...serviceIds].map(serviceId => (
+    episodeDestinations.find(destination => destination.serviceId === serviceId)
+    ?? seriesDestinations.find(destination => destination.serviceId === serviceId)
+  )).filter((destination): destination is StreamingDestination => Boolean(destination));
 }
 
-function EpisodeDestinationAction({
+function EpisodeDestinationActions({
   episodeNumber,
-  destination,
-  stateLabel,
-  fallbackUrl,
+  episodeDestinations,
+  seriesDestinations,
+  onSelectStreamingService,
 }: {
   episodeNumber: number;
-  destination?: MediaEpisodeDestinationDto;
-  stateLabel: string;
-  fallbackUrl?: string;
+  episodeDestinations: readonly StreamingDestination[];
+  seriesDestinations: readonly StreamingDestination[];
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
-  const action = getEpisodeDestinationAction(episodeNumber, destination, fallbackUrl);
-  if (!action) {
-    return <span className="media-detail-episode-state">{stateLabel}</span>;
-  }
+  const destinations = getEpisodeServiceDestinations(episodeDestinations, seriesDestinations);
+  if (destinations.length === 0) return <span className="media-detail-episode-state">No streaming link</span>;
 
   return (
-    <a
-      href={action.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label={action.ariaLabel}
-    >
-      {action.icon}
-      {action.label}
-    </a>
+    <div className="media-detail-episode-destinations">
+      {destinations.map(destination => {
+        const service = STREAMING_SERVICES[destination.serviceId];
+        const opensEpisode = destination.kind === 'episode';
+        return (
+          <a
+            key={destination.serviceId}
+            className="media-detail-streaming-destination"
+            href={destination.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${opensEpisode ? `Open episode ${episodeNumber}` : 'Open series'} on ${service.displayName}`}
+            title={opensEpisode ? `Watch episode ${episodeNumber}` : 'Open series page'}
+            style={{ '--streaming-service-color': service.brandColor } as CSSProperties}
+            onClick={() => onSelectStreamingService(destination.serviceId)}
+          >
+            <StreamingServiceIcon serviceId={destination.serviceId} aria-hidden />
+            <span>{service.displayName}</span>
+            {opensEpisode ? <Play aria-hidden /> : <ExternalLink aria-hidden />}
+          </a>
+        );
+      })}
+    </div>
   );
 }
 
@@ -73,15 +79,16 @@ function EpisodeRow({
   episodeNumber,
   destination,
   watchedThrough,
-  fallbackUrl,
+  seriesDestinations,
+  onSelectStreamingService,
 }: {
   episodeNumber: number;
-  destination?: MediaEpisodeDestinationDto;
+  destination?: MediaStreamingDestinations['episodes'][number];
   watchedThrough: number;
-  fallbackUrl?: string;
+  seriesDestinations: readonly StreamingDestination[];
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const isNext = episodeNumber === watchedThrough + 1;
-  const stateLabel = getEpisodeDestinationLabel(destination);
   const progressLabel = getEpisodeProgressLabel(episodeNumber, watchedThrough);
 
   return (
@@ -91,11 +98,11 @@ function EpisodeRow({
         <strong>{destination?.title || `Episode ${episodeNumber}`}</strong>
         <span>{progressLabel}</span>
       </div>
-      <EpisodeDestinationAction
+      <EpisodeDestinationActions
         episodeNumber={episodeNumber}
-        destination={destination}
-        stateLabel={stateLabel}
-        fallbackUrl={fallbackUrl}
+        episodeDestinations={destination?.destinations ?? []}
+        seriesDestinations={seriesDestinations}
+        onSelectStreamingService={onSelectStreamingService}
       />
     </li>
   );
@@ -103,12 +110,10 @@ function EpisodeRow({
 
 function EpisodeSectionHeading({
   state,
-  catalog,
   availableCount,
   onRefresh,
 }: {
   state: EpisodeCatalogState;
-  catalog: MediaEpisodeCatalogDto | null;
   availableCount: number;
   onRefresh: () => void;
 }) {
@@ -128,12 +133,6 @@ function EpisodeSectionHeading({
           <RefreshCcw className={isLoading ? 'media-detail-spin' : ''} aria-hidden />
           Refresh links
         </button>
-        {catalog?.seriesUrl ? (
-          <a href={catalog.seriesUrl} target="_blank" rel="noopener noreferrer">
-            <ExternalLink aria-hidden />
-            Open series on Crunchyroll
-          </a>
-        ) : null}
       </div>
     </div>
   );
@@ -143,13 +142,15 @@ function EpisodeSectionContent({
   entry,
   state,
   rows,
-  fallbackUrl,
+  seriesDestinations,
+  onSelectStreamingService,
   onRefresh,
 }: {
   entry: MediaLibraryEntryDetailDto;
   state: EpisodeCatalogState;
   rows: ReturnType<typeof getEpisodeRows>;
-  fallbackUrl?: string;
+  seriesDestinations: readonly StreamingDestination[];
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
 }) {
   if (state.status === 'error') {
@@ -165,7 +166,7 @@ function EpisodeSectionContent({
     return (
       <div className="media-detail-episode-empty">
         <p>No episode URLs have been observed for this title yet.</p>
-        <span>Visit its Crunchyroll series page with the Cantaro extension enabled, then refresh this tab.</span>
+        <span>Visit a supported streaming series page with the Cantaro extension enabled, then refresh this tab.</span>
       </div>
     );
   }
@@ -180,7 +181,8 @@ function EpisodeSectionContent({
           episodeNumber={row.episodeNumber}
           destination={row.destination}
           watchedThrough={entry.progressEpisodes ?? 0}
-          fallbackUrl={fallbackUrl}
+          seriesDestinations={seriesDestinations}
+          onSelectStreamingService={onSelectStreamingService}
         />
       ))}
     </ol>
@@ -190,35 +192,41 @@ function EpisodeSectionContent({
 function getEpisodeSectionData(
   entry: MediaLibraryEntryDetailDto,
   state: EpisodeCatalogState,
-  fallbackSeriesUrl: string | null,
+  streamingDestinations: MediaStreamingDestinations,
 ) {
   if (state.status !== 'loaded') {
-    return { catalog: null, rows: [], availableCount: 0 };
+    return { rows: [], availableCount: 0 };
   }
-
-  const catalog = {
-    ...state.value,
-    seriesUrl: state.value.seriesUrl ?? fallbackSeriesUrl ?? undefined,
-  };
   return {
-    catalog,
-    rows: getEpisodeRows(entry, catalog.episodes),
-    availableCount: catalog.episodes.filter((episode) => episode.url && !episode.hasConflict).length,
+    rows: getEpisodeRows(entry, streamingDestinations.episodes),
+    availableCount: streamingDestinations.episodes
+      .filter(episode => episode.destinations.length > 0).length,
   };
 }
 
 export function EpisodesSection({
   entry,
   state,
-  seriesUrl,
+  streamingDestinations,
+  preferredServiceId,
+  onSelectStreamingService,
   onRefresh,
 }: {
   entry: MediaLibraryEntryDetailDto;
   state: EpisodeCatalogState;
-  seriesUrl: string | null;
+  streamingDestinations: MediaStreamingDestinations;
+  preferredServiceId: StreamingServiceId | null;
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
 }) {
-  const { catalog, rows, availableCount } = getEpisodeSectionData(entry, state, seriesUrl);
+  const { rows, availableCount } = getEpisodeSectionData(entry, state, streamingDestinations);
+  const orderedSeriesDestinations = preferredServiceId
+    ? [...streamingDestinations.seriesDestinations].sort((left, right) => {
+      if (left.serviceId === preferredServiceId) return -1;
+      if (right.serviceId === preferredServiceId) return 1;
+      return 0;
+    })
+    : streamingDestinations.seriesDestinations;
 
   return (
     <section
@@ -229,7 +237,6 @@ export function EpisodesSection({
     >
       <EpisodeSectionHeading
         state={state}
-        catalog={catalog}
         availableCount={availableCount}
         onRefresh={onRefresh}
       />
@@ -237,7 +244,8 @@ export function EpisodesSection({
         entry={entry}
         state={state}
         rows={rows}
-        fallbackUrl={catalog?.seriesUrl}
+        seriesDestinations={orderedSeriesDestinations}
+        onSelectStreamingService={onSelectStreamingService}
         onRefresh={onRefresh}
       />
     </section>

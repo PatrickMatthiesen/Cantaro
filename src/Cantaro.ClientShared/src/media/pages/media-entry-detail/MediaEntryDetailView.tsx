@@ -2,9 +2,11 @@ import { useState, type ReactNode } from 'react';
 import { Snackbar } from '../../../ui';
 import {
   ActionRail,
-  getCrunchyrollSeriesUrl,
   ProgressCockpit,
 } from './MediaEntryDetailActions';
+import { resolveStreamingDestinations, type MediaStreamingDestinations } from '../../services/streamingDestinations';
+import { useStreamingServicePreference } from '../../services/streamingServicePreference';
+import type { StreamingServiceId } from '../../services/streamingServices';
 import {
   DetailErrorState,
   DetailLoadingState,
@@ -34,12 +36,16 @@ function MediaDetailTabPanel({
   activeTab,
   props,
   progressSummary,
-  crunchyrollSeriesUrl,
+  streamingDestinations,
+  preferredServiceId,
+  onSelectStreamingService,
 }: {
   activeTab: DetailTabId;
   props: MediaEntryDetailContentProps;
   progressSummary: ProgressSummary;
-  crunchyrollSeriesUrl: string | null;
+  streamingDestinations: MediaStreamingDestinations;
+  preferredServiceId: StreamingServiceId | null;
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const panels: Record<DetailTabId, ReactNode> = {
     overview: (
@@ -56,7 +62,9 @@ function MediaDetailTabPanel({
       <EpisodesSection
         entry={props.entry}
         state={props.episodeCatalog}
-        seriesUrl={crunchyrollSeriesUrl}
+        streamingDestinations={streamingDestinations}
+        preferredServiceId={preferredServiceId}
+        onSelectStreamingService={onSelectStreamingService}
         onRefresh={props.onReloadEpisodes}
       />
     ),
@@ -107,7 +115,18 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.progressVolumes,
   );
   const hasStatusChanged = getEntryStatusChanged(props);
-  const crunchyrollSeriesUrl = getCrunchyrollSeriesUrl(props.availabilityByProviderLink);
+  const [preferredServiceId, setPreferredServiceId] = useStreamingServicePreference();
+  const availabilityLinks = Object.values(props.availabilityByProviderLink)
+    .flatMap(state => state.status === 'loaded' ? state.links : []);
+  const episodeCatalog = props.episodeCatalog.status === 'loaded' ? props.episodeCatalog.value : null;
+  const streamingDestinations = resolveStreamingDestinations(
+    availabilityLinks,
+    episodeCatalog,
+    preferredServiceId,
+  );
+  const nextEpisodeNumber = (props.progressEpisodes ?? 0) + 1;
+  const nextEpisodeDestinations = streamingDestinations.episodes
+    .find(episode => episode.episodeNumber === nextEpisodeNumber)?.destinations ?? [];
 
   return (
     <>
@@ -129,7 +148,10 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               isRefreshingProgress={props.isRefreshingProgress}
               onSaveStatus={props.onSaveStatus}
               continueWatching={props.continueWatching}
-              crunchyrollSeriesUrl={crunchyrollSeriesUrl}
+              seriesDestinations={streamingDestinations.seriesDestinations}
+              episodeDestinations={nextEpisodeDestinations}
+              preferredServiceId={preferredServiceId}
+              onSelectStreamingService={setPreferredServiceId}
               canonicalTitle={props.entry.title.canonicalTitle}
               nextReleaseAt={props.entry.nextReleaseAt}
               nextReleaseLabel={props.entry.nextReleaseLabel}
@@ -140,7 +162,9 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 activeTab={activeTab}
                 props={props}
                 progressSummary={progressSummary}
-                crunchyrollSeriesUrl={crunchyrollSeriesUrl}
+                streamingDestinations={streamingDestinations}
+                preferredServiceId={preferredServiceId}
+                onSelectStreamingService={setPreferredServiceId}
               />
             </section>
           </div>

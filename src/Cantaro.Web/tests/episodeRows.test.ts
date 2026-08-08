@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  MediaEpisodeDestinationDto,
-  MediaLibraryEntryDetailDto,
-} from '../../Cantaro.ClientShared/src/media/services/mediaApi';
+import type { MediaLibraryEntryDetailDto } from '../../Cantaro.ClientShared/src/media/services/mediaApi';
+import type { EpisodeStreamingDestinations } from '../../Cantaro.ClientShared/src/media/services/streamingDestinations';
 import { getEpisodeRows } from '../../Cantaro.ClientShared/src/media/pages/media-entry-detail/episodeRows';
 
 function createEntry(episodeCount: number, progressEpisodes: number) {
@@ -15,7 +13,8 @@ function createEntry(episodeCount: number, progressEpisodes: number) {
 function createEpisodes(count: number) {
   return Array.from({ length: count }, (_, index) => ({
     episodeNumber: index + 1,
-  })) as MediaEpisodeDestinationDto[];
+    destinations: [],
+  })) as EpisodeStreamingDestinations[];
 }
 
 describe('getEpisodeRows', () => {

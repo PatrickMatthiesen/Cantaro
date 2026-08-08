@@ -294,6 +294,36 @@
   font-size: 0.68rem;
 }
 
+.cantaro-extension-media .media-detail-episode-destinations {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination {
+  --streaming-service-color: var(--color-accent);
+  display: inline-flex;
+  min-height: 2.1rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--streaming-service-color) 68%, var(--color-border-strong));
+  border-radius: 0.65rem;
+  padding: 0 0.55rem;
+  color: var(--color-content);
+  background: color-mix(in srgb, var(--streaming-service-color) 12%, var(--color-surface-raised));
+  font-size: 0.68rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination svg,
+.cantaro-extension-media .media-detail-streaming-destination > span:first-child {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+}
+
 .cantaro-extension-media .media-detail-provider-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 0.65rem;

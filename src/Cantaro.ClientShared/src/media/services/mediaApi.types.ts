@@ -102,18 +102,24 @@ export interface MediaContinueWatchingDto {
 }
 
 export interface MediaEpisodeCatalogDto {
-    seriesProvider?: string;
-    seriesUrl?: string;
+    seriesDestinations: MediaStreamingDestinationDto[];
     episodes: MediaEpisodeDestinationDto[];
 }
 
 export interface MediaEpisodeDestinationDto {
     episodeNumber: number;
     title?: string;
-    provider?: string;
-    url?: string;
+    destinations: MediaStreamingDestinationDto[];
     seenCount: number;
     hasConflict: boolean;
+}
+
+export interface MediaStreamingDestinationDto {
+    serviceId: string;
+    url: string;
+    seenCount: number;
+    firstSeenAt: string;
+    lastSeenAt: string;
 }
 
 export interface MediaProviderAccountStatusDto {

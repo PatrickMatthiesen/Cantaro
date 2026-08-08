@@ -1633,6 +1633,68 @@
   opacity: 0.58;
 }
 
+.media-detail-streaming-action {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.media-detail-streaming-primary {
+  min-width: 0;
+  border-radius: 16px 0 0 16px !important;
+}
+
+.media-detail-streaming-action > .media-detail-streaming-primary:only-child {
+  border-radius: 16px !important;
+}
+
+.media-detail-streaming-menu > summary {
+  display: grid;
+  width: 3.4rem;
+  height: 100%;
+  min-height: 4rem;
+  cursor: pointer;
+  place-items: center;
+  border-left: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 0 16px 16px 0;
+  color: #fff;
+  background: #4f46e5;
+  list-style: none;
+}
+
+.media-detail-streaming-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.media-detail-streaming-menu > div {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  display: grid;
+  width: min(20rem, 90vw);
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  background: var(--color-surface-raised);
+}
+
+.media-detail-streaming-menu > div a {
+  display: flex;
+  min-height: 2.8rem;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 0;
+  padding: 0.65rem 0.8rem;
+  color: var(--color-content);
+  background: transparent;
+}
+
+.media-detail-streaming-menu > div a:hover {
+  background: var(--color-surface-hover);
+}
+
 .media-detail-secondary-action {
   border: 1px solid rgba(148, 163, 184, 0.18);
   color: #f8fafc;
@@ -1794,6 +1856,45 @@
 
 .media-detail-episode-state {
   text-align: right;
+}
+
+.media-detail-episode-destinations {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.media-detail-streaming-destination {
+  --streaming-service-color: var(--color-accent);
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--streaming-service-color) 68%, var(--color-border-strong));
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  color: var(--color-content);
+  background: color-mix(in srgb, var(--streaming-service-color) 12%, var(--color-surface-raised));
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.media-detail-streaming-destination:hover {
+  background: color-mix(in srgb, var(--streaming-service-color) 20%, var(--color-surface-raised));
+}
+
+.media-detail-streaming-destination svg,
+.media-detail-streaming-destination > span:first-child {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.media-detail-streaming-destination > svg:last-child {
+  color: var(--color-content-muted);
 }
 
 .media-detail-episode-empty {

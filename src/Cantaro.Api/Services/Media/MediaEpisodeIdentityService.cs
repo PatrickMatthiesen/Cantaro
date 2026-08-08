@@ -264,13 +264,12 @@ public class MediaEpisodeIdentityService(
             .Include(episode => episode.ProviderIdentities)
             .OrderBy(episode => episode.EpisodeNumber)
             .ToListAsync(cancellationToken);
-        var seriesDestination = SelectSeriesDestination(
+        var seriesDestinations = SelectSeriesDestinations(
             episodes.SelectMany(episode => episode.ProviderIdentities));
 
         return new MediaEpisodeCatalogDto
         {
-            SeriesProvider = seriesDestination?.Provider,
-            SeriesUrl = seriesDestination?.Url,
+            SeriesDestinations = seriesDestinations,
             Episodes = episodes.Select(MapEpisodeDestination).ToList()
         };
     }
@@ -282,21 +281,36 @@ public class MediaEpisodeIdentityService(
             .ThenByDescending(identity => identity.SeenCount)
             .ThenByDescending(identity => identity.LastSeenAt)
             .ToList();
-        var directIdentity = identities.FirstOrDefault(identity =>
-            !identity.HasConflict
-            && MediaDestinationUrlPolicy.BuildUrl(identity.Provider, identity.ProviderUrlPath) is not null);
+        var destinations = identities
+            .Where(identity => !identity.HasConflict)
+            .Select(MapEpisodeProviderDestination)
+            .OfType<MediaStreamingDestinationDto>()
+            .ToList();
 
         return new MediaEpisodeDestinationDto
         {
             EpisodeNumber = episode.EpisodeNumber,
             Title = episode.Title,
-            Provider = directIdentity?.Provider,
-            Url = directIdentity is null
-                ? null
-                : MediaDestinationUrlPolicy.BuildUrl(directIdentity.Provider, directIdentity.ProviderUrlPath),
-            SeenCount = directIdentity?.SeenCount ?? identities.Select(identity => identity.SeenCount).DefaultIfEmpty(0).Max(),
+            Destinations = destinations,
+            SeenCount = identities.Select(identity => identity.SeenCount).DefaultIfEmpty(0).Max(),
             HasConflict = identities.Any(identity => identity.HasConflict)
         };
+    }
+
+    private static MediaStreamingDestinationDto? MapEpisodeProviderDestination(
+        MediaEpisodeProviderIdentity identity)
+    {
+        var url = MediaDestinationUrlPolicy.BuildUrl(identity.Provider, identity.ProviderUrlPath);
+        return url is null
+            ? null
+            : new MediaStreamingDestinationDto
+            {
+                ServiceId = identity.Provider,
+                Url = url,
+                SeenCount = identity.SeenCount,
+                FirstSeenAt = identity.FirstSeenAt,
+                LastSeenAt = identity.LastSeenAt
+            };
     }
 
     public async Task<MediaContinueWatchingDto?> ResolveContinueWatchingAsync(
@@ -408,27 +422,41 @@ public class MediaEpisodeIdentityService(
             .Where(identity => !identity.HasConflict && identity.ProviderSeriesId != null)
             .ToListAsync(cancellationToken);
 
-        return SelectSeriesDestination(identities);
+        var destination = SelectSeriesDestinations(identities).FirstOrDefault();
+        return destination is null ? null : (destination.ServiceId, destination.Url);
     }
 
-    private static (string Provider, string Url)? SelectSeriesDestination(
+    private static IReadOnlyList<MediaStreamingDestinationDto> SelectSeriesDestinations(
         IEnumerable<MediaEpisodeProviderIdentity> identities)
     {
-        foreach (var candidate in identities
-                     .Where(identity => !identity.HasConflict && !string.IsNullOrWhiteSpace(identity.ProviderSeriesId))
-                     .GroupBy(identity => new { identity.Provider, identity.ProviderSeriesId })
-                     .OrderByDescending(group => group.Sum(identity => identity.SeenCount)))
-        {
-            var url = MediaDestinationUrlPolicy.BuildSeriesUrl(
-                candidate.Key.Provider,
-                candidate.Key.ProviderSeriesId);
-            if (url is not null)
+        return identities
+            .Where(identity => !identity.HasConflict && !string.IsNullOrWhiteSpace(identity.ProviderSeriesId))
+            .GroupBy(identity => new { identity.Provider, identity.ProviderSeriesId })
+            .Select(group =>
             {
-                return (candidate.Key.Provider, url);
-            }
-        }
-
-        return null;
+                var url = MediaDestinationUrlPolicy.BuildSeriesUrl(
+                    group.Key.Provider,
+                    group.Key.ProviderSeriesId);
+                return url is null
+                    ? null
+                    : new MediaStreamingDestinationDto
+                    {
+                        ServiceId = group.Key.Provider,
+                        Url = url,
+                        SeenCount = group.Sum(identity => identity.SeenCount),
+                        FirstSeenAt = group.Min(identity => identity.FirstSeenAt),
+                        LastSeenAt = group.Max(identity => identity.LastSeenAt)
+                    };
+            })
+            .OfType<MediaStreamingDestinationDto>()
+            .GroupBy(destination => destination.ServiceId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(destination => destination.SeenCount)
+                .ThenByDescending(destination => destination.LastSeenAt)
+                .First())
+            .OrderByDescending(destination => destination.SeenCount)
+            .ThenBy(destination => destination.ServiceId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<bool> CanRecordNextEpisodeAsync(

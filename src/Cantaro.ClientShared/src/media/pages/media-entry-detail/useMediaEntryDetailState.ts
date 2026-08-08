@@ -188,7 +188,9 @@ export function useProviderAvailability(entry: MediaLibraryEntryDetailDto | null
 function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
   if (state.status !== 'loaded') return state.status;
   return state.value.episodes
-    .map((episode) => `${episode.episodeNumber}:${episode.url ?? ''}:${episode.hasConflict}`)
+    .map((episode) => `${episode.episodeNumber}:${episode.destinations
+      .map((destination) => `${destination.serviceId}:${destination.url}`)
+      .join(',')}:${episode.hasConflict}`)
     .join('|');
 }
 

@@ -122,8 +122,7 @@ public class MediaContinueWatchingDto
 
 public class MediaEpisodeCatalogDto
 {
-    public string? SeriesProvider { get; set; }
-    public string? SeriesUrl { get; set; }
+    public required IReadOnlyList<MediaStreamingDestinationDto> SeriesDestinations { get; set; }
     public required IReadOnlyList<MediaEpisodeDestinationDto> Episodes { get; set; }
 }
 
@@ -131,8 +130,16 @@ public class MediaEpisodeDestinationDto
 {
     public int EpisodeNumber { get; set; }
     public string? Title { get; set; }
-    public string? Provider { get; set; }
-    public string? Url { get; set; }
+    public required IReadOnlyList<MediaStreamingDestinationDto> Destinations { get; set; }
     public int SeenCount { get; set; }
     public bool HasConflict { get; set; }
+}
+
+public class MediaStreamingDestinationDto
+{
+    public required string ServiceId { get; set; }
+    public required string Url { get; set; }
+    public int SeenCount { get; set; }
+    public DateTimeOffset FirstSeenAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
 }

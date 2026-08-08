@@ -97,17 +97,60 @@ public class MediaEpisodeIdentityServiceTests
                 }),
             CancellationToken.None);
 
+        var episodeTwo = await fixture.Db.MediaEpisodes
+            .SingleAsync(episode => episode.EpisodeNumber == 2);
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.MediaEpisodeProviderIdentities.AddRange(
+            new MediaEpisodeProviderIdentity
+            {
+                Id = Guid.NewGuid(),
+                MediaEpisodeId = episodeTwo.Id,
+                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+                ProviderSeriesId = "SERIES1",
+                ProviderEpisodeId = "EPISODE2ALT",
+                ProviderUrlPath = "/watch/EPISODE2ALT",
+                SeenCount = 3,
+                FirstSeenAt = now.AddDays(-2),
+                LastSeenAt = now.AddDays(-1)
+            },
+            new MediaEpisodeProviderIdentity
+            {
+                Id = Guid.NewGuid(),
+                MediaEpisodeId = episodeTwo.Id,
+                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+                ProviderSeriesId = "SERIES1",
+                ProviderEpisodeId = "CONFLICT2",
+                ProviderUrlPath = "/watch/CONFLICT2",
+                SeenCount = 9,
+                FirstSeenAt = now.AddDays(-3),
+                LastSeenAt = now,
+                HasConflict = true
+            });
+        await fixture.Db.SaveChangesAsync();
+
         var catalog = await fixture.Service.GetEpisodeCatalogAsync(
             fixture.UserId,
             fixture.LibraryEntryId,
             CancellationToken.None);
 
         Assert.NotNull(catalog);
-        Assert.Equal("crunchyroll", catalog.SeriesProvider);
-        Assert.Equal("https://www.crunchyroll.com/series/SERIES1", catalog.SeriesUrl);
+        var seriesDestination = Assert.Single(catalog.SeriesDestinations);
+        Assert.Equal("crunchyroll", seriesDestination.ServiceId);
+        Assert.Equal("https://www.crunchyroll.com/series/SERIES1", seriesDestination.Url);
+        Assert.Equal(5, seriesDestination.SeenCount);
         Assert.Equal([1, 2], catalog.Episodes.Select(episode => episode.EpisodeNumber));
-        Assert.Equal("https://www.crunchyroll.com/watch/EPISODE2", catalog.Episodes[1].Url);
-        Assert.Equal("Two", catalog.Episodes[1].Title);
+        var secondEpisode = catalog.Episodes[1];
+        Assert.Equal("Two", secondEpisode.Title);
+        Assert.Equal(2, secondEpisode.Destinations.Count);
+        Assert.Equal(
+            ["https://www.crunchyroll.com/watch/EPISODE2ALT", "https://www.crunchyroll.com/watch/EPISODE2"],
+            secondEpisode.Destinations.Select(destination => destination.Url));
+        Assert.Equal([3, 1], secondEpisode.Destinations.Select(destination => destination.SeenCount));
+        Assert.Equal(9, secondEpisode.SeenCount);
+        Assert.True(secondEpisode.HasConflict);
+        Assert.DoesNotContain(
+            secondEpisode.Destinations,
+            destination => destination.Url.EndsWith("CONFLICT2", StringComparison.Ordinal));
     }
 
     [Fact]
