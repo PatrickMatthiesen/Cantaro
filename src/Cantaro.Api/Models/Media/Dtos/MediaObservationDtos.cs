@@ -118,6 +118,10 @@ public class ObservedProviderEpisodeDto
 
     [MaxLength(512)]
     public string? EpisodeTitle { get; set; }
+
+    public List<string> AvailableSubtitleLanguageCodes { get; set; } = [];
+
+    public List<string> AvailableAudioLanguageCodes { get; set; } = [];
 }
 
 /// <summary>

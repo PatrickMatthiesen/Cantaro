@@ -60,6 +60,11 @@ public sealed class ProfileController(
             return BadRequest(new { error = "Theme must be system, light, or dark." });
         }
 
+        if (!MediaReleaseTrackPreferences.TryNormalize(request.PreferredMediaReleaseTrack, out var preferredMediaReleaseTrack))
+        {
+            return BadRequest(new { error = "Preferred media release track must use sub or dub with a language code, for example sub:en or dub:en." });
+        }
+
         var user = await GetCurrentUserAsync(cancellationToken);
         if (user is null) return Unauthorized();
         var settings = await GetOrCreateSettingsAsync(user, cancellationToken);
@@ -72,6 +77,7 @@ public sealed class ProfileController(
         settings.HideUnavailableTracks = request.HideUnavailableTracks;
         settings.ScheduledSync = request.ScheduledSync;
         settings.BlurEmailAddress = request.BlurEmailAddress;
+        settings.PreferredMediaReleaseTrack = preferredMediaReleaseTrack;
         settings.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(MapProfile(user, settings));
@@ -313,7 +319,8 @@ public sealed class ProfileController(
         KeepPlaylistMetadata = settings.KeepPlaylistMetadata,
         HideUnavailableTracks = settings.HideUnavailableTracks,
         ScheduledSync = settings.ScheduledSync,
-        BlurEmailAddress = settings.BlurEmailAddress
+        BlurEmailAddress = settings.BlurEmailAddress,
+        PreferredMediaReleaseTrack = settings.PreferredMediaReleaseTrack
     };
 
     private static string ResolveDisplayName(User user, UserSettings settings) =>

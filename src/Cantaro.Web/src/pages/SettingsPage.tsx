@@ -343,8 +343,24 @@ function PreferencesSections({ profile, onProfile }: { profile: User; onProfile:
         {themeSaveState === 'saving' ? 'Saving appearance…' : themeSaveState === 'saved' ? 'Appearance saved' : 'Appearance saves automatically'}
       </p>
     </SettingsSection>
-    <SettingsSection id="sync" eyebrow="Set it once" title="Playlist sync defaults" description="New playlist sync sessions begin with these rules. You can still change them for an individual run.">
-      <div className="settings-toggle-group overflow-hidden rounded-3xl border px-5"><Toggle checked={preferences.keepPlaylistOrder} onChange={value => change('keepPlaylistOrder', value)} title="Preserve song order" detail="Keep the source playlist sequence intact." /><Toggle checked={preferences.keepPlaylistMetadata} onChange={value => change('keepPlaylistMetadata', value)} title="Preserve playlist metadata" detail="Carry title, description, and artwork where providers allow it." /><Toggle checked={preferences.hideUnavailableTracks} onChange={value => change('hideUnavailableTracks', value)} title="Hide unavailable tracks" detail="Keep missing or region-blocked tracks out of sync previews." /><Toggle checked={preferences.scheduledSync} onChange={value => change('scheduledSync', value)} title="Scheduled sync by default" detail="Prepare imported playlists for future automatic sync runs." /></div>{saveFooter}
+    <SettingsSection id="sync" eyebrow="Set it once" title="Sync and media defaults" description="New playlist sync sessions begin with these rules. Your media preference controls which released episodes Cantaro highlights.">
+      <div className="settings-toggle-group overflow-hidden rounded-3xl border px-5"><Toggle checked={preferences.keepPlaylistOrder} onChange={value => change('keepPlaylistOrder', value)} title="Preserve song order" detail="Keep the source playlist sequence intact." /><Toggle checked={preferences.keepPlaylistMetadata} onChange={value => change('keepPlaylistMetadata', value)} title="Preserve playlist metadata" detail="Carry title, description, and artwork where providers allow it." /><Toggle checked={preferences.hideUnavailableTracks} onChange={value => change('hideUnavailableTracks', value)} title="Hide unavailable tracks" detail="Keep missing or region-blocked tracks out of sync previews." /><Toggle checked={preferences.scheduledSync} onChange={value => change('scheduledSync', value)} title="Scheduled sync by default" detail="Prepare imported playlists for future automatic sync runs." /></div>
+      <label className="mt-5 block max-w-md">
+        <span className="text-xs font-black tracking-wider text-content-muted uppercase">Prefer watching</span>
+        <select
+          value={preferences.preferredMediaReleaseTrack}
+          onChange={event => change('preferredMediaReleaseTrack', event.target.value)}
+          className="settings-input mt-2 w-full rounded-2xl border px-4 py-3 text-sm font-bold outline-none focus:border-focus focus:ring-4 focus:ring-accent-soft"
+        >
+          <option value="sub:en">English subtitles</option>
+          <option value="dub:en">English dub</option>
+        </select>
+        <span className="mt-2 block text-xs leading-5 text-content-muted">
+          The red episode-progress segment follows this choice, with English subtitles used when no English dub is known. Release schedules are provided by{' '}
+          <a href="https://animeschedule.net" target="_blank" rel="noopener noreferrer" className="underline hover:text-content">AnimeSchedule.net</a>.
+        </span>
+      </label>
+      {saveFooter}
     </SettingsSection>
   </>;
 }

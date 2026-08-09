@@ -102,19 +102,45 @@ function readSeriesPageState(
   const rawUrl = typeof locationLike === 'string' ? locationLike : locationLike.href;
   const identity = readSeriesIdentity(rawUrl);
   const links = Array.from(doc.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR));
+  const seasonTitle = readSeasonTitle(doc);
+  const languageAvailability = readSeasonLanguageAvailability(seasonTitle);
   return {
     pageUrl: identity?.pageUrl.href ?? rawUrl,
     pageUrlValue: identity?.pageUrl ?? null,
     providerSeriesId: identity?.providerSeriesId,
     seriesTitle: readSeriesTitle(doc),
-    seasonTitle: readSeasonTitle(doc),
+    seasonTitle,
     providerSeasonId: readProviderSeasonId(doc),
     seasonNumber: readSeasonNumber(doc),
-    episodes: identity ? readRenderedEpisodes(doc, identity.pageUrl) : [],
+    episodes: identity
+      ? readRenderedEpisodes(doc, identity.pageUrl).map(episode => ({ ...episode, ...languageAvailability }))
+      : [],
     episodeCardCount: doc.querySelectorAll(EPISODE_CARD_SELECTOR).length,
     watchLinkCount: links.length,
     labelledWatchLinkCount: links.filter(isLabelledEpisodeLink).length,
   };
+}
+
+const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+  english: 'en',
+  german: 'de',
+  spanish: 'es',
+  french: 'fr',
+  portuguese: 'pt',
+  italian: 'it',
+  hindi: 'hi',
+  arabic: 'ar',
+  russian: 'ru',
+};
+
+function readSeasonLanguageAvailability(seasonTitle?: string) {
+  const match = seasonTitle?.match(/\(([^)]+?)\s+(dub|sub)\)/i);
+  if (!match) return {};
+  const languageCode = LANGUAGE_NAME_TO_CODE[match[1].trim().toLowerCase()];
+  if (!languageCode) return {};
+  return match[2].toLowerCase() === 'dub'
+    ? { availableAudioLanguageCodes: [languageCode] }
+    : { availableSubtitleLanguageCodes: [languageCode] };
 }
 
 function readSeriesIdentity(

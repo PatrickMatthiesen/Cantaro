@@ -336,6 +336,52 @@ public class MediaLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetLibraryAsync_UsesPreferredDubCountAndFallsBackToSameLanguageSubtitles()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(313, "release-preference@example.com");
+        db.Users.Add(user);
+        db.UserSettings.Add(new UserSettings
+        {
+            UserId = user.Id,
+            PreferredMediaReleaseTrack = "dub:en",
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        });
+
+        var dubbedTitle = MakeTitle("Dubbed", MediaKinds.Anime, now);
+        var subtitledTitle = MakeTitle("Sub fallback", MediaKinds.Anime, now);
+        db.MediaTitles.AddRange(dubbedTitle, subtitledTitle);
+        db.MediaLibraryEntries.AddRange(
+            MakeEntry(user.Id, dubbedTitle, MediaLibraryStatuses.Current, now),
+            MakeEntry(user.Id, subtitledTitle, MediaLibraryStatuses.Current, now));
+        db.MediaEpisodes.AddRange(
+            Enumerable.Range(1, 8).Select(number => new MediaEpisode
+            {
+                Id = Guid.NewGuid(), MediaTitleId = dubbedTitle.Id, EpisodeNumber = number,
+                AvailableSubtitleLanguageCodes = ["en"],
+                AvailableAudioLanguageCodes = number <= 5 ? ["en"] : [],
+                CreatedAt = now, UpdatedAt = now
+            }).Concat(Enumerable.Range(1, 7).Select(number => new MediaEpisode
+            {
+                Id = Guid.NewGuid(), MediaTitleId = subtitledTitle.Id, EpisodeNumber = number,
+                AvailableSubtitleLanguageCodes = ["en"],
+                CreatedAt = now, UpdatedAt = now
+            })));
+        await db.SaveChangesAsync();
+
+        var page = await new MediaLibraryQueryService(db)
+            .GetLibraryAsync(user.Id, new MediaLibraryQueryOptions { SortBy = "title", SortDir = "asc" }, CancellationToken.None);
+
+        Assert.Equal(5, page.Items.Single(item => item.CanonicalTitle == "Dubbed").AvailableReleasedCount);
+        Assert.Equal(7, page.Items.Single(item => item.CanonicalTitle == "Sub fallback").AvailableReleasedCount);
+    }
+
+    [Fact]
     public async Task LibraryQueries_PreferAniListExtraLargeArtwork()
     {
         var (db, connection) = await CreateDbAsync();

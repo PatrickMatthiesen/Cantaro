@@ -99,6 +99,8 @@ public class MediaEpisodeIdentityServiceTests
 
         var episodeTwo = await fixture.Db.MediaEpisodes
             .SingleAsync(episode => episode.EpisodeNumber == 2);
+        episodeTwo.AvailableSubtitleLanguageCodes = ["en", "da"];
+        episodeTwo.AvailableAudioLanguageCodes = ["en"];
         var now = DateTimeOffset.UtcNow;
         fixture.Db.MediaEpisodeProviderIdentities.AddRange(
             new MediaEpisodeProviderIdentity
@@ -141,6 +143,22 @@ public class MediaEpisodeIdentityServiceTests
         Assert.Equal([1, 2], catalog.Episodes.Select(episode => episode.EpisodeNumber));
         var secondEpisode = catalog.Episodes[1];
         Assert.Equal("Two", secondEpisode.Title);
+        Assert.Equal(["en", "da"], secondEpisode.AvailableSubtitleLanguageCodes);
+        Assert.Equal(["en"], secondEpisode.AvailableAudioLanguageCodes);
+        Assert.Collection(
+            catalog.ReleaseAvailability.Languages,
+            danish =>
+            {
+                Assert.Equal("da", danish.LanguageCode);
+                Assert.Equal(2, danish.SubReleasedEpisodes);
+                Assert.Null(danish.DubReleasedEpisodes);
+            },
+            english =>
+            {
+                Assert.Equal("en", english.LanguageCode);
+                Assert.Equal(2, english.SubReleasedEpisodes);
+                Assert.Equal(2, english.DubReleasedEpisodes);
+            });
         Assert.Equal(2, secondEpisode.Destinations.Count);
         Assert.Equal(
             ["https://www.crunchyroll.com/watch/EPISODE2ALT", "https://www.crunchyroll.com/watch/EPISODE2"],

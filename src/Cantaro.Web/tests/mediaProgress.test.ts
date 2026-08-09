@@ -12,6 +12,7 @@ function makeEntry(overrides: Partial<MediaLibraryListItemDto> = {}): MediaLibra
     progressEpisodes: 12,
     episodeCount: 24,
     releasedCount: 15,
+    availableReleasedCount: 15,
     primaryProgressDimension: 'episode',
     provider: 'anilist',
     providerMediaId: '1',
@@ -33,10 +34,20 @@ describe('progressSegments', () => {
   });
 
   test('clamps stale release metadata behind watched progress', () => {
-    expect(progressSegments(makeEntry({ progressEpisodes: 8, releasedCount: 5 }))).toEqual({
+    expect(progressSegments(makeEntry({ progressEpisodes: 8, releasedCount: 20, availableReleasedCount: 5 }))).toEqual({
       watched: 8,
       releasedUnwatched: 0,
       remaining: 16,
+      total: 24,
+      visualTotal: 24,
+    });
+  });
+
+  test('keeps the original released count while language availability is unknown', () => {
+    expect(progressSegments(makeEntry({ availableReleasedCount: undefined }))).toEqual({
+      watched: 12,
+      releasedUnwatched: 3,
+      remaining: 9,
       total: 24,
       visualTotal: 24,
     });
@@ -54,6 +65,7 @@ describe('progressSegments', () => {
       progressEpisodes: Math.min(6, releasedCount),
       episodeCount: undefined,
       releasedCount,
+      availableReleasedCount: releasedCount,
     }))).toEqual({
       watched: Math.min(6, releasedCount),
       releasedUnwatched: releasedCount - Math.min(6, releasedCount),
@@ -68,6 +80,7 @@ describe('progressSegments', () => {
       progressEpisodes: 0,
       episodeCount: undefined,
       releasedCount: undefined,
+      availableReleasedCount: undefined,
     }))).toBeNull();
   });
 

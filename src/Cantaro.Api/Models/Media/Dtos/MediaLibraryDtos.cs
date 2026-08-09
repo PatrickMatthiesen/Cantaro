@@ -26,6 +26,7 @@ public class MediaLibraryListItemDto
     public int? ChapterCount { get; set; }
     public int? VolumeCount { get; set; }
     public int? ReleasedCount { get; set; }
+    public int? AvailableReleasedCount { get; set; }
     public required string PrimaryProgressDimension { get; set; }
     public required string Provider { get; set; }
     public required string ProviderMediaId { get; set; }
@@ -124,12 +125,28 @@ public class MediaEpisodeCatalogDto
 {
     public required IReadOnlyList<MediaStreamingDestinationDto> SeriesDestinations { get; set; }
     public required IReadOnlyList<MediaEpisodeDestinationDto> Episodes { get; set; }
+    public required MediaReleaseAvailabilityDto ReleaseAvailability { get; set; }
+}
+
+public class MediaReleaseAvailabilityDto
+{
+    public int? MaxReleasedEpisodes { get; set; }
+    public required IReadOnlyList<MediaReleaseLanguageAvailabilityDto> Languages { get; set; }
+}
+
+public class MediaReleaseLanguageAvailabilityDto
+{
+    public required string LanguageCode { get; set; }
+    public int? SubReleasedEpisodes { get; set; }
+    public int? DubReleasedEpisodes { get; set; }
 }
 
 public class MediaEpisodeDestinationDto
 {
     public int EpisodeNumber { get; set; }
     public string? Title { get; set; }
+    public required IReadOnlyList<string> AvailableSubtitleLanguageCodes { get; set; }
+    public required IReadOnlyList<string> AvailableAudioLanguageCodes { get; set; }
     public required IReadOnlyList<MediaStreamingDestinationDto> Destinations { get; set; }
     public int SeenCount { get; set; }
     public bool HasConflict { get; set; }

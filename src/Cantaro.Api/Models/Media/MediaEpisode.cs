@@ -13,6 +13,16 @@ public class MediaEpisode
 
     public string? Title { get; set; }
 
+    /// <summary>
+    /// BCP-47 language codes for known subtitle tracks on this episode.
+    /// </summary>
+    public string[] AvailableSubtitleLanguageCodes { get; set; } = [];
+
+    /// <summary>
+    /// BCP-47 language codes for known audio tracks on this episode.
+    /// </summary>
+    public string[] AvailableAudioLanguageCodes { get; set; } = [];
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

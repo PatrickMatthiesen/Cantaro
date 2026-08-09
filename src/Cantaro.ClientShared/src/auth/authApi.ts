@@ -11,6 +11,7 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 export interface ProfilePreferences {
   theme: ThemePreference;
+  preferredMediaReleaseTrack: string;
   notifyOnSyncSuccess: boolean;
   notifyOnSyncFailure: boolean;
   notifyOnMediaReview: boolean;

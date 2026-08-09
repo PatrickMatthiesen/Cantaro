@@ -7,6 +7,7 @@ import {
   isStreamingDestinationUrl,
   resolveStreamingServiceId,
   STREAMING_SERVICES,
+  type StreamingServiceDefinition,
   type StreamingServiceId,
 } from './streamingServices';
 
@@ -25,6 +26,8 @@ export interface StreamingDestination {
 export interface EpisodeStreamingDestinations {
   episodeNumber: number;
   title?: string;
+  availableAudioLanguageCodes: string[];
+  availableSubtitleLanguageCodes: string[];
   destinations: StreamingDestination[];
 }
 
@@ -71,6 +74,8 @@ function resolveEpisodeDestinations(
   return (catalog?.episodes ?? []).map(episode => ({
     episodeNumber: episode.episodeNumber,
     title: episode.title,
+    availableAudioLanguageCodes: episode.availableAudioLanguageCodes ?? [],
+    availableSubtitleLanguageCodes: episode.availableSubtitleLanguageCodes ?? [],
     destinations: normalizeAndOrder(
       compact(episode.destinations.map(item => destination(item, 'episode'))),
       preferredServiceId,
@@ -123,20 +128,47 @@ function destination(
 ): StreamingDestination | null {
   if (!source.url) return null;
   const serviceId = resolveStreamingServiceId(source.serviceId);
-  if (!serviceId || !isStreamingDestinationUrl(serviceId, source.url, kind)) return null;
+  if (!serviceId) return null;
+  const url = normalizeProviderUrl(serviceId, source.url);
+  if (!url) return null;
+  if (!isStreamingDestinationUrl(serviceId, url, kind)) return null;
   const definition = STREAMING_SERVICES[serviceId];
-  const supported = kind === 'series'
-    ? definition.capabilities.seriesDestinations
-    : definition.capabilities.episodeDestinations;
-  return supported ? {
+  if (!supportsDestinationKind(definition, kind)) return null;
+
+  return {
     serviceId,
-    url: normalizeUrl(source.url),
+    url: normalizeUrl(url),
     kind,
     displayName: definition.displayName,
     seenCount: source.seenCount,
     firstSeenAt: source.firstSeenAt,
     lastSeenAt: source.lastSeenAt,
-  } : null;
+  };
+}
+
+function supportsDestinationKind(
+  definition: StreamingServiceDefinition,
+  kind: StreamingDestinationKind,
+): boolean {
+  return kind === 'series'
+    ? definition.capabilities.seriesDestinations
+    : definition.capabilities.episodeDestinations;
+}
+
+function normalizeProviderUrl(serviceId: StreamingServiceId, value: string): string | null {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const isOwnedHost = STREAMING_SERVICES[serviceId].allowedHosts.some(
+      allowed => hostname === allowed || hostname.endsWith(`.${allowed}`),
+    );
+    if (url.protocol === 'http:' && !url.port && isOwnedHost) {
+      url.protocol = 'https:';
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 
 function compact<T>(values: readonly (T | null)[]): T[] {

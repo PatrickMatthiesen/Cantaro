@@ -106,7 +106,9 @@ export function progressSegments(entry: MediaLibraryListItemDto): LibraryEntryPr
     }
 
     const current = Math.max(0, config.getCurrent(entry));
-    const reportedReleased = entry.primaryProgressDimension === 'episode' ? entry.releasedCount : undefined;
+    const reportedReleased = entry.primaryProgressDimension === 'episode'
+        ? entry.availableReleasedCount ?? entry.releasedCount
+        : undefined;
 
     if (total && total > 0) {
         return knownProgressSegments(current, total, reportedReleased);

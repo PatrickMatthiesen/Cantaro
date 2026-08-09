@@ -42,6 +42,7 @@ public sealed class MediaLibraryImportWorker(
         using var scope = _serviceScopeFactory.CreateScope();
         var registry = scope.ServiceProvider.GetRequiredService<IMediaProviderRegistry>();
         var importService = scope.ServiceProvider.GetRequiredService<MediaLibraryImportService>();
+        var availabilitySyncService = scope.ServiceProvider.GetRequiredService<AnimeScheduleAvailabilitySyncService>();
 
         var provider = registry.GetRequired(workItem.ProviderId);
         var account = await provider.GetConnectedAccountAsync(workItem.UserId, cancellationToken)
@@ -49,6 +50,18 @@ public sealed class MediaLibraryImportWorker(
 
         var importResult = await provider.ImportLibraryAsync(workItem.UserId, cancellationToken);
         var persisted = await importService.ImportAsync(workItem.UserId, account, importResult, cancellationToken);
+        try
+        {
+            await availabilitySyncService.SyncUserLibraryAsync(workItem.UserId, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "AnimeSchedule availability refresh failed after {ProviderId} import for user {UserId}.",
+                workItem.ProviderId,
+                workItem.UserId);
+        }
 
         Publish(workItem, "completed", new MediaLibraryImportEventDto
         {

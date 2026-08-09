@@ -23,6 +23,7 @@ public sealed class ProfilePreferencesDto
     public bool HideUnavailableTracks { get; set; }
     public bool ScheduledSync { get; set; }
     public bool BlurEmailAddress { get; set; }
+    public required string PreferredMediaReleaseTrack { get; set; }
 }
 
 public sealed class UpdateProfileRequest
@@ -43,6 +44,7 @@ public sealed class UpdateProfilePreferencesRequest
     public bool HideUnavailableTracks { get; set; }
     public bool ScheduledSync { get; set; }
     public bool BlurEmailAddress { get; set; }
+    public string PreferredMediaReleaseTrack { get; set; } = MediaReleaseTrackPreferences.Default;
 }
 
 public sealed class ChangePasswordRequest

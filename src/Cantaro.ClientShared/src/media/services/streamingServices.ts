@@ -57,7 +57,10 @@ export const STREAMING_SERVICES: Readonly<Record<StreamingServiceId, StreamingSe
     '#c94f08',
     direct,
     Crunchyroll,
-    [/^\/series\/[a-z0-9]+(?:\/|$)/i],
+    [
+      /^\/series\/[a-z0-9]+(?:\/|$)/i,
+      /^\/(?!(?:watch|search|login|signup|news|videos|games|store)(?:\/|$))[a-z0-9][a-z0-9-]*(?:\/|$)/i,
+    ],
     [/^\/watch\/[a-z0-9]+(?:\/|$)/i],
     crunchyrollSearchUrl,
   ),
