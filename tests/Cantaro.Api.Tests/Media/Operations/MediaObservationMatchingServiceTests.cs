@@ -316,7 +316,7 @@ public class MediaObservationMatchingServiceTests
                 Provider = "anilist",
                 ProviderAccountId = "test-account",
                 ProviderMediaId = Guid.NewGuid().ToString(),
-                NormalizedStatus = MediaLibraryStatuses.Current,
+                Status = MediaLibraryStatuses.Current,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             });

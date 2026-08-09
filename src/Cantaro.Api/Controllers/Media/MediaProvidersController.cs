@@ -367,7 +367,7 @@ public class MediaProvidersController(
                 {
                     LibraryEntryId = canonicalExistingEntry.Id,
                     MediaTitleId = canonicalExistingEntry.MediaTitleId,
-                    Status = canonicalExistingEntry.NormalizedStatus
+                    Status = canonicalExistingEntry.Status
                 });
             }
         }
@@ -395,7 +395,7 @@ public class MediaProvidersController(
             {
                 LibraryEntryId = existingEntry.Id,
                 MediaTitleId = existingEntry.MediaTitleId,
-                Status = existingEntry.NormalizedStatus
+                Status = existingEntry.Status
             });
         }
 
@@ -416,8 +416,7 @@ public class MediaProvidersController(
             Provider = provider.ProviderId,
             ProviderAccountId = account.ExternalAccountId,
             ProviderMediaId = providerMediaId,
-            NormalizedStatus = request.Status,
-            RawStatus = mutationResult.RawStatus,
+            Status = request.Status,
             ProgressEpisodes = details.PrimaryProgressDimension == MediaProgressDimensions.Episode ? 0 : null,
             ProgressChapters = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter ? 0 : null,
             ProgressVolumes = details.PrimaryProgressDimension == MediaProgressDimensions.Volume ? 0 : null,
@@ -437,7 +436,7 @@ public class MediaProvidersController(
         {
             LibraryEntryId = entry.Id,
             MediaTitleId = title.Id,
-            Status = entry.NormalizedStatus
+            Status = entry.Status
         });
     }
 
@@ -503,7 +502,8 @@ public class MediaProvidersController(
             MediaLibraryStatuses.Planned,
             MediaLibraryStatuses.Paused,
             MediaLibraryStatuses.Completed,
-            MediaLibraryStatuses.Dropped
+            MediaLibraryStatuses.Dropped,
+            MediaLibraryStatuses.Repeating
         };
 
         if (!allowedStatuses.Contains(request.Status))
@@ -554,7 +554,7 @@ public class MediaProvidersController(
     private static void ApplyLocalStatusUpdate(MediaLibraryEntry entry, MediaStatusUpdateDto request)
     {
         var now = DateTimeOffset.UtcNow;
-        entry.NormalizedStatus = request.Status;
+        entry.Status = request.Status;
         entry.LastLocalEditAt = now;
         entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
         entry.UpdatedAt = now;
@@ -753,7 +753,7 @@ public class MediaProvidersController(
             IsInLibrary = true,
             LibraryEntryId = entry.Id,
             MediaTitleId = entry.MediaTitleId,
-            NormalizedStatus = entry.NormalizedStatus,
+            Status = entry.Status,
             ProgressEpisodes = entry.ProgressEpisodes,
             ProgressChapters = entry.ProgressChapters,
             ProgressVolumes = entry.ProgressVolumes
@@ -849,7 +849,8 @@ public class MediaProvidersController(
             MediaLibraryStatuses.Planned,
             MediaLibraryStatuses.Paused,
             MediaLibraryStatuses.Completed,
-            MediaLibraryStatuses.Dropped
+            MediaLibraryStatuses.Dropped,
+            MediaLibraryStatuses.Repeating
         };
     }
 

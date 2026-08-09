@@ -321,6 +321,11 @@ public class MediaEpisodeIdentityService(
         {
             using var document = JsonDocument.Parse(rawMetadata);
             var root = document.RootElement;
+            if (root.TryGetProperty("media", out var media)
+                && media.ValueKind == JsonValueKind.Object)
+            {
+                root = media;
+            }
             if (root.TryGetProperty("releasedCount", out var releasedCount)
                 && releasedCount.TryGetInt32(out var parsedReleasedCount))
             {
@@ -403,7 +408,7 @@ public class MediaEpisodeIdentityService(
             {
                 item.MediaTitleId,
                 item.ProgressEpisodes,
-                item.NormalizedStatus,
+                item.Status,
                 item.MediaTitle!.EpisodeCount,
                 item.MediaTitle.SupportsEpisodeProgress
             })
@@ -420,7 +425,7 @@ public class MediaEpisodeIdentityService(
             return new MediaContinueWatchingDto { Outcome = "unavailable" };
         }
 
-        if (entry.NormalizedStatus == MediaLibraryStatuses.Completed
+        if (entry.Status == MediaLibraryStatuses.Completed
             || (entry.EpisodeCount is not null && nextEpisodeNumber > entry.EpisodeCount))
         {
             return new MediaContinueWatchingDto

@@ -2,7 +2,7 @@
 
 export interface MediaLibraryPageDto {
     items: MediaLibraryListItemDto[];
-    availableListNames: string[];
+    availableProviderListNames: string[];
     totalCount: number;
     page: number;
     pageSize: number;
@@ -16,7 +16,7 @@ export interface MediaLibraryListItemDto {
     originalTitle?: string;
     posterUrl?: string;
     mediaKind: string;
-    normalizedStatus: string;
+    status: string;
     progressEpisodes?: number;
     progressChapters?: number;
     progressVolumes?: number;
@@ -28,7 +28,7 @@ export interface MediaLibraryListItemDto {
     primaryProgressDimension: string;
     provider: string;
     providerMediaId: string;
-    rawListName?: string;
+    providerListNames: string[];
     isConnected: boolean;
     nextReleaseAt?: string;
     nextReleaseLabel?: string;
@@ -42,9 +42,8 @@ export interface MediaLibraryEntryDetailDto {
     provider: string;
     providerMediaId: string;
     providerLibraryEntryId?: string;
-    normalizedStatus: string;
-    rawStatus?: string;
-    rawListName?: string;
+    status: string;
+    providerListNames: string[];
     progressEpisodes?: number;
     progressChapters?: number;
     progressVolumes?: number;
@@ -240,7 +239,7 @@ export interface MediaCatalogLibraryStateDto {
     isInLibrary: boolean;
     libraryEntryId?: string;
     mediaTitleId?: string;
-    normalizedStatus?: string;
+    status?: string;
     progressEpisodes?: number;
     progressChapters?: number;
     progressVolumes?: number;
@@ -299,7 +298,7 @@ export interface MediaLibraryQueryParams {
     status?: string;
     mediaKind?: string;
     provider?: string;
-    listName?: string;
+    providerListName?: string;
     sortBy?: string;
     sortDir?: 'asc' | 'desc';
     page?: number;

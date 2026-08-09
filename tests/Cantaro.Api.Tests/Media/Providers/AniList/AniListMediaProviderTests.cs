@@ -223,7 +223,7 @@ public class AniListMediaProviderTests
             Provider = "anilist",
             ProviderAccountId = account.ExternalAccountId,
             ProviderMediaId = "161645",
-            NormalizedStatus = MediaLibraryStatuses.Current,
+            Status = MediaLibraryStatuses.Current,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -318,6 +318,162 @@ public class AniListMediaProviderTests
         Assert.Equal(6, variables.GetProperty("progress").GetInt32());
         Assert.False(variables.TryGetProperty("progressVolumes", out _));
         Assert.False(variables.TryGetProperty("status", out _));
+    }
+
+    [Fact]
+    public async Task UpdateStatusAsync_Repeating_MapsToAniListRepeating()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(304, "anilist-repeating@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(
+            new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 904,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "304",
+            DisplayName = "Repeating Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        const string graphQlResponse = """
+            {
+                "data": {
+                    "SaveMediaListEntry": {
+                        "id": 43,
+                        "status": "REPEATING",
+                        "progress": 12,
+                        "progressVolumes": null,
+                        "updatedAt": 1780776000,
+                        "media": { "id": 154587 }
+                    }
+                }
+            }
+            """;
+
+        var handler = new StubHttpMessageHandler(graphQlResponse);
+        var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
+
+        await provider.UpdateStatusAsync(
+            user.Id,
+            new MediaStatusUpdateRequest
+            {
+                ProviderMediaId = "154587",
+                Status = MediaLibraryStatuses.Repeating
+            },
+            CancellationToken.None);
+
+        Assert.NotNull(handler.LastRequestBody);
+        using var document = JsonDocument.Parse(handler.LastRequestBody);
+        Assert.Equal("REPEATING", document.RootElement.GetProperty("variables").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ImportLibraryAsync_AggregatesDuplicateGroupsAndKeepsOnlyCustomLists()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(305, "anilist-custom-lists@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(
+            new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 905,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "305",
+            DisplayName = "Custom List Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        const string graphQlResponse = """
+            {
+              "data": {
+                "MediaListCollection": {
+                  "lists": [
+                    {
+                      "name": "Watching",
+                      "isCustomList": false,
+                      "entries": [{
+                        "id": 42,
+                        "status": "REPEATING",
+                        "progress": 6,
+                        "progressVolumes": null,
+                        "updatedAt": 1780776000,
+                        "media": {
+                          "id": 154587,
+                          "type": "ANIME",
+                          "description": "An elf revisits old memories.",
+                          "episodes": 28,
+                          "title": { "romaji": "Sousou no Frieren", "english": "Frieren", "native": "葬送のフリーレン" }
+                        }
+                      }]
+                    },
+                    {
+                      "name": "Favorites",
+                      "isCustomList": true,
+                      "entries": [{
+                        "id": 42,
+                        "status": "REPEATING",
+                        "progress": 6,
+                        "progressVolumes": null,
+                        "updatedAt": 1780776000,
+                        "media": {
+                          "id": 154587,
+                          "type": "ANIME",
+                          "description": "An elf revisits old memories.",
+                          "episodes": 28,
+                          "title": { "romaji": "Sousou no Frieren", "english": "Frieren", "native": "葬送のフリーレン" }
+                        }
+                      }]
+                    }
+                  ]
+                }
+              }
+            }
+            """;
+
+        var provider = CreateProvider(
+            dbContext,
+            new StubHttpMessageHandler(graphQlResponse),
+            dataProtectionProvider);
+
+        var import = await provider.ImportLibraryAsync(user.Id, CancellationToken.None);
+
+        var item = Assert.Single(import.Items);
+        Assert.Equal(MediaLibraryStatuses.Repeating, item.Status);
+        Assert.Equal(["Favorites"], item.ProviderListNames);
+        using var rawMetadata = JsonDocument.Parse(item.RawMetadata!);
+        Assert.Equal("REPEATING", rawMetadata.RootElement.GetProperty("status").GetString());
+        Assert.True(rawMetadata.RootElement.TryGetProperty("media", out _));
     }
 
     private static AniListMediaProvider CreateProvider(

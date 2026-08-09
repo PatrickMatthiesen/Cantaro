@@ -582,7 +582,7 @@ public sealed class CantaroSearchServiceTests
             PrimaryProgressDimension = "episodes",
             ReleaseStatusDimension = "episodes",
             CanonicalMetadata =
-                """{"coverImage":{"medium":"https://img.example/medium.jpg","extraLarge":"https://img.example/poster.jpg"}}""",
+                """{"status":"CURRENT","media":{"coverImage":{"medium":"https://img.example/medium.jpg","extraLarge":"https://img.example/poster.jpg"}}}""",
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -600,7 +600,7 @@ public sealed class CantaroSearchServiceTests
             Provider = "anilist",
             ProviderAccountId = $"account-{userId}",
             ProviderMediaId = Guid.NewGuid().ToString(),
-            NormalizedStatus = status,
+            Status = status,
             CreatedAt = now,
             UpdatedAt = now
         };

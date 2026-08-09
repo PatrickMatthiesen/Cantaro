@@ -173,7 +173,7 @@ public sealed class AnimeScheduleAvailabilitySyncServiceTests
         db.MediaLibraryEntries.Add(new MediaLibraryEntry
         {
             Id = Guid.NewGuid(), UserId = user.Id, MediaTitleId = title.Id, Provider = "anilist",
-            ProviderAccountId = "account", ProviderMediaId = "123", NormalizedStatus = MediaLibraryStatuses.Current,
+            ProviderAccountId = "account", ProviderMediaId = "123", Status = MediaLibraryStatuses.Current,
             CreatedAt = now, UpdatedAt = now
         });
         await db.SaveChangesAsync();

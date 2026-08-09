@@ -69,7 +69,7 @@ function LibraryToolbar({
       {search.searchMode === 'library' ? (
         <LibraryFiltersPanel
           filters={library.filters}
-          availableListNames={library.availableListNames}
+          availableProviderListNames={library.availableProviderListNames}
           providerStatus={library.providerStatus}
           isRefreshing={library.isRefreshing}
           isPrimaryProviderSelected={library.isPrimaryProviderSelected}

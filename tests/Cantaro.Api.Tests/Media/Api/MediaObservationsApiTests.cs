@@ -199,7 +199,7 @@ public class MediaObservationsApiTests
             Provider = "anilist",
             ProviderAccountId = "viewer-611",
             ProviderMediaId = "129190",
-            NormalizedStatus = MediaLibraryStatuses.Current,
+            Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = 1,
             LastRemoteUpdateAt = now.AddMinutes(-10),
             CreatedAt = now,

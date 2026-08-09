@@ -116,7 +116,8 @@ function toCatalogEntry(details: MediaProviderTitleDetailsDto): MediaLibraryEntr
     },
     provider: details.providerId,
     providerMediaId: details.providerMediaId,
-    normalizedStatus: details.libraryState?.normalizedStatus ?? 'planned',
+    status: details.libraryState?.status ?? 'planned',
+    providerListNames: [],
     progressEpisodes: details.libraryState?.progressEpisodes,
     progressChapters: details.libraryState?.progressChapters,
     progressVolumes: details.libraryState?.progressVolumes,
@@ -284,30 +285,19 @@ function CatalogDetailContent({
 
   return (
     <DetailPageLayout embedded={embedded}>
-      <div className="media-detail-layout">
-        <section className="media-detail-top-area">
+      <div className="mx-auto grid w-full max-w-360 grid-cols-1 items-start gap-4 lg:gap-6">
+        <section className="relative grid min-w-0 gap-4 lg:block">
           <MediaHero
             entry={entry}
             onNavigateBack={onNavigateBack}
           />
-          <div className="media-detail-desktop-progress">
-            <CatalogAddPanel
-              selectedStatus={addState.selectedStatus}
-              isAdding={addState.isAdding}
-              error={addState.addError}
-              onStatusChange={addState.setSelectedStatus}
-              onAdd={() => void addState.handleAdd()}
-            />
-          </div>
-          <div className="media-detail-mobile-progress">
-            <CatalogAddPanel
-              selectedStatus={addState.selectedStatus}
-              isAdding={addState.isAdding}
-              error={addState.addError}
-              onStatusChange={addState.setSelectedStatus}
-              onAdd={() => void addState.handleAdd()}
-            />
-          </div>
+          <CatalogAddPanel
+            selectedStatus={addState.selectedStatus}
+            isAdding={addState.isAdding}
+            error={addState.addError}
+            onStatusChange={addState.setSelectedStatus}
+            onAdd={() => void addState.handleAdd()}
+          />
         </section>
         <div className="media-detail-main-column">
           <section className="media-detail-overview-card">

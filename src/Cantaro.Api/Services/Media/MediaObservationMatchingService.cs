@@ -391,7 +391,14 @@ public class MediaObservationMatchingService(
         try
         {
             using var document = JsonDocument.Parse(canonicalMetadata);
-            return !document.RootElement.TryGetProperty("format", out var format)
+            var root = document.RootElement;
+            if (root.TryGetProperty("media", out var media)
+                && media.ValueKind == JsonValueKind.Object)
+            {
+                root = media;
+            }
+
+            return !root.TryGetProperty("format", out var format)
                 || string.Equals(format.GetString(), "TV", StringComparison.OrdinalIgnoreCase);
         }
         catch (JsonException)

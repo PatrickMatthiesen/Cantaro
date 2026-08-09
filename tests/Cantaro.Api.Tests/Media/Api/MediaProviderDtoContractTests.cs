@@ -187,7 +187,7 @@ public class MediaProviderDtoContractTests
             Provider = "anilist",
             ProviderAccountId = "legacy-account",
             ProviderMediaId = "stale-provider-id",
-            NormalizedStatus = MediaLibraryStatuses.Planned,
+            Status = MediaLibraryStatuses.Planned,
             CreatedAt = now,
             UpdatedAt = now
         });
@@ -267,7 +267,6 @@ public class MediaProviderDtoContractTests
                 ProviderMediaId = "154587",
                 AppliedAt = now,
                 LastRemoteUpdateAt = now,
-                RawStatus = "PLANNING",
                 RawMetadata = "{\"status\":\"PLANNING\"}"
             }
         };
@@ -287,7 +286,7 @@ public class MediaProviderDtoContractTests
 
         var entry = await fixture.DbContext.MediaLibraryEntries.Include(item => item.MediaTitle).SingleAsync();
         Assert.Equal(entry.Id, payload.LibraryEntryId);
-        Assert.Equal(MediaLibraryStatuses.Planned, entry.NormalizedStatus);
+        Assert.Equal(MediaLibraryStatuses.Planned, entry.Status);
         Assert.Equal("Frieren: Beyond Journey's End", entry.MediaTitle!.CanonicalTitle);
         Assert.Equal("154587", entry.ProviderMediaId);
         Assert.Equal(0, entry.ProgressEpisodes);
@@ -321,7 +320,7 @@ public class MediaProviderDtoContractTests
             Provider = "anilist",
             ProviderAccountId = "disconnected-account",
             ProviderMediaId = "stale-id",
-            NormalizedStatus = MediaLibraryStatuses.Planned,
+            Status = MediaLibraryStatuses.Planned,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -363,7 +362,6 @@ public class MediaProviderDtoContractTests
                 ProviderMediaId = "140960",
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawStatus = "CURRENT"
             }
         };
         await using var fixture = await MediaControllerFixture.CreateAsync(provider);
@@ -420,19 +418,60 @@ public class MediaProviderDtoContractTests
 
         var result = await fixture.Controller.UpdateStatus(
             entry.Id,
-            new MediaStatusUpdateDto { Status = MediaLibraryStatuses.Completed },
+            new MediaStatusUpdateDto { Status = MediaLibraryStatuses.Repeating },
             CancellationToken.None);
 
         Assert.IsType<AcceptedResult>(result);
 
         var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync(item => item.Id == entry.Id);
-        Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.NormalizedStatus);
+        Assert.Equal(MediaLibraryStatuses.Repeating, persistedEntry.Status);
+        Assert.Equal(
+            ["Favorites"],
+            await fixture.DbContext.MediaProviderListMemberships.Select(membership => membership.Name).ToListAsync());
         Assert.Equal(MediaMutationSources.UserStatusUpdate, persistedEntry.LastMutationSource);
         Assert.NotNull(persistedEntry.LastLocalEditAt);
 
         var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);
         Assert.Contains("simulated", queuedOperation.LastError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ImmediatelyMovesEntryBetweenCanonicalLibraryStatusQueries()
+    {
+        var provider = new StubMediaProvider
+        {
+            ThrowOnStatusUpdate = true
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var entry = await SeedMediaEntryAsync(fixture);
+        var queryService = new MediaLibraryQueryService(fixture.DbContext);
+
+        var currentBefore = await queryService.GetLibraryAsync(
+            fixture.UserId,
+            new MediaLibraryQueryOptions { Status = MediaLibraryStatuses.Current },
+            CancellationToken.None);
+        Assert.Equal(entry.Id, Assert.Single(currentBefore.Items).Id);
+
+        var updateResult = await fixture.Controller.UpdateStatus(
+            entry.Id,
+            new MediaStatusUpdateDto { Status = MediaLibraryStatuses.Completed },
+            CancellationToken.None);
+        Assert.IsType<AcceptedResult>(updateResult);
+
+        var currentAfter = await queryService.GetLibraryAsync(
+            fixture.UserId,
+            new MediaLibraryQueryOptions { Status = MediaLibraryStatuses.Current },
+            CancellationToken.None);
+        var completedAfter = await queryService.GetLibraryAsync(
+            fixture.UserId,
+            new MediaLibraryQueryOptions { Status = MediaLibraryStatuses.Completed },
+            CancellationToken.None);
+
+        Assert.Empty(currentAfter.Items);
+        var completedEntry = Assert.Single(completedAfter.Items);
+        Assert.Equal(entry.Id, completedEntry.Id);
+        Assert.Equal(["Favorites"], completedEntry.ProviderListNames);
     }
 
     private sealed class MediaControllerFixture : IAsyncDisposable
@@ -601,7 +640,6 @@ public class MediaProviderDtoContractTests
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawStatus = request.Status.ToUpperInvariant()
             });
         }
 
@@ -703,7 +741,11 @@ public class MediaProviderDtoContractTests
             Provider = "anilist",
             ProviderAccountId = account.ExternalAccountId,
             ProviderMediaId = "140960",
-            NormalizedStatus = MediaLibraryStatuses.Current,
+            Status = MediaLibraryStatuses.Current,
+            ProviderListMemberships =
+            [
+                new MediaProviderListMembership { Name = "Favorites" }
+            ],
             ProgressEpisodes = 12,
             LastRemoteUpdateAt = now.AddMinutes(-2),
             CreatedAt = now,

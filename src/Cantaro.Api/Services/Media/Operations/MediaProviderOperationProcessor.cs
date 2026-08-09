@@ -337,7 +337,7 @@ public class MediaProviderOperationProcessor(
             case MediaProviderOperationTypes.UpdateStatus:
             {
                 var request = DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson);
-                entry.NormalizedStatus = request.Status;
+                entry.Status = request.Status;
                 entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
                 break;
             }
@@ -369,7 +369,6 @@ public class MediaProviderOperationProcessor(
         entry.LastSyncedAt = now;
         entry.LastRemoteUpdateAt = result.LastRemoteUpdateAt ?? now;
         entry.LastLocalEditAt = now;
-        entry.RawStatus = result.RawStatus ?? entry.RawStatus;
         entry.RawMetadata = result.RawMetadata ?? entry.RawMetadata;
         entry.UpdatedAt = now;
         _logger.LogInformation(

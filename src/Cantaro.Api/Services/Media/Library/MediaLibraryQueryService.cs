@@ -12,7 +12,7 @@ public class MediaLibraryQueryOptions
     public string? Status { get; set; }
     public string? MediaKind { get; set; }
     public string? Provider { get; set; }
-    public string? ListName { get; set; }
+    public string? ProviderListName { get; set; }
 
     /// <summary>
     /// Valid values: title, updatedAt, status, progress. Defaults to updatedAt.
@@ -39,6 +39,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
     {
         var query = _dbContext.MediaLibraryEntries
             .Include(e => e.MediaTitle)
+            .Include(e => e.ProviderListMemberships)
             .Where(e => e.UserId == userId);
 
         if (!string.IsNullOrWhiteSpace(options.Query))
@@ -54,7 +55,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
 
         if (!string.IsNullOrWhiteSpace(options.Status))
         {
-            query = query.Where(e => e.NormalizedStatus == options.Status);
+            query = query.Where(e => e.Status == options.Status);
         }
 
         if (!string.IsNullOrWhiteSpace(options.MediaKind))
@@ -67,16 +68,16 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             query = query.Where(e => e.Provider == options.Provider);
         }
 
-        var availableListNames = await query
-            .Where(e => !string.IsNullOrWhiteSpace(e.RawListName))
-            .Select(e => e.RawListName!)
+        var availableProviderListNames = await query
+            .SelectMany(e => e.ProviderListMemberships)
+            .Select(membership => membership.Name)
             .Distinct()
             .OrderBy(name => name)
             .ToListAsync(cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(options.ListName))
+        if (!string.IsNullOrWhiteSpace(options.ProviderListName))
         {
-            query = query.Where(e => e.RawListName == options.ListName);
+            query = query.Where(e => e.ProviderListMemberships.Any(membership => membership.Name == options.ProviderListName));
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -135,7 +136,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         return new MediaLibraryPageDto
         {
             Items = items,
-            AvailableListNames = availableListNames,
+            AvailableProviderListNames = availableProviderListNames,
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize,
@@ -151,6 +152,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         var entry = await _dbContext.MediaLibraryEntries
             .Include(e => e.MediaTitle)
                 .ThenInclude(t => t!.ProviderLinks)
+            .Include(e => e.ProviderListMemberships)
             .FirstOrDefaultAsync(e => e.Id == libraryEntryId && e.UserId == userId, cancellationToken);
 
         return entry is null ? null : MapDetail(entry);
@@ -169,8 +171,8 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 ? entries.OrderByDescending(e => e.MediaTitle?.CanonicalTitle ?? string.Empty)
                 : entries.OrderBy(e => e.MediaTitle?.CanonicalTitle ?? string.Empty),
             "status" => descending
-                ? entries.OrderByDescending(e => e.NormalizedStatus).ThenByDescending(e => e.UpdatedAt)
-                : entries.OrderBy(e => e.NormalizedStatus).ThenByDescending(e => e.UpdatedAt),
+                ? entries.OrderByDescending(e => e.Status).ThenByDescending(e => e.UpdatedAt)
+                : entries.OrderBy(e => e.Status).ThenByDescending(e => e.UpdatedAt),
             "progress" => descending
                 ? entries.OrderByDescending(e => e.ProgressEpisodes ?? e.ProgressChapters ?? e.ProgressVolumes)
                 : entries.OrderBy(e => e.ProgressEpisodes ?? e.ProgressChapters ?? e.ProgressVolumes),
@@ -193,8 +195,8 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 ? entries.OrderByDescending(e => e.MediaTitle!.CanonicalTitle).ThenByDescending(e => e.Id)
                 : entries.OrderBy(e => e.MediaTitle!.CanonicalTitle).ThenBy(e => e.Id),
             "status" => descending
-                ? entries.OrderByDescending(e => e.NormalizedStatus).ThenByDescending(e => e.UpdatedAt)
-                : entries.OrderBy(e => e.NormalizedStatus).ThenByDescending(e => e.UpdatedAt),
+                ? entries.OrderByDescending(e => e.Status).ThenByDescending(e => e.UpdatedAt)
+                : entries.OrderBy(e => e.Status).ThenByDescending(e => e.UpdatedAt),
             "progress" => descending
                 ? entries.OrderByDescending(e => e.ProgressEpisodes ?? e.ProgressChapters ?? e.ProgressVolumes ?? -1)
                     .ThenByDescending(e => e.UpdatedAt)
@@ -219,7 +221,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             OriginalTitle = entry.MediaTitle?.OriginalTitle,
             PosterUrl = artwork.LargePosterUrl,
             MediaKind = entry.MediaTitle?.MediaKind ?? string.Empty,
-            NormalizedStatus = entry.NormalizedStatus,
+            Status = entry.Status,
             ProgressEpisodes = entry.ProgressEpisodes,
             ProgressChapters = entry.ProgressChapters,
             ProgressVolumes = entry.ProgressVolumes,
@@ -231,7 +233,10 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             PrimaryProgressDimension = entry.MediaTitle?.PrimaryProgressDimension ?? string.Empty,
             Provider = entry.Provider,
             ProviderMediaId = entry.ProviderMediaId,
-            RawListName = entry.RawListName,
+            ProviderListNames = entry.ProviderListMemberships
+                .Select(membership => membership.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList(),
             IsConnected = entry.ConnectedServiceAccountId is not null,
             NextReleaseAt = releaseMetadata.NextReleaseAt,
             NextReleaseLabel = releaseMetadata.NextReleaseLabel,
@@ -303,9 +308,11 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             Provider = entry.Provider,
             ProviderMediaId = entry.ProviderMediaId,
             ProviderLibraryEntryId = entry.ProviderLibraryEntryId,
-            NormalizedStatus = entry.NormalizedStatus,
-            RawStatus = entry.RawStatus,
-            RawListName = entry.RawListName,
+            Status = entry.Status,
+            ProviderListNames = entry.ProviderListMemberships
+                .Select(membership => membership.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList(),
             ProgressEpisodes = entry.ProgressEpisodes,
             ProgressChapters = entry.ProgressChapters,
             ProgressVolumes = entry.ProgressVolumes,
@@ -340,15 +347,12 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         {
             using var document = JsonDocument.Parse(rawMetadata);
             var root = document.RootElement;
-            var releasedCount = TryReadInt32(root, "releasedCount");
-
-            if (root.TryGetProperty("releasedCount", out _)
-                || root.TryGetProperty("nextReleaseAt", out _)
-                || root.TryGetProperty("nextReleaseLabel", out _))
+            if (root.TryGetProperty("media", out var media)
+                && media.ValueKind == JsonValueKind.Object)
             {
-                _ = TryReadDateTimeOffset(root, "nextReleaseAt", out var nextReleaseAt);
-                return (releasedCount, nextReleaseAt, TryReadString(root, "nextReleaseLabel"));
+                root = media;
             }
+            var releasedCount = TryReadInt32(root, "releasedCount");
 
             if (root.TryGetProperty("nextAiringEpisode", out var nextAiringEpisode)
                 && nextAiringEpisode.ValueKind == JsonValueKind.Object)
@@ -369,6 +373,14 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 }
 
                 return (releasedCount, airingAt, label);
+            }
+
+            if (root.TryGetProperty("releasedCount", out _)
+                || root.TryGetProperty("nextReleaseAt", out _)
+                || root.TryGetProperty("nextReleaseLabel", out _))
+            {
+                _ = TryReadDateTimeOffset(root, "nextReleaseAt", out var nextReleaseAt);
+                return (releasedCount, nextReleaseAt, TryReadString(root, "nextReleaseLabel"));
             }
 
             if (string.Equals(TryReadString(root, "status"), "FINISHED", StringComparison.OrdinalIgnoreCase))
@@ -432,7 +444,9 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
 
     private static int? TryReadInt32(JsonElement root, string propertyName)
     {
-        return root.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value)
+        return root.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.Number
+            && property.TryGetInt32(out var value)
             ? value
             : null;
     }
@@ -454,7 +468,14 @@ file sealed class MediaArtworkMetadata
         try
         {
             using var document = JsonDocument.Parse(canonicalMetadata);
-            if (!document.RootElement.TryGetProperty("coverImage", out var coverImage)
+            var root = document.RootElement;
+            if (root.TryGetProperty("media", out var media)
+                && media.ValueKind == JsonValueKind.Object)
+            {
+                root = media;
+            }
+
+            if (!root.TryGetProperty("coverImage", out var coverImage)
                 || coverImage.ValueKind != JsonValueKind.Object)
             {
                 return new MediaArtworkMetadata();

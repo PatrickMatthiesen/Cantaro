@@ -69,7 +69,7 @@ public class MediaCatalogLibraryStateDto
     public bool IsInLibrary { get; set; }
     public Guid? LibraryEntryId { get; set; }
     public Guid? MediaTitleId { get; set; }
-    public string? NormalizedStatus { get; set; }
+    public string? Status { get; set; }
     public int? ProgressEpisodes { get; set; }
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }

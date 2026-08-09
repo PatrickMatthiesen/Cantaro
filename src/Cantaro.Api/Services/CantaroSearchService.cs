@@ -367,7 +367,7 @@ public sealed class CantaroSearchService(
             .Select(entry => new MediaLibrarySearchState(
                 entry.MediaTitleId,
                 entry.Id,
-                entry.NormalizedStatus,
+                entry.Status,
                 entry.ConnectedServiceAccountId != null,
                 entry.UpdatedAt))
             .ToListAsync(cancellationToken);
@@ -417,11 +417,11 @@ public sealed class CantaroSearchService(
                 Id = $"media-title:{candidate.Id}",
                 Title = candidate.CanonicalTitle,
                 Subtitle = BuildMediaSubtitle(candidate.MediaKind, candidate.StartYear),
-                Detail = libraryState?.NormalizedStatus,
+                Detail = libraryState?.Status,
                 ArtworkUrl = GetMediaArtworkUrl(candidate.CanonicalMetadata),
                 CanonicalRoute = route,
                 IsInLibrary = libraryState is not null,
-                LibraryStatus = libraryState?.NormalizedStatus
+                LibraryStatus = libraryState?.Status
             };
         }).ToList();
     }
@@ -599,7 +599,14 @@ public sealed class CantaroSearchService(
         try
         {
             using var document = JsonDocument.Parse(canonicalMetadata);
-            if (!document.RootElement.TryGetProperty("coverImage", out var coverImage)
+            var root = document.RootElement;
+            if (root.TryGetProperty("media", out var media)
+                && media.ValueKind == JsonValueKind.Object)
+            {
+                root = media;
+            }
+
+            if (!root.TryGetProperty("coverImage", out var coverImage)
                 || coverImage.ValueKind != JsonValueKind.Object)
             {
                 return null;
@@ -634,7 +641,7 @@ public sealed class CantaroSearchService(
     private sealed record MediaLibrarySearchState(
         Guid MediaTitleId,
         Guid LibraryEntryId,
-        string NormalizedStatus,
+        string Status,
         bool IsConnected,
         DateTimeOffset UpdatedAt);
 

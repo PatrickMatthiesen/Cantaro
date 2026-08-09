@@ -59,9 +59,8 @@ public class MediaLibraryImportServiceTests
                     ExternalUrl = "https://anilist.co/anime/154587",
                     StartYear = 2023,
                     EpisodeCount = 28,
-                    NormalizedStatus = MediaLibraryStatuses.Current,
-                    RawStatus = "CURRENT",
-                    RawListName = "Watching",
+                    Status = MediaLibraryStatuses.Current,
+                    ProviderListNames = ["Favorites", "Weekend"],
                     ProgressEpisodes = 12,
                     PrimaryProgressDimension = MediaProgressDimensions.Episode,
                     ReleaseStatusDimension = MediaProgressDimensions.Episode,
@@ -95,9 +94,8 @@ public class MediaLibraryImportServiceTests
                     ExternalUrl = "https://anilist.co/anime/154587",
                     StartYear = 2023,
                     EpisodeCount = 28,
-                    NormalizedStatus = MediaLibraryStatuses.Completed,
-                    RawStatus = "COMPLETED",
-                    RawListName = "Completed",
+                    Status = MediaLibraryStatuses.Completed,
+                    ProviderListNames = ["Favorites"],
                     ProgressEpisodes = 28,
                     PrimaryProgressDimension = MediaProgressDimensions.Episode,
                     ReleaseStatusDimension = MediaProgressDimensions.Episode,
@@ -116,9 +114,11 @@ public class MediaLibraryImportServiceTests
         Assert.Equal(0, secondResult.CreatedTitles);
         Assert.Equal(0, secondResult.CreatedEntries);
         Assert.Equal(1, secondResult.UpdatedEntries);
-        Assert.Equal(MediaLibraryStatuses.Completed, entry.NormalizedStatus);
+        Assert.Equal(MediaLibraryStatuses.Completed, entry.Status);
         Assert.Equal(28, entry.ProgressEpisodes);
-        Assert.Equal("Completed", entry.RawListName);
+        Assert.Equal(
+            ["Favorites"],
+            await dbContext.MediaProviderListMemberships.Select(membership => membership.Name).ToListAsync());
         Assert.Equal("Updated synopsis", title.Synopsis);
         Assert.Equal("https://anilist.co/anime/154587", link.ExternalUrl);
     }
@@ -182,9 +182,11 @@ public class MediaLibraryImportServiceTests
             ProviderAccountId = account.ExternalAccountId,
             ProviderMediaId = "154587",
             ProviderLibraryEntryId = "entry-1",
-            NormalizedStatus = MediaLibraryStatuses.Current,
-            RawStatus = "CURRENT",
-            RawListName = "Watching",
+            Status = MediaLibraryStatuses.Current,
+            ProviderListMemberships =
+            [
+                new MediaProviderListMembership { Name = "Favorites" }
+            ],
             ProgressEpisodes = 6,
             LastSyncedAt = now.AddMinutes(-5),
             LastRemoteUpdateAt = remoteUpdatedAt,
@@ -214,9 +216,8 @@ public class MediaLibraryImportServiceTests
                     ProviderLibraryEntryId = "entry-1",
                     Title = "Frieren: Beyond Journey's End",
                     MediaKind = MediaKinds.Anime,
-                    NormalizedStatus = MediaLibraryStatuses.Current,
-                    RawStatus = "CURRENT",
-                    RawListName = "Watching",
+                    Status = MediaLibraryStatuses.Current,
+                    ProviderListNames = ["Weekend"],
                     ProgressEpisodes = 5,
                     PrimaryProgressDimension = MediaProgressDimensions.Episode,
                     ReleaseStatusDimension = MediaProgressDimensions.Episode,
@@ -233,5 +234,8 @@ public class MediaLibraryImportServiceTests
         Assert.Equal(MediaMutationSources.UserProgressUpdate, persistedEntry.LastMutationSource);
         Assert.Equal("{\"progress\":6}", persistedEntry.RawMetadata);
         Assert.Equal(staleImport.ImportedAt, persistedEntry.LastSyncedAt);
+        Assert.Equal(
+            ["Weekend"],
+            await dbContext.MediaProviderListMemberships.Select(membership => membership.Name).ToListAsync());
     }
 }

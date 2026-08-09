@@ -103,7 +103,7 @@ export function useEntryDetailState(libraryEntryId: string) {
     setProgressEpisodes(data.progressEpisodes);
     setProgressChapters(data.progressChapters);
     setProgressVolumes(data.progressVolumes);
-    setSelectedStatus(data.normalizedStatus);
+    setSelectedStatus(data.status);
   }, []);
 
   const loadEntry = useCallback(async () => {
@@ -396,7 +396,7 @@ export function useManualRemoteRefresh(
 
 function getStatusChanges(entry: MediaLibraryEntryDetailDto, draft: StatusDraft) {
   return {
-    statusChanged: draft.selectedStatus !== entry.normalizedStatus,
+    statusChanged: draft.selectedStatus !== entry.status,
     progressChanged:
       draft.progressEpisodes !== entry.progressEpisodes
       || draft.progressChapters !== entry.progressChapters
@@ -429,7 +429,7 @@ function applySavedStatus(
   return current
     ? {
       ...current,
-      normalizedStatus: draft.selectedStatus,
+      status: draft.selectedStatus,
       progressEpisodes: draft.progressEpisodes,
       progressChapters: draft.progressChapters,
       progressVolumes: draft.progressVolumes,

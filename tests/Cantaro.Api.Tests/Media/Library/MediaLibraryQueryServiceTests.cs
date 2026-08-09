@@ -280,11 +280,14 @@ public class MediaLibraryQueryServiceTests
         db.Users.Add(user);
 
         var title = MakeTitle("The Apothecary Diaries", MediaKinds.Anime, now);
+        title.CanonicalMetadata = """
+            {"status":"CURRENT","media":{"coverImage":{"large":"https://example.test/apothecary.jpg"}}}
+            """;
         db.MediaTitles.Add(title);
         await db.SaveChangesAsync();
 
         var entry = MakeEntry(user.Id, title, MediaLibraryStatuses.Current, now);
-        entry.RawMetadata = $"{{\"nextAiringEpisode\":{{\"episode\":18,\"airingAt\":{nextReleaseAt}}}}}";
+        entry.RawMetadata = $"{{\"status\":\"CURRENT\",\"media\":{{\"releasedCount\":null,\"nextAiringEpisode\":{{\"episode\":18,\"airingAt\":{nextReleaseAt}}}}}}}";
         db.MediaLibraryEntries.Add(entry);
         await db.SaveChangesAsync();
 
@@ -297,6 +300,7 @@ public class MediaLibraryQueryServiceTests
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(nextReleaseAt), page.Items[0].NextReleaseAt);
         Assert.Equal("Ep 18", page.Items[0].NextReleaseLabel);
         Assert.Equal(17, page.Items[0].ReleasedCount);
+        Assert.Equal("https://example.test/apothecary.jpg", page.Items[0].PosterUrl);
         Assert.NotNull(detail);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(nextReleaseAt), detail!.NextReleaseAt);
         Assert.Equal("Ep 18", detail.NextReleaseLabel);
@@ -509,7 +513,7 @@ public class MediaLibraryQueryServiceTests
             Provider = "anilist",
             ProviderAccountId = $"account-{userId}",
             ProviderMediaId = Guid.NewGuid().ToString("N")[..6],
-            NormalizedStatus = status,
+            Status = status,
             CreatedAt = now,
             UpdatedAt = now
         };

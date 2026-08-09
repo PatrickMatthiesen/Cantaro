@@ -131,8 +131,8 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
   return (
     <>
       <DetailPageLayout embedded={props.embedded}>
-        <div className="media-detail-layout">
-          <section className="media-detail-top-area">
+        <div className="mx-auto grid w-full max-w-360 grid-cols-1 items-start gap-4 lg:gap-6">
+          <section className="relative min-w-0">
             <MediaHero entry={props.entry} onNavigateBack={props.onNavigateBack} />
             <div className="media-detail-progress">
               <ProgressCockpit {...props} />

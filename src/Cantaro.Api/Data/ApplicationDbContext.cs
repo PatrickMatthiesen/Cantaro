@@ -35,6 +35,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaEpisode> MediaEpisodes => Set<MediaEpisode>();
     public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
+    public DbSet<MediaProviderListMembership> MediaProviderListMemberships => Set<MediaProviderListMembership>();
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
     public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
     public DbSet<MediaObservationCandidate> MediaObservationCandidates => Set<MediaObservationCandidate>();
@@ -549,7 +550,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => new { e.UserId, e.Provider, e.ProviderAccountId, e.ProviderMediaId })
                 .IsUnique();
 
-            entity.HasIndex(e => new { e.UserId, e.NormalizedStatus });
+            entity.HasIndex(e => new { e.UserId, e.Status });
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -568,6 +569,18 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(a => a.MediaLibraryEntries)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MediaProviderListMembership>(entity =>
+        {
+            entity.HasKey(e => new { e.MediaLibraryEntryId, e.Name });
+            entity.HasIndex(e => new { e.Name, e.MediaLibraryEntryId });
+            entity.Property(e => e.Name).HasMaxLength(256);
+
+            entity.HasOne(e => e.MediaLibraryEntry)
+                .WithMany(entry => entry.ProviderListMemberships)
+                .HasForeignKey(e => e.MediaLibraryEntryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MediaProviderOperation>(entity =>

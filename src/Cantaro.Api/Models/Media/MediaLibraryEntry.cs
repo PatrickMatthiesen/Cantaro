@@ -29,11 +29,7 @@ public class MediaLibraryEntry
 
     public string? ProviderLibraryEntryId { get; set; }
 
-    public required string NormalizedStatus { get; set; }
-
-    public string? RawStatus { get; set; }
-
-    public string? RawListName { get; set; }
+    public required string Status { get; set; }
 
     public int? ProgressEpisodes { get; set; }
 
@@ -62,4 +58,6 @@ public class MediaLibraryEntry
     public ConnectedServiceAccount? ConnectedServiceAccount { get; set; }
 
     public ICollection<MediaProviderOperation> ProviderOperations { get; set; } = [];
+
+    public ICollection<MediaProviderListMembership> ProviderListMemberships { get; set; } = [];
 }

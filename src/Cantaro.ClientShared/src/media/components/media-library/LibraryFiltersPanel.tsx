@@ -6,7 +6,7 @@ import {
 import { mediaProviderCatalog } from '../../services/mediaProviders';
 import type { MediaLibraryQueryParams, MediaProviderAccountStatusDto } from '../../services/mediaApi';
 
-const NORMALIZED_STATUS_OPTIONS = [
+const STATUS_OPTIONS = [
     { value: '', label: 'All statuses' },
     { value: 'current', label: 'Watching / Reading' },
     { value: 'completed', label: 'Completed' },
@@ -31,7 +31,7 @@ interface FilterOption {
 
 export interface LibraryFiltersPanelProps {
     filters: MediaLibraryQueryParams;
-    availableListNames: string[];
+    availableProviderListNames: string[];
     providerStatus: MediaProviderAccountStatusDto | null;
     isRefreshing: boolean;
     isPrimaryProviderSelected: boolean;
@@ -45,7 +45,7 @@ export interface LibraryFiltersPanelProps {
 // fallow-ignore-next-line complexity
 export function LibraryFiltersPanel({
     filters,
-    availableListNames,
+    availableProviderListNames,
     providerStatus,
     isRefreshing,
     isPrimaryProviderSelected,
@@ -61,7 +61,7 @@ export function LibraryFiltersPanel({
     ];
     const listOptions: FilterOption[] = [
         { value: '', label: 'All lists' },
-        ...availableListNames.map((listName) => ({ value: listName, label: listName })),
+        ...availableProviderListNames.map((listName) => ({ value: listName, label: listName })),
     ];
 
     return (
@@ -71,18 +71,18 @@ export function LibraryFiltersPanel({
                     statusValue={filters.status ?? ''}
                     mediaKindValue={filters.mediaKind ?? ''}
                     providerValue={filters.provider ?? ''}
-                    listNameValue={filters.listName ?? ''}
+                    providerListNameValue={filters.providerListName ?? ''}
                     providerOptions={providerOptions}
                     listOptions={listOptions}
-                    normalizedStatusOptions={NORMALIZED_STATUS_OPTIONS}
+                    statusOptions={STATUS_OPTIONS}
                     mediaKindOptions={MEDIA_KIND_OPTIONS}
-                    isListDisabled={availableListNames.length === 0 || !isPrimaryProviderSelected}
+                    isListDisabled={availableProviderListNames.length === 0 || !isPrimaryProviderSelected}
                     sortBy={filters.sortBy ?? 'updatedAt'}
                     sortDir={filters.sortDir ?? 'desc'}
                     onStatusChange={(value) => onUpdateFilter('status', value)}
                     onMediaKindChange={(value) => onUpdateFilter('mediaKind', value)}
                     onProviderChange={onUpdateProviderFilter}
-                    onListChange={(value) => onUpdateFilter('listName', value)}
+                    onProviderListChange={(value) => onUpdateFilter('providerListName', value)}
                     onSortByChange={(value) => onUpdateFilter('sortBy', value)}
                     onToggleSortDir={onToggleSortDir}
                 />

@@ -211,7 +211,7 @@ public sealed class ProfileController(
             .Select(entry => new
             {
                 entry.Id, entry.MediaTitleId, entry.Provider, entry.ProviderAccountId, entry.ProviderMediaId,
-                entry.NormalizedStatus, entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes,
+                entry.Status, entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes,
                 entry.LastSyncedAt, entry.LastRemoteUpdateAt, entry.LastLocalEditAt, entry.CreatedAt, entry.UpdatedAt
             }).ToListAsync(cancellationToken);
         var observations = await dbContext.MediaObservations.AsNoTracking()
