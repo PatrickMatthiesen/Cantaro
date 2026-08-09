@@ -37,6 +37,7 @@ export interface StreamingServiceDefinition {
   displayName: string;
   allowedHosts: readonly string[];
   brandColor: string;
+  buttonColor: string;
   icon?: StreamingServiceIcon;
   capabilities: StreamingServiceCapabilities;
   seriesPathPatterns: readonly RegExp[];
@@ -52,23 +53,24 @@ export const STREAMING_SERVICES: Readonly<Record<StreamingServiceId, StreamingSe
     'crunchyroll',
     'Crunchyroll',
     ['crunchyroll.com'],
-    '#f47521',
+    '#ff640a',
+    '#c94f08',
     direct,
     Crunchyroll,
     [/^\/series\/[a-z0-9]+(?:\/|$)/i],
     [/^\/watch\/[a-z0-9]+(?:\/|$)/i],
     crunchyrollSearchUrl,
   ),
-  hidive: service('hidive', 'HIDIVE', ['hidive.com'], '#00a4dc', seriesOnly, undefined, [/^\/(?:season|tv)\//i]),
-  netflix: service('netflix', 'Netflix', ['netflix.com'], '#e50914', seriesOnly, Netflix, [/^\/(?:[a-z]{2}\/)?title\/\d+/i]),
-  hulu: service('hulu', 'Hulu', ['hulu.com'], '#1ce783', seriesOnly, Hulu, [/^\/(?:series|movie)\//i]),
-  'disney-plus': service('disney-plus', 'Disney+', ['disneyplus.com'], '#113ccf', seriesOnly, DisneyPlus, [/^\/(?:series|movies|browse\/entity-)/i]),
-  'prime-video': service('prime-video', 'Prime Video', ['primevideo.com', 'amazon.com'], '#00a8e1', seriesOnly, PrimeVideo, [/^\/(?:detail|gp\/video\/detail)\//i]),
-  max: service('max', 'Max', ['max.com'], '#002be7', seriesOnly, Max, [/^\/(?:[a-z]{2}\/[a-z]{2}\/)?(?:shows|movies)\//i]),
-  'apple-tv': service('apple-tv', 'Apple TV', ['tv.apple.com'], '#111111', seriesOnly, AppleTv, [/^\/(?:[a-z]{2}\/)?(?:show|movie)\//i]),
-  'paramount-plus': service('paramount-plus', 'Paramount+', ['paramountplus.com'], '#0064ff', seriesOnly, ParamountPlus, [/^\/(?:shows|movies)\//i]),
-  peacock: service('peacock', 'Peacock', ['peacocktv.com'], '#f5e500', seriesOnly, Peacock, [/^\/(?:watch\/asset|collections)\//i]),
-  youtube: service('youtube', 'YouTube', ['youtube.com', 'youtu.be'], '#ff0000', seriesOnly, YouTube, [/^\/(?:playlist|channel|@)/i]),
+  hidive: service('hidive', 'HIDIVE', ['hidive.com'], '#00a4dc', '#00526e', seriesOnly, undefined, [/^\/(?:season|tv)\//i]),
+  netflix: service('netflix', 'Netflix', ['netflix.com'], '#ff2137', '#e81e32', seriesOnly, Netflix, [/^\/(?:[a-z]{2}\/)?title\/\d+/i]),
+  hulu: service('hulu', 'Hulu', ['hulu.com'], '#1ce783', '#0e7442', seriesOnly, Hulu, [/^\/(?:series|movie)\//i]),
+  'disney-plus': service('disney-plus', 'Disney+', ['disneyplus.com'], '#113ccf', '#091e68', seriesOnly, DisneyPlus, [/^\/(?:series|movies|browse\/entity-)/i]),
+  'prime-video': service('prime-video', 'Prime Video', ['primevideo.com', 'amazon.com'], '#00a8e1', '#005471', seriesOnly, PrimeVideo, [/^\/(?:detail|gp\/video\/detail)\//i]),
+  max: service('max', 'Max', ['max.com'], '#002be7', '#001674', seriesOnly, Max, [/^\/(?:[a-z]{2}\/[a-z]{2}\/)?(?:shows|movies)\//i]),
+  'apple-tv': service('apple-tv', 'Apple TV', ['tv.apple.com'], '#111111', '#111111', seriesOnly, AppleTv, [/^\/(?:[a-z]{2}\/)?(?:show|movie)\//i]),
+  'paramount-plus': service('paramount-plus', 'Paramount+', ['paramountplus.com'], '#0064ff', '#003280', seriesOnly, ParamountPlus, [/^\/(?:shows|movies)\//i]),
+  peacock: service('peacock', 'Peacock', ['peacocktv.com'], '#f5e500', '#7b7300', seriesOnly, Peacock, [/^\/(?:watch\/asset|collections)\//i]),
+  youtube: service('youtube', 'YouTube', ['youtube.com', 'youtu.be'], '#ff0033', '#ed002f', seriesOnly, YouTube, [/^\/(?:playlist|channel|@)/i]),
 };
 
 const SERVICE_ALIASES: Readonly<Record<string, StreamingServiceId>> = {
@@ -138,6 +140,7 @@ function service(
   displayName: string,
   allowedHosts: readonly string[],
   brandColor: string,
+  buttonColor: string,
   capabilities: StreamingServiceCapabilities,
   icon?: StreamingServiceIcon,
   seriesPathPatterns: readonly RegExp[] = [],
@@ -149,6 +152,7 @@ function service(
     displayName,
     allowedHosts,
     brandColor,
+    buttonColor,
     capabilities,
     icon,
     seriesPathPatterns,

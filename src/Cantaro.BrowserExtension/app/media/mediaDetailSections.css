@@ -311,14 +311,14 @@
   border-radius: 0.65rem;
   padding: 0 0.55rem;
   color: #fff;
-  background: color-mix(in srgb, var(--streaming-service-color) 50%, #000);
+  background: var(--streaming-service-button-color);
   font-size: 0.68rem;
   font-weight: 750;
   text-decoration: none;
 }
 
 .cantaro-extension-media .media-detail-streaming-destination:hover {
-  background: color-mix(in srgb, var(--streaming-service-color) 44%, #000);
+  background: color-mix(in srgb, var(--streaming-service-button-color) 88%, #000);
 }
 
 .cantaro-extension-media .media-detail-streaming-destination > svg:last-child {

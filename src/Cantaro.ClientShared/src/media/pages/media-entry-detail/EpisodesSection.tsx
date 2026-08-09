@@ -62,7 +62,10 @@ function EpisodeDestinationActions({
             rel="noopener noreferrer"
             aria-label={`${opensEpisode ? `Open episode ${episodeNumber}` : 'Open series'} on ${service.displayName}`}
             title={opensEpisode ? `Watch episode ${episodeNumber}` : 'Open series page'}
-            style={{ '--streaming-service-color': service.brandColor } as CSSProperties}
+            style={{
+              '--streaming-service-color': service.brandColor,
+              '--streaming-service-button-color': service.buttonColor,
+            } as CSSProperties}
             onClick={() => onSelectStreamingService(destination.serviceId)}
           >
             <StreamingServiceIcon
