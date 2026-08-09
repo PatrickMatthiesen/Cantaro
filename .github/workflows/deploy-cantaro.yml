@@ -86,7 +86,6 @@ jobs:
       - name: Deploy with Aspire through Docker context
         env:
           ASPIRE_CONTAINER_RUNTIME: docker
-          COMPOSE_PROJECT_NAME: cantaro
           DEPLOY_HOST: ${{ secrets.SSH_HOST }}
           DEPLOY_USER: ${{ secrets.SSH_USER }}
           Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}

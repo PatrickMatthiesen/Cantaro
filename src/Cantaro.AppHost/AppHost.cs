@@ -5,7 +5,11 @@ using Cantaro.Aspire.Hosting.Garage;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var dockerEnv = builder.AddDockerComposeEnvironment("docker-compose");
+var dockerEnv = builder.AddDockerComposeEnvironment("cantaro-compose")
+    .ConfigureComposeFile(composeFile =>
+    {
+        composeFile.Name = "cantaro";
+    });
 
 var youtubeClientId = builder.AddParameter("YouTubeClientId", secret: true);
 var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: true);
