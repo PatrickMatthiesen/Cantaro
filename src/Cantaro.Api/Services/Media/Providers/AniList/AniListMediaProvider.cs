@@ -129,12 +129,9 @@ public class AniListMediaProvider(
             new { userId = viewerId, type = "MANGA" },
             cancellationToken);
 
-        var items = animeCollection.MediaListCollection?.Lists?
-            .Concat(mangaCollection.MediaListCollection?.Lists ?? [])
-            .SelectMany(list => list.Entries?.Select(entry => MapLibraryItem(entry, list.Name)) ?? [])
-            .Where(item => item is not null)
-            .Cast<MediaProviderLibraryItem>()
-            .ToList() ?? [];
+        var lists = (animeCollection.MediaListCollection?.Lists ?? [])
+            .Concat(mangaCollection.MediaListCollection?.Lists ?? []);
+        var items = MapLibraryItems(lists);
 
         return new MediaProviderLibraryImportResult
         {
@@ -290,7 +287,43 @@ public class AniListMediaProvider(
         return parsed;
     }
 
-    private static MediaProviderLibraryItem? MapLibraryItem(AniListMediaListEntry entry, string? listName)
+    private static IReadOnlyList<MediaProviderLibraryItem> MapLibraryItems(
+        IEnumerable<AniListMediaListGroup> lists)
+    {
+        return lists
+            .SelectMany(list => (list.Entries ?? []).Select(entry => new
+            {
+                Entry = entry,
+                CustomListName = list.IsCustomList ? list.Name : null
+            }))
+            .Where(item => item.Entry.Media is { Id: > 0 })
+            .GroupBy(item => item.Entry.Media!.Id)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                var representative = group
+                    .OrderByDescending(item => item.Entry.UpdatedAt)
+                    .ThenBy(item => item.Entry.Id)
+                    .First()
+                    .Entry;
+                var customListNames = group
+                    .Select(item => item.CustomListName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Select(name => name!.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .ToList();
+
+                return MapLibraryItem(representative, customListNames);
+            })
+            .Where(item => item is not null)
+            .Cast<MediaProviderLibraryItem>()
+            .ToList();
+    }
+
+    private static MediaProviderLibraryItem? MapLibraryItem(
+        AniListMediaListEntry entry,
+        IReadOnlyList<string> providerListNames)
     {
         if (entry.Media is null || entry.Media.Id <= 0)
         {
@@ -320,16 +353,15 @@ public class AniListMediaProvider(
             EpisodeCount = entry.Media.Episodes,
             ChapterCount = entry.Media.Chapters,
             VolumeCount = entry.Media.Volumes,
-            NormalizedStatus = MapNormalizedStatus(entry.Status),
-            RawStatus = entry.Status,
-            RawListName = listName,
+            Status = MapStatus(entry.Status),
+            ProviderListNames = providerListNames,
             ProgressEpisodes = mediaKind == MediaKinds.Anime ? entry.Progress : null,
             ProgressChapters = mediaKind == MediaKinds.Manga ? entry.Progress : null,
             ProgressVolumes = mediaKind == MediaKinds.Manga ? entry.ProgressVolumes : null,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
             LastRemoteUpdateAt = ToDateTimeOffset(entry.UpdatedAt),
-            RawMetadata = JsonSerializer.Serialize(entry.Media)
+            RawMetadata = JsonSerializer.Serialize(entry)
         };
     }
 
@@ -501,7 +533,6 @@ public class AniListMediaProvider(
                 ?? throw new InvalidOperationException("AniList did not return a media id for the saved entry."),
             AppliedAt = DateTimeOffset.UtcNow,
             LastRemoteUpdateAt = ToDateTimeOffset(savedEntry.UpdatedAt),
-            RawStatus = savedEntry.Status,
             RawMetadata = JsonSerializer.Serialize(savedEntry)
         };
     }
@@ -608,7 +639,7 @@ public class AniListMediaProvider(
         };
     }
 
-    private static string MapNormalizedStatus(string? status)
+    private static string MapStatus(string? status)
     {
         return status?.ToUpperInvariant() switch
         {
@@ -617,7 +648,7 @@ public class AniListMediaProvider(
             "PAUSED" => MediaLibraryStatuses.Paused,
             "COMPLETED" => MediaLibraryStatuses.Completed,
             "DROPPED" => MediaLibraryStatuses.Dropped,
-            "REPEATING" => MediaLibraryStatuses.Current,
+            "REPEATING" => MediaLibraryStatuses.Repeating,
             _ => MediaLibraryStatuses.Unknown
         };
     }
@@ -631,6 +662,7 @@ public class AniListMediaProvider(
             MediaLibraryStatuses.Paused => "PAUSED",
             MediaLibraryStatuses.Completed => "COMPLETED",
             MediaLibraryStatuses.Dropped => "DROPPED",
+            MediaLibraryStatuses.Repeating => "REPEATING",
             _ => throw new InvalidOperationException($"Media status '{status}' cannot be written to AniList.")
         };
     }
@@ -691,6 +723,7 @@ public class AniListMediaProvider(
           MediaListCollection(userId: $userId, type: $type) {
             lists {
               name
+              isCustomList
               entries {
                 id
                 status
@@ -876,6 +909,9 @@ public class AniListMediaListGroup
 {
     [JsonPropertyName("name")]
     public string? Name { get; set; }
+
+    [JsonPropertyName("isCustomList")]
+    public bool IsCustomList { get; set; }
 
     [JsonPropertyName("entries")]
     public List<AniListMediaListEntry>? Entries { get; set; }

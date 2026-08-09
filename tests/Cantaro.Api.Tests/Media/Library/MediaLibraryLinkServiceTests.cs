@@ -347,7 +347,7 @@ public class MediaLibraryLinkServiceTests
             Provider = "anilist",
             ProviderAccountId = $"account-{userId}",
             ProviderMediaId = Guid.NewGuid().ToString("N")[..6],
-            NormalizedStatus = MediaLibraryStatuses.Current,
+            Status = MediaLibraryStatuses.Current,
             CreatedAt = now,
             UpdatedAt = now
         };

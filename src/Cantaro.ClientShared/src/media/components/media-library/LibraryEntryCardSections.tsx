@@ -1,6 +1,7 @@
 import type { MediaLibraryListItemDto } from '../../services/mediaApi';
 import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
 import { Pill } from '../../../ui';
+import { mediaLibraryStatusClassName, mediaLibraryStatusLabel } from './mediaLibraryStatus';
 
 interface TopLeftBadge {
     label: string;
@@ -162,6 +163,11 @@ export function LibraryEntryCardDetails({
     return (
         <div className={`absolute inset-x-0 bottom-0 ${classNames.container}`}>
             <div className={`${classNames.panel} bg-black/30 backdrop-blur-md`}>
+                <span
+                    className={`${mediaLibraryStatusClassName(entry.status)} mb-1.5 inline-flex max-w-fit rounded-full px-2 py-0.5 text-[0.65rem] leading-none font-semibold shadow-sm ${density === 'compact' ? 'mb-1 px-1.5 text-[0.55rem]' : ''}`}
+                >
+                    {mediaLibraryStatusLabel(entry.status, entry.mediaKind)}
+                </span>
                 <p className={`${classNames.title} line-clamp-2 leading-tight font-semibold text-white transition-colors group-hover:text-cyan-100`}>
                     {entry.canonicalTitle}
                 </p>

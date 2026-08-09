@@ -29,14 +29,16 @@ public class MediaLibraryApiTests
         fixture.Db.MediaTitles.AddRange(anime, manga);
         await fixture.Db.SaveChangesAsync();
 
-        fixture.Db.MediaLibraryEntries.AddRange(
-            MakeEntry(fixture.UserId, anime, MediaLibraryStatuses.Completed, now),
-            MakeEntry(fixture.UserId, manga, MediaLibraryStatuses.Current, now));
+        var completedEntry = MakeEntry(fixture.UserId, anime, MediaLibraryStatuses.Completed, now);
+        completedEntry.ProviderListMemberships.Add(new MediaProviderListMembership { Name = "Favorites" });
+        var currentEntry = MakeEntry(fixture.UserId, manga, MediaLibraryStatuses.Current, now);
+        currentEntry.ProviderListMemberships.Add(new MediaProviderListMembership { Name = "Seasonal" });
+        fixture.Db.MediaLibraryEntries.AddRange(completedEntry, currentEntry);
         await fixture.Db.SaveChangesAsync();
 
         // No filter — returns both entries
         var allResult = await fixture.Controller.GetLibrary(
-            status: null, mediaKind: null, provider: null, listName: null,
+            status: null, mediaKind: null, provider: null, providerListName: null,
             sortBy: "title", sortDir: "asc",
             page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
 
@@ -44,10 +46,11 @@ public class MediaLibraryApiTests
         var page = Assert.IsType<MediaLibraryPageDto>(ok.Value);
         Assert.Equal(2, page.TotalCount);
         Assert.Equal("Fullmetal Alchemist: Brotherhood", page.Items[0].CanonicalTitle);
+        Assert.Equal(["Favorites", "Seasonal"], page.AvailableProviderListNames);
 
         // Filter by status=completed
         var completedResult = await fixture.Controller.GetLibrary(
-            status: MediaLibraryStatuses.Completed, mediaKind: null, provider: null, listName: null,
+            status: MediaLibraryStatuses.Completed, mediaKind: null, provider: null, providerListName: null,
             sortBy: null, sortDir: null,
             page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
 
@@ -55,6 +58,17 @@ public class MediaLibraryApiTests
         var completedPage = Assert.IsType<MediaLibraryPageDto>(completedOk.Value);
         Assert.Equal(1, completedPage.TotalCount);
         Assert.Equal("Fullmetal Alchemist: Brotherhood", completedPage.Items[0].CanonicalTitle);
+        Assert.Equal(["Favorites"], completedPage.Items[0].ProviderListNames);
+
+        var seasonalResult = await fixture.Controller.GetLibrary(
+            status: null, mediaKind: null, provider: null, providerListName: "Seasonal",
+            sortBy: null, sortDir: null,
+            page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
+
+        var seasonalOk = Assert.IsType<OkObjectResult>(seasonalResult.Result);
+        var seasonalPage = Assert.IsType<MediaLibraryPageDto>(seasonalOk.Value);
+        Assert.Equal(1, seasonalPage.TotalCount);
+        Assert.Equal("One Piece", seasonalPage.Items[0].CanonicalTitle);
     }
 
     [Fact]
@@ -374,7 +388,7 @@ public class MediaLibraryApiTests
             Provider = "anilist",
             ProviderAccountId = $"account-{userId}",
             ProviderMediaId = Guid.NewGuid().ToString("N")[..6],
-            NormalizedStatus = status,
+            Status = status,
             CreatedAt = now,
             UpdatedAt = now
         };

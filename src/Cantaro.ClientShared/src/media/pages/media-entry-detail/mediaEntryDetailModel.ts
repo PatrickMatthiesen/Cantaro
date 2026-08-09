@@ -107,7 +107,7 @@ export function getEntryStatusChanged(props: Pick<
   MediaEntryDetailContentProps,
   'entry' | 'selectedStatus' | 'progressEpisodes' | 'progressChapters' | 'progressVolumes'
 >) {
-  return props.selectedStatus !== props.entry.normalizedStatus
+  return props.selectedStatus !== props.entry.status
     || props.progressEpisodes !== props.entry.progressEpisodes
     || props.progressChapters !== props.entry.progressChapters
     || props.progressVolumes !== props.entry.progressVolumes;

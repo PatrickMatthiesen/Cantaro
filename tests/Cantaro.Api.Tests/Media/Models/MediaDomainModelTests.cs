@@ -73,8 +73,7 @@ public class MediaDomainModelTests
             ProviderAccountId = account.ExternalAccountId,
             ProviderMediaId = providerLink.ExternalId,
             ProviderLibraryEntryId = "list-entry-500",
-            NormalizedStatus = MediaLibraryStatuses.Current,
-            RawStatus = "CURRENT",
+            Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = 12,
             LastSyncedAt = timestamp,
             LastRemoteUpdateAt = timestamp.AddMinutes(-5),
@@ -96,7 +95,7 @@ public class MediaDomainModelTests
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
         var persistedProviderLink = await dbContext.MediaProviderLinks.SingleAsync();
 
-        Assert.Equal(MediaLibraryStatuses.Current, persistedEntry.NormalizedStatus);
+        Assert.Equal(MediaLibraryStatuses.Current, persistedEntry.Status);
         Assert.Equal(MediaProgressDimensions.Episode, persistedTitle.PrimaryProgressDimension);
         Assert.Equal(account.Id, persistedEntry.ConnectedServiceAccountId);
         Assert.Equal(timestamp.AddMinutes(-5), persistedEntry.LastRemoteUpdateAt);
@@ -142,7 +141,7 @@ public class MediaDomainModelTests
             Provider = "anilist",
             ProviderAccountId = "anilist-user-102",
             ProviderMediaId = "21519",
-            NormalizedStatus = MediaLibraryStatuses.Completed,
+            Status = MediaLibraryStatuses.Completed,
             CreatedAt = timestamp,
             UpdatedAt = timestamp
         };

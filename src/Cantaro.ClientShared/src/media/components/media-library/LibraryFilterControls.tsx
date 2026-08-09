@@ -22,10 +22,10 @@ export interface LibraryFilterFieldsProps {
     statusValue: string;
     mediaKindValue: string;
     providerValue: string;
-    listNameValue: string;
+    providerListNameValue: string;
     providerOptions: FilterOption[];
     listOptions: FilterOption[];
-    normalizedStatusOptions: FilterOption[];
+    statusOptions: FilterOption[];
     mediaKindOptions: FilterOption[];
     isListDisabled: boolean;
     sortBy: string;
@@ -33,7 +33,7 @@ export interface LibraryFilterFieldsProps {
     onStatusChange: (value: string | undefined) => void;
     onMediaKindChange: (value: string | undefined) => void;
     onProviderChange: (value: string | undefined) => void;
-    onListChange: (value: string | undefined) => void;
+    onProviderListChange: (value: string | undefined) => void;
     onSortByChange: (value: string) => void;
     onToggleSortDir: () => void;
 }
@@ -95,10 +95,10 @@ export function LibraryFilterFields({
     statusValue,
     mediaKindValue,
     providerValue,
-    listNameValue,
+    providerListNameValue,
     providerOptions,
     listOptions,
-    normalizedStatusOptions,
+    statusOptions,
     mediaKindOptions,
     isListDisabled,
     sortBy,
@@ -106,20 +106,20 @@ export function LibraryFilterFields({
     onStatusChange,
     onMediaKindChange,
     onProviderChange,
-    onListChange,
+    onProviderListChange,
     onSortByChange,
     onToggleSortDir,
 }: LibraryFilterFieldsProps) {
     return (
         <>
-            <FilterSelect label="Status" value={statusValue} options={normalizedStatusOptions} onChange={onStatusChange} />
+            <FilterSelect label="Status" value={statusValue} options={statusOptions} onChange={onStatusChange} />
             <FilterSelect label="Type" value={mediaKindValue} options={mediaKindOptions} onChange={onMediaKindChange} />
             <FilterSelect label="Provider" value={providerValue} options={providerOptions} onChange={onProviderChange} />
             <FilterSelect
-                label="List"
-                value={listNameValue}
+                label="Provider list"
+                value={providerListNameValue}
                 options={listOptions}
-                onChange={onListChange}
+                onChange={onProviderListChange}
                 disabled={isListDisabled}
             />
             <SortControls sortBy={sortBy} sortDir={sortDir} onSortByChange={onSortByChange} onToggleSortDir={onToggleSortDir} />

@@ -3,7 +3,7 @@ namespace Cantaro.Api.Models;
 public class MediaLibraryPageDto
 {
     public required IReadOnlyList<MediaLibraryListItemDto> Items { get; set; }
-    public required IReadOnlyList<string> AvailableListNames { get; set; }
+    public required IReadOnlyList<string> AvailableProviderListNames { get; set; }
     public int TotalCount { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }
@@ -18,7 +18,7 @@ public class MediaLibraryListItemDto
     public string? OriginalTitle { get; set; }
     public string? PosterUrl { get; set; }
     public required string MediaKind { get; set; }
-    public required string NormalizedStatus { get; set; }
+    public required string Status { get; set; }
     public int? ProgressEpisodes { get; set; }
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }
@@ -30,7 +30,7 @@ public class MediaLibraryListItemDto
     public required string PrimaryProgressDimension { get; set; }
     public required string Provider { get; set; }
     public required string ProviderMediaId { get; set; }
-    public string? RawListName { get; set; }
+    public required IReadOnlyList<string> ProviderListNames { get; set; }
     public bool IsConnected { get; set; }
     public DateTimeOffset? NextReleaseAt { get; set; }
     public string? NextReleaseLabel { get; set; }
@@ -45,9 +45,8 @@ public class MediaLibraryEntryDetailDto
     public required string Provider { get; set; }
     public required string ProviderMediaId { get; set; }
     public string? ProviderLibraryEntryId { get; set; }
-    public required string NormalizedStatus { get; set; }
-    public string? RawStatus { get; set; }
-    public string? RawListName { get; set; }
+    public required string Status { get; set; }
+    public required IReadOnlyList<string> ProviderListNames { get; set; }
     public int? ProgressEpisodes { get; set; }
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }

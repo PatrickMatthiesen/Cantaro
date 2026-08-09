@@ -28,6 +28,7 @@ public class MediaLibraryImportService(
             .ToDictionaryAsync(link => link.ExternalId, StringComparer.Ordinal, cancellationToken);
 
         var existingEntries = await _dbContext.MediaLibraryEntries
+            .Include(entry => entry.ProviderListMemberships)
             .Where(entry => entry.UserId == userId
                 && entry.Provider == importResult.ProviderId
                 && entry.ProviderAccountId == account.ExternalAccountId
@@ -84,9 +85,7 @@ public class MediaLibraryImportService(
                     ProviderAccountId = account.ExternalAccountId,
                     ProviderMediaId = item.ProviderMediaId,
                     ProviderLibraryEntryId = item.ProviderLibraryEntryId,
-                    NormalizedStatus = item.NormalizedStatus,
-                    RawStatus = item.RawStatus,
-                    RawListName = item.RawListName,
+                    Status = item.Status,
                     ProgressEpisodes = item.ProgressEpisodes,
                     ProgressChapters = item.ProgressChapters,
                     ProgressVolumes = item.ProgressVolumes,
@@ -110,9 +109,7 @@ public class MediaLibraryImportService(
                 var shouldApplyRemoteLibraryState = ShouldApplyRemoteLibraryState(entry, item);
                 if (shouldApplyRemoteLibraryState)
                 {
-                    entry.NormalizedStatus = item.NormalizedStatus;
-                    entry.RawStatus = item.RawStatus;
-                    entry.RawListName = item.RawListName;
+                    entry.Status = item.Status;
                     entry.ProgressEpisodes = item.ProgressEpisodes;
                     entry.ProgressChapters = item.ProgressChapters;
                     entry.ProgressVolumes = item.ProgressVolumes;
@@ -125,6 +122,8 @@ public class MediaLibraryImportService(
                 entry.UpdatedAt = importResult.ImportedAt;
                 updatedEntries++;
             }
+
+            ReplaceProviderListMemberships(entry, item.ProviderListNames);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -147,6 +146,38 @@ public class MediaLibraryImportService(
             UpdatedEntries = updatedEntries,
             ImportedAt = importResult.ImportedAt
         };
+    }
+
+    private void ReplaceProviderListMemberships(
+        MediaLibraryEntry entry,
+        IReadOnlyList<string> providerListNames)
+    {
+        var desiredNames = providerListNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var removedMemberships = entry.ProviderListMemberships
+            .Where(membership => !desiredNames.Contains(membership.Name))
+            .ToList();
+        _dbContext.MediaProviderListMemberships.RemoveRange(removedMemberships);
+
+        var existingNames = entry.ProviderListMemberships
+            .Except(removedMemberships)
+            .Select(membership => membership.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var name in desiredNames.OrderBy(name => name, StringComparer.Ordinal))
+        {
+            if (!existingNames.Contains(name))
+            {
+                entry.ProviderListMemberships.Add(new MediaProviderListMembership
+                {
+                    MediaLibraryEntryId = entry.Id,
+                    Name = name
+                });
+            }
+        }
     }
 
     private static MediaTitle CreateMediaTitle(MediaProviderLibraryItem item, DateTimeOffset timestamp)

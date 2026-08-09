@@ -44,11 +44,9 @@ public class MediaProviderLibraryItem
 
     public int? VolumeCount { get; set; }
 
-    public required string NormalizedStatus { get; set; }
+    public required string Status { get; set; }
 
-    public string? RawStatus { get; set; }
-
-    public string? RawListName { get; set; }
+    public IReadOnlyList<string> ProviderListNames { get; set; } = [];
 
     public int? ProgressEpisodes { get; set; }
 
@@ -191,8 +189,6 @@ public class MediaProviderMutationResult
     public DateTimeOffset AppliedAt { get; set; }
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
-
-    public string? RawStatus { get; set; }
 
     public string? RawMetadata { get; set; }
 }

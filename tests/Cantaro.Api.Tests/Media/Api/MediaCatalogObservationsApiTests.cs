@@ -501,7 +501,7 @@ public class MediaCatalogObservationsApiTests
                 Provider = "anilist",
                 ProviderAccountId = "catalog-test-account",
                 ProviderMediaId = providerMediaId,
-                NormalizedStatus = MediaLibraryStatuses.Current,
+                Status = MediaLibraryStatuses.Current,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             });

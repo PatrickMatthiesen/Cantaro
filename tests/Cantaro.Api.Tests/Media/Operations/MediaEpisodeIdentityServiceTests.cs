@@ -412,7 +412,7 @@ public class MediaEpisodeIdentityServiceTests
                 Provider = "anilist",
                 ProviderAccountId = "test-account",
                 ProviderMediaId = "123",
-                NormalizedStatus = MediaLibraryStatuses.Current,
+                Status = MediaLibraryStatuses.Current,
                 ProgressEpisodes = progressEpisodes,
                 CreatedAt = now,
                 UpdatedAt = now

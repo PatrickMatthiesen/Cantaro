@@ -25,6 +25,7 @@ public static class MediaLibraryStatuses
     public const string Paused = "paused";
     public const string Completed = "completed";
     public const string Dropped = "dropped";
+    public const string Repeating = "repeating";
     public const string Unknown = "unknown";
 }
 

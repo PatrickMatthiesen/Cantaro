@@ -308,7 +308,7 @@ public class MediaProviderOperationProcessorTests
             Provider = "anilist",
             ProviderAccountId = account.ExternalAccountId,
             ProviderMediaId = "140960",
-            NormalizedStatus = MediaLibraryStatuses.Current,
+            Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = 10,
             LastRemoteUpdateAt = now.AddMinutes(-2),
             CreatedAt = now,
@@ -391,7 +391,6 @@ public class MediaProviderOperationProcessorTests
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawStatus = "CURRENT",
                 RawMetadata = "{\"status\":\"CURRENT\"}"
             });
         }
@@ -411,7 +410,6 @@ public class MediaProviderOperationProcessorTests
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawStatus = request.Status.ToUpperInvariant(),
                 RawMetadata = $"{{\"status\":\"{request.Status}\"}}"
             });
         }
