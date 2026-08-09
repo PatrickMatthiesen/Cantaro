@@ -17,10 +17,6 @@
   padding: 0.85rem;
 }
 
-.cantaro-extension-media .media-detail-progress-main {
-  min-width: 0;
-}
-
 .cantaro-extension-media .media-detail-progress-ring {
   position: relative;
   display: grid;
@@ -73,6 +69,7 @@
 }
 
 .cantaro-extension-media .media-detail-progress-next {
+  min-width: 0;
   display: grid;
   align-content: center;
   gap: 0.5rem;

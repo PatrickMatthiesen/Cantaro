@@ -35,6 +35,31 @@ export function clampProgressValue(value: number, max?: number) {
   return max ? Math.min(lowerBoundedValue, max) : lowerBoundedValue;
 }
 
+function displayProgressValue(value: number | undefined): number {
+  return value ?? 0;
+}
+
+function displayProgressTotal(total: number | undefined): number | '?' {
+  return total ?? '?';
+}
+
+function createProgressSummary(
+  label: string,
+  noun: string,
+  action: string,
+  unit: string,
+  value: number | undefined,
+  total: number | undefined,
+): ProgressSummary {
+  return {
+    label,
+    noun,
+    value,
+    total,
+    progressLabel: `${action}: ${unit} ${displayProgressValue(value)} / ${displayProgressTotal(total)}`,
+  };
+}
+
 export function getPrimaryProgressSummary(
   title: MediaLibraryEntryDetailDto['title'],
   progressEpisodes: number | undefined,
@@ -42,32 +67,14 @@ export function getPrimaryProgressSummary(
   progressVolumes: number | undefined,
 ): ProgressSummary {
   if (title.primaryProgressDimension === 'chapter') {
-    return {
-      label: 'Chapters read',
-      noun: 'chapters',
-      value: progressChapters,
-      total: title.chapterCount,
-      progressLabel: `Read: Chapter ${progressChapters ?? 0}`,
-    };
+    return createProgressSummary('Chapters read', 'chapters', 'Read', 'Chapter', progressChapters, title.chapterCount);
   }
 
   if (title.primaryProgressDimension === 'volume') {
-    return {
-      label: 'Volumes read',
-      noun: 'volumes',
-      value: progressVolumes,
-      total: title.volumeCount,
-      progressLabel: `Read: Volume ${progressVolumes ?? 0}`,
-    };
+    return createProgressSummary('Volumes read', 'volumes', 'Read', 'Volume', progressVolumes, title.volumeCount);
   }
 
-  return {
-    label: 'Watched',
-    noun: 'episodes',
-    value: progressEpisodes,
-    total: title.episodeCount,
-    progressLabel: `Watched: Episode ${progressEpisodes ?? 0}`,
-  };
+  return createProgressSummary('Watched', 'episodes', 'Watched', 'Episode', progressEpisodes, title.episodeCount);
 }
 
 export function getProgressPercent(summary: ProgressSummary) {

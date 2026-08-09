@@ -11,7 +11,6 @@ import {
   DetailPageLayout,
   MediaHero,
 } from './media-entry-detail/MediaEntryDetailHero';
-import { getPrimaryProgressSummary } from './media-entry-detail/mediaEntryDetailModel';
 import { DetailTabs } from './media-entry-detail/DetailTabs';
 
 const ADD_STATUSES = [
@@ -275,7 +274,6 @@ function CatalogDetailContent({
 }) {
   const [activeTab, setActiveTab] = useState<CatalogTabId>('overview');
   const entry = useMemo(() => toCatalogEntry(details), [details]);
-  const progressSummary = getPrimaryProgressSummary(entry.title, undefined, undefined, undefined);
   const availability = useMemo<ProviderAvailabilityMap>(() => ({
     [providerAvailabilityKey(details.providerId, details.providerMediaId)]: {
       status: 'loaded',
@@ -290,10 +288,8 @@ function CatalogDetailContent({
         <section className="media-detail-top-area">
           <MediaHero
             entry={entry}
-            progressSummary={progressSummary}
             onNavigateBack={onNavigateBack}
             membershipLabel="Not in your library"
-            showProgress={false}
           />
           <div className="media-detail-desktop-progress">
             <CatalogAddPanel

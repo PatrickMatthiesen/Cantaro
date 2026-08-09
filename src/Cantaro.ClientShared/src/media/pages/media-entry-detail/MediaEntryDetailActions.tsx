@@ -13,14 +13,16 @@ import {
 import { formatNextReleaseDisplay } from '../../services/mediaFormatting';
 import type { MediaContinueWatchingDto } from '../../services/mediaApi';
 import type { StreamingDestination } from '../../services/streamingDestinations';
-import type { StreamingServiceId } from '../../services/streamingServices';
+import {
+  STREAMING_SERVICES,
+  type StreamingServiceId,
+} from '../../services/streamingServices';
 import { StreamingServiceIcon } from '../../components/StreamingServiceIcon';
 import {
   clampProgressValue,
   getEntryStatusChanged,
   getProgressCapabilities,
   getPrimaryProgressSummary,
-  getRemainingLabel,
   getStatusSaveLabel,
   isStatusRefreshDisabled,
 } from './mediaEntryDetailModel';
@@ -106,22 +108,6 @@ type ProgressCockpitProps = Pick<
   | 'onSaveStatus'
 >;
 
-function ProgressSummaryBlock({
-  progressSummary,
-}: {
-  progressSummary: ReturnType<typeof getPrimaryProgressSummary>;
-}) {
-  return (
-    <div className="media-detail-progress-main">
-      <div>
-        <p>{progressSummary.label}</p>
-        <strong>{progressSummary.value ?? 0}{progressSummary.total ? ` / ${progressSummary.total}` : ''}</strong>
-        <span>{getRemainingLabel(progressSummary)}</span>
-      </div>
-    </div>
-  );
-}
-
 function ProgressSyncStatus({ hasStatusChanged }: { hasStatusChanged: boolean }) {
   return (
     <span className={`media-detail-sync-chip ${hasStatusChanged ? 'media-detail-sync-chip--pending' : 'media-detail-sync-chip--ok'}`}>
@@ -156,14 +142,8 @@ function ProgressControls({
 function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
   return (
     <div className="media-detail-score-row">
-      <div className="media-detail-score">
-        <p>Your score</p>
-        <div aria-label="User score unavailable">
-          {[1, 2, 3, 4, 5].map((star) => <Star key={star} aria-hidden />)}
-        </div>
-      </div>
       <div className="media-detail-status-control">
-        <select value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
+        <select name="status" value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
           {NORMALIZED_STATUSES.map((status) => (
             <option key={status.value} value={status.value}>{status.label}</option>
           ))}
@@ -179,6 +159,12 @@ function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
         >
           <RefreshCcw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
         </button>
+      </div>
+      <div className="media-detail-score">
+        <p>Your score</p>
+        <div aria-label="User score unavailable">
+          {[1, 2, 3, 4, 5].map((star) => <Star key={star} aria-hidden />)}
+        </div>
       </div>
     </div>
   );
@@ -196,7 +182,6 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
 
   return (
     <section className="media-detail-progress-card">
-      <ProgressSummaryBlock progressSummary={progressSummary} />
       <div className="media-detail-progress-next">
         <div className="media-detail-progress-next-head">
           <div>
@@ -266,6 +251,7 @@ function ContinueDestinationLink({
       href={action.url}
       target="_blank"
       rel="noopener noreferrer"
+      style={menuItem ? { color: STREAMING_SERVICES[action.serviceId].buttonColor } : undefined}
       onClick={(event) => {
         onSelect(action.serviceId);
         if (menuItem) event.currentTarget.closest('details')?.removeAttribute('open');

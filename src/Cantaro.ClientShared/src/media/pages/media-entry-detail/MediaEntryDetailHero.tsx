@@ -1,15 +1,11 @@
 import { type ReactNode } from 'react';
-import { CalendarDays, Clock3, Star, Tv } from 'lucide-react';
+import { CalendarDays, Clock3, Tv } from 'lucide-react';
 import { DetailArtwork, SanitizedSynopsis } from '../../components/media-entry-detail/EntryDisplayPrimitives';
 import { SearchLinkDialog } from '../../components/SearchLinkDialog';
 import { GradientButton } from '../../../ui';
 import { formatNextReleaseDisplay, mediaKindLabel } from '../../services/mediaFormatting';
 import type { MediaLibraryEntryDetailDto, MediaProviderLinkSummaryDto } from '../../services/mediaApi';
-import {
-  getProgressPercent,
-  progressKindLabel,
-} from './mediaEntryDetailModel';
-import type { ProgressSummary } from './mediaEntryDetailTypes';
+import { progressKindLabel } from './mediaEntryDetailModel';
 
 export function DetailPageLayout({ children, className = '', embedded = false }: { children: ReactNode; className?: string; embedded?: boolean }) {
   if (embedded) {
@@ -157,15 +153,10 @@ function HeroTitleMeta({ entry }: { entry: MediaLibraryEntryDetailDto }) {
 
 function HeroDescription({ entry }: { entry: MediaLibraryEntryDetailDto }) {
   const { title } = entry;
-  const providerStatus = entry.rawListName ?? entry.rawStatus;
-
   return (
     <>
       {title.synopsis ? (
         <SanitizedSynopsis html={title.synopsis} className="media-detail-synopsis" />
-      ) : null}
-      {providerStatus ? (
-        <p className="media-detail-provider-status">Provider status: {providerStatus}</p>
       ) : null}
     </>
   );
@@ -173,16 +164,12 @@ function HeroDescription({ entry }: { entry: MediaLibraryEntryDetailDto }) {
 
 export function MediaHero({
   entry,
-  progressSummary,
   onNavigateBack,
   membershipLabel,
-  showProgress = true,
 }: {
   entry: MediaLibraryEntryDetailDto;
-  progressSummary: ProgressSummary;
   onNavigateBack: () => void;
   membershipLabel?: string;
-  showProgress?: boolean;
 }) {
   const { title } = entry;
 
@@ -205,12 +192,6 @@ export function MediaHero({
             </div>
             <h2>{title.canonicalTitle}</h2>
             <HeroTitleMeta entry={entry} />
-            {showProgress ? (
-              <div className="media-detail-rating-pill">
-                <Star aria-hidden />
-                <span>Library progress {getProgressPercent(progressSummary)}%</span>
-              </div>
-            ) : null}
             <HeroDescription entry={entry} />
           </div>
         </div>
