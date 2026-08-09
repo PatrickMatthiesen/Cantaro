@@ -6,7 +6,7 @@ import {
   MoreVertical,
   Play,
   Plus,
-  RefreshCcw,
+  RotateCw,
   Save,
   Star,
 } from 'lucide-react';
@@ -157,7 +157,7 @@ function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
           aria-label="Refresh progress from provider"
           title="Refresh progress from provider"
         >
-          <RefreshCcw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
+          <RotateCw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
         </button>
       </div>
       <div className="media-detail-score">

@@ -88,28 +88,12 @@ export function EntryLinkDialog({
   );
 }
 
-function DetailTopBar({
-  mediaKind,
-  isConnected,
-  membershipLabel,
-  onNavigateBack,
-}: {
-  mediaKind: string;
-  isConnected: boolean;
-  membershipLabel?: string;
-  onNavigateBack: () => void;
-}) {
+function DetailTopBar({ onNavigateBack }: { onNavigateBack: () => void }) {
   return (
     <header className="media-detail-topbar">
       <button type="button" className="media-detail-icon-button" onClick={onNavigateBack} aria-label="Back to library">
         <span aria-hidden>←</span>
       </button>
-      <div className="media-detail-topbar-pills">
-        <span className="media-detail-pill media-detail-pill--violet">{mediaKindLabel(mediaKind)}</span>
-        <span className={`media-detail-pill ${isConnected && !membershipLabel ? 'media-detail-pill--success' : 'media-detail-pill--warning'}`}>
-          {membershipLabel ?? (isConnected ? 'Synced' : 'Not synced')}
-        </span>
-      </div>
     </header>
   );
 }
@@ -135,9 +119,6 @@ function HeroTitleMeta({ entry }: { entry: MediaLibraryEntryDetailDto }) {
 
   return (
     <>
-      {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
-        <p className="media-detail-original-title">{title.originalTitle}</p>
-      ) : null}
       <div className="media-detail-meta-row">
         {title.startYear ? (
           <span><CalendarDays aria-hidden />{title.startYear}</span>
@@ -165,11 +146,9 @@ function HeroDescription({ entry }: { entry: MediaLibraryEntryDetailDto }) {
 export function MediaHero({
   entry,
   onNavigateBack,
-  membershipLabel,
 }: {
   entry: MediaLibraryEntryDetailDto;
   onNavigateBack: () => void;
-  membershipLabel?: string;
 }) {
   const { title } = entry;
 
@@ -178,19 +157,22 @@ export function MediaHero({
       <HeroBackdrop posterUrl={title.posterUrl} />
       <div className="media-detail-hero-scrim" aria-hidden />
       <div className="media-detail-hero-content">
-        <DetailTopBar mediaKind={title.mediaKind} isConnected={entry.isConnected} membershipLabel={membershipLabel} onNavigateBack={onNavigateBack} />
+        <DetailTopBar onNavigateBack={onNavigateBack} />
         <div className="media-detail-hero-grid">
           <div className="media-detail-poster">
             <DetailArtwork posterUrl={title.posterUrl} title={title.canonicalTitle} />
           </div>
           <div className="media-detail-title-stack">
+            <h2>{title.canonicalTitle}</h2>
+            {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
+              <p className="media-detail-original-title">{title.originalTitle}</p>
+            ) : null}
             <div className="media-detail-tag-row">
               <span className="media-detail-dot media-detail-dot--violet" />
               <span>{mediaKindLabel(title.mediaKind)}</span>
               <span className="media-detail-dot media-detail-dot--blue" />
               <span>{progressKindLabel(title)}</span>
             </div>
-            <h2>{title.canonicalTitle}</h2>
             <HeroTitleMeta entry={entry} />
             <HeroDescription entry={entry} />
           </div>

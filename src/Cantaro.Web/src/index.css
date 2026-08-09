@@ -1054,7 +1054,7 @@
 .media-detail-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 1rem;
 }
 
@@ -1087,42 +1087,12 @@
   transform: scale(0.98);
 }
 
-.media-detail-topbar-pills,
 .media-detail-tag-row,
 .media-detail-meta-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.55rem;
-}
-
-.media-detail-pill {
-  display: inline-flex;
-  min-height: 1.75rem;
-  align-items: center;
-  border: 1px solid;
-  border-radius: 999px;
-  padding: 0 0.85rem;
-  font-size: 0.76rem;
-  font-weight: 900;
-}
-
-.media-detail-pill--violet {
-  border-color: rgba(167, 139, 250, 0.36);
-  color: #ddd6fe;
-  background: rgba(124, 58, 237, 0.2);
-}
-
-.media-detail-pill--success {
-  border-color: rgba(110, 231, 183, 0.38);
-  color: #d1fae5;
-  background: rgba(16, 185, 129, 0.18);
-}
-
-.media-detail-pill--warning {
-  border-color: rgba(251, 191, 36, 0.38);
-  color: #fef3c7;
-  background: rgba(245, 158, 11, 0.2);
 }
 
 .media-detail-hero-grid {
@@ -1147,6 +1117,7 @@
 }
 
 .media-detail-tag-row {
+  margin-top: 0.7rem;
   color: rgba(248, 250, 252, 0.8);
   font-size: 0.9rem;
   font-weight: 850;
@@ -1168,7 +1139,7 @@
 
 .media-detail-title-stack h2 {
   max-width: 12ch;
-  margin: 1.2rem 0 0;
+  margin: 0;
   color: #fff;
   font-size: clamp(2.8rem, 5vw, 4.7rem);
   font-weight: 950;
@@ -1215,7 +1186,7 @@
 }
 
 .media-detail-rating-pill svg,
-.media-detail-score-row svg:first-child,
+.media-detail-score > div svg:first-child,
 .media-detail-metric-card svg {
   color: #f59e0b;
   fill: currentColor;
@@ -1730,10 +1701,16 @@
 
 .media-detail-tabs {
   display: flex;
+  min-width: 0;
   gap: 1.2rem;
   overflow-x: auto;
+  scrollbar-width: none;
   margin-top: 1.25rem;
   border-bottom: 1px solid rgba(100, 116, 139, 0.2);
+}
+
+.media-detail-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .media-detail-tabs button {
@@ -2309,6 +2286,7 @@
 }
 
 .media-detail-spin {
+  transform-origin: center;
   animation: media-detail-spin 800ms linear infinite;
 }
 
@@ -2884,7 +2862,7 @@
 
   .media-detail-title-stack h2 {
     max-width: 11ch;
-    margin-top: 0.9rem;
+    margin-top: 0;
     font-size: clamp(1.7rem, 9vw, 2.25rem);
     line-height: 0.98;
   }

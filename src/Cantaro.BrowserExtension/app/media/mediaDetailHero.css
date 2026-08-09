@@ -56,7 +56,6 @@
 }
 
 .cantaro-extension-media .media-detail-topbar,
-.cantaro-extension-media .media-detail-topbar-pills,
 .cantaro-extension-media .media-detail-tag-row,
 .cantaro-extension-media .media-detail-meta-row,
 .cantaro-extension-media .media-detail-episodes-actions {
@@ -66,7 +65,7 @@
 }
 
 .cantaro-extension-media .media-detail-topbar {
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .cantaro-extension-media .media-detail-icon-button,
@@ -82,7 +81,6 @@
   background: var(--color-surface-translucent);
 }
 
-.cantaro-extension-media .media-detail-pill,
 .cantaro-extension-media .media-detail-meta-row span,
 .cantaro-extension-media .media-detail-rating-pill,
 .cantaro-extension-media .media-detail-sync-chip {
@@ -96,19 +94,16 @@
   font-weight: 700;
 }
 
-.cantaro-extension-media .media-detail-pill--violet,
 .cantaro-extension-media .media-detail-rating-pill {
   color: var(--color-accent-strong);
   background: var(--color-accent-soft);
 }
 
-.cantaro-extension-media .media-detail-pill--success,
 .cantaro-extension-media .media-detail-sync-chip--ok {
   color: var(--color-success-content);
   background: var(--color-success-surface);
 }
 
-.cantaro-extension-media .media-detail-pill--warning,
 .cantaro-extension-media .media-detail-sync-chip--pending {
   color: var(--color-warning-content);
   background: var(--color-warning-surface);
@@ -143,6 +138,7 @@
 
 .cantaro-extension-media .media-detail-tag-row {
   flex-wrap: wrap;
+  margin-top: 0.5rem;
   color: var(--color-content-muted);
   font-size: 0.75rem;
   font-weight: 700;
@@ -163,7 +159,7 @@
 }
 
 .cantaro-extension-media .media-detail-title-stack h2 {
-  margin: 0.35rem 0 0;
+  margin: 0;
   color: var(--color-content);
   font-size: 1.55rem;
   font-weight: 850;

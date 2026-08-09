@@ -267,9 +267,15 @@
 
 .cantaro-extension-media .media-detail-tabs {
   display: flex;
+  min-width: 0;
   gap: 0.25rem;
   overflow-x: auto;
+  scrollbar-width: none;
   border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.cantaro-extension-media .media-detail-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .cantaro-extension-media .media-detail-tabs button {

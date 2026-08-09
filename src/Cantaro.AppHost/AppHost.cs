@@ -137,8 +137,8 @@ builder.AddJavaScriptApp("browser-extension", "../Cantaro.BrowserExtension")
     // https://github.com/wxt-dev/wxt/pull/2563
     .WithTerminal()
     .WithReference(api)
-    .WithReference(frontend)
-    .WithExplicitStart();
+    .WithReference(frontend);
+    // .WithExplicitStart();
 #pragma warning restore ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 builder.Build().Run();

@@ -289,7 +289,6 @@ function CatalogDetailContent({
           <MediaHero
             entry={entry}
             onNavigateBack={onNavigateBack}
-            membershipLabel="Not in your library"
           />
           <div className="media-detail-desktop-progress">
             <CatalogAddPanel

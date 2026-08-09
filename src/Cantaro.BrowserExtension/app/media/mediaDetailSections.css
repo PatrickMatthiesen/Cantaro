@@ -400,6 +400,7 @@
 }
 
 .cantaro-extension-media .media-detail-spin {
+  transform-origin: center;
   animation: cantaro-media-detail-spin 800ms linear infinite;
 }
 
