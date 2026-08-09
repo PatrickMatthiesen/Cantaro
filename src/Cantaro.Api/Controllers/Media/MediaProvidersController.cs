@@ -202,18 +202,27 @@ public class MediaProvidersController(
     }
 
     [HttpGet("providers/{providerId}/import/events")]
-    [Produces("text/event-stream")]
-    public async IAsyncEnumerable<SseItem<MediaLibraryImportEventDto>> StreamImportEvents(
+    public async Task<IResult> StreamImportEvents(
         string providerId,
         [FromQuery] Guid? importId,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         if (!_mediaProviderRegistry.IsSupported(providerId))
         {
-            yield break;
+            return TypedResults.NotFound();
         }
 
         var userId = await GetCurrentUserIdAsync();
+        return TypedResults.ServerSentEvents(
+            ReadImportEvents(providerId, userId, importId, cancellationToken));
+    }
+
+    private async IAsyncEnumerable<SseItem<MediaLibraryImportEventDto>> ReadImportEvents(
+        string providerId,
+        int userId,
+        Guid? importId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         var reader = _mediaLibraryImportQueue.Subscribe(userId, out var subscriptionId);
 
         try
@@ -224,6 +233,10 @@ public class MediaProvidersController(
                 && string.Equals(latestEvent.ProviderId, providerId, StringComparison.OrdinalIgnoreCase))
             {
                 yield return new SseItem<MediaLibraryImportEventDto>(latestEvent);
+                if (IsTerminalImportStatus(latestEvent.Status))
+                {
+                    yield break;
+                }
             }
 
             await foreach (var importEvent in reader.ReadAllAsync(cancellationToken))
@@ -239,12 +252,21 @@ public class MediaProvidersController(
                 }
 
                 yield return new SseItem<MediaLibraryImportEventDto>(importEvent);
+                if (importId.HasValue && IsTerminalImportStatus(importEvent.Status))
+                {
+                    yield break;
+                }
             }
         }
         finally
         {
             _mediaLibraryImportQueue.Unsubscribe(userId, subscriptionId);
         }
+    }
+
+    private static bool IsTerminalImportStatus(string status)
+    {
+        return status is "completed" or "failed";
     }
 
     [HttpGet("providers/{providerId}/search")]
@@ -298,8 +320,17 @@ public class MediaProvidersController(
             return NotFound();
         }
 
-        var libraryState = await GetLibraryStateAsync(userId, provider.ProviderId, providerMediaId, cancellationToken);
-        return Ok(MapTitleDetails(details, libraryState));
+        var now = DateTimeOffset.UtcNow;
+        var title = await FindOrCreateMediaTitleAsync(
+            provider.ProviderId,
+            providerMediaId,
+            details,
+            now,
+            cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);
+        return Ok(MapTitleDetails(details, title.Id, libraryState));
     }
 
     [HttpPost("providers/{providerId}/titles/{providerMediaId}/library")]
@@ -322,35 +353,50 @@ public class MediaProvidersController(
 
         var userId = await GetCurrentUserIdAsync();
         var provider = _mediaProviderRegistry.GetRequired(providerId);
+        var existingTitleId = await _dbContext.MediaProviderLinks
+            .AsNoTracking()
+            .Where(link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId)
+            .Select(link => (Guid?)link.MediaTitleId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existingTitleId is not null)
+        {
+            var canonicalExistingEntry = await FindPreferredLibraryEntryAsync(userId, existingTitleId.Value, cancellationToken);
+            if (canonicalExistingEntry is not null)
+            {
+                return Ok(new MediaCatalogAddResultDto
+                {
+                    LibraryEntryId = canonicalExistingEntry.Id,
+                    MediaTitleId = canonicalExistingEntry.MediaTitleId,
+                    Status = canonicalExistingEntry.NormalizedStatus
+                });
+            }
+        }
+
         var account = await provider.GetConnectedAccountAsync(userId, cancellationToken);
         if (account is null)
         {
             return BadRequest(new { error = $"{provider.ProviderId} is not connected." });
         }
 
-        var existingEntry = await _dbContext.MediaLibraryEntries
-            .AsNoTracking()
-            .FirstOrDefaultAsync(entry =>
-                entry.UserId == userId
-                && entry.Provider == provider.ProviderId
-                && entry.ProviderAccountId == account.ExternalAccountId
-                && entry.ProviderMediaId == providerMediaId,
-                cancellationToken);
+        var details = await provider.GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
+        if (details is null)
+        {
+            return NotFound(new { error = "Provider title not found." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var title = await FindOrCreateMediaTitleAsync(provider.ProviderId, providerMediaId, details, now, cancellationToken);
+        var existingEntry = await FindPreferredLibraryEntryAsync(userId, title.Id, cancellationToken);
 
         if (existingEntry is not null)
         {
+            await _dbContext.SaveChangesAsync(cancellationToken);
             return Ok(new MediaCatalogAddResultDto
             {
                 LibraryEntryId = existingEntry.Id,
                 MediaTitleId = existingEntry.MediaTitleId,
                 Status = existingEntry.NormalizedStatus
             });
-        }
-
-        var details = await provider.GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
-        if (details is null)
-        {
-            return NotFound(new { error = "Provider title not found." });
         }
 
         var mutationResult = await provider.UpdateStatusAsync(
@@ -361,9 +407,6 @@ public class MediaProvidersController(
                 Status = request.Status
             },
             cancellationToken);
-
-        var now = DateTimeOffset.UtcNow;
-        var title = await FindOrCreateMediaTitleAsync(provider.ProviderId, providerMediaId, details, now, cancellationToken);
         var entry = new MediaLibraryEntry
         {
             Id = Guid.NewGuid(),
@@ -562,10 +605,14 @@ public class MediaProvidersController(
         };
     }
 
-    private static MediaProviderTitleDetailsDto MapTitleDetails(MediaProviderTitleDetails details, MediaCatalogLibraryStateDto? libraryState = null)
+    private static MediaProviderTitleDetailsDto MapTitleDetails(
+        MediaProviderTitleDetails details,
+        Guid mediaTitleId,
+        MediaCatalogLibraryStateDto? libraryState = null)
     {
         return new MediaProviderTitleDetailsDto
         {
+            MediaTitleId = mediaTitleId,
             ProviderId = details.ProviderId,
             ProviderMediaId = details.ProviderMediaId,
             Title = details.Title,
@@ -635,39 +682,68 @@ public class MediaProvidersController(
             return new Dictionary<string, MediaCatalogLibraryStateDto>(StringComparer.Ordinal);
         }
 
-        var entries = await _dbContext.MediaLibraryEntries
+        var links = await _dbContext.MediaProviderLinks
             .AsNoTracking()
-            .Where(entry =>
-                entry.UserId == userId
-                && entry.Provider == providerId
-                && mediaIds.Contains(entry.ProviderMediaId))
+            .Where(link => link.Provider == providerId && mediaIds.Contains(link.ExternalId))
+            .Select(link => new { link.ExternalId, link.MediaTitleId })
             .ToListAsync(cancellationToken);
 
-        return entries
-            .OrderByDescending(entry => entry.ConnectedServiceAccountId is not null)
+        var titleIds = links.Select(link => link.MediaTitleId).Distinct().ToList();
+        if (titleIds.Count == 0)
+        {
+            return new Dictionary<string, MediaCatalogLibraryStateDto>(StringComparer.Ordinal);
+        }
+
+        var entriesByTitleId = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .Where(entry => entry.UserId == userId && titleIds.Contains(entry.MediaTitleId))
+            .ToListAsync(cancellationToken);
+
+        var preferredEntries = entriesByTitleId
+            .OrderByDescending(entry => entry.ConnectedServiceAccountId != null)
             .ThenByDescending(entry => entry.UpdatedAt)
-            .GroupBy(entry => entry.ProviderMediaId, StringComparer.Ordinal)
+            .GroupBy(entry => entry.MediaTitleId)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        return links
+            .Where(link => preferredEntries.ContainsKey(link.MediaTitleId))
             .ToDictionary(
-                group => group.Key,
-                group => MapLibraryState(group.First()),
+                link => link.ExternalId,
+                link => MapLibraryState(preferredEntries[link.MediaTitleId]),
                 StringComparer.Ordinal);
     }
 
     private async Task<MediaCatalogLibraryStateDto> GetLibraryStateAsync(
         int userId,
-        string providerId,
-        string providerMediaId,
+        Guid mediaTitleId,
         CancellationToken cancellationToken)
     {
-        var entry = await _dbContext.MediaLibraryEntries
+        var entries = await _dbContext.MediaLibraryEntries
             .AsNoTracking()
-            .FirstOrDefaultAsync(item =>
-                item.UserId == userId
-                && item.Provider == providerId
-                && item.ProviderMediaId == providerMediaId,
-                cancellationToken);
+            .Where(item => item.UserId == userId && item.MediaTitleId == mediaTitleId)
+            .ToListAsync(cancellationToken);
+        var entry = entries
+            .OrderByDescending(item => item.ConnectedServiceAccountId != null)
+            .ThenByDescending(item => item.UpdatedAt)
+            .FirstOrDefault();
 
         return entry is null ? new MediaCatalogLibraryStateDto() : MapLibraryState(entry);
+    }
+
+    private async Task<MediaLibraryEntry?> FindPreferredLibraryEntryAsync(
+        int userId,
+        Guid mediaTitleId,
+        CancellationToken cancellationToken)
+    {
+        var entries = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .Where(entry => entry.UserId == userId && entry.MediaTitleId == mediaTitleId)
+            .ToListAsync(cancellationToken);
+
+        return entries
+            .OrderByDescending(entry => entry.ConnectedServiceAccountId != null)
+            .ThenByDescending(entry => entry.UpdatedAt)
+            .FirstOrDefault();
     }
 
     private static MediaCatalogLibraryStateDto MapLibraryState(MediaLibraryEntry entry)
@@ -734,7 +810,7 @@ public class MediaProvidersController(
             MediaTitleId = title.Id,
             Provider = providerId,
             ExternalId = providerMediaId,
-            LinkSource = MediaMappingSources.UserConfirmed,
+            LinkSource = MediaMappingSources.Imported,
             LastVerifiedAt = now,
             RawMetadata = details.RawMetadata,
             CreatedAt = now,

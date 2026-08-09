@@ -1,6 +1,6 @@
 # Cantaro
 
-Cantaro is an open-source, self-hostable "music identity and playlist brain" that unifies your playlists and track mappings across multiple streaming services.
+Cantaro is an open-source, self-hostable media and music library that unifies playlists and track mappings, tracks watched episodes, and helps users return to the right provider page.
 
 ## Overview
 
@@ -232,16 +232,34 @@ The browser automatically includes the authentication cookie in all API requests
 
 ### Browser Extension Development
 
-The optional browser extension accelerates playlist sync by detecting changes in real-time:
+The optional browser extension accelerates playlist sync and observes supported media pages in real time:
 
 ```bash
 cd src/Cantaro.BrowserExtension
 bun install
-bun run dev              # For Chrome/Edge/Brave
-bun run dev:firefox      # For Firefox
+bun run dev              # Build and watch the Chrome extension
+bun run dev:firefox      # Build and watch the Firefox extension
 ```
 
-See [Cantaro.BrowserExtension/README.md](src/Cantaro.BrowserExtension/README.md) for detailed instructions on loading and using the extension.
+WXT does not launch a browser. Chrome development output is written to
+`src/Cantaro.BrowserExtension/.output/chrome-mv3-dev`; load that directory as
+an unpacked extension in the browser profile used for testing. Chrome DevTools
+MCP can install and reload it in its persistent managed profile, so extension
+development needs only that one Chrome window.
+
+#### Crunchyroll episode URL collection
+
+When the extension is enabled, connected to a Cantaro instance, and the user visits Crunchyroll, it collects episode destination URLs from the page that the user is already viewing. On a watch page this includes the current episode and a rendered next-episode link. On a series page it collects the episode ID, URL, number, and title for every episode card rendered in the currently selected season. If the user changes seasons, the newly rendered season can be collected as another batch.
+
+This is passive page observation: Cantaro does not click through the season selector, crawl Crunchyroll in the background, call private Crunchyroll APIs, download video or subtitle content, or read Crunchyroll credentials or cookies. It sends only the rendered provider identifiers, destination URLs, titles/numbers, and normal watch-progress observation data to the user's configured Cantaro server.
+
+If a Crunchyroll series page does not expose a usable title, selected season, or safe rendered episode URLs after five seconds, the collector writes a warning to that page's browser console with the relevant DOM counts and failure reason. Delivery results distinguish batches accepted by the API, batches safely queued while signed out or offline, rejected batches, and successful `pending_match` catalog evidence. Catalog matching never opens the watch-progress resolution UI.
+
+Enable **Verbose logging** in the extension settings to additionally log each series-page scan, extraction diagnostics, collected episode IDs and URLs, duplicate fingerprints, and the result returned by the extension background service. Warnings and errors remain enabled even when verbose logging is off.
+
+After an observation has been matched or explicitly resolved to the correct Cantaro media title, its validated episode destinations become shared catalog data inside that Cantaro instance. Other users of the same instance can therefore receive a direct **Continue watching** link without storing duplicate copies of the URL. Cantaro accepts only HTTPS URLs on the exact `crunchyroll.com` or `www.crunchyroll.com` hosts, records how many times a destination has been seen, and marks conflicting mappings instead of silently redirecting them.
+
+The extension keeps extraction and tracking state inside each provider tab. The popup asks only the active tab for its current context, while the background worker is a stateless authenticated delivery router with a bounded offline queue. See the extension [architecture](src/Cantaro.BrowserExtension/ARCHITECTURE.md) and [permission rationale](src/Cantaro.BrowserExtension/PERMISSIONS.md).
 
 ## Contributing
 

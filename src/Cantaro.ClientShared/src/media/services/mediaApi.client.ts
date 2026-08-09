@@ -12,6 +12,8 @@ import type {
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
     MediaLinkRequestDto,
+    MediaContinueWatchingDto,
+    MediaEpisodeCatalogDto,
     MediaObservationDto,
     MediaObservationSummaryDto,
     MediaProgressUpdateDto,
@@ -65,7 +67,10 @@ export class MediaApiClient {
     private async ensureOk(response: Response, fallbackMessage: string): Promise<void> {
         if (response.ok) return;
         const body = await response.json().catch(() => ({ error: fallbackMessage }));
-        throw new Error(body.error || fallbackMessage);
+        throw Object.assign(new Error(body.error || fallbackMessage), {
+            status: response.status,
+            responseBody: body,
+        });
     }
 
     async getLibrary(params: MediaLibraryQueryParams = {}): Promise<MediaLibraryPageDto> {
@@ -85,6 +90,22 @@ export class MediaApiClient {
         const response = await this.request(`/api/media/library/${encodeURIComponent(libraryEntryId)}`);
         await this.ensureOk(response, 'Failed to load media library entry');
         return response.json() as Promise<MediaLibraryEntryDetailDto>;
+    }
+
+    async getContinueWatching(libraryEntryId: string): Promise<MediaContinueWatchingDto> {
+        const response = await this.request(
+            `/api/media/library/${encodeURIComponent(libraryEntryId)}/continue-watching`,
+        );
+        await this.ensureOk(response, 'Failed to resolve the next episode');
+        return response.json() as Promise<MediaContinueWatchingDto>;
+    }
+
+    async getEpisodes(libraryEntryId: string): Promise<MediaEpisodeCatalogDto> {
+        const response = await this.request(
+            `/api/media/library/${encodeURIComponent(libraryEntryId)}/episodes`,
+        );
+        await this.ensureOk(response, 'Failed to load episode links');
+        return response.json() as Promise<MediaEpisodeCatalogDto>;
     }
 
     async linkProvider(libraryEntryId: string, request: MediaLinkRequestDto): Promise<void> {

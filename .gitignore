@@ -97,3 +97,6 @@ coverage/
 !**/.impeccable/live/config.json
 !**/.impeccable/critique/
 !**/.impeccable/critique/ignore.md
+
+# Playwright
+.playwright-cli

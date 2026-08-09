@@ -2,7 +2,8 @@
 @import "@cantaro/client-shared/theme.css";
 
 @source "./**/*.{ts,tsx,js,jsx}";
-@source "../../lib/**/*.{ts,tsx,js,jsx}";
+@source "../../app/**/*.{ts,tsx,js,jsx}";
+@source "../../platform/**/*.{ts,tsx,js,jsx}";
 @source "../../../Cantaro.ClientShared/src/**/*.{ts,tsx,js,jsx}";
 
 :root {
@@ -55,6 +56,11 @@ textarea {
   animation: cantaro-lyrics-pulse 1.4s ease-in-out infinite;
 }
 
+.cantaro-popup-loading-line {
+  background: var(--color-border-strong);
+  animation: cantaro-lyrics-pulse 1.4s ease-in-out infinite;
+}
+
 @keyframes cantaro-lyrics-pulse {
   50% {
     opacity: 0.48;
@@ -63,6 +69,10 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
   .cantaro-lyrics-loading-line {
+    animation: none;
+  }
+
+  .cantaro-popup-loading-line {
     animation: none;
   }
 }

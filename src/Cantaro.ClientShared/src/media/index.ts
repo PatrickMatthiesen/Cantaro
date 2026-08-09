@@ -8,3 +8,6 @@ export * from './services/mediaApi';
 export * from './services/mediaFormatting';
 export * from './services/mediaProviders';
 export * from './services/mediaRefreshCache';
+export * from './services/streamingDestinations';
+export * from './services/streamingServicePreference';
+export * from './services/streamingServices';

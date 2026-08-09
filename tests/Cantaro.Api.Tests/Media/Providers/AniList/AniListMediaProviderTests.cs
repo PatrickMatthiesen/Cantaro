@@ -135,6 +135,12 @@ public class AniListMediaProviderTests
 
         Assert.NotNull(details);
         Assert.Equal("https://example.test/poster-extra-large.jpg", details.PosterUrl);
+        using (var rawMetadata = JsonDocument.Parse(details.RawMetadata!))
+        {
+            Assert.Equal(
+                "https://example.test/poster-extra-large.jpg",
+                rawMetadata.RootElement.GetProperty("coverImage").GetProperty("extraLarge").GetString());
+        }
         var availabilityLinks = Assert.IsAssignableFrom<IReadOnlyList<MediaProviderAvailabilityLink>>(details.AvailabilityLinks);
         Assert.Collection(
                 availabilityLinks,

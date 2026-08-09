@@ -15,11 +15,13 @@ public class MediaLibraryController(
     ApplicationDbContext dbContext,
     MediaLibraryQueryService queryService,
     MediaLibraryLinkService linkService,
+    MediaEpisodeIdentityService episodeIdentityService,
     UserManager<User> userManager) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaLibraryQueryService _queryService = queryService;
     private readonly MediaLibraryLinkService _linkService = linkService;
+    private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
     private readonly UserManager<User> _userManager = userManager;
 
     /// <summary>
@@ -83,9 +85,47 @@ public class MediaLibraryController(
     }
 
     /// <summary>
+    /// Resolve the user's next canonical episode to a validated direct provider destination.
+    /// </summary>
+    [HttpGet("{libraryEntryId:guid}/continue-watching")]
+    public async Task<ActionResult<MediaContinueWatchingDto>> GetContinueWatching(
+        Guid libraryEntryId,
+        CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        var result = await _episodeIdentityService.ResolveContinueWatchingAsync(
+            userId,
+            libraryEntryId,
+            cancellationToken);
+
+        return result is null
+            ? NotFound(new { error = "Media library entry not found." })
+            : Ok(result);
+    }
+
+    /// <summary>
+    /// List the canonical episodes and validated provider destinations known for this library entry.
+    /// </summary>
+    [HttpGet("{libraryEntryId:guid}/episodes")]
+    public async Task<ActionResult<MediaEpisodeCatalogDto>> GetEpisodes(
+        Guid libraryEntryId,
+        CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        var result = await _episodeIdentityService.GetEpisodeCatalogAsync(
+            userId,
+            libraryEntryId,
+            cancellationToken);
+
+        return result is null
+            ? NotFound(new { error = "Media library entry not found." })
+            : Ok(result);
+    }
+
+    /// <summary>
     /// Manually link a library entry's canonical title to a provider catalog entry.
-    /// If the provider/external-ID pair is already associated with a different title a 409 is returned;
-    /// set forceRelink=true in the request body to override (no silent reassignment by default).
+    /// A same-provider replacement requires explicit confirmation. Provider identities already owned by
+    /// another canonical title are never reassigned through this endpoint.
     /// </summary>
     [HttpPost("{libraryEntryId:guid}/link")]
     public async Task<ActionResult> LinkProvider(
@@ -110,7 +150,7 @@ public class MediaLibraryController(
             libraryEntryId,
             request.ProviderId,
             request.ProviderMediaId,
-            request.ForceRelink,
+            request.ConfirmReplacement,
             cancellationToken);
 
         return result.Kind switch
@@ -120,10 +160,22 @@ public class MediaLibraryController(
             MediaLinkResultKind.EntryNotFound => NotFound(new { error = "Media library entry not found." }),
             MediaLinkResultKind.ConflictingTitle => Conflict(new MediaLinkConflictDto
             {
-                Error = "The requested provider/external-ID is already linked to a different title. " +
-                        "Set forceRelink=true to override.",
-                ConflictingMediaTitleId = result.ConflictingMediaTitleId!.Value,
-                ConflictingCanonicalTitle = result.ConflictingCanonicalTitle!
+                Error = "That provider title is already linked to a different Cantaro title and cannot be reassigned here.",
+                Code = "provider_identity_owned_by_another_title",
+                ConflictingMediaTitleId = result.ConflictingMediaTitleId,
+                ConflictingCanonicalTitle = result.ConflictingCanonicalTitle
+            }),
+            MediaLinkResultKind.ReplacementConfirmationRequired => Conflict(new MediaLinkConflictDto
+            {
+                Error = "This title already has a different identity for that provider. Confirm the replacement to continue.",
+                Code = "replacement_confirmation_required",
+                CurrentProviderMediaId = result.CurrentProviderMediaId
+            }),
+            MediaLinkResultKind.LinkInUse => Conflict(new MediaLinkConflictDto
+            {
+                Error = "This provider identity is used by another library entry and cannot be changed safely.",
+                Code = "provider_identity_in_use",
+                CurrentProviderMediaId = result.CurrentProviderMediaId
             }),
             _ => StatusCode(StatusCodes.Status500InternalServerError, new { error = "Unexpected link result." })
         };
@@ -152,6 +204,12 @@ public class MediaLibraryController(
             MediaLinkResultKind.Success => NoContent(),
             MediaLinkResultKind.EntryNotFound => NotFound(new { error = "Media library entry not found." }),
             MediaLinkResultKind.ProviderLinkNotFound => NotFound(new { error = "No link found for this provider." }),
+            MediaLinkResultKind.LinkInUse => Conflict(new MediaLinkConflictDto
+            {
+                Error = "This provider identity is used by a library entry and cannot be removed safely.",
+                Code = "provider_identity_in_use",
+                CurrentProviderMediaId = result.CurrentProviderMediaId
+            }),
             _ => StatusCode(StatusCodes.Status500InternalServerError, new { error = "Unexpected unlink result." })
         };
     }

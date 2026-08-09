@@ -96,6 +96,10 @@ public class MediaProviderSearchResultDto
 
 public class MediaProviderTitleDetailsDto
 {
+    /// <summary>
+    /// Stable Cantaro identity resolved (or created) for this provider title.
+    /// </summary>
+    public Guid MediaTitleId { get; set; }
     public required string ProviderId { get; set; }
     public required string ProviderMediaId { get; set; }
     public required string Title { get; set; }

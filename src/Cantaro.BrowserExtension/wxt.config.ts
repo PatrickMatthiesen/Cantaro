@@ -42,7 +42,7 @@ const defaultApiHostPermission = toOriginMatchPattern(defaultApiBaseUrl);
 export default defineConfig({
   manifest: {
     name: 'Cantaro',
-    description: 'Accelerate playlist sync between your music services',
+    description: 'Sync music and collect rendered episode URLs from supported streaming pages',
     version: '0.1.0',
     icons: {
       16: '/icon/16.png',
@@ -67,12 +67,6 @@ export default defineConfig({
     optional_host_permissions: [
       'http://*/*',
       'https://*/*',
-    ],
-  },
-  webExt: {
-    // Avoid automation signals from WXT's Chromium dev runner on sites with bot checks.
-    chromiumArgs: [
-      '--disable-blink-features=AutomationControlled',
     ],
   },
   dev: {

@@ -117,6 +117,7 @@ public class MediaLibraryApiTests
         await fixture.Db.SaveChangesAsync();
 
         var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Current, now);
+        entry.ProviderMediaId = "101922";
         fixture.Db.MediaLibraryEntries.Add(entry);
         await fixture.Db.SaveChangesAsync();
 
@@ -161,17 +162,18 @@ public class MediaLibraryApiTests
 
         var result = await fixture.Controller.LinkProvider(
             entryB.Id,
-            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "44444", ForceRelink = false },
+            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "44444", ConfirmReplacement = false },
             CancellationToken.None);
 
         var conflict = Assert.IsType<ConflictObjectResult>(result);
         var dto = Assert.IsType<MediaLinkConflictDto>(conflict.Value);
+        Assert.Equal("provider_identity_owned_by_another_title", dto.Code);
         Assert.Equal(titleA.Id, dto.ConflictingMediaTitleId);
         Assert.Contains("Title A", dto.ConflictingCanonicalTitle);
     }
 
     [Fact]
-    public async Task LinkProvider_ForceRelinkOverridesConflict()
+    public async Task LinkProvider_ConfirmationCannotOverrideCrossTitleConflict()
     {
         await using var fixture = await MediaLibraryFixture.CreateAsync();
         var now = DateTimeOffset.UtcNow;
@@ -199,13 +201,15 @@ public class MediaLibraryApiTests
 
         var result = await fixture.Controller.LinkProvider(
             entryB.Id,
-            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "44444", ForceRelink = true },
+            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "44444", ConfirmReplacement = true },
             CancellationToken.None);
 
-        Assert.IsType<NoContentResult>(result);
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var dto = Assert.IsType<MediaLinkConflictDto>(conflict.Value);
+        Assert.Equal("provider_identity_owned_by_another_title", dto.Code);
 
         var link = await fixture.Db.MediaProviderLinks.SingleAsync();
-        Assert.Equal(titleB.Id, link.MediaTitleId);
+        Assert.Equal(titleA.Id, link.MediaTitleId);
     }
 
     [Fact]
@@ -230,13 +234,16 @@ public class MediaLibraryApiTests
         });
 
         var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Completed, now);
+        entry.ProviderMediaId = "30";
         fixture.Db.MediaLibraryEntries.Add(entry);
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Controller.UnlinkProvider(entry.Id, "anilist", CancellationToken.None);
 
-        Assert.IsType<NoContentResult>(result);
-        Assert.Equal(0, await fixture.Db.MediaProviderLinks.CountAsync());
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        var dto = Assert.IsType<MediaLinkConflictDto>(conflict.Value);
+        Assert.Equal("provider_identity_in_use", dto.Code);
+        Assert.Equal(1, await fixture.Db.MediaProviderLinks.CountAsync());
     }
 
     [Fact]
@@ -291,9 +298,17 @@ public class MediaLibraryApiTests
 
             var queryService = new MediaLibraryQueryService(db);
             var linkService = new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance);
+            var episodeIdentityService = new MediaEpisodeIdentityService(
+                db,
+                NullLogger<MediaEpisodeIdentityService>.Instance);
             var userManager = CreateUserManager(db);
 
-            var controller = new MediaLibraryController(db, queryService, linkService, userManager);
+            var controller = new MediaLibraryController(
+                db,
+                queryService,
+                linkService,
+                episodeIdentityService,
+                userManager);
             controller.ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext

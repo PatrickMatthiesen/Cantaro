@@ -234,6 +234,111 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("ExtensionRefreshTokens");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.MediaEpisode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("EpisodeNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("MediaTitleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaTitleId", "EpisodeNumber")
+                        .IsUnique();
+
+                    b.ToTable("MediaEpisodes", t =>
+                        {
+                            t.HasCheckConstraint("CK_MediaEpisodes_EpisodeNumber", "\"EpisodeNumber\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaEpisodeProviderIdentity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("HasConflict")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MediaEpisodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderEpisodeId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("ProviderEpisodeNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProviderSeasonId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("ProviderSeasonNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ProviderSequenceNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProviderSeriesId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ProviderUrlPath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<int>("SeenCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "ProviderEpisodeId")
+                        .IsUnique();
+
+                    b.HasIndex("MediaEpisodeId", "Provider", "HasConflict");
+
+                    b.ToTable("MediaEpisodeProviderIdentities", t =>
+                        {
+                            t.HasCheckConstraint("CK_MediaEpisodeProviderIdentities_SeenCount", "\"SeenCount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1670,6 +1775,28 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.MediaEpisode", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaTitle", "MediaTitle")
+                        .WithMany("Episodes")
+                        .HasForeignKey("MediaTitleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaTitle");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaEpisodeProviderIdentity", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaEpisode", "MediaEpisode")
+                        .WithMany("ProviderIdentities")
+                        .HasForeignKey("MediaEpisodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaEpisode");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
                 {
                     b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
@@ -2089,6 +2216,11 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("ServicePlaylistMappings");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.MediaEpisode", b =>
+                {
+                    b.Navigation("ProviderIdentities");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
                 {
                     b.Navigation("ProviderOperations");
@@ -2101,6 +2233,8 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaTitle", b =>
                 {
+                    b.Navigation("Episodes");
+
                     b.Navigation("LibraryEntries");
 
                     b.Navigation("ProviderLinks");

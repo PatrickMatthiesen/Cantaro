@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
-import { GlassCard, GradientButton } from '../../ui';
-import { SanitizedSynopsis } from '../components/media-entry-detail/EntryDisplayPrimitives';
-import { mediaApi, type MediaProviderTitleDetailsDto } from '../services/mediaApi';
-import { mediaKindLabel } from '../services/mediaFormatting';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { CheckCircle2, Plus } from 'lucide-react';
+import { providerAvailabilityKey, type ProviderAvailabilityMap } from '../components/media-entry-detail/providerAvailability';
+import { MediaProviderIcon } from '../components/MediaProviderIcon';
+import { mediaApi, type MediaLibraryEntryDetailDto, type MediaProviderTitleDetailsDto } from '../services/mediaApi';
 import { mediaProviderCatalog } from '../services/mediaProviders';
+import { CharactersSection, InformationSection } from './media-entry-detail/MediaDetailSections';
+import {
+  DetailErrorState,
+  DetailLoadingState,
+  DetailPageLayout,
+  MediaHero,
+} from './media-entry-detail/MediaEntryDetailHero';
+import { DetailTabs } from './media-entry-detail/DetailTabs';
 
 const ADD_STATUSES = [
   { value: 'planned', label: 'Planning' },
@@ -12,7 +19,16 @@ const ADD_STATUSES = [
   { value: 'completed', label: 'Completed' },
   { value: 'paused', label: 'Paused' },
   { value: 'dropped', label: 'Dropped' },
-];
+] as const;
+
+const CATALOG_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'providers', label: 'Providers' },
+  { id: 'characters', label: 'Characters' },
+  { id: 'details', label: 'Details' },
+] as const;
+
+type CatalogTabId = (typeof CATALOG_TABS)[number]['id'];
 
 interface MediaCatalogDetailPageProps {
   providerId: string;
@@ -24,207 +40,6 @@ interface MediaCatalogDetailPageProps {
 
 function providerName(providerId: string): string {
   return mediaProviderCatalog.find((provider) => provider.id === providerId)?.name ?? providerId;
-}
-
-function DetailLayout({ children, embedded }: { children: ReactNode; embedded: boolean }) {
-  if (embedded) {
-    return <div className="mx-auto max-w-5xl space-y-5">{children}</div>;
-  }
-
-  return (
-    <div className="relative min-h-screen overflow-hidden bg-canvas px-6 py-8 text-content">
-      <div className="relative z-10 mx-auto max-w-5xl space-y-5">{children}</div>
-    </div>
-  );
-}
-
-function catalogMetadata(details: MediaProviderTitleDetailsDto): string[] {
-  return [
-    mediaKindLabel(details.mediaKind),
-    details.startYear ? String(details.startYear) : null,
-    details.episodeCount ? `${details.episodeCount} episodes` : null,
-    details.chapterCount ? `${details.chapterCount} chapters` : null,
-    details.volumeCount ? `${details.volumeCount} volumes` : null,
-  ].filter((value): value is string => Boolean(value));
-}
-
-function CatalogPoster({ details }: { details: MediaProviderTitleDetailsDto }) {
-  if (!details.posterUrl) {
-    return (
-      <div className="flex h-full min-h-96 items-center justify-center text-sm font-semibold text-content-subtle">
-        No artwork
-      </div>
-    );
-  }
-
-  return <img src={details.posterUrl} alt={`${details.title} cover art`} className="h-full w-full object-cover" />;
-}
-
-function CatalogLibraryBadge({ isInLibrary }: { isInLibrary: boolean }) {
-  return (
-    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isInLibrary ? 'bg-success-surface text-success-content' : 'bg-warning-surface text-warning-content'}`}>
-      {isInLibrary ? 'In your library' : 'Not in your library'}
-    </span>
-  );
-}
-
-function CatalogHeroHeader({ details, providerId }: { details: MediaProviderTitleDetailsDto; providerId: string }) {
-  return (
-    <div className="mb-auto flex flex-wrap gap-2">
-      <span className="rounded-full bg-action px-3 py-1 text-xs font-semibold text-action-content">
-        {providerName(providerId)}
-      </span>
-      <CatalogLibraryBadge isInLibrary={Boolean(details.libraryState?.isInLibrary)} />
-    </div>
-  );
-}
-
-function CatalogHeroCopy({ details }: { details: MediaProviderTitleDetailsDto }) {
-  const metadata = catalogMetadata(details);
-
-  return (
-    <>
-      <h1 className="mt-8 text-4xl leading-tight font-black text-content">{details.title}</h1>
-      {details.nativeTitle ? <p className="mt-2 text-sm font-medium text-content-muted">{details.nativeTitle}</p> : null}
-      {metadata.length > 0 ? <p className="mt-4 text-sm font-semibold text-content-muted">{metadata.join(' / ')}</p> : null}
-      {details.synopsis ? (
-        <SanitizedSynopsis html={details.synopsis} className="mt-5 line-clamp-5 text-sm leading-7 text-content-muted" />
-      ) : null}
-    </>
-  );
-}
-
-function CatalogHero({ details, providerId }: { details: MediaProviderTitleDetailsDto; providerId: string }) {
-  return (
-    <GlassCard className="overflow-hidden p-0">
-      <div className="grid gap-0 lg:grid-cols-[18rem_1fr]">
-        <div className="min-h-96 bg-surface-subtle"><CatalogPoster details={details} /></div>
-        <div className="flex flex-col justify-end p-6">
-          <CatalogHeroHeader details={details} providerId={providerId} />
-          <CatalogHeroCopy details={details} />
-        </div>
-      </div>
-    </GlassCard>
-  );
-}
-
-function ExistingLibraryAction({
-  libraryEntryId,
-  status,
-  onNavigateEntry,
-}: {
-  libraryEntryId: string;
-  status?: string;
-  onNavigateEntry: (libraryEntryId: string) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <p className="text-sm font-semibold text-content">This title is already in your library.</p>
-        {status ? <p className="mt-1 text-xs text-content-muted">Status: {status}</p> : null}
-      </div>
-      <GradientButton gradient="from-indigo-500 to-purple-500" onClick={() => onNavigateEntry(libraryEntryId)}>
-        Open library entry
-      </GradientButton>
-    </div>
-  );
-}
-
-function AddLibraryAction({
-  selectedStatus,
-  isAdding,
-  onStatusChange,
-  onAdd,
-}: {
-  selectedStatus: string;
-  isAdding: boolean;
-  onStatusChange: (status: string) => void;
-  onAdd: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-end gap-3">
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium tracking-wide text-content-muted uppercase">Add as</label>
-        <select
-          className="rounded-xl border border-border-subtle bg-surface-translucent px-4 py-2 text-sm text-content focus:ring-2 focus:ring-focus focus:outline-none"
-          value={selectedStatus}
-          onChange={(event) => onStatusChange(event.target.value)}
-        >
-          {ADD_STATUSES.map((status) => (
-            <option key={status.value} value={status.value}>{status.label}</option>
-          ))}
-        </select>
-      </div>
-      <GradientButton gradient="from-indigo-500 to-purple-500" onClick={onAdd} disabled={isAdding} aria-busy={isAdding}>
-        {isAdding ? 'Adding...' : 'Add to library'}
-      </GradientButton>
-    </div>
-  );
-}
-
-function LibraryActionCard({
-  details,
-  selectedStatus,
-  isAdding,
-  message,
-  onStatusChange,
-  onAdd,
-  onNavigateEntry,
-}: {
-  details: MediaProviderTitleDetailsDto;
-  selectedStatus: string;
-  isAdding: boolean;
-  message: string | null;
-  onStatusChange: (status: string) => void;
-  onAdd: () => void;
-  onNavigateEntry: (libraryEntryId: string) => void;
-}) {
-  const libraryEntryId = details.libraryState?.libraryEntryId;
-
-  return (
-    <GlassCard className="p-5">
-      {libraryEntryId ? (
-        <ExistingLibraryAction
-          libraryEntryId={libraryEntryId}
-          status={details.libraryState?.normalizedStatus}
-          onNavigateEntry={onNavigateEntry}
-        />
-      ) : (
-        <AddLibraryAction
-          selectedStatus={selectedStatus}
-          isAdding={isAdding}
-          onStatusChange={onStatusChange}
-          onAdd={onAdd}
-        />
-      )}
-      {message ? <p className="mt-3 text-sm text-danger-content">{message}</p> : null}
-    </GlassCard>
-  );
-}
-
-function AvailabilityCard({ details }: { details: MediaProviderTitleDetailsDto }) {
-  if (!details.availabilityLinks || details.availabilityLinks.length === 0) {
-    return null;
-  }
-
-  return (
-    <GlassCard className="p-5">
-      <h2 className="text-sm font-semibold tracking-wide text-content-muted uppercase">Availability</h2>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {details.availabilityLinks.map((link) => (
-          <a
-            key={`${link.serviceId}:${link.url ?? link.displayName}`}
-            href={link.url}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-xl border border-border-subtle bg-surface-translucent px-3 py-2 text-sm font-semibold text-content transition hover:bg-surface-hover"
-          >
-            {link.displayName}
-          </a>
-        ))}
-      </div>
-    </GlassCard>
-  );
 }
 
 function useCatalogDetails(providerId: string, providerMediaId: string) {
@@ -278,35 +93,230 @@ function useAddCatalogTitle(
   return { selectedStatus, setSelectedStatus, isAdding, addError, handleAdd };
 }
 
-function CatalogLoadingState({ embedded }: { embedded: boolean }) {
+// fallow-ignore-next-line complexity
+function toCatalogEntry(details: MediaProviderTitleDetailsDto): MediaLibraryEntryDetailDto {
+  const libraryEntryId = details.libraryState?.libraryEntryId ?? '';
+  const mediaTitleId = details.mediaTitleId || details.libraryState?.mediaTitleId || `${details.providerId}:${details.providerMediaId}`;
+
+  return {
+    id: libraryEntryId,
+    title: {
+      id: mediaTitleId,
+      canonicalTitle: details.title,
+      originalTitle: details.nativeTitle,
+      mediaKind: details.mediaKind,
+      synopsis: details.synopsis,
+      posterUrl: details.posterUrl,
+      startYear: details.startYear,
+      episodeCount: details.episodeCount,
+      chapterCount: details.chapterCount,
+      volumeCount: details.volumeCount,
+      primaryProgressDimension: details.primaryProgressDimension,
+      releaseStatusDimension: details.releaseStatusDimension,
+    },
+    provider: details.providerId,
+    providerMediaId: details.providerMediaId,
+    normalizedStatus: details.libraryState?.normalizedStatus ?? 'planned',
+    progressEpisodes: details.libraryState?.progressEpisodes,
+    progressChapters: details.libraryState?.progressChapters,
+    progressVolumes: details.libraryState?.progressVolumes,
+    isConnected: false,
+    updatedAt: new Date(0).toISOString(),
+    providerLinks: [{
+      id: `${details.providerId}:${details.providerMediaId}`,
+      provider: details.providerId,
+      externalId: details.providerMediaId,
+      linkSource: 'Provider catalog',
+    }],
+  };
+}
+
+function useOpenExistingLibraryEntry(
+  libraryEntryId: string | undefined,
+  onNavigateEntry: (libraryEntryId: string) => void,
+) {
+  useEffect(() => {
+    if (libraryEntryId) onNavigateEntry(libraryEntryId);
+  }, [libraryEntryId, onNavigateEntry]);
+}
+
+function CatalogAddPanel({
+  selectedStatus,
+  isAdding,
+  error,
+  onStatusChange,
+  onAdd,
+}: {
+  selectedStatus: string;
+  isAdding: boolean;
+  error: string | null;
+  onStatusChange: (status: string) => void;
+  onAdd: () => void;
+}) {
   return (
-    <DetailLayout embedded={embedded}>
-      <GlassCard className="h-96 animate-pulse" />
-    </DetailLayout>
+    <section className="media-detail-progress-card media-detail-add-card" aria-labelledby="add-title-heading">
+      <div>
+        <p className="media-detail-add-kicker">Add to your library</p>
+        <h2 id="add-title-heading">Choose where to start</h2>
+        <p>Planning is selected by default. You can change the status now or later.</p>
+      </div>
+      <label className="media-detail-add-field">
+        <span>Library status</span>
+        <select value={selectedStatus} onChange={(event) => onStatusChange(event.target.value)}>
+          {ADD_STATUSES.map((status) => (
+            <option key={status.value} value={status.value}>{status.label}</option>
+          ))}
+        </select>
+      </label>
+      <button type="button" className="media-detail-primary-action" onClick={onAdd} disabled={isAdding} aria-busy={isAdding}>
+        <Plus aria-hidden />
+        {isAdding ? 'Adding…' : `Add as ${ADD_STATUSES.find((status) => status.value === selectedStatus)?.label ?? 'Planning'}`}
+      </button>
+      {error ? <p className="media-detail-add-error" role="alert">{error}</p> : null}
+    </section>
   );
 }
 
-function CatalogErrorState({
-  embedded,
-  error,
-  onNavigateBack,
-  onRetry,
-}: {
-  embedded: boolean;
-  error: string | null;
-  onNavigateBack: () => void;
-  onRetry: () => void;
-}) {
+function CatalogProviderSection({ details }: { details: MediaProviderTitleDetailsDto }) {
+  const catalog = mediaProviderCatalog.find((provider) => provider.id === details.providerId);
+
   return (
-    <DetailLayout embedded={embedded}>
-      <GradientButton tone="soft" onClick={onNavigateBack}>Back</GradientButton>
-      <GlassCard className="p-6">
-        <p className="text-danger-content">{error ?? 'Media not found'}</p>
-        <div className="mt-3">
-          <GradientButton tone="soft" onClick={onRetry}>Retry</GradientButton>
+    <section className="media-detail-section">
+      <div className="media-detail-section-heading"><h3>Linked providers</h3></div>
+      <div className="media-detail-provider-grid">
+        <article className="media-detail-provider-card">
+          {catalog ? <MediaProviderIcon providerId={catalog.iconId} aria-hidden /> : null}
+          <div>
+            <h4>{providerName(details.providerId)}</h4>
+            <p>Catalog source</p>
+            <span className="media-detail-provider-id">ID {details.providerMediaId}</span>
+          </div>
+          <CheckCircle2 aria-hidden className="media-detail-provider-check" />
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function AvailabilitySection({ details }: { details: MediaProviderTitleDetailsDto }) {
+  return (
+    <section className="media-detail-section">
+      <div className="media-detail-section-heading"><h3>Where to watch</h3></div>
+      {details.availabilityLinks.length === 0 ? (
+        <div className="media-detail-episode-empty">
+          <p>No verified destinations yet</p>
+          <span>Cantaro will show provider destinations here when they become available.</span>
         </div>
-      </GlassCard>
-    </DetailLayout>
+      ) : (
+        <div className="media-detail-availability-list">
+          {details.availabilityLinks.map((link) => link.url ? (
+            <a key={`${link.serviceId}:${link.url}`} href={link.url} target="_blank" rel="noreferrer">
+              {link.displayName}
+            </a>
+          ) : (
+            <span key={`${link.serviceId}:${link.displayName}`}>{link.displayName}</span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CatalogPanel({
+  activeTab,
+  details,
+  entry,
+  availability,
+}: {
+  activeTab: CatalogTabId;
+  details: MediaProviderTitleDetailsDto;
+  entry: MediaLibraryEntryDetailDto;
+  availability: ProviderAvailabilityMap;
+}) {
+  const panels: Record<CatalogTabId, ReactNode> = {
+    overview: (
+      <div role="tabpanel" id="media-catalog-panel-overview" aria-labelledby="media-catalog-tab-overview">
+        <AvailabilitySection details={details} />
+        <CharactersSection entry={entry} availabilityByProviderLink={availability} />
+        <div className="media-detail-overview-meta-grid"><InformationSection entry={entry} /></div>
+      </div>
+    ),
+    providers: (
+      <div role="tabpanel" id="media-catalog-panel-providers" aria-labelledby="media-catalog-tab-providers">
+        <CatalogProviderSection details={details} />
+      </div>
+    ),
+    characters: (
+      <div role="tabpanel" id="media-catalog-panel-characters" aria-labelledby="media-catalog-tab-characters">
+        <CharactersSection entry={entry} availabilityByProviderLink={availability} />
+      </div>
+    ),
+    details: (
+      <div role="tabpanel" id="media-catalog-panel-details" aria-labelledby="media-catalog-tab-details">
+        <InformationSection entry={entry} />
+      </div>
+    ),
+  };
+
+  return panels[activeTab];
+}
+
+function CatalogDetailContent({
+  details,
+  embedded,
+  onNavigateBack,
+  addState,
+}: {
+  details: MediaProviderTitleDetailsDto;
+  embedded: boolean;
+  onNavigateBack: () => void;
+  addState: ReturnType<typeof useAddCatalogTitle>;
+}) {
+  const [activeTab, setActiveTab] = useState<CatalogTabId>('overview');
+  const entry = useMemo(() => toCatalogEntry(details), [details]);
+  const availability = useMemo<ProviderAvailabilityMap>(() => ({
+    [providerAvailabilityKey(details.providerId, details.providerMediaId)]: {
+      status: 'loaded',
+      links: details.availabilityLinks,
+      characters: details.characters,
+    },
+  }), [details]);
+
+  return (
+    <DetailPageLayout embedded={embedded}>
+      <div className="media-detail-layout">
+        <section className="media-detail-top-area">
+          <MediaHero
+            entry={entry}
+            onNavigateBack={onNavigateBack}
+          />
+          <div className="media-detail-desktop-progress">
+            <CatalogAddPanel
+              selectedStatus={addState.selectedStatus}
+              isAdding={addState.isAdding}
+              error={addState.addError}
+              onStatusChange={addState.setSelectedStatus}
+              onAdd={() => void addState.handleAdd()}
+            />
+          </div>
+          <div className="media-detail-mobile-progress">
+            <CatalogAddPanel
+              selectedStatus={addState.selectedStatus}
+              isAdding={addState.isAdding}
+              error={addState.addError}
+              onStatusChange={addState.setSelectedStatus}
+              onAdd={() => void addState.handleAdd()}
+            />
+          </div>
+        </section>
+        <div className="media-detail-main-column">
+          <section className="media-detail-overview-card">
+            <DetailTabs tabs={CATALOG_TABS} activeTab={activeTab} idPrefix="media-catalog" onChange={setActiveTab} />
+            <CatalogPanel activeTab={activeTab} details={details} entry={entry} availability={availability} />
+          </section>
+        </div>
+      </div>
+    </DetailPageLayout>
   );
 }
 
@@ -319,29 +329,14 @@ export function MediaCatalogDetailPage({
 }: MediaCatalogDetailPageProps) {
   const { details, isLoading, error, loadDetails } = useCatalogDetails(providerId, providerMediaId);
   const addState = useAddCatalogTitle(providerId, providerMediaId, onNavigateEntry);
+  const existingLibraryEntryId = details?.libraryState?.libraryEntryId;
 
-  if (isLoading) {
-    return <CatalogLoadingState embedded={embedded} />;
-  }
+  useOpenExistingLibraryEntry(existingLibraryEntryId, onNavigateEntry);
 
+  if (isLoading || existingLibraryEntryId) return <DetailLoadingState embedded={embedded} />;
   if (error || !details) {
-    return <CatalogErrorState embedded={embedded} error={error} onNavigateBack={onNavigateBack} onRetry={() => void loadDetails()} />;
+    return <DetailErrorState error={error} embedded={embedded} onNavigateBack={onNavigateBack} onRetry={loadDetails} />;
   }
 
-  return (
-    <DetailLayout embedded={embedded}>
-      <GradientButton tone="soft" onClick={onNavigateBack}>Back to search</GradientButton>
-      <CatalogHero details={details} providerId={providerId} />
-      <LibraryActionCard
-        details={details}
-        selectedStatus={addState.selectedStatus}
-        isAdding={addState.isAdding}
-        message={addState.addError}
-        onStatusChange={addState.setSelectedStatus}
-        onAdd={() => void addState.handleAdd()}
-        onNavigateEntry={onNavigateEntry}
-      />
-      <AvailabilityCard details={details} />
-    </DetailLayout>
-  );
+  return <CatalogDetailContent details={details} embedded={embedded} onNavigateBack={onNavigateBack} addState={addState} />;
 }

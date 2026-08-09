@@ -593,7 +593,8 @@ public class AniListMediaProvider(
             NextReleaseAt = ToDateTimeOffset(media.NextAiringEpisode?.AiringAt),
             NextReleaseLabel = media.NextAiringEpisode?.Episode is int nextReleaseEpisode
                 ? $"Episode {nextReleaseEpisode}"
-                : null
+                : null,
+            CoverImage = media.CoverImage
         };
     }
 
@@ -1108,4 +1109,7 @@ public class AniListReleaseMetadataRaw
 
     [JsonPropertyName("nextReleaseLabel")]
     public string? NextReleaseLabel { get; set; }
+
+    [JsonPropertyName("coverImage")]
+    public AniListCoverImage? CoverImage { get; set; }
 }

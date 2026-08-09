@@ -21,6 +21,7 @@ public class MediaObservationsController(
     UserManager<User> userManager,
     MediaObservationMatchingService matchingService,
     MediaObservationProgressService progressService,
+    MediaEpisodeIdentityService episodeIdentityService,
     IMediaProviderRegistry mediaProviderRegistry,
     ILogger<MediaObservationsController> logger) : ControllerBase
 {
@@ -28,6 +29,7 @@ public class MediaObservationsController(
     private readonly UserManager<User> _userManager = userManager;
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaObservationProgressService _progressService = progressService;
+    private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly ILogger<MediaObservationsController> _logger = logger;
     private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
@@ -45,6 +47,15 @@ public class MediaObservationsController(
         [FromBody] SubmitMediaObservationRequest request,
         CancellationToken cancellationToken)
     {
+        request.ObservedEpisodes ??= [];
+        if (request.ObservedEpisodes.Count > MediaCatalogObservationLimits.MaximumEpisodesPerObservation)
+        {
+            return BadRequest(new
+            {
+                error = $"A series-page observation may contain at most {MediaCatalogObservationLimits.MaximumEpisodesPerObservation} episodes."
+            });
+        }
+
         var userId = await GetCurrentUserIdAsync();
 
         var normalizedSite = request.SiteIdentifier.ToLowerInvariant().Trim();
@@ -85,6 +96,7 @@ public class MediaObservationsController(
                 if (existing.MatchStatus == MediaObservationStatuses.Matched)
                 {
                     await ApplyStoredOffsetAsync(existing, cancellationToken);
+                    await _episodeIdentityService.RecordObservationAsync(existing, cancellationToken);
                     await _progressService.TryEnqueueAutoProgressAsync(existing, cancellationToken);
                 }
 
@@ -129,6 +141,7 @@ public class MediaObservationsController(
         if (observation.MatchStatus == MediaObservationStatuses.Matched)
         {
             await ApplyStoredOffsetAsync(observation, cancellationToken);
+            await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
             await _progressService.TryEnqueueAutoProgressAsync(observation, cancellationToken);
         }
 
@@ -310,6 +323,8 @@ public class MediaObservationsController(
 
         await UpsertEpisodeOffsetAsync(userId, observation.SiteIdentifier, resolvedMediaTitleId, request.EpisodeOffset, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
 
         _logger.LogInformation(
             "User {UserId} resolved MediaObservation {ObservationId} to MediaTitle {MediaTitleId}.",

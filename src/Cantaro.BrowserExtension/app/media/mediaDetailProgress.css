@@ -1,0 +1,296 @@
+.cantaro-extension-media .media-detail-progress-card,
+.cantaro-extension-media .media-detail-overview-card,
+.cantaro-extension-media .media-detail-community,
+.cantaro-extension-media .media-detail-info-card {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 1rem;
+  color: var(--color-content);
+  background: var(--color-surface);
+}
+
+.cantaro-extension-media .media-detail-progress-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  margin: 0.75rem;
+  padding: 0.85rem;
+}
+
+.cantaro-extension-media .media-detail-progress-ring {
+  position: relative;
+  display: grid;
+  width: 4.5rem;
+  height: 4.5rem;
+  place-items: center;
+  border-radius: 999px;
+  background: conic-gradient(var(--color-accent) var(--media-detail-progress), var(--color-border-strong) 0deg);
+}
+
+.cantaro-extension-media .media-detail-progress-ring::before {
+  position: absolute;
+  width: 3.45rem;
+  height: 3.45rem;
+  border-radius: inherit;
+  content: '';
+  background: var(--color-surface);
+}
+
+.cantaro-extension-media .media-detail-progress-ring span {
+  position: relative;
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.cantaro-extension-media .media-detail-progress-main p,
+.cantaro-extension-media .media-detail-progress-main strong,
+.cantaro-extension-media .media-detail-progress-main span,
+.cantaro-extension-media .media-detail-progress-next p,
+.cantaro-extension-media .media-detail-progress-next span,
+.cantaro-extension-media .media-detail-stepper p,
+.cantaro-extension-media .media-detail-score-row p {
+  margin: 0;
+}
+
+.cantaro-extension-media .media-detail-progress-main p,
+.cantaro-extension-media .media-detail-progress-main span,
+.cantaro-extension-media .media-detail-progress-next span,
+.cantaro-extension-media .media-detail-score-row p,
+.cantaro-extension-media .media-detail-section-note {
+  color: var(--color-content-muted);
+  font-size: 0.72rem;
+}
+
+.cantaro-extension-media .media-detail-progress-main strong,
+.cantaro-extension-media .media-detail-progress-next p {
+  display: block;
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.cantaro-extension-media .media-detail-progress-next {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 0.5rem;
+}
+
+.cantaro-extension-media .media-detail-progress-next-head,
+.cantaro-extension-media .media-detail-stepper-row,
+.cantaro-extension-media .media-detail-score-row,
+.cantaro-extension-media .media-detail-action-rail {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cantaro-extension-media .media-detail-progress-next-head {
+  justify-content: space-between;
+}
+
+.cantaro-extension-media .media-detail-stepper {
+  grid-column: 1 / -1;
+}
+
+.cantaro-extension-media .media-detail-stepper input {
+  min-width: 0;
+  flex: 1;
+  accent-color: var(--color-accent);
+}
+
+.cantaro-extension-media .media-detail-stepper button,
+.cantaro-extension-media .media-detail-score-row button,
+.cantaro-extension-media .media-detail-score-row select {
+  min-height: 2.25rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.7rem;
+  color: var(--color-content);
+  background: var(--color-surface-subtle);
+}
+
+.cantaro-extension-media .media-detail-stepper button {
+  display: grid;
+  width: 2.25rem;
+  place-items: center;
+}
+
+.cantaro-extension-media .media-detail-stepper svg,
+.cantaro-extension-media .media-detail-score-row svg,
+.cantaro-extension-media .media-detail-action-rail svg,
+.cantaro-extension-media .media-detail-episodes-actions svg,
+.cantaro-extension-media .media-detail-episode-row > a svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.cantaro-extension-media .media-detail-score-row {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+}
+
+.cantaro-extension-media .media-detail-score-row > .media-detail-score {
+  margin-right: auto;
+}
+
+.cantaro-extension-media .media-detail-score-row > div > div {
+  display: flex;
+  color: var(--color-warning-content);
+}
+
+.cantaro-extension-media .media-detail-score-row select,
+.cantaro-extension-media .media-detail-score-row button {
+  padding: 0 0.65rem;
+}
+
+.cantaro-extension-media .media-detail-status-control {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.cantaro-extension-media .media-detail-status-control select {
+  min-width: 0;
+  flex: 1;
+}
+
+.cantaro-extension-media .media-detail-score-row .media-detail-refresh-status {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  padding: 0;
+}
+
+.cantaro-extension-media .media-detail-score-row button,
+.cantaro-extension-media .media-detail-primary-action,
+.cantaro-extension-media .media-detail-secondary-action,
+.cantaro-extension-media .media-detail-episodes-actions button,
+.cantaro-extension-media .media-detail-episodes-actions a,
+.cantaro-extension-media .media-detail-episode-row > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.cantaro-extension-media .media-detail-action-rail {
+  width: 100%;
+  min-width: 0;
+  padding: 0 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-primary-action,
+.cantaro-extension-media .media-detail-secondary-action {
+  min-width: 0;
+  min-height: 2.5rem;
+  border-radius: 0.75rem;
+  padding: 0 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.cantaro-extension-media .media-detail-primary-action {
+  flex: 1;
+  border: 0;
+  color: var(--color-action-content);
+  background: var(--color-action);
+}
+
+.cantaro-extension-media .media-detail-streaming-action {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.cantaro-extension-media .media-detail-streaming-primary {
+  border-radius: 0.75rem 0 0 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-streaming-action > .media-detail-streaming-primary:only-child {
+  border-radius: 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-streaming-menu > summary {
+  display: grid;
+  width: 2.5rem;
+  height: 100%;
+  cursor: pointer;
+  place-items: center;
+  border-left: 1px solid color-mix(in srgb, var(--color-action-content) 28%, transparent);
+  border-radius: 0 0.75rem 0.75rem 0;
+  color: var(--color-action-content);
+  background: var(--color-action);
+  list-style: none;
+}
+
+.cantaro-extension-media .media-detail-streaming-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cantaro-extension-media .media-detail-streaming-menu > div {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  display: grid;
+  width: min(18rem, 80vw);
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0.75rem;
+  background: var(--color-surface-raised);
+}
+
+.cantaro-extension-media .media-detail-streaming-menu > div a {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  color: var(--color-content);
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.cantaro-extension-media .media-detail-secondary-action {
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-content);
+  background: var(--color-surface);
+}
+
+.cantaro-extension-media .media-detail-overview-card {
+  margin: 0 0.75rem;
+  padding: 0.85rem;
+}
+
+.cantaro-extension-media .media-detail-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.cantaro-extension-media .media-detail-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.cantaro-extension-media .media-detail-tabs button {
+  min-height: 2.25rem;
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0 0.6rem;
+  color: var(--color-content-muted);
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.cantaro-extension-media .media-detail-tabs button.is-active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-content);
+}

@@ -83,13 +83,43 @@ export interface MediaProviderLinkSummaryDto {
 export interface MediaLinkRequestDto {
     providerId: string;
     providerMediaId: string;
-    forceRelink?: boolean;
+    confirmReplacement?: boolean;
 }
 
 export interface MediaLinkConflictDto {
     error: string;
-    conflictingMediaTitleId: string;
-    conflictingCanonicalTitle: string;
+    code: string;
+    conflictingMediaTitleId?: string;
+    conflictingCanonicalTitle?: string;
+    currentProviderMediaId?: string;
+}
+
+export interface MediaContinueWatchingDto {
+    outcome: 'direct' | 'series_fallback' | 'completed' | 'unavailable' | 'conflict';
+    episodeNumber?: number;
+    provider?: string;
+    url?: string;
+}
+
+export interface MediaEpisodeCatalogDto {
+    seriesDestinations: MediaStreamingDestinationDto[];
+    episodes: MediaEpisodeDestinationDto[];
+}
+
+export interface MediaEpisodeDestinationDto {
+    episodeNumber: number;
+    title?: string;
+    destinations: MediaStreamingDestinationDto[];
+    seenCount: number;
+    hasConflict: boolean;
+}
+
+export interface MediaStreamingDestinationDto {
+    serviceId: string;
+    url: string;
+    seenCount: number;
+    firstSeenAt: string;
+    lastSeenAt: string;
 }
 
 export interface MediaProviderAccountStatusDto {
@@ -223,6 +253,7 @@ export interface MediaProviderSearchResultDto extends MediaProviderMetadataDto {
 }
 
 export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
+    mediaTitleId: string;
     providerId: string;
     providerMediaId: string;
     availabilityLinks: MediaProviderAvailabilityLinkDto[];

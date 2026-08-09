@@ -64,5 +64,7 @@ public class MediaTitle
 
     public ICollection<MediaProviderLink> ProviderLinks { get; set; } = [];
 
+    public ICollection<MediaEpisode> Episodes { get; set; } = [];
+
     public ICollection<MediaLibraryEntry> LibraryEntries { get; set; } = [];
 }

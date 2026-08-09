@@ -91,16 +91,55 @@ public class MediaLinkRequestDto
     public required string ProviderMediaId { get; set; }
 
     /// <summary>
-    /// When true, allows stealing a provider link that is already associated with a
-    /// different canonical title. Without this flag a 409 Conflict is returned.
+    /// Confirms replacement of this title's existing identity for the same provider.
+    /// This never permits taking an identity from another canonical title.
     /// </summary>
-    public bool ForceRelink { get; set; }
+    public bool ConfirmReplacement { get; set; }
 }
 
 public class MediaLinkConflictDto
 {
     public required string Error { get; set; }
-    public Guid ConflictingMediaTitleId { get; set; }
-    public required string ConflictingCanonicalTitle { get; set; }
+    public required string Code { get; set; }
+    public Guid? ConflictingMediaTitleId { get; set; }
+    public string? ConflictingCanonicalTitle { get; set; }
+    public string? CurrentProviderMediaId { get; set; }
 }
 
+public class MediaContinueWatchingDto
+{
+    /// <summary>
+    /// direct | series_fallback | completed | unavailable | conflict
+    /// </summary>
+    public required string Outcome { get; set; }
+
+    public int? EpisodeNumber { get; set; }
+
+    public string? Provider { get; set; }
+
+    public string? Url { get; set; }
+}
+
+public class MediaEpisodeCatalogDto
+{
+    public required IReadOnlyList<MediaStreamingDestinationDto> SeriesDestinations { get; set; }
+    public required IReadOnlyList<MediaEpisodeDestinationDto> Episodes { get; set; }
+}
+
+public class MediaEpisodeDestinationDto
+{
+    public int EpisodeNumber { get; set; }
+    public string? Title { get; set; }
+    public required IReadOnlyList<MediaStreamingDestinationDto> Destinations { get; set; }
+    public int SeenCount { get; set; }
+    public bool HasConflict { get; set; }
+}
+
+public class MediaStreamingDestinationDto
+{
+    public required string ServiceId { get; set; }
+    public required string Url { get; set; }
+    public int SeenCount { get; set; }
+    public DateTimeOffset FirstSeenAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+}

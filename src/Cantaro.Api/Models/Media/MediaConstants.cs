@@ -41,6 +41,7 @@ public static class MediaMutationSources
     public const string ProviderImport = "provider_import";
     public const string UserProgressUpdate = "user_progress_update";
     public const string UserStatusUpdate = "user_status_update";
+    public const string UserProviderIdentityCorrection = "user_provider_identity_correction";
     public const string ProviderDisconnect = "provider_disconnect";
 
     /// <summary>

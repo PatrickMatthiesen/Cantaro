@@ -6,8 +6,10 @@
     ],
     "entry": [
         "entrypoints/background.ts",
-        "entrypoints/crunchyroll.content.ts",
-        "entrypoints/spotify.content.ts",
+        "entrypoints/crunchyroll-series.content/index.ts",
+        "entrypoints/crunchyroll-watch.content/index.tsx",
+        "entrypoints/spotify.content/index.ts",
+        "entrypoints/youtube-music.content/index.ts",
         "entrypoints/popup/index.html",
         "entrypoints/popup/main.tsx"
     ],

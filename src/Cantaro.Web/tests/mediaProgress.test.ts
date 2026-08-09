@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { progressSegments } from '../../Cantaro.ClientShared/src/media/components/LibraryEntryCard';
+import { progressSegments } from '../../Cantaro.ClientShared/src/media/components/media-library/libraryEntryProgress';
 import type { MediaLibraryListItemDto } from '../../Cantaro.ClientShared/src/media/services/mediaApi.types';
 
 function makeEntry(overrides: Partial<MediaLibraryListItemDto> = {}): MediaLibraryListItemDto {

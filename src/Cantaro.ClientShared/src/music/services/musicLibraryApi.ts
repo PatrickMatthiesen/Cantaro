@@ -79,6 +79,19 @@ export interface LyricsResult {
   explanation?: string;
 }
 
+function canonicalTrackId(songId: string): string {
+  return songId.startsWith('track:') ? songId.slice(6) : songId;
+}
+
+function youtubeVideoQuery(youtubeVideoId?: string): string {
+  return youtubeVideoId ? `?youtubeVideoId=${encodeURIComponent(youtubeVideoId)}` : '';
+}
+
+function playlistMutationError(method: 'POST' | 'DELETE', body: { error?: string } | null): Error {
+  const fallback = method === 'POST' ? 'Could not add this song.' : 'Could not remove this song.';
+  return new Error(body?.error ?? fallback);
+}
+
 class MusicLibraryApiClient {
   async getLibrary(): Promise<MusicLibraryResponse> {
     const response = await fetch('/api/music/library', {
@@ -97,14 +110,14 @@ class MusicLibraryApiClient {
   }
 
   async getCanonicalSong(songId: string): Promise<MusicLibrarySong> {
-    const trackId = songId.startsWith('track:') ? songId.slice(6) : songId;
+    const trackId = canonicalTrackId(songId);
     const response = await fetch(`/api/music/library/songs/${encodeURIComponent(trackId)}`, { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to load song details');
     return response.json() as Promise<MusicLibrarySong>;
   }
 
   async getLyrics(songId: string, signal?: AbortSignal): Promise<LyricsResult> {
-    const trackId = songId.startsWith('track:') ? songId.slice(6) : songId;
+    const trackId = canonicalTrackId(songId);
     const response = await fetch(`/api/music/tracks/${encodeURIComponent(trackId)}/lyrics`, {
       credentials: 'include',
       signal,
@@ -124,15 +137,15 @@ class MusicLibraryApiClient {
   }
 
   private async mutatePlaylistSong(method: 'POST' | 'DELETE', songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {
-    const trackId = songId.startsWith('track:') ? songId.slice(6) : songId;
-    const query = youtubeVideoId ? `?youtubeVideoId=${encodeURIComponent(youtubeVideoId)}` : '';
+    const trackId = canonicalTrackId(songId);
+    const query = youtubeVideoQuery(youtubeVideoId);
     const response = await fetch(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${query}`, {
       method,
       credentials: 'include',
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: string } | null;
-      throw new Error(body?.error ?? `Could not ${method === 'POST' ? 'add' : 'remove'} this song.`);
+      throw playlistMutationError(method, body);
     }
   }
 }

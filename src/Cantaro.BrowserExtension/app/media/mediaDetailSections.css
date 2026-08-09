@@ -1,0 +1,417 @@
+.cantaro-extension-media .media-detail-section,
+.cantaro-extension-media .media-detail-community,
+.cantaro-extension-media .media-detail-info-card {
+  margin-top: 0.9rem;
+}
+
+.cantaro-extension-media .media-detail-section-heading,
+.cantaro-extension-media .media-detail-episodes-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-section-heading h3,
+.cantaro-extension-media .media-detail-episodes-heading h3,
+.cantaro-extension-media .media-detail-info-card h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.cantaro-extension-media .media-detail-section-heading button,
+.cantaro-extension-media .media-detail-character-more {
+  border: 0;
+  color: var(--color-accent-strong);
+  background: transparent;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.cantaro-extension-media .media-detail-franchise-strip,
+.cantaro-extension-media .media-detail-character-row {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-item-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-item {
+  display: grid;
+  width: 13rem;
+  flex: 0 0 auto;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.55rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.8rem;
+  padding: 0.5rem;
+  background: var(--color-surface-subtle);
+}
+
+.cantaro-extension-media .media-detail-franchise-item.is-active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.cantaro-extension-media .media-detail-franchise-thumb {
+  aspect-ratio: 0.72;
+  overflow: hidden;
+  border-radius: 0.5rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-item h4,
+.cantaro-extension-media .media-detail-franchise-item p,
+.cantaro-extension-media .media-detail-franchise-item span,
+.cantaro-extension-media .media-detail-character-card h4,
+.cantaro-extension-media .media-detail-character-card p {
+  margin: 0;
+}
+
+.cantaro-extension-media .media-detail-franchise-item h4,
+.cantaro-extension-media .media-detail-character-card h4 {
+  overflow: hidden;
+  color: var(--color-content);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cantaro-extension-media .media-detail-franchise-item p,
+.cantaro-extension-media .media-detail-franchise-item span,
+.cantaro-extension-media .media-detail-character-card p,
+.cantaro-extension-media .media-detail-character-state {
+  color: var(--color-content-muted);
+  font-size: 0.68rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-arrow {
+  color: var(--color-content-subtle);
+}
+
+.cantaro-extension-media .media-detail-character-card {
+  width: 5.5rem;
+  flex: 0 0 auto;
+}
+
+.cantaro-extension-media .media-detail-character-card > div {
+  aspect-ratio: 0.72;
+  overflow: hidden;
+  margin-bottom: 0.35rem;
+  border-radius: 0.7rem;
+  background: var(--color-surface-subtle);
+}
+
+.cantaro-extension-media .media-detail-character-card a {
+  color: inherit;
+}
+
+.cantaro-extension-media .media-detail-character-more {
+  margin-top: 0.5rem;
+  padding: 0;
+}
+
+.cantaro-extension-media .media-detail-overview-meta-grid,
+.cantaro-extension-media .media-detail-community-grid,
+.cantaro-extension-media .media-detail-provider-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.cantaro-extension-media .media-detail-overview-meta-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.cantaro-extension-media .media-detail-info-card,
+.cantaro-extension-media .media-detail-community {
+  padding: 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-info-card dl {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0;
+}
+
+.cantaro-extension-media .media-detail-info-card dl > div {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.cantaro-extension-media .media-detail-info-card dt,
+.cantaro-extension-media .media-detail-info-card dd {
+  margin: 0;
+  font-size: 0.7rem;
+}
+
+.cantaro-extension-media .media-detail-info-card dt {
+  color: var(--color-content-muted);
+}
+
+.cantaro-extension-media .media-detail-info-card dd {
+  color: var(--color-content);
+  font-weight: 700;
+}
+
+.cantaro-extension-media .media-detail-community-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.6rem;
+}
+
+.cantaro-extension-media .media-detail-metric-card {
+  min-width: 0;
+  border-radius: 0.7rem;
+  padding: 0.6rem;
+  background: var(--color-surface-subtle);
+}
+
+.cantaro-extension-media .media-detail-metric-card p,
+.cantaro-extension-media .media-detail-metric-card strong,
+.cantaro-extension-media .media-detail-metric-card span {
+  display: block;
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cantaro-extension-media .media-detail-metric-card p,
+.cantaro-extension-media .media-detail-metric-card span {
+  color: var(--color-content-muted);
+  font-size: 0.65rem;
+}
+
+.cantaro-extension-media .media-detail-metric-card strong {
+  margin: 0.2rem 0;
+  font-size: 0.85rem;
+}
+
+.cantaro-extension-media .media-detail-metric-card strong svg {
+  display: inline;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin-right: 0.25rem;
+}
+
+.cantaro-extension-media .media-detail-episodes-heading {
+  align-items: flex-start;
+}
+
+.cantaro-extension-media .media-detail-episodes-heading p,
+.cantaro-extension-media .media-detail-episode-empty p,
+.cantaro-extension-media .media-detail-episode-empty span {
+  margin: 0.2rem 0 0;
+  color: var(--color-content-muted);
+  font-size: 0.72rem;
+}
+
+.cantaro-extension-media .media-detail-episodes-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.cantaro-extension-media .media-detail-episodes-actions button,
+.cantaro-extension-media .media-detail-episodes-actions a,
+.cantaro-extension-media .media-detail-episode-row > a,
+.cantaro-extension-media .media-detail-episode-empty button {
+  min-height: 2.1rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.65rem;
+  padding: 0 0.65rem;
+  color: var(--color-content);
+  background: var(--color-surface-subtle);
+  font-size: 0.7rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.cantaro-extension-media .media-detail-episode-list {
+  display: grid;
+  gap: 0;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cantaro-extension-media .media-detail-episode-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 3.6rem;
+  border-top: 1px solid var(--color-border-subtle);
+  padding: 0.45rem 0.3rem;
+}
+
+.cantaro-extension-media .media-detail-episode-row.is-next {
+  margin-inline: -0.35rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 0.75rem;
+  padding-inline: 0.65rem;
+  background: var(--color-accent-soft);
+}
+
+.cantaro-extension-media .media-detail-episode-number {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.65rem;
+  color: var(--color-accent-strong);
+  background: var(--color-surface-subtle);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.cantaro-extension-media .media-detail-episode-copy {
+  min-width: 0;
+}
+
+.cantaro-extension-media .media-detail-episode-copy strong,
+.cantaro-extension-media .media-detail-episode-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cantaro-extension-media .media-detail-episode-copy strong {
+  font-size: 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-episode-copy span,
+.cantaro-extension-media .media-detail-episode-state {
+  color: var(--color-content-muted);
+  font-size: 0.68rem;
+}
+
+.cantaro-extension-media .media-detail-episode-destinations {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination {
+  --streaming-service-color: var(--color-accent);
+  display: inline-flex;
+  min-height: 2.1rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  border-radius: 0.65rem;
+  padding: 0 0.55rem;
+  color: var(--streaming-service-button-color);
+  background: color-mix(in srgb, var(--streaming-service-color) 18%, var(--color-surface-raised));
+  font-size: 0.68rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination:hover {
+  background: color-mix(in srgb, var(--streaming-service-color) 26%, var(--color-surface-raised));
+}
+
+.cantaro-extension-media .media-detail-streaming-destination:active {
+  background: color-mix(in srgb, var(--streaming-service-color) 34%, var(--color-surface-raised));
+}
+
+.cantaro-extension-media .media-detail-streaming-destination:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination > svg:last-child {
+  color: currentColor;
+}
+
+.cantaro-extension-media .media-detail-streaming-destination svg,
+.cantaro-extension-media .media-detail-streaming-destination > span:first-child {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+}
+
+.cantaro-extension-media .media-detail-provider-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.65rem;
+}
+
+.cantaro-extension-media .media-detail-provider-card,
+.cantaro-extension-media .media-detail-provider-more,
+.cantaro-extension-media .media-detail-empty-provider {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+  color: var(--color-content);
+  background: var(--color-surface-subtle);
+}
+
+.cantaro-extension-media .media-detail-provider-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: 0.55rem;
+}
+
+.cantaro-extension-media .media-detail-provider-card h4,
+.cantaro-extension-media .media-detail-provider-card p {
+  margin: 0;
+}
+
+.cantaro-extension-media .media-detail-provider-card h4 {
+  font-size: 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-provider-card p,
+.cantaro-extension-media .media-detail-provider-card a,
+.cantaro-extension-media .media-detail-provider-card button {
+  font-size: 0.68rem;
+}
+
+.cantaro-extension-media .media-detail-provider-check {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 0.85rem;
+  color: var(--color-success-content);
+}
+
+.cantaro-extension-media .media-detail-skeleton,
+.cantaro-extension-media .media-detail-empty-panel {
+  min-height: 20rem;
+  border-radius: 1rem;
+  background: var(--color-surface-subtle);
+}
+
+.cantaro-extension-media .media-detail-empty-panel {
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.cantaro-extension-media .media-detail-spin {
+  transform-origin: center;
+  animation: cantaro-media-detail-spin 800ms linear infinite;
+}
+
+@keyframes cantaro-media-detail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cantaro-extension-media .media-detail-spin {
+    animation: none;
+  }
+}

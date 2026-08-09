@@ -1,7 +1,7 @@
 {
   "name": "cantaro-browser-extension",
   "version": "0.1.0",
-  "description": "Cantaro browser extension for accelerating playlist sync",
+  "description": "Cantaro extension for music sync and rendered episode URL collection",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,18 +9,20 @@
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
-    "check": "bun run test:run && bun run build",
+    "check": "bun run typecheck && bun run test:run && bun run build",
     "check:fallow": "bunx fallow",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "postinstall": "wxt prepare",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@cantaro/client-shared": "workspace:*",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -29,7 +31,6 @@
     "@types/webextension-polyfill": "^0.12.5",
     "@wxt-dev/module-react": "^1.2.2",
     "linkedom": "^0.18.13",
-    "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7",
     "wxt": "^0.20.26"
