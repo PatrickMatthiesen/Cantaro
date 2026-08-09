@@ -13,6 +13,8 @@ var spotifyClientId = builder.AddParameter("SpotifyClientId", secret: true);
 var spotifyClientSecret = builder.AddParameter("SpotifyClientSecret", secret: true);
 var aniListClientId = builder.AddParameter("AniListClientId", secret: true);
 var aniListClientSecret = builder.AddParameter("AniListClientSecret", secret: true);
+var animeScheduleId = builder.AddParameter("AnimeScheduleId");
+var animeScheduleToken = builder.AddParameter("AnimeScheduleToken", secret: true);
 var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
     ? builder.AddParameter("ExtensionAuthJwtSigningKey", "Cantaro.ExtensionAuth.Development.Signing.Key.2026.04.26", true)
     : builder.AddParameter("ExtensionAuthJwtSigningKey", secret: true);
@@ -52,6 +54,8 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("Spotify:ClientSecret", spotifyClientSecret)
     .WithEnvironment("AniList:ClientId", aniListClientId)
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
+    .WithEnvironment("AnimeSchedule:Id", animeScheduleId)
+    .WithEnvironment("AnimeSchedule:Token", animeScheduleToken)
     .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey);
 
 if (builder.ExecutionContext.IsRunMode)

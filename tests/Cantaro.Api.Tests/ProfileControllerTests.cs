@@ -28,6 +28,7 @@ public sealed class ProfileControllerTests
         Assert.Equal("listener", profile.DisplayName);
         Assert.Equal(UserThemePreferences.System, profile.Preferences.Theme);
         Assert.True(profile.Preferences.KeepPlaylistOrder);
+        Assert.Equal(MediaReleaseTrackPreferences.Default, profile.Preferences.PreferredMediaReleaseTrack);
         Assert.Single(fixture.Db.UserSettings);
     }
 
@@ -44,6 +45,50 @@ public sealed class ProfileControllerTests
             HideUnavailableTracks = true,
             ScheduledSync = true,
             BlurEmailAddress = false
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdatePreferencesNormalizesPreferredMediaReleaseTrack()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+
+        var result = await fixture.Controller.UpdatePreferences(new UpdateProfilePreferencesRequest
+        {
+            Theme = UserThemePreferences.Dark,
+            KeepPlaylistOrder = true,
+            KeepPlaylistMetadata = true,
+            HideUnavailableTracks = true,
+            ScheduledSync = true,
+            BlurEmailAddress = false,
+            PreferredMediaReleaseTrack = "DUB:pt-br"
+        }, CancellationToken.None);
+
+        var profile = Assert.IsType<ProfileDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("dub:pt-BR", profile.Preferences.PreferredMediaReleaseTrack);
+        Assert.Equal("dub:pt-BR", (await fixture.Db.UserSettings.SingleAsync()).PreferredMediaReleaseTrack);
+    }
+
+    [Theory]
+    [InlineData("raw:en")]
+    [InlineData("sub")]
+    [InlineData("dub:")]
+    [InlineData("dub:english")]
+    public async Task UpdatePreferencesRejectsInvalidPreferredMediaReleaseTrack(string preferredMediaReleaseTrack)
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+
+        var result = await fixture.Controller.UpdatePreferences(new UpdateProfilePreferencesRequest
+        {
+            Theme = UserThemePreferences.Dark,
+            KeepPlaylistOrder = true,
+            KeepPlaylistMetadata = true,
+            HideUnavailableTracks = true,
+            ScheduledSync = true,
+            BlurEmailAddress = false,
+            PreferredMediaReleaseTrack = preferredMediaReleaseTrack
         }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);

@@ -105,7 +105,32 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 .ToListAsync(cancellationToken);
         }
 
-        var items = entries.Select(MapListItem).ToList();
+        var preferredTrack = await _dbContext.UserSettings
+            .AsNoTracking()
+            .Where(settings => settings.UserId == userId)
+            .Select(settings => settings.PreferredMediaReleaseTrack)
+            .SingleOrDefaultAsync(cancellationToken) ?? MediaReleaseTrackPreferences.Default;
+        if (!MediaReleaseTrackPreferences.TryNormalize(preferredTrack, out preferredTrack))
+        {
+            preferredTrack = MediaReleaseTrackPreferences.Default;
+        }
+
+        var titleIds = entries.Select(entry => entry.MediaTitleId).Distinct().ToArray();
+        var episodeAvailability = await _dbContext.MediaEpisodes
+            .AsNoTracking()
+            .Where(episode => titleIds.Contains(episode.MediaTitleId))
+            .Select(episode => new EpisodeAvailabilityProjection(
+                episode.MediaTitleId,
+                episode.EpisodeNumber,
+                episode.AvailableSubtitleLanguageCodes,
+                episode.AvailableAudioLanguageCodes))
+            .ToListAsync(cancellationToken);
+        var availableCounts = ResolveAvailableReleasedCounts(episodeAvailability, preferredTrack);
+        var items = entries
+            .Select(entry => MapListItem(
+                entry,
+                availableCounts.GetValueOrDefault(entry.MediaTitleId)))
+            .ToList();
 
         return new MediaLibraryPageDto
         {
@@ -181,7 +206,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         };
     }
 
-    private static MediaLibraryListItemDto MapListItem(MediaLibraryEntry entry)
+    private static MediaLibraryListItemDto MapListItem(MediaLibraryEntry entry, int? availableReleasedCount)
     {
         var artwork = MediaArtworkMetadata.FromCanonicalMetadata(entry.MediaTitle?.CanonicalMetadata);
         var releaseMetadata = ReadNextReleaseMetadata(entry.RawMetadata);
@@ -202,6 +227,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             ChapterCount = entry.MediaTitle?.ChapterCount,
             VolumeCount = entry.MediaTitle?.VolumeCount,
             ReleasedCount = releaseMetadata.ReleasedCount,
+            AvailableReleasedCount = availableReleasedCount,
             PrimaryProgressDimension = entry.MediaTitle?.PrimaryProgressDimension ?? string.Empty,
             Provider = entry.Provider,
             ProviderMediaId = entry.ProviderMediaId,
@@ -213,6 +239,42 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             UpdatedAt = entry.UpdatedAt
         };
     }
+
+    private static Dictionary<Guid, int?> ResolveAvailableReleasedCounts(
+        IEnumerable<EpisodeAvailabilityProjection> episodes,
+        string preferredTrack)
+    {
+        var presentationSeparator = preferredTrack.IndexOf(':');
+        var presentation = preferredTrack[..presentationSeparator];
+        var languageCode = preferredTrack[(presentationSeparator + 1)..];
+        return episodes
+            .GroupBy(episode => episode.MediaTitleId)
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var preferred = group
+                        .Where(episode => (presentation == "dub" ? episode.AudioLanguageCodes : episode.SubtitleLanguageCodes)
+                            .Contains(languageCode, StringComparer.OrdinalIgnoreCase))
+                        .Select(episode => (int?)episode.EpisodeNumber)
+                        .Max();
+                    if (preferred is not null || presentation != "dub")
+                    {
+                        return preferred;
+                    }
+
+                    return group
+                        .Where(episode => episode.SubtitleLanguageCodes.Contains(languageCode, StringComparer.OrdinalIgnoreCase))
+                        .Select(episode => (int?)episode.EpisodeNumber)
+                        .Max();
+                });
+    }
+
+    private sealed record EpisodeAvailabilityProjection(
+        Guid MediaTitleId,
+        int EpisodeNumber,
+        string[] SubtitleLanguageCodes,
+        string[] AudioLanguageCodes);
 
     private static MediaLibraryEntryDetailDto MapDetail(MediaLibraryEntry entry)
     {

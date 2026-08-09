@@ -14,6 +14,56 @@ public static class UserThemePreferences
     };
 }
 
+public static class MediaReleaseTrackPreferences
+{
+    public const string Default = "sub:en";
+
+    public static bool TryNormalize(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var parts = value.Trim().Split(':', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        var presentation = parts[0].ToLowerInvariant();
+        if (presentation is not "sub" and not "dub" || !TryNormalizeLanguageCode(parts[1], out var languageCode))
+        {
+            return false;
+        }
+
+        normalized = $"{presentation}:{languageCode}";
+        return true;
+    }
+
+    private static bool TryNormalizeLanguageCode(string value, out string normalized)
+    {
+        normalized = string.Empty;
+        var subtags = value.Split('-', StringSplitOptions.TrimEntries);
+        if (subtags.Length == 0
+            || subtags.Any(subtag => subtag.Length is < 2 or > 8 || !subtag.All(char.IsLetterOrDigit))
+            || subtags[0].Length is < 2 or > 3
+            || !subtags[0].All(char.IsLetter))
+        {
+            return false;
+        }
+
+        normalized = string.Join('-', subtags.Select((subtag, index) =>
+            index == 0
+                ? subtag.ToLowerInvariant()
+                : subtag.Length == 2 && subtag.All(char.IsLetter)
+                    ? subtag.ToUpperInvariant()
+                    : subtag.ToLowerInvariant()));
+        return true;
+    }
+}
+
 public class UserSettings
 {
     public int UserId { get; set; }
@@ -29,6 +79,7 @@ public class UserSettings
     public bool HideUnavailableTracks { get; set; } = true;
     public bool ScheduledSync { get; set; } = true;
     public bool BlurEmailAddress { get; set; }
+    public string PreferredMediaReleaseTrack { get; set; } = MediaReleaseTrackPreferences.Default;
 
     public string? AvatarObjectKey { get; set; }
     public string? AvatarETag { get; set; }

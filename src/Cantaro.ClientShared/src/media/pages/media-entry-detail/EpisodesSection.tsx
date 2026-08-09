@@ -1,8 +1,6 @@
 import { ExternalLink, Play, RefreshCcw } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import type {
-  MediaLibraryEntryDetailDto,
-} from '../../services/mediaApi';
+import type { MediaLibraryEntryDetailDto } from '../../services/mediaApi';
 import {
   type MediaStreamingDestinations,
   type StreamingDestination,
@@ -12,12 +10,26 @@ import {
   type StreamingServiceId,
 } from '../../services/streamingServices';
 import { StreamingServiceIcon } from '../../components/StreamingServiceIcon';
+import { formatEpisodeAvailability, formatReleaseAvailability } from './episodeAvailability';
 import { getEpisodeRows } from './episodeRows';
 import type { EpisodeCatalogState } from './mediaEntryDetailTypes';
 function getEpisodeProgressLabel(episodeNumber: number, watchedThrough: number) {
   if (episodeNumber <= watchedThrough) return 'Watched';
   if (episodeNumber === watchedThrough + 1) return 'Up next';
   return 'Not watched';
+}
+
+function EpisodeAvailabilityLabel({ destination }: {
+  destination?: MediaStreamingDestinations['episodes'][number];
+}) {
+  const availability = formatEpisodeAvailability(destination);
+  if (!availability) return null;
+
+  return (
+    <span className="media-detail-episode-availability">
+      {availability}
+    </span>
+  );
 }
 
 function getEpisodeServiceDestinations(
@@ -104,6 +116,7 @@ function EpisodeRow({
       <div className="media-detail-episode-copy">
         <strong>{destination?.title || `Episode ${episodeNumber}`}</strong>
         <span>{progressLabel}</span>
+        <EpisodeAvailabilityLabel destination={destination} />
       </div>
       <EpisodeDestinationActions
         episodeNumber={episodeNumber}
@@ -126,7 +139,7 @@ function EpisodeSectionHeading({
 }) {
   const isLoading = state.status === 'loading';
   const summary = state.status === 'loaded'
-    ? `${availableCount} episode links collected`
+    ? formatReleaseAvailability(state.value.releaseAvailability) ?? `${availableCount} episode links collected`
     : 'Loading collected episode links…';
 
   return (

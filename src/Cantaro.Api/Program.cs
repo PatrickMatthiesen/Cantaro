@@ -53,6 +53,9 @@ builder.Services
     .AddOptions<AniListOptions>()
     .Bind(builder.Configuration.GetSection(AniListOptions.SectionName));
 builder.Services
+    .AddOptions<AnimeScheduleOptions>()
+    .Bind(builder.Configuration.GetSection(AnimeScheduleOptions.SectionName));
+builder.Services
     .AddOptions<LyricsOptions>()
     .Bind(builder.Configuration.GetSection(LyricsOptions.SectionName))
     .ValidateDataAnnotations();
@@ -80,6 +83,7 @@ builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
 builder.Services.AddMusicBrainzQueryClient();
 builder.Services.AddHttpClient<AniListApiClient>();
+builder.Services.AddHttpClient<AnimeScheduleApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {
     var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<LyricsOptions>>().Value;
@@ -91,6 +95,7 @@ builder.Services.AddSingleton<ILyricsProvider, LrclibLyricsProvider>();
 builder.Services.AddScoped<LyricsService>();
 builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
+builder.Services.AddScoped<AnimeScheduleAvailabilitySyncService>();
 builder.Services.AddSingleton<MediaLibraryImportQueue>();
 builder.Services.AddScoped<MediaLibraryQueryService>();
 builder.Services.AddScoped<MediaLibraryLinkService>();
@@ -111,6 +116,7 @@ builder.Services.AddHostedService<MusicSyncJobWorker>();
 builder.Services.AddHostedService<TrackMatchingWorker>();
 builder.Services.AddHostedService<MediaProviderOperationWorker>();
 builder.Services.AddHostedService<MediaLibraryImportWorker>();
+builder.Services.AddHostedService<AnimeScheduleAvailabilityRefreshWorker>();
 builder.Services.AddScoped<ExtensionAuthorizationCodeStore>();
 builder.Services.AddScoped<ExtensionAuthService>();
 builder.Services.AddSingleton<IAvatarStore, S3AvatarStore>();

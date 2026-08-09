@@ -164,7 +164,9 @@ public class MediaEpisodeIdentityService(
             ProviderEpisodeId = item.ProviderEpisodeId,
             ProviderUrl = item.ProviderUrl,
             EpisodeNumber = item.EpisodeNumber,
-            EpisodeTitle = item.EpisodeTitle
+            EpisodeTitle = item.EpisodeTitle,
+            AvailableSubtitleLanguageCodes = item.AvailableSubtitleLanguageCodes,
+            AvailableAudioLanguageCodes = item.AvailableAudioLanguageCodes
         }).ToList();
 
         return RecordRenderedEpisodesAsync(
@@ -236,7 +238,9 @@ public class MediaEpisodeIdentityService(
                 null,
                 now,
                 cancellationToken,
-                allowIdentityRemap);
+                allowIdentityRemap,
+                renderedEpisode.AvailableSubtitleLanguageCodes,
+                renderedEpisode.AvailableAudioLanguageCodes);
             recordedDestinationCount++;
         }
 
@@ -248,19 +252,19 @@ public class MediaEpisodeIdentityService(
         Guid libraryEntryId,
         CancellationToken cancellationToken)
     {
-        var mediaTitleId = await _dbContext.MediaLibraryEntries
+        var libraryEntry = await _dbContext.MediaLibraryEntries
             .AsNoTracking()
             .Where(item => item.Id == libraryEntryId && item.UserId == userId)
-            .Select(item => (Guid?)item.MediaTitleId)
+            .Select(item => new { item.MediaTitleId, item.RawMetadata })
             .SingleOrDefaultAsync(cancellationToken);
-        if (mediaTitleId is null)
+        if (libraryEntry is null)
         {
             return null;
         }
 
         var episodes = await _dbContext.MediaEpisodes
             .AsNoTracking()
-            .Where(episode => episode.MediaTitleId == mediaTitleId.Value)
+            .Where(episode => episode.MediaTitleId == libraryEntry.MediaTitleId)
             .Include(episode => episode.ProviderIdentities)
             .OrderBy(episode => episode.EpisodeNumber)
             .ToListAsync(cancellationToken);
@@ -270,8 +274,80 @@ public class MediaEpisodeIdentityService(
         return new MediaEpisodeCatalogDto
         {
             SeriesDestinations = seriesDestinations,
-            Episodes = episodes.Select(MapEpisodeDestination).ToList()
+            Episodes = episodes.Select(MapEpisodeDestination).ToList(),
+            ReleaseAvailability = BuildReleaseAvailability(
+                episodes,
+                ReadReleasedCount(libraryEntry.RawMetadata))
         };
+    }
+
+    private static MediaReleaseAvailabilityDto BuildReleaseAvailability(
+        IReadOnlyCollection<MediaEpisode> episodes,
+        int? maxReleasedEpisodes)
+    {
+        var languageCodes = episodes
+            .SelectMany(episode => episode.AvailableSubtitleLanguageCodes
+                .Concat(episode.AvailableAudioLanguageCodes))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new MediaReleaseAvailabilityDto
+        {
+            MaxReleasedEpisodes = maxReleasedEpisodes,
+            Languages = languageCodes.Select(languageCode => new MediaReleaseLanguageAvailabilityDto
+            {
+                LanguageCode = languageCode,
+                SubReleasedEpisodes = episodes
+                    .Where(episode => episode.AvailableSubtitleLanguageCodes.Contains(languageCode, StringComparer.OrdinalIgnoreCase))
+                    .Select(episode => (int?)episode.EpisodeNumber)
+                    .Max(),
+                DubReleasedEpisodes = episodes
+                    .Where(episode => episode.AvailableAudioLanguageCodes.Contains(languageCode, StringComparer.OrdinalIgnoreCase))
+                    .Select(episode => (int?)episode.EpisodeNumber)
+                    .Max()
+            }).ToList()
+        };
+    }
+
+    private static int? ReadReleasedCount(string? rawMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(rawMetadata))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawMetadata);
+            var root = document.RootElement;
+            if (root.TryGetProperty("releasedCount", out var releasedCount)
+                && releasedCount.TryGetInt32(out var parsedReleasedCount))
+            {
+                return parsedReleasedCount;
+            }
+
+            if (root.TryGetProperty("nextAiringEpisode", out var nextAiringEpisode)
+                && nextAiringEpisode.ValueKind == JsonValueKind.Object
+                && nextAiringEpisode.TryGetProperty("episode", out var episode)
+                && episode.TryGetInt32(out var nextEpisode))
+            {
+                return Math.Max(0, nextEpisode - 1);
+            }
+
+            return string.Equals(
+                    root.TryGetProperty("status", out var status) ? status.GetString() : null,
+                    "FINISHED",
+                    StringComparison.OrdinalIgnoreCase)
+                && root.TryGetProperty("episodes", out var episodes)
+                && episodes.TryGetInt32(out var totalEpisodes)
+                    ? totalEpisodes
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static MediaEpisodeDestinationDto MapEpisodeDestination(MediaEpisode episode)
@@ -291,6 +367,8 @@ public class MediaEpisodeIdentityService(
         {
             EpisodeNumber = episode.EpisodeNumber,
             Title = episode.Title,
+            AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes,
+            AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes,
             Destinations = destinations,
             SeenCount = identities.Select(identity => identity.SeenCount).DefaultIfEmpty(0).Max(),
             HasConflict = identities.Any(identity => identity.HasConflict)
@@ -486,7 +564,9 @@ public class MediaEpisodeIdentityService(
         int? providerSequenceNumber,
         DateTimeOffset now,
         CancellationToken cancellationToken,
-        bool allowIdentityRemap = false)
+        bool allowIdentityRemap = false,
+        IReadOnlyCollection<string>? subtitleLanguageCodes = null,
+        IReadOnlyCollection<string>? audioLanguageCodes = null)
     {
         var episode = await _dbContext.MediaEpisodes
             .FirstOrDefaultAsync(item =>
@@ -501,6 +581,8 @@ public class MediaEpisodeIdentityService(
                 MediaTitleId = mediaTitleId,
                 EpisodeNumber = canonicalEpisodeNumber,
                 Title = TrimToNull(episodeTitle),
+                AvailableSubtitleLanguageCodes = NormalizeLanguageCodes(subtitleLanguageCodes),
+                AvailableAudioLanguageCodes = NormalizeLanguageCodes(audioLanguageCodes),
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -509,6 +591,21 @@ public class MediaEpisodeIdentityService(
         else if (episode.Title is null && !string.IsNullOrWhiteSpace(episodeTitle))
         {
             episode.Title = episodeTitle.Trim();
+            episode.UpdatedAt = now;
+        }
+
+
+        var mergedSubtitleLanguageCodes = MergeLanguageCodes(
+            episode.AvailableSubtitleLanguageCodes,
+            subtitleLanguageCodes);
+        var mergedAudioLanguageCodes = MergeLanguageCodes(
+            episode.AvailableAudioLanguageCodes,
+            audioLanguageCodes);
+        if (!episode.AvailableSubtitleLanguageCodes.SequenceEqual(mergedSubtitleLanguageCodes)
+            || !episode.AvailableAudioLanguageCodes.SequenceEqual(mergedAudioLanguageCodes))
+        {
+            episode.AvailableSubtitleLanguageCodes = mergedSubtitleLanguageCodes;
+            episode.AvailableAudioLanguageCodes = mergedAudioLanguageCodes;
             episode.UpdatedAt = now;
         }
 
@@ -619,4 +716,23 @@ public class MediaEpisodeIdentityService(
 
     private static string? TrimToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string[] NormalizeLanguageCodes(IEnumerable<string>? values) =>
+        values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Where(value => MediaReleaseTrackPreferences.TryNormalize($"sub:{value}", out _))
+            .Select(value =>
+            {
+                MediaReleaseTrackPreferences.TryNormalize($"sub:{value}", out var normalized);
+                return normalized[4..];
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+
+    private static string[] MergeLanguageCodes(
+        IEnumerable<string> existing,
+        IEnumerable<string>? observed) =>
+        NormalizeLanguageCodes(existing.Concat(observed ?? []));
 }

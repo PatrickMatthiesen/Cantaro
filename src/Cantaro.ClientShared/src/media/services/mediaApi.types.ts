@@ -24,6 +24,7 @@ export interface MediaLibraryListItemDto {
     chapterCount?: number;
     volumeCount?: number;
     releasedCount?: number;
+    availableReleasedCount?: number;
     primaryProgressDimension: string;
     provider: string;
     providerMediaId: string;
@@ -104,12 +105,26 @@ export interface MediaContinueWatchingDto {
 export interface MediaEpisodeCatalogDto {
     seriesDestinations: MediaStreamingDestinationDto[];
     episodes: MediaEpisodeDestinationDto[];
+    releaseAvailability?: MediaReleaseAvailabilityDto;
+}
+
+export interface MediaReleaseAvailabilityDto {
+    maxReleasedEpisodes?: number;
+    languages: MediaReleaseLanguageAvailabilityDto[];
+}
+
+export interface MediaReleaseLanguageAvailabilityDto {
+    languageCode: string;
+    subReleasedEpisodes?: number;
+    dubReleasedEpisodes?: number;
 }
 
 export interface MediaEpisodeDestinationDto {
     episodeNumber: number;
     title?: string;
     destinations: MediaStreamingDestinationDto[];
+    availableAudioLanguageCodes?: string[];
+    availableSubtitleLanguageCodes?: string[];
     seenCount: number;
     hasConflict: boolean;
 }

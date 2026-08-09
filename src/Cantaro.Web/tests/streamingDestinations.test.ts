@@ -46,6 +46,18 @@ describe('streaming destination resolution', () => {
     expect(result.seriesDestinations).toEqual([]);
   });
 
+  it('upgrades a trusted legacy Crunchyroll series link to HTTPS', () => {
+    const result = resolveStreamingDestinations([{
+      serviceId: 'Crunchyroll',
+      displayName: 'Crunchyroll',
+      url: 'http://www.crunchyroll.com/one-piece',
+      availabilityKind: 'streaming',
+    }]);
+
+    expect(result.seriesDestinations).toHaveLength(1);
+    expect(result.seriesDestinations[0]?.url).toBe('https://www.crunchyroll.com/one-piece');
+  });
+
   it('keeps the strongest observed identity first for one service', () => {
     const result = resolveStreamingDestinations([], {
       seriesDestinations: [],
@@ -53,6 +65,8 @@ describe('streaming destination resolution', () => {
         episodeNumber: 1,
         seenCount: 4,
         hasConflict: false,
+        availableSubtitleLanguageCodes: ['en'],
+        availableAudioLanguageCodes: ['ja', 'en'],
         destinations: [
           { serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/AAA/one', seenCount: 1, firstSeenAt: '2026-08-01', lastSeenAt: '2026-08-09' },
           { serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/ZZZ/one', seenCount: 3, firstSeenAt: '2026-08-01', lastSeenAt: '2026-08-08' },
@@ -61,6 +75,8 @@ describe('streaming destination resolution', () => {
     });
 
     expect(result.episodes[0]?.destinations[0]?.url).toContain('/watch/ZZZ/');
+    expect(result.episodes[0]?.availableSubtitleLanguageCodes).toEqual(['en']);
+    expect(result.episodes[0]?.availableAudioLanguageCodes).toEqual(['ja', 'en']);
   });
 
   it('preserves provider-neutral destination arrays under each episode', () => {
@@ -84,6 +100,8 @@ describe('streaming destination resolution', () => {
           title: 'One',
           seenCount: 2,
           hasConflict: false,
+          availableSubtitleLanguageCodes: ['en'],
+          availableAudioLanguageCodes: ['en'],
           destinations: [
             {
               serviceId: 'crunchyroll',
@@ -101,5 +119,7 @@ describe('streaming destination resolution', () => {
     expect(result.episodes.map(item => item.episodeNumber)).toEqual([1, 2]);
     expect(result.episodes[0]?.destinations.map(item => item.serviceId)).toEqual(['crunchyroll']);
     expect(result.episodes[0]?.destinations[0]?.seenCount).toBe(2);
+    expect(result.episodes[0]?.availableSubtitleLanguageCodes).toEqual(['en']);
+    expect(result.episodes[0]?.availableAudioLanguageCodes).toEqual(['en']);
   });
 });

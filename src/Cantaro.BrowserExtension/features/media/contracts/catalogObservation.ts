@@ -7,6 +7,8 @@ export interface CatalogEpisodeObservation {
   providerUrl: string;
   episodeNumber: number;
   episodeTitle?: string;
+  availableSubtitleLanguageCodes?: string[];
+  availableAudioLanguageCodes?: string[];
 }
 
 export interface SeriesCatalogObservation {

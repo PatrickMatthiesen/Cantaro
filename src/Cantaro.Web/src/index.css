@@ -1853,6 +1853,10 @@
   font-weight: 700;
 }
 
+.media-detail-episode-copy .media-detail-episode-availability {
+  color: var(--color-content-subtle);
+}
+
 .media-detail-episode-state {
   text-align: right;
 }

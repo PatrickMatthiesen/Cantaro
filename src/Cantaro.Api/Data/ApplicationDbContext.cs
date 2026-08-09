@@ -83,6 +83,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasKey(e => e.UserId);
             entity.Property(e => e.DisplayName).HasMaxLength(100);
             entity.Property(e => e.Theme).HasMaxLength(16);
+            entity.Property(e => e.PreferredMediaReleaseTrack)
+                .HasDefaultValue(MediaReleaseTrackPreferences.Default);
             entity.Property(e => e.AvatarObjectKey).HasMaxLength(512);
             entity.Property(e => e.AvatarETag).HasMaxLength(128);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -499,6 +501,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .IsUnique();
 
             entity.Property(e => e.Title).HasMaxLength(512);
+            entity.Property(e => e.AvailableSubtitleLanguageCodes).HasDefaultValue(Array.Empty<string>());
+            entity.Property(e => e.AvailableAudioLanguageCodes).HasDefaultValue(Array.Empty<string>());
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 

@@ -179,7 +179,11 @@ describe('Crunchyroll series catalog extraction', () => {
       providerSeasonId: 'G649C7NJ9',
       seasonTitle: 'FAIRY TAIL 100 YEARS QUEST (English Dub)',
       seasonNumber: undefined,
-      episodes: [{ providerEpisodeId: 'GVWU0M4XG', episodeNumber: 1 }],
+      episodes: [{
+        providerEpisodeId: 'GVWU0M4XG',
+        episodeNumber: 1,
+        availableAudioLanguageCodes: ['en'],
+      }],
     });
   });
 

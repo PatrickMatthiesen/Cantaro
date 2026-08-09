@@ -67,6 +67,10 @@ public class MediaCatalogEpisodeObservationDto
 
     [MaxLength(512)]
     public string? EpisodeTitle { get; set; }
+
+    public List<string> AvailableSubtitleLanguageCodes { get; set; } = [];
+
+    public List<string> AvailableAudioLanguageCodes { get; set; } = [];
 }
 
 public static class MediaCatalogObservationStatuses
