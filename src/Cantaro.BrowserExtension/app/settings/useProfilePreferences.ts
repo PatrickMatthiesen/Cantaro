@@ -13,9 +13,9 @@ function resolveTheme(profile: ProfilePreferencesResponse): 'light' | 'dark' {
 }
 
 async function loadProfilePreferences(settings: ExtensionSettings) {
-  const accessToken = await runtimeAccessTokenProvider.getAccessToken(settings.apiBaseUrl);
+  const accessToken = await runtimeAccessTokenProvider.getAccessToken(settings.baseUrl);
   if (!accessToken) throw new Error('No active extension session.');
-  const response = await fetch(`${settings.apiBaseUrl}/api/profile`, {
+  const response = await fetch(`${settings.baseUrl}/api/profile`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) throw new Error('Could not load profile preferences.');

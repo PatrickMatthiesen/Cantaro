@@ -1,7 +1,7 @@
 import { BlurredEmail } from '@cantaro/client-shared/auth';
 import { GradientButton } from '@cantaro/client-shared/ui';
 import type { FormEvent } from 'react';
-import { DEFAULT_API_BASE_URL } from '../../platform/settings/extensionSettings';
+import { DEFAULT_BASE_URL } from '../../platform/settings/extensionSettings';
 import type { SettingsController } from './useSettings';
 
 interface SettingsPageProps {
@@ -53,21 +53,13 @@ function ConnectionSettings({ controller }: { controller: SettingsController }) 
 
       <div className="grid grid-cols-2 gap-3">
         <UrlField
-          id="webBaseUrl"
-          label="Website URL"
-          detail="Used when the extension opens a page in Cantaro."
-          value={controller.draft.webBaseUrl}
+          id="baseUrl"
+          label="Base URL"
+          detail={`Build default: ${DEFAULT_BASE_URL}`}
+          placeholder={DEFAULT_BASE_URL}
+          value={controller.draft.baseUrl}
           disabled={controller.loading}
-          onChange={(value) => controller.updateDraft('webBaseUrl', value)}
-        />
-        <UrlField
-          id="apiBaseUrl"
-          label="API base URL"
-          detail={`Build default: ${DEFAULT_API_BASE_URL}`}
-          placeholder={DEFAULT_API_BASE_URL}
-          value={controller.draft.apiBaseUrl}
-          disabled={controller.loading}
-          onChange={(value) => controller.updateDraft('apiBaseUrl', value)}
+          onChange={(value) => controller.updateDraft('baseUrl', value)}
         />
       </div>
     </section>

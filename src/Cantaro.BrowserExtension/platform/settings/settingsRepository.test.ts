@@ -18,7 +18,7 @@ function memoryStorage(initial: Record<string, unknown> = {}) {
 describe('settingsRepository', () => {
   it('uses defaults when the versioned record is absent', async () => {
     const storage = memoryStorage({
-      apiBaseUrl: 'https://api.example.test/',
+      baseUrl: 'https://api.example.test/',
       webBaseUrl: 'https://cantaro.example.test/',
       verboseLogging: true,
     });
@@ -26,7 +26,7 @@ describe('settingsRepository', () => {
 
     const settings = await repository.read();
 
-    expect(settings.apiBaseUrl).not.toBe('https://api.example.test');
+    expect(settings.baseUrl).not.toBe('https://api.example.test');
     expect(settings.verboseLogging).toBe(false);
     expect(storage.values[SETTINGS_STORAGE_KEY]).toBeUndefined();
   });
@@ -34,14 +34,14 @@ describe('settingsRepository', () => {
   it('reads the versioned settings record', async () => {
     const storage = memoryStorage({
       [SETTINGS_STORAGE_KEY]: {
-        apiBaseUrl: 'https://new.example.test',
+        baseUrl: 'https://new.example.test',
         webBaseUrl: 'https://web.example.test',
         injectLyricsOnYouTube: true,
         verboseLogging: false,
       },
     });
 
-    expect((await createSettingsRepository(storage).read()).apiBaseUrl)
+    expect((await createSettingsRepository(storage).read()).baseUrl)
       .toBe('https://new.example.test');
   });
 });

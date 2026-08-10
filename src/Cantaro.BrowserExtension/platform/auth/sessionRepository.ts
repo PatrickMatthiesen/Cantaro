@@ -21,7 +21,7 @@ function readString(record: Record<string, unknown>, key: string): string {
 
 function normalizeSession(session: ExtensionSession): ExtensionSession {
   return {
-    apiBaseUrl: normalizeBaseUrl(session.apiBaseUrl),
+    baseUrl: normalizeBaseUrl(session.baseUrl),
     accessToken: session.accessToken.trim(),
     refreshToken: session.refreshToken.trim(),
     accessTokenExpiresAt: session.accessTokenExpiresAt.trim(),
@@ -33,7 +33,7 @@ function parseSession(value: unknown): ExtensionSession | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const session = normalizeSession({
-    apiBaseUrl: readString(record, 'apiBaseUrl'),
+    baseUrl: readString(record, 'baseUrl'),
     accessToken: readString(record, 'accessToken'),
     refreshToken: readString(record, 'refreshToken'),
     accessTokenExpiresAt: readString(record, 'accessTokenExpiresAt'),

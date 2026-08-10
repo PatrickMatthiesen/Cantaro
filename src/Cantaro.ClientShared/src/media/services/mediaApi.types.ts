@@ -312,7 +312,7 @@ export interface MediaProviderSearchParams {
 }
 
 export interface MediaApiRuntimeConfig {
-    apiBaseUrl?: string;
+    baseUrl?: string;
     accessToken?: string;
     includeCredentials?: boolean;
 }

@@ -39,9 +39,9 @@ export class MediaApiClient {
     }
 
     private async buildUrl(path: string): Promise<string> {
-        const { apiBaseUrl } = await this.getRuntimeConfig();
-        const baseUrl = normalizeMediaApiBaseUrl(apiBaseUrl);
-        return baseUrl ? `${baseUrl}${path}` : path;
+        const { baseUrl } = await this.getRuntimeConfig();
+        const normalizedBaseUrl = normalizeMediaApiBaseUrl(baseUrl);
+        return baseUrl ? `${normalizedBaseUrl}${path}` : path;
     }
 
     private async getCredentialsMode(): Promise<RequestCredentials> {

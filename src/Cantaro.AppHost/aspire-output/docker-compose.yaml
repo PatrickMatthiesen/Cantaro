@@ -16,6 +16,7 @@ services:
         read_only: false
     networks:
       - "aspire"
+    restart: "unless-stopped"
   garage:
     image: "dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690"
     command:
@@ -36,6 +37,7 @@ services:
         read_only: false
     networks:
       - "aspire"
+    restart: "unless-stopped"
     configs:
       - source: "garage__etc_garage.toml"
         target: "/etc/garage.toml"

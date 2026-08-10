@@ -28,7 +28,12 @@ var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
 var postgres = builder.AddPostgres("postgres")
     .WithLifetime(ContainerLifetime.Persistent)
     .WithDataVolume("cantaro-postgres-data")
-    .WithHostPort(5432);
+    .WithHostPort(5432)
+    .PublishAsDockerComposeService((_, service) =>
+    {
+        service.Restart = "unless-stopped";
+    });
+
 if (builder.ExecutionContext.IsRunMode) {
     postgres.WithContainerName("cantaro-postgres");
 }
@@ -37,7 +42,11 @@ var db = postgres.AddDatabase("cantaro-db");
 
 var garage = builder.AddGarage("garage")
     .WithLifetime(ContainerLifetime.Persistent)
-    .WithVolume("cantaro-garage-data", GarageResource.DataPath);
+    .WithVolume("cantaro-garage-data", GarageResource.DataPath)
+    .PublishAsDockerComposeService((_, service) =>
+    {
+        service.Restart = "unless-stopped";
+    });
 var avatars = garage.AddBucket("avatars", "cantaro-avatars");
 var garageProvisioner = builder.AddProject<Projects.Cantaro_GarageProvisioner>("garage-provisioner")
     .WithReference(garage)
@@ -61,7 +70,11 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
     .WithEnvironment("AnimeSchedule:Id", animeScheduleId)
     .WithEnvironment("AnimeSchedule:Token", animeScheduleToken)
-    .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey);
+    .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey)
+    .PublishAsDockerComposeService((_, service) =>
+    {
+        service.Restart = "unless-stopped";
+    });
 
 if (builder.ExecutionContext.IsRunMode)
 {
@@ -75,11 +88,6 @@ if (builder.ExecutionContext.IsPublishMode)
     var frontendHttpsBaseUrl = builder.AddParameter("FrontendHttpsBaseUrl");
     api.WithEnvironment("Frontend:HttpsBaseUrl", frontendHttpsBaseUrl);
     api.WithEnvironment("Frontend:TrustedOrigins:0", frontendHttpsBaseUrl);
-
-    api.PublishAsDockerComposeService((_, service) =>
-    {
-        service.Restart = "unless-stopped";
-    });
 }
 
 api.WithReference(migrationService)

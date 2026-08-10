@@ -14,8 +14,8 @@ export function apiOriginMatchPattern(value: string | null | undefined): string 
   }
 }
 
-export async function ensureApiPermission(apiBaseUrl: string): Promise<void> {
-  const origin = apiOriginMatchPattern(apiBaseUrl);
+export async function ensureApiPermission(baseUrl: string): Promise<void> {
+  const origin = apiOriginMatchPattern(baseUrl);
   if (!origin) return;
 
   const permissions = browser.permissions;
@@ -26,6 +26,6 @@ export async function ensureApiPermission(apiBaseUrl: string): Promise<void> {
   if (await permissions.contains(request)) return;
 
   if (!await permissions.request(request)) {
-    throw new Error(`Access to ${new URL(apiBaseUrl).origin} was not granted.`);
+    throw new Error(`Access to ${new URL(baseUrl).origin} was not granted.`);
   }
 }

@@ -5,7 +5,7 @@ import { browserSessionRepository } from '../../platform/auth/sessionRepository'
 import type { ExtensionSettings } from '../../platform/settings/extensionSettings';
 
 async function verifySession(settings: ExtensionSettings) {
-  const user = await verifyRuntimeSession(settings.apiBaseUrl);
+  const user = await verifyRuntimeSession(settings.baseUrl);
   return { user, session: await browserSessionRepository.read() };
 }
 

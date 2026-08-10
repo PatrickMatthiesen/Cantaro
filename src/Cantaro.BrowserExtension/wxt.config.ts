@@ -14,13 +14,8 @@ function readEnvValue(name: string): string | undefined {
   return caseInsensitiveKey ? process.env[caseInsensitiveKey] : undefined;
 }
 
-const defaultApiBaseUrl = readEnvValue('services__api__https__0')
-  ?? readEnvValue('services__api__http__0')
-  ?? readEnvValue('CANTARO_API_BASE_URL')
-  ?? readEnvValue('WXT_API_BASE_URL')
-  ?? 'https://localhost:7203';
-const defaultWebBaseUrl = readEnvValue('services__web__http__0')
-  ?? readEnvValue('CANTARO_WEB_BASE_URL')
+const defaultBaseUrl = readEnvValue('services__web__https__0')
+  ?? readEnvValue('WEB_HTTP')
   ?? 'https://localhost:5173';
 
 function toOriginMatchPattern(value: string): string | null {
@@ -36,7 +31,18 @@ function toOriginMatchPattern(value: string): string | null {
   }
 }
 
-const defaultApiHostPermission = toOriginMatchPattern(defaultApiBaseUrl);
+const defaultApiHostPermission = toOriginMatchPattern(defaultBaseUrl);
+
+console.log('defaultApiBaseUrl:', defaultBaseUrl);
+console.log('defaultWebBaseUrl:', defaultBaseUrl);
+console.log('defaultApiHostPermission:', defaultApiHostPermission);
+
+console.log('process.env.services__web__https__0:', process.env.services__web__https__0);
+console.log('process.env.CANTARO_WEB_BASE_URL:', process.env.CANTARO_WEB_BASE_URL);
+console.log('process.env.WXT_API_BASE_URL:', process.env.WXT_API_BASE_URL);
+console.log('process.env.CANTARO_API_BASE_URL:', process.env.CANTARO_API_BASE_URL);
+console.log('process.env.services__api__https__0:', process.env.services__api__https__0);
+console.log('process.env.services__api__http__0:', process.env.services__api__http__0);
 
 // https://wxt.dev/api/config.html
 export default defineConfig({
@@ -71,15 +77,14 @@ export default defineConfig({
   },
   dev: {
     server: {
-      port: 5174,
+      port: 5173,
     },
   },
   modules: ['@wxt-dev/module-react'],
   vite: () => ({
     plugins: [tailwindcss()],
     define: {
-      __CANTARO_DEFAULT_API_BASE_URL__: JSON.stringify(defaultApiBaseUrl),
-      __CANTARO_DEFAULT_WEB_BASE_URL__: JSON.stringify(defaultWebBaseUrl.replace(/\/+$/, '')),
+      __CANTARO_BASE_URL__: JSON.stringify(defaultBaseUrl),
     },
     build: {
       sourcemap: false,

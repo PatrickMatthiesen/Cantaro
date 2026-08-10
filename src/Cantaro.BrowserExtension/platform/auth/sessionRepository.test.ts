@@ -20,7 +20,7 @@ describe('sessionRepository', () => {
   it('reads the versioned session record', async () => {
     const storage = memoryStorage({
       [SESSION_STORAGE_KEY]: {
-        apiBaseUrl: 'https://api.example.test/',
+        baseUrl: 'https://api.example.test/',
         accessToken: 'access',
         refreshToken: 'refresh',
         accessTokenExpiresAt: '2030-01-01T00:00:00.000Z',
@@ -43,7 +43,7 @@ describe('sessionRepository', () => {
 
   it('does not read flat session fields', async () => {
     const storage = memoryStorage({
-      apiBaseUrl: 'https://api.example.test',
+      baseUrl: 'https://api.example.test',
       accessToken: 'flat-access',
       refreshToken: 'flat-refresh',
       accessTokenExpiresAt: '2030-01-01T00:00:00.000Z',

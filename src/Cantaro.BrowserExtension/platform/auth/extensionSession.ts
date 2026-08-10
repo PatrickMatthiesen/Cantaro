@@ -1,5 +1,5 @@
 export interface ExtensionSession {
-  apiBaseUrl: string;
+  baseUrl: string;
   accessToken: string;
   refreshToken: string;
   accessTokenExpiresAt: string;

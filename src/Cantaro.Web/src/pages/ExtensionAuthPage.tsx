@@ -10,7 +10,7 @@ declare const __CANTARO_TRUSTED_API_BASE_URL__: string;
 type AuthPhase = 'checking' | 'ready' | 'submitting';
 
 interface AuthTarget {
-  apiBaseUrl: string;
+  baseUrl: string;
   returnTo: string;
 }
 
@@ -59,7 +59,7 @@ function readAuthTarget(): AuthTarget | null {
     }
 
     return {
-      apiBaseUrl: trustedApiBaseUrl,
+      baseUrl: trustedApiBaseUrl,
       returnTo: targetUrl.toString(),
     };
   } catch {
@@ -87,7 +87,7 @@ export function ExtensionAuthPage() {
 
     const continueIfSessionExists = async () => {
       try {
-        const response = await fetch(`${authTarget.apiBaseUrl}/api/auth/me`, {
+        const response = await fetch(`${authTarget.baseUrl}/api/auth/me`, {
           method: 'GET',
           credentials: 'include',
         });
@@ -125,7 +125,7 @@ export function ExtensionAuthPage() {
       formData,
       schema: loginSchema,
       submit: async () => {
-        const response = await fetch(`${authTarget.apiBaseUrl}/api/login?useCookies=true`, {
+        const response = await fetch(`${authTarget.baseUrl}/api/login?useCookies=true`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -164,7 +164,7 @@ export function ExtensionAuthPage() {
 
           {authTarget ? (
             <p className="mt-4 rounded-2xl bg-surface-translucent px-4 py-3 text-xs text-content-muted">
-              API origin: <span className="font-semibold text-content">{authTarget.apiBaseUrl}</span>
+              API origin: <span className="font-semibold text-content">{authTarget.baseUrl}</span>
             </p>
           ) : null}
 

@@ -10,10 +10,10 @@ import {
 } from './tokenProtocol';
 
 export interface AuthService {
-  beginInteractiveSignIn(apiBaseUrl: string): Promise<ExtensionSession>;
-  getAccessToken(apiBaseUrl: string, forceRefresh?: boolean): Promise<string | null>;
-  getVerifiedUser(apiBaseUrl: string): Promise<ExtensionUser | null>;
-  signOut(apiBaseUrl: string): Promise<void>;
+  beginInteractiveSignIn(baseUrl: string): Promise<ExtensionSession>;
+  getAccessToken(baseUrl: string, forceRefresh?: boolean): Promise<string | null>;
+  getVerifiedUser(baseUrl: string): Promise<ExtensionUser | null>;
+  signOut(baseUrl: string): Promise<void>;
 }
 
 interface AuthBrowser {
@@ -28,9 +28,9 @@ class AuthRequestError extends Error {
   }
 }
 
-function toSession(apiBaseUrl: string, grant: TokenGrant): ExtensionSession {
+function toSession(baseUrl: string, grant: TokenGrant): ExtensionSession {
   return {
-    apiBaseUrl,
+    baseUrl,
     accessToken: grant.accessToken,
     refreshToken: grant.refreshToken,
     accessTokenExpiresAt: new Date(Date.now() + grant.expiresInSeconds * 1000).toISOString(),
@@ -39,10 +39,10 @@ function toSession(apiBaseUrl: string, grant: TokenGrant): ExtensionSession {
 }
 
 async function postGrant(
-  apiBaseUrl: string,
+  baseUrl: string,
   params: URLSearchParams,
 ): Promise<TokenGrant> {
-  const response = await fetch(`${apiBaseUrl}/api/auth/extension/token`, {
+  const response = await fetch(`${baseUrl}/api/auth/extension/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
@@ -57,8 +57,8 @@ async function postGrant(
   return parseTokenGrant(payload);
 }
 
-async function fetchUser(apiBaseUrl: string, accessToken: string): Promise<ExtensionUser> {
-  const response = await fetch(`${apiBaseUrl}/api/auth/me`, {
+async function fetchUser(baseUrl: string, accessToken: string): Promise<ExtensionUser> {
+  const response = await fetch(`${baseUrl}/api/auth/me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const payload: unknown = await response.json().catch(() => null);
@@ -76,33 +76,33 @@ async function fetchUser(apiBaseUrl: string, accessToken: string): Promise<Exten
   return { email };
 }
 
-function isSessionForApi(session: ExtensionSession | null, apiBaseUrl: string): session is ExtensionSession {
-  return Boolean(session && normalizeBaseUrl(session.apiBaseUrl) === apiBaseUrl);
+function isSessionForApi(session: ExtensionSession | null, baseUrl: string): session is ExtensionSession {
+  return Boolean(session && normalizeBaseUrl(session.baseUrl) === baseUrl);
 }
 
 async function clearUnchangedRefreshSession(
   repository: SessionRepository,
-  apiBaseUrl: string,
+  baseUrl: string,
   refreshToken: string,
 ): Promise<void> {
   const unchanged = await repository.read();
-  if (isSessionForApi(unchanged, apiBaseUrl) && unchanged.refreshToken === refreshToken) {
+  if (isSessionForApi(unchanged, baseUrl) && unchanged.refreshToken === refreshToken) {
     await repository.clear();
   }
 }
 
 async function recoverRefreshFailure(
   repository: SessionRepository,
-  apiBaseUrl: string,
+  baseUrl: string,
   session: ExtensionSession,
   error: unknown,
 ): Promise<string | null> {
   const latest = await repository.read();
-  if (isSessionForApi(latest, apiBaseUrl) && latest.refreshToken !== session.refreshToken) {
+  if (isSessionForApi(latest, baseUrl) && latest.refreshToken !== session.refreshToken) {
     return latest.accessToken || null;
   }
   if (error instanceof AuthRequestError && error.invalidatesSession) {
-    await clearUnchangedRefreshSession(repository, apiBaseUrl, session.refreshToken);
+    await clearUnchangedRefreshSession(repository, baseUrl, session.refreshToken);
   }
   return null;
 }
@@ -112,9 +112,9 @@ type UserVerification =
   | { status: 'rejected' }
   | { status: 'unavailable' };
 
-async function verifyUser(apiBaseUrl: string, token: string): Promise<UserVerification> {
+async function verifyUser(baseUrl: string, token: string): Promise<UserVerification> {
   try {
-    return { status: 'verified', user: await fetchUser(apiBaseUrl, token) };
+    return { status: 'verified', user: await fetchUser(baseUrl, token) };
   } catch (error) {
     return error instanceof AuthRequestError && error.invalidatesSession
       ? { status: 'rejected' }
@@ -134,11 +134,11 @@ async function saveVerifiedEmail(
 
 async function clearRejectedAccessToken(
   repository: SessionRepository,
-  apiBaseUrl: string,
+  baseUrl: string,
   accessToken: string,
 ): Promise<void> {
   const current = await repository.read();
-  if (isSessionForApi(current, apiBaseUrl) && current.accessToken === accessToken) {
+  if (isSessionForApi(current, baseUrl) && current.accessToken === accessToken) {
     await repository.clear();
   }
 }
@@ -149,49 +149,49 @@ export function createAuthService(
 ): AuthService {
   let refreshInFlight: Promise<string | null> | null = null;
 
-  async function refreshToken(apiBaseUrl: string, session: ExtensionSession): Promise<string | null> {
+  async function refreshToken(baseUrl: string, session: ExtensionSession): Promise<string | null> {
     if (!session.refreshToken) return session.accessToken || null;
     try {
-      const grant = await postGrant(apiBaseUrl, new URLSearchParams({
+      const grant = await postGrant(baseUrl, new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: session.refreshToken,
         client_id: authBrowser.runtimeId(),
       }));
       const current = await repository.read();
-      if (!isSessionForApi(current, apiBaseUrl)
+      if (!isSessionForApi(current, baseUrl)
         || current.refreshToken !== session.refreshToken) {
-        return current && isSessionForApi(current, apiBaseUrl)
+        return current && isSessionForApi(current, baseUrl)
           ? current.accessToken || null
           : null;
       }
-      const saved = await repository.save(toSession(apiBaseUrl, grant));
+      const saved = await repository.save(toSession(baseUrl, grant));
       return saved.accessToken;
     } catch (error) {
-      return recoverRefreshFailure(repository, apiBaseUrl, session, error);
+      return recoverRefreshFailure(repository, baseUrl, session, error);
     }
   }
 
-  async function getAccessToken(apiBaseUrl: string, forceRefresh = false): Promise<string | null> {
-    const normalizedApiBaseUrl = normalizeBaseUrl(apiBaseUrl);
+  async function getAccessToken(baseUrl: string, forceRefresh = false): Promise<string | null> {
+    const normalizedbaseUrl = normalizeBaseUrl(baseUrl);
     const session = await repository.read();
-    if (!isSessionForApi(session, normalizedApiBaseUrl)) {
+    if (!isSessionForApi(session, normalizedbaseUrl)) {
       if (session) await repository.clear();
       return null;
     }
     if (!forceRefresh && isAccessTokenFresh(session)) return session.accessToken;
 
-    refreshInFlight ??= refreshToken(normalizedApiBaseUrl, session)
+    refreshInFlight ??= refreshToken(normalizedbaseUrl, session)
       .finally(() => { refreshInFlight = null; });
     return refreshInFlight;
   }
 
   return {
-    async beginInteractiveSignIn(apiBaseUrl) {
-      const normalizedApiBaseUrl = normalizeBaseUrl(apiBaseUrl);
+    async beginInteractiveSignIn(baseUrl) {
+      const normalizedbaseUrl = normalizeBaseUrl(baseUrl);
       const redirectUri = authBrowser.redirectUrl('cantaro-auth');
       const state = createRandomBase64Url(24);
       const verifier = createRandomBase64Url(48);
-      const authorizeUrl = new URL(`${normalizedApiBaseUrl}/api/auth/extension/authorize`);
+      const authorizeUrl = new URL(`${normalizedbaseUrl}/api/auth/extension/authorize`);
       authorizeUrl.searchParams.set('response_type', 'code');
       authorizeUrl.searchParams.set('client_id', authBrowser.runtimeId());
       authorizeUrl.searchParams.set('redirect_uri', redirectUri);
@@ -210,45 +210,45 @@ export function createAuthService(
         throw new Error('The authorization callback was invalid or did not match the original request.');
       }
 
-      const grant = await postGrant(normalizedApiBaseUrl, new URLSearchParams({
+      const grant = await postGrant(normalizedbaseUrl, new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         client_id: authBrowser.runtimeId(),
         redirect_uri: redirectUri,
         code_verifier: verifier,
       }));
-      return repository.save(toSession(normalizedApiBaseUrl, grant));
+      return repository.save(toSession(normalizedbaseUrl, grant));
     },
 
     getAccessToken,
 
-    async getVerifiedUser(apiBaseUrl) {
-      const normalizedApiBaseUrl = normalizeBaseUrl(apiBaseUrl);
-      const token = await getAccessToken(normalizedApiBaseUrl);
+    async getVerifiedUser(baseUrl) {
+      const normalizedbaseUrl = normalizeBaseUrl(baseUrl);
+      const token = await getAccessToken(normalizedbaseUrl);
       if (!token) return null;
-      const first = await verifyUser(normalizedApiBaseUrl, token);
+      const first = await verifyUser(normalizedbaseUrl, token);
       if (first.status === 'verified') {
         await saveVerifiedEmail(repository, first.user);
         return first.user;
       }
       if (first.status === 'unavailable') return null;
 
-      const refreshedToken = await getAccessToken(normalizedApiBaseUrl, true);
+      const refreshedToken = await getAccessToken(normalizedbaseUrl, true);
       if (!refreshedToken) return null;
-      const second = await verifyUser(normalizedApiBaseUrl, refreshedToken);
+      const second = await verifyUser(normalizedbaseUrl, refreshedToken);
       if (second.status === 'verified') return second.user;
       if (second.status === 'rejected') {
-        await clearRejectedAccessToken(repository, normalizedApiBaseUrl, refreshedToken);
+        await clearRejectedAccessToken(repository, normalizedbaseUrl, refreshedToken);
       }
       return null;
     },
 
-    async signOut(apiBaseUrl) {
-      const normalizedApiBaseUrl = normalizeBaseUrl(apiBaseUrl);
+    async signOut(baseUrl) {
+      const normalizedbaseUrl = normalizeBaseUrl(baseUrl);
       await refreshInFlight?.catch(() => null);
       const session = await repository.read();
-      if (isSessionForApi(session, normalizedApiBaseUrl) && session.refreshToken) {
-        await fetch(`${normalizedApiBaseUrl}/api/auth/extension/revoke`, {
+      if (isSessionForApi(session, normalizedbaseUrl) && session.refreshToken) {
+        await fetch(`${normalizedbaseUrl}/api/auth/extension/revoke`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({

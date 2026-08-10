@@ -5,7 +5,7 @@ import { signOutRuntimeSession } from '../../platform/auth/runtimeAuthClient';
 import { createCorrelationId } from '../../platform/messaging/messageResult';
 import { ensureApiPermission } from '../../platform/settings/apiPermission';
 import {
-  DEFAULT_API_BASE_URL,
+  DEFAULT_BASE_URL,
   normalizeBaseUrl,
   type ExtensionSettings,
 } from '../../platform/settings/extensionSettings';
@@ -35,13 +35,13 @@ export function useSettingsActions(context: SettingsActionContext) {
   const save = useCallback(async () => {
     try {
       const update = createSettingsUpdate(context.savedSettings, context.draft);
-      await ensureApiPermission(update.settings.apiBaseUrl);
-      if (update.apiBaseUrlChanged) {
-        await signOutRuntimeSession(context.savedSettings.apiBaseUrl);
+      await ensureApiPermission(update.settings.baseUrl);
+      if (update.baseUrlChanged) {
+        await signOutRuntimeSession(context.savedSettings.baseUrl);
         context.setSession(null);
         context.setSessionEmail(null);
       }
-      await persist(update.settings, update.apiBaseUrlChanged
+      await persist(update.settings, update.baseUrlChanged
         ? 'API origin updated. Stored Cantaro session was cleared.'
         : 'Extension settings saved');
       return true;
@@ -54,17 +54,17 @@ export function useSettingsActions(context: SettingsActionContext) {
 
   const signIn = useCallback(async () => {
     const update = createSettingsUpdate(context.savedSettings, context.draft);
-    const apiBaseUrl = normalizeBaseUrl(update.settings.apiBaseUrl) || DEFAULT_API_BASE_URL;
+    const baseUrl = normalizeBaseUrl(update.settings.baseUrl) || DEFAULT_BASE_URL;
     setIsSigningIn(true);
     try {
-      await ensureApiPermission(apiBaseUrl);
-      if (update.apiBaseUrlChanged) {
-        await signOutRuntimeSession(context.savedSettings.apiBaseUrl);
+      await ensureApiPermission(baseUrl);
+      if (update.baseUrlChanged) {
+        await signOutRuntimeSession(context.savedSettings.baseUrl);
         context.setSession(null);
         context.setSessionEmail(null);
       }
       await persist(update.settings, 'Extension settings saved');
-      const session = await browserAuthService.beginInteractiveSignIn(apiBaseUrl);
+      const session = await browserAuthService.beginInteractiveSignIn(baseUrl);
       context.setSession(session);
       context.setSessionEmail(session.email || null);
       context.notify('Signed in to Cantaro', 'success');
@@ -83,10 +83,10 @@ export function useSettingsActions(context: SettingsActionContext) {
   }, [context, persist]);
 
   const disconnect = useCallback(async () => {
-    const apiBaseUrl = normalizeBaseUrl(context.savedSettings.apiBaseUrl) || DEFAULT_API_BASE_URL;
+    const baseUrl = normalizeBaseUrl(context.savedSettings.baseUrl) || DEFAULT_BASE_URL;
     setIsDisconnecting(true);
     try {
-      await signOutRuntimeSession(apiBaseUrl);
+      await signOutRuntimeSession(baseUrl);
       context.setSession(null);
       context.setSessionEmail(null);
       context.notify('Cantaro session cleared', 'success');

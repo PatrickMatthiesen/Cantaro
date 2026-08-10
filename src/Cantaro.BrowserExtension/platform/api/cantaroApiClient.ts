@@ -44,7 +44,7 @@ export interface CantaroApiClient {
 }
 
 export interface AccessTokenProvider {
-  getAccessToken(apiBaseUrl: string, forceRefresh?: boolean): Promise<string | null>;
+  getAccessToken(baseUrl: string, forceRefresh?: boolean): Promise<string | null>;
 }
 
 async function responsePayload(response: Response): Promise<unknown> {
@@ -106,10 +106,10 @@ export function createCantaroApiClient(
 ): CantaroApiClient {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const settings = await settingsRepository.read();
-    let token = await authService.getAccessToken(settings.apiBaseUrl);
+    let token = await authService.getAccessToken(settings.baseUrl);
     if (!token) throw new ApiError('Sign in to Cantaro first.', 401, false);
 
-    const send = (accessToken: string) => fetch(`${settings.apiBaseUrl}${path}`, {
+    const send = (accessToken: string) => fetch(`${settings.baseUrl}${path}`, {
       ...init,
       headers: {
         Accept: 'application/json',
@@ -124,7 +124,7 @@ export function createCantaroApiClient(
       throw new ApiError('Cantaro API could not be reached.', null, true);
     }
     if (response.status === 401) {
-      token = await authService.getAccessToken(settings.apiBaseUrl, true);
+      token = await authService.getAccessToken(settings.baseUrl, true);
       if (token) {
         try {
           response = await send(token);

@@ -8,7 +8,7 @@ describe('authService', () => {
 
   it('uses a fresh session without starting a refresh grant', async () => {
     const session: ExtensionSession = {
-      apiBaseUrl: 'https://api.example.test',
+      baseUrl: 'https://api.example.test',
       accessToken: 'fresh-access',
       refreshToken: 'refresh',
       accessTokenExpiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
@@ -99,7 +99,7 @@ describe('authService', () => {
 
 function expiredSession(accessToken: string, refreshToken: string): ExtensionSession {
   return {
-    apiBaseUrl: 'https://api.example.test',
+    baseUrl: 'https://api.example.test',
     accessToken,
     refreshToken,
     accessTokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),

@@ -4,7 +4,7 @@ import type { MediaApiRuntimeConfig } from './mediaApi.types';
 export type MediaApiConfigResolver = () => MediaApiRuntimeConfig | Promise<MediaApiRuntimeConfig>;
 
 const defaultMediaApiConfigResolver: MediaApiConfigResolver = () => ({
-    apiBaseUrl: '',
+    baseUrl: '',
     includeCredentials: true,
 });
 
@@ -19,7 +19,7 @@ export async function resolveMediaApiRuntimeConfig(): Promise<MediaApiRuntimeCon
     return mediaApiConfigResolver();
 }
 
-export function normalizeMediaApiBaseUrl(apiBaseUrl?: string): string {
-    const trimmed = apiBaseUrl?.trim();
+export function normalizeMediaApiBaseUrl(baseUrl?: string): string {
+    const trimmed = baseUrl?.trim();
     return trimmed ? trimmed.replace(/\/+$/, '') : '';
 }
