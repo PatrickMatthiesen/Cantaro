@@ -6,6 +6,7 @@ using Cantaro.Aspire.Hosting.Garage;
 var builder = DistributedApplication.CreateBuilder(args);
 
 var dockerEnv = builder.AddDockerComposeEnvironment("cantaro-compose")
+    .WithDashboard(enabled: false)
     .ConfigureComposeFile(composeFile =>
     {
         composeFile.Name = "cantaro";
@@ -139,14 +140,16 @@ if (builder.ExecutionContext.IsRunMode)
 }
 
 #pragma warning disable ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-builder.AddJavaScriptApp("browser-extension", "../Cantaro.BrowserExtension")
-    .WithBun()
-    // no need for terminal if we get the fix merged:
-    // https://github.com/wxt-dev/wxt/pull/2563
-    .WithTerminal()
-    .WithReference(api)
-    .WithReference(frontend);
-    // .WithExplicitStart();
+if (builder.ExecutionContext.IsRunMode)
+{
+    builder.AddJavaScriptApp("browser-extension", "../Cantaro.BrowserExtension")
+        .WithBun()
+        // no need for terminal if we get the fix merged:
+        // https://github.com/wxt-dev/wxt/pull/2563
+        .WithTerminal()
+        .WithReference(api)
+        .WithReference(frontend);
+}
 #pragma warning restore ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
 builder.Build().Run();

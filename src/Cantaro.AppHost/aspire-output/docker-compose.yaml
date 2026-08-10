@@ -1,14 +1,5 @@
+name: "cantaro"
 services:
-  docker-compose-dashboard:
-    image: "mcr.microsoft.com/dotnet/nightly/aspire-dashboard:latest"
-    ports:
-      - "18888"
-    expose:
-      - "18889"
-      - "18890"
-    networks:
-      - "aspire"
-    restart: "always"
   postgres:
     image: "docker.io/library/postgres:18.3"
     environment:
@@ -55,9 +46,6 @@ services:
       OTEL_DOTNET_EXPERIMENTAL_OTLP_RETRY: "in_memory"
       ConnectionStrings__garage: "AdminUrl=http://garage:3903;AdminToken=${GARAGE_ADMIN_TOKEN}"
       ConnectionStrings__avatars: "ServiceUrl=http://garage:3900;AccessKeyId=${GARAGE_ACCESS_KEY_ID};SecretAccessKey=${GARAGE_SECRET_ACCESS_KEY};Region=garage;ForcePathStyle=true;BucketName=cantaro-avatars"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://docker-compose-dashboard:18889"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
-      OTEL_SERVICE_NAME: "garage-provisioner"
     depends_on:
       garage:
         condition: "service_started"
@@ -75,9 +63,6 @@ services:
       CANTARO_DB_URI: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cantaro-db"
       CANTARO_DB_JDBCCONNECTIONSTRING: "jdbc:postgresql://postgres:5432/cantaro-db"
       CANTARO_DB_DATABASENAME: "cantaro-db"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://docker-compose-dashboard:18889"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
-      OTEL_SERVICE_NAME: "migration-service"
     depends_on:
       postgres:
         condition: "service_started"
@@ -95,6 +80,8 @@ services:
       Spotify:ClientSecret: "${SPOTIFYCLIENTSECRET}"
       AniList:ClientId: "${ANILISTCLIENTID}"
       AniList:ClientSecret: "${ANILISTCLIENTSECRET}"
+      AnimeSchedule:Id: "${ANIMESCHEDULEID}"
+      AnimeSchedule:Token: "${ANIMESCHEDULETOKEN}"
       ExtensionAuth:JwtSigningKey: "${EXTENSIONAUTHJWTSIGNINGKEY}"
       Frontend:HttpsBaseUrl: "${FRONTENDHTTPSBASEURL}"
       Frontend:TrustedOrigins:0: "${FRONTENDHTTPSBASEURL}"
@@ -107,9 +94,6 @@ services:
       CANTARO_DB_JDBCCONNECTIONSTRING: "jdbc:postgresql://postgres:5432/cantaro-db"
       CANTARO_DB_DATABASENAME: "cantaro-db"
       ConnectionStrings__avatars: "ServiceUrl=http://garage:3900;AccessKeyId=${GARAGE_ACCESS_KEY_ID};SecretAccessKey=${GARAGE_SECRET_ACCESS_KEY};Region=garage;ForcePathStyle=true;BucketName=cantaro-avatars"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://docker-compose-dashboard:18889"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
-      OTEL_SERVICE_NAME: "api"
     ports:
       - "${API_PORT}"
       - "7689:${API_PORT}"
