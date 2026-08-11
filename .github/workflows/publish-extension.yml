@@ -127,7 +127,6 @@ jobs:
           for required_source in \
             package.json \
             bun.lock \
-            SOURCE_CODE_REVIEW.md \
             src/Cantaro.BrowserExtension/package.json \
             src/Cantaro.ClientShared/package.json; do
             if ! grep -Fxq "$required_source" "$RUNNER_TEMP/firefox-source-files.txt"; then

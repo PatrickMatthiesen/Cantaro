@@ -38,6 +38,7 @@ const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // https://wxt.dev/api/config.html
 export default defineConfig({
+  manifestVersion: 3,
   manifest: ({ browser }) => ({
     name: 'Cantaro',
     description: 'Sync music and collect rendered episode URLs from supported streaming pages',
@@ -51,7 +52,6 @@ export default defineConfig({
     },
     permissions: [
       'storage',
-      'tabs',
       'identity',
     ],
     host_permissions: [
@@ -62,10 +62,7 @@ export default defineConfig({
       'https://youtube.com/*',
       'https://www.crunchyroll.com/*',
     ],
-    optional_host_permissions: [
-      'http://*/*',
-      'https://*/*',
-    ],
+    optional_host_permissions: ['https://*/*'],
     ...(browser === 'firefox' ? {
       browser_specific_settings: {
         gecko: {
@@ -94,7 +91,6 @@ export default defineConfig({
     includeSources: [
       'package.json',
       'bun.lock',
-      'SOURCE_CODE_REVIEW.md',
       'src/Cantaro.BrowserExtension/app/**',
       'src/Cantaro.BrowserExtension/entrypoints/**',
       'src/Cantaro.BrowserExtension/features/**',

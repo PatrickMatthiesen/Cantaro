@@ -3,7 +3,10 @@ import { browserAuthService } from '../../platform/auth/authService';
 import type { ExtensionSession } from '../../platform/auth/extensionSession';
 import { signOutRuntimeSession } from '../../platform/auth/runtimeAuthClient';
 import { createCorrelationId } from '../../platform/messaging/messageResult';
-import { ensureApiPermission } from '../../platform/settings/apiPermission';
+import {
+  ensureApiPermission,
+  removeReplacedApiPermission,
+} from '../../platform/settings/apiPermission';
 import {
   DEFAULT_BASE_URL,
   normalizeBaseUrl,
@@ -21,6 +24,15 @@ interface SettingsActionContext {
   applySettings: (settings: ExtensionSettings) => void;
   setSession: (session: ExtensionSession | null) => void;
   setSessionEmail: (email: string | null) => void;
+}
+
+async function removePreviousPermissionIfChanged(
+  previousBaseUrl: string,
+  currentBaseUrl: string,
+  changed: boolean,
+): Promise<void> {
+  if (!changed) return;
+  await removeReplacedApiPermission(previousBaseUrl, currentBaseUrl);
 }
 
 export function useSettingsActions(context: SettingsActionContext) {
@@ -44,6 +56,11 @@ export function useSettingsActions(context: SettingsActionContext) {
       await persist(update.settings, update.baseUrlChanged
         ? 'API origin updated. Stored Cantaro session was cleared.'
         : 'Extension settings saved');
+      await removePreviousPermissionIfChanged(
+        context.savedSettings.baseUrl,
+        update.settings.baseUrl,
+        update.baseUrlChanged,
+      );
       return true;
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -64,6 +81,11 @@ export function useSettingsActions(context: SettingsActionContext) {
         context.setSessionEmail(null);
       }
       await persist(update.settings, 'Extension settings saved');
+      await removePreviousPermissionIfChanged(
+        context.savedSettings.baseUrl,
+        update.settings.baseUrl,
+        update.baseUrlChanged,
+      );
       const session = await browserAuthService.beginInteractiveSignIn(baseUrl);
       context.setSession(session);
       context.setSessionEmail(session.email || null);
