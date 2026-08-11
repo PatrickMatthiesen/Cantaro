@@ -16,6 +16,7 @@ import {
   type SeriesExtractionIssue,
 } from './seriesParser';
 import { buildSeriesDiscoveryLog } from './seriesLogging';
+import { extractSeriesId } from '../shared/crunchyrollUrls';
 
 const SCAN_DELAY_MS = 750;
 const FAILURE_WARNING_DELAY_MS = 5_000;
@@ -90,7 +91,7 @@ export function createCrunchyrollSeriesController(
     scanRunning = true;
     scanRequested = false;
     try {
-      await scanPage();
+      if (isCurrentSeriesPage()) await scanPage();
     } catch (error) {
       handleUnexpectedFailure(error);
     } finally {
@@ -234,7 +235,7 @@ export function createCrunchyrollSeriesController(
   }, () => {
     logVerbose('Cantaro: Crunchyroll series controller started', { pageUrl: location.href });
     requestScan();
-  });
+  }, isCurrentSeriesPage);
 
   ctx.addEventListener(window, 'wxt:locationchange', requestScan);
   ctx.onInvalidated(() => {
@@ -247,6 +248,10 @@ export function createCrunchyrollSeriesController(
     requestScan,
     dispose: () => ctx.abort(),
   };
+}
+
+function isCurrentSeriesPage(): boolean {
+  return extractSeriesId(location.pathname) !== undefined;
 }
 
 function createInitialSnapshot(): MediaSeriesTabContext {

@@ -14,15 +14,24 @@ export function readYouTubePageContext(
   const visibleTitle = doc.querySelector<HTMLElement>(
     'ytmusic-player-bar .title, h1.ytd-watch-metadata',
   )?.innerText.trim();
-  const visibleArtist = doc.querySelector<HTMLElement>(
-    'ytmusic-player-bar .byline, #owner #channel-name',
-  )?.innerText.trim();
+  const visibleArtist = firstInnerText(doc, [
+    'ytmusic-player-bar .byline a',
+    '#owner #channel-name a',
+    'ytmusic-player-bar .byline',
+    '#owner #channel-name',
+  ]);
 
   return parseYouTubePageContext(
     pageUrl,
     visibleTitle || doc.querySelector<HTMLMetaElement>('meta[name="title"]')?.content,
     visibleArtist || doc.querySelector<HTMLMetaElement>('meta[itemprop="author"]')?.content,
   );
+}
+
+function firstInnerText(doc: Document, selectors: string[]): string | undefined {
+  return selectors
+    .map(selector => doc.querySelector<HTMLElement>(selector)?.innerText.trim())
+    .find(Boolean);
 }
 
 function parseYouTubePageContext(

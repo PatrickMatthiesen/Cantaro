@@ -34,8 +34,9 @@ export function startMediaControllerRuntime(
   getSnapshot: () => MediaTabContext,
   setVerboseLogging: (enabled: boolean) => void,
   onReady: () => void,
+  isActive: () => boolean = () => true,
 ): () => void {
-  const notifyChanged = registerTabContext(ctx, getSnapshot);
+  const notifyChanged = registerTabContext(ctx, getSnapshot, isActive);
   startVerboseLogging(ctx, dependencies, setVerboseLogging, onReady);
   return notifyChanged;
 }

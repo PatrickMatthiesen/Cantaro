@@ -72,7 +72,8 @@ export function extractCrunchyrollWatchMetadata(
   if (!identity) return null;
   const titles = readWatchTitles(doc, identity.pageUrl.pathname);
   if (!titles) return null;
-  const seasonTitle = readText(doc, SEASON_SELECTORS) ?? undefined;
+  const seasonTitle = readText(doc, SEASON_SELECTORS)
+    ?? seasonTitleFromPageTitle(parsePageTitle(doc.title));
   const nextEpisode = readNextEpisode(doc, identity.pageUrl.href);
 
   return {
@@ -229,6 +230,10 @@ function episodeTitleFromPageTitle(title: string): string | undefined {
 function seriesTitleFromPageTitle(title: string): string | undefined {
   const parts = titleParts(title);
   return parts.length > 1 ? parts.at(-1) : undefined;
+}
+
+function seasonTitleFromPageTitle(title: string): string | undefined {
+  return /\bseason\s+\d+\b/i.exec(title)?.[0];
 }
 
 function isBlockedPage(values: string[]): boolean {

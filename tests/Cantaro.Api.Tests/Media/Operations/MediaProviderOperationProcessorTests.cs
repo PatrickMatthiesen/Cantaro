@@ -5,6 +5,7 @@ using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -27,7 +28,8 @@ public class MediaProviderOperationProcessorTests
 
         var entry = await SeedMediaEntryAsync(dbContext, 401, "success@example.com");
         var registry = new MediaProviderRegistry([new FakeMediaProvider("anilist")]);
-        var processor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
+        var logger = new RecordingLogger<MediaProviderOperationProcessor>();
+        var processor = new MediaProviderOperationProcessor(dbContext, registry, logger);
 
         var operation = await processor.EnqueueProgressUpdateAsync(
             entry.UserId,
@@ -48,6 +50,11 @@ public class MediaProviderOperationProcessorTests
         Assert.Equal(MediaMutationSources.UserProgressUpdate, persistedEntry.LastMutationSource);
         Assert.NotNull(persistedEntry.LastLocalEditAt);
         Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+        Assert.Contains(
+            logger.Messages,
+            message => message.Level == LogLevel.Information
+                && message.Text.Contains("Attempting provider progress update", StringComparison.Ordinal)
+                && message.Text.Contains("episodes=17", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -417,6 +424,25 @@ public class MediaProviderOperationProcessorTests
         public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
         {
             throw new NotSupportedException();
+        }
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Text)> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add((logLevel, formatter(state, exception)));
         }
     }
 

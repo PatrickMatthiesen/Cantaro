@@ -37,4 +37,15 @@ describe('episode availability presentation', () => {
       }],
     })).toBe('12 episodes released · EN: Sub 12 · Dub 8');
   });
+
+  test('does not render nullable release counts as literal null', () => {
+    expect(formatReleaseAvailability({
+      maxReleasedEpisodes: null,
+      languages: [{
+        languageCode: 'en',
+        subReleasedEpisodes: null,
+        dubReleasedEpisodes: null,
+      }],
+    })).toBeNull();
+  });
 });

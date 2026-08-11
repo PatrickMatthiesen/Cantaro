@@ -14,7 +14,7 @@ import {
 
 const EPISODE_CARD_SELECTOR = '[data-t^="episode-card"]';
 const WATCH_LINK_SELECTOR = 'a[href*="/watch/"]';
-const EPISODE_LINK_LABEL_RE = /^(?:play|watch again)\s+episode\s+\d+\b/i;
+const EPISODE_LINK_LABEL_RE = /^(?:(?:play|watch again)\s+)?(?:s\d+\s+)?(?:episode|ep|e)[- _]?\d+\b/i;
 const SEASON_LABEL_RE = /^(?:(?:ova|special)\s+)?season\s+\d+(?:\s+part\s+\d+)?$/i;
 
 export type SeriesExtractionIssue =
@@ -91,8 +91,16 @@ export function catalogObservationFingerprint(observation: SeriesCatalogObservat
     observation.providerSeriesId,
     observation.providerSeasonId ?? '',
     observation.seasonTitle,
-    ...observation.episodes.map(episode => episode.providerEpisodeId),
+    ...observation.episodes.flatMap(episode => [
+      episode.providerEpisodeId,
+      episode.episodeNumber,
+      normalizeProviderUrlForFingerprint(episode.providerUrl),
+    ]),
   ].join('|');
+}
+
+function normalizeProviderUrlForFingerprint(providerUrl: string): string {
+  return parseCrunchyrollUrl(providerUrl)?.href ?? providerUrl;
 }
 
 function readSeriesPageState(
@@ -278,13 +286,15 @@ function uniqueEpisodes(
 }
 
 function isLabelledEpisodeLink(link: HTMLAnchorElement): boolean {
-  return EPISODE_LINK_LABEL_RE.test(normalizeText(link.getAttribute('aria-label')) ?? '');
+  return [link.getAttribute('aria-label'), link.getAttribute('title')]
+    .map(normalizeText)
+    .some(label => Boolean(label && EPISODE_LINK_LABEL_RE.test(label)));
 }
 
 function stripEpisodePrefix(value: string): string | undefined {
   return value
     .replace(/^(?:play|watch again)\s+/i, '')
-    .replace(/^(?:episode|ep|e)\s*\d+\s*[-:–—]?\s*/i, '')
+    .replace(/^(?:s\d+\s+)?(?:episode|ep|e)\s*\d+\s*[-:–—]?\s*/i, '')
     .trim() || undefined;
 }
 

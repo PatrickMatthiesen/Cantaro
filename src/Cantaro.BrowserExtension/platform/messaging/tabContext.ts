@@ -30,9 +30,11 @@ function isGetTabContextRequest(value: unknown): value is GetTabContextRequest {
 export function registerTabContext(
   ctx: ContentScriptContext,
   getSnapshot: () => TabContextSnapshot,
+  isActive: () => boolean = () => true,
 ): () => void {
   const onMessage = (message: unknown) => {
     if (!isGetTabContextRequest(message)) return undefined;
+    if (!isActive()) return undefined;
     return Promise.resolve(messageSuccess(getSnapshot(), message.correlationId));
   };
   browser.runtime.onMessage.addListener(onMessage);
