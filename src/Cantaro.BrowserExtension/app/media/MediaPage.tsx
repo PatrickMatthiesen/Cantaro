@@ -57,6 +57,7 @@ export function MediaPage(props: MediaPageProps) {
             mediaTitleId={route.id}
             embedded
             onNavigateBack={() => startTransition(() => setRoute({ kind: 'library' }))}
+            onNavigateTitle={(id) => startTransition(() => setRoute({ kind: 'title', id }))}
           />
         )}
       </div>

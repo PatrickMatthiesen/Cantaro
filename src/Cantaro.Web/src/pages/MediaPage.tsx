@@ -158,6 +158,10 @@ export function MediaTitleRoutePage({ mediaTitleId }: { mediaTitleId: string }) 
       mediaTitleId={mediaTitleId}
       onHeadingChange={setHeading}
       onNavigateBack={() => void navigate({ to: '/media/library' })}
+      onNavigateTitle={(relatedMediaTitleId) => void navigate({
+        to: '/media/$mediaTitleId',
+        params: { mediaTitleId: relatedMediaTitleId },
+      })}
     />
   );
 }

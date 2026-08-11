@@ -91,6 +91,7 @@ public class MediaObservationsController(
                 existing.RawPayload = rawPayload;
                 existing.UpdatedAt = now;
 
+                await _matchingService.TryApplyProviderEpisodeIdentityAsync(existing, cancellationToken);
                 var deduplicatedProviderChoicesUnavailableReason = await EnsureProviderChoicesAsync(existing, cancellationToken);
 
                 if (existing.MatchStatus == MediaObservationStatuses.Matched)
@@ -863,8 +864,9 @@ public class MediaObservationsController(
                 cancellationToken);
         if (offset is null)
         {
-            observation.ResolvedProgress = observedProgress;
-            observation.EpisodeOffset = 0;
+            var inferredOffset = observation.EpisodeOffset ?? 0;
+            observation.ResolvedProgress = Math.Max(1, observedProgress + inferredOffset);
+            observation.EpisodeOffset = inferredOffset;
             await _dbContext.SaveChangesAsync(cancellationToken);
             return;
         }

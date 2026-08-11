@@ -21,9 +21,12 @@ public class MediaTitle
     /// </summary>
     public required string MediaKind { get; set; }
 
-    public string? Synopsis { get; set; }
-
+    /// <summary>
+    /// Provider-neutral presentation format such as tv, movie, ova, or manga.
+    /// </summary>
     public string? Format { get; set; }
+
+    public string? Synopsis { get; set; }
 
     public string? PosterUrl { get; set; }
 
@@ -74,4 +77,8 @@ public class MediaTitle
     public ICollection<MediaEpisode> Episodes { get; set; } = [];
 
     public ICollection<MediaLibraryEntry> LibraryEntries { get; set; } = [];
+
+    public ICollection<MediaTitleRelation> OutgoingRelations { get; set; } = [];
+
+    public ICollection<MediaTitleRelation> IncomingRelations { get; set; } = [];
 }

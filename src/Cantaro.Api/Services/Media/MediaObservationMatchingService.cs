@@ -46,18 +46,33 @@ public class MediaObservationMatchingService(
 
         try
         {
-            var candidates = await GenerateCandidatesAsync(observation, cancellationToken);
-
-            // Remove stale candidates from previous runs.
-            _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
-            observation.Candidates.Clear();
-
-            foreach (var candidate in candidates)
+            if (!await TryApplyProviderEpisodeIdentityCoreAsync(observation, cancellationToken))
             {
-                _dbContext.MediaObservationCandidates.Add(candidate);
-            }
+                var candidates = await GenerateCandidatesAsync(observation, cancellationToken);
 
-            ApplyMatchDecision(observation, candidates);
+                // Remove stale candidates from previous runs.
+                _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
+                observation.Candidates.Clear();
+
+                foreach (var candidate in candidates)
+                {
+                    _dbContext.MediaObservationCandidates.Add(candidate);
+                }
+
+                ApplyMatchDecision(observation, candidates);
+                if (observation.MatchStatus == MediaObservationStatuses.Matched
+                    && observation.MediaTitleId is { } matchedMediaTitleId)
+                {
+                    var inferredEpisodeOffset = await InferCumulativeEpisodeOffsetAsync(
+                        observation,
+                        matchedMediaTitleId,
+                        cancellationToken);
+                    if (inferredEpisodeOffset.HasValue || observation.EpisodeOffset is null)
+                    {
+                        observation.EpisodeOffset = inferredEpisodeOffset;
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -76,6 +91,129 @@ public class MediaObservationMatchingService(
             observation.Candidates.Count);
 
         return observation;
+    }
+
+    public async Task<bool> TryApplyProviderEpisodeIdentityAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        var applied = await TryApplyProviderEpisodeIdentityCoreAsync(observation, cancellationToken);
+        if (!applied)
+        {
+            return false;
+        }
+
+        observation.UpdatedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task<bool> TryApplyProviderEpisodeIdentityCoreAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(observation.SiteMediaId))
+        {
+            return false;
+        }
+
+        var provider = observation.SiteIdentifier.Trim().ToLowerInvariant();
+        var providerEpisodeId = provider == MediaObservationSiteIdentifiers.Crunchyroll
+            ? observation.SiteMediaId.Trim().ToUpperInvariant()
+            : observation.SiteMediaId.Trim();
+        var identity = await _dbContext.MediaEpisodeProviderIdentities
+            .Include(item => item.MediaEpisode)
+                .ThenInclude(episode => episode!.MediaTitle)
+            .FirstOrDefaultAsync(item =>
+                item.Provider == provider
+                && item.ProviderEpisodeId == providerEpisodeId,
+                cancellationToken);
+        var episode = identity?.MediaEpisode;
+        var title = episode?.MediaTitle;
+        if (identity is null || episode is null || title is null
+            || !IsCompatibleEpisodeIdentity(identity, observation.RawPayload))
+        {
+            return false;
+        }
+
+        _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
+        observation.Candidates.Clear();
+        var candidate = new MediaObservationCandidate
+        {
+            Id = Guid.NewGuid(),
+            MediaObservationId = observation.Id,
+            CandidateSource = MediaObservationCandidateSources.ProviderEpisodeIdentityExact,
+            MediaTitleId = title.Id,
+            Title = title.CanonicalTitle,
+            MediaKind = title.MediaKind,
+            Score = 1m,
+            Explanation = $"Exact provider episode identity: {provider}/{providerEpisodeId}",
+            IsAccepted = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _dbContext.MediaObservationCandidates.Add(candidate);
+        observation.MatchStatus = MediaObservationStatuses.Matched;
+        observation.MediaTitleId = title.Id;
+        observation.MediaTitle = title;
+        observation.AcceptedCandidateId = candidate.Id;
+        observation.ResolutionNotes = $"Automatically matched by exact provider episode identity: {provider}/{providerEpisodeId}.";
+        if (MediaObservationProgressService.TryParseProgressHint(observation.ProgressHint, out var observedProgress))
+        {
+            observation.EpisodeOffset = episode.EpisodeNumber - observedProgress;
+            observation.ResolvedProgress = episode.EpisodeNumber;
+        }
+        identity.HasConflict = false;
+
+        _logger.LogInformation(
+            "Matched MediaObservation {ObservationId} through provider episode identity {Provider}/{ProviderEpisodeId}: title {MediaTitleId}, episode {EpisodeNumber}.",
+            observation.Id,
+            provider,
+            providerEpisodeId,
+            title.Id,
+            episode.EpisodeNumber);
+        return true;
+    }
+
+    private static bool IsCompatibleEpisodeIdentity(
+        MediaEpisodeProviderIdentity identity,
+        string? rawPayload)
+    {
+        if (!identity.HasConflict)
+        {
+            return true;
+        }
+
+        var payload = DeserializeRawPayload(rawPayload);
+        if (payload is null)
+        {
+            return false;
+        }
+
+        var seriesMatches = !string.IsNullOrWhiteSpace(identity.ProviderSeriesId)
+            && string.Equals(
+                identity.ProviderSeriesId,
+                payload.ProviderSeriesId,
+                StringComparison.OrdinalIgnoreCase);
+        var episodeMatches = identity.ProviderEpisodeNumber is > 0
+            && identity.ProviderEpisodeNumber == payload.EpisodeNumber;
+        return seriesMatches && episodeMatches;
+    }
+
+    private static ObservationRawPayload? DeserializeRawPayload(string? rawPayload)
+    {
+        if (string.IsNullOrWhiteSpace(rawPayload))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ObservationRawPayload>(rawPayload, RawPayloadJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private async Task<List<MediaObservationCandidate>> GenerateCandidatesAsync(
@@ -178,11 +316,17 @@ public class MediaObservationMatchingService(
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        var ordinalSeasonTargetId = await FindOrdinalSeasonTargetAsync(
+            libraryTitles,
+            ReadEpisodeEvidence(observation),
+            cancellationToken);
+
         return ScoreTitleCandidates(
             observation,
             libraryTitles,
             queryTitles,
-            MediaObservationCandidateSources.LibraryTitleSearch);
+            MediaObservationCandidateSources.LibraryTitleSearch,
+            ordinalSeasonTargetId);
     }
 
     private async Task<List<MediaObservationCandidate>> FindByCatalogTitleAsync(
@@ -214,18 +358,26 @@ public class MediaObservationMatchingService(
                 .ToListAsync(cancellationToken));
         }
 
+        var distinctCandidates = candidates.DistinctBy(title => title.Id).ToList();
+        var ordinalSeasonTargetId = await FindOrdinalSeasonTargetAsync(
+            distinctCandidates,
+            ReadEpisodeEvidence(observation),
+            cancellationToken);
+
         return ScoreTitleCandidates(
             observation,
-            candidates.DistinctBy(title => title.Id),
+            distinctCandidates,
             queryTitles,
-            MediaObservationCandidateSources.CatalogTitleSearch);
+            MediaObservationCandidateSources.CatalogTitleSearch,
+            ordinalSeasonTargetId);
     }
 
     private static List<MediaObservationCandidate> ScoreTitleCandidates(
         MediaObservation observation,
         IEnumerable<MediaTitle> titles,
         IReadOnlyList<string> queryTitles,
-        string source)
+        string source,
+        Guid? ordinalSeasonTargetId)
     {
         var result = new List<MediaObservationCandidate>();
         var candidateTitles = titles.DistinctBy(title => title.Id).ToList();
@@ -233,15 +385,11 @@ public class MediaObservationMatchingService(
             .Select(NormalizeTitle)
             .Where(query => !string.IsNullOrWhiteSpace(query))
             .ToList();
-        var catalogEvidence = ReadCatalogEvidence(observation);
-        var ordinalSeasonTargetId = FindOrdinalSeasonTarget(
-            candidateTitles,
-            catalogEvidence,
-            TryReadRawSeriesTitle(observation.RawPayload));
-
+        var catalogEvidence = ReadEpisodeEvidence(observation);
         foreach (var title in candidateTitles)
         {
-            if (catalogEvidence?.HighestEpisodeNumber is int highestEpisodeNumber
+            if (title.Id != ordinalSeasonTargetId
+                && catalogEvidence?.HighestEpisodeNumber is int highestEpisodeNumber
                 && title.EpisodeCount is int episodeCount
                 && episodeCount < highestEpisodeNumber)
             {
@@ -327,10 +475,13 @@ public class MediaObservationMatchingService(
         }
     }
 
-    private static CatalogEvidence? ReadCatalogEvidence(MediaObservation observation)
+    private static CatalogEvidence? ReadEpisodeEvidence(MediaObservation observation)
     {
         if (string.IsNullOrWhiteSpace(observation.RawPayload)
-            || observation.SiteMediaId?.StartsWith("catalog:", StringComparison.OrdinalIgnoreCase) != true)
+            || !string.Equals(
+                observation.SiteIdentifier,
+                MediaObservationSiteIdentifiers.Crunchyroll,
+                StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -340,13 +491,19 @@ public class MediaObservationMatchingService(
             var payload = JsonSerializer.Deserialize<ObservationRawPayload>(
                 observation.RawPayload,
                 RawPayloadJsonOptions);
-            var highestEpisodeNumber = payload?.Episodes?
+            var episodeNumbers = payload?.Episodes?
                 .Where(episode => episode.EpisodeNumber > 0)
                 .Select(episode => episode.EpisodeNumber)
-                .DefaultIfEmpty()
-                .Max();
+                .ToList() ?? [];
+            if (payload?.EpisodeNumber is > 0)
+            {
+                episodeNumbers.Add(payload.EpisodeNumber.Value);
+            }
+
+            var lowestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Min() : (int?)null;
+            var highestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Max() : (int?)null;
             return highestEpisodeNumber > 0 || payload?.SeasonNumber is > 0
-                ? new CatalogEvidence(payload?.SeasonNumber, highestEpisodeNumber > 0 ? highestEpisodeNumber : null)
+                ? new CatalogEvidence(payload?.SeasonNumber, lowestEpisodeNumber, highestEpisodeNumber)
                 : null;
         }
         catch (JsonException)
@@ -355,34 +512,180 @@ public class MediaObservationMatchingService(
         }
     }
 
-    private static Guid? FindOrdinalSeasonTarget(
-        IReadOnlyCollection<MediaTitle> titles,
-        CatalogEvidence? evidence,
-        string? seriesTitle)
+    private async Task<int?> InferCumulativeEpisodeOffsetAsync(
+        MediaObservation observation,
+        Guid matchedMediaTitleId,
+        CancellationToken cancellationToken)
     {
-        if (evidence?.SeasonNumber is not > 0 || string.IsNullOrWhiteSpace(seriesTitle))
+        var evidence = ReadEpisodeEvidence(observation);
+        if (evidence?.SeasonNumber is not > 1
+            || evidence.LowestEpisodeNumber is not > 0
+            || evidence.HighestEpisodeNumber is not > 0)
         {
             return null;
         }
 
-        var normalizedSeriesTitle = NormalizeTitle(seriesTitle);
-        var relatedTvTitles = titles
-            .Where(title => title.MediaKind == MediaKinds.Anime
-                && title.StartYear is not null
-                && IsTvSeries(title.Format)
-                && ComputeTitleScore(normalizedSeriesTitle, title) >= LowConfidenceThreshold)
-            .OrderBy(title => title.StartYear)
-            .ThenBy(title => title.CanonicalTitle, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var continuity = await LoadContinuityAsync([matchedMediaTitleId], cancellationToken);
+        if (!continuity.IsComplete
+            || !continuity.OrderedTitleIds.Contains(matchedMediaTitleId)
+            || !continuity.Titles.TryGetValue(matchedMediaTitleId, out var matchedTitle)
+            || matchedTitle.EpisodeCount is not > 0)
+        {
+            return null;
+        }
 
         var seasonIndex = evidence.SeasonNumber.Value - 1;
-        return seasonIndex < relatedTvTitles.Count
-            ? relatedTvTitles[seasonIndex].Id
+        if (seasonIndex >= continuity.OrderedTitleIds.Count
+            || continuity.OrderedTitleIds[seasonIndex] != matchedMediaTitleId)
+        {
+            return null;
+        }
+
+        var previousEpisodeCounts = continuity.OrderedTitleIds
+            .Take(seasonIndex)
+            .Select(titleId => continuity.Titles[titleId].EpisodeCount)
+            .ToList();
+        if (previousEpisodeCounts.Any(count => count is not > 0))
+        {
+            return null;
+        }
+
+        var precedingEpisodeCount = previousEpisodeCounts.Sum(count => count!.Value);
+        var targetEpisodeCount = matchedTitle.EpisodeCount.Value;
+        if (evidence.HighestEpisodeNumber <= targetEpisodeCount)
+        {
+            return 0;
+        }
+
+        var localLowest = evidence.LowestEpisodeNumber.Value - precedingEpisodeCount;
+        var localHighest = evidence.HighestEpisodeNumber.Value - precedingEpisodeCount;
+        return localLowest > 0 && localHighest <= targetEpisodeCount
+            ? -precedingEpisodeCount
             : null;
     }
 
-    private static bool IsTvSeries(string? format) =>
-        string.Equals(format, "TV", StringComparison.OrdinalIgnoreCase);
+    private async Task<Guid?> FindOrdinalSeasonTargetAsync(
+        IReadOnlyCollection<MediaTitle> titles,
+        CatalogEvidence? evidence,
+        CancellationToken cancellationToken)
+    {
+        if (evidence?.SeasonNumber is not > 0 || titles.Count == 0)
+        {
+            return null;
+        }
+
+        var candidateIds = titles.Select(title => title.Id).ToHashSet();
+        var seasonIndex = evidence.SeasonNumber.Value - 1;
+        var targets = new HashSet<Guid>();
+        foreach (var candidateId in candidateIds)
+        {
+            var continuity = await LoadContinuityAsync([candidateId], cancellationToken);
+            if (continuity.IsComplete && seasonIndex < continuity.OrderedTitleIds.Count)
+            {
+                var target = continuity.OrderedTitleIds[seasonIndex];
+                if (candidateIds.Contains(target))
+                {
+                    targets.Add(target);
+                }
+            }
+        }
+
+        return targets.Count == 1 ? targets.Single() : null;
+    }
+
+    private async Task<ContinuityComponent> LoadContinuityAsync(
+        IReadOnlyCollection<Guid> seedTitleIds,
+        CancellationToken cancellationToken)
+    {
+        const int maxTitles = 50;
+        var titleIds = seedTitleIds.Take(maxTitles).ToHashSet();
+        var frontier = titleIds.ToHashSet();
+        var relationsById = new Dictionary<Guid, MediaTitleRelation>();
+
+        while (frontier.Count > 0 && titleIds.Count < maxTitles)
+        {
+            var frontierIds = frontier.ToArray();
+            var relations = await _dbContext.MediaTitleRelations
+                .AsNoTracking()
+                .Where(relation => relation.SourceProvider == "anilist"
+                    && (relation.RelationType == MediaRelationTypes.Prequel
+                        || relation.RelationType == MediaRelationTypes.Sequel)
+                    && (frontierIds.Contains(relation.MediaTitleId)
+                        || frontierIds.Contains(relation.RelatedMediaTitleId)))
+                .ToListAsync(cancellationToken);
+            frontier.Clear();
+            foreach (var relation in relations)
+            {
+                relationsById[relation.Id] = relation;
+                if (titleIds.Count < maxTitles && titleIds.Add(relation.MediaTitleId))
+                {
+                    frontier.Add(relation.MediaTitleId);
+                }
+                if (titleIds.Count < maxTitles && titleIds.Add(relation.RelatedMediaTitleId))
+                {
+                    frontier.Add(relation.RelatedMediaTitleId);
+                }
+            }
+        }
+
+        var titles = await _dbContext.MediaTitles
+            .AsNoTracking()
+            .Where(title => titleIds.Contains(title.Id))
+            .ToDictionaryAsync(title => title.Id, cancellationToken);
+        var edges = relationsById.Values
+            .Where(relation => IsTvAnime(titles.GetValueOrDefault(relation.MediaTitleId))
+                && IsTvAnime(titles.GetValueOrDefault(relation.RelatedMediaTitleId)))
+            .Select(relation => relation.RelationType == MediaRelationTypes.Prequel
+                ? (Earlier: relation.RelatedMediaTitleId, Later: relation.MediaTitleId)
+                : (Earlier: relation.MediaTitleId, Later: relation.RelatedMediaTitleId))
+            .Distinct()
+            .ToList();
+        if (edges.Count == 0)
+        {
+            return new ContinuityComponent(
+                seedTitleIds.Count == 1 ? [seedTitleIds.First()] : [],
+                titles,
+                seedTitleIds.Count == 1);
+        }
+
+        var previousByNode = edges.GroupBy(edge => edge.Later)
+            .ToDictionary(group => group.Key, group => group.Select(edge => edge.Earlier).Distinct().ToList());
+        var nextByNode = edges.GroupBy(edge => edge.Earlier)
+            .ToDictionary(group => group.Key, group => group.Select(edge => edge.Later).Distinct().ToList());
+        if (previousByNode.Values.Any(values => values.Count != 1)
+            || nextByNode.Values.Any(values => values.Count != 1))
+        {
+            return new ContinuityComponent([], titles, false);
+        }
+
+        var allEdgeTitleIds = edges.SelectMany(edge => new[] { edge.Earlier, edge.Later }).ToHashSet();
+        var starts = allEdgeTitleIds.Where(id => !previousByNode.ContainsKey(id)).ToList();
+        if (starts.Count != 1)
+        {
+            return new ContinuityComponent([], titles, false);
+        }
+
+        var ordered = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        var current = starts[0];
+        while (seen.Add(current))
+        {
+            ordered.Add(current);
+            if (!nextByNode.TryGetValue(current, out var next))
+            {
+                break;
+            }
+            current = next[0];
+        }
+
+        var complete = seen.Count == allEdgeTitleIds.Count && titleIds.Count < maxTitles;
+        return new ContinuityComponent(ordered, titles, complete);
+    }
+
+    private static bool IsTvAnime(MediaTitle? title)
+        => title is not null
+            && string.Equals(title.MediaKind, MediaKinds.Anime, StringComparison.Ordinal)
+            && string.Equals(title.Format, "TV", StringComparison.OrdinalIgnoreCase);
 
     private static void AddTitle(List<string> titles, string? title)
     {
@@ -537,7 +840,11 @@ public class MediaObservationMatchingService(
     {
         public string? SeriesTitle { get; set; }
 
+        public string? ProviderSeriesId { get; set; }
+
         public int? SeasonNumber { get; set; }
+
+        public int? EpisodeNumber { get; set; }
 
         public List<ObservationRawEpisode>? Episodes { get; set; }
     }
@@ -547,5 +854,13 @@ public class MediaObservationMatchingService(
         public int EpisodeNumber { get; set; }
     }
 
-    private sealed record CatalogEvidence(int? SeasonNumber, int? HighestEpisodeNumber);
+    private sealed record CatalogEvidence(
+        int? SeasonNumber,
+        int? LowestEpisodeNumber,
+        int? HighestEpisodeNumber);
+
+    private sealed record ContinuityComponent(
+        IReadOnlyList<Guid> OrderedTitleIds,
+        IReadOnlyDictionary<Guid, MediaTitle> Titles,
+        bool IsComplete);
 }

@@ -16,7 +16,7 @@ import type {
   MediaTitleDetailDto,
   MediaViewerStateDto,
 } from '../../services/mediaApi';
-import type { ContinueWatchingState, EpisodeCatalogState, StatusDraft } from './mediaEntryDetailTypes';
+import type { ContinueWatchingState, EpisodeCatalogState, FranchiseGraphState, StatusDraft } from './mediaEntryDetailTypes';
 
 function getErrorMessage(error: unknown, fallbackMessage: string): string {
   return error instanceof Error ? error.message : fallbackMessage;
@@ -293,6 +293,32 @@ export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
     void mediaApi.getEpisodes(mediaTitleId)
       .then((value) => setState({ status: 'loaded', value }))
       .catch(() => setState({ status: 'error' }));
+  }, [mediaTitleId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { state, reload };
+}
+
+export function useFranchiseGraph(entry: MediaEntryDetailModel | null) {
+  const [state, setState] = useState<FranchiseGraphState>({ status: 'loading' });
+  const mediaTitleId = entry?.mediaTitleId;
+
+  const reload = useCallback(() => {
+    if (!mediaTitleId) {
+      setState({ status: 'loading' });
+      return;
+    }
+
+    setState({ status: 'loading' });
+    void mediaApi.getFranchiseGraph(mediaTitleId)
+      .then((value) => setState({ status: 'loaded', value }))
+      .catch((error) => setState({
+        status: 'error',
+        error: getErrorMessage(error, 'Failed to load franchise connections'),
+      }));
   }, [mediaTitleId]);
 
   useEffect(() => {

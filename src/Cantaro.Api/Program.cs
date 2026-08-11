@@ -95,6 +95,8 @@ builder.Services.AddSingleton<ILyricsProvider, LrclibLyricsProvider>();
 builder.Services.AddScoped<LyricsService>();
 builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
+builder.Services.AddScoped<MediaTitleRelationSyncService>();
+builder.Services.AddScoped<MediaFranchiseGraphService>();
 builder.Services.AddScoped<AnimeScheduleAvailabilitySyncService>();
 builder.Services.AddSingleton<MediaLibraryImportQueue>();
 builder.Services.AddScoped<MediaLibraryQueryService>();

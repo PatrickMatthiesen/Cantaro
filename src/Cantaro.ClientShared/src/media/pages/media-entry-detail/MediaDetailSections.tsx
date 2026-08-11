@@ -113,38 +113,6 @@ function SectionHeading({ title, action, onAction }: { title: string; action?: s
   );
 }
 
-export function FranchiseSection({ entry }: { entry: MediaEntryDetailModel }) {
-  const { title } = entry;
-  const items = [
-    { title: title.canonicalTitle, subtitle: title.episodeCount ? `${title.episodeCount} episodes` : 'Current entry', active: true },
-    { title: `${title.canonicalTitle} extras`, subtitle: 'Related media', active: false },
-    { title: `${title.canonicalTitle} specials`, subtitle: 'Upcoming', active: false },
-  ];
-
-  return (
-    <section className="media-detail-section">
-      <SectionHeading title="Franchise Order" />
-      <div className="media-detail-franchise-strip">
-        {items.map((item, index) => (
-          <div key={item.title} className="media-detail-franchise-item-wrap">
-            <article className={`media-detail-franchise-item ${item.active ? 'is-active' : ''}`}>
-              <div className="media-detail-franchise-thumb">
-                <DetailArtwork posterUrl={title.posterUrl} title={item.title} />
-              </div>
-              <div>
-                <h4>{item.title}</h4>
-                <p>{item.subtitle}</p>
-                <span>{item.active ? 'Watched' : 'Linked soon'}</span>
-              </div>
-            </article>
-            {index < items.length - 1 ? <span className="media-detail-franchise-arrow">→</span> : null}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 interface CharactersSectionProps {
   entry: MediaEntryDetailModel;
   availabilityByProviderLink: ProviderAvailabilityMap;

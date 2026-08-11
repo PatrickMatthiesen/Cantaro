@@ -6,6 +6,7 @@ import {
   useContinueWatching,
   useEntryDetailState,
   useEpisodeCatalog,
+  useFranchiseGraph,
   useManualRemoteRefresh,
   useProviderAvailability,
   useProviderUnlinkAction,
@@ -17,12 +18,17 @@ import {
 interface MediaEntryDetailPageProps {
   mediaTitleId: string;
   onNavigateBack: () => void;
+  onNavigateTitle?: (mediaTitleId: string) => void;
   embedded?: boolean;
   onHeadingChange?: (heading: { eyebrow: string; title: string; details?: string[]; hidden?: boolean }) => void;
 }
+
+// Page-level composition intentionally coordinates the independent detail resources and actions.
+// fallow-ignore-next-line complexity
 export function MediaEntryDetailPage({
   mediaTitleId,
   onNavigateBack,
+  onNavigateTitle,
   embedded = false,
   onHeadingChange,
 }: MediaEntryDetailPageProps) {
@@ -44,6 +50,7 @@ export function MediaEntryDetailPage({
   } = useEntryDetailState(mediaTitleId);
   const availabilityByProviderLink = useProviderAvailability(entry);
   const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
+  const { state: franchiseGraph, reload: reloadFranchise } = useFranchiseGraph(entry);
   const continueWatching = useContinueWatching(entry, episodeCatalog);
   const { snackbar, showSnackbar } = useTimedSnackbar();
   useRemoteEntryRefresh(entry, reloadEntry, showSnackbar);
@@ -99,6 +106,7 @@ export function MediaEntryDetailPage({
     <MediaEntryDetailPageView
       mediaTitleId={mediaTitleId}
       onNavigateBack={onNavigateBack}
+      onNavigateTitle={onNavigateTitle}
       embedded={embedded}
       entry={entry}
       isLoading={isLoading}
@@ -117,6 +125,7 @@ export function MediaEntryDetailPage({
       selectedStatus={selectedStatus}
       continueWatching={continueWatching}
       episodeCatalog={episodeCatalog}
+      franchiseGraph={franchiseGraph}
       onSetShowLinkDialog={setShowLinkDialog}
       onSetProgressEpisodes={setProgressEpisodes}
       onSetProgressChapters={setProgressChapters}
@@ -127,6 +136,7 @@ export function MediaEntryDetailPage({
       onAddToLibrary={() => void handleAddToLibrary()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
       onReloadEpisodes={reloadEpisodes}
+      onReloadFranchise={reloadFranchise}
     />
   );
 }

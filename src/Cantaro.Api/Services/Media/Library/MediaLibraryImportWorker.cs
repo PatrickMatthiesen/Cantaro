@@ -42,6 +42,7 @@ public sealed class MediaLibraryImportWorker(
         using var scope = _serviceScopeFactory.CreateScope();
         var registry = scope.ServiceProvider.GetRequiredService<IMediaProviderRegistry>();
         var importService = scope.ServiceProvider.GetRequiredService<MediaLibraryImportService>();
+        var relationSyncService = scope.ServiceProvider.GetRequiredService<MediaTitleRelationSyncService>();
         var availabilitySyncService = scope.ServiceProvider.GetRequiredService<AnimeScheduleAvailabilitySyncService>();
 
         var provider = registry.GetRequired(workItem.ProviderId);
@@ -50,6 +51,37 @@ public sealed class MediaLibraryImportWorker(
 
         var importResult = await provider.ImportLibraryAsync(workItem.UserId, cancellationToken);
         var persisted = await importService.ImportAsync(workItem.UserId, account, importResult, cancellationToken);
+        if (provider is IMediaRelationGraphProvider relationProvider)
+        {
+            var activeAnime = importResult.Items
+                .Where(item => item.MediaKind == MediaKinds.Anime
+                    && (item.Status is MediaLibraryStatuses.Current or MediaLibraryStatuses.Repeating)
+                    && LooksLikeSplitSeason(item.Title))
+                .Select(item => item.ProviderMediaId)
+                .Distinct(StringComparer.Ordinal)
+                .Take(10)
+                .ToList();
+            foreach (var providerMediaId in activeAnime)
+            {
+                try
+                {
+                    await relationSyncService.SyncAsync(
+                        workItem.UserId,
+                        relationProvider,
+                        providerMediaId,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Relation graph refresh failed after {ProviderId} import for title {ProviderMediaId}.",
+                        workItem.ProviderId,
+                        providerMediaId);
+                }
+            }
+        }
+
         try
         {
             await availabilitySyncService.SyncUserLibraryAsync(workItem.UserId, cancellationToken);
@@ -76,6 +108,11 @@ public sealed class MediaLibraryImportWorker(
             OccurredAt = persisted.ImportedAt
         });
     }
+
+    private static bool LooksLikeSplitSeason(string title)
+        => title.Contains("season", StringComparison.OrdinalIgnoreCase)
+            || title.Contains("part ", StringComparison.OrdinalIgnoreCase)
+            || title.Contains("cour", StringComparison.OrdinalIgnoreCase);
 
     private void PublishFailure(MediaLibraryImportWorkItem workItem, string errorMessage)
     {

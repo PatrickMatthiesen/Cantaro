@@ -31,6 +31,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
     public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
     public DbSet<MediaTitle> MediaTitles => Set<MediaTitle>();
+    public DbSet<MediaTitleRelation> MediaTitleRelations => Set<MediaTitleRelation>();
     public DbSet<MediaProviderLink> MediaProviderLinks => Set<MediaProviderLink>();
     public DbSet<MediaEpisode> MediaEpisodes => Set<MediaEpisode>();
     public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
@@ -465,10 +466,51 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
+            entity.Property(e => e.Format).HasMaxLength(32);
+
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasIndex(e => new { e.MediaKind, e.CanonicalTitle });
+        });
+
+        modelBuilder.Entity<MediaTitleRelation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.RelationType).HasMaxLength(32);
+            entity.Property(e => e.SourceProvider).HasMaxLength(64);
+            entity.Property(e => e.SourceRelationId).HasMaxLength(256);
+
+            entity.HasIndex(e => new
+                {
+                    e.MediaTitleId,
+                    e.RelatedMediaTitleId,
+                    e.RelationType,
+                    e.SourceProvider
+                })
+                .IsUnique();
+
+            entity.HasIndex(e => new
+            {
+                e.RelatedMediaTitleId,
+                e.RelationType,
+                e.MediaTitleId
+            });
+
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_MediaTitleRelations_NoSelfRelation",
+                "\"MediaTitleId\" <> \"RelatedMediaTitleId\""));
+
+            entity.HasOne(e => e.MediaTitle)
+                .WithMany(title => title.OutgoingRelations)
+                .HasForeignKey(e => e.MediaTitleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.RelatedMediaTitle)
+                .WithMany(title => title.IncomingRelations)
+                .HasForeignKey(e => e.RelatedMediaTitleId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<MediaProviderLink>(entity =>
