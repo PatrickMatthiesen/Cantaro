@@ -55,7 +55,7 @@ function ConnectionSettings({ controller }: { controller: SettingsController }) 
         <UrlField
           id="baseUrl"
           label="Base URL"
-          detail={`Build default: ${DEFAULT_BASE_URL}`}
+          detail={`Self-hosted instances must use HTTPS. Build default: ${DEFAULT_BASE_URL}`}
           placeholder={DEFAULT_BASE_URL}
           value={controller.draft.baseUrl}
           disabled={controller.loading}
