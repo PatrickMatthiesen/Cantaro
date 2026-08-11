@@ -108,14 +108,14 @@ export interface MediaEpisodeCatalogDto {
 }
 
 export interface MediaReleaseAvailabilityDto {
-    maxReleasedEpisodes?: number;
+    maxReleasedEpisodes?: number | null;
     languages: MediaReleaseLanguageAvailabilityDto[];
 }
 
 export interface MediaReleaseLanguageAvailabilityDto {
     languageCode: string;
-    subReleasedEpisodes?: number;
-    dubReleasedEpisodes?: number;
+    subReleasedEpisodes?: number | null;
+    dubReleasedEpisodes?: number | null;
 }
 
 export interface MediaEpisodeDestinationDto {

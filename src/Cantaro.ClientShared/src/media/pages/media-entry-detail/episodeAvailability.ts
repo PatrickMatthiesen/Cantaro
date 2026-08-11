@@ -22,17 +22,17 @@ export function formatEpisodeAvailability(destination?: EpisodeStreamingDestinat
   return tracks.length > 0 ? tracks.join(' · ') : null;
 }
 
-export function formatReleaseAvailability(availability?: MediaReleaseAvailabilityDto) {
+export function formatReleaseAvailability(availability?: MediaReleaseAvailabilityDto | null) {
   if (!availability) return null;
 
   const summary = [
-    availability.maxReleasedEpisodes === undefined
+    availability.maxReleasedEpisodes == null
       ? null
       : `${availability.maxReleasedEpisodes} episode${availability.maxReleasedEpisodes === 1 ? '' : 's'} released`,
     ...availability.languages.map(language => {
       const tracks = [
-        language.subReleasedEpisodes === undefined ? null : `Sub ${language.subReleasedEpisodes}`,
-        language.dubReleasedEpisodes === undefined ? null : `Dub ${language.dubReleasedEpisodes}`,
+        language.subReleasedEpisodes == null ? null : `Sub ${language.subReleasedEpisodes}`,
+        language.dubReleasedEpisodes == null ? null : `Dub ${language.dubReleasedEpisodes}`,
       ].filter((track): track is string => track !== null);
 
       return tracks.length > 0 ? `${formatLanguageCode(language.languageCode)}: ${tracks.join(' · ')}` : null;

@@ -210,17 +210,11 @@ export function createCrunchyrollWatchController(
       if (status.type === 'threshold-reached') {
         updateSnapshot({ status: 'submitting' });
       }
-      verboseLog('Cantaro: Crunchyroll watch progress', {
-        watchId: currentWatchId,
-        ...status,
-      });
+      logWatchProgressStatus(status, currentWatchId, verboseLog);
       return;
     }
     if (status.type === 'progress-unavailable') {
-      verboseLog('Cantaro: Crunchyroll video progress unavailable', {
-        watchId: currentWatchId,
-        ...status,
-      });
+      logWatchProgressStatus(status, currentWatchId, verboseLog);
     }
   };
 
@@ -297,7 +291,7 @@ export function createCrunchyrollWatchController(
   }, () => {
     verboseLog('Cantaro: Crunchyroll watch controller started', { pageUrl: location.href });
     requestRestart();
-  });
+  }, () => extractEpisodeId(location.pathname) !== undefined);
 
   const stopWatchingPause = dependencies.watchTrackingPause(() => {
     tracker = disposeTracker(tracker);
@@ -342,6 +336,23 @@ export function createCrunchyrollWatchController(
     requestRestart,
     dispose: () => ctx.abort(),
   };
+}
+
+export function logWatchProgressStatus(
+  status: VideoProgressTrackerStatus,
+  watchId: string | undefined,
+  verboseLog: (message: string, details?: unknown) => void,
+): void {
+  const details = { watchId, ...status };
+  if (status.type === 'threshold-reached') {
+    console.info('Cantaro: Crunchyroll watch threshold reached', details);
+    return;
+  }
+  if (status.type === 'progress') {
+    verboseLog('Cantaro: Crunchyroll watch progress', details);
+    return;
+  }
+  verboseLog('Cantaro: Crunchyroll video progress unavailable', details);
 }
 
 function createInitialSnapshot(): MediaWatchTabContext {
@@ -434,12 +445,22 @@ function disposeTracker(tracker: VideoProgressTracker | null): null {
   return null;
 }
 
-function hasRelevantPageChange(mutation: MutationRecord): boolean {
+const WATCH_METADATA_SELECTOR = [
+  'video',
+  'h1',
+  'a[href*="/series/"]',
+  '[data-t="series-title"]',
+  '[data-t="show-title"]',
+  '[data-t="episode-title"]',
+  '[data-t="title"]',
+  '[data-testid="series-title"]',
+  '[data-testid="episode-title"]',
+].join(', ');
+
+export function hasRelevantPageChange(mutation: Pick<MutationRecord, 'addedNodes'>): boolean {
   return Array.from(mutation.addedNodes).some((node) => {
-    if (node.nodeName.toLowerCase() === 'video') return true;
     if (!(node instanceof Element)) return false;
-    return Boolean(node.querySelector(
-      'video, [data-t="series-title"], [data-t="episode-title"], [data-t="title"], [data-testid="series-title"], [data-testid="episode-title"]',
-    ));
+    return node.matches(WATCH_METADATA_SELECTOR)
+      || Boolean(node.querySelector(WATCH_METADATA_SELECTOR));
   });
 }

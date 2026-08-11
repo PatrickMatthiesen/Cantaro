@@ -1,6 +1,7 @@
 import { parseHTML } from 'linkedom';
 import { describe, expect, it } from 'vitest';
 import type { WatchProgressObservation } from '../../../../contracts/watchObservation';
+import wistoriaSeasonTwoEpisodeTwentyFourHtml from './fixtures/wistoria-season-2-episode-24.html?raw';
 import {
   extractCrunchyrollWatchMetadata,
   trackVideoProgress,
@@ -52,6 +53,16 @@ function makeDoc(
   return document;
 }
 
+function fixtureDoc(html: string): Document {
+  const { document } = parseHTML(html);
+  for (const element of document.querySelectorAll<HTMLElement>('*')) {
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      value: () => ({ width: 400, height: 28 }),
+    });
+  }
+  return document;
+}
+
 class FakeVideo {
   currentTime = 0;
   duration = 100;
@@ -74,6 +85,63 @@ class FakeVideo {
 }
 
 describe('Crunchyroll watch metadata extraction', () => {
+  it('extracts the cumulative Wistoria episode from the sanitized Crunchyroll DOM contract', () => {
+    const metadata = extractCrunchyrollWatchMetadata(
+      fixtureDoc(wistoriaSeasonTwoEpisodeTwentyFourHtml),
+      'https://www.crunchyroll.com/watch/GE00340382ENUS/a-story-of-a-dream-with-no-end',
+    );
+
+    expect(metadata).toMatchObject({
+      providerEpisodeId: 'GE00340382ENUS',
+      providerSeriesId: 'GW4HM7WK9',
+      seriesTitle: 'Wistoria: Wand and Sword',
+      episodeTitle: 'E24 - A Story of a Dream with No End',
+      episodeNumber: 24,
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+    });
+    expect(metadata?.nextEpisodeProviderId).toBeUndefined();
+  });
+
+  it('builds the API threshold observation from the sanitized Crunchyroll DOM contract', () => {
+    const doc = fixtureDoc(wistoriaSeasonTwoEpisodeTwentyFourHtml);
+    const metadata = extractCrunchyrollWatchMetadata(
+      doc,
+      'https://www.crunchyroll.com/watch/GE00340382ENUS/a-story-of-a-dream-with-no-end',
+    );
+    expect(metadata).not.toBeNull();
+
+    const video = doc.querySelector('video');
+    expect(video).not.toBeNull();
+    Object.defineProperties(video, {
+      currentTime: { value: 1353.32302, writable: true },
+      duration: { value: 1426.051, writable: true },
+      paused: { value: false, writable: true },
+    });
+
+    let observation: WatchProgressObservation | undefined;
+    const tracker = trackVideoProgress(
+      doc,
+      metadata!,
+      value => { observation = value; },
+    );
+
+    expect(observation).toMatchObject({
+      provider: 'crunchyroll',
+      providerEpisodeId: 'GE00340382ENUS',
+      providerSeriesId: 'GW4HM7WK9',
+      seriesTitle: 'Wistoria: Wand and Sword',
+      episodeTitle: 'E24 - A Story of a Dream with No End',
+      episodeNumber: 24,
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+      watchProgressPercent: 94.9,
+      positionSeconds: 1353.32,
+      durationSeconds: 1426.05,
+    });
+    tracker?.dispose();
+  });
+
   it('keeps multi-part fallback episode titles together', () => {
     const metadata = extractCrunchyrollWatchMetadata(
       makeDoc('Episode 7 - Like a Fairy Tale - Frieren - Crunchyroll'),

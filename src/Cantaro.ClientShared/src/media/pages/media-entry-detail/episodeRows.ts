@@ -3,7 +3,7 @@ import type {
 } from '../../services/mediaApi';
 import type { EpisodeStreamingDestinations } from '../../services/streamingDestinations';
 
-function getKnownEpisodeCount(episodeCount: number | undefined, knownNumbers: number[]) {
+function getKnownEpisodeCount(episodeCount: number | null | undefined, knownNumbers: number[]) {
   return episodeCount ?? Math.max(0, ...knownNumbers);
 }
 
@@ -20,6 +20,10 @@ function getSparseEpisodeNumbers(
 
 function getEpisodeNumbers(entry: MediaLibraryEntryDetailDto, knownNumbers: number[]) {
   const episodeCount = getKnownEpisodeCount(entry.title.episodeCount, knownNumbers);
+  if (episodeCount <= 0 && knownNumbers.length === 0) {
+    return [];
+  }
+
   if (episodeCount > 0 && episodeCount <= 100) {
     return Array.from({ length: episodeCount }, (_, index) => index + 1);
   }

@@ -44,4 +44,32 @@ describe('registerTabContext', () => {
     invalidate?.();
     expect(removeListener).toHaveBeenCalledWith(messageListener);
   });
+
+  it('does not answer tab-context requests while its route is inactive', () => {
+    let messageListener: ((message: unknown) => unknown) | undefined;
+    vi.stubGlobal('browser', {
+      runtime: {
+        sendMessage: vi.fn().mockResolvedValue(undefined),
+        onMessage: {
+          addListener: vi.fn(listener => { messageListener = listener; }),
+          removeListener: vi.fn(),
+        },
+      },
+    } as unknown as typeof browser);
+    const ctx = {
+      onInvalidated: vi.fn(),
+    } as unknown as ContentScriptContext;
+
+    registerTabContext(ctx, () => ({
+      feature: 'media',
+      provider: 'crunchyroll',
+      pageKind: 'series',
+      pageUrl: 'https://www.crunchyroll.com/series/example',
+      status: 'starting',
+      observedEpisodeCount: 0,
+    }), () => false);
+
+    expect(messageListener?.({ type: 'tab.context.get', correlationId: 'request-2' }))
+      .toBeUndefined();
+  });
 });

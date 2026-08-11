@@ -240,9 +240,9 @@ public class MediaProviderOperationProcessor(
 
         return operation.OperationType switch
         {
-            MediaProviderOperationTypes.UpdateProgress => await provider.UpdateProgressAsync(
-                operation.UserId,
-                DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson),
+            MediaProviderOperationTypes.UpdateProgress => await ExecuteProgressUpdateAsync(
+                provider,
+                operation,
                 cancellationToken),
             MediaProviderOperationTypes.UpdateStatus => await provider.UpdateStatusAsync(
                 operation.UserId,
@@ -260,6 +260,16 @@ public class MediaProviderOperationProcessor(
     {
         return JsonSerializer.Deserialize<TRequest>(payloadJson, SerializerOptions)
             ?? throw new InvalidOperationException("Provider operation payload could not be deserialized.");
+    }
+
+    private async Task<MediaProviderMutationResult> ExecuteProgressUpdateAsync(
+        IMediaProvider provider,
+        MediaProviderOperation operation,
+        CancellationToken cancellationToken)
+    {
+        var request = DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson);
+        LogProviderProgressUpdateAttempt(operation, request);
+        return await provider.UpdateProgressAsync(operation.UserId, request, cancellationToken);
     }
 
     private async Task<MediaProviderMutationResult> ExecuteAutoProgressAsync(
@@ -305,17 +315,31 @@ public class MediaProviderOperationProcessor(
             }
         }
 
-        return await provider.UpdateProgressAsync(
-            operation.UserId,
-            new MediaProgressUpdateRequest
-            {
-                ProviderMediaId = payload.ProviderMediaId,
-                ProgressEpisodes = payload.ProgressEpisodes,
-                ProgressChapters = payload.ProgressChapters,
-                ProgressVolumes = payload.ProgressVolumes,
-                LastKnownRemoteUpdateAt = payload.LastKnownRemoteUpdateAt
-            },
-            cancellationToken);
+        var request = new MediaProgressUpdateRequest
+        {
+            ProviderMediaId = payload.ProviderMediaId,
+            ProgressEpisodes = payload.ProgressEpisodes,
+            ProgressChapters = payload.ProgressChapters,
+            ProgressVolumes = payload.ProgressVolumes,
+            LastKnownRemoteUpdateAt = payload.LastKnownRemoteUpdateAt
+        };
+        LogProviderProgressUpdateAttempt(operation, request);
+        return await provider.UpdateProgressAsync(operation.UserId, request, cancellationToken);
+    }
+
+    private void LogProviderProgressUpdateAttempt(
+        MediaProviderOperation operation,
+        MediaProgressUpdateRequest request)
+    {
+        _logger.LogInformation(
+            "Attempting provider progress update for operation {OperationId}: " +
+            "provider={Provider}, entry={EntryId}, episodes={Episodes}, chapters={Chapters}, volumes={Volumes}.",
+            operation.Id,
+            operation.Provider,
+            operation.MediaLibraryEntryId,
+            request.ProgressEpisodes,
+            request.ProgressChapters,
+            request.ProgressVolumes);
     }
 
     private void ApplyMutationSuccess(MediaProviderOperation operation, MediaProviderMutationResult result)

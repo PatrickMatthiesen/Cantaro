@@ -1,11 +1,41 @@
 import { parseHTML } from 'linkedom';
 import { describe, expect, it } from 'vitest';
 import { MAX_CATALOG_EPISODES_PER_OBSERVATION } from '../../../../contracts/catalogObservation';
+import wistoriaSeasonTwoHtml from './fixtures/wistoria-season-2.html?raw';
 import { catalogObservationFingerprint, inspectSeriesPage } from './seriesParser';
 
 const SERIES_URL = 'https://www.crunchyroll.com/series/GYZJ43JMR/that-time-i-got-reincarnated-as-a-slime';
 
 describe('Crunchyroll series catalog extraction', () => {
+  it('collects every numbered episode URL from the sanitized Wistoria Season 2 DOM contract', () => {
+    const { document } = parseHTML(wistoriaSeasonTwoHtml);
+
+    const result = inspectSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/GW4HM7WK9/wistoria-wand-and-sword',
+    );
+
+    expect(result.diagnostics).toMatchObject({
+      episodeCardCount: 13,
+      observedEpisodeCount: 12,
+      issue: undefined,
+    });
+    expect(result.observation).toMatchObject({
+      providerSeriesId: 'GW4HM7WK9',
+      seriesTitle: 'Wistoria: Wand and Sword',
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+    });
+    expect(result.observation?.episodes.map(episode => episode.episodeNumber))
+      .toEqual([13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
+    expect(result.observation?.episodes.at(-1)).toEqual({
+      providerEpisodeId: 'GE00340382ENUS',
+      providerUrl: 'https://www.crunchyroll.com/watch/GE00340382ENUS/a-story-of-a-dream-with-no-end',
+      episodeNumber: 24,
+      episodeTitle: 'A Story of a Dream with No End',
+    });
+  });
+
   it('collects one safe destination per rendered episode card', () => {
     const { document } = parseHTML(`
       <h1>That Time I Got Reincarnated as a Slime</h1>
@@ -108,6 +138,41 @@ describe('Crunchyroll series catalog extraction', () => {
         seasonNumber: 4,
         episodes: [{ providerEpisodeId: 'EP1', episodeNumber: 1, episodeTitle: 'One' }],
       });
+  });
+
+  it('collects E22 and S2 E22 fallback links without episode-card markers', () => {
+    const { document } = parseHTML(`
+      <h1>Wistoria: Wand and Sword</h1>
+      <div class="season-info"><span>Season 2</span><span>12 Episodes</span></div>
+      <a href="https://www.crunchyroll.com/watch/GE00340376ENUS/hoping-blooming-thundering"
+         title="E22 - Hoping, Blooming, Thundering">
+        E22 - Hoping, Blooming, Thundering
+      </a>
+      <a href="/watch/NEXT23/a-roar-of-ice-and-lightning" aria-label="S2 E23 - A Roar of Ice and Lightning"></a>
+      <a href="https://example.com/watch/UNSAFE24/not-crunchyroll">E24 - Unsafe</a>
+    `);
+
+    expect(inspectSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/GW4HM7WK9/wistoria-wand-and-sword',
+    ).observation).toMatchObject({
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+      episodes: [
+        {
+          providerEpisodeId: 'GE00340376ENUS',
+          providerUrl: 'https://www.crunchyroll.com/watch/GE00340376ENUS/hoping-blooming-thundering',
+          episodeNumber: 22,
+          episodeTitle: 'Hoping, Blooming, Thundering',
+        },
+        {
+          providerEpisodeId: 'NEXT23',
+          providerUrl: 'https://www.crunchyroll.com/watch/NEXT23/a-roar-of-ice-and-lightning',
+          episodeNumber: 23,
+          episodeTitle: 'A Roar of Ice and Lightning',
+        },
+      ],
+    });
   });
 
   it('collects a long-running Crunchyroll season beyond the old fixed limit', () => {
@@ -238,7 +303,7 @@ describe('Crunchyroll series catalog extraction', () => {
     ).observation;
 
     expect(observation && catalogObservationFingerprint(observation))
-      .toBe('SERIES1||Season 1|EP1');
+      .toBe('SERIES1||Season 1|EP1|1|https://www.crunchyroll.com/watch/EP1/one');
   });
 
   it('fingerprints Crunchyroll parts separately even when their season number is shared', () => {
@@ -261,11 +326,41 @@ describe('Crunchyroll series catalog extraction', () => {
     };
 
     expect(catalogObservationFingerprint(observation))
-      .toBe('SERIES1|PART2|Season 1 Part 2|EP13');
+      .toBe('SERIES1|PART2|Season 1 Part 2|EP13|13|https://www.crunchyroll.com/watch/EP13/thirteen');
     expect(catalogObservationFingerprint({
       ...observation,
       providerSeasonId: 'PART3',
       seasonTitle: 'Season 1 Part 3',
     })).not.toBe(catalogObservationFingerprint(observation));
+  });
+
+  it('fingerprints corrected episode numbers and normalized provider URLs', () => {
+    const observation = {
+      schemaVersion: 1 as const,
+      provider: 'crunchyroll' as const,
+      seriesUrl: 'https://www.crunchyroll.com/series/SERIES1/my-show',
+      providerSeriesId: 'SERIES1',
+      seriesTitle: 'My Show',
+      seasonTitle: 'Season 2',
+      episodes: [{
+        providerEpisodeId: 'EP22',
+        providerUrl: 'https://WWW.CRUNCHYROLL.COM:443/watch/EP22/old-slug',
+        episodeNumber: 22,
+      }],
+      observedAt: '2026-08-11T00:00:00.000Z',
+      extensionVersion: '0.1.0',
+    };
+    const fingerprint = catalogObservationFingerprint(observation);
+
+    expect(fingerprint)
+      .toBe('SERIES1||Season 2|EP22|22|https://www.crunchyroll.com/watch/EP22/old-slug');
+    expect(catalogObservationFingerprint({
+      ...observation,
+      episodes: [{ ...observation.episodes[0], episodeNumber: 10 }],
+    })).not.toBe(fingerprint);
+    expect(catalogObservationFingerprint({
+      ...observation,
+      episodes: [{ ...observation.episodes[0], providerUrl: 'https://www.crunchyroll.com/watch/EP22/corrected-slug' }],
+    })).not.toBe(fingerprint);
   });
 });

@@ -3,7 +3,7 @@ import type { MediaLibraryEntryDetailDto } from '../../Cantaro.ClientShared/src/
 import type { EpisodeStreamingDestinations } from '../../Cantaro.ClientShared/src/media/services/streamingDestinations';
 import { getEpisodeRows } from '../../Cantaro.ClientShared/src/media/pages/media-entry-detail/episodeRows';
 
-function createEntry(episodeCount: number, progressEpisodes: number) {
+function createEntry(episodeCount: number | null | undefined, progressEpisodes: number) {
   return {
     progressEpisodes,
     title: { episodeCount },
@@ -18,6 +18,18 @@ function createEpisodes(count: number) {
 }
 
 describe('getEpisodeRows', () => {
+  it('does not invent episode one when the episode count and catalog are unknown', () => {
+    const rows = getEpisodeRows(createEntry(null, 0), []);
+
+    expect(rows).toEqual([]);
+  });
+
+  it('still shows observed episodes when the total episode count is unknown', () => {
+    const rows = getEpisodeRows(createEntry(null, 0), createEpisodes(2));
+
+    expect(rows.map(row => row.episodeNumber)).toEqual([1, 2]);
+  });
+
   it('does not add an episode beyond the known episode count', () => {
     const rows = getEpisodeRows(createEntry(170, 170), createEpisodes(170));
 
