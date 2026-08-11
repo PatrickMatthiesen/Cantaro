@@ -4,17 +4,17 @@ export type AuthBackgroundRequest =
   | {
     type: 'auth.token.get';
     correlationId: string;
-    payload: { apiBaseUrl: string; forceRefresh: boolean };
+    payload: { baseUrl: string; forceRefresh: boolean };
   }
   | {
     type: 'auth.session.verify';
     correlationId: string;
-    payload: { apiBaseUrl: string };
+    payload: { baseUrl: string };
   }
   | {
     type: 'auth.session.signOut';
     correlationId: string;
-    payload: { apiBaseUrl: string };
+    payload: { baseUrl: string };
   };
 
 export type AuthBackgroundResponse =
@@ -30,7 +30,7 @@ export function isAuthBackgroundRequest(value: unknown): value is AuthBackground
     && request.type !== 'auth.session.signOut') return false;
   if (typeof request.correlationId !== 'string') return false;
   if (!request.payload || typeof request.payload !== 'object') return false;
-  const payload = request.payload as { apiBaseUrl?: unknown; forceRefresh?: unknown };
-  if (typeof payload.apiBaseUrl !== 'string') return false;
+  const payload = request.payload as { baseUrl?: unknown; forceRefresh?: unknown };
+  if (typeof payload.baseUrl !== 'string') return false;
   return request.type !== 'auth.token.get' || typeof payload.forceRefresh === 'boolean';
 }

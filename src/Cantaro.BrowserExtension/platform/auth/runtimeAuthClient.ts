@@ -16,31 +16,31 @@ async function sendAuthRequest<T extends AuthBackgroundResponse>(
 }
 
 export const runtimeAccessTokenProvider: {
-  getAccessToken(apiBaseUrl: string, forceRefresh?: boolean): Promise<string | null>;
+  getAccessToken(baseUrl: string, forceRefresh?: boolean): Promise<string | null>;
 } = {
-  async getAccessToken(apiBaseUrl, forceRefresh = false) {
+  async getAccessToken(baseUrl, forceRefresh = false) {
     const result = await sendAuthRequest<{ accessToken: string | null }>({
       type: 'auth.token.get',
       correlationId: createCorrelationId(),
-      payload: { apiBaseUrl, forceRefresh },
+      payload: { baseUrl, forceRefresh },
     });
     return result.accessToken;
   },
 };
 
-export async function verifyRuntimeSession(apiBaseUrl: string): Promise<ExtensionUser | null> {
+export async function verifyRuntimeSession(baseUrl: string): Promise<ExtensionUser | null> {
   const result = await sendAuthRequest<{ user: ExtensionUser | null }>({
     type: 'auth.session.verify',
     correlationId: createCorrelationId(),
-    payload: { apiBaseUrl },
+    payload: { baseUrl },
   });
   return result.user;
 }
 
-export async function signOutRuntimeSession(apiBaseUrl: string): Promise<void> {
+export async function signOutRuntimeSession(baseUrl: string): Promise<void> {
   await sendAuthRequest<{ signedOut: true }>({
     type: 'auth.session.signOut',
     correlationId: createCorrelationId(),
-    payload: { apiBaseUrl },
+    payload: { baseUrl },
   });
 }

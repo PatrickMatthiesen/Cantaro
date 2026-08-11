@@ -13,7 +13,7 @@ const logger = createExtensionLogger({ scope: 'background' });
 async function handleAuthRequest(request: AuthBackgroundRequest) {
   try {
     const settings = await browserSettingsRepository.read();
-    if (normalizeBaseUrl(request.payload.apiBaseUrl) !== settings.apiBaseUrl) {
+    if (normalizeBaseUrl(request.payload.baseUrl) !== settings.baseUrl) {
       return messageFailure(
         request.correlationId,
         'invalid_request',
@@ -21,15 +21,17 @@ async function handleAuthRequest(request: AuthBackgroundRequest) {
       );
     }
     if (request.type === 'auth.session.signOut') {
-      await browserAuthService.signOut(settings.apiBaseUrl);
+      await browserAuthService.signOut(settings.baseUrl);
       return messageSuccess({ signedOut: true }, request.correlationId);
     }
     const value = request.type === 'auth.token.get'
-      ? { accessToken: await browserAuthService.getAccessToken(
-        settings.apiBaseUrl,
-        request.payload.forceRefresh,
-      ) }
-      : { user: await browserAuthService.getVerifiedUser(settings.apiBaseUrl) };
+      ? {
+        accessToken: await browserAuthService.getAccessToken(
+          settings.baseUrl,
+          request.payload.forceRefresh,
+        )
+      }
+      : { user: await browserAuthService.getVerifiedUser(settings.baseUrl) };
     return messageSuccess(value, request.correlationId);
   } catch (error) {
     logger.error('Authentication request failed', error);

@@ -110,5 +110,5 @@ function abortAwareError(error: unknown, signal?: AbortSignal): unknown {
 
 export async function openCantaroPage(path: string) {
   const settings = await browserSettingsRepository.read();
-  await browser.tabs.create({ url: `${settings.webBaseUrl}${path}` });
+  await browser.tabs.create({ url: `${settings.baseUrl}${path}` });
 }

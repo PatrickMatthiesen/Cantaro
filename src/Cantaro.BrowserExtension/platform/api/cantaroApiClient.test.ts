@@ -6,8 +6,7 @@ import { createCantaroApiClient } from './cantaroApiClient';
 
 const settingsRepository: SettingsRepository = {
   read: vi.fn(async () => ({
-    apiBaseUrl: 'https://api.example.test',
-    webBaseUrl: 'https://web.example.test',
+    baseUrl: 'https://cantaro.example.test',
     injectLyricsOnYouTube: false,
     verboseLogging: false,
   })),
@@ -44,7 +43,7 @@ describe('cantaroApiClient', () => {
     ).request<{ value: number }>('/api/test');
 
     expect(result.value).toBe(1);
-    expect(getAccessToken).toHaveBeenNthCalledWith(2, 'https://api.example.test', true);
+    expect(getAccessToken).toHaveBeenNthCalledWith(2, 'https://cantaro.example.test', true);
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer fresh');
   });
 

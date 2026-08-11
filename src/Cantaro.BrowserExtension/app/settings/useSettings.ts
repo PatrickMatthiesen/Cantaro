@@ -39,7 +39,7 @@ export function useSettings(notify: SettingsNotice): SettingsController {
     setSessionEmail: state.setSessionEmail,
   });
 
-  useMediaApiConfiguration(state.savedSettings.apiBaseUrl);
+  useMediaApiConfiguration(state.savedSettings.baseUrl);
   useSessionVerification({
     settings: state.savedSettings,
     session: state.session,

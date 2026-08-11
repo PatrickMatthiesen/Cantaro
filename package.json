@@ -7,6 +7,9 @@
         "src/Cantaro.Web",
         "src/Cantaro.BrowserExtension"
     ],
+    "overrides": {
+        "publish-browser-extension": "6.1.1"
+    },
     "scripts": {
         "check:shared": "cd src/Cantaro.ClientShared && bun run check",
         "check:web": "cd src/Cantaro.Web && bun run check",

@@ -16,7 +16,7 @@ describe('runtimeAuthClient', () => {
       .resolves.toBe('background-token');
     expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'auth.token.get',
-      payload: { apiBaseUrl: 'https://api.example.test', forceRefresh: true },
+      payload: { baseUrl: 'https://api.example.test', forceRefresh: true },
     }));
   });
 
