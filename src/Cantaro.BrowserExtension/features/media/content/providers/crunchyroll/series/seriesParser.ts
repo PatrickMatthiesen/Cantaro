@@ -3,6 +3,7 @@ import {
   type CatalogEpisodeObservation,
   type SeriesCatalogObservation,
 } from '../../../../contracts/catalogObservation';
+import { getExtensionVersion } from '../../../../extensionVersion';
 import {
   extractEpisodeId,
   extractEpisodeNumber,
@@ -11,7 +12,6 @@ import {
   parseCrunchyrollUrl,
 } from '../shared/crunchyrollUrls';
 
-const EXTENSION_VERSION = '0.1.0';
 const EPISODE_CARD_SELECTOR = '[data-t^="episode-card"]';
 const WATCH_LINK_SELECTOR = 'a[href*="/watch/"]';
 const EPISODE_LINK_LABEL_RE = /^(?:play|watch again)\s+episode\s+\d+\b/i;
@@ -81,7 +81,7 @@ export function inspectSeriesPage(
       seasonNumber: state.seasonNumber,
       episodes: state.episodes,
       observedAt: new Date().toISOString(),
-      extensionVersion: EXTENSION_VERSION,
+      extensionVersion: getExtensionVersion(),
     },
   };
 }

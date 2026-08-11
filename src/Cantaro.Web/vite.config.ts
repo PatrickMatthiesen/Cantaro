@@ -26,10 +26,7 @@ const configuredApiBaseUrl =
 const apiProxyTarget = configuredApiBaseUrl || 'https://localhost:7203'
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
-  define: {
-    __CANTARO_TRUSTED_API_BASE_URL__: JSON.stringify(command === 'serve' ? apiProxyTarget : configuredApiBaseUrl),
-  },
+export default defineConfig({
   plugins: [
     tanstackRouter({
       target: 'react',
@@ -56,4 +53,4 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-}))
+})

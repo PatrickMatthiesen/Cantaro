@@ -1,4 +1,5 @@
 import type { WatchProgressObservation } from '../../../../contracts/watchObservation';
+import { getExtensionVersion } from '../../../../extensionVersion';
 import {
   extractEpisodeId,
   extractEpisodeNumber,
@@ -9,7 +10,6 @@ import {
 
 export { extractEpisodeId } from '../shared/crunchyrollUrls';
 
-const EXTENSION_VERSION = '0.1.0';
 const WATCH_PROGRESS_THRESHOLD = 0.85;
 const BLOCKED_PAGE_TITLE_RE = /(?:please verify your email address|watch popular anime|play games|shop online)/i;
 const SERIES_SELECTORS = [
@@ -189,7 +189,7 @@ function buildProgressObservation(
     ...refreshed,
     ...snapshot,
     observedAt: new Date().toISOString(),
-    extensionVersion: EXTENSION_VERSION,
+    extensionVersion: getExtensionVersion(),
   };
 }
 

@@ -1,4 +1,5 @@
 declare const __CANTARO_BASE_URL__: string;
+
 export interface ExtensionSettings {
   baseUrl: string;
   injectLyricsOnYouTube: boolean;
@@ -10,7 +11,11 @@ export function normalizeBaseUrl(value: string | null | undefined): string {
   return trimmed ? trimmed.replace(/\/+$/, '') : '';
 }
 
-export const DEFAULT_BASE_URL = normalizeBaseUrl(__CANTARO_BASE_URL__)
+function readBuildBaseUrl(): string {
+  return typeof __CANTARO_BASE_URL__ === 'string' ? __CANTARO_BASE_URL__ : '';
+}
+
+export const DEFAULT_BASE_URL = normalizeBaseUrl(readBuildBaseUrl())
   || 'https://localhost:5173';
 
 export const defaultExtensionSettings: ExtensionSettings = {

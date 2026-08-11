@@ -126,8 +126,5 @@ jobs:
       - name: Check shared package
         run: bun run check:shared
 
-      - name: Test extension
-        run: cd src/Cantaro.BrowserExtension && bun run test:run
-
-      - name: Build Extension
-        run: bun run build:extension
+      - name: Check extension
+        run: bun run check:extension

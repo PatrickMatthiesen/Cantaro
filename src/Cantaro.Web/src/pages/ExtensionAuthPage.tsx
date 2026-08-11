@@ -5,8 +5,6 @@ import { AuthInputField } from '@cantaro/client-shared/auth';
 import { submitAuthForm } from '@cantaro/client-shared/auth';
 import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
 
-declare const __CANTARO_TRUSTED_API_BASE_URL__: string;
-
 type AuthPhase = 'checking' | 'ready' | 'submitting';
 
 interface AuthTarget {
@@ -14,22 +12,8 @@ interface AuthTarget {
   returnTo: string;
 }
 
-function normalizeApiBaseUrl(value: string): string {
+function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '');
-}
-
-function readTrustedApiBaseUrl(): string {
-  const configuredBaseUrl = __CANTARO_TRUSTED_API_BASE_URL__?.trim() ?? '';
-
-  if (!configuredBaseUrl) {
-    return window.location.origin;
-  }
-
-  try {
-    return normalizeApiBaseUrl(new URL(configuredBaseUrl).origin);
-  } catch {
-    return window.location.origin;
-  }
 }
 
 function readErrorMessage(payload: unknown, fallbackMessage: string): string {
@@ -49,17 +33,17 @@ function readAuthTarget(): AuthTarget | null {
     return null;
   }
 
-  const trustedApiBaseUrl = readTrustedApiBaseUrl();
+  const trustedBaseUrl = normalizeBaseUrl(window.location.origin);
 
   try {
     const targetUrl = new URL(returnTo);
-    const targetApiBaseUrl = normalizeApiBaseUrl(targetUrl.origin);
-    if (targetUrl.pathname !== '/api/auth/extension/authorize' || targetApiBaseUrl !== trustedApiBaseUrl) {
+    const targetBaseUrl = normalizeBaseUrl(targetUrl.origin);
+    if (targetUrl.pathname !== '/api/auth/extension/authorize' || targetBaseUrl !== trustedBaseUrl) {
       return null;
     }
 
     return {
-      baseUrl: trustedApiBaseUrl,
+      baseUrl: trustedBaseUrl,
       returnTo: targetUrl.toString(),
     };
   } catch {

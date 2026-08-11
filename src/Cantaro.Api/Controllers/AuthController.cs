@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Cantaro.Api.Controllers;
 
@@ -14,6 +16,7 @@ namespace Cantaro.Api.Controllers;
 [Route("api/auth")]
 public class AuthController : ControllerBase
 {
+    private const string CantaroFirefoxExtensionId = "cantaro@bmstack.net";
     private readonly UserManager<User> _userManager;
     private readonly ExtensionAuthService _extensionAuthService;
     private readonly IFrontendUrlResolver _frontendUrlResolver;
@@ -92,7 +95,7 @@ public class AuthController : ControllerBase
             return BadRequest(new
             {
                 error = "invalid_request",
-                error_description = "The redirect_uri must be the extension redirect URI returned by chrome.identity.getRedirectURL()."
+                error_description = "The redirect_uri must be the extension redirect URI returned by browser.identity.getRedirectURL()."
             });
         }
 
@@ -221,7 +224,7 @@ public class AuthController : ControllerBase
         return NoContent();
     }
 
-    private static bool IsValidExtensionRedirectUri(string clientId, string redirectUri)
+    internal static bool IsValidExtensionRedirectUri(string clientId, string redirectUri)
     {
         if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(redirectUri))
         {
@@ -233,8 +236,31 @@ public class AuthController : ControllerBase
             return false;
         }
 
-        return string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(uri.Host, $"{clientId}.chromiumapp.org", StringComparison.OrdinalIgnoreCase);
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !uri.IsDefaultPort
+            || !string.Equals(uri.AbsolutePath, "/cantaro-auth", StringComparison.Ordinal)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        if (string.Equals(uri.Host, $"{clientId}.chromiumapp.org", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.Equals(clientId, CantaroFirefoxExtensionId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var firefoxClientHash = Convert.ToHexStringLower(
+            SHA1.HashData(Encoding.UTF8.GetBytes(clientId)));
+        return string.Equals(
+            uri.Host,
+            $"{firefoxClientHash}.extensions.allizom.org",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static RedirectResult RedirectExtensionError(string redirectUri, string error, string? state, string? description = null)

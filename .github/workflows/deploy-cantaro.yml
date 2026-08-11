@@ -2,17 +2,40 @@ name: Deploy Cantaro
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_extensions:
+        description: "Build extension artifacts and publish configured stores after deployment"
+        type: boolean
+        default: false
+      create_extension_tag:
+        description: "Create an immutable extension version tag after successful store submission"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
   group: deploy-cantaro
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  verify-ref:
+    name: Verify deployment ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          if [ "$RELEASE_REF" != "refs/heads/main" ]; then
+            echo "::error::Production deployments must run from main, not $RELEASE_REF."
+            exit 1
+          fi
+
   deploy:
     name: Publish and deploy
+    needs: verify-ref
     runs-on: ubuntu-latest
     environment:
       name: "Production"
@@ -107,3 +130,14 @@ jobs:
         run: |
           docker context use default
           docker context rm "$DOCKER_CONTEXT_NAME" || true
+
+  extension-release:
+    name: Build and optionally publish extensions
+    needs: deploy
+    uses: ./.github/workflows/publish-extension.yml
+    with:
+      publish_extensions: ${{ inputs.publish_extensions }}
+      create_tag: ${{ inputs.create_extension_tag }}
+    secrets: inherit
+    permissions:
+      contents: write

@@ -1,169 +1,396 @@
 name: Publish Extension
 
 on:
-    workflow_dispatch:
-        inputs:
-            publish_extensions:
-                description: "Publish extensions to web stores (Chrome/Firefox)"
-                type: boolean
-                default: false
-            create_tag:
-                description: "Create an extension version tag after successful publish"
-                type: boolean
-                default: true
+  workflow_call:
+    inputs:
+      publish_extensions:
+        description: "Publish configured extensions to their web stores"
+        type: boolean
+        required: false
+        default: false
+      create_tag:
+        description: "Create an extension version tag after successful publication"
+        type: boolean
+        required: false
+        default: true
+  workflow_dispatch:
+    inputs:
+      publish_extensions:
+        description: "Publish configured extensions to their web stores"
+        type: boolean
+        default: false
+      create_tag:
+        description: "Create an extension version tag after successful publication"
+        type: boolean
+        default: true
 
 permissions:
-    contents: read
+  contents: read
+
+concurrency:
+  group: publish-extension
+  cancel-in-progress: false
 
 jobs:
-    build-extension:
-        name: Build Extension Artifacts
-        runs-on: ubuntu-latest
-        environment: "Production"
-        outputs:
-            version: ${{ steps.version.outputs.version }}
-            chrome_zip: ${{ steps.zip.outputs.chrome_zip }}
-            firefox_zip: ${{ steps.zip.outputs.firefox_zip }}
+  verify-ref:
+    name: Verify release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          if [ "$RELEASE_REF" != "refs/heads/main" ]; then
+            echo "::error::Extension artifacts and store releases must be built from main, not $RELEASE_REF."
+            exit 1
+          fi
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v6
+  build-extension:
+    name: Build extension artifacts
+    needs: verify-ref
+    runs-on: ubuntu-latest
+    environment: "Production"
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      chrome_filename: ${{ steps.package.outputs.chrome_filename }}
+      firefox_filename: ${{ steps.package.outputs.firefox_filename }}
+      firefox_sources_filename: ${{ steps.package.outputs.firefox_sources_filename }}
 
-            - name: Set up Bun
-              uses: oven-sh/setup-bun@v2
-              with:
-                  bun-version: 1.3.3
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-            - name: Install dependencies
-              run: bun install --frozen-lockfile
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
 
-            - name: Extract extension version
-              id: version
-              run: |
-                  VERSION=$(node -p "require('./src/Cantaro.BrowserExtension/package.json').version")
-                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-                  echo "Extension version: $VERSION"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
-            - name: Validate version consistency
-              run: |
-                  PKG_VERSION=$(node -p "require('./src/Cantaro.BrowserExtension/package.json').version")
-                  WXT_VERSION=$(grep -oP "version:\s*'\K[^']+" src/Cantaro.BrowserExtension/wxt.config.ts)
-                  MANIFEST_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('src/Cantaro.BrowserExtension/.output/chrome-mv3/manifest.json','utf8')).version")
+      - name: Package Chrome and Firefox extensions
+        id: package
+        working-directory: src/Cantaro.BrowserExtension
+        env:
+          WEB_HTTP: ${{ vars.CANTARO_HTTPS_BASE_URL }}
+        run: |
+          set -euo pipefail
 
-                  if [ "$PKG_VERSION" != "$WXT_VERSION" ]; then
-                      echo "::error::Version mismatch: package.json=$PKG_VERSION wxt.config.ts=$WXT_VERSION"
-                      exit 1
-                  fi
-                  if [ "$PKG_VERSION" != "$MANIFEST_VERSION" ]; then
-                      echo "::error::Version mismatch: package.json=$PKG_VERSION manifest.json=$MANIFEST_VERSION"
-                      exit 1
-                  fi
-                  echo "All versions match: $PKG_VERSION"
+          if [ -z "$WEB_HTTP" ]; then
+            echo "::error::The Production environment variable CANTARO_HTTPS_BASE_URL is not configured."
+            exit 1
+          fi
 
-            - name: Build extension (Chrome)
-              working-directory: src/Cantaro.BrowserExtension
-              run: bun run build
-              env:
-                  WEB_HTTP: "${{ secrets.CANTARO_HTTPS_BASE_URL }}"
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          CHROME_FILENAME="${PACKAGE_NAME}-${VERSION}-chrome.zip"
+          FIREFOX_FILENAME="${PACKAGE_NAME}-${VERSION}-firefox.zip"
+          FIREFOX_SOURCES_FILENAME="${PACKAGE_NAME}-${VERSION}-sources.zip"
 
-            - name: Build extension (Firefox)
-              working-directory: src/Cantaro.BrowserExtension
-              run: bun run build:firefox
-              env:
-                  WEB_HTTP: "${{ secrets.CANTARO_HTTPS_BASE_URL }}"
+          bun run zip
+          bun run zip:firefox
 
-            - name: Create Chrome ZIP
-              id: zip
-              run: |
-                  bun run zip
-                  echo "chrome_zip=.output/chrome.zip" >> "$GITHUB_OUTPUT"
+          for artifact in \
+            ".output/$CHROME_FILENAME" \
+            ".output/$FIREFOX_FILENAME" \
+            ".output/$FIREFOX_SOURCES_FILENAME"; do
+            if [ ! -s "$artifact" ]; then
+              echo "::error::Expected extension artifact was not created: $artifact"
+              exit 1
+            fi
+          done
 
-            - name: Create Firefox ZIP
-              run: bun run zip:firefox
-              working-directory: src/Cantaro.BrowserExtension
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "chrome_filename=$CHROME_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "firefox_filename=$FIREFOX_FILENAME" >> "$GITHUB_OUTPUT"
+          echo "firefox_sources_filename=$FIREFOX_SOURCES_FILENAME" >> "$GITHUB_OUTPUT"
 
-            - name: Upload Chrome artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: cantaro-extension-chrome-${{ steps.version.outputs.version }}
-                  path: src/Cantaro.BrowserExtension/.output/chrome.zip
-                  retention-days: 30
+      - name: Validate generated extension packages
+        working-directory: src/Cantaro.BrowserExtension
+        env:
+          EXPECTED_BASE_URL: ${{ vars.CANTARO_HTTPS_BASE_URL }}
+          EXPECTED_VERSION: ${{ steps.package.outputs.version }}
+          CHROME_ZIP: .output/${{ steps.package.outputs.chrome_filename }}
+          FIREFOX_ZIP: .output/${{ steps.package.outputs.firefox_filename }}
+          FIREFOX_SOURCES_ZIP: .output/${{ steps.package.outputs.firefox_sources_filename }}
+          CHROME_MANIFEST: ${{ runner.temp }}/chrome-manifest.json
+          FIREFOX_MANIFEST: ${{ runner.temp }}/firefox-manifest.json
+        run: |
+          set -euo pipefail
 
-            - name: Upload Firefox artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: cantaro-extension-firefox-${{ steps.version.outputs.version }}
-                  path: src/Cantaro.BrowserExtension/.output/firefox.zip
-                  retention-days: 30
+          CHROME_MANIFEST="$RUNNER_TEMP/chrome-manifest.json"
+          FIREFOX_MANIFEST="$RUNNER_TEMP/firefox-manifest.json"
+          unzip -p "$CHROME_ZIP" manifest.json > "$CHROME_MANIFEST"
+          unzip -p "$FIREFOX_ZIP" manifest.json > "$FIREFOX_MANIFEST"
+          unzip -Z1 "$FIREFOX_SOURCES_ZIP" > "$RUNNER_TEMP/firefox-source-files.txt"
 
-    submit-stores:
-        name: Submit to Chrome & Firefox
-        runs-on: ubuntu-latest
-        needs: build-extension
-        if: ${{ github.event.inputs.publish_extensions == 'true' }}
-        environment: "Production"
-        permissions:
-            contents: write
+          for required_source in \
+            package.json \
+            bun.lock \
+            SOURCE_CODE_REVIEW.md \
+            src/Cantaro.BrowserExtension/package.json \
+            src/Cantaro.ClientShared/package.json; do
+            if ! grep -Fxq "$required_source" "$RUNNER_TEMP/firefox-source-files.txt"; then
+              echo "::error::Firefox source archive is missing $required_source"
+              exit 1
+            fi
+          done
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v6
-              with:
-                  fetch-depth: 0
+          node <<'NODE'
+          const fs = require('node:fs');
 
-            - name: Set up Bun
-              uses: oven-sh/setup-bun@v2
-              with:
-                  bun-version: 1.3.3
+          const expectedVersion = process.env.EXPECTED_VERSION;
+          const expectedOrigin = new URL(process.env.EXPECTED_BASE_URL).origin;
+          const packageVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 
-            - name: Download Chrome artifact
-              uses: actions/download-artifact@v4
-              with:
-                  name: cantaro-extension-chrome-${{ needs.build-extension.outputs.version }}
-                  path: .output
-              continue-on-error: true
+          const manifests = [
+            ['Chrome', process.env.CHROME_MANIFEST],
+            ['Firefox', process.env.FIREFOX_MANIFEST],
+          ];
 
-            - name: Download Firefox artifact
-              uses: actions/download-artifact@v4
-              with:
-                  name: cantaro-extension-firefox-${{ needs.build-extension.outputs.version }}
-                  path: .output/firefox
-              continue-on-error: true
+          if (packageVersion !== expectedVersion) {
+            throw new Error(`Package version ${packageVersion} does not match ${expectedVersion}`);
+          }
 
-            - name: Setup Node for WXT CLI
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 22
+          for (const [browser, path] of manifests) {
+            const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+            if (manifest.version !== expectedVersion) {
+              throw new Error(`${browser} manifest version ${manifest.version} does not match ${expectedVersion}`);
+            }
 
-            - name: Submit to Chrome & Firefox (staged/unlisted)
-              working-directory: src/Cantaro.BrowserExtension
-              run: wxt submit --chrome-zip ../cantaro-extension-chrome-${{ needs.build-extension.outputs.version }}/chrome.zip --firefox-zip ../cantaro-extension-firefox-${{ needs.build-extension.outputs.version }}/firefox.zip --firefox-sources-zip ../cantaro-extension-firefox-${{ needs.build-extension.outputs.version }}/sources.zip
-              env:
-                  CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
-                  CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
-                  CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
-                  CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
-                  FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
-                  FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
-                  FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+            const requiredHost = `${expectedOrigin}/*`;
+            const grantedHosts = [
+              ...(manifest.host_permissions ?? []),
+              ...(manifest.permissions ?? []),
+            ];
+            if (!grantedHosts.includes(requiredHost)) {
+              throw new Error(`${browser} manifest is missing production host permission ${requiredHost}`);
+            }
+            if (grantedHosts.some(host => host.includes('localhost'))) {
+              throw new Error(`${browser} manifest contains a localhost host permission`);
+            }
+          }
 
-            - name: Create extension version tag
-              if: ${{ github.event.inputs.create_tag == 'true' && success() }}
-              working-directory: src/Cantaro.BrowserExtension
-              run: |
-                  TAG="extension/v${{ needs.build-extension.outputs.version }}"
-                  EXISTING_SHA=$(git rev-parse "$TAG" 2>/dev/null || echo "")
-                  if [ -n "$EXISTING_SHA" ] && [ "$EXISTING_SHA" != "${{ github.sha }}" ]; then
-                      echo "::error::Tag $TAG already exists but points to a different commit ($EXISTING_SHA). Refusing to overwrite."
-                      exit 1
-                  elif [ -z "$EXISTING_SHA" ]; then
-                      git config user.name "github-actions[bot]"
-                      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                      git tag -a "$TAG" -m "Extension version ${{ needs.build-extension.outputs.version }} submitted to Chrome/Firefox"
-                      git push origin "$TAG" || echo "::warning::Could not push tag (permissions or remote may be missing)."
-                  else
-                      echo "Tag $TAG already exists and points to this commit. Skipping."
-                  fi
-                      git push origin "$TAG"
-                      echo "Created and pushed tag $TAG"
-                  fi
+          console.log(`Validated extension version ${expectedVersion} for ${expectedOrigin}`);
+          NODE
+      - name: Upload Chrome artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cantaro-extension-chrome-${{ steps.package.outputs.version }}
+          path: src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.chrome_filename }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Firefox artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cantaro-extension-firefox-${{ steps.package.outputs.version }}
+          path: |
+            src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.firefox_filename }}
+            src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.firefox_sources_filename }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-stores:
+    name: Submit configured stores
+    if: ${{ inputs.publish_extensions }}
+    needs: build-extension
+    runs-on: ubuntu-latest
+    environment: "Production"
+    permissions:
+      contents: read
+    outputs:
+      any_submitted: ${{ steps.stores.outputs.any_enabled }}
+      chrome_submitted: ${{ steps.stores.outputs.chrome_enabled }}
+      firefox_submitted: ${{ steps.stores.outputs.firefox_enabled }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Select configured stores
+        id: stores
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_SERVICE_ACCOUNT_JSON: ${{ secrets.CHROME_SERVICE_ACCOUNT_JSON }}
+          FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
+          FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
+          FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          validate_store() {
+            local store="$1"
+            shift
+            local configured=0
+            local missing=()
+
+            for variable_name in "$@"; do
+              if [ -n "${!variable_name:-}" ]; then
+                configured=$((configured + 1))
+              else
+                missing+=("$variable_name")
+              fi
+            done
+
+            if [ "$configured" -eq 0 ]; then
+              echo "${store}_enabled=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping $store because no credentials are configured."
+            elif [ "${#missing[@]}" -gt 0 ]; then
+              echo "::error::$store credentials are only partially configured. Missing: ${missing[*]}"
+              exit 1
+            else
+              echo "${store}_enabled=true" >> "$GITHUB_OUTPUT"
+              echo "$store is configured for submission."
+            fi
+          }
+
+          validate_store chrome \
+            CHROME_EXTENSION_ID \
+            CHROME_PUBLISHER_ID \
+            CHROME_SERVICE_ACCOUNT_JSON
+          validate_store firefox \
+            FIREFOX_EXTENSION_ID \
+            FIREFOX_JWT_ISSUER \
+            FIREFOX_JWT_SECRET
+
+          if [ "$(grep -c '_enabled=true' "$GITHUB_OUTPUT")" -gt 0 ]; then
+            echo "any_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No extension stores are configured; artifacts were built but nothing was submitted."
+          fi
+
+      - name: Download Chrome artifact
+        if: ${{ steps.stores.outputs.chrome_enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: cantaro-extension-chrome-${{ needs.build-extension.outputs.version }}
+          path: .release/chrome
+
+      - name: Submit Chrome extension for staged publishing
+        if: ${{ steps.stores.outputs.chrome_enabled == 'true' }}
+        working-directory: src/Cantaro.BrowserExtension
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_SERVICE_ACCOUNT_JSON: ${{ secrets.CHROME_SERVICE_ACCOUNT_JSON }}
+          CHROME_ZIP: ${{ github.workspace }}/.release/chrome/${{ needs.build-extension.outputs.chrome_filename }}
+        run: |
+          set -euo pipefail
+
+          chrome_client_email=$(node -e \
+            "process.stdout.write(JSON.parse(process.env.CHROME_SERVICE_ACCOUNT_JSON).client_email ?? '')")
+          chrome_private_key=$(node -e \
+            "process.stdout.write(JSON.parse(process.env.CHROME_SERVICE_ACCOUNT_JSON).private_key ?? '')")
+
+          if [ -z "$chrome_client_email" ] || [ -z "$chrome_private_key" ]; then
+            echo "::error::CHROME_SERVICE_ACCOUNT_JSON must contain client_email and private_key."
+            exit 1
+          fi
+
+          bun wxt submit \
+            --chrome-api-version v2 \
+            --chrome-extension-id "$CHROME_EXTENSION_ID" \
+            --chrome-publisher-id "$CHROME_PUBLISHER_ID" \
+            --chrome-service-account-client-email "$chrome_client_email" \
+            --chrome-service-account-private-key "$chrome_private_key" \
+            --chrome-publish-type STAGED_PUBLISH \
+            --chrome-zip "$CHROME_ZIP"
+
+      - name: Download Firefox artifacts
+        if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: cantaro-extension-firefox-${{ needs.build-extension.outputs.version }}
+          path: .release/firefox
+
+      - name: Submit Firefox extension as unlisted
+        if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
+        working-directory: src/Cantaro.BrowserExtension
+        env:
+          FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
+          FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
+          FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+          FIREFOX_ZIP: ${{ github.workspace }}/.release/firefox/${{ needs.build-extension.outputs.firefox_filename }}
+          FIREFOX_SOURCES_ZIP: ${{ github.workspace }}/.release/firefox/${{ needs.build-extension.outputs.firefox_sources_filename }}
+        run: |
+          set -euo pipefail
+
+          manifest_extension_id=$(unzip -p "$FIREFOX_ZIP" manifest.json | node -e \
+            "let input=''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(JSON.parse(input).browser_specific_settings?.gecko?.id ?? ''));"
+          )
+          if [ "$manifest_extension_id" != "$FIREFOX_EXTENSION_ID" ]; then
+            echo "::error::Firefox credential ID $FIREFOX_EXTENSION_ID does not match manifest ID $manifest_extension_id."
+            exit 1
+          fi
+
+          bun wxt submit \
+            --firefox-channel unlisted \
+            --firefox-extension-id "$FIREFOX_EXTENSION_ID" \
+            --firefox-zip "$FIREFOX_ZIP" \
+            --firefox-sources-zip "$FIREFOX_SOURCES_ZIP"
+
+  tag-release:
+    name: Tag submitted extension version
+    if: >-
+      ${{
+        inputs.publish_extensions &&
+        inputs.create_tag &&
+        needs.publish-stores.result == 'success' &&
+        needs.publish-stores.outputs.any_submitted == 'true'
+      }}
+    needs:
+      - build-extension
+      - publish-stores
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code and tags
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create immutable extension version tag
+        env:
+          EXTENSION_VERSION: ${{ needs.build-extension.outputs.version }}
+          TARGET_SHA: ${{ github.sha }}
+          CHROME_SUBMITTED: ${{ needs.publish-stores.outputs.chrome_submitted }}
+          FIREFOX_SUBMITTED: ${{ needs.publish-stores.outputs.firefox_submitted }}
+        run: |
+          set -euo pipefail
+
+          TAG="extension/v$EXTENSION_VERSION"
+          EXISTING_SHA=$(git rev-parse "$TAG^{commit}" 2>/dev/null || true)
+
+          if [ -n "$EXISTING_SHA" ]; then
+            if [ "$EXISTING_SHA" != "$TARGET_SHA" ]; then
+              echo "::error::Tag $TAG already points to $EXISTING_SHA; refusing to move it to $TARGET_SHA."
+              exit 1
+            fi
+
+            echo "Tag $TAG already points to $TARGET_SHA."
+            exit 0
+          fi
+
+          stores=()
+          [ "$CHROME_SUBMITTED" = "true" ] && stores+=("Chrome")
+          [ "$FIREFOX_SUBMITTED" = "true" ] && stores+=("Firefox")
+          store_list=$(IFS=,; echo "${stores[*]}")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$TARGET_SHA" -m "Extension version $EXTENSION_VERSION submitted to $store_list"
+          git push origin "$TAG"
+          echo "Created and pushed tag $TAG for $TARGET_SHA."
