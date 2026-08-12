@@ -130,7 +130,7 @@ export interface MediaFranchiseNodeDto {
     episodeCount?: number;
     isInLibrary: boolean;
     viewerStatus?: string;
-    progressEpisodes?: number;
+    progressEpisodes?: number | null;
     isCurrent: boolean;
 }
 

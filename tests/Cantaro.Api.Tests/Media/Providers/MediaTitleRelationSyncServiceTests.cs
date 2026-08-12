@@ -61,6 +61,35 @@ public sealed class MediaTitleRelationSyncServiceTests
         Assert.True(complete.IsComplete);
         Assert.Equal(1, complete.RemovedRelations);
         Assert.Empty(await dbContext.MediaTitleRelations.ToListAsync());
+        Assert.All(
+            await dbContext.MediaProviderLinks.ToListAsync(),
+            link => Assert.NotNull(link.RelationsLastVerifiedAt));
+    }
+
+    [Fact]
+    public async Task SyncAsync_RecordsFreshnessForCompleteGraphWithoutRelations()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var service = new MediaTitleRelationSyncService(
+            dbContext,
+            NullLogger<MediaTitleRelationSyncService>.Instance);
+        var provider = new StubRelationGraphProvider(
+            CreateSnapshot(isComplete: true, includeEdge: false));
+
+        var result = await service.SyncAsync(42, provider, "200", CancellationToken.None);
+
+        Assert.True(result.IsComplete);
+        Assert.Empty(await dbContext.MediaTitleRelations.ToListAsync());
+        Assert.All(
+            await dbContext.MediaProviderLinks.ToListAsync(),
+            link => Assert.NotNull(link.RelationsLastVerifiedAt));
     }
 
     private static MediaProviderRelationGraphSnapshot CreateSnapshot(bool isComplete, bool includeEdge)

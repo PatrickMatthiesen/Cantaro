@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('franchise graph API', () => {
-  it('loads the graph from the library entry franchise endpoint', async () => {
+  it('loads the graph from the canonical media title endpoint', async () => {
     let requestedUrl = '';
     globalThis.fetch = (input) => {
       requestedUrl = String(input);
@@ -27,9 +27,8 @@ describe('franchise graph API', () => {
     };
     configureMediaApi(() => ({ baseUrl: 'https://cantaro.test/', includeCredentials: true }));
 
-    await mediaApi.getFranchiseGraph('entry / 1');
+    await mediaApi.getFranchiseGraph('title / 1');
 
-    expect(requestedUrl).toBe('https://cantaro.test/api/media/library/entry%20%2F%201/franchise');
+    expect(requestedUrl).toBe('https://cantaro.test/api/media/titles/title%20%2F%201/franchise');
   });
 });
-

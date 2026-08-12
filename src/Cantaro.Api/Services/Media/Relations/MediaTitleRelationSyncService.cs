@@ -92,6 +92,14 @@ public sealed class MediaTitleRelationSyncService(
             .Select(id => titlesByProviderId[id].Id)
             .Distinct()
             .ToList();
+        foreach (var providerMediaId in snapshot.RefreshedProviderMediaIds)
+        {
+            if (existingLinks.TryGetValue(providerMediaId, out var refreshedLink))
+            {
+                refreshedLink.RelationsLastVerifiedAt = now;
+            }
+        }
+
         var existingRelations = await _dbContext.MediaTitleRelations
             .Where(relation => relation.SourceProvider == snapshot.ProviderId
                 && sourceTitleIds.Contains(relation.MediaTitleId))

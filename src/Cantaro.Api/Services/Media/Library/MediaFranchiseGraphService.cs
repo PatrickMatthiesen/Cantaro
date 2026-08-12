@@ -50,6 +50,8 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             frontier = nextFrontier;
         }
 
+        var traversalIsComplete = frontier.Count == 0;
+
         var selectedIds = titleIds.ToArray();
         var titles = await _dbContext.MediaTitles
             .AsNoTracking()
@@ -76,7 +78,7 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             .ThenBy(relation => relation.MediaTitleId)
             .ThenBy(relation => relation.RelatedMediaTitleId)
             .ToList();
-        var continuity = BuildContinuity(mediaTitleId, titles, graphRelations);
+        var continuity = BuildContinuity(mediaTitleId, titles, graphRelations, traversalIsComplete);
 
         var nodes = titles.Values
             .Where(title => links.ContainsKey(title.Id) || title.Id == mediaTitleId)
@@ -111,9 +113,7 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         {
             CurrentMediaTitleId = mediaTitleId,
             SourceProvider = AniListProvider,
-            RefreshedAt = graphRelations.Count == 0
-                ? links.GetValueOrDefault(mediaTitleId)?.LastVerifiedAt
-                : graphRelations.Max(relation => relation.LastVerifiedAt),
+            RefreshedAt = links.GetValueOrDefault(mediaTitleId)?.RelationsLastVerifiedAt,
             Nodes = nodes,
             Relations = graphRelations.Select(relation => new MediaFranchiseRelationDto
             {
@@ -140,7 +140,8 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
     private static MediaEpisodeContinuityDto BuildContinuity(
         Guid currentTitleId,
         IReadOnlyDictionary<Guid, MediaTitle> titles,
-        IReadOnlyCollection<MediaTitleRelation> relations)
+        IReadOnlyCollection<MediaTitleRelation> relations,
+        bool traversalIsComplete)
     {
         var directedEdges = relations
             .Where(relation => IsContinuityRelation(relation, titles))
@@ -174,7 +175,8 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         var nextByNode = directedEdges
             .GroupBy(edge => edge.Earlier)
             .ToDictionary(group => group.Key, group => group.Select(edge => edge.Later).Distinct().ToList());
-        var isComplete = previousByNode.Values.All(values => values.Count <= 1)
+        var isComplete = traversalIsComplete
+            && previousByNode.Values.All(values => values.Count <= 1)
             && nextByNode.Values.All(values => values.Count <= 1);
 
         var before = new List<Guid>();

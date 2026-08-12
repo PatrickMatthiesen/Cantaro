@@ -14,9 +14,10 @@ import type {
   MediaLibraryImportEventDto,
   MediaProviderLinkSummaryDto,
   MediaTitleDetailDto,
+  MediaViewerProviderBindingDto,
   MediaViewerStateDto,
 } from '../../services/mediaApi';
-import type { ContinueWatchingState, EpisodeCatalogState, FranchiseGraphState, StatusDraft } from './mediaEntryDetailTypes';
+import type { ContinueWatchingState, EpisodeCatalogState, StatusDraft } from './mediaEntryDetailTypes';
 
 function getErrorMessage(error: unknown, fallbackMessage: string): string {
   return error instanceof Error ? error.message : fallbackMessage;
@@ -91,32 +92,73 @@ export function useTimedSnackbar(timeoutMs = 3000) {
   return { snackbar, showSnackbar };
 }
 
+function getPrimaryBinding(viewer: MediaViewerStateDto | null): MediaViewerProviderBindingDto | undefined {
+  if (!viewer) return undefined;
+  return viewer.providerBindings.find((binding) => binding.isConnected)
+    ?? viewer.providerBindings[0];
+}
+
+function composeViewerProjection(viewer: MediaViewerStateDto | null) {
+  if (!viewer) {
+    return {
+      id: '',
+      isInLibrary: false,
+      status: 'planned',
+      providerListNames: [] as string[],
+      isConnected: false,
+    };
+  }
+
+  return {
+    id: viewer.id,
+    isInLibrary: true,
+    status: viewer.status,
+    providerListNames: viewer.providerBindings.flatMap((binding) => binding.providerListNames),
+    progressEpisodes: viewer.progressEpisodes,
+    progressChapters: viewer.progressChapters,
+    progressVolumes: viewer.progressVolumes,
+    isConnected: viewer.providerBindings.some((binding) => binding.isConnected),
+    updatedAt: viewer.updatedAt,
+  };
+}
+
+function composeProviderProjection(
+  title: MediaTitleDetailDto,
+  primaryBinding: MediaViewerProviderBindingDto | undefined,
+) {
+  if (primaryBinding) {
+    return {
+      provider: primaryBinding.provider,
+      providerMediaId: primaryBinding.providerMediaId,
+      lastSyncedAt: primaryBinding.lastSyncedAt,
+      lastRemoteUpdateAt: primaryBinding.lastRemoteUpdateAt,
+    };
+  }
+
+  const titleProvider = title.providerLinks[0];
+  return {
+    provider: titleProvider?.provider ?? '',
+    providerMediaId: titleProvider?.externalId ?? '',
+  };
+}
+
 function composeEntry(
   title: MediaTitleDetailDto,
   viewer: MediaViewerStateDto | null,
   viewerStateStatus: MediaEntryDetailModel['viewerStateStatus'] = 'loaded',
 ): MediaEntryDetailModel {
-  const primaryBinding = viewer?.providerBindings.find((binding) => binding.isConnected)
-    ?? viewer?.providerBindings[0];
+  const primaryBinding = getPrimaryBinding(viewer);
+  const viewerProjection = composeViewerProjection(viewer);
+  const providerProjection = composeProviderProjection(title, primaryBinding);
   return {
-    id: viewer?.id ?? '',
+    ...viewerProjection,
+    ...providerProjection,
     mediaTitleId: title.id,
     viewerStateStatus,
-    isInLibrary: viewer !== null,
     title,
-    provider: primaryBinding?.provider ?? title.providerLinks[0]?.provider ?? '',
-    providerMediaId: primaryBinding?.providerMediaId ?? title.providerLinks[0]?.externalId ?? '',
-    status: viewer?.status ?? 'planned',
-    providerListNames: viewer?.providerBindings.flatMap((binding) => binding.providerListNames) ?? [],
-    progressEpisodes: viewer?.progressEpisodes,
-    progressChapters: viewer?.progressChapters,
-    progressVolumes: viewer?.progressVolumes,
-    isConnected: viewer?.providerBindings.some((binding) => binding.isConnected) ?? false,
     nextReleaseAt: title.nextReleaseAt,
     nextReleaseLabel: title.nextReleaseLabel,
-    lastSyncedAt: primaryBinding?.lastSyncedAt,
-    lastRemoteUpdateAt: primaryBinding?.lastRemoteUpdateAt,
-    updatedAt: viewer?.updatedAt ?? title.updatedAt,
+    updatedAt: viewerProjection.updatedAt ?? title.updatedAt,
     providerLinks: title.providerLinks,
   };
 }
@@ -279,9 +321,17 @@ export function useContinueWatching(
   return state;
 }
 
-export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
-  const [state, setState] = useState<EpisodeCatalogState>({ status: 'loading' });
-  const mediaTitleId = entry?.mediaTitleId;
+type ReloadableResourceState<TValue, TError> =
+  | { status: 'loading' }
+  | { status: 'loaded'; value: TValue }
+  | TError;
+
+function useReloadableMediaResource<TValue, TError>(
+  mediaTitleId: string | undefined,
+  loader: (id: string) => Promise<TValue>,
+  createErrorState: (error: unknown) => TError,
+) {
+  const [state, setState] = useState<ReloadableResourceState<TValue, TError>>({ status: 'loading' });
 
   const reload = useCallback(() => {
     if (!mediaTitleId) {
@@ -290,10 +340,10 @@ export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
     }
 
     setState({ status: 'loading' });
-    void mediaApi.getEpisodes(mediaTitleId)
+    void loader(mediaTitleId)
       .then((value) => setState({ status: 'loaded', value }))
-      .catch(() => setState({ status: 'error' }));
-  }, [mediaTitleId]);
+      .catch((error) => setState(createErrorState(error)));
+  }, [createErrorState, loader, mediaTitleId]);
 
   useEffect(() => {
     reload();
@@ -302,30 +352,28 @@ export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
   return { state, reload };
 }
 
+const loadEpisodeCatalog = (mediaTitleId: string) => mediaApi.getEpisodes(mediaTitleId);
+const createEpisodeCatalogError = () => ({ status: 'error' as const });
+const loadFranchiseGraph = (mediaTitleId: string) => mediaApi.getFranchiseGraph(mediaTitleId);
+const createFranchiseGraphError = (error: unknown) => ({
+  status: 'error' as const,
+  error: getErrorMessage(error, 'Failed to load franchise connections'),
+});
+
+export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
+  return useReloadableMediaResource(
+    entry?.mediaTitleId,
+    loadEpisodeCatalog,
+    createEpisodeCatalogError,
+  );
+}
+
 export function useFranchiseGraph(entry: MediaEntryDetailModel | null) {
-  const [state, setState] = useState<FranchiseGraphState>({ status: 'loading' });
-  const mediaTitleId = entry?.mediaTitleId;
-
-  const reload = useCallback(() => {
-    if (!mediaTitleId) {
-      setState({ status: 'loading' });
-      return;
-    }
-
-    setState({ status: 'loading' });
-    void mediaApi.getFranchiseGraph(mediaTitleId)
-      .then((value) => setState({ status: 'loaded', value }))
-      .catch((error) => setState({
-        status: 'error',
-        error: getErrorMessage(error, 'Failed to load franchise connections'),
-      }));
-  }, [mediaTitleId]);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  return { state, reload };
+  return useReloadableMediaResource(
+    entry?.mediaTitleId,
+    loadFranchiseGraph,
+    createFranchiseGraphError,
+  );
 }
 
 export function useRemoteEntryRefresh(

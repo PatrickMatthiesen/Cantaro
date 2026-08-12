@@ -82,7 +82,7 @@ public sealed class MediaFranchiseGraphServiceTests
     }
 
     [Fact]
-    public async Task GetAsync_ReturnsGlobalGraphWithoutAnotherUsersViewerState()
+    public async Task GetAsync_ReturnsGlobalGraphWithoutLeakingViewerState()
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -100,6 +100,40 @@ public sealed class MediaFranchiseGraphServiceTests
 
         Assert.NotNull(graph);
         Assert.False(Assert.Single(graph.Nodes).IsInLibrary);
+
+        var anonymousGraph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, title.Id, CancellationToken.None);
+
+        Assert.NotNull(anonymousGraph);
+        var anonymousNode = Assert.Single(anonymousGraph.Nodes);
+        Assert.False(anonymousNode.IsInLibrary);
+        Assert.Null(anonymousNode.ViewerStatus);
+        Assert.Null(anonymousNode.ProgressEpisodes);
+    }
+
+    [Fact]
+    public async Task GetAsync_MarksContinuityIncompleteWhenTraversalIsBounded()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var titles = Enumerable.Range(1, 10)
+            .Select(index => CreateTitle($"Season {index}", "TV", 12, 2020 + index, now))
+            .ToList();
+        db.MediaTitles.AddRange(titles);
+        db.MediaProviderLinks.AddRange(titles.Select((title, index) => CreateLink(title, $"bounded-{index}", now)));
+        db.MediaTitleRelations.AddRange(titles
+            .Zip(titles.Skip(1))
+            .Select(pair => CreateRelation(pair.First, pair.Second, MediaRelationTypes.Sequel, now)));
+        await db.SaveChangesAsync();
+
+        var graph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, titles[0].Id, CancellationToken.None);
+
+        Assert.NotNull(graph);
+        Assert.False(graph.Continuity.IsComplete);
+        Assert.True(graph.Continuity.OrderedMediaTitleIds.Count < titles.Count);
     }
 
     private static async Task<(ApplicationDbContext Db, SqliteConnection Connection)> CreateDbAsync()

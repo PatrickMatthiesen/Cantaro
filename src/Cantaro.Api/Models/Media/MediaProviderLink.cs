@@ -28,6 +28,13 @@ public class MediaProviderLink
 
     public DateTimeOffset? LastVerifiedAt { get; set; }
 
+    /// <summary>
+    /// Last time this provider identity's outgoing relation collection was read.
+    /// This is distinct from identity verification so an empty relation graph can
+    /// still be cached without inventing an edge row.
+    /// </summary>
+    public DateTimeOffset? RelationsLastVerifiedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

@@ -52,7 +52,7 @@ function nodeMetadata(node: MediaFranchiseNodeDto): string {
 
 function libraryDetail(node: MediaFranchiseNodeDto): string {
   const status = libraryStatusLabel(node.viewerStatus);
-  const progress = node.progressEpisodes !== undefined
+  const progress = node.progressEpisodes != null
     ? `${node.progressEpisodes}${node.episodeCount ? `/${node.episodeCount}` : ''} episodes`
     : null;
   return [status, progress].filter(Boolean).join(' · ') || 'In your library';

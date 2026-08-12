@@ -38,7 +38,7 @@ public sealed class MediaFranchiseController(
             .Where(title => title.Id == mediaTitleId)
             .SelectMany(title => title.ProviderLinks)
             .Where(link => link.Provider == AniListProvider)
-            .Select(link => new { link.MediaTitleId, link.ExternalId })
+            .Select(link => new { link.MediaTitleId, link.ExternalId, link.RelationsLastVerifiedAt })
             .SingleOrDefaultAsync(cancellationToken);
 
         if (root is null)
@@ -50,12 +50,7 @@ public sealed class MediaFranchiseController(
         }
 
         var freshnessCutoff = DateTimeOffset.UtcNow.AddHours(-6);
-        var hasFreshGraph = await _dbContext.MediaTitleRelations
-            .AsNoTracking()
-            .AnyAsync(relation => relation.MediaTitleId == root.MediaTitleId
-                && relation.SourceProvider == AniListProvider
-                && relation.LastVerifiedAt >= freshnessCutoff,
-                cancellationToken);
+        var hasFreshGraph = root.RelationsLastVerifiedAt >= freshnessCutoff;
         if (user is not null
             && !hasFreshGraph
             && _mediaProviderRegistry.GetRequired(AniListProvider) is IMediaRelationGraphProvider relationProvider)

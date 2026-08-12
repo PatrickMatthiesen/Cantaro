@@ -141,15 +141,27 @@ function ProgressControls({
   );
 }
 
+function StatusSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select name="status" value={value} onChange={(event) => onChange(event.target.value)}>
+      {NORMALIZED_STATUSES.map((status) => (
+        <option key={status.value} value={status.value}>{status.label}</option>
+      ))}
+    </select>
+  );
+}
+
 function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
   return (
     <div className="media-detail-score-row">
       <div className="media-detail-status-control">
-        <select name="status" value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
-          {NORMALIZED_STATUSES.map((status) => (
-            <option key={status.value} value={status.value}>{status.label}</option>
-          ))}
-        </select>
+        <StatusSelect value={props.selectedStatus} onChange={props.onSetSelectedStatus} />
         <button
           type="button"
           className="media-detail-refresh-status"
@@ -202,11 +214,7 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
           <h2>Track this title</h2>
           <p>The title and its provider links are already part of Cantaro. Adding it only creates your personal progress state.</p>
         </div>
-        <select name="status" value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
-          {NORMALIZED_STATUSES.map((status) => (
-            <option key={status.value} value={status.value}>{status.label}</option>
-          ))}
-        </select>
+        <StatusSelect value={props.selectedStatus} onChange={props.onSetSelectedStatus} />
         <button
           type="button"
           className="media-detail-primary-action"
