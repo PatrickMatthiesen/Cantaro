@@ -158,7 +158,12 @@ public class MediaLibraryApiTests
             Titles = new MediaTitlesController(
                 db,
                 query,
-                new MediaEpisodeIdentityService(db, NullLogger<MediaEpisodeIdentityService>.Instance),
+                new MediaEpisodeIdentityService(
+                    db,
+                    new MediaProviderSeasonMappingService(
+                        db,
+                        NullLogger<MediaProviderSeasonMappingService>.Instance),
+                    NullLogger<MediaEpisodeIdentityService>.Instance),
                 new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance),
                 manager);
             var principal = new ClaimsPrincipal(new ClaimsIdentity(

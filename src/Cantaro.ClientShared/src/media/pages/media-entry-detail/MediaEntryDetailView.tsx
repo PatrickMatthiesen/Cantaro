@@ -18,10 +18,10 @@ import { EpisodesSection } from './EpisodesSection';
 import {
   CharactersSection,
   CommunitySection,
-  FranchiseSection,
   InformationSection,
   ProviderSection,
 } from './MediaDetailSections';
+import { FranchiseSection } from './FranchiseSection';
 import { getEntryStatusChanged, getPrimaryProgressSummary } from './mediaEntryDetailModel';
 import { DetailTabs } from './DetailTabs';
 import {
@@ -39,6 +39,7 @@ function MediaDetailTabPanel({
   streamingDestinations,
   preferredServiceId,
   onSelectStreamingService,
+  onViewFullFranchise,
 }: {
   activeTab: DetailTabId;
   props: MediaEntryDetailContentProps;
@@ -46,11 +47,18 @@ function MediaDetailTabPanel({
   streamingDestinations: MediaStreamingDestinations;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
+  onViewFullFranchise: () => void;
 }) {
   const panels: Record<DetailTabId, ReactNode> = {
     overview: (
       <div role="tabpanel" id="media-detail-panel-overview" aria-labelledby="media-detail-tab-overview">
-        <FranchiseSection entry={props.entry} />
+        <FranchiseSection
+          state={props.franchiseGraph}
+          variant="preview"
+          onRetry={props.onReloadFranchise}
+          onViewAll={onViewFullFranchise}
+          onNavigateTitle={props.onNavigateTitle}
+        />
         <CharactersSection entry={props.entry} availabilityByProviderLink={props.availabilityByProviderLink} />
         <div className="media-detail-overview-meta-grid">
           <InformationSection entry={props.entry} />
@@ -88,7 +96,12 @@ function MediaDetailTabPanel({
     ),
     franchise: (
       <div role="tabpanel" id="media-detail-panel-franchise" aria-labelledby="media-detail-tab-franchise">
-        <FranchiseSection entry={props.entry} />
+        <FranchiseSection
+          state={props.franchiseGraph}
+          variant="full"
+          onRetry={props.onReloadFranchise}
+          onNavigateTitle={props.onNavigateTitle}
+        />
       </div>
     ),
     characters: (
@@ -163,6 +176,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 streamingDestinations={streamingDestinations}
                 preferredServiceId={preferredServiceId}
                 onSelectStreamingService={setPreferredServiceId}
+                onViewFullFranchise={() => setActiveTab('franchise')}
               />
             </section>
           </div>

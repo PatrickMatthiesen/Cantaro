@@ -38,6 +38,53 @@ function availabilityText(availability?: ProviderAvailabilityState) {
   return availability.links.length > 0 ? `${availability.links.length} options` : 'Linked';
 }
 
+function ProviderCard({
+  link,
+  availability,
+  canManageLinks,
+  isUnlinking,
+  onUnlink,
+}: {
+  link: MediaProviderLinkSummaryDto;
+  availability?: ProviderAvailabilityState;
+  canManageLinks: boolean;
+  isUnlinking: boolean;
+  onUnlink: (providerId: string) => void;
+}) {
+  const catalog = mediaProviderCatalog.find((provider) => provider.id === link.provider);
+  return (
+    <article className="media-detail-provider-card">
+      {catalog
+        ? <MediaProviderIcon providerId={catalog.iconId} aria-hidden />
+        : <span className="media-detail-provider-letter">{link.provider.slice(0, 1).toUpperCase()}</span>}
+      <div>
+        <h4>{providerLabel(link.provider)}</h4>
+        <p>{availabilityText(availability)}</p>
+        {link.externalUrl ? <a href={link.externalUrl} target="_blank" rel="noopener noreferrer">Open</a> : null}
+      </div>
+      {canManageLinks ? (
+        <button type="button" onClick={() => onUnlink(link.provider)} disabled={isUnlinking}>
+          {isUnlinking ? '...' : 'Unlink'}
+        </button>
+      ) : null}
+      <CircleCheck aria-hidden className="media-detail-provider-check" />
+    </article>
+  );
+}
+
+function EmptyProviderState({ canManageLinks, onLinkProvider }: {
+  canManageLinks: boolean;
+  onLinkProvider: () => void;
+}) {
+  if (!canManageLinks) return <p>No provider identities are known for this title.</p>;
+  return (
+    <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
+      <Plus aria-hidden />
+      Link a provider to show availability.
+    </button>
+  );
+}
+
 export function ProviderSection({
   providerLinks,
   availabilityByProviderLink,
@@ -62,32 +109,20 @@ export function ProviderSection({
     <section className="media-detail-section">
       <SectionHeading title="Provider identities" action={canManageLinks ? 'Manage links' : undefined} onAction={canManageLinks ? onLinkProvider : undefined} />
       {providerLinks.length === 0 ? (
-        canManageLinks ? (
-          <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
-            <Plus aria-hidden />
-            Link a provider to show availability.
-          </button>
-        ) : <p>No provider identities are known for this title.</p>
+        <EmptyProviderState canManageLinks={canManageLinks} onLinkProvider={onLinkProvider} />
       ) : (
         <div className="media-detail-provider-grid">
           {visibleLinks.map((link) => {
             const availability = availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)];
-            const catalog = mediaProviderCatalog.find((provider) => provider.id === link.provider);
             return (
-              <article key={link.id} className="media-detail-provider-card">
-                {catalog ? <MediaProviderIcon providerId={catalog.iconId} aria-hidden /> : <span className="media-detail-provider-letter">{link.provider.slice(0, 1).toUpperCase()}</span>}
-                <div>
-                  <h4>{providerLabel(link.provider)}</h4>
-                  <p>{availabilityText(availability)}</p>
-                  {link.externalUrl ? <a href={link.externalUrl} target="_blank" rel="noopener noreferrer">Open</a> : null}
-                </div>
-                {canManageLinks ? (
-                  <button type="button" onClick={() => onUnlink(link.provider)} disabled={unlinkingId === link.provider}>
-                    {unlinkingId === link.provider ? '...' : 'Unlink'}
-                  </button>
-                ) : null}
-                <CircleCheck aria-hidden className="media-detail-provider-check" />
-              </article>
+              <ProviderCard
+                key={link.id}
+                link={link}
+                availability={availability}
+                canManageLinks={canManageLinks}
+                isUnlinking={unlinkingId === link.provider}
+                onUnlink={onUnlink}
+              />
             );
           })}
           {hiddenCount > 0 ? (
@@ -110,38 +145,6 @@ function SectionHeading({ title, action, onAction }: { title: string; action?: s
       <h3>{title}</h3>
       {action ? <button type="button" onClick={onAction}>{action}</button> : null}
     </div>
-  );
-}
-
-export function FranchiseSection({ entry }: { entry: MediaEntryDetailModel }) {
-  const { title } = entry;
-  const items = [
-    { title: title.canonicalTitle, subtitle: title.episodeCount ? `${title.episodeCount} episodes` : 'Current entry', active: true },
-    { title: `${title.canonicalTitle} extras`, subtitle: 'Related media', active: false },
-    { title: `${title.canonicalTitle} specials`, subtitle: 'Upcoming', active: false },
-  ];
-
-  return (
-    <section className="media-detail-section">
-      <SectionHeading title="Franchise Order" />
-      <div className="media-detail-franchise-strip">
-        {items.map((item, index) => (
-          <div key={item.title} className="media-detail-franchise-item-wrap">
-            <article className={`media-detail-franchise-item ${item.active ? 'is-active' : ''}`}>
-              <div className="media-detail-franchise-thumb">
-                <DetailArtwork posterUrl={title.posterUrl} title={item.title} />
-              </div>
-              <div>
-                <h4>{item.title}</h4>
-                <p>{item.subtitle}</p>
-                <span>{item.active ? 'Watched' : 'Linked soon'}</span>
-              </div>
-            </article>
-            {index < items.length - 1 ? <span className="media-detail-franchise-arrow">→</span> : null}
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 

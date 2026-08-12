@@ -36,6 +36,12 @@ public class MediaEpisodeProviderIdentity
     public DateTimeOffset LastSeenAt { get; set; }
 
     /// <summary>
+    /// True only when the canonical episode assignment was established by an
+    /// explicit user resolution or an already-authoritative season mapping.
+    /// </summary>
+    public bool IsTrusted { get; set; }
+
+    /// <summary>
     /// Set when the same provider episode identity is observed against a
     /// different canonical episode. Conflicted identities are not resolved.
     /// </summary>

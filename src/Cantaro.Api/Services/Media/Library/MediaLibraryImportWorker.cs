@@ -4,10 +4,12 @@ namespace Cantaro.Api.Services;
 
 public sealed class MediaLibraryImportWorker(
     MediaLibraryImportQueue importQueue,
+    MediaRelationGraphRefreshQueue relationGraphRefreshQueue,
     IServiceScopeFactory serviceScopeFactory,
     ILogger<MediaLibraryImportWorker> logger) : BackgroundService
 {
     private readonly MediaLibraryImportQueue _importQueue = importQueue;
+    private readonly MediaRelationGraphRefreshQueue _relationGraphRefreshQueue = relationGraphRefreshQueue;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
     private readonly ILogger<MediaLibraryImportWorker> _logger = logger;
 
@@ -50,11 +52,28 @@ public sealed class MediaLibraryImportWorker(
 
         var importResult = await provider.ImportLibraryAsync(workItem.UserId, cancellationToken);
         var persisted = await importService.ImportAsync(workItem.UserId, account, importResult, cancellationToken);
+        if (provider is IMediaRelationGraphProvider relationProvider)
+        {
+            var animeProviderMediaIds = importResult.Items
+                .Where(item => item.MediaKind == MediaKinds.Anime)
+                .Select(item => item.ProviderMediaId)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            foreach (var providerMediaId in animeProviderMediaIds)
+            {
+                _relationGraphRefreshQueue.Enqueue(
+                    workItem.UserId,
+                    relationProvider.ProviderId,
+                    providerMediaId);
+            }
+        }
+
         try
         {
             await availabilitySyncService.SyncUserLibraryAsync(workItem.UserId, cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException
+            || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 exception,

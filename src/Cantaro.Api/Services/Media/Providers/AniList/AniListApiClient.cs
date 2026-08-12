@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -100,7 +101,9 @@ public class AniListApiClient(
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("AniList GraphQL request failed with status {StatusCode}: {Body}", response.StatusCode, responseBody);
-            throw new InvalidOperationException($"AniList request failed with status {(int)response.StatusCode}.");
+            throw new AniListRequestException(
+                response.StatusCode,
+                GetRetryAfter(response));
         }
 
         var graphQlResponse = JsonSerializer.Deserialize<AniListGraphQlResponse<TData>>(responseBody, SerializerOptions)
@@ -113,6 +116,21 @@ public class AniListApiClient(
         }
 
         return graphQlResponse.Data ?? throw new InvalidOperationException("AniList returned an empty GraphQL response.");
+    }
+
+    private static TimeSpan? GetRetryAfter(HttpResponseMessage response)
+    {
+        if (response.Headers.RetryAfter?.Delta is { } delta)
+        {
+            return delta;
+        }
+
+        if (response.Headers.RetryAfter?.Date is { } date)
+        {
+            return date - DateTimeOffset.UtcNow;
+        }
+
+        return null;
     }
 
     public static string GenerateCodeVerifier()
@@ -157,6 +175,15 @@ public class AniListApiClient(
             throw new InvalidOperationException("AniList OAuth is not configured. Set AniList:ClientId before connecting a provider.");
         }
     }
+}
+
+public sealed class AniListRequestException(
+    HttpStatusCode statusCode,
+    TimeSpan? retryAfter) : InvalidOperationException(
+        $"AniList request failed with status {(int)statusCode}.")
+{
+    public HttpStatusCode StatusCode { get; } = statusCode;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 
 public class AniListTokenResponse

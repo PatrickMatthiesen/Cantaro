@@ -4,6 +4,7 @@ import type {
   MediaContinueWatchingDto,
   MediaEpisodeCatalogDto,
   MediaEntryDetailModel,
+  MediaFranchiseGraphDto,
 } from '../../services/mediaApi';
 
 export const DETAIL_TABS = [
@@ -42,6 +43,11 @@ export type EpisodeCatalogState =
   | { status: 'loaded'; value: MediaEpisodeCatalogDto }
   | { status: 'error' };
 
+export type FranchiseGraphState =
+  | { status: 'loading' }
+  | { status: 'loaded'; value: MediaFranchiseGraphDto }
+  | { status: 'error'; error: string };
+
 export interface MediaEntryDetailContentProps {
   mediaTitleId: string;
   entry: MediaEntryDetailModel;
@@ -58,7 +64,9 @@ export interface MediaEntryDetailContentProps {
   selectedStatus: string;
   continueWatching: ContinueWatchingState;
   episodeCatalog: EpisodeCatalogState;
+  franchiseGraph: FranchiseGraphState;
   onNavigateBack: () => void;
+  onNavigateTitle?: (mediaTitleId: string) => void;
   onLoadEntry: () => Promise<void>;
   onSetShowLinkDialog: (visible: boolean) => void;
   onSetProgressEpisodes: (value: number) => void;
@@ -70,6 +78,7 @@ export interface MediaEntryDetailContentProps {
   onAddToLibrary: () => void;
   onUnlink: (providerId: string) => void;
   onReloadEpisodes: () => void;
+  onReloadFranchise: () => void;
 }
 
 export interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProps, 'entry'> {

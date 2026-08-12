@@ -6,6 +6,7 @@ import type {
     MediaApiRuntimeConfig,
     MediaViewerStateCreateDto,
     MediaImportRequestDto,
+    MediaFranchiseGraphDto,
     MediaTitleDetailDto,
     MediaViewerStateDto,
     MediaLibraryImportEventDto,
@@ -97,6 +98,14 @@ export class MediaApiClient {
         if (response.status === 401) return null;
         await this.ensureOk(response, 'Failed to load your media state');
         return response.json() as Promise<MediaViewerStateDto | null>;
+    }
+
+    async getFranchiseGraph(mediaTitleId: string): Promise<MediaFranchiseGraphDto> {
+        const response = await this.request(
+            `/api/media/titles/${encodeURIComponent(mediaTitleId)}/franchise`,
+        );
+        await this.ensureOk(response, 'Failed to load franchise connections');
+        return response.json() as Promise<MediaFranchiseGraphDto>;
     }
 
     async getContinueWatching(mediaTitleId: string): Promise<MediaContinueWatchingDto> {

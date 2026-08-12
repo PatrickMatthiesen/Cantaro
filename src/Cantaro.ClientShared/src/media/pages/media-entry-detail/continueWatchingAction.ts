@@ -117,7 +117,7 @@ export function getContinueLinkActions(
   preferredServiceId: StreamingServiceId | null,
   canonicalTitle: string,
 ): ContinueLinkAction[] {
-  if (state.status !== 'loaded' || state.value.outcome === 'completed') return [];
+  if (state.status !== 'loaded') return [];
   const candidates = destinationCandidates(state.value, seriesDestinations, episodeDestinations);
   const serviceIds = orderServiceIds([...candidates.episodes, ...candidates.series], preferredServiceId);
   const actions = serviceIds

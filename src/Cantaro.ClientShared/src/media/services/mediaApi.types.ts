@@ -107,6 +107,46 @@ export interface MediaEntryDetailModel {
     providerLinks: MediaProviderLinkSummaryDto[];
 }
 
+export interface MediaFranchiseGraphDto {
+    currentMediaTitleId: string;
+    sourceProvider: string;
+    refreshedAt?: string;
+    nodes: MediaFranchiseNodeDto[];
+    relations: MediaFranchiseRelationDto[];
+    continuity: MediaFranchiseContinuityDto;
+}
+
+export interface MediaFranchiseNodeDto {
+    mediaTitleId: string;
+    provider: string;
+    providerMediaId: string;
+    externalUrl?: string;
+    canonicalTitle: string;
+    originalTitle?: string;
+    posterUrl?: string;
+    mediaKind: string;
+    mediaFormat?: string;
+    startYear?: number;
+    episodeCount?: number;
+    isInLibrary: boolean;
+    viewerStatus?: string;
+    progressEpisodes?: number | null;
+    isCurrent: boolean;
+}
+
+export interface MediaFranchiseRelationDto {
+    sourceMediaTitleId: string;
+    targetMediaTitleId: string;
+    relationType: string;
+    isEpisodeContinuity: boolean;
+}
+
+export interface MediaFranchiseContinuityDto {
+    orderedMediaTitleIds: string[];
+    episodeOffsetByMediaTitleId: Record<string, number>;
+    isComplete: boolean;
+}
+
 export interface MediaProviderLinkSummaryDto {
     id: string;
     provider: string;

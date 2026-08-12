@@ -11,6 +11,8 @@ namespace Cantaro.Api.Services;
 /// </summary>
 public class MediaObservationMatchingService(
     ApplicationDbContext dbContext,
+    MediaProviderSeasonMappingService seasonMappingService,
+    MediaRelationGraphRefreshQueue relationGraphRefreshQueue,
     ILogger<MediaObservationMatchingService> logger)
 {
     private const decimal HighConfidenceThreshold = 0.85m;
@@ -18,6 +20,8 @@ public class MediaObservationMatchingService(
 
     private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
+    private readonly MediaRelationGraphRefreshQueue _relationGraphRefreshQueue = relationGraphRefreshQueue;
     private readonly ILogger<MediaObservationMatchingService> _logger = logger;
 
     /// <summary>
@@ -43,21 +47,37 @@ public class MediaObservationMatchingService(
         observation.MatchAttemptCount++;
         observation.LastMatchAttemptedAt = DateTimeOffset.UtcNow;
         observation.LastMatchError = null;
+        observation.EpisodeOffset = null;
+        observation.ResolvedProgress = null;
 
         try
         {
-            var candidates = await GenerateCandidatesAsync(observation, cancellationToken);
-
-            // Remove stale candidates from previous runs.
-            _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
-            observation.Candidates.Clear();
-
-            foreach (var candidate in candidates)
+            if (!await TryApplyProviderEpisodeIdentityCoreAsync(observation, cancellationToken))
             {
-                _dbContext.MediaObservationCandidates.Add(candidate);
-            }
+                var candidates = await GenerateCandidatesAsync(observation, cancellationToken);
 
-            ApplyMatchDecision(observation, candidates);
+                // Remove stale candidates from previous runs.
+                _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
+                observation.Candidates.Clear();
+
+                foreach (var candidate in candidates)
+                {
+                    _dbContext.MediaObservationCandidates.Add(candidate);
+                }
+
+                ApplyMatchDecision(observation, candidates);
+                if (observation.MatchStatus == MediaObservationStatuses.Matched
+                    && observation.MediaTitleId is { } matchedMediaTitleId)
+                {
+                    if (observation.EpisodeOffset is null)
+                    {
+                        observation.EpisodeOffset = await InferCumulativeEpisodeOffsetAsync(
+                            observation,
+                            matchedMediaTitleId,
+                            cancellationToken);
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -78,13 +98,144 @@ public class MediaObservationMatchingService(
         return observation;
     }
 
+    public async Task<bool> TryApplyProviderEpisodeIdentityAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        var applied = await TryApplyProviderEpisodeIdentityCoreAsync(observation, cancellationToken);
+        if (!applied)
+        {
+            return false;
+        }
+
+        observation.UpdatedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task<bool> TryApplyProviderEpisodeIdentityCoreAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(observation.SiteMediaId))
+        {
+            return false;
+        }
+
+        var provider = observation.SiteIdentifier.Trim().ToLowerInvariant();
+        var providerEpisodeId = provider == MediaObservationSiteIdentifiers.Crunchyroll
+            ? observation.SiteMediaId.Trim().ToUpperInvariant()
+            : observation.SiteMediaId.Trim();
+        var identity = await _dbContext.MediaEpisodeProviderIdentities
+            .Include(item => item.MediaEpisode)
+                .ThenInclude(episode => episode!.MediaTitle)
+            .FirstOrDefaultAsync(item =>
+                item.Provider == provider
+                && item.ProviderEpisodeId == providerEpisodeId,
+                cancellationToken);
+        var episode = identity?.MediaEpisode;
+        var title = episode?.MediaTitle;
+        if (identity is null || !identity.IsTrusted || episode is null || title is null
+            || !IsCompatibleEpisodeIdentity(identity, observation.RawPayload))
+        {
+            return false;
+        }
+
+        _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
+        observation.Candidates.Clear();
+        var candidate = new MediaObservationCandidate
+        {
+            Id = Guid.NewGuid(),
+            MediaObservationId = observation.Id,
+            CandidateSource = MediaObservationCandidateSources.ProviderEpisodeIdentityExact,
+            MediaTitleId = title.Id,
+            Title = title.CanonicalTitle,
+            MediaKind = title.MediaKind,
+            Score = 1m,
+            Explanation = $"Exact provider episode identity: {provider}/{providerEpisodeId}",
+            IsAccepted = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _dbContext.MediaObservationCandidates.Add(candidate);
+        observation.MatchStatus = MediaObservationStatuses.Matched;
+        observation.MediaTitleId = title.Id;
+        observation.MediaTitle = title;
+        observation.AcceptedCandidateId = candidate.Id;
+        observation.ResolutionNotes = $"Automatically matched by exact provider episode identity: {provider}/{providerEpisodeId}.";
+        if (MediaObservationProgressService.TryParseProgressHint(observation.ProgressHint, out var observedProgress))
+        {
+            observation.EpisodeOffset = episode.EpisodeNumber - observedProgress;
+            observation.ResolvedProgress = episode.EpisodeNumber;
+        }
+        identity.HasConflict = false;
+
+        _logger.LogInformation(
+            "Matched MediaObservation {ObservationId} through provider episode identity {Provider}/{ProviderEpisodeId}: title {MediaTitleId}, episode {EpisodeNumber}.",
+            observation.Id,
+            provider,
+            providerEpisodeId,
+            title.Id,
+            episode.EpisodeNumber);
+        return true;
+    }
+
+    private static bool IsCompatibleEpisodeIdentity(
+        MediaEpisodeProviderIdentity identity,
+        string? rawPayload)
+    {
+        if (!identity.HasConflict)
+        {
+            return true;
+        }
+
+        var payload = DeserializeRawPayload(rawPayload);
+        if (payload is null)
+        {
+            return false;
+        }
+
+        var seriesMatches = !string.IsNullOrWhiteSpace(identity.ProviderSeriesId)
+            && string.Equals(
+                identity.ProviderSeriesId,
+                payload.ProviderSeriesId,
+                StringComparison.OrdinalIgnoreCase);
+        var episodeMatches = identity.ProviderEpisodeNumber is > 0
+            && identity.ProviderEpisodeNumber == payload.EpisodeNumber;
+        return seriesMatches && episodeMatches;
+    }
+
+    private static ObservationRawPayload? DeserializeRawPayload(string? rawPayload)
+    {
+        if (string.IsNullOrWhiteSpace(rawPayload))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ObservationRawPayload>(rawPayload, RawPayloadJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private async Task<List<MediaObservationCandidate>> GenerateCandidatesAsync(
         MediaObservation observation,
         CancellationToken cancellationToken)
     {
         var candidates = new List<MediaObservationCandidate>();
 
-        // --- Strategy 1: exact provider link lookup via SiteMediaId ---
+        // --- Strategy 1: an established provider season/container mapping ---
+        var mappedCandidates = await FindByProviderSeasonMappingAsync(observation, cancellationToken);
+        candidates.AddRange(mappedCandidates);
+        if (mappedCandidates.Count > 0)
+        {
+            return mappedCandidates;
+        }
+
+        // --- Strategy 2: exact provider link lookup via SiteMediaId ---
         if (!string.IsNullOrWhiteSpace(observation.SiteMediaId))
         {
             var exactCandidates = await FindByProviderLinkAsync(
@@ -98,12 +249,12 @@ public class MediaObservationMatchingService(
             return [.. candidates.OrderByDescending(c => c.Score)];
         }
 
-        // --- Strategy 2: fuzzy title search against user library entries ---
+        // --- Strategy 3: fuzzy title search against user library entries ---
         var libraryCandidates = await FindByUserLibraryTitleAsync(
             observation, cancellationToken);
         MergeCandidates(candidates, libraryCandidates);
 
-        // --- Strategy 3: fuzzy title search against full catalog ---
+        // --- Strategy 4: fuzzy title search against full catalog ---
         var catalogCandidates = await FindByCatalogTitleAsync(
             observation, cancellationToken);
         MergeCandidates(candidates, catalogCandidates);
@@ -112,6 +263,45 @@ public class MediaObservationMatchingService(
             .Where(c => c.Score >= LowConfidenceThreshold)
             .OrderByDescending(c => c.Score)
             .Take(10)];
+    }
+
+    private async Task<List<MediaObservationCandidate>> FindByProviderSeasonMappingAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        var payload = DeserializeRawPayload(observation.RawPayload);
+        if (payload is null)
+        {
+            return [];
+        }
+
+        var mapping = await _seasonMappingService.FindAsync(
+            observation.SiteIdentifier,
+            payload.ProviderSeriesId,
+            payload.ProviderSeasonId,
+            payload.SeasonNumber,
+            cancellationToken);
+        if (mapping?.MediaTitle is null)
+        {
+            return [];
+        }
+
+        observation.EpisodeOffset = mapping.EpisodeOffset;
+        return
+        [
+            new MediaObservationCandidate
+            {
+                Id = Guid.NewGuid(),
+                MediaObservationId = observation.Id,
+                CandidateSource = MediaObservationCandidateSources.ProviderSeasonMappingExact,
+                MediaTitleId = mapping.MediaTitleId,
+                Title = mapping.MediaTitle.CanonicalTitle,
+                MediaKind = mapping.MediaTitle.MediaKind,
+                Score = 1m,
+                Explanation = $"Established provider season mapping: {mapping.Provider}/{mapping.ProviderSeriesId}",
+                CreatedAt = DateTimeOffset.UtcNow
+            }
+        ];
     }
 
     private async Task<List<MediaObservationCandidate>> FindByProviderLinkAsync(
@@ -177,12 +367,27 @@ public class MediaObservationMatchingService(
             .Select(e => e.MediaTitle!)
             .Distinct()
             .ToListAsync(cancellationToken);
+        libraryTitles = libraryTitles
+            .Select(title => new
+            {
+                Title = title,
+                Score = queryTitles.Select(NormalizeTitle)
+                    .Select(query => ComputeTitleScore(query, title))
+                    .DefaultIfEmpty(0m)
+                    .Max()
+            })
+            .Where(item => item.Score >= LowConfidenceThreshold)
+            .OrderByDescending(item => item.Score)
+            .Take(50)
+            .Select(item => item.Title)
+            .ToList();
 
-        return ScoreTitleCandidates(
+        return await ScoreTitleCandidatesAsync(
             observation,
             libraryTitles,
             queryTitles,
-            MediaObservationCandidateSources.LibraryTitleSearch);
+            MediaObservationCandidateSources.LibraryTitleSearch,
+            cancellationToken);
     }
 
     private async Task<List<MediaObservationCandidate>> FindByCatalogTitleAsync(
@@ -214,18 +419,44 @@ public class MediaObservationMatchingService(
                 .ToListAsync(cancellationToken));
         }
 
-        return ScoreTitleCandidates(
+        var distinctCandidates = candidates.DistinctBy(title => title.Id).ToList();
+        var anchorIds = distinctCandidates
+            .Select(title => new
+            {
+                title.Id,
+                Score = queryTitles.Select(NormalizeTitle)
+                    .Select(query => ComputeTitleScore(query, title))
+                    .DefaultIfEmpty(0m)
+                    .Max()
+            })
+            .Where(item => item.Score >= LowConfidenceThreshold)
+            .OrderByDescending(item => item.Score)
+            .Take(5)
+            .Select(item => item.Id)
+            .ToList();
+        if (anchorIds.Count > 0)
+        {
+            var relatedComponents = await LoadContinuitiesAsync(anchorIds, cancellationToken);
+            distinctCandidates = distinctCandidates
+                .Concat(relatedComponents.Values.SelectMany(component => component.Titles.Values))
+                .DistinctBy(title => title.Id)
+                .Take(50)
+                .ToList();
+        }
+        return await ScoreTitleCandidatesAsync(
             observation,
-            candidates.DistinctBy(title => title.Id),
+            distinctCandidates,
             queryTitles,
-            MediaObservationCandidateSources.CatalogTitleSearch);
+            MediaObservationCandidateSources.CatalogTitleSearch,
+            cancellationToken);
     }
 
-    private static List<MediaObservationCandidate> ScoreTitleCandidates(
+    private async Task<List<MediaObservationCandidate>> ScoreTitleCandidatesAsync(
         MediaObservation observation,
         IEnumerable<MediaTitle> titles,
         IReadOnlyList<string> queryTitles,
-        string source)
+        string source,
+        CancellationToken cancellationToken)
     {
         var result = new List<MediaObservationCandidate>();
         var candidateTitles = titles.DistinctBy(title => title.Id).ToList();
@@ -233,20 +464,25 @@ public class MediaObservationMatchingService(
             .Select(NormalizeTitle)
             .Where(query => !string.IsNullOrWhiteSpace(query))
             .ToList();
-        var catalogEvidence = ReadCatalogEvidence(observation);
-        var ordinalSeasonTargetId = FindOrdinalSeasonTarget(
-            candidateTitles,
+        var catalogEvidence = ReadEpisodeEvidence(observation);
+        var rawPayload = DeserializeRawPayload(observation.RawPayload);
+        var hasProviderSeasonContext = !string.IsNullOrWhiteSpace(rawPayload?.ProviderSeasonId)
+            || rawPayload?.SeasonNumber is > 0;
+        var candidateOffsets = await FindCandidateEpisodeOffsetsAsync(
+            observation.UserId,
+            candidateTitles.Select(title => title.Id).ToList(),
             catalogEvidence,
-            TryReadRawSeriesTitle(observation.RawPayload));
-
+            cancellationToken);
+        var ambiguousContinuityTitleIds = candidateOffsets
+            .Where(item => item.Value.IsAmbiguous)
+            .Select(item => item.Key)
+            .ToHashSet();
         foreach (var title in candidateTitles)
         {
-            if (catalogEvidence?.HighestEpisodeNumber is int highestEpisodeNumber
-                && title.EpisodeCount is int episodeCount
-                && episodeCount < highestEpisodeNumber)
+            if (catalogEvidence?.HighestEpisodeNumber is > 0
+                && title.EpisodeCount is > 0
+                && !candidateOffsets.ContainsKey(title.Id))
             {
-                // A rendered provider episode is direct evidence that this
-                // observation cannot belong to a shorter AniList split title.
                 continue;
             }
 
@@ -255,28 +491,28 @@ public class MediaObservationMatchingService(
                 .DefaultIfEmpty(0m)
                 .Max();
 
-            if (ordinalSeasonTargetId is not null)
-            {
-                // The provider's explicit season ordinal is stronger than the
-                // aggregate series title, which otherwise makes season one an
-                // exact-title winner for every Crunchyroll season.
-                score = title.Id == ordinalSeasonTargetId
-                    ? 0.98m
-                    : Math.Min(score, 0.94m);
-            }
-
-            if (catalogEvidence?.HighestEpisodeNumber is int observedEpisodeNumber
-                && title.EpisodeCount is int candidateEpisodeCount
-                && candidateEpisodeCount >= observedEpisodeNumber
-                && ordinalSeasonTargetId is null
+            if (catalogEvidence?.HighestEpisodeNumber is > 0
+                && candidateOffsets.TryGetValue(title.Id, out var offsetEvidence)
+                && offsetEvidence.EpisodeOffset < 0
                 && score >= LowConfidenceThreshold)
             {
-                // Crunchyroll commonly groups several seasons under one series
-                // title while AniList stores each cour/season separately. Once
-                // the observed episode number rules out the exact base-title
-                // match, a related title that can actually contain the episode
-                // is materially stronger than title similarity alone.
                 score = Math.Max(score, Math.Min(0.94m, score + 0.45m));
+            }
+
+            if (ambiguousContinuityTitleIds.Contains(title.Id))
+            {
+                // Title text may discover a franchise candidate, but it cannot
+                // establish which provider season maps to which graph node.
+                score = Math.Min(score, HighConfidenceThreshold - 0.01m);
+            }
+
+            if (hasProviderSeasonContext
+                && catalogEvidence?.HighestEpisodeNumber is > 0
+                && title.EpisodeCount is null)
+            {
+                // Unknown bounds cannot prove that provider episode numbers map
+                // into this canonical title, so do not establish a mapping yet.
+                score = Math.Min(score, HighConfidenceThreshold - 0.01m);
             }
 
             if (score < 0.01m)
@@ -293,7 +529,9 @@ public class MediaObservationMatchingService(
                 Title = title.CanonicalTitle,
                 MediaKind = title.MediaKind,
                 Score = score,
-                Explanation = $"Title similarity ({source}): {score:P0}",
+                Explanation = candidateOffsets.TryGetValue(title.Id, out var episodeEvidence)
+                    ? $"Title and episode-range evidence ({source}, offset {episodeEvidence.EpisodeOffset}): {score:P0}"
+                    : $"Title similarity ({source}): {score:P0}",
                 CreatedAt = DateTimeOffset.UtcNow
             });
         }
@@ -327,10 +565,13 @@ public class MediaObservationMatchingService(
         }
     }
 
-    private static CatalogEvidence? ReadCatalogEvidence(MediaObservation observation)
+    private static CatalogEvidence? ReadEpisodeEvidence(MediaObservation observation)
     {
         if (string.IsNullOrWhiteSpace(observation.RawPayload)
-            || observation.SiteMediaId?.StartsWith("catalog:", StringComparison.OrdinalIgnoreCase) != true)
+            || !string.Equals(
+                observation.SiteIdentifier,
+                MediaObservationSiteIdentifiers.Crunchyroll,
+                StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -340,13 +581,19 @@ public class MediaObservationMatchingService(
             var payload = JsonSerializer.Deserialize<ObservationRawPayload>(
                 observation.RawPayload,
                 RawPayloadJsonOptions);
-            var highestEpisodeNumber = payload?.Episodes?
+            var episodeNumbers = (payload?.ObservedEpisodes ?? payload?.Episodes)?
                 .Where(episode => episode.EpisodeNumber > 0)
                 .Select(episode => episode.EpisodeNumber)
-                .DefaultIfEmpty()
-                .Max();
+                .ToList() ?? [];
+            if (payload?.EpisodeNumber is > 0)
+            {
+                episodeNumbers.Add(payload.EpisodeNumber.Value);
+            }
+
+            var lowestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Min() : (int?)null;
+            var highestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Max() : (int?)null;
             return highestEpisodeNumber > 0 || payload?.SeasonNumber is > 0
-                ? new CatalogEvidence(payload?.SeasonNumber, highestEpisodeNumber > 0 ? highestEpisodeNumber : null)
+                ? new CatalogEvidence(payload?.SeasonNumber, lowestEpisodeNumber, highestEpisodeNumber)
                 : null;
         }
         catch (JsonException)
@@ -355,34 +602,314 @@ public class MediaObservationMatchingService(
         }
     }
 
-    private static Guid? FindOrdinalSeasonTarget(
-        IReadOnlyCollection<MediaTitle> titles,
-        CatalogEvidence? evidence,
-        string? seriesTitle)
+    private async Task<int?> InferCumulativeEpisodeOffsetAsync(
+        MediaObservation observation,
+        Guid matchedMediaTitleId,
+        CancellationToken cancellationToken)
     {
-        if (evidence?.SeasonNumber is not > 0 || string.IsNullOrWhiteSpace(seriesTitle))
+        var evidence = ReadEpisodeEvidence(observation);
+        if (evidence?.LowestEpisodeNumber is not > 0
+            || evidence.HighestEpisodeNumber is not > 0)
         {
             return null;
         }
 
-        var normalizedSeriesTitle = NormalizeTitle(seriesTitle);
-        var relatedTvTitles = titles
-            .Where(title => title.MediaKind == MediaKinds.Anime
-                && title.StartYear is not null
-                && IsTvSeries(title.Format)
-                && ComputeTitleScore(normalizedSeriesTitle, title) >= LowConfidenceThreshold)
-            .OrderBy(title => title.StartYear)
-            .ThenBy(title => title.CanonicalTitle, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var continuity = await LoadContinuityAsync([matchedMediaTitleId], cancellationToken);
+        if (!continuity.IsComplete
+            || !continuity.OrderedTitleIds.Contains(matchedMediaTitleId)
+            || !continuity.Titles.TryGetValue(matchedMediaTitleId, out var matchedTitle)
+            || matchedTitle.EpisodeCount is not > 0)
+        {
+            return null;
+        }
 
-        var seasonIndex = evidence.SeasonNumber.Value - 1;
-        return seasonIndex < relatedTvTitles.Count
-            ? relatedTvTitles[seasonIndex].Id
+        var matchedIndex = continuity.OrderedTitleIds.ToList().IndexOf(matchedMediaTitleId);
+        var previousEpisodeCounts = continuity.OrderedTitleIds
+            .Take(matchedIndex)
+            .Select(titleId => continuity.Titles[titleId].EpisodeCount)
+            .ToList();
+        if (previousEpisodeCounts.Any(count => count is not > 0))
+        {
+            return null;
+        }
+
+        var precedingEpisodeCount = previousEpisodeCounts.Sum(count => count!.Value);
+        var targetEpisodeCount = matchedTitle.EpisodeCount.Value;
+        if (evidence.HighestEpisodeNumber <= targetEpisodeCount)
+        {
+            return 0;
+        }
+
+        var localLowest = evidence.LowestEpisodeNumber.Value - precedingEpisodeCount;
+        var localHighest = evidence.HighestEpisodeNumber.Value - precedingEpisodeCount;
+        return localLowest > 0 && localHighest <= targetEpisodeCount
+            ? -precedingEpisodeCount
             : null;
     }
 
-    private static bool IsTvSeries(string? format) =>
-        string.Equals(format, "TV", StringComparison.OrdinalIgnoreCase);
+    private async Task<Dictionary<Guid, CandidateOffsetEvidence>> FindCandidateEpisodeOffsetsAsync(
+        int userId,
+        IReadOnlyCollection<Guid> candidateTitleIds,
+        CatalogEvidence? evidence,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, CandidateOffsetEvidence>();
+        if (evidence?.LowestEpisodeNumber is not > 0
+            || evidence.HighestEpisodeNumber is not > 0
+            || candidateTitleIds.Count == 0)
+        {
+            return result;
+        }
+
+        await QueueMissingRelationGraphsAsync(userId, candidateTitleIds, cancellationToken);
+        var continuities = await LoadContinuitiesAsync(candidateTitleIds, cancellationToken);
+        foreach (var candidateId in candidateTitleIds)
+        {
+            if (!continuities.TryGetValue(candidateId, out var continuity)
+                || !continuity.Titles.TryGetValue(candidateId, out var title)
+                || title.EpisodeCount is not > 0)
+            {
+                continue;
+            }
+
+            var directFits = evidence.LowestEpisodeNumber.Value > 0
+                && evidence.HighestEpisodeNumber.Value <= title.EpisodeCount.Value;
+            var offset = directFits
+                ? 0
+                : TryGetCumulativeOffset(continuity, candidateId, evidence);
+            if (offset is null)
+            {
+                continue;
+            }
+
+            var viableInComponent = continuity.Titles.Keys.Count(titleId =>
+                continuity.Titles[titleId].EpisodeCount is > 0
+                && evidence.HighestEpisodeNumber.Value <= continuity.Titles[titleId].EpisodeCount!.Value);
+            result[candidateId] = new CandidateOffsetEvidence(
+                offset.Value,
+                !continuity.IsComplete || (directFits && viableInComponent > 1));
+        }
+
+        return result;
+    }
+
+    private async Task QueueMissingRelationGraphsAsync(
+        int userId,
+        IReadOnlyCollection<Guid> mediaTitleIds,
+        CancellationToken cancellationToken)
+    {
+        var missingLinks = await _dbContext.MediaProviderLinks
+            .AsNoTracking()
+            .Where(link => mediaTitleIds.Contains(link.MediaTitleId)
+                && link.Provider == "anilist"
+                && link.RelationsLastVerifiedAt == null)
+            .Select(link => link.ExternalId)
+            .ToListAsync(cancellationToken);
+        foreach (var providerMediaId in missingLinks)
+        {
+            _relationGraphRefreshQueue.Enqueue(userId, "anilist", providerMediaId);
+        }
+    }
+
+    private static int? TryGetCumulativeOffset(
+        ContinuityComponent continuity,
+        Guid candidateId,
+        CatalogEvidence evidence)
+    {
+        if (!continuity.IsComplete)
+        {
+            return null;
+        }
+
+        var index = continuity.OrderedTitleIds.ToList().IndexOf(candidateId);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        var precedingCounts = continuity.OrderedTitleIds
+            .Take(index)
+            .Select(titleId => continuity.Titles[titleId].EpisodeCount)
+            .ToList();
+        if (precedingCounts.Any(count => count is not > 0))
+        {
+            return null;
+        }
+
+        var precedingCount = precedingCounts.Sum(count => count!.Value);
+        var localLowest = evidence.LowestEpisodeNumber!.Value - precedingCount;
+        var localHighest = evidence.HighestEpisodeNumber!.Value - precedingCount;
+        var candidateCount = continuity.Titles[candidateId].EpisodeCount!.Value;
+        return localLowest > 0 && localHighest <= candidateCount ? -precedingCount : null;
+    }
+
+    private async Task<ContinuityComponent> LoadContinuityAsync(
+        IReadOnlyCollection<Guid> seedTitleIds,
+        CancellationToken cancellationToken)
+    {
+        var components = await LoadContinuitiesAsync(seedTitleIds, cancellationToken);
+        return seedTitleIds.Select(id => components.GetValueOrDefault(id)).FirstOrDefault(component => component is not null)
+            ?? new ContinuityComponent([], new Dictionary<Guid, MediaTitle>(), false);
+    }
+
+    private async Task<Dictionary<Guid, ContinuityComponent>> LoadContinuitiesAsync(
+        IReadOnlyCollection<Guid> seedTitleIds,
+        CancellationToken cancellationToken)
+    {
+        var maxTitles = Math.Min(100, Math.Max(50, seedTitleIds.Count + 50));
+        var titleIds = seedTitleIds.Take(maxTitles).ToHashSet();
+        var frontier = titleIds.ToHashSet();
+        var relationsById = new Dictionary<Guid, MediaTitleRelation>();
+
+        while (frontier.Count > 0 && titleIds.Count < maxTitles)
+        {
+            var frontierIds = frontier.ToArray();
+            var relations = await _dbContext.MediaTitleRelations
+                .AsNoTracking()
+                .Where(relation => relation.SourceProvider == "anilist"
+                    && (relation.RelationType == MediaRelationTypes.Prequel
+                        || relation.RelationType == MediaRelationTypes.Sequel)
+                    && (frontierIds.Contains(relation.MediaTitleId)
+                        || frontierIds.Contains(relation.RelatedMediaTitleId)))
+                .ToListAsync(cancellationToken);
+            frontier.Clear();
+            foreach (var relation in relations)
+            {
+                relationsById[relation.Id] = relation;
+                if (titleIds.Count < maxTitles && titleIds.Add(relation.MediaTitleId))
+                {
+                    frontier.Add(relation.MediaTitleId);
+                }
+                if (titleIds.Count < maxTitles && titleIds.Add(relation.RelatedMediaTitleId))
+                {
+                    frontier.Add(relation.RelatedMediaTitleId);
+                }
+            }
+        }
+
+        var titles = await _dbContext.MediaTitles
+            .AsNoTracking()
+            .Where(title => titleIds.Contains(title.Id))
+            .ToDictionaryAsync(title => title.Id, cancellationToken);
+        var aniListLinks = await _dbContext.MediaProviderLinks
+            .AsNoTracking()
+            .Where(link => titleIds.Contains(link.MediaTitleId)
+                && link.Provider == "anilist")
+            .Select(link => new
+            {
+                link.MediaTitleId,
+                link.RelationsLastVerifiedAt,
+                link.RelationsSnapshotId
+            })
+            .ToListAsync(cancellationToken);
+        var linkedTitleIds = aniListLinks.Select(link => link.MediaTitleId).ToHashSet();
+        var edges = relationsById.Values
+            .Where(relation => IsTvAnime(titles.GetValueOrDefault(relation.MediaTitleId))
+                && IsTvAnime(titles.GetValueOrDefault(relation.RelatedMediaTitleId)))
+            .Select(relation => relation.RelationType == MediaRelationTypes.Prequel
+                ? (Earlier: relation.RelatedMediaTitleId, Later: relation.MediaTitleId)
+                : (Earlier: relation.MediaTitleId, Later: relation.RelatedMediaTitleId))
+            .Distinct()
+            .ToList();
+        var result = new Dictionary<Guid, ContinuityComponent>();
+        var remaining = titleIds.ToHashSet();
+        while (remaining.Count > 0)
+        {
+            var componentIds = new HashSet<Guid> { remaining.First() };
+            var changed = true;
+            while (changed)
+            {
+                changed = false;
+                foreach (var edge in edges)
+                {
+                    if ((componentIds.Contains(edge.Earlier) && componentIds.Add(edge.Later))
+                        || (componentIds.Contains(edge.Later) && componentIds.Add(edge.Earlier)))
+                    {
+                        changed = true;
+                    }
+                }
+            }
+            remaining.ExceptWith(componentIds);
+            var componentEdges = edges
+                .Where(edge => componentIds.Contains(edge.Earlier) && componentIds.Contains(edge.Later))
+                .ToList();
+            var componentTitles = titles
+                .Where(item => componentIds.Contains(item.Key))
+                .ToDictionary(item => item.Key, item => item.Value);
+            var componentSnapshotIds = aniListLinks
+                .Where(link => componentIds.Contains(link.MediaTitleId)
+                    && link.RelationsLastVerifiedAt is not null
+                    && link.RelationsSnapshotId is not null)
+                .Select(link => link.RelationsSnapshotId!.Value)
+                .Distinct()
+                .ToList();
+            var sourcesShareSnapshot = componentSnapshotIds.Count == 1
+                && componentIds.All(id => !linkedTitleIds.Contains(id)
+                    || aniListLinks.Any(link => link.MediaTitleId == id
+                        && link.RelationsSnapshotId == componentSnapshotIds[0]));
+            var component = BuildContinuityComponent(
+                componentIds,
+                componentEdges,
+                componentTitles,
+                titleIds.Count < maxTitles && sourcesShareSnapshot);
+            foreach (var id in componentIds)
+            {
+                result[id] = component;
+            }
+        }
+
+        return result;
+    }
+
+    private static ContinuityComponent BuildContinuityComponent(
+        IReadOnlyCollection<Guid> componentIds,
+        IReadOnlyCollection<(Guid Earlier, Guid Later)> edges,
+        IReadOnlyDictionary<Guid, MediaTitle> titles,
+        bool sourcesVerified)
+    {
+        if (edges.Count == 0)
+        {
+            return new ContinuityComponent([componentIds.Single()], titles, true);
+        }
+
+        var previousByNode = edges.GroupBy(edge => edge.Later)
+            .ToDictionary(group => group.Key, group => group.Select(edge => edge.Earlier).Distinct().ToList());
+        var nextByNode = edges.GroupBy(edge => edge.Earlier)
+            .ToDictionary(group => group.Key, group => group.Select(edge => edge.Later).Distinct().ToList());
+        if (previousByNode.Values.Any(values => values.Count != 1)
+            || nextByNode.Values.Any(values => values.Count != 1))
+        {
+            return new ContinuityComponent([], titles, false);
+        }
+
+        var allEdgeTitleIds = edges.SelectMany(edge => new[] { edge.Earlier, edge.Later }).ToHashSet();
+        var starts = allEdgeTitleIds.Where(id => !previousByNode.ContainsKey(id)).ToList();
+        if (starts.Count != 1)
+        {
+            return new ContinuityComponent([], titles, false);
+        }
+
+        var ordered = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        var current = starts[0];
+        while (seen.Add(current))
+        {
+            ordered.Add(current);
+            if (!nextByNode.TryGetValue(current, out var next))
+            {
+                break;
+            }
+            current = next[0];
+        }
+
+        var complete = seen.Count == allEdgeTitleIds.Count && sourcesVerified;
+        return new ContinuityComponent(ordered, titles, complete);
+    }
+
+    private static bool IsTvAnime(MediaTitle? title)
+        => title is not null
+            && string.Equals(title.MediaKind, MediaKinds.Anime, StringComparison.Ordinal)
+            && string.Equals(title.Format, "TV", StringComparison.OrdinalIgnoreCase);
 
     private static void AddTitle(List<string> titles, string? title)
     {
@@ -537,9 +1064,17 @@ public class MediaObservationMatchingService(
     {
         public string? SeriesTitle { get; set; }
 
+        public string? ProviderSeriesId { get; set; }
+
+        public string? ProviderSeasonId { get; set; }
+
         public int? SeasonNumber { get; set; }
 
+        public int? EpisodeNumber { get; set; }
+
         public List<ObservationRawEpisode>? Episodes { get; set; }
+
+        public List<ObservationRawEpisode>? ObservedEpisodes { get; set; }
     }
 
     private sealed class ObservationRawEpisode
@@ -547,5 +1082,15 @@ public class MediaObservationMatchingService(
         public int EpisodeNumber { get; set; }
     }
 
-    private sealed record CatalogEvidence(int? SeasonNumber, int? HighestEpisodeNumber);
+    private sealed record CatalogEvidence(
+        int? SeasonNumber,
+        int? LowestEpisodeNumber,
+        int? HighestEpisodeNumber);
+
+    private sealed record CandidateOffsetEvidence(int EpisodeOffset, bool IsAmbiguous);
+
+    private sealed record ContinuityComponent(
+        IReadOnlyList<Guid> OrderedTitleIds,
+        IReadOnlyDictionary<Guid, MediaTitle> Titles,
+        bool IsComplete);
 }

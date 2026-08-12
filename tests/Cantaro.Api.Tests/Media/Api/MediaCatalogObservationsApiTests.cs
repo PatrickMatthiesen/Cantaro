@@ -123,7 +123,7 @@ public class MediaCatalogObservationsApiTests
     [InlineData(2, "113693")]
     [InlineData(3, "121176")]
     [InlineData(4, "171110")]
-    public async Task Submit_CrunchyrollAggregateSeason_MatchesAniListSplitTitleByTvSeasonOrdinal(
+    public async Task Submit_EstablishedProviderSeasonMapping_SelectsCanonicalTitleWithoutUsingOrdinal(
         int seasonNumber,
         string expectedAniListId)
     {
@@ -141,6 +141,9 @@ public class MediaCatalogObservationsApiTests
         fixture.AddLibraryEntry(seasonTwoTitle, "113693");
         fixture.AddLibraryEntry(seasonThreeTitle, "121176");
         fixture.AddLibraryEntry(seasonFourTitle, "171110");
+        fixture.AddSequel(baseTitle, seasonTwoTitle);
+        fixture.AddSequel(seasonTwoTitle, seasonThreeTitle);
+        fixture.AddSequel(seasonThreeTitle, seasonFourTitle);
         await fixture.Db.SaveChangesAsync();
 
         var request = CreateRequest(
@@ -149,18 +152,25 @@ public class MediaCatalogObservationsApiTests
             episodeCount: 3);
         request.ProviderSeasonId = $"BOOKWORM{seasonNumber}";
         request.SeasonTitle = $"Season {seasonNumber}";
-        request.SeasonNumber = seasonNumber;
-
-        var result = await fixture.Controller.Submit(request, CancellationToken.None);
-
-        var response = GetResponse(result);
-        Assert.Equal(MediaCatalogObservationStatuses.Accepted, response.Status);
+        request.SeasonNumber = 99;
         var expectedTitle = expectedAniListId switch
         {
             "113693" => seasonTwoTitle,
             "121176" => seasonThreeTitle,
             _ => seasonFourTitle
         };
+        fixture.AddSeasonMapping(
+            request.ProviderSeriesId,
+            request.ProviderSeasonId,
+            request.SeasonNumber,
+            expectedTitle,
+            0);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Submit(request, CancellationToken.None);
+
+        var response = GetResponse(result);
+        Assert.Equal(MediaCatalogObservationStatuses.Accepted, response.Status);
         Assert.Equal(expectedTitle.Id.ToString(), response.MatchedMediaTitleId);
         Assert.Equal(3, response.RecordedEpisodeCount);
         Assert.DoesNotContain(
@@ -169,6 +179,70 @@ public class MediaCatalogObservationsApiTests
         Assert.All(
             fixture.Db.MediaEpisodeProviderIdentities,
             identity => Assert.Equal(expectedTitle.Id, identity.MediaEpisode!.MediaTitleId));
+    }
+
+    [Fact]
+    public async Task Submit_ProviderSeasonNumberAlone_DoesNotChooseAFranchisePosition()
+    {
+        await using var fixture = await CatalogFixture.CreateAsync();
+        var seasonOne = fixture.AddTitle("Example", 12, 2024, "TV");
+        var seasonTwo = fixture.AddTitle("Example Season 2", 12, 2025, "TV");
+        fixture.AddLibraryEntry(seasonOne, "100");
+        fixture.AddLibraryEntry(seasonTwo, "200");
+        fixture.AddSequel(seasonOne, seasonTwo);
+        await fixture.Db.SaveChangesAsync();
+        var request = CreateRequest("Example", "EXAMPLE", 3);
+        request.ProviderSeasonId = "EXAMPLE-SEASON";
+        request.SeasonNumber = 2;
+
+        var response = GetResponse(await fixture.Controller.Submit(request, CancellationToken.None));
+
+        Assert.Equal(MediaCatalogObservationStatuses.PendingMatch, response.Status);
+        Assert.Equal(MediaObservationStatuses.Ambiguous, response.MatchStatus);
+        Assert.Null(response.MatchedMediaTitleId);
+        Assert.Empty(fixture.Db.MediaEpisodeProviderIdentities);
+    }
+
+    [Fact]
+    public async Task Submit_CumulativeCrunchyrollSeason_MapsEpisodesToSeasonLocalNumbers()
+    {
+        await using var fixture = await CatalogFixture.CreateAsync();
+        var seasonOne = fixture.AddTitle("Wistoria: Wand and Sword", 12, 2024, "TV");
+        var seasonTwo = fixture.AddTitle("Wistoria: Wand and Sword Season 2", 12, 2026, "TV");
+        fixture.AddLibraryEntry(seasonOne, "174576");
+        fixture.AddLibraryEntry(seasonTwo, "182300");
+        fixture.AddSequel(seasonOne, seasonTwo);
+        await fixture.Db.SaveChangesAsync();
+
+        var request = CreateRequest("Wistoria: Wand and Sword", "GW4HM7WK9", episodeCount: 1);
+        request.ProviderSeasonId = "WISTORIA2";
+        request.SeasonTitle = "Season 2";
+        request.SeasonNumber = 2;
+        request.Episodes = Enumerable.Range(13, 12)
+            .Select(number => new MediaCatalogEpisodeObservationDto
+            {
+                ProviderEpisodeId = number == 22 ? "GE00340376ENUS" : $"WISTORIA{number}",
+                ProviderUrl = number == 22
+                    ? "https://www.crunchyroll.com/watch/GE00340376ENUS/hoping-blooming-thundering"
+                    : $"https://www.crunchyroll.com/watch/WISTORIA{number}/episode-{number}",
+                EpisodeNumber = number,
+                EpisodeTitle = number == 22 ? "Hoping, Blooming, Thundering" : $"Episode {number}"
+            })
+            .ToList();
+
+        var result = await fixture.Controller.Submit(request, CancellationToken.None);
+
+        var response = GetResponse(result);
+        Assert.Equal(MediaCatalogObservationStatuses.Accepted, response.Status);
+        Assert.Equal(seasonTwo.Id.ToString(), response.MatchedMediaTitleId);
+        Assert.Equal(12, response.RecordedEpisodeCount);
+        var observation = await fixture.Db.MediaObservations.SingleAsync();
+        Assert.Equal(-12, observation.EpisodeOffset);
+        var episode22 = await fixture.Db.MediaEpisodeProviderIdentities
+            .Include(identity => identity.MediaEpisode)
+            .SingleAsync(identity => identity.ProviderEpisodeId == "GE00340376ENUS");
+        Assert.Equal(10, episode22.MediaEpisode!.EpisodeNumber);
+        Assert.Equal(22, episode22.ProviderEpisodeNumber);
     }
 
     [Fact]
@@ -181,7 +255,7 @@ public class MediaCatalogObservationsApiTests
         var request = CreateRequest("Ascendance of a Bookworm", "G6793XKZY", 3);
         request.ProviderSeasonId = "BOOKWORM4";
         request.SeasonTitle = "Season 4";
-        request.SeasonNumber = 4;
+        request.SeasonNumber = 1;
 
         await fixture.Controller.Submit(request, CancellationToken.None);
         var initiallyRecorded = await fixture.Db.MediaEpisodeProviderIdentities
@@ -189,6 +263,7 @@ public class MediaCatalogObservationsApiTests
             .Where(identity => identity.ProviderSeasonId == "BOOKWORM4")
             .ToListAsync();
         Assert.All(initiallyRecorded, identity => Assert.Equal(baseTitle.Id, identity.MediaEpisode!.MediaTitleId));
+        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
 
         var unrelatedEpisode = new MediaEpisode
         {
@@ -224,7 +299,19 @@ public class MediaCatalogObservationsApiTests
         fixture.AddLibraryEntry(seasonTwo, "113693");
         fixture.AddLibraryEntry(seasonThree, "121176");
         fixture.AddLibraryEntry(seasonFour, "171110");
+        fixture.AddSequel(baseTitle, seasonTwo);
+        fixture.AddSequel(seasonTwo, seasonThree);
+        fixture.AddSequel(seasonThree, seasonFour);
         await fixture.Db.SaveChangesAsync();
+
+        fixture.AddSeasonMapping(
+            "G6793XKZY",
+            "BOOKWORM4",
+            4,
+            seasonFour,
+            0);
+        await fixture.Db.SaveChangesAsync();
+        request.SeasonNumber = 4;
 
         var duplicateResult = await fixture.Controller.Submit(request, CancellationToken.None);
 
@@ -371,6 +458,9 @@ public class MediaCatalogObservationsApiTests
 
         var service = new MediaEpisodeIdentityService(
             fixture.Db,
+            new MediaProviderSeasonMappingService(
+                fixture.Db,
+                NullLogger<MediaProviderSeasonMappingService>.Instance),
             NullLogger<MediaEpisodeIdentityService>.Instance);
         await service.RecordObservationAsync(observation, CancellationToken.None);
 
@@ -416,6 +506,7 @@ public class MediaCatalogObservationsApiTests
     private sealed class CatalogFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
+        private readonly Guid _relationsSnapshotId = Guid.NewGuid();
 
         private CatalogFixture(
             SqliteConnection connection,
@@ -445,11 +536,21 @@ public class MediaCatalogObservationsApiTests
             db.Users.Add(TestUserFactory.Create(userId, email));
             await db.SaveChangesAsync();
 
+            var seasonMappingService = new MediaProviderSeasonMappingService(
+                db,
+                NullLogger<MediaProviderSeasonMappingService>.Instance);
             var controller = new MediaCatalogObservationsController(
                 db,
                 CreateUserManager(db),
-                new MediaObservationMatchingService(db, NullLogger<MediaObservationMatchingService>.Instance),
-                new MediaEpisodeIdentityService(db, NullLogger<MediaEpisodeIdentityService>.Instance),
+                new MediaObservationMatchingService(
+                    db,
+                    seasonMappingService,
+                    new MediaRelationGraphRefreshQueue(),
+                    NullLogger<MediaObservationMatchingService>.Instance),
+                new MediaEpisodeIdentityService(
+                    db,
+                    seasonMappingService,
+                    NullLogger<MediaEpisodeIdentityService>.Instance),
                 NullLogger<MediaCatalogObservationsController>.Instance)
             {
                 ControllerContext = new ControllerContext
@@ -478,9 +579,9 @@ public class MediaCatalogObservationsApiTests
                 Id = Guid.NewGuid(),
                 CanonicalTitle = title,
                 MediaKind = MediaKinds.Anime,
+                Format = format,
                 EpisodeCount = episodeCount,
                 StartYear = startYear,
-                Format = format,
                 SupportsEpisodeProgress = true,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
@@ -493,14 +594,67 @@ public class MediaCatalogObservationsApiTests
 
         public void AddLibraryEntry(MediaTitle title, string providerMediaId)
         {
+            var now = DateTimeOffset.UtcNow;
             Db.MediaLibraryEntries.Add(new MediaLibraryEntry
             {
                 Id = Guid.NewGuid(),
                 UserId = UserId,
                 MediaTitleId = title.Id,
                 Status = MediaLibraryStatuses.Current,
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            Db.MediaProviderLinks.Add(new MediaProviderLink
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = title.Id,
+                Provider = MediaObservationSiteIdentifiers.AniList,
+                ExternalId = providerMediaId,
+                LinkSource = MediaMappingSources.Imported,
+                LastVerifiedAt = now,
+                RelationsLastVerifiedAt = now,
+                RelationsSnapshotId = _relationsSnapshotId,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+
+        public void AddSequel(MediaTitle source, MediaTitle sequel)
+        {
+            var now = DateTimeOffset.UtcNow;
+            Db.MediaTitleRelations.Add(new MediaTitleRelation
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = source.Id,
+                RelatedMediaTitleId = sequel.Id,
+                RelationType = MediaRelationTypes.Sequel,
+                SourceProvider = "anilist",
+                FirstSeenAt = now,
+                LastVerifiedAt = now
+            });
+        }
+
+        public void AddSeasonMapping(
+            string providerSeriesId,
+            string providerSeasonId,
+            int? providerSeasonNumber,
+            MediaTitle title,
+            int episodeOffset)
+        {
+            var now = DateTimeOffset.UtcNow;
+            Db.MediaProviderSeasonMappings.Add(new MediaProviderSeasonMapping
+            {
+                Id = Guid.NewGuid(),
+                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+                ProviderSeriesId = providerSeriesId.ToUpperInvariant(),
+                ProviderSeasonId = providerSeasonId.ToUpperInvariant(),
+                ProviderSeasonNumber = providerSeasonNumber,
+                MediaTitleId = title.Id,
+                EpisodeOffset = episodeOffset,
+                MappingSource = MediaProviderSeasonMappingSources.Manual,
+                Confidence = 1m,
+                FirstSeenAt = now,
+                LastVerifiedAt = now
             });
         }
 

@@ -9,6 +9,37 @@ public static class MediaKinds
     public const string Other = "other";
 }
 
+public static class MediaFormats
+{
+    public const string Tv = "tv";
+    public const string TvShort = "tv_short";
+    public const string Movie = "movie";
+    public const string Special = "special";
+    public const string Ova = "ova";
+    public const string Ona = "ona";
+    public const string Music = "music";
+    public const string Manga = "manga";
+    public const string Novel = "novel";
+    public const string OneShot = "one_shot";
+}
+
+public static class MediaRelationTypes
+{
+    public const string Adaptation = "adaptation";
+    public const string Prequel = "prequel";
+    public const string Sequel = "sequel";
+    public const string Parent = "parent";
+    public const string SideStory = "side_story";
+    public const string Character = "character";
+    public const string Summary = "summary";
+    public const string Alternative = "alternative";
+    public const string SpinOff = "spin_off";
+    public const string Other = "other";
+    public const string Source = "source";
+    public const string Compilation = "compilation";
+    public const string Contains = "contains";
+}
+
 public static class MediaProgressDimensions
 {
     public const string Episode = "episode";
@@ -93,6 +124,12 @@ public static class MediaObservationStatuses
 
 public static class MediaObservationCandidateSources
 {
+    /// <summary>Exact lookup through a previously catalogued provider episode identity.</summary>
+    public const string ProviderEpisodeIdentityExact = "provider_episode_identity_exact";
+
+    /// <summary>Exact lookup through an established provider series/season mapping.</summary>
+    public const string ProviderSeasonMappingExact = "provider_season_mapping_exact";
+
     /// <summary>Direct lookup via provider link using the stable SiteMediaId.</summary>
     public const string ProviderLinkExact = "provider_link_exact";
 
@@ -101,6 +138,12 @@ public static class MediaObservationCandidateSources
 
     /// <summary>Fuzzy title match across all canonical MediaTitles in the catalog.</summary>
     public const string CatalogTitleSearch = "catalog_title_search";
+}
+
+public static class MediaProviderSeasonMappingSources
+{
+    public const string ProviderEpisodeIdentity = "provider_episode_identity";
+    public const string Manual = "manual";
 }
 
 public static class MediaObservationSiteIdentifiers
