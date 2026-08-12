@@ -35,6 +35,7 @@ public sealed class MediaTitleRelationSyncService(
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var relationSnapshotId = Guid.NewGuid();
         var nodesByProviderId = snapshot.Nodes
             .Where(node => !string.IsNullOrWhiteSpace(node.ProviderMediaId))
             .GroupBy(node => node.ProviderMediaId, StringComparer.Ordinal)
@@ -97,6 +98,7 @@ public sealed class MediaTitleRelationSyncService(
             if (existingLinks.TryGetValue(providerMediaId, out var refreshedLink))
             {
                 refreshedLink.RelationsLastVerifiedAt = now;
+                refreshedLink.RelationsSnapshotId = relationSnapshotId;
             }
         }
 
@@ -146,15 +148,14 @@ public sealed class MediaTitleRelationSyncService(
             createdRelations++;
         }
 
-        var removedRelations = 0;
-        if (snapshot.IsComplete)
-        {
-            var staleRelations = existingRelations
-                .Where(relation => !desiredKeys.Contains(RelationKey(relation)))
-                .ToList();
-            _dbContext.MediaTitleRelations.RemoveRange(staleRelations);
-            removedRelations = staleRelations.Count;
-        }
+        // RefreshedProviderMediaIds means each listed source's complete outgoing
+        // collection was read. A traversal can be globally truncated while
+        // those individual source snapshots are still safe to prune.
+        var staleRelations = existingRelations
+            .Where(relation => !desiredKeys.Contains(RelationKey(relation)))
+            .ToList();
+        _dbContext.MediaTitleRelations.RemoveRange(staleRelations);
+        var removedRelations = staleRelations.Count;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 

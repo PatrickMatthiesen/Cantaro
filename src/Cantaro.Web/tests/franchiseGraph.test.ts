@@ -131,4 +131,38 @@ describe('franchise graph presentation', () => {
 
     expect(continuityRelationLabel(value, 'season-1', 'season-2')).toBe('Sequel');
   });
+
+  it('keeps unused continuity edges as branches with their real relation and source', () => {
+    const value = graph({
+      nodes: [...graph().nodes, node('alternate-sequel')],
+      relations: [
+        ...graph().relations,
+        relation('season-2', 'alternate-sequel', 'sequel', true),
+      ],
+    });
+
+    const branch = buildFranchisePresentation(value).branchGroups
+      .find((group) => group.source.mediaTitleId === 'season-2')
+      ?.branches.find((item) => item.node.mediaTitleId === 'alternate-sequel');
+
+    expect(branch?.relation.relationType).toBe('sequel');
+    expect(branch?.relation.sourceMediaTitleId).toBe('season-2');
+  });
+
+  it('orients a reverse unused continuity assertion away from the main lane', () => {
+    const value = graph({
+      nodes: [...graph().nodes, node('alternate-sequel')],
+      relations: [
+        ...graph().relations,
+        relation('alternate-sequel', 'season-2', 'prequel', true),
+      ],
+    });
+
+    const branch = buildFranchisePresentation(value).branchGroups
+      .find((group) => group.source.mediaTitleId === 'season-2')
+      ?.branches.find((item) => item.node.mediaTitleId === 'alternate-sequel');
+
+    expect(branch?.displayRelationType).toBe('sequel');
+    expect(branch?.relation.sourceMediaTitleId).toBe('alternate-sequel');
+  });
 });

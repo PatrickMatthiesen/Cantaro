@@ -162,7 +162,7 @@ function BranchCard({
 }) {
   return (
     <li>
-      <span className="media-detail-franchise-relation">{relationLabel(branch.relation.relationType)}</span>
+      <span className="media-detail-franchise-relation">{relationLabel(branch.displayRelationType)}</span>
       <NodeCard node={branch.node} {...navigation} />
     </li>
   );
@@ -235,7 +235,7 @@ function FranchiseBranches({
           <ul>
             {group.branches.map((branch) => (
               <BranchCard
-                key={`${branch.relation.relationType}:${branch.node.mediaTitleId}`}
+                key={`${branch.displayRelationType}:${branch.node.mediaTitleId}`}
                 branch={branch}
                 navigation={navigation}
               />

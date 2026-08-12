@@ -127,6 +127,9 @@ public static class MediaObservationCandidateSources
     /// <summary>Exact lookup through a previously catalogued provider episode identity.</summary>
     public const string ProviderEpisodeIdentityExact = "provider_episode_identity_exact";
 
+    /// <summary>Exact lookup through an established provider series/season mapping.</summary>
+    public const string ProviderSeasonMappingExact = "provider_season_mapping_exact";
+
     /// <summary>Direct lookup via provider link using the stable SiteMediaId.</summary>
     public const string ProviderLinkExact = "provider_link_exact";
 
@@ -135,6 +138,12 @@ public static class MediaObservationCandidateSources
 
     /// <summary>Fuzzy title match across all canonical MediaTitles in the catalog.</summary>
     public const string CatalogTitleSearch = "catalog_title_search";
+}
+
+public static class MediaProviderSeasonMappingSources
+{
+    public const string ProviderEpisodeIdentity = "provider_episode_identity";
+    public const string Manual = "manual";
 }
 
 public static class MediaObservationSiteIdentifiers

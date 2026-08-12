@@ -81,4 +81,6 @@ public class MediaTitle
     public ICollection<MediaTitleRelation> OutgoingRelations { get; set; } = [];
 
     public ICollection<MediaTitleRelation> IncomingRelations { get; set; } = [];
+
+    public ICollection<MediaProviderSeasonMapping> ProviderSeasonMappings { get; set; } = [];
 }

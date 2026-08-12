@@ -35,6 +35,13 @@ public class MediaProviderLink
     /// </summary>
     public DateTimeOffset? RelationsLastVerifiedAt { get; set; }
 
+    /// <summary>
+    /// Identifies the provider graph snapshot that verified this title's
+    /// outgoing relations. Continuity is complete only when every source in
+    /// the component was verified by the same snapshot.
+    /// </summary>
+    public Guid? RelationsSnapshotId { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

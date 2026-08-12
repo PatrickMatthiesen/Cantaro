@@ -11,7 +11,7 @@ namespace Cantaro.Api.Tests;
 public sealed class MediaTitleRelationSyncServiceTests
 {
     [Fact]
-    public async Task SyncAsync_UpsertsRelatedTitlesAndOnlyPrunesFromCompleteSnapshots()
+    public async Task SyncAsync_UpsertsRelatedTitlesAndPrunesEachRefreshedSource()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -52,18 +52,21 @@ public sealed class MediaTitleRelationSyncServiceTests
         var incomplete = await service.SyncAsync(42, provider, "200", CancellationToken.None);
 
         Assert.False(incomplete.IsComplete);
-        Assert.Equal(0, incomplete.RemovedRelations);
-        Assert.Single(await dbContext.MediaTitleRelations.ToListAsync());
+        Assert.Equal(1, incomplete.RemovedRelations);
+        Assert.Empty(await dbContext.MediaTitleRelations.ToListAsync());
 
         provider.Snapshot = CreateSnapshot(isComplete: true, includeEdge: false);
         var complete = await service.SyncAsync(42, provider, "200", CancellationToken.None);
 
         Assert.True(complete.IsComplete);
-        Assert.Equal(1, complete.RemovedRelations);
+        Assert.Equal(0, complete.RemovedRelations);
         Assert.Empty(await dbContext.MediaTitleRelations.ToListAsync());
         Assert.All(
             await dbContext.MediaProviderLinks.ToListAsync(),
             link => Assert.NotNull(link.RelationsLastVerifiedAt));
+        Assert.Single((await dbContext.MediaProviderLinks.ToListAsync())
+            .Select(link => link.RelationsSnapshotId)
+            .Distinct());
     }
 
     [Fact]

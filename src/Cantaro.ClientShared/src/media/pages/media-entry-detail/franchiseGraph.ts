@@ -7,6 +7,7 @@ import type {
 export interface FranchiseBranch {
   node: MediaFranchiseNodeDto;
   relation: MediaFranchiseRelationDto;
+  displayRelationType: string;
 }
 
 export interface FranchiseBranchGroup {
@@ -24,8 +25,8 @@ function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
-function relationSortKey(relation: MediaFranchiseRelationDto, node: MediaFranchiseNodeDto): string {
-  return `${relationLabel(relation.relationType)}:${node.startYear ?? 9999}:${node.canonicalTitle}:${node.mediaTitleId}`;
+function branchSortKey(branch: FranchiseBranch): string {
+  return `${relationLabel(branch.displayRelationType)}:${branch.node.startYear ?? 9999}:${branch.node.canonicalTitle}:${branch.node.mediaTitleId}`;
 }
 
 export function relationLabel(relationType: string): string {
@@ -96,14 +97,15 @@ function addRelationBranch(
   source: MediaFranchiseNodeDto,
   target: MediaFranchiseNodeDto,
   relation: MediaFranchiseRelationDto,
+  displayRelationType = relation.relationType,
 ) {
   const branches = branchesBySource.get(source.mediaTitleId) ?? [];
   const isDuplicate = branches.some((branch) =>
     branch.node.mediaTitleId === target.mediaTitleId
-    && branch.relation.relationType === relation.relationType);
+    && branch.displayRelationType === displayRelationType);
   if (isDuplicate) return;
 
-  branches.push({ node: target, relation });
+  branches.push({ node: target, relation, displayRelationType });
   representedBranchIds.add(target.mediaTitleId);
   branchesBySource.set(source.mediaTitleId, branches);
 }
@@ -111,18 +113,72 @@ function addRelationBranch(
 function collectRelationBranches(
   graph: MediaFranchiseGraphDto,
   nodesById: Map<string, MediaFranchiseNodeDto>,
+  continuityNodes: MediaFranchiseNodeDto[],
 ) {
   const representedBranchIds = new Set<string>();
   const branchesBySource = new Map<string, FranchiseBranch[]>();
+  const laneEdges = new Set(
+    continuityNodes.slice(0, -1).map((node, index) =>
+      [node.mediaTitleId, continuityNodes[index + 1].mediaTitleId].sort().join(':')),
+  );
+  const continuityIds = new Set(continuityNodes.map((node) => node.mediaTitleId));
 
-  for (const relation of graph.relations.filter((candidate) => !candidate.isEpisodeContinuity)) {
-    const source = nodesById.get(relation.sourceMediaTitleId);
-    const target = nodesById.get(relation.targetMediaTitleId);
-    if (!source || !target || source.mediaTitleId === target.mediaTitleId) continue;
-    addRelationBranch(branchesBySource, representedBranchIds, source, target, relation);
+  for (const relation of graph.relations) {
+    if (isLaneRelation(relation, laneEdges)) continue;
+    const endpoints = getRelationEndpoints(relation, nodesById, continuityIds);
+    if (!endpoints) continue;
+    const { source, target, displayRelationType } = endpoints;
+    addRelationBranch(
+      branchesBySource,
+      representedBranchIds,
+      source,
+      target,
+      relation,
+      displayRelationType,
+    );
   }
 
   return { representedBranchIds, branchesBySource };
+}
+
+function isLaneRelation(relation: MediaFranchiseRelationDto, laneEdges: Set<string>): boolean {
+  const relationKey = [relation.sourceMediaTitleId, relation.targetMediaTitleId].sort().join(':');
+  return relation.isEpisodeContinuity && laneEdges.has(relationKey);
+}
+
+function getRelationEndpoints(
+  relation: MediaFranchiseRelationDto,
+  nodesById: Map<string, MediaFranchiseNodeDto>,
+  continuityIds: Set<string>,
+): {
+  source: MediaFranchiseNodeDto;
+  target: MediaFranchiseNodeDto;
+  displayRelationType: string;
+} | undefined {
+  const source = nodesById.get(relation.sourceMediaTitleId);
+  const target = nodesById.get(relation.targetMediaTitleId);
+  if (!source || !target || source.mediaTitleId === target.mediaTitleId) return undefined;
+  if (!continuityIds.has(source.mediaTitleId) && continuityIds.has(target.mediaTitleId)) {
+    return {
+      source: target,
+      target: source,
+      displayRelationType: invertRelationType(relation.relationType),
+    };
+  }
+  return { source, target, displayRelationType: relation.relationType };
+}
+
+const inverseRelationTypes = new Map<string, string>([
+  ['prequel', 'sequel'],
+  ['sequel', 'prequel'],
+  ['adaptation', 'source'],
+  ['source', 'adaptation'],
+  ['compilation', 'contains'],
+  ['contains', 'compilation'],
+]);
+
+function invertRelationType(relationType: string): string {
+  return inverseRelationTypes.get(relationType.trim().toLowerCase()) ?? relationType;
 }
 
 function addUnconnectedBranches(
@@ -158,7 +214,7 @@ function buildBranchGroups(
     .map(([sourceId, branches]) => ({
       source: nodesById.get(sourceId)!,
       branches: branches.sort((left, right) =>
-        relationSortKey(left.relation, left.node).localeCompare(relationSortKey(right.relation, right.node))),
+        branchSortKey(left).localeCompare(branchSortKey(right))),
     }))
     .filter((group) => group.source && group.branches.length > 0)
     .sort((left, right) => {
@@ -172,7 +228,11 @@ function buildBranchGroups(
 export function buildFranchisePresentation(graph: MediaFranchiseGraphDto): FranchisePresentation {
   const nodesById = new Map(graph.nodes.map((node) => [node.mediaTitleId, node]));
   const { currentNode, orderedIds, continuityNodes } = buildContinuity(graph, nodesById);
-  const { representedBranchIds, branchesBySource } = collectRelationBranches(graph, nodesById);
+  const { representedBranchIds, branchesBySource } = collectRelationBranches(
+    graph,
+    nodesById,
+    continuityNodes,
+  );
   addUnconnectedBranches(
     graph,
     continuityNodes,

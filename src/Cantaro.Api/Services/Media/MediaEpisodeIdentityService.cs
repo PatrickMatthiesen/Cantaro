@@ -7,15 +7,18 @@ namespace Cantaro.Api.Services;
 
 public class MediaEpisodeIdentityService(
     ApplicationDbContext dbContext,
+    MediaProviderSeasonMappingService seasonMappingService,
     ILogger<MediaEpisodeIdentityService> logger)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly ILogger<MediaEpisodeIdentityService> _logger = logger;
     private static readonly JsonSerializerOptions PayloadJsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task RecordObservationAsync(
         MediaObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isUserConfirmed = false)
     {
         if (observation.MatchStatus != MediaObservationStatuses.Matched
             || observation.MediaTitleId is null
@@ -27,11 +30,15 @@ public class MediaEpisodeIdentityService(
             return;
         }
 
-        var payload = DeserializePayload(observation.RawPayload);
-        var catalogPayload = payload is null
+        var catalogPayload = HasCatalogEpisodesProperty(observation.RawPayload)
             ? DeserializeCatalogPayload(observation.RawPayload)
             : null;
+        var payload = catalogPayload is null
+            ? DeserializePayload(observation.RawPayload)
+            : null;
         var now = DateTimeOffset.UtcNow;
+        var canTrustIdentities = isUserConfirmed
+            || await WasMatchedByTrustedCandidateAsync(observation, cancellationToken);
         var recordedDestinationCount = payload is not null
             ? await RecordRenderedEpisodesAsync(
                 observation,
@@ -40,9 +47,15 @@ public class MediaEpisodeIdentityService(
                 payload.SeasonNumber,
                 payload.ObservedEpisodes,
                 now,
-                cancellationToken)
+                cancellationToken,
+                trustIdentities: canTrustIdentities)
             : catalogPayload is not null
-                ? await RecordCatalogEpisodesAsync(observation, catalogPayload, now, cancellationToken)
+                ? await RecordCatalogEpisodesAsync(
+                    observation,
+                    catalogPayload,
+                    now,
+                    cancellationToken,
+                    canTrustIdentities)
                 : 0;
 
         if (observation.ResolvedProgress is > 0)
@@ -51,12 +64,26 @@ public class MediaEpisodeIdentityService(
                 observation,
                 payload,
                 now,
-                cancellationToken);
+                cancellationToken,
+                canTrustIdentities);
             recordedDestinationCount += recordedWatchDestination ? 1 : 0;
         }
 
         if (recordedDestinationCount > 0)
         {
+            if (await WasMatchedByExactProviderEpisodeIdentityAsync(observation, cancellationToken))
+            {
+                await _seasonMappingService.EstablishAsync(
+                    observation.SiteIdentifier,
+                    payload?.ProviderSeriesId ?? catalogPayload?.ProviderSeriesId,
+                    payload?.ProviderSeasonId ?? catalogPayload?.ProviderSeasonId,
+                    payload?.SeasonNumber ?? catalogPayload?.SeasonNumber,
+                    observation.MediaTitleId.Value,
+                    observation.EpisodeOffset ?? 0,
+                    MediaProviderSeasonMappingSources.ProviderEpisodeIdentity,
+                    1m,
+                    cancellationToken);
+            }
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
     }
@@ -77,20 +104,56 @@ public class MediaEpisodeIdentityService(
             observation,
             payload,
             DateTimeOffset.UtcNow,
-            cancellationToken);
+            cancellationToken,
+            await WasMatchedByTrustedCandidateAsync(observation, cancellationToken));
         if (recordedCount > 0)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-
         return recordedCount;
+    }
+
+    private async Task<bool> WasMatchedByExactProviderEpisodeIdentityAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.AcceptedCandidateId is not { } candidateId)
+        {
+            return false;
+        }
+
+        return await _dbContext.MediaObservationCandidates
+            .AnyAsync(candidate => candidate.Id == candidateId
+                && candidate.MediaObservationId == observation.Id
+                && candidate.IsAccepted
+                && candidate.CandidateSource == MediaObservationCandidateSources.ProviderEpisodeIdentityExact,
+                cancellationToken);
+    }
+
+    private async Task<bool> WasMatchedByTrustedCandidateAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.AcceptedCandidateId is not { } candidateId)
+        {
+            return false;
+        }
+
+        return await _dbContext.MediaObservationCandidates
+            .AnyAsync(candidate => candidate.Id == candidateId
+                && candidate.MediaObservationId == observation.Id
+                && candidate.IsAccepted
+                && (candidate.CandidateSource == MediaObservationCandidateSources.ProviderEpisodeIdentityExact
+                    || candidate.CandidateSource == MediaObservationCandidateSources.ProviderSeasonMappingExact),
+                cancellationToken);
     }
 
     private async Task<bool> RecordWatchedEpisodeAsync(
         MediaObservation observation,
         SubmitMediaObservationRequest? payload,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool trustIdentities)
     {
         var providerEpisodeId = FirstNonBlank(payload?.SiteMediaId, observation.SiteMediaId);
         if (providerEpisodeId is null
@@ -120,7 +183,8 @@ public class MediaEpisodeIdentityService(
             payload?.EpisodeNumber,
             payload?.ProviderSequenceNumber,
             now,
-            cancellationToken);
+            cancellationToken,
+            isTrusted: trustIdentities);
 
         if (payload?.NextEpisodeProviderId is { Length: > 0 } nextEpisodeId
             && !string.Equals(nextEpisodeId, providerEpisodeId, StringComparison.OrdinalIgnoreCase)
@@ -147,7 +211,8 @@ public class MediaEpisodeIdentityService(
                 payload.NextEpisodeNumber,
                 null,
                 now,
-                cancellationToken);
+                cancellationToken,
+                isTrusted: trustIdentities);
         }
 
         return true;
@@ -157,7 +222,8 @@ public class MediaEpisodeIdentityService(
         MediaObservation observation,
         SubmitMediaCatalogObservationRequest payload,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool trustIdentities)
     {
         var episodes = payload.Episodes.Select(item => new ObservedProviderEpisodeDto
         {
@@ -177,7 +243,8 @@ public class MediaEpisodeIdentityService(
             episodes,
             now,
             cancellationToken,
-            allowIdentityRemap: true);
+            allowIdentityRemap: true,
+            trustIdentities: trustIdentities);
     }
 
     private async Task<int> RecordRenderedEpisodesAsync(
@@ -188,7 +255,8 @@ public class MediaEpisodeIdentityService(
         IReadOnlyCollection<ObservedProviderEpisodeDto> observedEpisodes,
         DateTimeOffset now,
         CancellationToken cancellationToken,
-        bool allowIdentityRemap = false)
+        bool allowIdentityRemap = false,
+        bool trustIdentities = false)
     {
         if (observation.MediaTitleId is not { } mediaTitleId
             || observedEpisodes.Count == 0)
@@ -239,6 +307,7 @@ public class MediaEpisodeIdentityService(
                 now,
                 cancellationToken,
                 allowIdentityRemap,
+                trustIdentities,
                 renderedEpisode.AvailableSubtitleLanguageCodes,
                 renderedEpisode.AvailableAudioLanguageCodes);
             recordedDestinationCount++;
@@ -524,6 +593,7 @@ public class MediaEpisodeIdentityService(
         DateTimeOffset now,
         CancellationToken cancellationToken,
         bool allowIdentityRemap = false,
+        bool isTrusted = false,
         IReadOnlyCollection<string>? subtitleLanguageCodes = null,
         IReadOnlyCollection<string>? audioLanguageCodes = null)
     {
@@ -597,7 +667,8 @@ public class MediaEpisodeIdentityService(
                 ProviderUrlPath = providerUrlPath,
                 SeenCount = 1,
                 FirstSeenAt = now,
-                LastSeenAt = now
+                LastSeenAt = now,
+                IsTrusted = isTrusted
             });
             return;
         }
@@ -606,7 +677,7 @@ public class MediaEpisodeIdentityService(
         identity.LastSeenAt = now;
         if (identity.MediaEpisodeId != episode.Id)
         {
-            if (!allowIdentityRemap)
+            if (!allowIdentityRemap || identity.IsTrusted && !isTrusted)
             {
                 identity.HasConflict = true;
                 _logger.LogWarning(
@@ -627,6 +698,8 @@ public class MediaEpisodeIdentityService(
             identity.MediaEpisodeId = episode.Id;
             identity.HasConflict = false;
         }
+
+        identity.IsTrusted |= isTrusted;
 
         identity.ProviderSeriesId = FirstNonBlank(providerSeriesId, identity.ProviderSeriesId);
         identity.ProviderSeasonId = FirstNonBlank(providerSeasonId, identity.ProviderSeasonId);
@@ -650,6 +723,25 @@ public class MediaEpisodeIdentityService(
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    private static bool HasCatalogEpisodesProperty(string? rawPayload)
+    {
+        if (string.IsNullOrWhiteSpace(rawPayload))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawPayload);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("episodes", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 

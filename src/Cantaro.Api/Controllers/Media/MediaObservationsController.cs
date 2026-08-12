@@ -22,6 +22,7 @@ public class MediaObservationsController(
     MediaObservationMatchingService matchingService,
     MediaObservationProgressService progressService,
     MediaEpisodeIdentityService episodeIdentityService,
+    MediaProviderSeasonMappingService seasonMappingService,
     IMediaProviderRegistry mediaProviderRegistry,
     ILogger<MediaObservationsController> logger) : ControllerBase
 {
@@ -30,6 +31,7 @@ public class MediaObservationsController(
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaObservationProgressService _progressService = progressService;
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
+    private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly ILogger<MediaObservationsController> _logger = logger;
     private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
@@ -91,7 +93,13 @@ public class MediaObservationsController(
                 existing.RawPayload = rawPayload;
                 existing.UpdatedAt = now;
 
-                await _matchingService.TryApplyProviderEpisodeIdentityAsync(existing, cancellationToken);
+                var exactIdentityApplied = await _matchingService.TryApplyProviderEpisodeIdentityAsync(
+                    existing,
+                    cancellationToken);
+                if (!exactIdentityApplied && existing.MatchStatus != MediaObservationStatuses.Matched)
+                {
+                    existing = await _matchingService.ProcessObservationAsync(existing, cancellationToken);
+                }
                 var deduplicatedProviderChoicesUnavailableReason = await EnsureProviderChoicesAsync(existing, cancellationToken);
 
                 if (existing.MatchStatus == MediaObservationStatuses.Matched)
@@ -323,9 +331,17 @@ public class MediaObservationsController(
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
         await UpsertEpisodeOffsetAsync(userId, observation.SiteIdentifier, resolvedMediaTitleId, request.EpisodeOffset, cancellationToken);
+        await EstablishManualSeasonMappingAsync(
+            observation,
+            resolvedMediaTitleId,
+            request.EpisodeOffset,
+            cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
+        await _episodeIdentityService.RecordObservationAsync(
+            observation,
+            cancellationToken,
+            isUserConfirmed: true);
 
         _logger.LogInformation(
             "User {UserId} resolved MediaObservation {ObservationId} to MediaTitle {MediaTitleId}.",
@@ -396,6 +412,8 @@ public class MediaObservationsController(
         observation.AcceptedCandidateId = null;
         observation.ResolutionNotes = null;
         observation.ProviderChoicesPayload = null;
+        observation.EpisodeOffset = null;
+        observation.ResolvedProgress = null;
 
         observation = await _matchingService.ProcessObservationAsync(observation, cancellationToken);
         await EnsureProviderChoicesAsync(observation, cancellationToken);
@@ -405,6 +423,46 @@ public class MediaObservationsController(
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    private async Task EstablishManualSeasonMappingAsync(
+        MediaObservation observation,
+        Guid mediaTitleId,
+        int episodeOffset,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(observation.RawPayload))
+        {
+            return;
+        }
+
+        SubmitMediaObservationRequest? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<SubmitMediaObservationRequest>(
+                observation.RawPayload,
+                RawPayloadJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (payload is null)
+        {
+            return;
+        }
+
+        await _seasonMappingService.EstablishAsync(
+            observation.SiteIdentifier,
+            payload.ProviderSeriesId,
+            payload.ProviderSeasonId,
+            payload.SeasonNumber,
+            mediaTitleId,
+            episodeOffset,
+            MediaProviderSeasonMappingSources.Manual,
+            1m,
+            cancellationToken);
+    }
 
     private async Task<MediaObservation?> LoadObservationAsync(
         Guid observationId,
@@ -855,6 +913,22 @@ public class MediaObservationsController(
             return;
         }
 
+        var payload = TryDeserializeRawPayload(observation.RawPayload);
+        var seasonMapping = await _seasonMappingService.FindAsync(
+            observation.SiteIdentifier,
+            payload?.ProviderSeriesId,
+            payload?.ProviderSeasonId,
+            payload?.SeasonNumber,
+            cancellationToken);
+        if (seasonMapping is not null && seasonMapping.MediaTitleId == observation.MediaTitleId)
+        {
+            observation.EpisodeOffset = seasonMapping.EpisodeOffset;
+            observation.ResolvedProgress = Math.Max(1, observedProgress + seasonMapping.EpisodeOffset);
+            observation.UpdatedAt = DateTimeOffset.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
         var offset = await _dbContext.MediaObservationEpisodeOffsets
             .AsNoTracking()
             .FirstOrDefaultAsync(item =>
@@ -1001,6 +1075,12 @@ public class MediaObservationsController(
     private sealed class ObservationRawPayload
     {
         public string? SeriesTitle { get; set; }
+
+        public string? ProviderSeriesId { get; set; }
+
+        public string? ProviderSeasonId { get; set; }
+
+        public int? SeasonNumber { get; set; }
     }
 
     private sealed class ObservationResolutionLogEntry

@@ -17,6 +17,31 @@ namespace Cantaro.Api.Tests;
 public class AniListMediaProviderTests
 {
     [Fact]
+    public async Task ApiClient_PreservesRetryAfterForRateLimitResponses()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+            TimeSpan.FromSeconds(12));
+        var client = new AniListApiClient(
+            new HttpClient(new SingleResponseHandler(response)),
+            Options.Create(new AniListOptions
+            {
+                ClientId = "client-id",
+                ClientSecret = "client-secret"
+            }),
+            NullLogger<AniListApiClient>.Instance);
+
+        var exception = await Assert.ThrowsAsync<AniListRequestException>(() =>
+            client.SendGraphQlAsync<object>("token", "query { Viewer { id } }", null, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, exception.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(12), exception.RetryAfter);
+    }
+
+    [Fact]
     public async Task GetRelationGraphAsync_FollowsOnlyTvContinuityAndIncludesOtherRelationsOneHop()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -611,6 +636,13 @@ public class AniListMediaProviderTests
                 Content = new StringContent(_responseBody, Encoding.UTF8, "application/json")
             };
         }
+    }
+
+    private sealed class SingleResponseHandler(HttpResponseMessage response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(response);
     }
 
     private sealed class QueueHttpMessageHandler(params string[] responses) : HttpMessageHandler

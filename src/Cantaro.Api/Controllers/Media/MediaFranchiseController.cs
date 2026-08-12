@@ -12,17 +12,19 @@ namespace Cantaro.Api.Controllers;
 [Route("api/media/titles")]
 public sealed class MediaFranchiseController(
     ApplicationDbContext dbContext,
-    IMediaProviderRegistry mediaProviderRegistry,
-    MediaTitleRelationSyncService relationSyncService,
     MediaFranchiseGraphService graphService,
+    MediaRelationGraphRefreshQueue relationGraphRefreshQueue,
+    MediaTitleRelationSyncService relationSyncService,
+    IMediaProviderRegistry mediaProviderRegistry,
     UserManager<User> userManager,
     ILogger<MediaFranchiseController> logger) : ControllerBase
 {
     private const string AniListProvider = "anilist";
     private readonly ApplicationDbContext _dbContext = dbContext;
-    private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
-    private readonly MediaTitleRelationSyncService _relationSyncService = relationSyncService;
     private readonly MediaFranchiseGraphService _graphService = graphService;
+    private readonly MediaRelationGraphRefreshQueue _relationGraphRefreshQueue = relationGraphRefreshQueue;
+    private readonly MediaTitleRelationSyncService _relationSyncService = relationSyncService;
+    private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaFranchiseController> _logger = logger;
 
@@ -49,23 +51,54 @@ public sealed class MediaFranchiseController(
                 : Ok(existing);
         }
 
-        var freshnessCutoff = DateTimeOffset.UtcNow.AddHours(-6);
-        var hasFreshGraph = root.RelationsLastVerifiedAt >= freshnessCutoff;
-        if (user is not null
-            && !hasFreshGraph
-            && _mediaProviderRegistry.GetRequired(AniListProvider) is IMediaRelationGraphProvider relationProvider)
+        if (root.RelationsLastVerifiedAt is null)
         {
+            if (user is null)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    error = "Franchise connections have not been synchronized yet. Sign in and retry."
+                });
+            }
+
             try
             {
-                await _relationSyncService.SyncAsync(user.Id, relationProvider, root.ExternalId, cancellationToken);
+                if (_mediaProviderRegistry.GetRequired(AniListProvider) is not IMediaRelationGraphProvider provider)
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        error = "AniList franchise synchronization is unavailable."
+                    });
+                }
+
+                await _relationSyncService.SyncAsync(
+                    user.Id,
+                    provider,
+                    root.ExternalId,
+                    cancellationToken);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
             {
                 _logger.LogWarning(
                     exception,
-                    "AniList franchise refresh failed for media title {MediaTitleId}; serving the last persisted graph.",
+                    "Initial franchise synchronization failed for MediaTitle {MediaTitleId}.",
                     mediaTitleId);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    error = "Could not synchronize franchise connections from AniList."
+                });
             }
+        }
+
+        var freshnessCutoff = DateTimeOffset.UtcNow.AddHours(-6);
+        var hasFreshGraph = root.RelationsLastVerifiedAt >= freshnessCutoff;
+        if (user is not null && root.RelationsLastVerifiedAt is not null && !hasFreshGraph)
+        {
+            _relationGraphRefreshQueue.Enqueue(user.Id, AniListProvider, root.ExternalId);
         }
 
         var graph = await _graphService.GetAsync(user?.Id, mediaTitleId, cancellationToken);

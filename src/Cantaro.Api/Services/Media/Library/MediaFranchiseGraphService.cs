@@ -78,7 +78,20 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             .ThenBy(relation => relation.MediaTitleId)
             .ThenBy(relation => relation.RelatedMediaTitleId)
             .ToList();
-        var continuity = BuildContinuity(mediaTitleId, titles, graphRelations, traversalIsComplete);
+        var currentSnapshotId = links.GetValueOrDefault(mediaTitleId)?.RelationsSnapshotId;
+        var verifiedRelationSourceIds = currentSnapshotId is null
+            ? []
+            : links
+                .Where(item => item.Value.RelationsLastVerifiedAt is not null
+                    && item.Value.RelationsSnapshotId == currentSnapshotId)
+                .Select(item => item.Key)
+                .ToHashSet();
+        var continuity = BuildContinuity(
+            mediaTitleId,
+            titles,
+            graphRelations,
+            verifiedRelationSourceIds,
+            traversalIsComplete);
 
         var nodes = titles.Values
             .Where(title => links.ContainsKey(title.Id) || title.Id == mediaTitleId)
@@ -141,6 +154,7 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         Guid currentTitleId,
         IReadOnlyDictionary<Guid, MediaTitle> titles,
         IReadOnlyCollection<MediaTitleRelation> relations,
+        IReadOnlySet<Guid> verifiedRelationSourceIds,
         bool traversalIsComplete)
     {
         var directedEdges = relations
@@ -176,6 +190,7 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             .GroupBy(edge => edge.Earlier)
             .ToDictionary(group => group.Key, group => group.Select(edge => edge.Later).Distinct().ToList());
         var isComplete = traversalIsComplete
+            && connectedIds.All(verifiedRelationSourceIds.Contains)
             && previousByNode.Values.All(values => values.Count <= 1)
             && nextByNode.Values.All(values => values.Count <= 1);
 

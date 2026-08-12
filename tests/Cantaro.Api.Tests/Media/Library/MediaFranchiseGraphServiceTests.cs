@@ -82,6 +82,53 @@ public sealed class MediaFranchiseGraphServiceTests
     }
 
     [Fact]
+    public async Task GetAsync_MarksContinuityIncompleteWhenARelatedSourceWasNotRefreshed()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var first = CreateTitle("First", "TV", 12, 2024, now);
+        var second = CreateTitle("Second", "TV", 12, 2025, now);
+        var firstLink = CreateLink(first, "coverage-1", now);
+        var secondLink = CreateLink(second, "coverage-2", now);
+        secondLink.RelationsLastVerifiedAt = null;
+        db.AddRange(first, second, firstLink, secondLink);
+        db.MediaTitleRelations.Add(CreateRelation(first, second, MediaRelationTypes.Sequel, now));
+        await db.SaveChangesAsync();
+
+        var graph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, first.Id, CancellationToken.None);
+
+        Assert.NotNull(graph);
+        Assert.False(graph.Continuity.IsComplete);
+        Assert.Equal([first.Id, second.Id], graph.Continuity.OrderedMediaTitleIds);
+    }
+
+    [Fact]
+    public async Task GetAsync_MarksContinuityIncompleteWhenSourcesComeFromDifferentSnapshots()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var first = CreateTitle("First", "TV", 12, 2024, now);
+        var second = CreateTitle("Second", "TV", 12, 2025, now);
+        var firstLink = CreateLink(first, "snapshot-1", now);
+        var secondLink = CreateLink(second, "snapshot-2", now);
+        secondLink.RelationsSnapshotId = Guid.NewGuid();
+        db.AddRange(first, second, firstLink, secondLink);
+        db.MediaTitleRelations.Add(CreateRelation(first, second, MediaRelationTypes.Sequel, now));
+        await db.SaveChangesAsync();
+
+        var graph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, first.Id, CancellationToken.None);
+
+        Assert.NotNull(graph);
+        Assert.False(graph.Continuity.IsComplete);
+    }
+
+    [Fact]
     public async Task GetAsync_ReturnsGlobalGraphWithoutLeakingViewerState()
     {
         var (db, connection) = await CreateDbAsync();
@@ -176,6 +223,8 @@ public sealed class MediaFranchiseGraphServiceTests
             ExternalUrl = $"https://anilist.co/anime/{externalId}",
             LinkSource = MediaMappingSources.Automatic,
             LastVerifiedAt = now,
+            RelationsLastVerifiedAt = now,
+            RelationsSnapshotId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
             CreatedAt = now,
             UpdatedAt = now
         };

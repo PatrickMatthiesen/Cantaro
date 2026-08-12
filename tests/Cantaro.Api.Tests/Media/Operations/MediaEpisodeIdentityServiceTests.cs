@@ -31,6 +31,8 @@ public class MediaEpisodeIdentityServiceTests
         Assert.Equal([7, 8], episodes.Select(item => item.EpisodeNumber));
         Assert.Equal("/watch/CURRENT7", episodes[0].ProviderIdentities.Single().ProviderUrlPath);
         Assert.Equal("/watch/NEXT8", episodes[1].ProviderIdentities.Single().ProviderUrlPath);
+        Assert.All(episodes.SelectMany(item => item.ProviderIdentities), identity => Assert.False(identity.IsTrusted));
+        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
 
         var destination = await fixture.Service.ResolveContinueWatchingAsync(
             fixture.UserId,
@@ -40,6 +42,25 @@ public class MediaEpisodeIdentityServiceTests
         Assert.Equal("direct", destination.Outcome);
         Assert.Equal(8, destination.EpisodeNumber);
         Assert.Equal("https://www.crunchyroll.com/watch/NEXT8", destination.Url);
+    }
+
+    [Fact]
+    public async Task RecordObservation_UserConfirmedAssignmentCreatesTrustedIdentities()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync();
+        var observation = fixture.MakeObservation(
+            3,
+            "CONFIRMED3",
+            "https://www.crunchyroll.com/watch/CONFIRMED3");
+
+        await fixture.Service.RecordObservationAsync(
+            observation,
+            CancellationToken.None,
+            isUserConfirmed: true);
+
+        var identity = await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync();
+        Assert.True(identity.IsTrusted);
+        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
     }
 
     [Fact]
@@ -422,7 +443,12 @@ public class MediaEpisodeIdentityServiceTests
             return new EpisodeIdentityFixture(
                 connection,
                 db,
-                new MediaEpisodeIdentityService(db, NullLogger<MediaEpisodeIdentityService>.Instance),
+                new MediaEpisodeIdentityService(
+                    db,
+                    new MediaProviderSeasonMappingService(
+                        db,
+                        NullLogger<MediaProviderSeasonMappingService>.Instance),
+                    NullLogger<MediaEpisodeIdentityService>.Instance),
                 userId,
                 title.Id,
                 entry.Id);
