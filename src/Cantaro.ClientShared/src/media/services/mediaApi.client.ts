@@ -4,10 +4,11 @@ import {
 } from './mediaApi.runtime';
 import type {
     MediaApiRuntimeConfig,
-    MediaCatalogAddRequestDto,
-    MediaCatalogAddResultDto,
+    MediaViewerStateCreateDto,
     MediaImportRequestDto,
-    MediaLibraryEntryDetailDto,
+    MediaFranchiseGraphDto,
+    MediaTitleDetailDto,
+    MediaViewerStateDto,
     MediaLibraryImportEventDto,
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
@@ -86,39 +87,54 @@ export class MediaApiClient {
         return response.json() as Promise<MediaLibraryPageDto>;
     }
 
-    async getLibraryEntry(libraryEntryId: string): Promise<MediaLibraryEntryDetailDto> {
-        const response = await this.request(`/api/media/library/${encodeURIComponent(libraryEntryId)}`);
-        await this.ensureOk(response, 'Failed to load media library entry');
-        return response.json() as Promise<MediaLibraryEntryDetailDto>;
+    async getMediaTitle(mediaTitleId: string): Promise<MediaTitleDetailDto> {
+        const response = await this.request(`/api/media/titles/${encodeURIComponent(mediaTitleId)}`);
+        await this.ensureOk(response, 'Failed to load media title');
+        return response.json() as Promise<MediaTitleDetailDto>;
     }
 
-    async getContinueWatching(libraryEntryId: string): Promise<MediaContinueWatchingDto> {
+    async getViewerState(mediaTitleId: string): Promise<MediaViewerStateDto | null> {
+        const response = await this.request(`/api/media/titles/${encodeURIComponent(mediaTitleId)}/viewer`);
+        if (response.status === 401) return null;
+        await this.ensureOk(response, 'Failed to load your media state');
+        return response.json() as Promise<MediaViewerStateDto | null>;
+    }
+
+    async getFranchiseGraph(mediaTitleId: string): Promise<MediaFranchiseGraphDto> {
         const response = await this.request(
-            `/api/media/library/${encodeURIComponent(libraryEntryId)}/continue-watching`,
+            `/api/media/titles/${encodeURIComponent(mediaTitleId)}/franchise`,
+        );
+        await this.ensureOk(response, 'Failed to load franchise connections');
+        return response.json() as Promise<MediaFranchiseGraphDto>;
+    }
+
+    async getContinueWatching(mediaTitleId: string): Promise<MediaContinueWatchingDto> {
+        const response = await this.request(
+            `/api/media/titles/${encodeURIComponent(mediaTitleId)}/viewer/continue-watching`,
         );
         await this.ensureOk(response, 'Failed to resolve the next episode');
         return response.json() as Promise<MediaContinueWatchingDto>;
     }
 
-    async getEpisodes(libraryEntryId: string): Promise<MediaEpisodeCatalogDto> {
+    async getEpisodes(mediaTitleId: string): Promise<MediaEpisodeCatalogDto> {
         const response = await this.request(
-            `/api/media/library/${encodeURIComponent(libraryEntryId)}/episodes`,
+            `/api/media/titles/${encodeURIComponent(mediaTitleId)}/episodes`,
         );
         await this.ensureOk(response, 'Failed to load episode links');
         return response.json() as Promise<MediaEpisodeCatalogDto>;
     }
 
-    async linkProvider(libraryEntryId: string, request: MediaLinkRequestDto): Promise<void> {
-        const response = await this.request(`/api/media/library/${encodeURIComponent(libraryEntryId)}/link`, {
+    async linkProvider(mediaTitleId: string, request: MediaLinkRequestDto): Promise<void> {
+        const response = await this.request(`/api/media/titles/${encodeURIComponent(mediaTitleId)}/links`, {
             method: 'POST',
             body: JSON.stringify(request),
         });
         await this.ensureOk(response, 'Failed to link provider');
     }
 
-    async unlinkProvider(libraryEntryId: string, providerId: string): Promise<void> {
+    async unlinkProvider(mediaTitleId: string, providerId: string): Promise<void> {
         const response = await this.request(
-            `/api/media/library/${encodeURIComponent(libraryEntryId)}/link/${encodeURIComponent(providerId)}`,
+            `/api/media/titles/${encodeURIComponent(mediaTitleId)}/links/${encodeURIComponent(providerId)}`,
             {
                 method: 'DELETE',
             },
@@ -207,32 +223,31 @@ export class MediaApiClient {
         return response.json() as Promise<MediaProviderTitleDetailsDto>;
     }
 
-    async addProviderTitleToLibrary(
-        providerId: string,
-        providerMediaId: string,
-        request: MediaCatalogAddRequestDto,
-    ): Promise<MediaCatalogAddResultDto> {
+    async addToLibrary(
+        mediaTitleId: string,
+        request: MediaViewerStateCreateDto,
+    ): Promise<MediaViewerStateDto> {
         const response = await this.request(
-            `/api/media/providers/${encodeURIComponent(providerId)}/titles/${encodeURIComponent(providerMediaId)}/library`,
+            `/api/media/titles/${encodeURIComponent(mediaTitleId)}/viewer`,
             {
                 method: 'POST',
                 body: JSON.stringify(request),
             },
         );
         await this.ensureOk(response, 'Failed to add media to library');
-        return response.json() as Promise<MediaCatalogAddResultDto>;
+        return response.json() as Promise<MediaViewerStateDto>;
     }
 
-    async updateProgress(libraryEntryId: string, request: MediaProgressUpdateDto): Promise<void> {
-        const response = await this.request(`/api/media/library/${encodeURIComponent(libraryEntryId)}/progress`, {
+    async updateProgress(mediaTitleId: string, request: MediaProgressUpdateDto): Promise<void> {
+        const response = await this.request(`/api/media/titles/${encodeURIComponent(mediaTitleId)}/viewer/progress`, {
             method: 'POST',
             body: JSON.stringify(request),
         });
         await this.ensureOk(response, 'Failed to update media progress');
     }
 
-    async updateStatus(libraryEntryId: string, request: MediaStatusUpdateDto): Promise<void> {
-        const response = await this.request(`/api/media/library/${encodeURIComponent(libraryEntryId)}/status`, {
+    async updateStatus(mediaTitleId: string, request: MediaStatusUpdateDto): Promise<void> {
+        const response = await this.request(`/api/media/titles/${encodeURIComponent(mediaTitleId)}/viewer/status`, {
             method: 'POST',
             body: JSON.stringify(request),
         });

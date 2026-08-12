@@ -29,7 +29,6 @@
   font-weight: 750;
 }
 
-.cantaro-extension-media .media-detail-franchise-strip,
 .cantaro-extension-media .media-detail-character-row {
   display: flex;
   gap: 0.65rem;
@@ -38,25 +37,73 @@
   padding-bottom: 0.35rem;
 }
 
-.cantaro-extension-media .media-detail-franchise-item-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
+.cantaro-extension-media .media-detail-section-heading > div > p {
+  margin: 0.15rem 0 0;
+  color: var(--color-content-muted);
+  font-size: 0.68rem;
 }
 
-.cantaro-extension-media .media-detail-franchise-item {
+.cantaro-extension-media .media-detail-franchise-sequence {
+  display: flex;
+  margin: 0;
+  overflow-x: auto;
+  padding: 0 0 0.35rem;
+  list-style: none;
+}
+
+.cantaro-extension-media .media-detail-franchise-step {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.cantaro-extension-media .media-detail-franchise-connector {
+  display: grid;
+  min-width: 4.25rem;
+  place-items: center;
+  color: var(--color-content-muted);
+  font-size: 0.62rem;
+  font-weight: 750;
+}
+
+.cantaro-extension-media .media-detail-franchise-connector svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-accent-strong);
+}
+
+.cantaro-extension-media .media-detail-franchise-node {
   display: grid;
   width: 13rem;
+  min-height: 5.5rem;
   flex: 0 0 auto;
   grid-template-columns: 3rem minmax(0, 1fr);
   gap: 0.55rem;
   border: 1px solid var(--color-border-subtle);
   border-radius: 0.8rem;
   padding: 0.5rem;
+  color: var(--color-content);
   background: var(--color-surface-subtle);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
 }
 
-.cantaro-extension-media .media-detail-franchise-item.is-active {
+.cantaro-extension-media .media-detail-franchise-node:is(button, a) {
+  cursor: pointer;
+}
+
+.cantaro-extension-media .media-detail-franchise-node:is(button, a):hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-hover);
+}
+
+.cantaro-extension-media .media-detail-franchise-node:is(button, a):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.cantaro-extension-media .media-detail-franchise-node.is-current {
   border-color: var(--color-accent);
   background: var(--color-accent-soft);
 }
@@ -67,15 +114,21 @@
   border-radius: 0.5rem;
 }
 
-.cantaro-extension-media .media-detail-franchise-item h4,
-.cantaro-extension-media .media-detail-franchise-item p,
-.cantaro-extension-media .media-detail-franchise-item span,
+.cantaro-extension-media .media-detail-franchise-copy > strong,
+.cantaro-extension-media .media-detail-franchise-copy > span,
 .cantaro-extension-media .media-detail-character-card h4,
 .cantaro-extension-media .media-detail-character-card p {
   margin: 0;
 }
 
-.cantaro-extension-media .media-detail-franchise-item h4,
+.cantaro-extension-media .media-detail-franchise-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.cantaro-extension-media .media-detail-franchise-copy > strong,
 .cantaro-extension-media .media-detail-character-card h4 {
   overflow: hidden;
   color: var(--color-content);
@@ -85,16 +138,171 @@
   white-space: nowrap;
 }
 
-.cantaro-extension-media .media-detail-franchise-item p,
-.cantaro-extension-media .media-detail-franchise-item span,
+.cantaro-extension-media .media-detail-franchise-copy > span:not(.media-detail-franchise-state),
+.cantaro-extension-media .media-detail-franchise-state,
 .cantaro-extension-media .media-detail-character-card p,
 .cantaro-extension-media .media-detail-character-state {
   color: var(--color-content-muted);
   font-size: 0.68rem;
 }
 
-.cantaro-extension-media .media-detail-franchise-arrow {
-  color: var(--color-content-subtle);
+.cantaro-extension-media .media-detail-character-state[role="alert"] {
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-content);
+  background: var(--color-danger-surface);
+}
+
+.cantaro-extension-media .media-detail-franchise-state {
+  display: grid;
+  gap: 0.15rem;
+  margin-top: 0.2rem;
+  font-weight: 800;
+}
+
+.cantaro-extension-media .media-detail-franchise-state svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-progress {
+  display: block;
+  padding-left: 0.95rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-completed {
+  color: var(--color-info-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-active {
+  color: var(--color-success-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-pending {
+  color: var(--color-warning-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-dropped {
+  color: var(--color-danger-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-custom {
+  color: var(--color-custom-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-branches {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 0.7rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-branches > h4,
+.cantaro-extension-media .media-detail-franchise-branches > section > p {
+  margin: 0;
+}
+
+.cantaro-extension-media .media-detail-franchise-branches > h4 {
+  font-size: 0.78rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-branches > section {
+  margin-top: 0.7rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-branches > section > p,
+.cantaro-extension-media .media-detail-franchise-summary,
+.cantaro-extension-media .media-detail-franchise-empty,
+.cantaro-extension-media .media-detail-franchise-source {
+  color: var(--color-content-muted);
+  font-size: 0.66rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-branches ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cantaro-extension-media .media-detail-franchise-branches .media-detail-franchise-node {
+  width: 100%;
+}
+
+.cantaro-extension-media .media-detail-franchise-relation {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--color-accent-strong);
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.cantaro-extension-media .media-detail-franchise-summary,
+.cantaro-extension-media .media-detail-franchise-empty,
+.cantaro-extension-media .media-detail-franchise-source {
+  margin: 0.5rem 0 0;
+}
+
+.cantaro-extension-media .media-detail-franchise-message {
+  display: flex;
+  min-height: 4rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  border: 1px solid var(--color-danger-border);
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+  color: var(--color-danger-content);
+  background: var(--color-danger-surface);
+  font-size: 0.7rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-message p {
+  margin: 0;
+}
+
+.cantaro-extension-media .media-detail-franchise-message button {
+  display: inline-flex;
+  min-height: 2.1rem;
+  align-items: center;
+  gap: 0.25rem;
+  border: 0;
+  border-radius: 0.65rem;
+  padding: 0 0.6rem;
+  color: var(--color-action-content);
+  background: var(--color-action);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.cantaro-extension-media .media-detail-franchise-message svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-loading {
+  display: flex;
+  gap: 4.25rem;
+  overflow: hidden;
+}
+
+.cantaro-extension-media .media-detail-franchise-skeleton {
+  width: 13rem;
+  height: 5.5rem;
+  flex: 0 0 auto;
+  border-radius: 0.8rem;
+  background: var(--color-surface-subtle);
+  animation: cantaro-media-franchise-pulse 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes cantaro-media-franchise-pulse {
+  to { opacity: 0.52; }
 }
 
 .cantaro-extension-media .media-detail-character-card {
@@ -411,7 +619,38 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cantaro-extension-media .media-detail-spin {
+  .cantaro-extension-media .media-detail-spin,
+  .cantaro-extension-media .media-detail-franchise-skeleton {
     animation: none;
+  }
+}
+
+@media (width < 42rem) {
+  .cantaro-extension-media .media-detail-franchise-sequence {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .cantaro-extension-media .media-detail-franchise-step {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cantaro-extension-media .media-detail-franchise-connector {
+    min-width: 0;
+    min-height: 2.5rem;
+  }
+
+  .cantaro-extension-media .media-detail-franchise-connector svg {
+    transform: rotate(90deg);
+  }
+
+  .cantaro-extension-media .media-detail-franchise-node {
+    width: 100%;
+  }
+
+  .cantaro-extension-media .media-detail-franchise-branches ul {
+    grid-template-columns: 1fr;
   }
 }

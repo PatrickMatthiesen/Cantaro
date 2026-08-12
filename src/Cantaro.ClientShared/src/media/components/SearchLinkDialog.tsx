@@ -12,7 +12,7 @@ import type {
 } from '../services/mediaApi';
 
 export interface SearchLinkDialogProps {
-    libraryEntryId: string;
+    mediaTitleId: string;
     currentTitle: string;
     mediaKind: string;
     existingLinks: MediaProviderLinkSummaryDto[];
@@ -138,7 +138,7 @@ function useProviderSearch(
 }
 
 function useProviderLink(
-    libraryEntryId: string,
+    mediaTitleId: string,
     providerId: string,
     onLinked: () => void,
     feedback: LinkFeedbackState,
@@ -149,7 +149,7 @@ function useProviderLink(
         feedback.resetLinkState();
 
         try {
-            await mediaApi.linkProvider(libraryEntryId, {
+            await mediaApi.linkProvider(mediaTitleId, {
                 providerId,
                 providerMediaId: result.providerMediaId,
                 confirmReplacement: replaceExisting,
@@ -167,21 +167,21 @@ function useProviderLink(
         } finally {
             feedback.setLinkingId(null);
         }
-    }, [feedback, libraryEntryId, onLinked, onReplacementRequired, providerId]);
+    }, [feedback, mediaTitleId, onLinked, onReplacementRequired, providerId]);
 
     return handleLink;
 }
 
 function useSearchLinkDialogState({
-    libraryEntryId,
+    mediaTitleId,
     mediaKind,
     onLinked,
-}: Pick<SearchLinkDialogProps, 'libraryEntryId' | 'mediaKind' | 'onLinked'>,
+}: Pick<SearchLinkDialogProps, 'mediaTitleId' | 'mediaKind' | 'onLinked'>,
 onReplacementRequired: (result: MediaProviderSearchResultDto) => void) {
     const feedback = useLinkFeedbackState();
     const fields = useSearchFields(feedback.resetLinkState);
     const search = useProviderSearch(mediaKind, fields.providerId, fields.query, feedback.resetLinkState);
-    const handleLink = useProviderLink(libraryEntryId, fields.providerId, onLinked, feedback, onReplacementRequired);
+    const handleLink = useProviderLink(mediaTitleId, fields.providerId, onLinked, feedback, onReplacementRequired);
 
     const selectProvider = useCallback((nextProviderId: string) => {
         fields.selectProvider(nextProviderId);
@@ -373,7 +373,7 @@ function SearchResultsList({ results, query, linkingId, alreadyLinkedIds, onLink
 }
 
 // fallow-ignore-next-line complexity
-export function SearchLinkDialog({ libraryEntryId, currentTitle, mediaKind, existingLinks, onClose, onLinked }: SearchLinkDialogProps) {
+export function SearchLinkDialog({ mediaTitleId, currentTitle, mediaKind, existingLinks, onClose, onLinked }: SearchLinkDialogProps) {
     const [replacement, setReplacement] = useState<MediaProviderSearchResultDto | null>(null);
     const {
         providerId,
@@ -390,7 +390,7 @@ export function SearchLinkDialog({ libraryEntryId, currentTitle, mediaKind, exis
         handleSearch,
         handleLink,
         clearConflict,
-    } = useSearchLinkDialogState({ libraryEntryId, mediaKind, onLinked }, setReplacement);
+    } = useSearchLinkDialogState({ mediaTitleId, mediaKind, onLinked }, setReplacement);
     const alreadyLinkedIds = new Set(existingLinks.filter((link) => link.provider === providerId).map((link) => link.externalId));
     const currentProviderLink = existingLinks.find((link) => link.provider === providerId);
     const providerName = providerDisplayName(providerId);

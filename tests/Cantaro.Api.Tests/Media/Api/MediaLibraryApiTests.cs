@@ -3,6 +3,7 @@ using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -19,327 +20,188 @@ namespace Cantaro.Api.Tests;
 public class MediaLibraryApiTests
 {
     [Fact]
-    public async Task GetLibrary_ReturnsPagedItemsWithFilterAndSort()
+    public void CanonicalTitleAndOptionalViewerEndpoints_ArePublicWhileLibraryRequiresAuthentication()
     {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var anime = MakeTitle("Fullmetal Alchemist: Brotherhood", MediaKinds.Anime, now);
-        var manga = MakeTitle("One Piece", MediaKinds.Manga, now);
-        fixture.Db.MediaTitles.AddRange(anime, manga);
-        await fixture.Db.SaveChangesAsync();
-
-        var completedEntry = MakeEntry(fixture.UserId, anime, MediaLibraryStatuses.Completed, now);
-        completedEntry.ProviderListMemberships.Add(new MediaProviderListMembership { Name = "Favorites" });
-        var currentEntry = MakeEntry(fixture.UserId, manga, MediaLibraryStatuses.Current, now);
-        currentEntry.ProviderListMemberships.Add(new MediaProviderListMembership { Name = "Seasonal" });
-        fixture.Db.MediaLibraryEntries.AddRange(completedEntry, currentEntry);
-        await fixture.Db.SaveChangesAsync();
-
-        // No filter — returns both entries
-        var allResult = await fixture.Controller.GetLibrary(
-            status: null, mediaKind: null, provider: null, providerListName: null,
-            sortBy: "title", sortDir: "asc",
-            page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(allResult.Result);
-        var page = Assert.IsType<MediaLibraryPageDto>(ok.Value);
-        Assert.Equal(2, page.TotalCount);
-        Assert.Equal("Fullmetal Alchemist: Brotherhood", page.Items[0].CanonicalTitle);
-        Assert.Equal(["Favorites", "Seasonal"], page.AvailableProviderListNames);
-
-        // Filter by status=completed
-        var completedResult = await fixture.Controller.GetLibrary(
-            status: MediaLibraryStatuses.Completed, mediaKind: null, provider: null, providerListName: null,
-            sortBy: null, sortDir: null,
-            page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
-
-        var completedOk = Assert.IsType<OkObjectResult>(completedResult.Result);
-        var completedPage = Assert.IsType<MediaLibraryPageDto>(completedOk.Value);
-        Assert.Equal(1, completedPage.TotalCount);
-        Assert.Equal("Fullmetal Alchemist: Brotherhood", completedPage.Items[0].CanonicalTitle);
-        Assert.Equal(["Favorites"], completedPage.Items[0].ProviderListNames);
-
-        var seasonalResult = await fixture.Controller.GetLibrary(
-            status: null, mediaKind: null, provider: null, providerListName: "Seasonal",
-            sortBy: null, sortDir: null,
-            page: 1, pageSize: 10, cancellationToken: CancellationToken.None);
-
-        var seasonalOk = Assert.IsType<OkObjectResult>(seasonalResult.Result);
-        var seasonalPage = Assert.IsType<MediaLibraryPageDto>(seasonalOk.Value);
-        Assert.Equal(1, seasonalPage.TotalCount);
-        Assert.Equal("One Piece", seasonalPage.Items[0].CanonicalTitle);
+        var controllerType = typeof(MediaTitlesController);
+        Assert.NotNull(controllerType.GetMethod(nameof(MediaTitlesController.GetTitle))!
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), true).SingleOrDefault());
+        Assert.NotNull(controllerType.GetMethod(nameof(MediaTitlesController.GetEpisodes))!
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), true).SingleOrDefault());
+        Assert.NotNull(controllerType.GetMethod(nameof(MediaTitlesController.GetViewerState))!
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), true).SingleOrDefault());
+        Assert.NotNull(typeof(MediaLibraryController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true).SingleOrDefault());
     }
 
     [Fact]
-    public async Task GetEntry_ReturnsFullDetailIncludingProviderLinks()
+    public async Task GetTitle_ReturnsCanonicalMediaWithoutLibraryEntry()
     {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var title = MakeTitle("Hunter x Hunter", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.Add(title);
+        await using var fixture = await Fixture.CreateAsync();
+        var title = fixture.MakeTitle("One Piece");
+        fixture.Db.Add(title);
         await fixture.Db.SaveChangesAsync();
 
-        fixture.Db.MediaProviderLinks.Add(new MediaProviderLink
+        var result = await fixture.Titles.GetTitle(title.Id, CancellationToken.None);
+
+        var dto = Assert.IsType<MediaTitleDetailDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(title.Id, dto.Id);
+        Assert.Equal("One Piece", dto.CanonicalTitle);
+        Assert.Empty(fixture.Db.MediaLibraryEntries);
+    }
+
+    [Fact]
+    public async Task GetViewerState_ReturnsJsonNullWhenTitleIsNotInUsersLibrary()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var title = fixture.MakeTitle("Untracked");
+        fixture.Db.Add(title);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Titles.GetViewerState(title.Id, CancellationToken.None);
+
+        var json = Assert.IsType<JsonResult>(result.Result);
+        Assert.Equal(StatusCodes.Status200OK, json.StatusCode);
+        Assert.Null(json.Value);
+    }
+
+    [Fact]
+    public async Task GetViewerState_ReturnsJsonNullForAnonymousVisitor()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Titles.ControllerContext.HttpContext.User = new ClaimsPrincipal();
+
+        var result = await fixture.Titles.GetViewerState(Guid.NewGuid(), CancellationToken.None);
+
+        var json = Assert.IsType<JsonResult>(result.Result);
+        Assert.Equal(StatusCodes.Status200OK, json.StatusCode);
+        Assert.Null(json.Value);
+    }
+
+    [Fact]
+    public async Task LibraryAndViewerState_UseCanonicalMediaTitleId()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var title = fixture.MakeTitle("Tracked");
+        var entry = new MediaLibraryEntry
         {
             Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
             MediaTitleId = title.Id,
-            Provider = "anilist",
-            ExternalId = "11061",
-            ExternalUrl = "https://anilist.co/anime/11061",
-            LinkSource = MediaMappingSources.Imported,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-
-        var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Completed, now);
-        entry.ProgressEpisodes = 148;
-        fixture.Db.MediaLibraryEntries.Add(entry);
+            Status = MediaLibraryStatuses.Current,
+            ProgressEpisodes = 3,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        fixture.Db.AddRange(title, entry);
         await fixture.Db.SaveChangesAsync();
 
-        var result = await fixture.Controller.GetEntry(entry.Id, CancellationToken.None);
+        var viewerResult = await fixture.Titles.GetViewerState(title.Id, CancellationToken.None);
+        var viewer = Assert.IsType<MediaViewerStateDto>(Assert.IsType<JsonResult>(viewerResult.Result).Value);
+        var libraryResult = await fixture.Library.GetLibrary(
+            null, null, null, null, null, null, cancellationToken: CancellationToken.None);
+        var page = Assert.IsType<MediaLibraryPageDto>(Assert.IsType<OkObjectResult>(libraryResult.Result).Value);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var detail = Assert.IsType<MediaLibraryEntryDetailDto>(ok.Value);
-
-        Assert.Equal("Hunter x Hunter", detail.Title.CanonicalTitle);
-        Assert.Equal(148, detail.ProgressEpisodes);
-        Assert.Single(detail.ProviderLinks);
-        Assert.Equal("anilist", detail.ProviderLinks[0].Provider);
-        Assert.Equal("11061", detail.ProviderLinks[0].ExternalId);
+        Assert.Equal(entry.Id, viewer.Id);
+        Assert.Equal(title.Id, viewer.MediaTitleId);
+        Assert.Equal(title.Id, Assert.Single(page.Items).MediaTitleId);
     }
 
     [Fact]
-    public async Task GetEntry_ReturnsNotFoundForMissingEntry()
+    public async Task AddToLibrary_CreatesOnlyViewerStateWithoutProviderBinding()
     {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-
-        var result = await fixture.Controller.GetEntry(Guid.NewGuid(), CancellationToken.None);
-
-        Assert.IsType<NotFoundObjectResult>(result.Result);
-    }
-
-    [Fact]
-    public async Task LinkProvider_CreatesNewLinkAndReturnsNoContent()
-    {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var title = MakeTitle("Demon Slayer", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.Add(title);
+        await using var fixture = await Fixture.CreateAsync();
+        var title = fixture.MakeTitle("Local tracking");
+        fixture.Db.Add(title);
         await fixture.Db.SaveChangesAsync();
 
-        var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Current, now);
-        entry.ProviderMediaId = "101922";
-        fixture.Db.MediaLibraryEntries.Add(entry);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.LinkProvider(
-            entry.Id,
-            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "101922" },
+        var result = await fixture.Titles.AddToLibrary(
+            title.Id,
+            new MediaViewerStateCreateDto { Status = MediaLibraryStatuses.Planned },
             CancellationToken.None);
 
-        Assert.IsType<NoContentResult>(result);
-
-        var link = await fixture.Db.MediaProviderLinks.SingleAsync();
-        Assert.Equal("anilist", link.Provider);
-        Assert.Equal("101922", link.ExternalId);
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        var state = Assert.IsType<MediaViewerStateDto>(created.Value);
+        Assert.Equal(title.Id, state.MediaTitleId);
+        Assert.Equal(MediaLibraryStatuses.Planned, state.Status);
+        Assert.Equal(0, state.ProgressEpisodes);
+        Assert.Empty(state.ProviderBindings);
+        Assert.Empty(fixture.Db.MediaLibraryProviderBindings);
     }
 
     [Fact]
-    public async Task LinkProvider_ReturnsConflictWhenExternalIdAlreadyLinkedToDifferentTitle()
+    public async Task AddToLibrary_IsIdempotentForUserAndTitle()
     {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var titleA = MakeTitle("Title A", MediaKinds.Anime, now);
-        var titleB = MakeTitle("Title B", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.AddRange(titleA, titleB);
+        await using var fixture = await Fixture.CreateAsync();
+        var title = fixture.MakeTitle("One state");
+        fixture.Db.Add(title);
         await fixture.Db.SaveChangesAsync();
+        var request = new MediaViewerStateCreateDto { Status = MediaLibraryStatuses.Current };
 
-        fixture.Db.MediaProviderLinks.Add(new MediaProviderLink
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = titleA.Id,
-            Provider = "anilist",
-            ExternalId = "44444",
-            LinkSource = MediaMappingSources.Imported,
-            MediaTitle = titleA,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
+        await fixture.Titles.AddToLibrary(title.Id, request, CancellationToken.None);
+        var second = await fixture.Titles.AddToLibrary(title.Id, request, CancellationToken.None);
 
-        var entryB = MakeEntry(fixture.UserId, titleB, MediaLibraryStatuses.Planned, now);
-        fixture.Db.MediaLibraryEntries.Add(entryB);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.LinkProvider(
-            entryB.Id,
-            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "44444", ConfirmReplacement = false },
-            CancellationToken.None);
-
-        var conflict = Assert.IsType<ConflictObjectResult>(result);
-        var dto = Assert.IsType<MediaLinkConflictDto>(conflict.Value);
-        Assert.Equal("provider_identity_owned_by_another_title", dto.Code);
-        Assert.Equal(titleA.Id, dto.ConflictingMediaTitleId);
-        Assert.Contains("Title A", dto.ConflictingCanonicalTitle);
+        Assert.IsType<OkObjectResult>(second.Result);
+        Assert.Equal(1, await fixture.Db.MediaLibraryEntries.CountAsync());
     }
 
-    [Fact]
-    public async Task LinkProvider_ConfirmationCannotOverrideCrossTitleConflict()
+    private sealed class Fixture : IAsyncDisposable
     {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
+        private readonly SqliteConnection _connection;
 
-        var titleA = MakeTitle("Title A", MediaKinds.Anime, now);
-        var titleB = MakeTitle("Title B", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.AddRange(titleA, titleB);
-        await fixture.Db.SaveChangesAsync();
-
-        fixture.Db.MediaProviderLinks.Add(new MediaProviderLink
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = titleA.Id,
-            Provider = "anilist",
-            ExternalId = "44444",
-            LinkSource = MediaMappingSources.Imported,
-            MediaTitle = titleA,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-
-        var entryB = MakeEntry(fixture.UserId, titleB, MediaLibraryStatuses.Planned, now);
-        fixture.Db.MediaLibraryEntries.Add(entryB);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.LinkProvider(
-            entryB.Id,
-            new MediaLinkRequestDto { ProviderId = "anilist", ProviderMediaId = "44444", ConfirmReplacement = true },
-            CancellationToken.None);
-
-        var conflict = Assert.IsType<ConflictObjectResult>(result);
-        var dto = Assert.IsType<MediaLinkConflictDto>(conflict.Value);
-        Assert.Equal("provider_identity_owned_by_another_title", dto.Code);
-
-        var link = await fixture.Db.MediaProviderLinks.SingleAsync();
-        Assert.Equal(titleA.Id, link.MediaTitleId);
-    }
-
-    [Fact]
-    public async Task UnlinkProvider_RemovesLinkAndReturnsNoContent()
-    {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-
-        var title = MakeTitle("Neon Genesis Evangelion", MediaKinds.Anime, now);
-        fixture.Db.MediaTitles.Add(title);
-        await fixture.Db.SaveChangesAsync();
-
-        fixture.Db.MediaProviderLinks.Add(new MediaProviderLink
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = title.Id,
-            Provider = "anilist",
-            ExternalId = "30",
-            LinkSource = MediaMappingSources.Imported,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-
-        var entry = MakeEntry(fixture.UserId, title, MediaLibraryStatuses.Completed, now);
-        entry.ProviderMediaId = "30";
-        fixture.Db.MediaLibraryEntries.Add(entry);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.UnlinkProvider(entry.Id, "anilist", CancellationToken.None);
-
-        var conflict = Assert.IsType<ConflictObjectResult>(result);
-        var dto = Assert.IsType<MediaLinkConflictDto>(conflict.Value);
-        Assert.Equal("provider_identity_in_use", dto.Code);
-        Assert.Equal(1, await fixture.Db.MediaProviderLinks.CountAsync());
-    }
-
-    [Fact]
-    public async Task LinkProvider_ReturnsBadRequestWhenProviderIdMissing()
-    {
-        await using var fixture = await MediaLibraryFixture.CreateAsync();
-
-        var result = await fixture.Controller.LinkProvider(
-            Guid.NewGuid(),
-            new MediaLinkRequestDto { ProviderId = "  ", ProviderMediaId = "123" },
-            CancellationToken.None);
-
-        Assert.IsType<BadRequestObjectResult>(result);
-    }
-
-    private sealed class MediaLibraryFixture : IAsyncDisposable
-    {
-        private MediaLibraryFixture(
-            SqliteConnection connection,
-            ApplicationDbContext db,
-            MediaLibraryController controller,
-            int userId)
+        private Fixture(SqliteConnection connection, ApplicationDbContext db, UserManager<User> manager, int userId)
         {
             _connection = connection;
             Db = db;
-            Controller = controller;
             UserId = userId;
+            var query = new MediaLibraryQueryService(db);
+            Library = new MediaLibraryController(query, manager);
+            Titles = new MediaTitlesController(
+                db,
+                query,
+                new MediaEpisodeIdentityService(
+                    db,
+                    new MediaProviderSeasonMappingService(
+                        db,
+                        NullLogger<MediaProviderSeasonMappingService>.Instance),
+                    NullLogger<MediaEpisodeIdentityService>.Instance),
+                new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance),
+                manager);
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "Test"));
+            Library.ControllerContext = new() { HttpContext = new DefaultHttpContext { User = principal } };
+            Titles.ControllerContext = new() { HttpContext = new DefaultHttpContext { User = principal } };
         }
-
-        private readonly SqliteConnection _connection;
 
         public ApplicationDbContext Db { get; }
-        public MediaLibraryController Controller { get; }
+        public MediaLibraryController Library { get; }
+        public MediaTitlesController Titles { get; }
         public int UserId { get; }
 
-        public static async Task<MediaLibraryFixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync()
         {
             const int userId = 501;
-            const string email = "library.api@example.com";
-
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-
-            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlite(connection)
-                .Options;
-
-            var db = new ApplicationDbContext(options);
+            var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
-            db.Users.Add(TestUserFactory.Create(userId, email));
+            db.Users.Add(TestUserFactory.Create(userId, "media-api@example.test"));
             await db.SaveChangesAsync();
-
-            var queryService = new MediaLibraryQueryService(db);
-            var linkService = new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance);
-            var episodeIdentityService = new MediaEpisodeIdentityService(
-                db,
-                NullLogger<MediaEpisodeIdentityService>.Instance);
-            var userManager = CreateUserManager(db);
-
-            var controller = new MediaLibraryController(
-                db,
-                queryService,
-                linkService,
-                episodeIdentityService,
-                userManager);
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext
-                {
-                    User = new ClaimsPrincipal(
-                        new ClaimsIdentity(
-                            [
-                                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                                new Claim(ClaimTypes.Name, email),
-                                new Claim(ClaimTypes.Email, email)
-                            ],
-                            authenticationType: "Test"))
-                }
-            };
-
-            return new MediaLibraryFixture(connection, db, controller, userId);
+            return new Fixture(connection, db, CreateUserManager(db), userId);
         }
+
+        public MediaTitle MakeTitle(string name) => new()
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = name,
+            SortTitle = name,
+            MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
 
         public async ValueTask DisposeAsync()
         {
@@ -353,44 +215,13 @@ public class MediaLibraryApiTests
         var store = new UserStore<User, IdentityRole<int>, ApplicationDbContext, int>(db);
         return new UserManager<User>(
             store,
-            optionsAccessor: Options.Create(new IdentityOptions()),
-            passwordHasher: new PasswordHasher<User>(),
-            userValidators: [],
-            passwordValidators: [],
-            keyNormalizer: new UpperInvariantLookupNormalizer(),
-            errors: new IdentityErrorDescriber(),
-            services: new ServiceCollection().BuildServiceProvider(),
-            logger: NullLogger<UserManager<User>>.Instance);
-    }
-
-    private static MediaTitle MakeTitle(string name, string kind, DateTimeOffset now)
-    {
-        return new MediaTitle
-        {
-            Id = Guid.NewGuid(),
-            CanonicalTitle = name,
-            MediaKind = kind,
-            PrimaryProgressDimension = MediaProgressDimensions.Episode,
-            ReleaseStatusDimension = MediaProgressDimensions.Episode,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-    }
-
-    private static MediaLibraryEntry MakeEntry(int userId, MediaTitle title, string status, DateTimeOffset now)
-    {
-        return new MediaLibraryEntry
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            MediaTitleId = title.Id,
-            MediaTitle = title,
-            Provider = "anilist",
-            ProviderAccountId = $"account-{userId}",
-            ProviderMediaId = Guid.NewGuid().ToString("N")[..6],
-            Status = status,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
+            Options.Create(new IdentityOptions()),
+            new PasswordHasher<User>(),
+            [],
+            [],
+            new UpperInvariantLookupNormalizer(),
+            new IdentityErrorDescriber(),
+            new ServiceCollection().BuildServiceProvider(),
+            NullLogger<UserManager<User>>.Instance);
     }
 }

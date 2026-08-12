@@ -1,7 +1,8 @@
 namespace Cantaro.Api.Models;
 
 /// <summary>
-/// Represents a user-owned media library row synchronized with a provider.
+/// Represents the Cantaro-owned state for one media title in one user's library.
+/// Provider/account synchronization belongs to <see cref="MediaLibraryProviderBinding"/>.
 /// </summary>
 public class MediaLibraryEntry
 {
@@ -11,24 +12,6 @@ public class MediaLibraryEntry
 
     public Guid MediaTitleId { get; set; }
 
-    /// <summary>
-    /// Optional while disconnected library state is retained after account
-    /// removal.
-    /// </summary>
-    public int? ConnectedServiceAccountId { get; set; }
-
-    public required string Provider { get; set; }
-
-    /// <summary>
-    /// Snapshot of the upstream account identifier so rows remain attributable
-    /// after disconnect.
-    /// </summary>
-    public required string ProviderAccountId { get; set; }
-
-    public required string ProviderMediaId { get; set; }
-
-    public string? ProviderLibraryEntryId { get; set; }
-
     public required string Status { get; set; }
 
     public int? ProgressEpisodes { get; set; }
@@ -37,15 +20,9 @@ public class MediaLibraryEntry
 
     public int? ProgressVolumes { get; set; }
 
-    public DateTimeOffset? LastSyncedAt { get; set; }
-
-    public DateTimeOffset? LastRemoteUpdateAt { get; set; }
-
     public DateTimeOffset? LastLocalEditAt { get; set; }
 
     public string? LastMutationSource { get; set; }
-
-    public string? RawMetadata { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 
@@ -55,9 +32,5 @@ public class MediaLibraryEntry
 
     public MediaTitle? MediaTitle { get; set; }
 
-    public ConnectedServiceAccount? ConnectedServiceAccount { get; set; }
-
-    public ICollection<MediaProviderOperation> ProviderOperations { get; set; } = [];
-
-    public ICollection<MediaProviderListMembership> ProviderListMemberships { get; set; } = [];
+    public ICollection<MediaLibraryProviderBinding> ProviderBindings { get; set; } = [];
 }

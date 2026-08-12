@@ -14,7 +14,7 @@ export interface CatalogSearchSectionProps {
     hasSearched: boolean;
     onRetry: () => void;
     onNavigateCatalogResult: (providerId: string, providerMediaId: string) => void;
-    onNavigateEntry: (libraryEntryId: string) => void;
+    onNavigateEntry: (mediaTitleId: string) => void;
 }
 
 function CatalogPoster({ posterUrl, title }: { posterUrl?: string; title: string }) {
@@ -75,20 +75,20 @@ function CatalogResultText({ result, metadata }: { result: MediaProviderSearchRe
 }
 
 function CatalogLibraryAction({
-    libraryEntryId,
+    mediaTitleId,
     onNavigateEntry,
 }: {
-    libraryEntryId?: string;
-    onNavigateEntry: (libraryEntryId: string) => void;
+    mediaTitleId?: string;
+    onNavigateEntry: (mediaTitleId: string) => void;
 }) {
-    if (!libraryEntryId) return null;
+    if (!mediaTitleId) return null;
 
     return (
         <div className="border-t border-border-subtle bg-surface-translucent p-3">
             <GradientButton
                 tone="soft"
                 className="w-full justify-center"
-                onClick={() => onNavigateEntry(libraryEntryId)}
+                onClick={() => onNavigateEntry(mediaTitleId)}
             >
                 Open library entry
             </GradientButton>
@@ -103,10 +103,10 @@ function CatalogResultCard({
 }: {
     result: MediaProviderSearchResultDto;
     onNavigateCatalogResult: (providerId: string, providerMediaId: string) => void;
-    onNavigateEntry: (libraryEntryId: string) => void;
+    onNavigateEntry: (mediaTitleId: string) => void;
 }) {
-    const libraryEntryId = result.libraryState?.libraryEntryId;
-    const isInLibrary = Boolean(result.libraryState?.isInLibrary && libraryEntryId);
+    const mediaTitleId = result.libraryState?.mediaTitleId;
+    const isInLibrary = Boolean(result.libraryState?.isInLibrary && mediaTitleId);
     const metadata = catalogResultMetadata(result);
 
     return (
@@ -123,7 +123,7 @@ function CatalogResultCard({
                     <CatalogResultText result={result} metadata={metadata} />
                 </div>
             </button>
-            <CatalogLibraryAction libraryEntryId={isInLibrary ? libraryEntryId : undefined} onNavigateEntry={onNavigateEntry} />
+            <CatalogLibraryAction mediaTitleId={isInLibrary ? mediaTitleId : undefined} onNavigateEntry={onNavigateEntry} />
         </GlassCard>
     );
 }

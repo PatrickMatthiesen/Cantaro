@@ -1,8 +1,10 @@
+using System.Data.Common;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -10,6 +12,74 @@ namespace Cantaro.Api.Tests;
 
 public class MediaObservationMatchingServiceTests
 {
+    [Fact]
+    public async Task ProcessObservation_LoadsContinuityInBatchesInsteadOfOncePerCandidate()
+    {
+        var interceptor = new RelationQueryCountingInterceptor();
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        db.Users.Add(TestUserFactory.Create(812, "batch-continuity@example.com"));
+        for (var index = 1; index <= 20; index++)
+        {
+            var title = new MediaTitle
+            {
+                Id = Guid.NewGuid(),
+                CanonicalTitle = $"Example Season {index}",
+                MediaKind = MediaKinds.Anime,
+                Format = MediaFormats.Tv,
+                EpisodeCount = 12,
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.MediaTitles.Add(title);
+            db.MediaLibraryEntries.Add(new MediaLibraryEntry
+            {
+                Id = Guid.NewGuid(),
+                UserId = 812,
+                MediaTitleId = title.Id,
+                Status = MediaLibraryStatuses.Current,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = 812,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/series/EXAMPLE/example",
+            ObservedTitle = "Example",
+            RawPayload = "{\"seriesTitle\":\"Example\",\"observedEpisodes\":[{\"episodeNumber\":1}]}",
+            MatchStatus = MediaObservationStatuses.Pending,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.MediaObservations.Add(observation);
+        await db.SaveChangesAsync();
+        interceptor.RelationQueryCount = 0;
+        var seasonMappings = new MediaProviderSeasonMappingService(
+            db,
+            NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var service = new MediaObservationMatchingService(
+            db,
+            seasonMappings,
+            new MediaRelationGraphRefreshQueue(),
+            NullLogger<MediaObservationMatchingService>.Instance);
+
+        await service.ProcessObservationAsync(observation, CancellationToken.None);
+
+        Assert.InRange(interceptor.RelationQueryCount, 1, 4);
+    }
+
     // -----------------------------------------------------------------------
     // Exact provider link match
     // -----------------------------------------------------------------------
@@ -203,6 +273,52 @@ public class MediaObservationMatchingServiceTests
     // -----------------------------------------------------------------------
 
     [Fact]
+    public async Task ProcessObservation_DoesNotTrustAnotherUsersUnconfirmedEpisodeAssignment()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+        var poisonedTitle = fixture.SeedTitle("Wrong global title", MediaKinds.Anime);
+        var correctTitle = fixture.SeedTitle("Correct title", MediaKinds.Anime);
+        const int secondUserId = 502;
+        fixture.DbContext.Users.Add(TestUserFactory.Create(secondUserId, "second-user@example.com"));
+        fixture.SeedLibraryEntry(correctTitle, secondUserId);
+        var now = DateTimeOffset.UtcNow;
+        var poisonedEpisode = new MediaEpisode
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = poisonedTitle.Id,
+            EpisodeNumber = 1,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.DbContext.AddRange(
+            poisonedEpisode,
+            new MediaEpisodeProviderIdentity
+            {
+                Id = Guid.NewGuid(),
+                MediaEpisodeId = poisonedEpisode.Id,
+                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+                ProviderEpisodeId = "POISONED1",
+                ProviderUrlPath = "/watch/POISONED1",
+                SeenCount = 1,
+                FirstSeenAt = now,
+                LastSeenAt = now,
+                IsTrusted = false
+            });
+        await fixture.DbContext.SaveChangesAsync();
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            "POISONED1",
+            "Correct title",
+            userId: secondUserId);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations.SingleAsync(item => item.Id == observation.Id);
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(correctTitle.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
     public async Task ProcessObservation_IncrementsAttemptCount()
     {
         await using var fixture = await ObservationTestFixture.CreateAsync();
@@ -267,6 +383,10 @@ public class MediaObservationMatchingServiceTests
 
             var service = new MediaObservationMatchingService(
                 dbContext,
+                new MediaProviderSeasonMappingService(
+                    dbContext,
+                    NullLogger<MediaProviderSeasonMappingService>.Instance),
+                new MediaRelationGraphRefreshQueue(),
                 NullLogger<MediaObservationMatchingService>.Instance);
 
             return new ObservationTestFixture(connection, dbContext, service);
@@ -306,16 +426,13 @@ public class MediaObservationMatchingServiceTests
             return title;
         }
 
-        public void SeedLibraryEntry(MediaTitle title)
+        public void SeedLibraryEntry(MediaTitle title, int userId = UserId)
         {
             DbContext.MediaLibraryEntries.Add(new MediaLibraryEntry
             {
                 Id = Guid.NewGuid(),
-                UserId = UserId,
+                UserId = userId,
                 MediaTitleId = title.Id,
-                Provider = "anilist",
-                ProviderAccountId = "test-account",
-                ProviderMediaId = Guid.NewGuid().ToString(),
                 Status = MediaLibraryStatuses.Current,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
@@ -328,12 +445,13 @@ public class MediaObservationMatchingServiceTests
             string siteIdentifier,
             string? siteMediaId,
             string observedTitle,
-            string? rawPayload = null)
+            string? rawPayload = null,
+            int userId = UserId)
         {
             var observation = new MediaObservation
             {
                 Id = Guid.NewGuid(),
-                UserId = UserId,
+                UserId = userId,
                 SiteIdentifier = siteIdentifier,
                 ObservedUrl = $"https://{siteIdentifier}.co/anime/test",
                 SiteMediaId = siteMediaId,
@@ -354,6 +472,38 @@ public class MediaObservationMatchingServiceTests
         {
             await DbContext.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    private sealed class RelationQueryCountingInterceptor : DbCommandInterceptor
+    {
+        public int RelationQueryCount { get; set; }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            Count(command);
+            return base.ReaderExecuting(command, eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Count(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private void Count(DbCommand command)
+        {
+            if (command.CommandText.Contains("MediaTitleRelations", StringComparison.Ordinal))
+            {
+                RelationQueryCount++;
+            }
         }
     }
 }

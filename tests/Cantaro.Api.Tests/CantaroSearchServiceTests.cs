@@ -89,7 +89,7 @@ public sealed class CantaroSearchServiceTests
             [$"media-title:{exactMedia.Id}", $"media-title:{prefixMedia.Id}"],
             result.Groups.Media.Items.Select(item => item.Id));
         Assert.Equal("https://img.example/poster.jpg", result.Groups.Media.Items[0].ArtworkUrl);
-        Assert.Equal($"/media/library/{exactMediaEntry.Id}", result.Groups.Media.Items[0].CanonicalRoute);
+        Assert.Equal($"/media/{exactMedia.Id}", result.Groups.Media.Items[0].CanonicalRoute);
         Assert.True(result.Groups.Media.Items[0].IsInLibrary);
         Assert.Equal("watching", result.Groups.Media.Items[0].LibraryStatus);
         Assert.DoesNotContain(
@@ -271,7 +271,7 @@ public sealed class CantaroSearchServiceTests
         var title = MakeMediaTitle("Shared Echo", "anime", 2025, now);
         db.MediaTitles.Add(title);
         await db.SaveChangesAsync();
-        db.MediaProviderLinks.Add(new MediaProviderLink
+        var providerLink = new MediaProviderLink
         {
             Id = Guid.NewGuid(),
             MediaTitleId = title.Id,
@@ -280,7 +280,8 @@ public sealed class CantaroSearchServiceTests
             LinkSource = MediaMappingSources.Imported,
             CreatedAt = now,
             UpdatedAt = now
-        });
+        };
+        db.MediaProviderLinks.Add(providerLink);
         db.MediaLibraryEntries.Add(MakeMediaEntry(other.Id, title.Id, "dropped", now));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
@@ -292,7 +293,7 @@ public sealed class CantaroSearchServiceTests
 
         var item = Assert.Single(result.Groups.Media.Items);
         Assert.Equal($"media-title:{title.Id}", item.Id);
-        Assert.Equal("/media/catalog/anilist/shared-1", item.CanonicalRoute);
+        Assert.Equal($"/media/{title.Id}", item.CanonicalRoute);
         Assert.False(item.IsInLibrary);
         Assert.Null(item.LibraryStatus);
         Assert.Null(item.Detail);
@@ -314,7 +315,7 @@ public sealed class CantaroSearchServiceTests
         var title = MakeMediaTitle("Echo Identity", "anime", 2024, now);
         db.MediaTitles.Add(title);
         await db.SaveChangesAsync();
-        db.MediaProviderLinks.Add(new MediaProviderLink
+        var providerLink = new MediaProviderLink
         {
             Id = Guid.NewGuid(),
             MediaTitleId = title.Id,
@@ -323,15 +324,21 @@ public sealed class CantaroSearchServiceTests
             LinkSource = MediaMappingSources.Imported,
             CreatedAt = now,
             UpdatedAt = now
-        });
+        };
+        db.MediaProviderLinks.Add(providerLink);
         var connectedEntry = MakeMediaEntry(owner.Id, title.Id, "watching", now);
-        connectedEntry.Provider = "anilist";
-        connectedEntry.ProviderMediaId = "linked-1";
-        connectedEntry.ConnectedServiceAccountId = account.Id;
-        var olderDuplicate = MakeMediaEntry(owner.Id, title.Id, "completed", now.AddDays(-1));
-        olderDuplicate.Provider = "legacy";
         var otherUserEntry = MakeMediaEntry(other.Id, title.Id, "dropped", now.AddDays(1));
-        db.MediaLibraryEntries.AddRange(connectedEntry, olderDuplicate, otherUserEntry);
+        db.MediaLibraryEntries.AddRange(connectedEntry, otherUserEntry);
+        db.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = connectedEntry.Id,
+            MediaProviderLinkId = providerLink.Id,
+            ConnectedServiceAccountId = account.Id,
+            ProviderAccountId = account.ExternalAccountId,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -351,7 +358,7 @@ public sealed class CantaroSearchServiceTests
         var canonical = Assert.Single(
             result.Groups.Media.Items,
             item => item.Id == $"media-title:{title.Id}");
-        Assert.Equal($"/media/library/{connectedEntry.Id}", canonical.CanonicalRoute);
+        Assert.Equal($"/media/{title.Id}", canonical.CanonicalRoute);
         Assert.True(canonical.IsInLibrary);
         Assert.Equal("watching", canonical.LibraryStatus);
         Assert.Equal("watching", canonical.Detail);
@@ -581,8 +588,7 @@ public sealed class CantaroSearchServiceTests
             StartYear = startYear,
             PrimaryProgressDimension = "episodes",
             ReleaseStatusDimension = "episodes",
-            CanonicalMetadata =
-                """{"status":"CURRENT","media":{"coverImage":{"medium":"https://img.example/medium.jpg","extraLarge":"https://img.example/poster.jpg"}}}""",
+            PosterUrl = "https://img.example/poster.jpg",
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -597,9 +603,6 @@ public sealed class CantaroSearchServiceTests
             Id = Guid.NewGuid(),
             UserId = userId,
             MediaTitleId = mediaTitleId,
-            Provider = "anilist",
-            ProviderAccountId = $"account-{userId}",
-            ProviderMediaId = Guid.NewGuid().ToString(),
             Status = status,
             CreatedAt = now,
             UpdatedAt = now

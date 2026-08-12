@@ -11,9 +11,10 @@ public class AniListMediaProvider(
     ApplicationDbContext dbContext,
     AniListApiClient apiClient,
     TokenEncryptionService tokenEncryptionService,
-    ILogger<AniListMediaProvider> logger) : IMediaProvider
+    ILogger<AniListMediaProvider> logger) : IMediaProvider, IMediaRelationGraphProvider
 {
     private const string ProviderName = "anilist";
+    private const int MaxContinuityGraphNodes = 50;
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly AniListApiClient _apiClient = apiClient;
     private readonly TokenEncryptionService _tokenEncryptionService = tokenEncryptionService;
@@ -95,15 +96,23 @@ public class AniListMediaProvider(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var libraryEntries = await _dbContext.MediaLibraryEntries
-            .Where(entry => entry.UserId == userId && entry.Provider == ProviderName && entry.ConnectedServiceAccountId == account.Id)
+        var bindings = await _dbContext.MediaLibraryProviderBindings
+            .Include(binding => binding.MediaLibraryEntry)
+            .Include(binding => binding.MediaProviderLink)
+            .Where(binding => binding.MediaLibraryEntry!.UserId == userId
+                && binding.MediaProviderLink!.Provider == ProviderName
+                && binding.ConnectedServiceAccountId == account.Id)
             .ToListAsync(cancellationToken);
 
-        foreach (var entry in libraryEntries)
+        foreach (var binding in bindings)
         {
-            entry.ConnectedServiceAccountId = null;
-            entry.LastMutationSource = MediaMutationSources.ProviderDisconnect;
-            entry.UpdatedAt = now;
+            binding.ConnectedServiceAccountId = null;
+            binding.UpdatedAt = now;
+            if (binding.MediaLibraryEntry is { } entry)
+            {
+                entry.LastMutationSource = MediaMutationSources.ProviderDisconnect;
+                entry.UpdatedAt = now;
+            }
         }
 
         _dbContext.ConnectedServiceAccounts.Remove(account);
@@ -189,6 +198,117 @@ public class AniListMediaProvider(
             cancellationToken);
 
         return data.Media is null ? null : MapTitleDetails(data.Media);
+    }
+
+    public async Task<MediaProviderRelationGraphSnapshot> GetRelationGraphAsync(
+        int userId,
+        string providerMediaId,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireConnectedAccountAsync(userId, cancellationToken);
+        var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
+        var rootMediaId = ParseProviderMediaId(providerMediaId);
+        var pending = new Queue<int>();
+        var enqueued = new HashSet<int> { rootMediaId };
+        var fetched = new HashSet<int>();
+        var refreshed = new HashSet<int>();
+        var nodes = new Dictionary<int, MediaProviderRelationGraphNode>();
+        var edges = new Dictionary<string, MediaProviderRelationGraphEdge>(StringComparer.Ordinal);
+        var isComplete = true;
+        pending.Enqueue(rootMediaId);
+
+        while (pending.Count > 0)
+        {
+            if (fetched.Count >= MaxContinuityGraphNodes)
+            {
+                isComplete = false;
+                break;
+            }
+
+            var batch = new List<int>(Math.Min(50, MaxContinuityGraphNodes - fetched.Count));
+            while (pending.Count > 0 && batch.Count < batch.Capacity)
+            {
+                var id = pending.Dequeue();
+                if (fetched.Add(id))
+                {
+                    batch.Add(id);
+                }
+            }
+
+            if (batch.Count == 0)
+            {
+                continue;
+            }
+
+            var data = await _apiClient.SendGraphQlAsync<AniListPageData>(
+                accessToken,
+                MediaRelationGraphQuery,
+                new { ids = batch },
+                cancellationToken);
+
+            var returnedMedia = data.Page?.Media ?? [];
+            if (returnedMedia.Select(media => media.Id).ToHashSet().Count < batch.Count)
+            {
+                isComplete = false;
+            }
+
+            foreach (var media in returnedMedia)
+            {
+                if (media.Id <= 0)
+                {
+                    continue;
+                }
+
+                nodes[media.Id] = MapRelationGraphNode(media);
+                refreshed.Add(media.Id);
+                foreach (var relation in media.Relations?.Edges ?? [])
+                {
+                    if (relation.Node is not { Id: > 0 } related || related.Id == media.Id)
+                    {
+                        continue;
+                    }
+
+                    nodes[related.Id] = MapRelationGraphNode(related);
+                    var relationType = NormalizeRelationType(relation.RelationType);
+                    var edgeKey = $"{media.Id}:{related.Id}:{relationType}";
+                    edges[edgeKey] = new MediaProviderRelationGraphEdge
+                    {
+                        MediaProviderMediaId = media.Id.ToString(CultureInfo.InvariantCulture),
+                        RelatedProviderMediaId = related.Id.ToString(CultureInfo.InvariantCulture),
+                        RelationType = relationType,
+                        SourceRelationId = relation.Id is > 0
+                            ? relation.Id.Value.ToString(CultureInfo.InvariantCulture)
+                            : null
+                    };
+
+                    if (relationType is MediaRelationTypes.Prequel or MediaRelationTypes.Sequel
+                        && MapMediaKind(related.Type) == MediaKinds.Anime
+                        && MapMediaFormat(related.Format) == MediaFormats.Tv
+                        && enqueued.Add(related.Id))
+                    {
+                        pending.Enqueue(related.Id);
+                    }
+                }
+            }
+        }
+
+        if (pending.Count > 0)
+        {
+            isComplete = false;
+        }
+
+        return new MediaProviderRelationGraphSnapshot
+        {
+            ProviderId = ProviderName,
+            RootProviderMediaId = rootMediaId.ToString(CultureInfo.InvariantCulture),
+            Nodes = nodes.Values.OrderBy(node => int.Parse(node.ProviderMediaId, CultureInfo.InvariantCulture)).ToList(),
+            Edges = edges.Values.ToList(),
+            RefreshedProviderMediaIds = refreshed
+                .OrderBy(id => id)
+                .Select(id => id.ToString(CultureInfo.InvariantCulture))
+                .ToList(),
+            IsComplete = isComplete
+        };
     }
 
     public async Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken)
@@ -338,6 +458,7 @@ public class AniListMediaProvider(
 
         var title = SelectCanonicalTitle(entry.Media.Title);
         var dimensions = GetDimensions(mediaKind);
+        var releaseMetadata = BuildReleaseMetadata(entry.Media, dimensions.ReleaseStatusDimension);
 
         return new MediaProviderLibraryItem
         {
@@ -348,11 +469,17 @@ public class AniListMediaProvider(
             OriginalTitle = entry.Media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = entry.Media.Description,
+            Format = entry.Media.Format,
+            PosterUrl = SelectPosterUrl(entry.Media.CoverImage),
+            BackgroundUrl = entry.Media.BannerImage,
             ExternalUrl = entry.Media.SiteUrl,
             StartYear = entry.Media.StartDate?.Year,
             EpisodeCount = entry.Media.Episodes,
             ChapterCount = entry.Media.Chapters,
             VolumeCount = entry.Media.Volumes,
+            ReleasedCount = releaseMetadata.ReleasedCount,
+            NextReleaseAt = releaseMetadata.NextReleaseAt,
+            NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             Status = MapStatus(entry.Status),
             ProviderListNames = providerListNames,
             ProgressEpisodes = mediaKind == MediaKinds.Anime ? entry.Progress : null,
@@ -404,17 +531,49 @@ public class AniListMediaProvider(
             NativeTitle = media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = media.Description,
+            Format = media.Format,
             PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
             ChapterCount = media.Chapters,
             VolumeCount = media.Volumes,
+            ReleasedCount = releaseMetadata.ReleasedCount,
+            NextReleaseAt = releaseMetadata.NextReleaseAt,
+            NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
             AvailabilityLinks = BuildAvailabilityLinks(media),
             Characters = MapCharacters(media.Characters),
             RawMetadata = JsonSerializer.Serialize(releaseMetadata)
+        };
+    }
+
+    private static MediaProviderRelationGraphNode MapRelationGraphNode(AniListMedia media)
+    {
+        var mediaKind = MapMediaKind(media.Type) ?? MediaKinds.Other;
+        return new MediaProviderRelationGraphNode
+        {
+            ProviderMediaId = media.Id.ToString(CultureInfo.InvariantCulture),
+            Title = SelectCanonicalTitle(media.Title),
+            NativeTitle = media.Title?.Native,
+            MediaKind = mediaKind,
+            Format = MapMediaFormat(media.Format),
+            Synopsis = media.Description,
+            ExternalUrl = media.SiteUrl,
+            PosterUrl = SelectPosterUrl(media.CoverImage),
+            BackgroundUrl = media.BannerImage,
+            StartYear = media.StartDate?.Year,
+            EpisodeCount = media.Episodes,
+            ChapterCount = media.Chapters,
+            VolumeCount = media.Volumes,
+            RawMetadata = JsonSerializer.Serialize(new
+            {
+                type = media.Type,
+                format = media.Format,
+                status = media.Status,
+                coverImage = media.CoverImage
+            })
         };
     }
 
@@ -639,6 +798,36 @@ public class AniListMediaProvider(
         };
     }
 
+    private static string? MapMediaFormat(string? format)
+    {
+        if (string.IsNullOrWhiteSpace(format))
+        {
+            return null;
+        }
+
+        return format.Trim().ToUpperInvariant() switch
+        {
+            "TV" => MediaFormats.Tv,
+            "TV_SHORT" => MediaFormats.TvShort,
+            "MOVIE" => MediaFormats.Movie,
+            "SPECIAL" => MediaFormats.Special,
+            "OVA" => MediaFormats.Ova,
+            "ONA" => MediaFormats.Ona,
+            "MUSIC" => MediaFormats.Music,
+            "MANGA" => MediaFormats.Manga,
+            "NOVEL" => MediaFormats.Novel,
+            "ONE_SHOT" => MediaFormats.OneShot,
+            var value => value.ToLowerInvariant()
+        };
+    }
+
+    private static string NormalizeRelationType(string? relationType)
+    {
+        return string.IsNullOrWhiteSpace(relationType)
+            ? MediaRelationTypes.Other
+            : relationType.Trim().ToLowerInvariant();
+    }
+
     private static string MapStatus(string? status)
     {
         return status?.ToUpperInvariant() switch
@@ -858,6 +1047,49 @@ public class AniListMediaProvider(
         }
         """;
 
+    private const string MediaRelationGraphQuery = """
+        query ($ids: [Int]) {
+          Page(page: 1, perPage: 50) {
+            media(id_in: $ids) {
+              id
+              type
+              format
+              status
+              siteUrl
+              description(asHtml: true)
+              episodes
+              chapters
+              volumes
+              bannerImage
+              startDate { year }
+              title { romaji english native }
+              coverImage { extraLarge medium large }
+              relations {
+                edges {
+                  id
+                  relationType(version: 2)
+                  node {
+                    id
+                    type
+                    format
+                    status
+                    siteUrl
+                    description(asHtml: true)
+                    episodes
+                    chapters
+                    volumes
+                    bannerImage
+                    startDate { year }
+                    title { romaji english native }
+                    coverImage { extraLarge medium large }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+
 }
 
 public class AniListViewerData
@@ -1017,6 +1249,27 @@ public class AniListMedia
 
     [JsonPropertyName("characters")]
     public AniListCharacterConnection? Characters { get; set; }
+
+    [JsonPropertyName("relations")]
+    public AniListMediaRelationConnection? Relations { get; set; }
+}
+
+public sealed class AniListMediaRelationConnection
+{
+    [JsonPropertyName("edges")]
+    public List<AniListMediaRelationEdge>? Edges { get; set; }
+}
+
+public sealed class AniListMediaRelationEdge
+{
+    [JsonPropertyName("id")]
+    public int? Id { get; set; }
+
+    [JsonPropertyName("relationType")]
+    public string? RelationType { get; set; }
+
+    [JsonPropertyName("node")]
+    public AniListMedia? Node { get; set; }
 }
 
 public class AniListCharacterConnection

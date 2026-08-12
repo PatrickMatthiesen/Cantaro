@@ -38,41 +38,101 @@ public class MediaLibraryListItemDto
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-public class MediaLibraryEntryDetailDto
-{
-    public Guid Id { get; set; }
-    public required MediaLibraryTitleDto Title { get; set; }
-    public required string Provider { get; set; }
-    public required string ProviderMediaId { get; set; }
-    public string? ProviderLibraryEntryId { get; set; }
-    public required string Status { get; set; }
-    public required IReadOnlyList<string> ProviderListNames { get; set; }
-    public int? ProgressEpisodes { get; set; }
-    public int? ProgressChapters { get; set; }
-    public int? ProgressVolumes { get; set; }
-    public bool IsConnected { get; set; }
-    public DateTimeOffset? NextReleaseAt { get; set; }
-    public string? NextReleaseLabel { get; set; }
-    public DateTimeOffset? LastSyncedAt { get; set; }
-    public DateTimeOffset? LastRemoteUpdateAt { get; set; }
-    public DateTimeOffset UpdatedAt { get; set; }
-    public required IReadOnlyList<MediaProviderLinkSummaryDto> ProviderLinks { get; set; }
-}
-
-public class MediaLibraryTitleDto
+public class MediaTitleDetailDto
 {
     public Guid Id { get; set; }
     public required string CanonicalTitle { get; set; }
     public string? OriginalTitle { get; set; }
     public required string MediaKind { get; set; }
+    public string? Format { get; set; }
     public string? Synopsis { get; set; }
     public string? PosterUrl { get; set; }
+    public string? BackgroundUrl { get; set; }
     public int? StartYear { get; set; }
     public int? EpisodeCount { get; set; }
     public int? ChapterCount { get; set; }
     public int? VolumeCount { get; set; }
+    public int? ReleasedCount { get; set; }
+    public DateTimeOffset? NextReleaseAt { get; set; }
+    public string? NextReleaseLabel { get; set; }
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public required IReadOnlyList<MediaProviderLinkSummaryDto> ProviderLinks { get; set; }
+}
+
+public class MediaViewerStateDto
+{
+    public Guid Id { get; set; }
+    public Guid MediaTitleId { get; set; }
+    public required string Status { get; set; }
+    public int? ProgressEpisodes { get; set; }
+    public int? ProgressChapters { get; set; }
+    public int? ProgressVolumes { get; set; }
+    public DateTimeOffset? LastLocalEditAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public required IReadOnlyList<MediaViewerProviderBindingDto> ProviderBindings { get; set; }
+}
+
+public class MediaViewerStateCreateDto
+{
+    public string Status { get; set; } = MediaLibraryStatuses.Planned;
+}
+
+public class MediaViewerProviderBindingDto
+{
+    public Guid Id { get; set; }
+    public required string Provider { get; set; }
+    public required string ProviderMediaId { get; set; }
+    public string? ProviderLibraryEntryId { get; set; }
+    public required IReadOnlyList<string> ProviderListNames { get; set; }
+    public bool IsConnected { get; set; }
+    public DateTimeOffset? LastSyncedAt { get; set; }
+    public DateTimeOffset? LastRemoteUpdateAt { get; set; }
+}
+
+public class MediaFranchiseGraphDto
+{
+    public Guid CurrentMediaTitleId { get; set; }
+    public required string SourceProvider { get; set; }
+    public DateTimeOffset? RefreshedAt { get; set; }
+    public required IReadOnlyList<MediaFranchiseNodeDto> Nodes { get; set; }
+    public required IReadOnlyList<MediaFranchiseRelationDto> Relations { get; set; }
+    public required MediaEpisodeContinuityDto Continuity { get; set; }
+}
+
+public class MediaFranchiseNodeDto
+{
+    public Guid MediaTitleId { get; set; }
+    public required string Provider { get; set; }
+    public required string ProviderMediaId { get; set; }
+    public string? ExternalUrl { get; set; }
+    public required string CanonicalTitle { get; set; }
+    public string? OriginalTitle { get; set; }
+    public string? PosterUrl { get; set; }
+    public required string MediaKind { get; set; }
+    public string? MediaFormat { get; set; }
+    public int? StartYear { get; set; }
+    public int? EpisodeCount { get; set; }
+    public bool IsInLibrary { get; set; }
+    public string? ViewerStatus { get; set; }
+    public int? ProgressEpisodes { get; set; }
+    public bool IsCurrent { get; set; }
+}
+
+public class MediaFranchiseRelationDto
+{
+    public Guid SourceMediaTitleId { get; set; }
+    public Guid TargetMediaTitleId { get; set; }
+    public required string RelationType { get; set; }
+    public bool IsEpisodeContinuity { get; set; }
+}
+
+public class MediaEpisodeContinuityDto
+{
+    public required IReadOnlyList<Guid> OrderedMediaTitleIds { get; set; }
+    public required IReadOnlyDictionary<Guid, int> EpisodeOffsetByMediaTitleId { get; set; }
+    public bool IsComplete { get; set; }
 }
 
 public class MediaProviderLinkSummaryDto

@@ -1,4 +1,4 @@
-import type { MediaLibraryEntryDetailDto } from '../../services/mediaApi';
+import type { MediaEntryDetailModel } from '../../services/mediaApi';
 import type { MediaEntryDetailContentProps, ProgressSummary } from './mediaEntryDetailTypes';
 
 export function releaseStatusLabel(dimension: string): string {
@@ -14,7 +14,7 @@ export function releaseStatusLabel(dimension: string): string {
   return map[dimension] ?? dimension;
 }
 
-export function progressKindLabel(title: MediaLibraryEntryDetailDto['title']) {
+export function progressKindLabel(title: MediaEntryDetailModel['title']) {
   if (title.primaryProgressDimension === 'episode') {
     return title.episodeCount ? 'TV Series' : 'Episode tracking';
   }
@@ -61,7 +61,7 @@ function createProgressSummary(
 }
 
 export function getPrimaryProgressSummary(
-  title: MediaLibraryEntryDetailDto['title'],
+  title: MediaEntryDetailModel['title'],
   progressEpisodes: number | undefined,
   progressChapters: number | undefined,
   progressVolumes: number | undefined,
@@ -94,7 +94,7 @@ export function getRemainingLabel(summary: ProgressSummary) {
   return remaining === 1 ? `1 ${summary.noun.slice(0, -1)} left` : `${remaining} ${summary.noun} left`;
 }
 
-export function getProgressCapabilities(title: MediaLibraryEntryDetailDto['title']) {
+export function getProgressCapabilities(title: MediaEntryDetailModel['title']) {
   const dim = title.primaryProgressDimension;
   return {
     supportsEpisodes: dim === 'episode',

@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { authApi } from '@cantaro/client-shared/auth';
 import type { User, RegisterRequest, LoginRequest, ThemePreference } from '@cantaro/client-shared/auth';
+import { router } from '../router';
 
 interface AuthContextType {
   user: User | null;
@@ -52,6 +53,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     await authApi.login(request);
     const currentUser = await authApi.getCurrentUser();
     setUser(currentUser);
+    await router.invalidate();
   };
 
   const register = async (request: RegisterRequest) => {

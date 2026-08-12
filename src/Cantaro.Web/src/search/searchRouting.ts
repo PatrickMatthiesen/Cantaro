@@ -56,12 +56,13 @@ export function trustedCanonicalRoute(route: string): string | null {
 
 function isTrustedDecodedRoute(segmentCount: number, decoded: Array<string | null>): boolean {
   if (segmentCount === 5) return decoded[0] === 'media' && decoded[1] === 'catalog';
+  if (segmentCount === 3) return decoded[0] === 'media' && guidPattern.test(decoded[1]!);
   if (segmentCount !== 4) return false;
 
   const [area, collection, id] = decoded;
   if (area === 'music' && collection === 'songs') return isSongId(id!);
   if (area === 'music' && collection === 'playlists') return guidPattern.test(id!);
-  return area === 'media' && collection === 'library' && guidPattern.test(id!);
+  return false;
 }
 
 export function searchResultDomId(item: SearchResultItem): string {

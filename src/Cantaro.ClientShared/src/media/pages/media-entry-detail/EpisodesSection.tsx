@@ -1,6 +1,6 @@
 import { ExternalLink, Play, RefreshCcw } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import type { MediaLibraryEntryDetailDto } from '../../services/mediaApi';
+import type { MediaEntryDetailModel } from '../../services/mediaApi';
 import {
   type MediaStreamingDestinations,
   type StreamingDestination,
@@ -166,7 +166,7 @@ function EpisodeSectionContent({
   onSelectStreamingService,
   onRefresh,
 }: {
-  entry: MediaLibraryEntryDetailDto;
+  entry: MediaEntryDetailModel;
   state: EpisodeCatalogState;
   rows: ReturnType<typeof getEpisodeRows>;
   seriesDestinations: readonly StreamingDestination[];
@@ -210,7 +210,7 @@ function EpisodeSectionContent({
 }
 
 function getEpisodeSectionData(
-  entry: MediaLibraryEntryDetailDto,
+  entry: MediaEntryDetailModel,
   state: EpisodeCatalogState,
   streamingDestinations: MediaStreamingDestinations,
 ) {
@@ -232,7 +232,7 @@ export function EpisodesSection({
   onSelectStreamingService,
   onRefresh,
 }: {
-  entry: MediaLibraryEntryDetailDto;
+  entry: MediaEntryDetailModel;
   state: EpisodeCatalogState;
   streamingDestinations: MediaStreamingDestinations;
   preferredServiceId: StreamingServiceId | null;

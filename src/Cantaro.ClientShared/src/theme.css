@@ -46,6 +46,9 @@
   --color-warning-surface: #fef3c7;
   --color-warning-content: #92400e;
   --color-warning-border: #fde68a;
+  --color-custom-surface: #ffedd5;
+  --color-custom-content: #c2410c;
+  --color-custom-border: #fed7aa;
   --color-danger-surface: #fff1f2;
   --color-danger-content: #be123c;
   --color-danger-border: #fecdd3;
@@ -94,6 +97,9 @@
     --color-warning-surface: rgb(245 158 11 / 14%);
     --color-warning-content: #fcd34d;
     --color-warning-border: rgb(251 191 36 / 25%);
+    --color-custom-surface: rgb(249 115 22 / 14%);
+    --color-custom-content: #fb923c;
+    --color-custom-border: rgb(251 146 60 / 28%);
     --color-danger-surface: rgb(127 29 29 / 28%);
     --color-danger-content: #fda4af;
     --color-danger-border: rgb(251 113 133 / 30%);

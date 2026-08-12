@@ -18,10 +18,10 @@ import { EpisodesSection } from './EpisodesSection';
 import {
   CharactersSection,
   CommunitySection,
-  FranchiseSection,
   InformationSection,
   ProviderSection,
 } from './MediaDetailSections';
+import { FranchiseSection } from './FranchiseSection';
 import { getEntryStatusChanged, getPrimaryProgressSummary } from './mediaEntryDetailModel';
 import { DetailTabs } from './DetailTabs';
 import {
@@ -39,6 +39,7 @@ function MediaDetailTabPanel({
   streamingDestinations,
   preferredServiceId,
   onSelectStreamingService,
+  onViewFullFranchise,
 }: {
   activeTab: DetailTabId;
   props: MediaEntryDetailContentProps;
@@ -46,11 +47,18 @@ function MediaDetailTabPanel({
   streamingDestinations: MediaStreamingDestinations;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
+  onViewFullFranchise: () => void;
 }) {
   const panels: Record<DetailTabId, ReactNode> = {
     overview: (
       <div role="tabpanel" id="media-detail-panel-overview" aria-labelledby="media-detail-tab-overview">
-        <FranchiseSection entry={props.entry} />
+        <FranchiseSection
+          state={props.franchiseGraph}
+          variant="preview"
+          onRetry={props.onReloadFranchise}
+          onViewAll={onViewFullFranchise}
+          onNavigateTitle={props.onNavigateTitle}
+        />
         <CharactersSection entry={props.entry} availabilityByProviderLink={props.availabilityByProviderLink} />
         <div className="media-detail-overview-meta-grid">
           <InformationSection entry={props.entry} />
@@ -80,6 +88,7 @@ function MediaDetailTabPanel({
           availabilityByProviderLink={props.availabilityByProviderLink}
           unlinkingId={props.unlinkingId}
           lastSyncedAt={props.entry.lastSyncedAt}
+          canManageLinks={props.entry.viewerStateStatus === 'loaded' && props.entry.isInLibrary}
           onLinkProvider={() => props.onSetShowLinkDialog(true)}
           onUnlink={props.onUnlink}
         />
@@ -87,7 +96,12 @@ function MediaDetailTabPanel({
     ),
     franchise: (
       <div role="tabpanel" id="media-detail-panel-franchise" aria-labelledby="media-detail-tab-franchise">
-        <FranchiseSection entry={props.entry} />
+        <FranchiseSection
+          state={props.franchiseGraph}
+          variant="full"
+          onRetry={props.onReloadFranchise}
+          onNavigateTitle={props.onNavigateTitle}
+        />
       </div>
     ),
     characters: (
@@ -139,7 +153,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
             </div>
           </section>
           <div className="media-detail-main-column">
-            <ActionRail
+            {props.entry.isInLibrary ? <ActionRail
               hasStatusChanged={hasStatusChanged}
               isSavingStatus={props.isSavingStatus}
               isRefreshingProgress={props.isRefreshingProgress}
@@ -152,7 +166,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               canonicalTitle={props.entry.title.canonicalTitle}
               nextReleaseAt={props.entry.nextReleaseAt}
               nextReleaseLabel={props.entry.nextReleaseLabel}
-            />
+            /> : null}
             <section className="media-detail-overview-card">
               <DetailTabs tabs={DETAIL_TABS} activeTab={activeTab} idPrefix="media-detail" onChange={setActiveTab} />
               <MediaDetailTabPanel
@@ -162,6 +176,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 streamingDestinations={streamingDestinations}
                 preferredServiceId={preferredServiceId}
                 onSelectStreamingService={setPreferredServiceId}
+                onViewFullFranchise={() => setActiveTab('franchise')}
               />
             </section>
           </div>
@@ -169,7 +184,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
       </DetailPageLayout>
       <EntryLinkDialog
         showLinkDialog={props.showLinkDialog}
-        libraryEntryId={props.libraryEntryId}
+        mediaTitleId={props.mediaTitleId}
         mediaKind={mediaKind}
         currentTitle={props.entry.title.canonicalTitle}
         existingLinks={props.entry.providerLinks}

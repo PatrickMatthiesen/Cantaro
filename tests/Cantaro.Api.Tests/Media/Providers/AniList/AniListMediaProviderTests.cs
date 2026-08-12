@@ -17,6 +17,101 @@ namespace Cantaro.Api.Tests;
 public class AniListMediaProviderTests
 {
     [Fact]
+    public async Task ApiClient_PreservesRetryAfterForRateLimitResponses()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
+            TimeSpan.FromSeconds(12));
+        var client = new AniListApiClient(
+            new HttpClient(new SingleResponseHandler(response)),
+            Options.Create(new AniListOptions
+            {
+                ClientId = "client-id",
+                ClientSecret = "client-secret"
+            }),
+            NullLogger<AniListApiClient>.Instance);
+
+        var exception = await Assert.ThrowsAsync<AniListRequestException>(() =>
+            client.SendGraphQlAsync<object>("token", "query { Viewer { id } }", null, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, exception.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(12), exception.RetryAfter);
+    }
+
+    [Fact]
+    public async Task GetRelationGraphAsync_FollowsOnlyTvContinuityAndIncludesOtherRelationsOneHop()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(306, "relations@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(
+            new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 906,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "306",
+            DisplayName = "Relation Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        var handler = new QueueHttpMessageHandler(
+            """
+            {"data":{"Page":{"media":[{
+              "id":200,"type":"ANIME","format":"TV","episodes":12,
+              "siteUrl":"https://anilist.co/anime/200","title":{"english":"Example Season 2"},
+              "relations":{"edges":[
+                {"id":1,"relationType":"PREQUEL","node":{"id":100,"type":"ANIME","format":"TV","episodes":12,"title":{"english":"Example"}}},
+                {"id":2,"relationType":"SIDE_STORY","node":{"id":300,"type":"ANIME","format":"OVA","episodes":1,"title":{"english":"Example OVA"}}}
+              ]}
+            }]}}}
+            """,
+            """
+            {"data":{"Page":{"media":[{
+              "id":100,"type":"ANIME","format":"TV","episodes":12,
+              "siteUrl":"https://anilist.co/anime/100","title":{"english":"Example"},
+              "relations":{"edges":[
+                {"id":3,"relationType":"SEQUEL","node":{"id":200,"type":"ANIME","format":"TV","episodes":12,"title":{"english":"Example Season 2"}}}
+              ]}
+            }]}}}
+            """);
+        var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
+
+        var graph = await provider.GetRelationGraphAsync(user.Id, "200", CancellationToken.None);
+
+        Assert.True(graph.IsComplete);
+        Assert.Equal(["100", "200"], graph.RefreshedProviderMediaIds);
+        Assert.Equal(3, graph.Nodes.Count);
+        Assert.Contains(graph.Nodes, node => node.ProviderMediaId == "100" && node.Format == MediaFormats.Tv);
+        Assert.Contains(graph.Nodes, node => node.ProviderMediaId == "300" && node.Format == MediaFormats.Ova);
+        Assert.Contains(graph.Edges, edge => edge.MediaProviderMediaId == "200"
+            && edge.RelatedProviderMediaId == "100"
+            && edge.RelationType == MediaRelationTypes.Prequel);
+        Assert.Contains(graph.Edges, edge => edge.MediaProviderMediaId == "200"
+            && edge.RelatedProviderMediaId == "300"
+            && edge.RelationType == MediaRelationTypes.SideStory);
+        Assert.Equal(2, handler.RequestBodies.Count);
+        Assert.All(handler.RequestBodies, body => Assert.Contains("relationType(version: 2)", body, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task GetTitleDetailsAsync_NormalizesStreamingAvailabilityLinks()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -219,11 +314,27 @@ public class AniListMediaProviderTests
             Id = Guid.NewGuid(),
             UserId = user.Id,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = "anilist",
-            ProviderAccountId = account.ExternalAccountId,
-            ProviderMediaId = "161645",
             Status = MediaLibraryStatuses.Current,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "161645",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = entry.Id,
+            MediaProviderLinkId = link.Id,
+            ConnectedServiceAccountId = account.Id,
+            ProviderAccountId = account.ExternalAccountId,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -231,7 +342,9 @@ public class AniListMediaProviderTests
         dbContext.Users.Add(user);
         dbContext.ConnectedServiceAccounts.Add(account);
         dbContext.MediaTitles.Add(title);
+        dbContext.MediaProviderLinks.Add(link);
         dbContext.MediaLibraryEntries.Add(entry);
+        dbContext.MediaLibraryProviderBindings.Add(binding);
         await dbContext.SaveChangesAsync();
 
         var provider = CreateProvider(dbContext);
@@ -240,7 +353,7 @@ public class AniListMediaProviderTests
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
 
         Assert.Empty(dbContext.ConnectedServiceAccounts);
-        Assert.Null(persistedEntry.ConnectedServiceAccountId);
+        Assert.Null((await dbContext.MediaLibraryProviderBindings.SingleAsync()).ConnectedServiceAccountId);
         Assert.Equal(MediaMutationSources.ProviderDisconnect, persistedEntry.LastMutationSource);
     }
 
@@ -521,6 +634,36 @@ public class AniListMediaProviderTests
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(_responseBody, Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
+    private sealed class SingleResponseHandler(HttpResponseMessage response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(response);
+    }
+
+    private sealed class QueueHttpMessageHandler(params string[] responses) : HttpMessageHandler
+    {
+        private readonly Queue<string> _responses = new(responses);
+
+        public List<string> RequestBodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestBodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (!_responses.TryDequeue(out var response))
+            {
+                throw new InvalidOperationException("No queued AniList response remains.");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json")
             };
         }
     }

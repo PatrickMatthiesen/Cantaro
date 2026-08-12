@@ -52,22 +52,10 @@ public class MediaStatusUpdateDto
     public required string Status { get; set; }
 }
 
-public class MediaCatalogAddRequestDto
-{
-    public string Status { get; set; } = MediaLibraryStatuses.Planned;
-}
-
-public class MediaCatalogAddResultDto
-{
-    public required Guid LibraryEntryId { get; set; }
-    public required Guid MediaTitleId { get; set; }
-    public required string Status { get; set; }
-}
-
 public class MediaCatalogLibraryStateDto
 {
     public bool IsInLibrary { get; set; }
-    public Guid? LibraryEntryId { get; set; }
+    public Guid? ViewerStateId { get; set; }
     public Guid? MediaTitleId { get; set; }
     public string? Status { get; set; }
     public int? ProgressEpisodes { get; set; }

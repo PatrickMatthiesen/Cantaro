@@ -22,6 +22,7 @@ public class MediaObservationsController(
     MediaObservationMatchingService matchingService,
     MediaObservationProgressService progressService,
     MediaEpisodeIdentityService episodeIdentityService,
+    MediaProviderSeasonMappingService seasonMappingService,
     IMediaProviderRegistry mediaProviderRegistry,
     ILogger<MediaObservationsController> logger) : ControllerBase
 {
@@ -30,6 +31,7 @@ public class MediaObservationsController(
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaObservationProgressService _progressService = progressService;
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
+    private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly ILogger<MediaObservationsController> _logger = logger;
     private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
@@ -91,6 +93,13 @@ public class MediaObservationsController(
                 existing.RawPayload = rawPayload;
                 existing.UpdatedAt = now;
 
+                var exactIdentityApplied = await _matchingService.TryApplyProviderEpisodeIdentityAsync(
+                    existing,
+                    cancellationToken);
+                if (!exactIdentityApplied && existing.MatchStatus != MediaObservationStatuses.Matched)
+                {
+                    existing = await _matchingService.ProcessObservationAsync(existing, cancellationToken);
+                }
                 var deduplicatedProviderChoicesUnavailableReason = await EnsureProviderChoicesAsync(existing, cancellationToken);
 
                 if (existing.MatchStatus == MediaObservationStatuses.Matched)
@@ -322,9 +331,17 @@ public class MediaObservationsController(
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
         await UpsertEpisodeOffsetAsync(userId, observation.SiteIdentifier, resolvedMediaTitleId, request.EpisodeOffset, cancellationToken);
+        await EstablishManualSeasonMappingAsync(
+            observation,
+            resolvedMediaTitleId,
+            request.EpisodeOffset,
+            cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
+        await _episodeIdentityService.RecordObservationAsync(
+            observation,
+            cancellationToken,
+            isUserConfirmed: true);
 
         _logger.LogInformation(
             "User {UserId} resolved MediaObservation {ObservationId} to MediaTitle {MediaTitleId}.",
@@ -395,6 +412,8 @@ public class MediaObservationsController(
         observation.AcceptedCandidateId = null;
         observation.ResolutionNotes = null;
         observation.ProviderChoicesPayload = null;
+        observation.EpisodeOffset = null;
+        observation.ResolvedProgress = null;
 
         observation = await _matchingService.ProcessObservationAsync(observation, cancellationToken);
         await EnsureProviderChoicesAsync(observation, cancellationToken);
@@ -404,6 +423,46 @@ public class MediaObservationsController(
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    private async Task EstablishManualSeasonMappingAsync(
+        MediaObservation observation,
+        Guid mediaTitleId,
+        int episodeOffset,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(observation.RawPayload))
+        {
+            return;
+        }
+
+        SubmitMediaObservationRequest? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<SubmitMediaObservationRequest>(
+                observation.RawPayload,
+                RawPayloadJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (payload is null)
+        {
+            return;
+        }
+
+        await _seasonMappingService.EstablishAsync(
+            observation.SiteIdentifier,
+            payload.ProviderSeriesId,
+            payload.ProviderSeasonId,
+            payload.SeasonNumber,
+            mediaTitleId,
+            episodeOffset,
+            MediaProviderSeasonMappingSources.Manual,
+            1m,
+            cancellationToken);
+    }
 
     private async Task<MediaObservation?> LoadObservationAsync(
         Guid observationId,
@@ -553,14 +612,18 @@ public class MediaObservationsController(
     {
         var materialized = results.ToList();
         var providerMediaIds = materialized.Select(result => result.ProviderMediaId).Distinct(StringComparer.Ordinal).ToList();
-        var libraryEntries = await _dbContext.MediaLibraryEntries
+        var libraryEntries = await _dbContext.MediaLibraryProviderBindings
             .AsNoTracking()
-            .Where(entry => entry.UserId == userId && entry.Provider == providerId && providerMediaIds.Contains(entry.ProviderMediaId))
+            .Include(binding => binding.MediaLibraryEntry)
+            .Include(binding => binding.MediaProviderLink)
+            .Where(binding => binding.MediaLibraryEntry!.UserId == userId
+                && binding.MediaProviderLink!.Provider == providerId
+                && providerMediaIds.Contains(binding.MediaProviderLink.ExternalId))
             .ToListAsync(cancellationToken);
         var entryByProviderId = libraryEntries
-            .OrderByDescending(entry => entry.ConnectedServiceAccountId is not null)
-            .ThenByDescending(entry => entry.UpdatedAt)
-            .GroupBy(entry => entry.ProviderMediaId, StringComparer.Ordinal)
+            .OrderByDescending(binding => binding.ConnectedServiceAccountId is not null)
+            .ThenByDescending(binding => binding.UpdatedAt)
+            .GroupBy(binding => binding.MediaProviderLink!.ExternalId, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
         return materialized.Select(result =>
@@ -581,8 +644,8 @@ public class MediaObservationsController(
                 VolumeCount = result.VolumeCount,
                 PrimaryProgressDimension = result.PrimaryProgressDimension,
                 IsInLibrary = entry is not null,
-                LibraryEntryId = entry?.Id.ToString(),
-                MediaTitleId = entry?.MediaTitleId.ToString()
+                LibraryEntryId = entry?.MediaLibraryEntryId.ToString(),
+                MediaTitleId = entry?.MediaLibraryEntry?.MediaTitleId.ToString()
             };
         }).ToList();
     }
@@ -604,7 +667,6 @@ public class MediaObservationsController(
             var libraryEntryId = await _dbContext.MediaLibraryEntries
                 .AsNoTracking()
                 .Where(entry => entry.UserId == userId && entry.MediaTitleId == candidate.MediaTitleId)
-                .OrderByDescending(entry => entry.ConnectedServiceAccountId != null)
                 .Select(entry => (Guid?)entry.Id)
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -639,11 +701,15 @@ public class MediaObservationsController(
             return ResolveTargetResult.FromError(NotFound(new { error = $"Media provider '{providerId}' is not implemented" }));
         }
 
-        var existingEntry = await _dbContext.MediaLibraryEntries
+        var existingBinding = await _dbContext.MediaLibraryProviderBindings
             .AsNoTracking()
-            .FirstOrDefaultAsync(entry => entry.UserId == userId && entry.Provider == providerId && entry.ProviderMediaId == providerMediaId, cancellationToken);
+            .Include(binding => binding.MediaLibraryEntry)
+            .Include(binding => binding.MediaProviderLink)
+            .FirstOrDefaultAsync(binding => binding.MediaLibraryEntry!.UserId == userId
+                && binding.MediaProviderLink!.Provider == providerId
+                && binding.MediaProviderLink.ExternalId == providerMediaId, cancellationToken);
 
-        if (existingEntry is not null)
+        if (existingBinding?.MediaLibraryEntry is { } existingEntry)
         {
             return new ResolveTargetResult(
                 existingEntry.MediaTitleId,
@@ -717,24 +783,32 @@ public class MediaObservationsController(
             Id = Guid.NewGuid(),
             UserId = userId,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = provider.ProviderId,
-            ProviderAccountId = account.ExternalAccountId,
-            ProviderMediaId = providerMediaId,
             Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = details.PrimaryProgressDimension == MediaProgressDimensions.Episode ? 0 : null,
             ProgressChapters = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter ? 0 : null,
             ProgressVolumes = details.PrimaryProgressDimension == MediaProgressDimensions.Volume ? 0 : null,
-            LastSyncedAt = now,
-            LastRemoteUpdateAt = mutationResult.LastRemoteUpdateAt ?? now,
             LastLocalEditAt = now,
             LastMutationSource = MediaMutationSources.UserStatusUpdate,
-            RawMetadata = mutationResult.RawMetadata ?? details.RawMetadata,
             CreatedAt = now,
             UpdatedAt = now
         };
 
         _dbContext.MediaLibraryEntries.Add(entry);
+        var providerLink = await _dbContext.MediaProviderLinks
+            .SingleAsync(link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId, cancellationToken);
+        _dbContext.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = entry.Id,
+            MediaProviderLinkId = providerLink.Id,
+            ConnectedServiceAccountId = account.Id,
+            ProviderAccountId = account.ExternalAccountId,
+            LastSyncedAt = now,
+            LastRemoteUpdateAt = mutationResult.LastRemoteUpdateAt ?? now,
+            RawMetadata = mutationResult.RawMetadata ?? details.RawMetadata,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
         await _dbContext.SaveChangesAsync(cancellationToken);
         return new AddProviderTitleResult(entry.Id, title.Id, title.CanonicalTitle, null);
     }
@@ -768,17 +842,22 @@ public class MediaObservationsController(
             OriginalTitle = details.NativeTitle,
             MediaKind = details.MediaKind,
             Synopsis = details.Synopsis,
+            Format = details.Format,
+            PosterUrl = details.PosterUrl,
+            BackgroundUrl = details.BackgroundUrl,
             StartYear = details.StartYear,
             EpisodeCount = details.EpisodeCount,
             ChapterCount = details.ChapterCount,
             VolumeCount = details.VolumeCount,
+            ReleasedCount = details.ReleasedCount,
+            NextReleaseAt = details.NextReleaseAt,
+            NextReleaseLabel = details.NextReleaseLabel,
             SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
             SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter,
             SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume,
             IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly,
             PrimaryProgressDimension = details.PrimaryProgressDimension,
             ReleaseStatusDimension = details.ReleaseStatusDimension,
-            CanonicalMetadata = details.RawMetadata,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -808,17 +887,22 @@ public class MediaObservationsController(
         title.OriginalTitle = details.NativeTitle ?? title.OriginalTitle;
         title.MediaKind = details.MediaKind;
         title.Synopsis = details.Synopsis ?? title.Synopsis;
+        title.Format = details.Format ?? title.Format;
+        title.PosterUrl = details.PosterUrl ?? title.PosterUrl;
+        title.BackgroundUrl = details.BackgroundUrl ?? title.BackgroundUrl;
         title.StartYear = details.StartYear ?? title.StartYear;
         title.EpisodeCount = details.EpisodeCount ?? title.EpisodeCount;
         title.ChapterCount = details.ChapterCount ?? title.ChapterCount;
         title.VolumeCount = details.VolumeCount ?? title.VolumeCount;
+        title.ReleasedCount = details.ReleasedCount ?? title.ReleasedCount;
+        title.NextReleaseAt = details.NextReleaseAt;
+        title.NextReleaseLabel = details.NextReleaseLabel;
         title.SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode;
         title.SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter;
         title.SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume;
         title.IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly;
         title.PrimaryProgressDimension = details.PrimaryProgressDimension;
         title.ReleaseStatusDimension = details.ReleaseStatusDimension;
-        title.CanonicalMetadata = details.RawMetadata ?? title.CanonicalMetadata;
         title.UpdatedAt = now;
     }
 
@@ -826,6 +910,22 @@ public class MediaObservationsController(
     {
         if (observation.MediaTitleId is null || !TryParseObservationProgress(observation, out var observedProgress))
         {
+            return;
+        }
+
+        var payload = TryDeserializeRawPayload(observation.RawPayload);
+        var seasonMapping = await _seasonMappingService.FindAsync(
+            observation.SiteIdentifier,
+            payload?.ProviderSeriesId,
+            payload?.ProviderSeasonId,
+            payload?.SeasonNumber,
+            cancellationToken);
+        if (seasonMapping is not null && seasonMapping.MediaTitleId == observation.MediaTitleId)
+        {
+            observation.EpisodeOffset = seasonMapping.EpisodeOffset;
+            observation.ResolvedProgress = Math.Max(1, observedProgress + seasonMapping.EpisodeOffset);
+            observation.UpdatedAt = DateTimeOffset.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
             return;
         }
 
@@ -838,8 +938,9 @@ public class MediaObservationsController(
                 cancellationToken);
         if (offset is null)
         {
-            observation.ResolvedProgress = observedProgress;
-            observation.EpisodeOffset = 0;
+            var inferredOffset = observation.EpisodeOffset ?? 0;
+            observation.ResolvedProgress = Math.Max(1, observedProgress + inferredOffset);
+            observation.EpisodeOffset = inferredOffset;
             await _dbContext.SaveChangesAsync(cancellationToken);
             return;
         }
@@ -974,6 +1075,12 @@ public class MediaObservationsController(
     private sealed class ObservationRawPayload
     {
         public string? SeriesTitle { get; set; }
+
+        public string? ProviderSeriesId { get; set; }
+
+        public string? ProviderSeasonId { get; set; }
+
+        public int? SeasonNumber { get; set; }
     }
 
     private sealed class ObservationResolutionLogEntry

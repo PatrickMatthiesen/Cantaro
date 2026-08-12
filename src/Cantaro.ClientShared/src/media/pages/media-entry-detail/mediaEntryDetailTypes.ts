@@ -3,7 +3,8 @@ import type { ProviderAvailabilityMap } from '../../components/media-entry-detai
 import type {
   MediaContinueWatchingDto,
   MediaEpisodeCatalogDto,
-  MediaLibraryEntryDetailDto,
+  MediaEntryDetailModel,
+  MediaFranchiseGraphDto,
 } from '../../services/mediaApi';
 
 export const DETAIL_TABS = [
@@ -42,13 +43,19 @@ export type EpisodeCatalogState =
   | { status: 'loaded'; value: MediaEpisodeCatalogDto }
   | { status: 'error' };
 
+export type FranchiseGraphState =
+  | { status: 'loading' }
+  | { status: 'loaded'; value: MediaFranchiseGraphDto }
+  | { status: 'error'; error: string };
+
 export interface MediaEntryDetailContentProps {
-  libraryEntryId: string;
-  entry: MediaLibraryEntryDetailDto;
+  mediaTitleId: string;
+  entry: MediaEntryDetailModel;
   embedded: boolean;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingProgress: boolean;
   isSavingStatus: boolean;
+  isAddingToLibrary: boolean;
   showLinkDialog: boolean;
   unlinkingId: string | null;
   progressEpisodes: number | undefined;
@@ -57,7 +64,9 @@ export interface MediaEntryDetailContentProps {
   selectedStatus: string;
   continueWatching: ContinueWatchingState;
   episodeCatalog: EpisodeCatalogState;
+  franchiseGraph: FranchiseGraphState;
   onNavigateBack: () => void;
+  onNavigateTitle?: (mediaTitleId: string) => void;
   onLoadEntry: () => Promise<void>;
   onSetShowLinkDialog: (visible: boolean) => void;
   onSetProgressEpisodes: (value: number) => void;
@@ -66,12 +75,14 @@ export interface MediaEntryDetailContentProps {
   onSetSelectedStatus: (value: string) => void;
   onRefreshProgress: () => void;
   onSaveStatus: () => void;
+  onAddToLibrary: () => void;
   onUnlink: (providerId: string) => void;
   onReloadEpisodes: () => void;
+  onReloadFranchise: () => void;
 }
 
 export interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProps, 'entry'> {
-  entry: MediaLibraryEntryDetailDto | null;
+  entry: MediaEntryDetailModel | null;
   isLoading: boolean;
   error: string | null;
   snackbar: SnackbarNotification | null;

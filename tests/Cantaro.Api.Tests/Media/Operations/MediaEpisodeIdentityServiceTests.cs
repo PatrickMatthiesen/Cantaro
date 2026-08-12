@@ -31,15 +31,36 @@ public class MediaEpisodeIdentityServiceTests
         Assert.Equal([7, 8], episodes.Select(item => item.EpisodeNumber));
         Assert.Equal("/watch/CURRENT7", episodes[0].ProviderIdentities.Single().ProviderUrlPath);
         Assert.Equal("/watch/NEXT8", episodes[1].ProviderIdentities.Single().ProviderUrlPath);
+        Assert.All(episodes.SelectMany(item => item.ProviderIdentities), identity => Assert.False(identity.IsTrusted));
+        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
 
         var destination = await fixture.Service.ResolveContinueWatchingAsync(
             fixture.UserId,
-            fixture.LibraryEntryId,
+            fixture.TitleId,
             CancellationToken.None);
         Assert.NotNull(destination);
         Assert.Equal("direct", destination.Outcome);
         Assert.Equal(8, destination.EpisodeNumber);
         Assert.Equal("https://www.crunchyroll.com/watch/NEXT8", destination.Url);
+    }
+
+    [Fact]
+    public async Task RecordObservation_UserConfirmedAssignmentCreatesTrustedIdentities()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync();
+        var observation = fixture.MakeObservation(
+            3,
+            "CONFIRMED3",
+            "https://www.crunchyroll.com/watch/CONFIRMED3");
+
+        await fixture.Service.RecordObservationAsync(
+            observation,
+            CancellationToken.None,
+            isUserConfirmed: true);
+
+        var identity = await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync();
+        Assert.True(identity.IsTrusted);
+        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
     }
 
     [Fact]
@@ -66,7 +87,7 @@ public class MediaEpisodeIdentityServiceTests
 
         var destination = await fixture.Service.ResolveContinueWatchingAsync(
             fixture.UserId,
-            fixture.LibraryEntryId,
+            fixture.TitleId,
             CancellationToken.None);
 
         Assert.NotNull(destination);
@@ -131,8 +152,7 @@ public class MediaEpisodeIdentityServiceTests
         await fixture.Db.SaveChangesAsync();
 
         var catalog = await fixture.Service.GetEpisodeCatalogAsync(
-            fixture.UserId,
-            fixture.LibraryEntryId,
+            fixture.TitleId,
             CancellationToken.None);
 
         Assert.NotNull(catalog);
@@ -409,9 +429,6 @@ public class MediaEpisodeIdentityServiceTests
                 Id = Guid.NewGuid(),
                 UserId = userId,
                 MediaTitleId = title.Id,
-                Provider = "anilist",
-                ProviderAccountId = "test-account",
-                ProviderMediaId = "123",
                 Status = MediaLibraryStatuses.Current,
                 ProgressEpisodes = progressEpisodes,
                 CreatedAt = now,
@@ -426,7 +443,12 @@ public class MediaEpisodeIdentityServiceTests
             return new EpisodeIdentityFixture(
                 connection,
                 db,
-                new MediaEpisodeIdentityService(db, NullLogger<MediaEpisodeIdentityService>.Instance),
+                new MediaEpisodeIdentityService(
+                    db,
+                    new MediaProviderSeasonMappingService(
+                        db,
+                        NullLogger<MediaProviderSeasonMappingService>.Instance),
+                    NullLogger<MediaEpisodeIdentityService>.Instance),
                 userId,
                 title.Id,
                 entry.Id);

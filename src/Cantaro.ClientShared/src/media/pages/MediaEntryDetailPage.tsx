@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { mediaApi } from '../services/mediaApi';
 import { mediaKindLabel } from '../services/mediaFormatting';
 import { MediaEntryDetailPageView } from './media-entry-detail/MediaEntryDetailView';
 import {
   useContinueWatching,
   useEntryDetailState,
   useEpisodeCatalog,
+  useFranchiseGraph,
   useManualRemoteRefresh,
   useProviderAvailability,
   useProviderUnlinkAction,
@@ -14,14 +16,19 @@ import {
 } from './media-entry-detail/useMediaEntryDetailState';
 
 interface MediaEntryDetailPageProps {
-  libraryEntryId: string;
+  mediaTitleId: string;
   onNavigateBack: () => void;
+  onNavigateTitle?: (mediaTitleId: string) => void;
   embedded?: boolean;
   onHeadingChange?: (heading: { eyebrow: string; title: string; details?: string[]; hidden?: boolean }) => void;
 }
+
+// Page-level composition intentionally coordinates the independent detail resources and actions.
+// fallow-ignore-next-line complexity
 export function MediaEntryDetailPage({
-  libraryEntryId,
+  mediaTitleId,
   onNavigateBack,
+  onNavigateTitle,
   embedded = false,
   onHeadingChange,
 }: MediaEntryDetailPageProps) {
@@ -40,9 +47,10 @@ export function MediaEntryDetailPage({
     setProgressVolumes,
     selectedStatus,
     setSelectedStatus,
-  } = useEntryDetailState(libraryEntryId);
+  } = useEntryDetailState(mediaTitleId);
   const availabilityByProviderLink = useProviderAvailability(entry);
   const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
+  const { state: franchiseGraph, reload: reloadFranchise } = useFranchiseGraph(entry);
   const continueWatching = useContinueWatching(entry, episodeCatalog);
   const { snackbar, showSnackbar } = useTimedSnackbar();
   useRemoteEntryRefresh(entry, reloadEntry, showSnackbar);
@@ -51,7 +59,7 @@ export function MediaEntryDetailPage({
     handleRefreshFromProvider,
   } = useManualRemoteRefresh(entry, reloadEntry, showSnackbar);
   const { isSavingStatus, handleSaveStatus } = useStatusSaveAction(
-    libraryEntryId,
+    mediaTitleId,
     entry,
     selectedStatus,
     progressEpisodes,
@@ -60,8 +68,26 @@ export function MediaEntryDetailPage({
     setEntry,
     showSnackbar,
   );
-  const { unlinkingId, handleUnlink } = useProviderUnlinkAction(libraryEntryId, setEntry, showSnackbar);
+  const { unlinkingId, handleUnlink } = useProviderUnlinkAction(mediaTitleId, setEntry, showSnackbar);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [isAddingToLibrary, setIsAddingToLibrary] = useState(false);
+
+  const handleAddToLibrary = async () => {
+    if (!entry) return;
+    setIsAddingToLibrary(true);
+    try {
+      await mediaApi.addToLibrary(mediaTitleId, { status: selectedStatus || 'planned' });
+      await reloadEntry();
+      showSnackbar({ message: 'Added to your library', variant: 'success' });
+    } catch (addError) {
+      showSnackbar({
+        message: addError instanceof Error ? addError.message : 'Failed to add title',
+        variant: 'error',
+      });
+    } finally {
+      setIsAddingToLibrary(false);
+    }
+  };
 
   useEffect(() => {
     if (!entry || !onHeadingChange) {
@@ -78,8 +104,9 @@ export function MediaEntryDetailPage({
 
   return (
     <MediaEntryDetailPageView
-      libraryEntryId={libraryEntryId}
+      mediaTitleId={mediaTitleId}
       onNavigateBack={onNavigateBack}
+      onNavigateTitle={onNavigateTitle}
       embedded={embedded}
       entry={entry}
       isLoading={isLoading}
@@ -89,6 +116,7 @@ export function MediaEntryDetailPage({
       snackbar={snackbar}
       isRefreshingProgress={isRefreshingProgress}
       isSavingStatus={isSavingStatus}
+      isAddingToLibrary={isAddingToLibrary}
       showLinkDialog={showLinkDialog}
       unlinkingId={unlinkingId}
       progressEpisodes={progressEpisodes}
@@ -97,6 +125,7 @@ export function MediaEntryDetailPage({
       selectedStatus={selectedStatus}
       continueWatching={continueWatching}
       episodeCatalog={episodeCatalog}
+      franchiseGraph={franchiseGraph}
       onSetShowLinkDialog={setShowLinkDialog}
       onSetProgressEpisodes={setProgressEpisodes}
       onSetProgressChapters={setProgressChapters}
@@ -104,8 +133,10 @@ export function MediaEntryDetailPage({
       onSetSelectedStatus={setSelectedStatus}
       onRefreshProgress={() => void handleRefreshFromProvider()}
       onSaveStatus={() => void handleSaveStatus()}
+      onAddToLibrary={() => void handleAddToLibrary()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
       onReloadEpisodes={reloadEpisodes}
+      onReloadFranchise={reloadFranchise}
     />
   );
 }

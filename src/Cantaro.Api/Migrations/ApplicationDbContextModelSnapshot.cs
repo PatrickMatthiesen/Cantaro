@@ -295,6 +295,9 @@ namespace Cantaro.Api.Migrations
                     b.Property<bool>("HasConflict")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsTrusted")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTimeOffset>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -357,9 +360,6 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int?>("ConnectedServiceAccountId")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -370,12 +370,6 @@ namespace Cantaro.Api.Migrations
 
                     b.Property<string>("LastMutationSource")
                         .HasColumnType("text");
-
-                    b.Property<DateTimeOffset?>("LastRemoteUpdateAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset?>("LastSyncedAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("MediaTitleId")
                         .HasColumnType("uuid");
@@ -388,24 +382,6 @@ namespace Cantaro.Api.Migrations
 
                     b.Property<int?>("ProgressVolumes")
                         .HasColumnType("integer");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ProviderAccountId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ProviderLibraryEntryId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ProviderMediaId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("RawMetadata")
-                        .HasColumnType("text");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -421,16 +397,69 @@ namespace Cantaro.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectedServiceAccountId");
-
                     b.HasIndex("MediaTitleId");
+
+                    b.HasIndex("UserId", "MediaTitleId")
+                        .IsUnique();
 
                     b.HasIndex("UserId", "Status");
 
-                    b.HasIndex("UserId", "Provider", "ProviderAccountId", "ProviderMediaId")
+                    b.ToTable("MediaLibraryEntries");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryProviderBinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("ConnectedServiceAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTimeOffset?>("LastRemoteUpdateAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastSyncedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MediaLibraryEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MediaProviderLinkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderAccountId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ProviderLibraryEntryId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("RawMetadata")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectedServiceAccountId");
+
+                    b.HasIndex("MediaProviderLinkId");
+
+                    b.HasIndex("MediaLibraryEntryId", "MediaProviderLinkId", "ProviderAccountId")
                         .IsUnique();
 
-                    b.ToTable("MediaLibraryEntries");
+                    b.ToTable("MediaLibraryProviderBindings");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaObservation", b =>
@@ -664,6 +693,12 @@ namespace Cantaro.Api.Migrations
                     b.Property<string>("RawMetadata")
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("RelationsLastVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RelationsSnapshotId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -684,16 +719,16 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaProviderListMembership", b =>
                 {
-                    b.Property<Guid>("MediaLibraryEntryId")
+                    b.Property<Guid>("MediaLibraryProviderBindingId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Name")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
-                    b.HasKey("MediaLibraryEntryId", "Name");
+                    b.HasKey("MediaLibraryProviderBindingId", "Name");
 
-                    b.HasIndex("Name", "MediaLibraryEntryId");
+                    b.HasIndex("Name", "MediaLibraryProviderBindingId");
 
                     b.ToTable("MediaProviderListMemberships");
                 });
@@ -707,9 +742,6 @@ namespace Cantaro.Api.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("ConnectedServiceAccountId")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -721,7 +753,7 @@ namespace Cantaro.Api.Migrations
                     b.Property<string>("LastError")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("MediaLibraryEntryId")
+                    b.Property<Guid>("MediaLibraryProviderBindingId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset?>("NextAttemptAt")
@@ -735,10 +767,6 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -748,20 +776,76 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectedServiceAccountId");
-
-                    b.HasIndex("MediaLibraryEntryId");
+                    b.HasIndex("MediaLibraryProviderBindingId");
 
                     b.HasIndex("Status", "NextAttemptAt");
 
-                    b.HasIndex("UserId", "Provider", "CreatedAt");
-
                     b.ToTable("MediaProviderOperations");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderSeasonMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Confidence")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("numeric(5,4)");
+
+                    b.Property<int>("EpisodeOffset")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("HasConflict")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("LastVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MappingSource")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("MediaTitleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ProviderSeasonId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("ProviderSeasonNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProviderSeriesId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaTitleId");
+
+                    b.HasIndex("Provider", "ProviderSeriesId", "ProviderSeasonId")
+                        .IsUnique()
+                        .HasFilter("\"ProviderSeasonId\" IS NOT NULL");
+
+                    b.HasIndex("Provider", "ProviderSeriesId", "ProviderSeasonNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MediaProviderSeasonMappings_Provider_ProviderSeriesId_Prov~1")
+                        .HasFilter("\"ProviderSeasonId\" IS NULL AND \"ProviderSeasonNumber\" IS NOT NULL");
+
+                    b.ToTable("MediaProviderSeasonMappings");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaTitle", b =>
@@ -770,7 +854,7 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("CanonicalMetadata")
+                    b.Property<string>("BackgroundUrl")
                         .HasColumnType("text");
 
                     b.Property<string>("CanonicalTitle")
@@ -788,6 +872,10 @@ namespace Cantaro.Api.Migrations
                     b.Property<int?>("EpisodeCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Format")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<bool>("IsCompletionOnly")
                         .HasColumnType("boolean");
 
@@ -795,7 +883,16 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("NextReleaseAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NextReleaseLabel")
+                        .HasColumnType("text");
+
                     b.Property<string>("OriginalTitle")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PosterUrl")
                         .HasColumnType("text");
 
                     b.Property<string>("PrimaryProgressDimension")
@@ -805,6 +902,9 @@ namespace Cantaro.Api.Migrations
                     b.Property<string>("ReleaseStatusDimension")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("ReleasedCount")
+                        .HasColumnType("integer");
 
                     b.Property<string>("SortTitle")
                         .HasColumnType("text");
@@ -837,6 +937,51 @@ namespace Cantaro.Api.Migrations
                     b.HasIndex("MediaKind", "CanonicalTitle");
 
                     b.ToTable("MediaTitles");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaTitleRelation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MediaTitleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RelatedMediaTitleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RelationType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SourceProvider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SourceRelationId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RelatedMediaTitleId", "RelationType", "MediaTitleId");
+
+                    b.HasIndex("MediaTitleId", "RelatedMediaTitleId", "RelationType", "SourceProvider")
+                        .IsUnique();
+
+                    b.ToTable("MediaTitleRelations", t =>
+                        {
+                            t.HasCheckConstraint("CK_MediaTitleRelations_NoSelfRelation", "\"MediaTitleId\" <> \"RelatedMediaTitleId\"");
+                        });
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MusicSyncJob", b =>
@@ -1827,11 +1972,6 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
-                        .WithMany("MediaLibraryEntries")
-                        .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Cantaro.Api.Models.MediaTitle", "MediaTitle")
                         .WithMany("LibraryEntries")
                         .HasForeignKey("MediaTitleId")
@@ -1844,11 +1984,35 @@ namespace Cantaro.Api.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("ConnectedServiceAccount");
-
                     b.Navigation("MediaTitle");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryProviderBinding", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
+                        .WithMany("MediaLibraryProviderBindings")
+                        .HasForeignKey("ConnectedServiceAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", "MediaLibraryEntry")
+                        .WithMany("ProviderBindings")
+                        .HasForeignKey("MediaLibraryEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cantaro.Api.Models.MediaProviderLink", "MediaProviderLink")
+                        .WithMany("LibraryBindings")
+                        .HasForeignKey("MediaProviderLinkId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ConnectedServiceAccount");
+
+                    b.Navigation("MediaLibraryEntry");
+
+                    b.Navigation("MediaProviderLink");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaObservation", b =>
@@ -1927,39 +2091,54 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaProviderListMembership", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", "MediaLibraryEntry")
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryProviderBinding", "MediaLibraryProviderBinding")
                         .WithMany("ProviderListMemberships")
-                        .HasForeignKey("MediaLibraryEntryId")
+                        .HasForeignKey("MediaLibraryProviderBindingId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("MediaLibraryEntry");
+                    b.Navigation("MediaLibraryProviderBinding");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaProviderOperation", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
-                        .WithMany("MediaProviderOperations")
-                        .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", "MediaLibraryEntry")
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryProviderBinding", "MediaLibraryProviderBinding")
                         .WithMany("ProviderOperations")
-                        .HasForeignKey("MediaLibraryEntryId")
+                        .HasForeignKey("MediaLibraryProviderBindingId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Cantaro.Api.Models.User", "User")
-                        .WithMany("MediaProviderOperations")
-                        .HasForeignKey("UserId")
+                    b.Navigation("MediaLibraryProviderBinding");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderSeasonMapping", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaTitle", "MediaTitle")
+                        .WithMany("ProviderSeasonMappings")
+                        .HasForeignKey("MediaTitleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("ConnectedServiceAccount");
+                    b.Navigation("MediaTitle");
+                });
 
-                    b.Navigation("MediaLibraryEntry");
+            modelBuilder.Entity("Cantaro.Api.Models.MediaTitleRelation", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaTitle", "MediaTitle")
+                        .WithMany("OutgoingRelations")
+                        .HasForeignKey("MediaTitleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
-                    b.Navigation("User");
+                    b.HasOne("Cantaro.Api.Models.MediaTitle", "RelatedMediaTitle")
+                        .WithMany("IncomingRelations")
+                        .HasForeignKey("RelatedMediaTitleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MediaTitle");
+
+                    b.Navigation("RelatedMediaTitle");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MusicSyncJob", b =>
@@ -2248,9 +2427,7 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.ConnectedServiceAccount", b =>
                 {
-                    b.Navigation("MediaLibraryEntries");
-
-                    b.Navigation("MediaProviderOperations");
+                    b.Navigation("MediaLibraryProviderBindings");
 
                     b.Navigation("ServicePlaylistMappings");
                 });
@@ -2262,6 +2439,11 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryEntry", b =>
                 {
+                    b.Navigation("ProviderBindings");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaLibraryProviderBinding", b =>
+                {
                     b.Navigation("ProviderListMemberships");
 
                     b.Navigation("ProviderOperations");
@@ -2272,13 +2454,24 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("Candidates");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderLink", b =>
+                {
+                    b.Navigation("LibraryBindings");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.MediaTitle", b =>
                 {
                     b.Navigation("Episodes");
 
+                    b.Navigation("IncomingRelations");
+
                     b.Navigation("LibraryEntries");
 
+                    b.Navigation("OutgoingRelations");
+
                     b.Navigation("ProviderLinks");
+
+                    b.Navigation("ProviderSeasonMappings");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.Playlist", b =>
@@ -2322,8 +2515,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("ConnectedServiceAccounts");
 
                     b.Navigation("MediaLibraryEntries");
-
-                    b.Navigation("MediaProviderOperations");
 
                     b.Navigation("Settings");
                 });

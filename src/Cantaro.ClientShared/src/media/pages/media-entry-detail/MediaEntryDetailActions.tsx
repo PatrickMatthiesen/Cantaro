@@ -100,12 +100,14 @@ type ProgressCockpitProps = Pick<
   | 'progressVolumes'
   | 'isRefreshingProgress'
   | 'isSavingStatus'
+  | 'isAddingToLibrary'
   | 'onSetSelectedStatus'
   | 'onSetProgressEpisodes'
   | 'onSetProgressChapters'
   | 'onSetProgressVolumes'
   | 'onRefreshProgress'
   | 'onSaveStatus'
+  | 'onAddToLibrary'
 >;
 
 function ProgressSyncStatus({ hasStatusChanged }: { hasStatusChanged: boolean }) {
@@ -139,15 +141,27 @@ function ProgressControls({
   );
 }
 
+function StatusSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select name="status" value={value} onChange={(event) => onChange(event.target.value)}>
+      {NORMALIZED_STATUSES.map((status) => (
+        <option key={status.value} value={status.value}>{status.label}</option>
+      ))}
+    </select>
+  );
+}
+
 function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
   return (
     <div className="media-detail-score-row">
       <div className="media-detail-status-control">
-        <select name="status" value={props.selectedStatus} onChange={(event) => props.onSetSelectedStatus(event.target.value)}>
-          {NORMALIZED_STATUSES.map((status) => (
-            <option key={status.value} value={status.value}>{status.label}</option>
-          ))}
-        </select>
+        <StatusSelect value={props.selectedStatus} onChange={props.onSetSelectedStatus} />
         <button
           type="button"
           className="media-detail-refresh-status"
@@ -179,6 +193,41 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
     props.progressVolumes,
   );
   const hasStatusChanged = getEntryStatusChanged(props);
+
+  if (props.entry.viewerStateStatus !== 'loaded') {
+    return (
+      <section className="media-detail-progress-card media-detail-add-card" aria-busy={props.entry.viewerStateStatus === 'loading'}>
+        <div>
+          <p className="media-detail-add-kicker">Your library</p>
+          <h2>{props.entry.viewerStateStatus === 'loading' ? 'Loading your progress…' : "Couldn't load your progress"}</h2>
+          <p>The media details are available independently while Cantaro loads your private library state.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!props.entry.isInLibrary) {
+    return (
+      <section className="media-detail-progress-card media-detail-add-card">
+        <div>
+          <p className="media-detail-add-kicker">Not in your library</p>
+          <h2>Track this title</h2>
+          <p>The title and its provider links are already part of Cantaro. Adding it only creates your personal progress state.</p>
+        </div>
+        <StatusSelect value={props.selectedStatus} onChange={props.onSetSelectedStatus} />
+        <button
+          type="button"
+          className="media-detail-primary-action"
+          onClick={props.onAddToLibrary}
+          disabled={props.isAddingToLibrary}
+          aria-busy={props.isAddingToLibrary}
+        >
+          <Plus aria-hidden />
+          <span>{props.isAddingToLibrary ? 'Adding…' : 'Add to your library'}</span>
+        </button>
+      </section>
+    );
+  }
 
   return (
     <section className="media-detail-progress-card">

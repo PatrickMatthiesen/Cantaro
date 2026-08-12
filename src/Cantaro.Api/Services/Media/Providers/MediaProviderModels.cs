@@ -34,6 +34,12 @@ public class MediaProviderLibraryItem
 
     public string? Synopsis { get; set; }
 
+    public string? Format { get; set; }
+
+    public string? PosterUrl { get; set; }
+
+    public string? BackgroundUrl { get; set; }
+
     public string? ExternalUrl { get; set; }
 
     public int? StartYear { get; set; }
@@ -43,6 +49,12 @@ public class MediaProviderLibraryItem
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
+
+    public int? ReleasedCount { get; set; }
+
+    public DateTimeOffset? NextReleaseAt { get; set; }
+
+    public string? NextReleaseLabel { get; set; }
 
     public required string Status { get; set; }
 
@@ -110,6 +122,8 @@ public class MediaProviderTitleDetails
 
     public string? Synopsis { get; set; }
 
+    public string? Format { get; set; }
+
     public string? PosterUrl { get; set; }
 
     public string? BackgroundUrl { get; set; }
@@ -121,6 +135,12 @@ public class MediaProviderTitleDetails
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
+
+    public int? ReleasedCount { get; set; }
+
+    public DateTimeOffset? NextReleaseAt { get; set; }
+
+    public string? NextReleaseLabel { get; set; }
 
     public required string PrimaryProgressDimension { get; set; }
 
@@ -225,4 +245,83 @@ public class MediaLibraryImportPersistenceResult
     public int UpdatedEntries { get; set; }
 
     public DateTimeOffset ImportedAt { get; set; }
+}
+
+public sealed class MediaProviderRelationGraphSnapshot
+{
+    public required string ProviderId { get; set; }
+
+    public required string RootProviderMediaId { get; set; }
+
+    public required IReadOnlyList<MediaProviderRelationGraphNode> Nodes { get; set; }
+
+    public required IReadOnlyList<MediaProviderRelationGraphEdge> Edges { get; set; }
+
+    /// <summary>
+    /// Provider media ids whose complete outgoing relation collection was read.
+    /// Related one-hop nodes that were not traversed are intentionally absent.
+    /// </summary>
+    public required IReadOnlyList<string> RefreshedProviderMediaIds { get; set; }
+
+    /// <summary>
+    /// True when the provider traversal reached the end of every continuity
+    /// branch without hitting its safety bound. Only complete snapshots may
+    /// prune source-owned relations that disappeared upstream.
+    /// </summary>
+    public bool IsComplete { get; set; }
+}
+
+public sealed class MediaProviderRelationGraphNode
+{
+    public required string ProviderMediaId { get; set; }
+
+    public required string Title { get; set; }
+
+    public string? NativeTitle { get; set; }
+
+    public required string MediaKind { get; set; }
+
+    public string? Format { get; set; }
+
+    public string? Synopsis { get; set; }
+
+    public string? ExternalUrl { get; set; }
+
+    public string? PosterUrl { get; set; }
+
+    public string? BackgroundUrl { get; set; }
+
+    public int? StartYear { get; set; }
+
+    public int? EpisodeCount { get; set; }
+
+    public int? ChapterCount { get; set; }
+
+    public int? VolumeCount { get; set; }
+
+    public string? RawMetadata { get; set; }
+}
+
+public sealed class MediaProviderRelationGraphEdge
+{
+    public required string MediaProviderMediaId { get; set; }
+
+    public required string RelatedProviderMediaId { get; set; }
+
+    public required string RelationType { get; set; }
+
+    public string? SourceRelationId { get; set; }
+}
+
+public sealed class MediaTitleRelationSyncResult
+{
+    public Guid? RootMediaTitleId { get; set; }
+
+    public int CreatedTitles { get; set; }
+
+    public int CreatedRelations { get; set; }
+
+    public int RemovedRelations { get; set; }
+
+    public bool IsComplete { get; set; }
 }

@@ -21,7 +21,16 @@ public class MediaTitle
     /// </summary>
     public required string MediaKind { get; set; }
 
+    /// <summary>
+    /// Provider-neutral presentation format such as tv, movie, ova, or manga.
+    /// </summary>
+    public string? Format { get; set; }
+
     public string? Synopsis { get; set; }
+
+    public string? PosterUrl { get; set; }
+
+    public string? BackgroundUrl { get; set; }
 
     public int? StartYear { get; set; }
 
@@ -30,6 +39,12 @@ public class MediaTitle
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
+
+    public int? ReleasedCount { get; set; }
+
+    public DateTimeOffset? NextReleaseAt { get; set; }
+
+    public string? NextReleaseLabel { get; set; }
 
     public bool SupportsEpisodeProgress { get; set; }
 
@@ -53,11 +68,6 @@ public class MediaTitle
     /// </summary>
     public required string ReleaseStatusDimension { get; set; }
 
-    /// <summary>
-    /// Additional canonical metadata captured as JSON for future expansion.
-    /// </summary>
-    public string? CanonicalMetadata { get; set; }
-
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
@@ -67,4 +77,10 @@ public class MediaTitle
     public ICollection<MediaEpisode> Episodes { get; set; } = [];
 
     public ICollection<MediaLibraryEntry> LibraryEntries { get; set; } = [];
+
+    public ICollection<MediaTitleRelation> OutgoingRelations { get; set; } = [];
+
+    public ICollection<MediaTitleRelation> IncomingRelations { get; set; } = [];
+
+    public ICollection<MediaProviderSeasonMapping> ProviderSeasonMappings { get; set; } = [];
 }

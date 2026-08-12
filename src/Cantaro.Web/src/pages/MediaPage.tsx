@@ -60,16 +60,14 @@ export function MediaLayout() {
   const contextValue = useMemo(() => ({ setHeading }), [setHeading]);
 
   return (
-    <RequireAuth>
-      <MediaPageShell>
-        <MediaShellContext.Provider value={contextValue}>
-          <MediaSectionHeader heading={heading} />
-          <main className="space-y-5">
-            <Outlet />
-          </main>
-        </MediaShellContext.Provider>
-      </MediaPageShell>
-    </RequireAuth>
+    <MediaPageShell>
+      <MediaShellContext.Provider value={contextValue}>
+        <MediaSectionHeader heading={heading} />
+        <main className="space-y-5">
+          <Outlet />
+        </main>
+      </MediaShellContext.Provider>
+    </MediaPageShell>
   );
 }
 
@@ -103,7 +101,7 @@ export function MediaLibraryRoutePage() {
       onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
       onHeadingChange={setHeading}
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
-      onNavigateEntry={(id) => void navigate({ to: '/media/library/$entryId', params: { entryId: id } })}
+      onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}
       onNavigateCatalogResult={(providerId, providerMediaId) => void navigate({
         to: '/media/catalog/$providerId/$providerMediaId',
         params: { providerId, providerMediaId },
@@ -121,10 +119,12 @@ export function MediaProvidersRoutePage() {
   useStaticMediaHeading(heading);
 
   return (
-    <MediaProvidersPage
-      embedded
-      onNavigateLibrary={() => void navigate({ to: '/media/library' })}
-    />
+    <RequireAuth>
+      <MediaProvidersPage
+        embedded
+        onNavigateLibrary={() => void navigate({ to: '/media/library' })}
+      />
+    </RequireAuth>
   );
 }
 
@@ -136,18 +136,18 @@ export function MediaReviewRoutePage() {
   useStaticMediaHeading(heading);
 
   return (
-    <MediaObservationReviewPage
-      embedded
-    />
+    <RequireAuth>
+      <MediaObservationReviewPage embedded />
+    </RequireAuth>
   );
 }
 
-export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
+export function MediaTitleRoutePage({ mediaTitleId }: { mediaTitleId: string }) {
   const navigate = useNavigate();
   const { setHeading } = useMediaShell();
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
-    title: 'Library entry',
+    title: 'Media title',
     hidden: true,
   }), []);
   useStaticMediaHeading(heading);
@@ -155,9 +155,13 @@ export function MediaEntryRoutePage({ entryId }: { entryId: string }) {
   return (
     <MediaEntryDetailPage
       embedded
-      libraryEntryId={entryId}
+      mediaTitleId={mediaTitleId}
       onHeadingChange={setHeading}
       onNavigateBack={() => void navigate({ to: '/media/library' })}
+      onNavigateTitle={(relatedMediaTitleId) => void navigate({
+        to: '/media/$mediaTitleId',
+        params: { mediaTitleId: relatedMediaTitleId },
+      })}
     />
   );
 }
@@ -171,12 +175,18 @@ export function MediaCatalogRoutePage({ providerId, providerMediaId }: { provide
   useStaticMediaHeading(heading);
 
   return (
-    <MediaCatalogDetailPage
-      embedded
-      providerId={providerId}
-      providerMediaId={providerMediaId}
-      onNavigateBack={() => void navigate({ to: '/media/library' })}
-      onNavigateEntry={(entryId) => void navigate({ to: '/media/library/$entryId', params: { entryId } })}
-    />
+    <RequireAuth>
+      <MediaCatalogDetailPage
+        embedded
+        providerId={providerId}
+        providerMediaId={providerMediaId}
+        onNavigateBack={() => void navigate({ to: '/media/library' })}
+        onNavigateTitle={(mediaTitleId) => void navigate({
+          to: '/media/$mediaTitleId',
+          params: { mediaTitleId },
+          replace: true,
+        })}
+      />
+    </RequireAuth>
   );
 }
