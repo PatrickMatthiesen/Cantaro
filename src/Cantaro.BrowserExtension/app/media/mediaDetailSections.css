@@ -146,10 +146,15 @@
   font-size: 0.68rem;
 }
 
+.cantaro-extension-media .media-detail-character-state[role="alert"] {
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-content);
+  background: var(--color-danger-surface);
+}
+
 .cantaro-extension-media .media-detail-franchise-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
+  display: grid;
+  gap: 0.15rem;
   margin-top: 0.2rem;
   font-weight: 800;
 }
@@ -159,12 +164,35 @@
   height: 0.75rem;
 }
 
-.cantaro-extension-media .media-detail-franchise-state.is-current {
-  color: var(--color-accent-strong);
+.cantaro-extension-media .media-detail-franchise-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
 }
 
-.cantaro-extension-media .media-detail-franchise-state.is-tracked {
+.cantaro-extension-media .media-detail-franchise-progress {
+  display: block;
+  padding-left: 0.95rem;
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-completed {
+  color: var(--color-info-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-active {
   color: var(--color-success-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-pending {
+  color: var(--color-warning-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-dropped {
+  color: var(--color-danger-content);
+}
+
+.cantaro-extension-media .media-detail-franchise-state.is-custom {
+  color: var(--color-custom-content);
 }
 
 .cantaro-extension-media .media-detail-franchise-branches {

@@ -17,6 +17,21 @@ describe('getContinueLinkActions', () => {
     }]);
   });
 
+  it('opens the known series page after the title is completed', () => {
+    expect(getContinueLinkActions(
+      { status: 'loaded', value: { outcome: 'completed', episodeNumber: 24 } },
+      [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/series/ABC123', kind: 'series', displayName: 'Crunchyroll' }],
+      [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/FINAL24', kind: 'episode', displayName: 'Crunchyroll' }],
+      'crunchyroll',
+      'Completed title',
+    )).toEqual([{
+      serviceId: 'crunchyroll',
+      url: 'https://www.crunchyroll.com/series/ABC123',
+      label: 'Open on Crunchyroll',
+      kind: 'series',
+    }]);
+  });
+
   it('limits fallback searches to Crunchyrolls working query length', () => {
     expect(getContinueLinkActions(
       { status: 'loaded', value: { outcome: 'unavailable', episodeNumber: 4 } },

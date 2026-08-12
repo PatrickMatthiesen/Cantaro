@@ -50,25 +50,40 @@ function nodeMetadata(node: MediaFranchiseNodeDto): string {
   return values.filter(Boolean).join(' · ');
 }
 
-function libraryDetail(node: MediaFranchiseNodeDto): string {
-  const status = libraryStatusLabel(node.viewerStatus);
-  const progress = node.progressEpisodes != null
+function libraryProgress(node: MediaFranchiseNodeDto): string | null {
+  return node.progressEpisodes != null
     ? `${node.progressEpisodes}${node.episodeCount ? `/${node.episodeCount}` : ''} episodes`
     : null;
-  return [status, progress].filter(Boolean).join(' · ') || 'In your library';
+}
+
+const libraryStatusTones: Record<string, string> = {
+  completed: 'is-completed',
+  current: 'is-active',
+  dropped: 'is-dropped',
+  paused: 'is-pending',
+  planned: 'is-pending',
+  repeating: 'is-active',
+};
+
+function libraryStatusTone(status?: string): string {
+  if (!status) return '';
+  return libraryStatusTones[status.toLowerCase()] ?? 'is-custom';
 }
 
 function NodeState({ node }: { node: MediaFranchiseNodeDto }) {
-  if (node.isCurrent) {
+  if (node.isInLibrary) {
+    const status = libraryStatusLabel(node.viewerStatus) ?? 'In your library';
+    const progress = libraryProgress(node);
+    const tone = libraryStatusTone(node.viewerStatus);
     return (
-      <span className="media-detail-franchise-state is-current">
-        You are here{node.isInLibrary ? ` · ${libraryDetail(node)}` : ''}
+      <span className={`media-detail-franchise-state is-tracked ${tone}`.trim()}>
+        <span className="media-detail-franchise-status-line">
+          <Check aria-hidden />
+          <span>{status}</span>
+        </span>
+        {progress ? <span className="media-detail-franchise-progress">{progress}</span> : null}
       </span>
     );
-  }
-
-  if (node.isInLibrary) {
-    return <span className="media-detail-franchise-state is-tracked"><Check aria-hidden />{libraryDetail(node)}</span>;
   }
 
   return <span className="media-detail-franchise-state">Not in library</span>;

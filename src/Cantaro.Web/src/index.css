@@ -1526,11 +1526,11 @@
 .media-detail-score-row select {
   min-width: 0;
   min-height: 2.8rem;
-  border: 1px solid rgba(226, 232, 240, 0.14);
+  border: 1px solid var(--color-border-strong);
   border-radius: 14px;
   padding: 0 0.9rem;
-  color: #fff;
-  background: #374151;
+  color: var(--color-content);
+  background: var(--color-surface-raised);
   font-weight: 850;
 }
 
@@ -1606,8 +1606,12 @@
 
 .media-detail-primary-action {
   border: 0;
-  color: #fff;
-  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  color: var(--color-action-content);
+  background: var(--color-action);
+}
+
+.media-detail-primary-action:not(:disabled):hover {
+  background: var(--color-action-hover);
 }
 
 .media-detail-primary-action:disabled {
@@ -2181,18 +2185,18 @@
 
 .media-detail-character-state {
   margin: 0;
-  border: 1px dashed rgba(148, 163, 184, 0.35);
+  border: 1px solid var(--color-danger-border);
   border-radius: 12px;
   padding: 1rem;
-  color: #64748b;
-  background: rgba(248, 250, 252, 0.65);
+  color: var(--color-danger-content);
+  background: var(--color-danger-surface);
 }
 
 .media-detail-character-more {
   margin-top: 0.8rem;
   border: 0;
   padding: 0;
-  color: #6d28d9;
+  color: var(--color-accent-strong);
   background: transparent;
   font-weight: 800;
   cursor: pointer;
@@ -2207,9 +2211,8 @@
 }
 
 .media-detail-franchise-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
+  display: grid;
+  gap: 0.18rem;
   margin-top: 0.35rem;
   color: var(--color-content-muted);
   font-size: 0.72rem;
@@ -2221,12 +2224,35 @@
   height: 0.85rem;
 }
 
-.media-detail-franchise-state.is-current {
-  color: var(--color-accent-strong);
+.media-detail-franchise-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
-.media-detail-franchise-state.is-tracked {
+.media-detail-franchise-progress {
+  display: block;
+  padding-left: 1.1rem;
+}
+
+.media-detail-franchise-state.is-completed {
+  color: var(--color-info-content);
+}
+
+.media-detail-franchise-state.is-active {
   color: var(--color-success-content);
+}
+
+.media-detail-franchise-state.is-pending {
+  color: var(--color-warning-content);
+}
+
+.media-detail-franchise-state.is-dropped {
+  color: var(--color-danger-content);
+}
+
+.media-detail-franchise-state.is-custom {
+  color: var(--color-custom-content);
 }
 
 .media-detail-franchise-branches {
@@ -2758,8 +2784,9 @@
 }
 
 .media-detail-score-row select {
-  border-color: rgba(148, 163, 184, 0.24);
-  background: rgba(255, 255, 255, 0.9);
+  border-color: var(--color-border-strong);
+  color: var(--color-content);
+  background: var(--color-surface-raised);
 }
 
 .media-detail-score-row button,
@@ -2929,9 +2956,9 @@
 :root[data-theme="dark"] .media-detail-score-row select,
 :root[data-theme="dark"] .media-detail-score-row button,
 :root[data-theme="dark"] .media-detail-stepper button {
-  border-color: rgba(226, 232, 240, 0.14);
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-border-strong);
+  color: var(--color-content);
+  background: var(--color-surface-raised);
 }
 
 :root[data-theme="dark"] .media-detail-tabs {
