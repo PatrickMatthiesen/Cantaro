@@ -23,6 +23,12 @@ public class MediaTitle
 
     public string? Synopsis { get; set; }
 
+    public string? Format { get; set; }
+
+    public string? PosterUrl { get; set; }
+
+    public string? BackgroundUrl { get; set; }
+
     public int? StartYear { get; set; }
 
     public int? EpisodeCount { get; set; }
@@ -30,6 +36,12 @@ public class MediaTitle
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
+
+    public int? ReleasedCount { get; set; }
+
+    public DateTimeOffset? NextReleaseAt { get; set; }
+
+    public string? NextReleaseLabel { get; set; }
 
     public bool SupportsEpisodeProgress { get; set; }
 
@@ -52,11 +64,6 @@ public class MediaTitle
     /// Dimension used for release-state semantics.
     /// </summary>
     public required string ReleaseStatusDimension { get; set; }
-
-    /// <summary>
-    /// Additional canonical metadata captured as JSON for future expansion.
-    /// </summary>
-    public string? CanonicalMetadata { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

@@ -31,13 +31,13 @@ public class MediaProviderOperationProcessor(
 
     public async Task<MediaProviderOperation> EnqueueProgressUpdateAsync(
         int userId,
-        MediaLibraryEntry entry,
+        MediaLibraryProviderBinding binding,
         MediaProgressUpdateRequest request,
         CancellationToken cancellationToken)
     {
         return await EnqueueAsync(
             userId,
-            entry,
+            binding,
             MediaProviderOperationTypes.UpdateProgress,
             request,
             cancellationToken);
@@ -45,13 +45,13 @@ public class MediaProviderOperationProcessor(
 
     public async Task<MediaProviderOperation> EnqueueAutoProgressAsync(
         int userId,
-        MediaLibraryEntry entry,
+        MediaLibraryProviderBinding binding,
         AutoProgressUpdatePayload payload,
         CancellationToken cancellationToken)
     {
         return await EnqueueAsync(
             userId,
-            entry,
+            binding,
             MediaProviderOperationTypes.AutoProgressUpdate,
             payload,
             cancellationToken);
@@ -59,13 +59,13 @@ public class MediaProviderOperationProcessor(
 
     public async Task<MediaProviderOperation> EnqueueStatusUpdateAsync(
         int userId,
-        MediaLibraryEntry entry,
+        MediaLibraryProviderBinding binding,
         MediaStatusUpdateRequest request,
         CancellationToken cancellationToken)
     {
         return await EnqueueAsync(
             userId,
-            entry,
+            binding,
             MediaProviderOperationTypes.UpdateStatus,
             request,
             cancellationToken);
@@ -82,13 +82,17 @@ public class MediaProviderOperationProcessor(
         }
 
         var operation = await _dbContext.MediaProviderOperations
-            .Include(item => item.MediaLibraryEntry)
+            .Include(item => item.MediaLibraryProviderBinding)
+                .ThenInclude(binding => binding!.MediaLibraryEntry)
+            .Include(item => item.MediaLibraryProviderBinding)
+                .ThenInclude(binding => binding!.MediaProviderLink)
             .FirstOrDefaultAsync(item => item.Id == operationId, cancellationToken)
             ?? throw new InvalidOperationException($"Media provider operation {operationId} was not found.");
 
         try
         {
-            var provider = _mediaProviderRegistry.GetRequired(operation.Provider);
+            var provider = _mediaProviderRegistry.GetRequired(
+                operation.MediaLibraryProviderBinding!.MediaProviderLink!.Provider);
             var mutationResult = await ExecuteOperationAsync(provider, operation, cancellationToken);
             ApplyMutationSuccess(operation, mutationResult);
             _dbContext.MediaProviderOperations.Remove(operation);
@@ -202,7 +206,7 @@ public class MediaProviderOperationProcessor(
 
     private async Task<MediaProviderOperation> EnqueueAsync<TRequest>(
         int userId,
-        MediaLibraryEntry entry,
+        MediaLibraryProviderBinding binding,
         string operationType,
         TRequest request,
         CancellationToken cancellationToken)
@@ -210,10 +214,7 @@ public class MediaProviderOperationProcessor(
         var operation = new MediaProviderOperation
         {
             Id = Guid.NewGuid(),
-            UserId = userId,
-            MediaLibraryEntryId = entry.Id,
-            ConnectedServiceAccountId = entry.ConnectedServiceAccountId,
-            Provider = entry.Provider,
+            MediaLibraryProviderBindingId = binding.Id,
             OperationType = operationType,
             PayloadJson = JsonSerializer.Serialize(request, SerializerOptions),
             Status = MediaProviderOperationStatuses.Pending,
@@ -233,7 +234,8 @@ public class MediaProviderOperationProcessor(
         MediaProviderOperation operation,
         CancellationToken cancellationToken)
     {
-        if (operation.MediaLibraryEntry is null)
+        if (operation.MediaLibraryProviderBinding?.MediaLibraryEntry is null
+            || operation.MediaLibraryProviderBinding.MediaProviderLink is null)
         {
             throw new InvalidOperationException("Provider operation is missing a media library entry.");
         }
@@ -245,7 +247,7 @@ public class MediaProviderOperationProcessor(
                 operation,
                 cancellationToken),
             MediaProviderOperationTypes.UpdateStatus => await provider.UpdateStatusAsync(
-                operation.UserId,
+                operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
                 DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
             MediaProviderOperationTypes.AutoProgressUpdate => await ExecuteAutoProgressAsync(
@@ -269,7 +271,10 @@ public class MediaProviderOperationProcessor(
     {
         var request = DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson);
         LogProviderProgressUpdateAttempt(operation, request);
-        return await provider.UpdateProgressAsync(operation.UserId, request, cancellationToken);
+        return await provider.UpdateProgressAsync(
+            operation.MediaLibraryProviderBinding!.MediaLibraryEntry!.UserId,
+            request,
+            cancellationToken);
     }
 
     private async Task<MediaProviderMutationResult> ExecuteAutoProgressAsync(
@@ -282,13 +287,13 @@ public class MediaProviderOperationProcessor(
         // Sync-metadata guard: re-read the current LastRemoteUpdateAt from the DB.
         // If the provider has written a newer timestamp since we enqueued this
         // operation, the entry may already be ahead and we should skip the write.
-        if (operation.MediaLibraryEntry is not null
+        if (operation.MediaLibraryProviderBinding is not null
             && payload.LastKnownRemoteUpdateAt.HasValue)
         {
-            var currentRemoteUpdateAt = await _dbContext.MediaLibraryEntries
+            var currentRemoteUpdateAt = await _dbContext.MediaLibraryProviderBindings
                 .AsNoTracking()
-                .Where(e => e.Id == operation.MediaLibraryEntryId)
-                .Select(e => e.LastRemoteUpdateAt)
+                .Where(binding => binding.Id == operation.MediaLibraryProviderBindingId)
+                .Select(binding => binding.LastRemoteUpdateAt)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (currentRemoteUpdateAt.HasValue
@@ -307,7 +312,7 @@ public class MediaProviderOperationProcessor(
                 // is treated as successful and removed from the queue.
                 return new MediaProviderMutationResult
                 {
-                    ProviderId = operation.Provider,
+                    ProviderId = operation.MediaLibraryProviderBinding.MediaProviderLink!.Provider,
                     ProviderMediaId = payload.ProviderMediaId,
                     AppliedAt = DateTimeOffset.UtcNow,
                     LastRemoteUpdateAt = currentRemoteUpdateAt
@@ -324,7 +329,10 @@ public class MediaProviderOperationProcessor(
             LastKnownRemoteUpdateAt = payload.LastKnownRemoteUpdateAt
         };
         LogProviderProgressUpdateAttempt(operation, request);
-        return await provider.UpdateProgressAsync(operation.UserId, request, cancellationToken);
+        return await provider.UpdateProgressAsync(
+            operation.MediaLibraryProviderBinding!.MediaLibraryEntry!.UserId,
+            request,
+            cancellationToken);
     }
 
     private void LogProviderProgressUpdateAttempt(
@@ -335,8 +343,8 @@ public class MediaProviderOperationProcessor(
             "Attempting provider progress update for operation {OperationId}: " +
             "provider={Provider}, entry={EntryId}, episodes={Episodes}, chapters={Chapters}, volumes={Volumes}.",
             operation.Id,
-            operation.Provider,
-            operation.MediaLibraryEntryId,
+            operation.MediaLibraryProviderBinding?.MediaProviderLink?.Provider,
+            operation.MediaLibraryProviderBinding?.MediaLibraryEntryId,
             request.ProgressEpisodes,
             request.ProgressChapters,
             request.ProgressVolumes);
@@ -345,7 +353,10 @@ public class MediaProviderOperationProcessor(
     private void ApplyMutationSuccess(MediaProviderOperation operation, MediaProviderMutationResult result)
     {
         var now = DateTimeOffset.UtcNow;
-        var entry = operation.MediaLibraryEntry ?? throw new InvalidOperationException("Provider operation is missing a media library entry.");
+        var binding = operation.MediaLibraryProviderBinding
+            ?? throw new InvalidOperationException("Provider operation is missing a provider binding.");
+        var entry = binding.MediaLibraryEntry
+            ?? throw new InvalidOperationException("Provider binding is missing a media library entry.");
 
         switch (operation.OperationType)
         {
@@ -377,7 +388,7 @@ public class MediaProviderOperationProcessor(
                     "Auto-progress applied for user {UserId}, entry {EntryId}: " +
                     "ep={Ep}/ch={Ch}/vol={Vol}. " +
                     "Provenance: observation={ObsId}, site={Site}, hint=\"{Hint}\", score={Score}.",
-                    operation.UserId,
+                    entry.UserId,
                     entry.Id,
                     payload.ProgressEpisodes,
                     payload.ProgressChapters,
@@ -390,17 +401,18 @@ public class MediaProviderOperationProcessor(
             }
         }
 
-        entry.LastSyncedAt = now;
-        entry.LastRemoteUpdateAt = result.LastRemoteUpdateAt ?? now;
         entry.LastLocalEditAt = now;
-        entry.RawMetadata = result.RawMetadata ?? entry.RawMetadata;
         entry.UpdatedAt = now;
+        binding.LastSyncedAt = now;
+        binding.LastRemoteUpdateAt = result.LastRemoteUpdateAt ?? now;
+        binding.RawMetadata = result.RawMetadata ?? binding.RawMetadata;
+        binding.UpdatedAt = now;
         _logger.LogInformation(
             "Media provider operation {OperationId} ({OperationType}) succeeded for user {UserId} on provider {Provider}.",
             operation.Id,
             operation.OperationType,
-            operation.UserId,
-            operation.Provider);
+            entry.UserId,
+            binding.MediaProviderLink?.Provider);
     }
 
     private void ApplyMutationFailure(MediaProviderOperation operation, Exception exception)

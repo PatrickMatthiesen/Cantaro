@@ -35,4 +35,6 @@ public class MediaProviderLink
     public MediaTitle? MediaTitle { get; set; }
 
     public User? LinkedByUser { get; set; }
+
+    public ICollection<MediaLibraryProviderBinding> LibraryBindings { get; set; } = [];
 }

@@ -195,15 +195,21 @@ public class MediaObservationsApiTests
             Id = Guid.NewGuid(),
             UserId = fixture.UserId,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = "anilist",
-            ProviderAccountId = "viewer-611",
-            ProviderMediaId = "129190",
             Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = 1,
-            LastRemoteUpdateAt = now.AddMinutes(-10),
             CreatedAt = now,
             UpdatedAt = now
+        };
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "anilist", ExternalId = "129190",
+            LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+        };
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(), MediaLibraryEntryId = entry.Id, MediaProviderLinkId = link.Id,
+            ConnectedServiceAccountId = account.Id, ProviderAccountId = "viewer-611",
+            LastRemoteUpdateAt = now.AddMinutes(-10), CreatedAt = now, UpdatedAt = now
         };
         var existingObservation = new MediaObservation
         {
@@ -223,7 +229,9 @@ public class MediaObservationsApiTests
 
         fixture.Db.MediaTitles.Add(title);
         fixture.Db.ConnectedServiceAccounts.Add(account);
+        fixture.Db.MediaProviderLinks.Add(link);
         fixture.Db.MediaLibraryEntries.Add(entry);
+        fixture.Db.MediaLibraryProviderBindings.Add(binding);
         fixture.Db.MediaObservations.Add(existingObservation);
         await fixture.Db.SaveChangesAsync();
 

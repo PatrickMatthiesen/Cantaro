@@ -2,21 +2,21 @@ import { describe, expect, test } from 'bun:test';
 import { createInitialMediaLibraryFilters } from '../../Cantaro.ClientShared/src/media/components/media-library/mediaLibraryFilters';
 import { mediaLibraryStatusLabel } from '../../Cantaro.ClientShared/src/media/components/media-library/mediaLibraryStatus';
 import type {
-  MediaLibraryEntryDetailDto,
   MediaLibraryListItemDto,
   MediaLibraryPageDto,
+  MediaViewerProviderBindingDto,
 } from '../../Cantaro.ClientShared/src/media/services/mediaApi.types';
 import { getMediaFilterDefaults } from '../src/media/mediaLibraryRouteFilters';
 
 test('media library contracts preserve plural provider-list memberships', () => {
   const pageLists: MediaLibraryPageDto['availableProviderListNames'] = ['Favorites'];
   const itemLists: MediaLibraryListItemDto['providerListNames'] = ['Favorites', 'Seasonal'];
-  const detailLists: MediaLibraryEntryDetailDto['providerListNames'] = itemLists;
+  const bindingLists: MediaViewerProviderBindingDto['providerListNames'] = itemLists;
 
-  expect({ pageLists, itemLists, detailLists }).toEqual({
+  expect({ pageLists, itemLists, bindingLists }).toEqual({
     pageLists: ['Favorites'],
     itemLists: ['Favorites', 'Seasonal'],
-    detailLists: ['Favorites', 'Seasonal'],
+    bindingLists: ['Favorites', 'Seasonal'],
   });
 });
 

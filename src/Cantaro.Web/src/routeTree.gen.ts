@@ -26,6 +26,7 @@ import { Route as MusicMatchingRouteImport } from './routes/music.matching'
 import { Route as MediaReviewRouteImport } from './routes/media.review'
 import { Route as MediaProvidersRouteImport } from './routes/media.providers'
 import { Route as MediaLibraryRouteImport } from './routes/media.library'
+import { Route as MediaMediaTitleIdRouteImport } from './routes/media.$mediaTitleId'
 import { Route as MusicSongsIndexRouteImport } from './routes/music.songs.index'
 import { Route as MusicPlaylistsIndexRouteImport } from './routes/music.playlists.index'
 import { Route as MusicPlatformsIndexRouteImport } from './routes/music.platforms.index'
@@ -35,7 +36,6 @@ import { Route as MusicSongsSongIdRouteImport } from './routes/music.songs.$song
 import { Route as MusicPlaylistsPlaylistIdRouteImport } from './routes/music.playlists.$playlistId'
 import { Route as MusicPlatformsSyncRouteImport } from './routes/music.platforms.sync'
 import { Route as MusicPlatformsPlatformIdRouteImport } from './routes/music.platforms.$platformId'
-import { Route as MediaLibraryEntryIdRouteImport } from './routes/media.library.$entryId'
 import { Route as MusicPlatformsPlatformIdIndexRouteImport } from './routes/music.platforms.$platformId.index'
 import { Route as MediaCatalogProviderIdProviderMediaIdRouteImport } from './routes/media.catalog.$providerId.$providerMediaId'
 import { Route as MusicPlatformsPlatformIdPlaylistsPlaylistIdRouteImport } from './routes/music.platforms.$platformId.playlists.$playlistId'
@@ -125,6 +125,11 @@ const MediaLibraryRoute = MediaLibraryRouteImport.update({
   path: '/library',
   getParentRoute: () => MediaRoute,
 } as any)
+const MediaMediaTitleIdRoute = MediaMediaTitleIdRouteImport.update({
+  id: '/$mediaTitleId',
+  path: '/$mediaTitleId',
+  getParentRoute: () => MediaRoute,
+} as any)
 const MusicSongsIndexRoute = MusicSongsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -173,11 +178,6 @@ const MusicPlatformsPlatformIdRoute =
     path: '/$platformId',
     getParentRoute: () => MusicPlatformsRoute,
   } as any)
-const MediaLibraryEntryIdRoute = MediaLibraryEntryIdRouteImport.update({
-  id: '/$entryId',
-  path: '/$entryId',
-  getParentRoute: () => MediaLibraryRoute,
-} as any)
 const MusicPlatformsPlatformIdIndexRoute =
   MusicPlatformsPlatformIdIndexRouteImport.update({
     id: '/',
@@ -206,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/youtube': typeof YoutubeRouteWithChildren
+  '/media/$mediaTitleId': typeof MediaMediaTitleIdRoute
   '/media/library': typeof MediaLibraryRouteWithChildren
   '/media/providers': typeof MediaProvidersRoute
   '/media/review': typeof MediaReviewRoute
@@ -215,7 +216,6 @@ export interface FileRoutesByFullPath {
   '/music/songs': typeof MusicSongsRouteWithChildren
   '/media/': typeof MediaIndexRoute
   '/music/': typeof MusicIndexRoute
-  '/media/library/$entryId': typeof MediaLibraryEntryIdRoute
   '/music/platforms/$platformId': typeof MusicPlatformsPlatformIdRouteWithChildren
   '/music/platforms/sync': typeof MusicPlatformsSyncRoute
   '/music/playlists/$playlistId': typeof MusicPlaylistsPlaylistIdRoute
@@ -236,12 +236,12 @@ export interface FileRoutesByTo {
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/youtube': typeof YoutubeRouteWithChildren
+  '/media/$mediaTitleId': typeof MediaMediaTitleIdRoute
   '/media/providers': typeof MediaProvidersRoute
   '/media/review': typeof MediaReviewRoute
   '/music/matching': typeof MusicMatchingRoute
   '/media': typeof MediaIndexRoute
   '/music': typeof MusicIndexRoute
-  '/media/library/$entryId': typeof MediaLibraryEntryIdRoute
   '/music/platforms/sync': typeof MusicPlatformsSyncRoute
   '/music/playlists/$playlistId': typeof MusicPlaylistsPlaylistIdRoute
   '/music/songs/$songId': typeof MusicSongsSongIdRoute
@@ -264,6 +264,7 @@ export interface FileRoutesById {
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/youtube': typeof YoutubeRouteWithChildren
+  '/media/$mediaTitleId': typeof MediaMediaTitleIdRoute
   '/media/library': typeof MediaLibraryRouteWithChildren
   '/media/providers': typeof MediaProvidersRoute
   '/media/review': typeof MediaReviewRoute
@@ -273,7 +274,6 @@ export interface FileRoutesById {
   '/music/songs': typeof MusicSongsRouteWithChildren
   '/media/': typeof MediaIndexRoute
   '/music/': typeof MusicIndexRoute
-  '/media/library/$entryId': typeof MediaLibraryEntryIdRoute
   '/music/platforms/$platformId': typeof MusicPlatformsPlatformIdRouteWithChildren
   '/music/platforms/sync': typeof MusicPlatformsSyncRoute
   '/music/playlists/$playlistId': typeof MusicPlaylistsPlaylistIdRoute
@@ -298,6 +298,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/youtube'
+    | '/media/$mediaTitleId'
     | '/media/library'
     | '/media/providers'
     | '/media/review'
@@ -307,7 +308,6 @@ export interface FileRouteTypes {
     | '/music/songs'
     | '/media/'
     | '/music/'
-    | '/media/library/$entryId'
     | '/music/platforms/$platformId'
     | '/music/platforms/sync'
     | '/music/playlists/$playlistId'
@@ -328,12 +328,12 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/youtube'
+    | '/media/$mediaTitleId'
     | '/media/providers'
     | '/media/review'
     | '/music/matching'
     | '/media'
     | '/music'
-    | '/media/library/$entryId'
     | '/music/platforms/sync'
     | '/music/playlists/$playlistId'
     | '/music/songs/$songId'
@@ -355,6 +355,7 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/youtube'
+    | '/media/$mediaTitleId'
     | '/media/library'
     | '/media/providers'
     | '/media/review'
@@ -364,7 +365,6 @@ export interface FileRouteTypes {
     | '/music/songs'
     | '/media/'
     | '/music/'
-    | '/media/library/$entryId'
     | '/music/platforms/$platformId'
     | '/music/platforms/sync'
     | '/music/playlists/$playlistId'
@@ -511,6 +511,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MediaLibraryRouteImport
       parentRoute: typeof MediaRoute
     }
+    '/media/$mediaTitleId': {
+      id: '/media/$mediaTitleId'
+      path: '/$mediaTitleId'
+      fullPath: '/media/$mediaTitleId'
+      preLoaderRoute: typeof MediaMediaTitleIdRouteImport
+      parentRoute: typeof MediaRoute
+    }
     '/music/songs/': {
       id: '/music/songs/'
       path: '/'
@@ -574,13 +581,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MusicPlatformsPlatformIdRouteImport
       parentRoute: typeof MusicPlatformsRoute
     }
-    '/media/library/$entryId': {
-      id: '/media/library/$entryId'
-      path: '/$entryId'
-      fullPath: '/media/library/$entryId'
-      preLoaderRoute: typeof MediaLibraryEntryIdRouteImport
-      parentRoute: typeof MediaLibraryRoute
-    }
     '/music/platforms/$platformId/': {
       id: '/music/platforms/$platformId/'
       path: '/'
@@ -606,12 +606,10 @@ declare module '@tanstack/react-router' {
 }
 
 interface MediaLibraryRouteChildren {
-  MediaLibraryEntryIdRoute: typeof MediaLibraryEntryIdRoute
   MediaLibraryIndexRoute: typeof MediaLibraryIndexRoute
 }
 
 const MediaLibraryRouteChildren: MediaLibraryRouteChildren = {
-  MediaLibraryEntryIdRoute: MediaLibraryEntryIdRoute,
   MediaLibraryIndexRoute: MediaLibraryIndexRoute,
 }
 
@@ -620,6 +618,7 @@ const MediaLibraryRouteWithChildren = MediaLibraryRoute._addFileChildren(
 )
 
 interface MediaRouteChildren {
+  MediaMediaTitleIdRoute: typeof MediaMediaTitleIdRoute
   MediaLibraryRoute: typeof MediaLibraryRouteWithChildren
   MediaProvidersRoute: typeof MediaProvidersRoute
   MediaReviewRoute: typeof MediaReviewRoute
@@ -628,6 +627,7 @@ interface MediaRouteChildren {
 }
 
 const MediaRouteChildren: MediaRouteChildren = {
+  MediaMediaTitleIdRoute: MediaMediaTitleIdRoute,
   MediaLibraryRoute: MediaLibraryRouteWithChildren,
   MediaProvidersRoute: MediaProvidersRoute,
   MediaReviewRoute: MediaReviewRoute,

@@ -248,23 +248,22 @@ public class MediaEpisodeIdentityService(
     }
 
     public async Task<MediaEpisodeCatalogDto?> GetEpisodeCatalogAsync(
-        int userId,
-        Guid libraryEntryId,
+        Guid mediaTitleId,
         CancellationToken cancellationToken)
     {
-        var libraryEntry = await _dbContext.MediaLibraryEntries
+        var title = await _dbContext.MediaTitles
             .AsNoTracking()
-            .Where(item => item.Id == libraryEntryId && item.UserId == userId)
-            .Select(item => new { item.MediaTitleId, item.RawMetadata })
+            .Where(item => item.Id == mediaTitleId)
+            .Select(item => new { item.Id, item.ReleasedCount })
             .SingleOrDefaultAsync(cancellationToken);
-        if (libraryEntry is null)
+        if (title is null)
         {
             return null;
         }
 
         var episodes = await _dbContext.MediaEpisodes
             .AsNoTracking()
-            .Where(episode => episode.MediaTitleId == libraryEntry.MediaTitleId)
+            .Where(episode => episode.MediaTitleId == title.Id)
             .Include(episode => episode.ProviderIdentities)
             .OrderBy(episode => episode.EpisodeNumber)
             .ToListAsync(cancellationToken);
@@ -277,7 +276,7 @@ public class MediaEpisodeIdentityService(
             Episodes = episodes.Select(MapEpisodeDestination).ToList(),
             ReleaseAvailability = BuildReleaseAvailability(
                 episodes,
-                ReadReleasedCount(libraryEntry.RawMetadata))
+                title.ReleasedCount)
         };
     }
 
@@ -308,51 +307,6 @@ public class MediaEpisodeIdentityService(
                     .Max()
             }).ToList()
         };
-    }
-
-    private static int? ReadReleasedCount(string? rawMetadata)
-    {
-        if (string.IsNullOrWhiteSpace(rawMetadata))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(rawMetadata);
-            var root = document.RootElement;
-            if (root.TryGetProperty("media", out var media)
-                && media.ValueKind == JsonValueKind.Object)
-            {
-                root = media;
-            }
-            if (root.TryGetProperty("releasedCount", out var releasedCount)
-                && releasedCount.TryGetInt32(out var parsedReleasedCount))
-            {
-                return parsedReleasedCount;
-            }
-
-            if (root.TryGetProperty("nextAiringEpisode", out var nextAiringEpisode)
-                && nextAiringEpisode.ValueKind == JsonValueKind.Object
-                && nextAiringEpisode.TryGetProperty("episode", out var episode)
-                && episode.TryGetInt32(out var nextEpisode))
-            {
-                return Math.Max(0, nextEpisode - 1);
-            }
-
-            return string.Equals(
-                    root.TryGetProperty("status", out var status) ? status.GetString() : null,
-                    "FINISHED",
-                    StringComparison.OrdinalIgnoreCase)
-                && root.TryGetProperty("episodes", out var episodes)
-                && episodes.TryGetInt32(out var totalEpisodes)
-                    ? totalEpisodes
-                    : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private static MediaEpisodeDestinationDto MapEpisodeDestination(MediaEpisode episode)
@@ -398,12 +352,12 @@ public class MediaEpisodeIdentityService(
 
     public async Task<MediaContinueWatchingDto?> ResolveContinueWatchingAsync(
         int userId,
-        Guid libraryEntryId,
+        Guid mediaTitleId,
         CancellationToken cancellationToken)
     {
         var entry = await _dbContext.MediaLibraryEntries
             .AsNoTracking()
-            .Where(item => item.Id == libraryEntryId && item.UserId == userId)
+            .Where(item => item.MediaTitleId == mediaTitleId && item.UserId == userId)
             .Select(item => new
             {
                 item.MediaTitleId,

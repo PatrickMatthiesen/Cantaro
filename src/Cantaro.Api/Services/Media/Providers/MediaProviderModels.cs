@@ -34,6 +34,12 @@ public class MediaProviderLibraryItem
 
     public string? Synopsis { get; set; }
 
+    public string? Format { get; set; }
+
+    public string? PosterUrl { get; set; }
+
+    public string? BackgroundUrl { get; set; }
+
     public string? ExternalUrl { get; set; }
 
     public int? StartYear { get; set; }
@@ -43,6 +49,12 @@ public class MediaProviderLibraryItem
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
+
+    public int? ReleasedCount { get; set; }
+
+    public DateTimeOffset? NextReleaseAt { get; set; }
+
+    public string? NextReleaseLabel { get; set; }
 
     public required string Status { get; set; }
 
@@ -110,6 +122,8 @@ public class MediaProviderTitleDetails
 
     public string? Synopsis { get; set; }
 
+    public string? Format { get; set; }
+
     public string? PosterUrl { get; set; }
 
     public string? BackgroundUrl { get; set; }
@@ -121,6 +135,12 @@ public class MediaProviderTitleDetails
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
+
+    public int? ReleasedCount { get; set; }
+
+    public DateTimeOffset? NextReleaseAt { get; set; }
+
+    public string? NextReleaseLabel { get; set; }
 
     public required string PrimaryProgressDimension { get; set; }
 

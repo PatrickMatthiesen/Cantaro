@@ -70,6 +70,8 @@ public class MediaObservationProgressService(
         // Find all library entries for this user and title. Local Cantaro state
         // advances immediately; connected entries also sync to the provider.
         var entries = await _dbContext.MediaLibraryEntries
+            .Include(entry => entry.ProviderBindings)
+                .ThenInclude(binding => binding.MediaProviderLink)
             .Where(e => e.UserId == observation.UserId
                         && e.MediaTitleId == observation.MediaTitleId)
             .ToListAsync(cancellationToken);
@@ -108,7 +110,11 @@ public class MediaObservationProgressService(
             ApplyLocalProgressUpdate(entry, progressEpisodes, progressChapters, progressVolumes);
             localUpdatesCount++;
 
-            if (entry.ConnectedServiceAccountId is null)
+            var connectedBindings = entry.ProviderBindings
+                .Where(binding => binding.ConnectedServiceAccountId is not null
+                    && binding.MediaProviderLink is not null)
+                .ToList();
+            if (connectedBindings.Count == 0)
             {
                 _logger.LogInformation(
                     "Applied local observation progress for user {UserId}, entry {EntryId}: " +
@@ -123,22 +129,24 @@ public class MediaObservationProgressService(
                 continue;
             }
 
-            var payload = new AutoProgressUpdatePayload
+            foreach (var binding in connectedBindings)
             {
-                ProviderMediaId = entry.ProviderMediaId,
-                ProgressEpisodes = progressEpisodes,
-                ProgressChapters = progressChapters,
-                ProgressVolumes = progressVolumes,
-                LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt,
-                TriggeredByObservationId = observation.Id.ToString(),
-                ObservedSiteIdentifier = observation.SiteIdentifier,
-                ObservedProgressHint = observation.ProgressHint,
-                ObservationMatchScore = matchScore,
-                TriggeredAt = DateTimeOffset.UtcNow
-            };
+                var payload = new AutoProgressUpdatePayload
+                {
+                    ProviderMediaId = binding.MediaProviderLink!.ExternalId,
+                    ProgressEpisodes = progressEpisodes,
+                    ProgressChapters = progressChapters,
+                    ProgressVolumes = progressVolumes,
+                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt,
+                    TriggeredByObservationId = observation.Id.ToString(),
+                    ObservedSiteIdentifier = observation.SiteIdentifier,
+                    ObservedProgressHint = observation.ProgressHint,
+                    ObservationMatchScore = matchScore,
+                    TriggeredAt = DateTimeOffset.UtcNow
+                };
 
-            await _operationProcessor.EnqueueAutoProgressAsync(
-                entry.UserId, entry, payload, cancellationToken);
+                await _operationProcessor.EnqueueAutoProgressAsync(
+                    entry.UserId, binding, payload, cancellationToken);
 
             _logger.LogInformation(
                 "Queued auto-progress for user {UserId}, entry {EntryId} " +
@@ -147,15 +155,16 @@ public class MediaObservationProgressService(
                 "(site={Site}, hint=\"{Hint}\", score={Score:P0}).",
                 entry.UserId,
                 entry.Id,
-                entry.Provider,
-                entry.ProviderMediaId,
+                binding.MediaProviderLink.Provider,
+                binding.MediaProviderLink.ExternalId,
                 progressEpisodes,
                 observation.Id,
                 observation.SiteIdentifier,
                 observation.ProgressHint,
                 matchScore ?? 0);
 
-            enqueuedCount++;
+                enqueuedCount++;
+            }
         }
 
         if (localUpdatesCount > 0)

@@ -8,21 +8,9 @@ public enum MediaLinkResultKind
 {
     Success,
     EntryNotFound,
-    /// <summary>
-    /// The link already exists and is correct (idempotent success).
-    /// </summary>
     AlreadyLinked,
-    /// <summary>
-    /// Another canonical title is already associated with the given provider/external ID.
-    /// </summary>
     ConflictingTitle,
-    /// <summary>
-    /// This title already has a different identity for the provider and replacement must be confirmed.
-    /// </summary>
     ReplacementConfirmationRequired,
-    /// <summary>
-    /// The provider identity is used by other library entries and cannot be safely changed or removed.
-    /// </summary>
     LinkInUse,
     ProviderLinkNotFound
 }
@@ -43,13 +31,11 @@ public class MediaLinkResult
         Kind = MediaLinkResultKind.ReplacementConfirmationRequired,
         CurrentProviderMediaId = currentProviderMediaId
     };
-
     public static MediaLinkResult LinkInUse(string currentProviderMediaId) => new()
     {
         Kind = MediaLinkResultKind.LinkInUse,
         CurrentProviderMediaId = currentProviderMediaId
     };
-
     public static MediaLinkResult Conflict(Guid conflictingId, string conflictingTitle) => new()
     {
         Kind = MediaLinkResultKind.ConflictingTitle,
@@ -58,9 +44,6 @@ public class MediaLinkResult
     };
 }
 
-/// <summary>
-/// Handles manual linking and unlinking of a user's media library entry to a provider catalog entry.
-/// </summary>
 public class MediaLibraryLinkService(
     ApplicationDbContext dbContext,
     ILogger<MediaLibraryLinkService> logger)
@@ -68,158 +51,76 @@ public class MediaLibraryLinkService(
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly ILogger<MediaLibraryLinkService> _logger = logger;
 
-    /// <summary>
-    /// Links the <see cref="MediaTitle"/> of a library entry to a provider catalog entry identified by
-    /// <paramref name="providerId"/>/<paramref name="providerMediaId"/>.
-    ///
-    /// No-silent-reassignment rule: a provider identity owned by another canonical title can never be
-    /// reassigned through this user-facing operation. Replacing this title's identity for the same provider
-    /// requires explicit confirmation and is blocked when other library entries depend on the old identity.
-    /// </summary>
     public async Task<MediaLinkResult> LinkProviderAsync(
         int userId,
-        Guid libraryEntryId,
+        Guid mediaTitleId,
         string providerId,
         string providerMediaId,
         bool confirmReplacement,
         CancellationToken cancellationToken)
     {
-        var entry = await _dbContext.MediaLibraryEntries
-            .Include(e => e.MediaTitle)
-            .FirstOrDefaultAsync(e => e.Id == libraryEntryId && e.UserId == userId, cancellationToken);
-
-        if (entry is null || entry.MediaTitle is null)
+        var canEdit = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .AnyAsync(entry => entry.UserId == userId && entry.MediaTitleId == mediaTitleId, cancellationToken);
+        if (!canEdit)
         {
             return MediaLinkResult.EntryNotFound();
         }
 
         var normalizedProvider = providerId.Trim().ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
-
-        // Check whether a link for (provider, externalId) already exists globally.
-        var existingLinkForExternalId = await _dbContext.MediaProviderLinks
-            .Include(l => l.MediaTitle)
+        var externalIdentity = await _dbContext.MediaProviderLinks
+            .Include(link => link.MediaTitle)
             .FirstOrDefaultAsync(
-                l => l.Provider == normalizedProvider && l.ExternalId == providerMediaId,
+                link => link.Provider == normalizedProvider && link.ExternalId == providerMediaId,
                 cancellationToken);
 
-        if (existingLinkForExternalId is not null)
+        if (externalIdentity is not null)
         {
-            if (existingLinkForExternalId.MediaTitleId == entry.MediaTitleId)
+            if (externalIdentity.MediaTitleId != mediaTitleId)
             {
-                if (string.Equals(entry.Provider, normalizedProvider, StringComparison.OrdinalIgnoreCase)
-                    && entry.ProviderMediaId != providerMediaId)
-                {
-                    if (!confirmReplacement)
-                    {
-                        return MediaLinkResult.ReplacementRequired(entry.ProviderMediaId);
-                    }
-
-                    var hasOtherIncompatibleEntries = await _dbContext.MediaLibraryEntries
-                        .AsNoTracking()
-                        .AnyAsync(item =>
-                            item.MediaTitleId == entry.MediaTitleId
-                            && item.Provider == normalizedProvider
-                            && item.ProviderMediaId != providerMediaId
-                            && item.Id != entry.Id,
-                            cancellationToken);
-
-                    if (hasOtherIncompatibleEntries)
-                    {
-                        return MediaLinkResult.LinkInUse(entry.ProviderMediaId);
-                    }
-
-                    entry.ProviderMediaId = providerMediaId;
-                    entry.LastMutationSource = MediaMutationSources.UserProviderIdentityCorrection;
-                    entry.UpdatedAt = now;
-                }
-
-                // Idempotent: the correct link already exists. Refresh the verification timestamp.
-                existingLinkForExternalId.LastVerifiedAt = now;
-                existingLinkForExternalId.UpdatedAt = now;
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                return MediaLinkResult.AlreadyLinked();
+                return MediaLinkResult.Conflict(
+                    externalIdentity.MediaTitleId,
+                    externalIdentity.MediaTitle?.CanonicalTitle ?? externalIdentity.MediaTitleId.ToString());
             }
 
-            return MediaLinkResult.Conflict(
-                existingLinkForExternalId.MediaTitleId,
-                existingLinkForExternalId.MediaTitle?.CanonicalTitle ?? existingLinkForExternalId.MediaTitleId.ToString());
+            externalIdentity.LastVerifiedAt = now;
+            externalIdentity.UpdatedAt = now;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return MediaLinkResult.AlreadyLinked();
         }
 
-        // Check whether this title already has a link for this provider (replace it).
-        var existingLinkForTitleProvider = await _dbContext.MediaProviderLinks
+        var currentLink = await _dbContext.MediaProviderLinks
             .FirstOrDefaultAsync(
-                l => l.MediaTitleId == entry.MediaTitleId && l.Provider == normalizedProvider,
+                link => link.MediaTitleId == mediaTitleId && link.Provider == normalizedProvider,
                 cancellationToken);
-
-        if (existingLinkForTitleProvider is not null && existingLinkForTitleProvider.ExternalId != providerMediaId)
+        if (currentLink is not null)
         {
             if (!confirmReplacement)
             {
-                return MediaLinkResult.ReplacementRequired(existingLinkForTitleProvider.ExternalId);
+                return MediaLinkResult.ReplacementRequired(currentLink.ExternalId);
             }
 
-            var incompatibleEntries = await _dbContext.MediaLibraryEntries
+            var isBound = await _dbContext.MediaLibraryProviderBindings
                 .AsNoTracking()
-                .Where(item =>
-                    item.MediaTitleId == entry.MediaTitleId
-                    && item.Provider == normalizedProvider
-                    && item.ProviderMediaId != providerMediaId)
-                .Select(item => new { item.Id, item.ProviderMediaId })
-                .ToListAsync(cancellationToken);
-
-            if (incompatibleEntries.Any(item =>
-                    item.Id != entry.Id || item.ProviderMediaId != existingLinkForTitleProvider.ExternalId))
+                .AnyAsync(binding => binding.MediaProviderLinkId == currentLink.Id, cancellationToken);
+            if (isBound)
             {
-                return MediaLinkResult.LinkInUse(existingLinkForTitleProvider.ExternalId);
+                return MediaLinkResult.LinkInUse(currentLink.ExternalId);
             }
 
-            // Replace the existing link for this title+provider with the new external ID.
-            _logger.LogInformation(
-                "Updating provider link for MediaTitle {TitleId} on {Provider} from ExternalId {OldExternalId} to {NewExternalId} by user {UserId}.",
-                entry.MediaTitleId, normalizedProvider, existingLinkForTitleProvider.ExternalId, providerMediaId, userId);
-
-            existingLinkForTitleProvider.ExternalId = providerMediaId;
-            existingLinkForTitleProvider.LinkSource = MediaMappingSources.UserConfirmed;
-            existingLinkForTitleProvider.LinkedByUserId = userId;
-            existingLinkForTitleProvider.LastVerifiedAt = now;
-            existingLinkForTitleProvider.UpdatedAt = now;
+            currentLink.ExternalId = providerMediaId;
+            currentLink.LinkSource = MediaMappingSources.UserConfirmed;
+            currentLink.LinkedByUserId = userId;
+            currentLink.LastVerifiedAt = now;
+            currentLink.UpdatedAt = now;
         }
-        else if (existingLinkForExternalId is null && existingLinkForTitleProvider is null)
+        else
         {
-            var entryIdentityIsBeingReplaced = string.Equals(
-                    entry.Provider,
-                    normalizedProvider,
-                    StringComparison.OrdinalIgnoreCase)
-                && entry.ProviderMediaId != providerMediaId;
-
-            if (entryIdentityIsBeingReplaced && !confirmReplacement)
-            {
-                return MediaLinkResult.ReplacementRequired(entry.ProviderMediaId);
-            }
-
-            if (entryIdentityIsBeingReplaced)
-            {
-                var hasOtherIncompatibleEntries = await _dbContext.MediaLibraryEntries
-                    .AsNoTracking()
-                    .AnyAsync(item =>
-                        item.MediaTitleId == entry.MediaTitleId
-                        && item.Provider == normalizedProvider
-                        && item.ProviderMediaId != providerMediaId
-                        && item.Id != entry.Id,
-                        cancellationToken);
-
-                if (hasOtherIncompatibleEntries)
-                {
-                    return MediaLinkResult.LinkInUse(entry.ProviderMediaId);
-                }
-            }
-
-            // No link exists yet — create one.
-            var link = new MediaProviderLink
+            _dbContext.MediaProviderLinks.Add(new MediaProviderLink
             {
                 Id = Guid.NewGuid(),
-                MediaTitleId = entry.MediaTitleId,
+                MediaTitleId = mediaTitleId,
                 Provider = normalizedProvider,
                 ExternalId = providerMediaId,
                 LinkSource = MediaMappingSources.UserConfirmed,
@@ -227,78 +128,58 @@ public class MediaLibraryLinkService(
                 LastVerifiedAt = now,
                 CreatedAt = now,
                 UpdatedAt = now
-            };
-            _dbContext.MediaProviderLinks.Add(link);
-        }
-
-        // A confirmed same-provider correction must keep the initiating library entry's remote identity in sync.
-        if (string.Equals(entry.Provider, normalizedProvider, StringComparison.OrdinalIgnoreCase)
-            && entry.ProviderMediaId != providerMediaId)
-        {
-            entry.ProviderMediaId = providerMediaId;
-            entry.LastMutationSource = MediaMutationSources.UserProviderIdentityCorrection;
-            entry.UpdatedAt = now;
+            });
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
-
         _logger.LogInformation(
-            "User {UserId} linked library entry {EntryId} (MediaTitle {TitleId}) to {Provider}/{ExternalId}.",
-            userId, libraryEntryId, entry.MediaTitleId, normalizedProvider, providerMediaId);
-
+            "User {UserId} linked MediaTitle {TitleId} to {Provider}/{ExternalId}.",
+            userId,
+            mediaTitleId,
+            normalizedProvider,
+            providerMediaId);
         return MediaLinkResult.Success();
     }
 
-    /// <summary>
-    /// Removes the <see cref="MediaProviderLink"/> between the entry's <see cref="MediaTitle"/> and the
-    /// given provider. Returns false when no such link exists.
-    /// </summary>
     public async Task<MediaLinkResult> UnlinkProviderAsync(
         int userId,
-        Guid libraryEntryId,
+        Guid mediaTitleId,
         string providerId,
         CancellationToken cancellationToken)
     {
-        var entry = await _dbContext.MediaLibraryEntries
-            .FirstOrDefaultAsync(e => e.Id == libraryEntryId && e.UserId == userId, cancellationToken);
-
-        if (entry is null)
+        var canEdit = await _dbContext.MediaLibraryEntries
+            .AsNoTracking()
+            .AnyAsync(entry => entry.UserId == userId && entry.MediaTitleId == mediaTitleId, cancellationToken);
+        if (!canEdit)
         {
             return MediaLinkResult.EntryNotFound();
         }
 
-        var normalizedProvider = providerId.ToLowerInvariant();
-
+        var normalizedProvider = providerId.Trim().ToLowerInvariant();
         var link = await _dbContext.MediaProviderLinks
             .FirstOrDefaultAsync(
-                l => l.MediaTitleId == entry.MediaTitleId && l.Provider == normalizedProvider,
+                item => item.MediaTitleId == mediaTitleId && item.Provider == normalizedProvider,
                 cancellationToken);
-
         if (link is null)
         {
             return MediaLinkResult.ProviderLinkNotFound();
         }
 
-        var isUsedByLibraryEntry = await _dbContext.MediaLibraryEntries
+        var isBound = await _dbContext.MediaLibraryProviderBindings
             .AsNoTracking()
-            .AnyAsync(item =>
-                item.MediaTitleId == entry.MediaTitleId
-                && item.Provider == normalizedProvider
-                && item.ProviderMediaId == link.ExternalId,
-                cancellationToken);
-
-        if (isUsedByLibraryEntry)
+            .AnyAsync(binding => binding.MediaProviderLinkId == link.Id, cancellationToken);
+        if (isBound)
         {
             return MediaLinkResult.LinkInUse(link.ExternalId);
         }
 
         _dbContext.MediaProviderLinks.Remove(link);
         await _dbContext.SaveChangesAsync(cancellationToken);
-
         _logger.LogInformation(
             "User {UserId} unlinked MediaTitle {TitleId} from provider {Provider}.",
-            userId, entry.MediaTitleId, normalizedProvider);
-
+            userId,
+            mediaTitleId,
+            normalizedProvider);
         return MediaLinkResult.Success();
     }
 }

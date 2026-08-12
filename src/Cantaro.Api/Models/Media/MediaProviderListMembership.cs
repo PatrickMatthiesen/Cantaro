@@ -6,9 +6,9 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class MediaProviderListMembership
 {
-    public Guid MediaLibraryEntryId { get; set; }
+    public Guid MediaLibraryProviderBindingId { get; set; }
 
     public required string Name { get; set; }
 
-    public MediaLibraryEntry? MediaLibraryEntry { get; set; }
+    public MediaLibraryProviderBinding? MediaLibraryProviderBinding { get; set; }
 }

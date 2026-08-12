@@ -95,15 +95,23 @@ public class AniListMediaProvider(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var libraryEntries = await _dbContext.MediaLibraryEntries
-            .Where(entry => entry.UserId == userId && entry.Provider == ProviderName && entry.ConnectedServiceAccountId == account.Id)
+        var bindings = await _dbContext.MediaLibraryProviderBindings
+            .Include(binding => binding.MediaLibraryEntry)
+            .Include(binding => binding.MediaProviderLink)
+            .Where(binding => binding.MediaLibraryEntry!.UserId == userId
+                && binding.MediaProviderLink!.Provider == ProviderName
+                && binding.ConnectedServiceAccountId == account.Id)
             .ToListAsync(cancellationToken);
 
-        foreach (var entry in libraryEntries)
+        foreach (var binding in bindings)
         {
-            entry.ConnectedServiceAccountId = null;
-            entry.LastMutationSource = MediaMutationSources.ProviderDisconnect;
-            entry.UpdatedAt = now;
+            binding.ConnectedServiceAccountId = null;
+            binding.UpdatedAt = now;
+            if (binding.MediaLibraryEntry is { } entry)
+            {
+                entry.LastMutationSource = MediaMutationSources.ProviderDisconnect;
+                entry.UpdatedAt = now;
+            }
         }
 
         _dbContext.ConnectedServiceAccounts.Remove(account);
@@ -338,6 +346,7 @@ public class AniListMediaProvider(
 
         var title = SelectCanonicalTitle(entry.Media.Title);
         var dimensions = GetDimensions(mediaKind);
+        var releaseMetadata = BuildReleaseMetadata(entry.Media, dimensions.ReleaseStatusDimension);
 
         return new MediaProviderLibraryItem
         {
@@ -348,11 +357,17 @@ public class AniListMediaProvider(
             OriginalTitle = entry.Media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = entry.Media.Description,
+            Format = entry.Media.Format,
+            PosterUrl = SelectPosterUrl(entry.Media.CoverImage),
+            BackgroundUrl = entry.Media.BannerImage,
             ExternalUrl = entry.Media.SiteUrl,
             StartYear = entry.Media.StartDate?.Year,
             EpisodeCount = entry.Media.Episodes,
             ChapterCount = entry.Media.Chapters,
             VolumeCount = entry.Media.Volumes,
+            ReleasedCount = releaseMetadata.ReleasedCount,
+            NextReleaseAt = releaseMetadata.NextReleaseAt,
+            NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             Status = MapStatus(entry.Status),
             ProviderListNames = providerListNames,
             ProgressEpisodes = mediaKind == MediaKinds.Anime ? entry.Progress : null,
@@ -404,12 +419,16 @@ public class AniListMediaProvider(
             NativeTitle = media.Title?.Native,
             MediaKind = mediaKind,
             Synopsis = media.Description,
+            Format = media.Format,
             PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
             ChapterCount = media.Chapters,
             VolumeCount = media.Volumes,
+            ReleasedCount = releaseMetadata.ReleasedCount,
+            NextReleaseAt = releaseMetadata.NextReleaseAt,
+            NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
             AvailabilityLinks = BuildAvailabilityLinks(media),

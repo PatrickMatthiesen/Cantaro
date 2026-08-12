@@ -26,19 +26,19 @@ public class MediaProviderOperationProcessorTests
         await using var dbContext = new ApplicationDbContext(options);
         await dbContext.Database.EnsureCreatedAsync();
 
-        var entry = await SeedMediaEntryAsync(dbContext, 401, "success@example.com");
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 401, "success@example.com");
         var registry = new MediaProviderRegistry([new FakeMediaProvider("anilist")]);
         var logger = new RecordingLogger<MediaProviderOperationProcessor>();
         var processor = new MediaProviderOperationProcessor(dbContext, registry, logger);
 
         var operation = await processor.EnqueueProgressUpdateAsync(
             entry.UserId,
-            entry,
+            binding,
             new MediaProgressUpdateRequest
             {
-                ProviderMediaId = entry.ProviderMediaId,
+                ProviderMediaId = "140960",
                 ProgressEpisodes = 17,
-                LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
             },
             CancellationToken.None);
 
@@ -70,18 +70,18 @@ public class MediaProviderOperationProcessorTests
         await using var dbContext = new ApplicationDbContext(options);
         await dbContext.Database.EnsureCreatedAsync();
 
-        var entry = await SeedMediaEntryAsync(dbContext, 402, "retry@example.com");
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 402, "retry@example.com");
         var registry = new MediaProviderRegistry([new FakeMediaProvider("anilist", shouldThrow: true)]);
         var processor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
 
         var operation = await processor.EnqueueStatusUpdateAsync(
             entry.UserId,
-            entry,
+            binding,
             new MediaStatusUpdateRequest
             {
-                ProviderMediaId = entry.ProviderMediaId,
+                ProviderMediaId = "140960",
                 Status = MediaLibraryStatuses.Completed,
-                LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
             },
             CancellationToken.None);
 
@@ -113,7 +113,7 @@ public class MediaProviderOperationProcessorTests
         {
             await setupContext.Database.EnsureCreatedAsync();
 
-            var entry = await SeedMediaEntryAsync(setupContext, 403, "claim@example.com");
+            var (entry, binding) = await SeedMediaEntryAsync(setupContext, 403, "claim@example.com");
             var enqueueProcessor = new MediaProviderOperationProcessor(
                 setupContext,
                 new MediaProviderRegistry([new FakeMediaProvider("anilist")]),
@@ -121,12 +121,12 @@ public class MediaProviderOperationProcessorTests
 
             var operation = await enqueueProcessor.EnqueueProgressUpdateAsync(
                 entry.UserId,
-                entry,
+                binding,
                 new MediaProgressUpdateRequest
                 {
-                    ProviderMediaId = entry.ProviderMediaId,
+                    ProviderMediaId = "140960",
                     ProgressEpisodes = 12,
-                    LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt
+                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
                 },
                 CancellationToken.None);
 
@@ -202,16 +202,16 @@ public class MediaProviderOperationProcessorTests
         await using var dbContext = new ApplicationDbContext(options);
         await dbContext.Database.EnsureCreatedAsync();
 
-        var entry = await SeedMediaEntryAsync(dbContext, 411, "auto-progress@example.com");
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 411, "auto-progress@example.com");
         var provider = new FakeMediaProvider("anilist");
         var registry = new MediaProviderRegistry([provider]);
         var processor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
 
         var payload = new AutoProgressUpdatePayload
         {
-            ProviderMediaId = entry.ProviderMediaId,
+            ProviderMediaId = "140960",
             ProgressEpisodes = 15,
-            LastKnownRemoteUpdateAt = entry.LastRemoteUpdateAt,
+            LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt,
             TriggeredByObservationId = Guid.NewGuid().ToString(),
             ObservedSiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
             ObservedProgressHint = "15",
@@ -219,7 +219,7 @@ public class MediaProviderOperationProcessorTests
             TriggeredAt = DateTimeOffset.UtcNow
         };
 
-        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, entry, payload, CancellationToken.None);
+        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, binding, payload, CancellationToken.None);
 
         var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
@@ -245,16 +245,16 @@ public class MediaProviderOperationProcessorTests
         await using var dbContext = new ApplicationDbContext(options);
         await dbContext.Database.EnsureCreatedAsync();
 
-        var entry = await SeedMediaEntryAsync(dbContext, 412, "sync-guard@example.com");
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 412, "sync-guard@example.com");
 
         // Payload carries an old LastKnownRemoteUpdateAt
-        var oldKnownAt = entry.LastRemoteUpdateAt!.Value.AddMinutes(-5);
+        var oldKnownAt = binding.LastRemoteUpdateAt!.Value.AddMinutes(-5);
 
         // Simulate that the DB entry has since been updated to a newer timestamp
         // (i.e., a provider sync ran after we enqueued the operation).
-        var newerRemoteAt = entry.LastRemoteUpdateAt.Value.AddMinutes(2);
-        await dbContext.MediaLibraryEntries
-            .Where(e => e.Id == entry.Id)
+        var newerRemoteAt = binding.LastRemoteUpdateAt.Value.AddMinutes(2);
+        await dbContext.MediaLibraryProviderBindings
+            .Where(e => e.Id == binding.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.LastRemoteUpdateAt, newerRemoteAt));
 
         var provider = new FakeMediaProvider("anilist");
@@ -263,13 +263,13 @@ public class MediaProviderOperationProcessorTests
 
         var payload = new AutoProgressUpdatePayload
         {
-            ProviderMediaId = entry.ProviderMediaId,
+            ProviderMediaId = "140960",
             ProgressEpisodes = 18,
             LastKnownRemoteUpdateAt = oldKnownAt,  // stale snapshot
             TriggeredAt = DateTimeOffset.UtcNow
         };
 
-        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, entry, payload, CancellationToken.None);
+        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, binding, payload, CancellationToken.None);
 
         var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
 
@@ -281,7 +281,7 @@ public class MediaProviderOperationProcessorTests
         Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
     }
 
-    private static async Task<MediaLibraryEntry> SeedMediaEntryAsync(ApplicationDbContext dbContext, int userId, string email)
+    private static async Task<(MediaLibraryEntry Entry, MediaLibraryProviderBinding Binding)> SeedMediaEntryAsync(ApplicationDbContext dbContext, int userId, string email)
     {
         var now = DateTimeOffset.UtcNow;
         var user = TestUserFactory.Create(userId, email);
@@ -311,24 +311,32 @@ public class MediaProviderOperationProcessorTests
             Id = Guid.NewGuid(),
             UserId = userId,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = "anilist",
-            ProviderAccountId = account.ExternalAccountId,
-            ProviderMediaId = "140960",
             Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = 10,
-            LastRemoteUpdateAt = now.AddMinutes(-2),
             CreatedAt = now,
             UpdatedAt = now
+        };
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "anilist", ExternalId = "140960",
+            LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+        };
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(), MediaLibraryEntryId = entry.Id, MediaProviderLinkId = link.Id,
+            ConnectedServiceAccountId = account.Id, ProviderAccountId = account.ExternalAccountId,
+            LastRemoteUpdateAt = now.AddMinutes(-2), CreatedAt = now, UpdatedAt = now
         };
 
         dbContext.Users.Add(user);
         dbContext.ConnectedServiceAccounts.Add(account);
         dbContext.MediaTitles.Add(title);
+        dbContext.MediaProviderLinks.Add(link);
         dbContext.MediaLibraryEntries.Add(entry);
+        dbContext.MediaLibraryProviderBindings.Add(binding);
         await dbContext.SaveChangesAsync();
 
-        return entry;
+        return (entry, binding);
     }
 
     private sealed class FakeMediaProvider : IMediaProvider

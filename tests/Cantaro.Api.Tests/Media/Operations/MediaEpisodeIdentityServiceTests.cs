@@ -34,7 +34,7 @@ public class MediaEpisodeIdentityServiceTests
 
         var destination = await fixture.Service.ResolveContinueWatchingAsync(
             fixture.UserId,
-            fixture.LibraryEntryId,
+            fixture.TitleId,
             CancellationToken.None);
         Assert.NotNull(destination);
         Assert.Equal("direct", destination.Outcome);
@@ -66,7 +66,7 @@ public class MediaEpisodeIdentityServiceTests
 
         var destination = await fixture.Service.ResolveContinueWatchingAsync(
             fixture.UserId,
-            fixture.LibraryEntryId,
+            fixture.TitleId,
             CancellationToken.None);
 
         Assert.NotNull(destination);
@@ -131,8 +131,7 @@ public class MediaEpisodeIdentityServiceTests
         await fixture.Db.SaveChangesAsync();
 
         var catalog = await fixture.Service.GetEpisodeCatalogAsync(
-            fixture.UserId,
-            fixture.LibraryEntryId,
+            fixture.TitleId,
             CancellationToken.None);
 
         Assert.NotNull(catalog);
@@ -409,9 +408,6 @@ public class MediaEpisodeIdentityServiceTests
                 Id = Guid.NewGuid(),
                 UserId = userId,
                 MediaTitleId = title.Id,
-                Provider = "anilist",
-                ProviderAccountId = "test-account",
-                ProviderMediaId = "123",
                 Status = MediaLibraryStatuses.Current,
                 ProgressEpisodes = progressEpisodes,
                 CreatedAt = now,

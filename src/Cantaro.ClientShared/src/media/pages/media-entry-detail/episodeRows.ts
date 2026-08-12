@@ -1,5 +1,5 @@
 import type {
-  MediaLibraryEntryDetailDto,
+  MediaEntryDetailModel,
 } from '../../services/mediaApi';
 import type { EpisodeStreamingDestinations } from '../../services/streamingDestinations';
 
@@ -18,7 +18,7 @@ function getSparseEpisodeNumbers(
   return [...new Set(numbers)].sort((left, right) => left - right);
 }
 
-function getEpisodeNumbers(entry: MediaLibraryEntryDetailDto, knownNumbers: number[]) {
+function getEpisodeNumbers(entry: MediaEntryDetailModel, knownNumbers: number[]) {
   const episodeCount = getKnownEpisodeCount(entry.title.episodeCount, knownNumbers);
   if (episodeCount <= 0 && knownNumbers.length === 0) {
     return [];
@@ -36,7 +36,7 @@ function getEpisodeNumbers(entry: MediaLibraryEntryDetailDto, knownNumbers: numb
 }
 
 export function getEpisodeRows(
-  entry: MediaLibraryEntryDetailDto,
+  entry: MediaEntryDetailModel,
   episodes: EpisodeStreamingDestinations[],
 ) {
   const knownNumbers = episodes.map((episode) => episode.episodeNumber);

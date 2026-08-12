@@ -35,6 +35,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaEpisode> MediaEpisodes => Set<MediaEpisode>();
     public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
+    public DbSet<MediaLibraryProviderBinding> MediaLibraryProviderBindings => Set<MediaLibraryProviderBinding>();
     public DbSet<MediaProviderListMembership> MediaProviderListMemberships => Set<MediaProviderListMembership>();
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
     public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
@@ -547,7 +548,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
-            entity.HasIndex(e => new { e.UserId, e.Provider, e.ProviderAccountId, e.ProviderMediaId })
+            entity.HasIndex(e => new { e.UserId, e.MediaTitleId })
                 .IsUnique();
 
             entity.HasIndex(e => new { e.UserId, e.Status });
@@ -564,22 +565,51 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(t => t.LibraryEntries)
                 .HasForeignKey(e => e.MediaTitleId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<MediaLibraryProviderBinding>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new
+                {
+                    e.MediaLibraryEntryId,
+                    e.MediaProviderLinkId,
+                    e.ProviderAccountId
+                })
+                .IsUnique();
+
+            entity.HasIndex(e => e.ConnectedServiceAccountId);
+            entity.Property(e => e.ProviderAccountId).HasMaxLength(256);
+            entity.Property(e => e.ProviderLibraryEntryId).HasMaxLength(256);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.MediaLibraryEntry)
+                .WithMany(entry => entry.ProviderBindings)
+                .HasForeignKey(e => e.MediaLibraryEntryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.MediaProviderLink)
+                .WithMany(link => link.LibraryBindings)
+                .HasForeignKey(e => e.MediaProviderLinkId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.ConnectedServiceAccount)
-                .WithMany(a => a.MediaLibraryEntries)
+                .WithMany(a => a.MediaLibraryProviderBindings)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<MediaProviderListMembership>(entity =>
         {
-            entity.HasKey(e => new { e.MediaLibraryEntryId, e.Name });
-            entity.HasIndex(e => new { e.Name, e.MediaLibraryEntryId });
+            entity.HasKey(e => new { e.MediaLibraryProviderBindingId, e.Name });
+            entity.HasIndex(e => new { e.Name, e.MediaLibraryProviderBindingId });
             entity.Property(e => e.Name).HasMaxLength(256);
 
-            entity.HasOne(e => e.MediaLibraryEntry)
-                .WithMany(entry => entry.ProviderListMemberships)
-                .HasForeignKey(e => e.MediaLibraryEntryId)
+            entity.HasOne(e => e.MediaLibraryProviderBinding)
+                .WithMany(binding => binding.ProviderListMemberships)
+                .HasForeignKey(e => e.MediaLibraryProviderBindingId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -588,27 +618,15 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasKey(e => e.Id);
 
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
-            entity.HasIndex(e => new { e.UserId, e.Provider, e.CreatedAt });
-            entity.HasIndex(e => e.MediaLibraryEntryId);
-            entity.HasIndex(e => e.ConnectedServiceAccountId);
+            entity.HasIndex(e => e.MediaLibraryProviderBindingId);
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-            entity.HasOne(e => e.User)
-                .WithMany(u => u.MediaProviderOperations)
-                .HasForeignKey(e => e.UserId)
+            entity.HasOne(e => e.MediaLibraryProviderBinding)
+                .WithMany(binding => binding.ProviderOperations)
+                .HasForeignKey(e => e.MediaLibraryProviderBindingId)
                 .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.MediaLibraryEntry)
-                .WithMany(entry => entry.ProviderOperations)
-                .HasForeignKey(e => e.MediaLibraryEntryId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.ConnectedServiceAccount)
-                .WithMany(account => account.MediaProviderOperations)
-                .HasForeignKey(e => e.ConnectedServiceAccountId)
-                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<MediaObservation>(entity =>

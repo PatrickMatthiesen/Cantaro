@@ -172,8 +172,8 @@ public class MediaObservationProgressServiceTests
 
         var op = await fixture.Db.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationTypes.AutoProgressUpdate, op.OperationType);
-        Assert.Equal(entry.Provider, op.Provider);
-        Assert.Equal(entry.Id, op.MediaLibraryEntryId);
+        var binding = await fixture.Db.MediaLibraryProviderBindings.SingleAsync();
+        Assert.Equal(binding.Id, op.MediaLibraryProviderBindingId);
         Assert.Equal(MediaProviderOperationStatuses.Pending, op.Status);
 
         var payload = System.Text.Json.JsonSerializer.Deserialize<AutoProgressUpdatePayload>(
@@ -185,7 +185,7 @@ public class MediaObservationProgressServiceTests
         Assert.Equal(observation.Id.ToString(), payload.TriggeredByObservationId);
         Assert.Equal(observation.SiteIdentifier, payload.ObservedSiteIdentifier);
         Assert.Equal("8", payload.ObservedProgressHint);
-        Assert.Equal(entry.LastRemoteUpdateAt, payload.LastKnownRemoteUpdateAt);
+        Assert.Equal(binding.LastRemoteUpdateAt, payload.LastKnownRemoteUpdateAt);
     }
 
     [Fact]
@@ -268,11 +268,10 @@ public class MediaObservationProgressServiceTests
     }
 
     [Fact]
-    public async Task TryEnqueueAutoProgress_SkipsEntryBelowMonotonicThreshold_EnqueuesOther()
+    public async Task TryEnqueueAutoProgress_SkipsAllBindingsWhenViewerProgressWouldRegress()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
-        // Entry A is at episode 10 (hint=8 would regress — skip)
-        // Entry B is at episode 5 (hint=8 would advance — enqueue)
+        // Progress belongs to the viewer/title pair, not to an individual provider.
         var (title, _) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 10, providerMediaId: "111");
         await fixture.SeedAdditionalEntryAsync(title, currentEpisodes: 5, providerMediaId: "222");
 
@@ -286,12 +285,8 @@ public class MediaObservationProgressServiceTests
 
         var count = await fixture.Service.TryEnqueueAutoProgressAsync(observation, CancellationToken.None);
 
-        Assert.Equal(1, count);
-        var op = await fixture.Db.MediaProviderOperations.SingleAsync();
-        var payload = System.Text.Json.JsonSerializer.Deserialize<AutoProgressUpdatePayload>(
-            op.PayloadJson,
-            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
-        Assert.Equal("222", payload.ProviderMediaId);
+        Assert.Equal(0, count);
+        Assert.Empty(fixture.Db.MediaProviderOperations);
     }
 
     // ── Fixture ──────────────────────────────────────────────────────────────
@@ -376,18 +371,27 @@ public class MediaObservationProgressServiceTests
                 Id = Guid.NewGuid(),
                 UserId = UserId,
                 MediaTitleId = title.Id,
-                ConnectedServiceAccountId = connected ? accountId : null,
-                Provider = "anilist",
-                ProviderAccountId = $"viewer-{UserId}",
-                ProviderMediaId = providerMediaId,
                 Status = MediaLibraryStatuses.Current,
                 ProgressEpisodes = currentEpisodes,
                 ProgressChapters = currentChapters > 0 ? currentChapters : null,
-                LastRemoteUpdateAt = now.AddMinutes(-10),
                 CreatedAt = now,
                 UpdatedAt = now
             };
+            var link = new MediaProviderLink
+            {
+                Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "anilist", ExternalId = providerMediaId,
+                LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+            };
+            var binding = new MediaLibraryProviderBinding
+            {
+                Id = Guid.NewGuid(), MediaLibraryEntryId = entry.Id, MediaProviderLinkId = link.Id,
+                ConnectedServiceAccountId = connected ? accountId : null,
+                ProviderAccountId = $"viewer-{UserId}", LastRemoteUpdateAt = now.AddMinutes(-10),
+                CreatedAt = now, UpdatedAt = now
+            };
+            Db.MediaProviderLinks.Add(link);
             Db.MediaLibraryEntries.Add(entry);
+            Db.MediaLibraryProviderBindings.Add(binding);
             await Db.SaveChangesAsync();
 
             return (title, entry);
@@ -401,22 +405,19 @@ public class MediaObservationProgressServiceTests
             var now = DateTimeOffset.UtcNow;
             var accountId = 5000 + UserId;
 
-            var entry = new MediaLibraryEntry
+            var entry = await Db.MediaLibraryEntries.SingleAsync(item => item.UserId == UserId && item.MediaTitleId == title.Id);
+            var link = new MediaProviderLink
             {
-                Id = Guid.NewGuid(),
-                UserId = UserId,
-                MediaTitleId = title.Id,
-                ConnectedServiceAccountId = accountId,
-                Provider = "anilist",
-                ProviderAccountId = $"viewer-{UserId}-alt",
-                ProviderMediaId = providerMediaId,
-                Status = MediaLibraryStatuses.Current,
-                ProgressEpisodes = currentEpisodes,
-                LastRemoteUpdateAt = now.AddMinutes(-10),
-                CreatedAt = now,
-                UpdatedAt = now
+                Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "trakt", ExternalId = providerMediaId,
+                LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
             };
-            Db.MediaLibraryEntries.Add(entry);
+            Db.MediaProviderLinks.Add(link);
+            Db.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
+            {
+                Id = Guid.NewGuid(), MediaLibraryEntryId = entry.Id, MediaProviderLinkId = link.Id,
+                ConnectedServiceAccountId = accountId, ProviderAccountId = $"viewer-{UserId}-alt",
+                LastRemoteUpdateAt = now.AddMinutes(-10), CreatedAt = now, UpdatedAt = now
+            });
             await Db.SaveChangesAsync();
             return entry;
         }

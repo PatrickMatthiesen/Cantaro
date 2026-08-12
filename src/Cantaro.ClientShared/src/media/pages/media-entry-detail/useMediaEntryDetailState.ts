@@ -10,9 +10,11 @@ import {
   writeStoredValue,
 } from '../../services/mediaRefreshCache';
 import type {
-  MediaLibraryEntryDetailDto,
+  MediaEntryDetailModel,
   MediaLibraryImportEventDto,
   MediaProviderLinkSummaryDto,
+  MediaTitleDetailDto,
+  MediaViewerStateDto,
 } from '../../services/mediaApi';
 import type { ContinueWatchingState, EpisodeCatalogState, StatusDraft } from './mediaEntryDetailTypes';
 
@@ -89,8 +91,46 @@ export function useTimedSnackbar(timeoutMs = 3000) {
   return { snackbar, showSnackbar };
 }
 
-export function useEntryDetailState(libraryEntryId: string) {
-  const [entry, setEntry] = useState<MediaLibraryEntryDetailDto | null>(null);
+function composeEntry(
+  title: MediaTitleDetailDto,
+  viewer: MediaViewerStateDto | null,
+  viewerStateStatus: MediaEntryDetailModel['viewerStateStatus'] = 'loaded',
+): MediaEntryDetailModel {
+  const primaryBinding = viewer?.providerBindings.find((binding) => binding.isConnected)
+    ?? viewer?.providerBindings[0];
+  return {
+    id: viewer?.id ?? '',
+    mediaTitleId: title.id,
+    viewerStateStatus,
+    isInLibrary: viewer !== null,
+    title,
+    provider: primaryBinding?.provider ?? title.providerLinks[0]?.provider ?? '',
+    providerMediaId: primaryBinding?.providerMediaId ?? title.providerLinks[0]?.externalId ?? '',
+    status: viewer?.status ?? 'planned',
+    providerListNames: viewer?.providerBindings.flatMap((binding) => binding.providerListNames) ?? [],
+    progressEpisodes: viewer?.progressEpisodes,
+    progressChapters: viewer?.progressChapters,
+    progressVolumes: viewer?.progressVolumes,
+    isConnected: viewer?.providerBindings.some((binding) => binding.isConnected) ?? false,
+    nextReleaseAt: title.nextReleaseAt,
+    nextReleaseLabel: title.nextReleaseLabel,
+    lastSyncedAt: primaryBinding?.lastSyncedAt,
+    lastRemoteUpdateAt: primaryBinding?.lastRemoteUpdateAt,
+    updatedAt: viewer?.updatedAt ?? title.updatedAt,
+    providerLinks: title.providerLinks,
+  };
+}
+
+async function loadComposedEntry(mediaTitleId: string) {
+  const [title, viewer] = await Promise.all([
+    mediaApi.getMediaTitle(mediaTitleId),
+    mediaApi.getViewerState(mediaTitleId),
+  ]);
+  return composeEntry(title, viewer, 'loaded');
+}
+
+export function useEntryDetailState(mediaTitleId: string) {
+  const [entry, setEntry] = useState<MediaEntryDetailModel | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [progressEpisodes, setProgressEpisodes] = useState<number | undefined>();
@@ -98,7 +138,7 @@ export function useEntryDetailState(libraryEntryId: string) {
   const [progressVolumes, setProgressVolumes] = useState<number | undefined>();
   const [selectedStatus, setSelectedStatus] = useState('');
 
-  const applyEntryData = useCallback((data: MediaLibraryEntryDetailDto) => {
+  const applyEntryData = useCallback((data: MediaEntryDetailModel) => {
     setEntry(data);
     setProgressEpisodes(data.progressEpisodes);
     setProgressChapters(data.progressChapters);
@@ -111,19 +151,29 @@ export function useEntryDetailState(libraryEntryId: string) {
     setError(null);
 
     try {
-      const data = await mediaApi.getLibraryEntry(libraryEntryId);
-      applyEntryData(data);
+      const viewerPromise = mediaApi.getViewerState(mediaTitleId)
+        .then((viewer) => ({ viewer, failed: false as const }))
+        .catch(() => ({ viewer: null, failed: true as const }));
+      const title = await mediaApi.getMediaTitle(mediaTitleId);
+      applyEntryData(composeEntry(title, null, 'loading'));
+      setIsLoading(false);
+
+      const viewerResult = await viewerPromise;
+      applyEntryData(composeEntry(
+        title,
+        viewerResult.viewer,
+        viewerResult.failed ? 'error' : 'loaded',
+      ));
     } catch (loadError) {
       setError(getErrorMessage(loadError, 'Failed to load entry'));
-    } finally {
       setIsLoading(false);
     }
-  }, [applyEntryData, libraryEntryId]);
+  }, [applyEntryData, mediaTitleId]);
 
   const reloadEntry = useCallback(async () => {
-    const data = await mediaApi.getLibraryEntry(libraryEntryId);
+    const data = await loadComposedEntry(mediaTitleId);
     applyEntryData(data);
-  }, [applyEntryData, libraryEntryId]);
+  }, [applyEntryData, mediaTitleId]);
 
   useEffect(() => {
     void loadEntry();
@@ -147,7 +197,7 @@ export function useEntryDetailState(libraryEntryId: string) {
   };
 }
 
-export function useProviderAvailability(entry: MediaLibraryEntryDetailDto | null) {
+export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
   const [availabilityByProviderLink, setAvailabilityByProviderLink] = useState<ProviderAvailabilityMap>({});
 
   useEffect(() => {
@@ -195,16 +245,17 @@ function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
 }
 
 export function useContinueWatching(
-  entry: MediaLibraryEntryDetailDto | null,
+  entry: MediaEntryDetailModel | null,
   episodeCatalog: EpisodeCatalogState,
 ): ContinueWatchingState {
   const [state, setState] = useState<ContinueWatchingState>({ status: 'loading' });
-  const entryId = entry?.id;
+  const mediaTitleId = entry?.mediaTitleId;
+  const isInLibrary = entry?.isInLibrary;
   const persistedProgress = entry?.progressEpisodes;
   const episodeCatalogRevision = getEpisodeCatalogRevision(episodeCatalog);
 
   useEffect(() => {
-    if (!entryId || episodeCatalog.status === 'loading') {
+    if (!mediaTitleId || !isInLibrary || episodeCatalog.status === 'loading') {
       setState({ status: 'loading' });
       return;
     }
@@ -212,7 +263,7 @@ export function useContinueWatching(
     let isCancelled = false;
     setState({ status: 'loading' });
 
-    void mediaApi.getContinueWatching(entryId)
+    void mediaApi.getContinueWatching(mediaTitleId)
       .then((value) => {
         if (!isCancelled) setState({ status: 'loaded', value });
       })
@@ -223,26 +274,26 @@ export function useContinueWatching(
     return () => {
       isCancelled = true;
     };
-  }, [entryId, persistedProgress, episodeCatalog.status, episodeCatalogRevision]);
+  }, [mediaTitleId, isInLibrary, persistedProgress, episodeCatalog.status, episodeCatalogRevision]);
 
   return state;
 }
 
-export function useEpisodeCatalog(entry: MediaLibraryEntryDetailDto | null) {
+export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
   const [state, setState] = useState<EpisodeCatalogState>({ status: 'loading' });
-  const entryId = entry?.id;
+  const mediaTitleId = entry?.mediaTitleId;
 
   const reload = useCallback(() => {
-    if (!entryId) {
+    if (!mediaTitleId) {
       setState({ status: 'loading' });
       return;
     }
 
     setState({ status: 'loading' });
-    void mediaApi.getEpisodes(entryId)
+    void mediaApi.getEpisodes(mediaTitleId)
       .then((value) => setState({ status: 'loaded', value }))
       .catch(() => setState({ status: 'error' }));
-  }, [entryId]);
+  }, [mediaTitleId]);
 
   useEffect(() => {
     reload();
@@ -252,7 +303,7 @@ export function useEpisodeCatalog(entry: MediaLibraryEntryDetailDto | null) {
 }
 
 export function useRemoteEntryRefresh(
-  entry: MediaLibraryEntryDetailDto | null,
+  entry: MediaEntryDetailModel | null,
   reloadEntry: () => Promise<void>,
   showSnackbar: ShowSnackbar,
 ) {
@@ -341,7 +392,7 @@ export function useRemoteEntryRefresh(
 }
 
 export function useManualRemoteRefresh(
-  entry: MediaLibraryEntryDetailDto | null,
+  entry: MediaEntryDetailModel | null,
   reloadEntry: () => Promise<void>,
   showSnackbar: ShowSnackbar,
 ) {
@@ -394,7 +445,7 @@ export function useManualRemoteRefresh(
   return { isRefreshingRemote, handleRefreshFromProvider };
 }
 
-function getStatusChanges(entry: MediaLibraryEntryDetailDto, draft: StatusDraft) {
+function getStatusChanges(entry: MediaEntryDetailModel, draft: StatusDraft) {
   return {
     statusChanged: draft.selectedStatus !== entry.status,
     progressChanged:
@@ -405,16 +456,16 @@ function getStatusChanges(entry: MediaLibraryEntryDetailDto, draft: StatusDraft)
 }
 
 async function saveStatusChanges(
-  libraryEntryId: string,
+  mediaTitleId: string,
   draft: StatusDraft,
   changes: ReturnType<typeof getStatusChanges>,
 ) {
   if (changes.statusChanged) {
-    await mediaApi.updateStatus(libraryEntryId, { status: draft.selectedStatus });
+    await mediaApi.updateStatus(mediaTitleId, { status: draft.selectedStatus });
   }
 
   if (changes.progressChanged) {
-    await mediaApi.updateProgress(libraryEntryId, {
+    await mediaApi.updateProgress(mediaTitleId, {
       progressEpisodes: draft.progressEpisodes,
       progressChapters: draft.progressChapters,
       progressVolumes: draft.progressVolumes,
@@ -423,7 +474,7 @@ async function saveStatusChanges(
 }
 
 function applySavedStatus(
-  current: MediaLibraryEntryDetailDto | null,
+  current: MediaEntryDetailModel | null,
   draft: StatusDraft,
 ) {
   return current
@@ -438,13 +489,13 @@ function applySavedStatus(
 }
 
 export function useStatusSaveAction(
-  libraryEntryId: string,
-  entry: MediaLibraryEntryDetailDto | null,
+  mediaTitleId: string,
+  entry: MediaEntryDetailModel | null,
   selectedStatus: string,
   progressEpisodes: number | undefined,
   progressChapters: number | undefined,
   progressVolumes: number | undefined,
-  setEntry: Dispatch<SetStateAction<MediaLibraryEntryDetailDto | null>>,
+  setEntry: Dispatch<SetStateAction<MediaEntryDetailModel | null>>,
   showSnackbar: ShowSnackbar,
 ) {
   const [isSavingStatus, setIsSavingStatus] = useState(false);
@@ -457,7 +508,7 @@ export function useStatusSaveAction(
 
     setIsSavingStatus(true);
     try {
-      await saveStatusChanges(libraryEntryId, draft, changes);
+      await saveStatusChanges(mediaTitleId, draft, changes);
       setEntry((current) => applySavedStatus(current, draft));
       showSnackbar({ message: 'Status saved', variant: 'success' });
     } catch (saveError) {
@@ -470,7 +521,7 @@ export function useStatusSaveAction(
     }
   }, [
     entry,
-    libraryEntryId,
+    mediaTitleId,
     progressChapters,
     progressEpisodes,
     progressVolumes,
@@ -483,8 +534,8 @@ export function useStatusSaveAction(
 }
 
 export function useProviderUnlinkAction(
-  libraryEntryId: string,
-  setEntry: Dispatch<SetStateAction<MediaLibraryEntryDetailDto | null>>,
+  mediaTitleId: string,
+  setEntry: Dispatch<SetStateAction<MediaEntryDetailModel | null>>,
   showSnackbar: ShowSnackbar,
 ) {
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
@@ -493,7 +544,7 @@ export function useProviderUnlinkAction(
     setUnlinkingId(providerId);
 
     try {
-      await mediaApi.unlinkProvider(libraryEntryId, providerId);
+      await mediaApi.unlinkProvider(mediaTitleId, providerId);
       setEntry((current) => current
         ? { ...current, providerLinks: current.providerLinks.filter((link) => link.provider !== providerId) }
         : current);
@@ -505,7 +556,7 @@ export function useProviderUnlinkAction(
     } finally {
       setUnlinkingId(null);
     }
-  }, [libraryEntryId, setEntry, showSnackbar]);
+  }, [mediaTitleId, setEntry, showSnackbar]);
 
   return { unlinkingId, handleUnlink };
 }

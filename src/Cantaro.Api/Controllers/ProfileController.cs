@@ -210,9 +210,19 @@ public sealed class ProfileController(
             .Where(entry => entry.UserId == user.Id)
             .Select(entry => new
             {
-                entry.Id, entry.MediaTitleId, entry.Provider, entry.ProviderAccountId, entry.ProviderMediaId,
+                entry.Id, entry.MediaTitleId,
                 entry.Status, entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes,
-                entry.LastSyncedAt, entry.LastRemoteUpdateAt, entry.LastLocalEditAt, entry.CreatedAt, entry.UpdatedAt
+                entry.LastLocalEditAt, entry.CreatedAt, entry.UpdatedAt,
+                ProviderBindings = entry.ProviderBindings.Select(binding => new
+                {
+                    binding.Id,
+                    Provider = binding.MediaProviderLink!.Provider,
+                    ProviderMediaId = binding.MediaProviderLink.ExternalId,
+                    binding.ProviderAccountId,
+                    binding.ProviderLibraryEntryId,
+                    binding.LastSyncedAt,
+                    binding.LastRemoteUpdateAt
+                })
             }).ToListAsync(cancellationToken);
         var observations = await dbContext.MediaObservations.AsNoTracking()
             .Where(observation => observation.UserId == user.Id)

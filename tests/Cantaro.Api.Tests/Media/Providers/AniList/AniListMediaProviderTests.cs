@@ -219,11 +219,27 @@ public class AniListMediaProviderTests
             Id = Guid.NewGuid(),
             UserId = user.Id,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = "anilist",
-            ProviderAccountId = account.ExternalAccountId,
-            ProviderMediaId = "161645",
             Status = MediaLibraryStatuses.Current,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "161645",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = entry.Id,
+            MediaProviderLinkId = link.Id,
+            ConnectedServiceAccountId = account.Id,
+            ProviderAccountId = account.ExternalAccountId,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -231,7 +247,9 @@ public class AniListMediaProviderTests
         dbContext.Users.Add(user);
         dbContext.ConnectedServiceAccounts.Add(account);
         dbContext.MediaTitles.Add(title);
+        dbContext.MediaProviderLinks.Add(link);
         dbContext.MediaLibraryEntries.Add(entry);
+        dbContext.MediaLibraryProviderBindings.Add(binding);
         await dbContext.SaveChangesAsync();
 
         var provider = CreateProvider(dbContext);
@@ -240,7 +258,7 @@ public class AniListMediaProviderTests
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
 
         Assert.Empty(dbContext.ConnectedServiceAccounts);
-        Assert.Null(persistedEntry.ConnectedServiceAccountId);
+        Assert.Null((await dbContext.MediaLibraryProviderBindings.SingleAsync()).ConnectedServiceAccountId);
         Assert.Equal(MediaMutationSources.ProviderDisconnect, persistedEntry.LastMutationSource);
     }
 

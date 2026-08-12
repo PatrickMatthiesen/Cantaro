@@ -8,13 +8,7 @@ public class MediaProviderOperation
 {
     public Guid Id { get; set; }
 
-    public int UserId { get; set; }
-
-    public Guid MediaLibraryEntryId { get; set; }
-
-    public int? ConnectedServiceAccountId { get; set; }
-
-    public required string Provider { get; set; }
+    public Guid MediaLibraryProviderBindingId { get; set; }
 
     public required string OperationType { get; set; }
 
@@ -34,9 +28,5 @@ public class MediaProviderOperation
 
     public DateTimeOffset UpdatedAt { get; set; }
 
-    public User? User { get; set; }
-
-    public MediaLibraryEntry? MediaLibraryEntry { get; set; }
-
-    public ConnectedServiceAccount? ConnectedServiceAccount { get; set; }
+    public MediaLibraryProviderBinding? MediaLibraryProviderBinding { get; set; }
 }

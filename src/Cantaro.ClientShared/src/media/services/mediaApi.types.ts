@@ -36,12 +36,63 @@ export interface MediaLibraryListItemDto {
     updatedAt: string;
 }
 
-export interface MediaLibraryEntryDetailDto {
+export interface MediaTitleDetailDto {
     id: string;
-    title: MediaLibraryTitleDto;
+    canonicalTitle: string;
+    originalTitle?: string;
+    mediaKind: string;
+    format?: string;
+    synopsis?: string;
+    posterUrl?: string;
+    backgroundUrl?: string;
+    startYear?: number;
+    episodeCount?: number;
+    chapterCount?: number;
+    volumeCount?: number;
+    releasedCount?: number;
+    nextReleaseAt?: string;
+    nextReleaseLabel?: string;
+    primaryProgressDimension: string;
+    releaseStatusDimension: string;
+    updatedAt: string;
+    providerLinks: MediaProviderLinkSummaryDto[];
+}
+
+export interface MediaViewerStateDto {
+    id: string;
+    mediaTitleId: string;
+    status: string;
+    progressEpisodes?: number;
+    progressChapters?: number;
+    progressVolumes?: number;
+    lastLocalEditAt?: string;
+    updatedAt: string;
+    providerBindings: MediaViewerProviderBindingDto[];
+}
+
+export interface MediaViewerProviderBindingDto {
+    id: string;
     provider: string;
     providerMediaId: string;
     providerLibraryEntryId?: string;
+    providerListNames: string[];
+    isConnected: boolean;
+    lastSyncedAt?: string;
+    lastRemoteUpdateAt?: string;
+}
+
+/**
+ * Client-side presentation model composed from independently fetched global
+ * title data and nullable viewer state. This is not an API DTO.
+ */
+export interface MediaEntryDetailModel {
+    id: string;
+    mediaTitleId: string;
+    viewerStateStatus: 'loading' | 'loaded' | 'error';
+    isInLibrary: boolean;
+    title: MediaTitleDetailDto;
+    provider: string;
+    providerMediaId: string;
     status: string;
     providerListNames: string[];
     progressEpisodes?: number;
@@ -54,21 +105,6 @@ export interface MediaLibraryEntryDetailDto {
     lastRemoteUpdateAt?: string;
     updatedAt: string;
     providerLinks: MediaProviderLinkSummaryDto[];
-}
-
-export interface MediaLibraryTitleDto {
-    id: string;
-    canonicalTitle: string;
-    originalTitle?: string;
-    mediaKind: string;
-    synopsis?: string;
-    posterUrl?: string;
-    startYear?: number;
-    episodeCount?: number;
-    chapterCount?: number;
-    volumeCount?: number;
-    primaryProgressDimension: string;
-    releaseStatusDimension: string;
 }
 
 export interface MediaProviderLinkSummaryDto {
@@ -182,13 +218,7 @@ export interface MediaStatusUpdateDto {
     status: string;
 }
 
-export interface MediaCatalogAddRequestDto {
-    status: string;
-}
-
-export interface MediaCatalogAddResultDto {
-    libraryEntryId: string;
-    mediaTitleId: string;
+export interface MediaViewerStateCreateDto {
     status: string;
 }
 
@@ -237,7 +267,7 @@ export interface ResolveMediaObservationDto {
 
 export interface MediaCatalogLibraryStateDto {
     isInLibrary: boolean;
-    libraryEntryId?: string;
+    viewerStateId?: string;
     mediaTitleId?: string;
     status?: string;
     progressEpisodes?: number;

@@ -184,9 +184,6 @@ public class MediaProviderDtoContractTests
             Id = Guid.NewGuid(),
             UserId = fixture.UserId,
             MediaTitleId = title.Id,
-            Provider = "anilist",
-            ProviderAccountId = "legacy-account",
-            ProviderMediaId = "stale-provider-id",
             Status = MediaLibraryStatuses.Planned,
             CreatedAt = now,
             UpdatedAt = now
@@ -233,125 +230,6 @@ public class MediaProviderDtoContractTests
     }
 
     [Fact]
-    public async Task AddTitleToLibrary_CreatesLocalEntryAfterProviderWrite()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var provider = new StubMediaProvider
-        {
-            ConnectedAccount = new ConnectedServiceAccount
-            {
-                Id = 2601,
-                UserId = 901,
-                Service = "anilist",
-                ExternalAccountId = "viewer-901",
-                DisplayName = "Search Tester",
-                CreatedAt = now.UtcDateTime,
-                UpdatedAt = now.UtcDateTime
-            },
-            TitleDetails = new MediaProviderTitleDetails
-            {
-                ProviderId = "anilist",
-                ProviderMediaId = "154587",
-                Title = "Frieren: Beyond Journey's End",
-                NativeTitle = "Sousou no Frieren",
-                MediaKind = MediaKinds.Anime,
-                PosterUrl = "https://example.test/frieren.jpg",
-                EpisodeCount = 28,
-                PrimaryProgressDimension = MediaProgressDimensions.Episode,
-                ReleaseStatusDimension = MediaProgressDimensions.Episode,
-                RawMetadata = "{\"coverImage\":{\"large\":\"https://example.test/frieren.jpg\"}}"
-            },
-            StatusMutationResult = new MediaProviderMutationResult
-            {
-                ProviderId = "anilist",
-                ProviderMediaId = "154587",
-                AppliedAt = now,
-                LastRemoteUpdateAt = now,
-                RawMetadata = "{\"status\":\"PLANNING\"}"
-            }
-        };
-
-        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
-        fixture.DbContext.ConnectedServiceAccounts.Add(provider.ConnectedAccount);
-        await fixture.DbContext.SaveChangesAsync();
-
-        var result = await fixture.Controller.AddTitleToLibrary(
-            "anilist",
-            "154587",
-            new MediaCatalogAddRequestDto { Status = MediaLibraryStatuses.Planned },
-            CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var payload = Assert.IsType<MediaCatalogAddResultDto>(ok.Value);
-
-        var entry = await fixture.DbContext.MediaLibraryEntries.Include(item => item.MediaTitle).SingleAsync();
-        Assert.Equal(entry.Id, payload.LibraryEntryId);
-        Assert.Equal(MediaLibraryStatuses.Planned, entry.Status);
-        Assert.Equal("Frieren: Beyond Journey's End", entry.MediaTitle!.CanonicalTitle);
-        Assert.Equal("154587", entry.ProviderMediaId);
-        Assert.Equal(0, entry.ProgressEpisodes);
-
-        var link = await fixture.DbContext.MediaProviderLinks.SingleAsync();
-        Assert.Equal(entry.MediaTitleId, link.MediaTitleId);
-        Assert.Equal("154587", link.ExternalId);
-    }
-
-    [Fact]
-    public async Task AddTitleToLibrary_IsIdempotentByCanonicalTitleWithoutProviderWrite()
-    {
-        var provider = new StubMediaProvider { ThrowOnStatusUpdate = true };
-        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
-        var now = DateTimeOffset.UtcNow;
-        var title = new MediaTitle
-        {
-            Id = Guid.NewGuid(),
-            CanonicalTitle = "Existing title",
-            MediaKind = MediaKinds.Anime,
-            PrimaryProgressDimension = MediaProgressDimensions.Episode,
-            ReleaseStatusDimension = MediaProgressDimensions.Episode,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var entry = new MediaLibraryEntry
-        {
-            Id = Guid.NewGuid(),
-            UserId = fixture.UserId,
-            MediaTitleId = title.Id,
-            Provider = "anilist",
-            ProviderAccountId = "disconnected-account",
-            ProviderMediaId = "stale-id",
-            Status = MediaLibraryStatuses.Planned,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        fixture.DbContext.MediaTitles.Add(title);
-        fixture.DbContext.MediaProviderLinks.Add(new MediaProviderLink
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = title.Id,
-            Provider = "anilist",
-            ExternalId = "154587",
-            LinkSource = MediaMappingSources.Imported,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-        fixture.DbContext.MediaLibraryEntries.Add(entry);
-        await fixture.DbContext.SaveChangesAsync();
-
-        var result = await fixture.Controller.AddTitleToLibrary(
-            "anilist",
-            "154587",
-            new MediaCatalogAddRequestDto(),
-            CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var payload = Assert.IsType<MediaCatalogAddResultDto>(ok.Value);
-        Assert.Equal(entry.Id, payload.LibraryEntryId);
-        Assert.Equal(MediaLibraryStatuses.Planned, payload.Status);
-        Assert.Single(await fixture.DbContext.MediaLibraryEntries.ToListAsync());
-    }
-
-    [Fact]
     public async Task UpdateProgress_ReturnsNoContentAndDeletesCompletedQueueRow()
     {
         var provider = new StubMediaProvider
@@ -368,7 +246,7 @@ public class MediaProviderDtoContractTests
         var entry = await SeedMediaEntryAsync(fixture);
 
         var result = await fixture.Controller.UpdateProgress(
-            entry.Id,
+            entry.MediaTitleId,
             new MediaProgressUpdateDto { ProgressEpisodes = 17 },
             CancellationToken.None);
 
@@ -377,6 +255,38 @@ public class MediaProviderDtoContractTests
         var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync(item => item.Id == entry.Id);
         Assert.Equal(17, persistedEntry.ProgressEpisodes);
         Assert.Equal(0, await fixture.DbContext.MediaProviderOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task UpdateProgress_PersistsCantaroStateWithoutProviderBinding()
+    {
+        await using var fixture = await MediaControllerFixture.CreateAsync(new StubMediaProvider());
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Local-only title", MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now, UpdatedAt = now
+        };
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, MediaTitleId = title.Id,
+            Status = MediaLibraryStatuses.Current, ProgressEpisodes = 2,
+            CreatedAt = now, UpdatedAt = now
+        };
+        fixture.DbContext.AddRange(title, entry);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var result = await fixture.Controller.UpdateProgress(
+            title.Id,
+            new MediaProgressUpdateDto { ProgressEpisodes = 3 },
+            CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Equal(3, (await fixture.DbContext.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
+        Assert.Empty(fixture.DbContext.MediaProviderOperations);
     }
 
     [Fact]
@@ -390,7 +300,7 @@ public class MediaProviderDtoContractTests
         var entry = await SeedMediaEntryAsync(fixture);
 
         var result = await fixture.Controller.UpdateProgress(
-            entry.Id,
+            entry.MediaTitleId,
             new MediaProgressUpdateDto { ProgressEpisodes = 17 },
             CancellationToken.None);
 
@@ -417,7 +327,7 @@ public class MediaProviderDtoContractTests
         var entry = await SeedMediaEntryAsync(fixture);
 
         var result = await fixture.Controller.UpdateStatus(
-            entry.Id,
+            entry.MediaTitleId,
             new MediaStatusUpdateDto { Status = MediaLibraryStatuses.Repeating },
             CancellationToken.None);
 
@@ -454,7 +364,7 @@ public class MediaProviderDtoContractTests
         Assert.Equal(entry.Id, Assert.Single(currentBefore.Items).Id);
 
         var updateResult = await fixture.Controller.UpdateStatus(
-            entry.Id,
+            entry.MediaTitleId,
             new MediaStatusUpdateDto { Status = MediaLibraryStatuses.Completed },
             CancellationToken.None);
         Assert.IsType<AcceptedResult>(updateResult);
@@ -737,24 +647,29 @@ public class MediaProviderDtoContractTests
             Id = Guid.NewGuid(),
             UserId = fixture.UserId,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = "anilist",
-            ProviderAccountId = account.ExternalAccountId,
-            ProviderMediaId = "140960",
             Status = MediaLibraryStatuses.Current,
-            ProviderListMemberships =
-            [
-                new MediaProviderListMembership { Name = "Favorites" }
-            ],
             ProgressEpisodes = 12,
-            LastRemoteUpdateAt = now.AddMinutes(-2),
             CreatedAt = now,
             UpdatedAt = now
+        };
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "anilist", ExternalId = "140960",
+            LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+        };
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(), MediaLibraryEntryId = entry.Id, MediaProviderLinkId = link.Id,
+            ConnectedServiceAccountId = account.Id, ProviderAccountId = account.ExternalAccountId,
+            LastRemoteUpdateAt = now.AddMinutes(-2), CreatedAt = now, UpdatedAt = now,
+            ProviderListMemberships = [new MediaProviderListMembership { Name = "Favorites" }]
         };
 
         fixture.DbContext.ConnectedServiceAccounts.Add(account);
         fixture.DbContext.MediaTitles.Add(title);
+        fixture.DbContext.MediaProviderLinks.Add(link);
         fixture.DbContext.MediaLibraryEntries.Add(entry);
+        fixture.DbContext.MediaLibraryProviderBindings.Add(binding);
         await fixture.DbContext.SaveChangesAsync();
 
         return entry;

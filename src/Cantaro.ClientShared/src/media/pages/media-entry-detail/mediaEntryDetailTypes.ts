@@ -3,7 +3,7 @@ import type { ProviderAvailabilityMap } from '../../components/media-entry-detai
 import type {
   MediaContinueWatchingDto,
   MediaEpisodeCatalogDto,
-  MediaLibraryEntryDetailDto,
+  MediaEntryDetailModel,
 } from '../../services/mediaApi';
 
 export const DETAIL_TABS = [
@@ -43,12 +43,13 @@ export type EpisodeCatalogState =
   | { status: 'error' };
 
 export interface MediaEntryDetailContentProps {
-  libraryEntryId: string;
-  entry: MediaLibraryEntryDetailDto;
+  mediaTitleId: string;
+  entry: MediaEntryDetailModel;
   embedded: boolean;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingProgress: boolean;
   isSavingStatus: boolean;
+  isAddingToLibrary: boolean;
   showLinkDialog: boolean;
   unlinkingId: string | null;
   progressEpisodes: number | undefined;
@@ -66,12 +67,13 @@ export interface MediaEntryDetailContentProps {
   onSetSelectedStatus: (value: string) => void;
   onRefreshProgress: () => void;
   onSaveStatus: () => void;
+  onAddToLibrary: () => void;
   onUnlink: (providerId: string) => void;
   onReloadEpisodes: () => void;
 }
 
 export interface MediaEntryDetailPageViewProps extends Omit<MediaEntryDetailContentProps, 'entry'> {
-  entry: MediaLibraryEntryDetailDto | null;
+  entry: MediaEntryDetailModel | null;
   isLoading: boolean;
   error: string | null;
   snackbar: SnackbarNotification | null;

@@ -210,7 +210,7 @@ public sealed class CantaroSearchService(
                 title.CanonicalTitle,
                 title.MediaKind,
                 title.StartYear,
-                title.CanonicalMetadata))
+                title.PosterUrl))
             .Take(limit + 1)
             .ToListAsync(cancellationToken);
 
@@ -280,7 +280,7 @@ public sealed class CantaroSearchService(
                     title.CanonicalTitle,
                     title.MediaKind,
                     title.StartYear,
-                    title.CanonicalMetadata))
+                    title.PosterUrl))
                 .ToListAsync(cancellationToken);
         var linkedItems = await BuildCanonicalMediaItemsAsync(
             userId,
@@ -368,7 +368,7 @@ public sealed class CantaroSearchService(
                 entry.MediaTitleId,
                 entry.Id,
                 entry.Status,
-                entry.ConnectedServiceAccountId != null,
+                entry.ProviderBindings.Any(binding => binding.ConnectedServiceAccountId != null),
                 entry.UpdatedAt))
             .ToListAsync(cancellationToken);
         var libraryStateByTitle = libraryEntries
@@ -403,13 +403,7 @@ public sealed class CantaroSearchService(
         return candidates.Select(candidate =>
         {
             libraryStateByTitle.TryGetValue(candidate.Id, out var libraryState);
-            providerLinkByTitle.TryGetValue(candidate.Id, out var providerLink);
-            var route = libraryState is not null
-                ? $"/media/library/{libraryState.LibraryEntryId}"
-                : providerLink is not null
-                    ? BuildCatalogRoute(providerLink.ProviderId, providerLink.ProviderMediaId)
-                    : throw new InvalidOperationException(
-                        "Canonical media candidates must have an actionable user route.");
+            var route = $"/media/{candidate.Id}";
 
             return new SearchResultDto
             {
@@ -418,7 +412,7 @@ public sealed class CantaroSearchService(
                 Title = candidate.CanonicalTitle,
                 Subtitle = BuildMediaSubtitle(candidate.MediaKind, candidate.StartYear),
                 Detail = libraryState?.Status,
-                ArtworkUrl = GetMediaArtworkUrl(candidate.CanonicalMetadata),
+                ArtworkUrl = candidate.PosterUrl,
                 CanonicalRoute = route,
                 IsInLibrary = libraryState is not null,
                 LibraryStatus = libraryState?.Status
@@ -589,45 +583,6 @@ public sealed class CantaroSearchService(
         }
     }
 
-    private static string? GetMediaArtworkUrl(string? canonicalMetadata)
-    {
-        if (string.IsNullOrWhiteSpace(canonicalMetadata))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(canonicalMetadata);
-            var root = document.RootElement;
-            if (root.TryGetProperty("media", out var media)
-                && media.ValueKind == JsonValueKind.Object)
-            {
-                root = media;
-            }
-
-            if (!root.TryGetProperty("coverImage", out var coverImage)
-                || coverImage.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
-
-            return GetString(coverImage, "extraLarge")
-                ?? GetString(coverImage, "large")
-                ?? GetString(coverImage, "medium");
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private static string? GetString(JsonElement parent, string propertyName) =>
-        parent.TryGetProperty(propertyName, out var property)
-            && property.ValueKind == JsonValueKind.String
-            ? property.GetString()
-            : null;
-
     private static string BuildMediaSubtitle(string mediaKind, int? startYear) =>
         startYear is null ? mediaKind : $"{mediaKind} · {startYear}";
 
@@ -636,7 +591,7 @@ public sealed class CantaroSearchService(
         string CanonicalTitle,
         string MediaKind,
         int? StartYear,
-        string? CanonicalMetadata);
+        string? PosterUrl);
 
     private sealed record MediaLibrarySearchState(
         Guid MediaTitleId,

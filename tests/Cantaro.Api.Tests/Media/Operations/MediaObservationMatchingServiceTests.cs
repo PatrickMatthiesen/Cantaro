@@ -313,9 +313,6 @@ public class MediaObservationMatchingServiceTests
                 Id = Guid.NewGuid(),
                 UserId = UserId,
                 MediaTitleId = title.Id,
-                Provider = "anilist",
-                ProviderAccountId = "test-account",
-                ProviderMediaId = Guid.NewGuid().ToString(),
                 Status = MediaLibraryStatuses.Current,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow

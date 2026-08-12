@@ -80,6 +80,7 @@ function MediaDetailTabPanel({
           availabilityByProviderLink={props.availabilityByProviderLink}
           unlinkingId={props.unlinkingId}
           lastSyncedAt={props.entry.lastSyncedAt}
+          canManageLinks={props.entry.viewerStateStatus === 'loaded' && props.entry.isInLibrary}
           onLinkProvider={() => props.onSetShowLinkDialog(true)}
           onUnlink={props.onUnlink}
         />
@@ -139,7 +140,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
             </div>
           </section>
           <div className="media-detail-main-column">
-            <ActionRail
+            {props.entry.isInLibrary ? <ActionRail
               hasStatusChanged={hasStatusChanged}
               isSavingStatus={props.isSavingStatus}
               isRefreshingProgress={props.isRefreshingProgress}
@@ -152,7 +153,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               canonicalTitle={props.entry.title.canonicalTitle}
               nextReleaseAt={props.entry.nextReleaseAt}
               nextReleaseLabel={props.entry.nextReleaseLabel}
-            />
+            /> : null}
             <section className="media-detail-overview-card">
               <DetailTabs tabs={DETAIL_TABS} activeTab={activeTab} idPrefix="media-detail" onChange={setActiveTab} />
               <MediaDetailTabPanel
@@ -169,7 +170,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
       </DetailPageLayout>
       <EntryLinkDialog
         showLinkDialog={props.showLinkDialog}
-        libraryEntryId={props.libraryEntryId}
+        mediaTitleId={props.mediaTitleId}
         mediaKind={mediaKind}
         currentTitle={props.entry.title.canonicalTitle}
         existingLinks={props.entry.providerLinks}

@@ -9,7 +9,7 @@ namespace Cantaro.Api.Tests;
 public class MediaDomainModelTests
 {
     [Fact]
-    public async Task MediaDomainEntities_PersistCanonicalTitleLinksAndSyncMetadata()
+    public async Task MediaDomainEntities_SeparateCanonicalTitleViewerStateAndProviderBinding()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -68,17 +68,23 @@ public class MediaDomainModelTests
             Id = Guid.NewGuid(),
             UserId = user.Id,
             MediaTitleId = title.Id,
-            ConnectedServiceAccountId = account.Id,
-            Provider = "anilist",
-            ProviderAccountId = account.ExternalAccountId,
-            ProviderMediaId = providerLink.ExternalId,
-            ProviderLibraryEntryId = "list-entry-500",
             Status = MediaLibraryStatuses.Current,
             ProgressEpisodes = 12,
-            LastSyncedAt = timestamp,
-            LastRemoteUpdateAt = timestamp.AddMinutes(-5),
             LastLocalEditAt = timestamp.AddMinutes(-1),
             LastMutationSource = MediaMappingSources.UserConfirmed,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp
+        };
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = libraryEntry.Id,
+            MediaProviderLinkId = providerLink.Id,
+            ConnectedServiceAccountId = account.Id,
+            ProviderAccountId = account.ExternalAccountId,
+            ProviderLibraryEntryId = "list-entry-500",
+            LastSyncedAt = timestamp,
+            LastRemoteUpdateAt = timestamp.AddMinutes(-5),
             CreatedAt = timestamp,
             UpdatedAt = timestamp
         };
@@ -88,17 +94,19 @@ public class MediaDomainModelTests
         dbContext.MediaTitles.Add(title);
         dbContext.MediaProviderLinks.Add(providerLink);
         dbContext.MediaLibraryEntries.Add(libraryEntry);
+        dbContext.MediaLibraryProviderBindings.Add(binding);
 
         await dbContext.SaveChangesAsync();
 
         var persistedTitle = await dbContext.MediaTitles.SingleAsync();
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
         var persistedProviderLink = await dbContext.MediaProviderLinks.SingleAsync();
+        var persistedBinding = await dbContext.MediaLibraryProviderBindings.SingleAsync();
 
         Assert.Equal(MediaLibraryStatuses.Current, persistedEntry.Status);
         Assert.Equal(MediaProgressDimensions.Episode, persistedTitle.PrimaryProgressDimension);
-        Assert.Equal(account.Id, persistedEntry.ConnectedServiceAccountId);
-        Assert.Equal(timestamp.AddMinutes(-5), persistedEntry.LastRemoteUpdateAt);
+        Assert.Equal(account.Id, persistedBinding.ConnectedServiceAccountId);
+        Assert.Equal(timestamp.AddMinutes(-5), persistedBinding.LastRemoteUpdateAt);
         Assert.Equal(providerLink.ExternalId, persistedProviderLink.ExternalId);
         Assert.Equal(MediaMappingSources.Imported, persistedProviderLink.LinkSource);
     }
@@ -138,9 +146,6 @@ public class MediaDomainModelTests
             Id = Guid.NewGuid(),
             UserId = user.Id,
             MediaTitleId = title.Id,
-            Provider = "anilist",
-            ProviderAccountId = "anilist-user-102",
-            ProviderMediaId = "21519",
             Status = MediaLibraryStatuses.Completed,
             CreatedAt = timestamp,
             UpdatedAt = timestamp
@@ -290,6 +295,44 @@ public class MediaDomainModelTests
         });
 
         await Assert.ThrowsAsync<DbUpdateException>(() => dbContext.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task MediaLibraryEntries_EnforceOneViewerStatePerUserAndTitle()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await using var _ = db;
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(103, "one-state@example.test");
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "One canonical title",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.AddRange(user, title);
+        await db.SaveChangesAsync();
+        db.MediaLibraryEntries.AddRange(
+            new MediaLibraryEntry
+            {
+                Id = Guid.NewGuid(), UserId = user.Id, MediaTitleId = title.Id,
+                Status = MediaLibraryStatuses.Planned, CreatedAt = now, UpdatedAt = now
+            },
+            new MediaLibraryEntry
+            {
+                Id = Guid.NewGuid(), UserId = user.Id, MediaTitleId = title.Id,
+                Status = MediaLibraryStatuses.Current, CreatedAt = now, UpdatedAt = now
+            });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
 
 }

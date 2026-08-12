@@ -10,7 +10,7 @@ import { MediaProviderIcon } from '../../components/MediaProviderIcon';
 import { mediaKindLabel } from '../../services/mediaFormatting';
 import { mediaProviderCatalog } from '../../services/mediaProviders';
 import type {
-  MediaLibraryEntryDetailDto,
+  MediaEntryDetailModel,
   MediaProviderCharacterCreditDto,
   MediaProviderLinkSummaryDto,
 } from '../../services/mediaApi';
@@ -43,6 +43,7 @@ export function ProviderSection({
   availabilityByProviderLink,
   unlinkingId,
   lastSyncedAt,
+  canManageLinks,
   onLinkProvider,
   onUnlink,
 }: {
@@ -50,6 +51,7 @@ export function ProviderSection({
   availabilityByProviderLink: ProviderAvailabilityMap;
   unlinkingId: string | null;
   lastSyncedAt?: string;
+  canManageLinks: boolean;
   onLinkProvider: () => void;
   onUnlink: (providerId: string) => void;
 }) {
@@ -58,12 +60,14 @@ export function ProviderSection({
 
   return (
     <section className="media-detail-section">
-      <SectionHeading title="Linked providers" action="Manage links" onAction={onLinkProvider} />
+      <SectionHeading title="Provider identities" action={canManageLinks ? 'Manage links' : undefined} onAction={canManageLinks ? onLinkProvider : undefined} />
       {providerLinks.length === 0 ? (
-        <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
-          <Plus aria-hidden />
-          Link a provider to show availability.
-        </button>
+        canManageLinks ? (
+          <button type="button" className="media-detail-empty-provider" onClick={onLinkProvider}>
+            <Plus aria-hidden />
+            Link a provider to show availability.
+          </button>
+        ) : <p>No provider identities are known for this title.</p>
       ) : (
         <div className="media-detail-provider-grid">
           {visibleLinks.map((link) => {
@@ -77,15 +81,17 @@ export function ProviderSection({
                   <p>{availabilityText(availability)}</p>
                   {link.externalUrl ? <a href={link.externalUrl} target="_blank" rel="noopener noreferrer">Open</a> : null}
                 </div>
-                <button type="button" onClick={() => onUnlink(link.provider)} disabled={unlinkingId === link.provider}>
-                  {unlinkingId === link.provider ? '...' : 'Unlink'}
-                </button>
+                {canManageLinks ? (
+                  <button type="button" onClick={() => onUnlink(link.provider)} disabled={unlinkingId === link.provider}>
+                    {unlinkingId === link.provider ? '...' : 'Unlink'}
+                  </button>
+                ) : null}
                 <CircleCheck aria-hidden className="media-detail-provider-check" />
               </article>
             );
           })}
           {hiddenCount > 0 ? (
-            <button type="button" className="media-detail-provider-more" onClick={onLinkProvider}>
+            <button type="button" className="media-detail-provider-more" onClick={onLinkProvider} disabled={!canManageLinks}>
               <MoreVertical aria-hidden />
               More
               <span>{hiddenCount}+</span>
@@ -107,7 +113,7 @@ function SectionHeading({ title, action, onAction }: { title: string; action?: s
   );
 }
 
-export function FranchiseSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+export function FranchiseSection({ entry }: { entry: MediaEntryDetailModel }) {
   const { title } = entry;
   const items = [
     { title: title.canonicalTitle, subtitle: title.episodeCount ? `${title.episodeCount} episodes` : 'Current entry', active: true },
@@ -140,7 +146,7 @@ export function FranchiseSection({ entry }: { entry: MediaLibraryEntryDetailDto 
 }
 
 interface CharactersSectionProps {
-  entry: MediaLibraryEntryDetailDto;
+  entry: MediaEntryDetailModel;
   availabilityByProviderLink: ProviderAvailabilityMap;
 }
 
@@ -220,7 +226,7 @@ export function CharactersSection(props: CharactersSectionProps) {
   );
 }
 
-export function CommunitySection({ entry, progressSummary }: { entry: MediaLibraryEntryDetailDto; progressSummary: ProgressSummary }) {
+export function CommunitySection({ entry, progressSummary }: { entry: MediaEntryDetailModel; progressSummary: ProgressSummary }) {
   return (
     <section className="media-detail-community">
       <SectionHeading title="Community" action="See all" />
@@ -233,7 +239,7 @@ export function CommunitySection({ entry, progressSummary }: { entry: MediaLibra
   );
 }
 
-export function InformationSection({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+export function InformationSection({ entry }: { entry: MediaEntryDetailModel }) {
   const { title } = entry;
   const rows = [
     ['Format', progressKindLabel(title)],

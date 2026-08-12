@@ -9,7 +9,7 @@ import { MediaSetup } from './MediaSetup';
 import { useEpisodeTracking } from './useEpisodeTracking';
 import './mediaDetail.css';
 
-type MediaRoute = { kind: 'library' } | { kind: 'entry'; id: string };
+type MediaRoute = { kind: 'library' } | { kind: 'title'; id: string };
 
 interface MediaPageProps {
   configured: boolean;
@@ -50,11 +50,11 @@ export function MediaPage(props: MediaPageProps) {
             embedded
             density="compact"
             onHeadingChange={suppressEmbeddedHeading}
-            onNavigateEntry={(id) => startTransition(() => setRoute({ kind: 'entry', id }))}
+            onNavigateEntry={(id) => startTransition(() => setRoute({ kind: 'title', id }))}
           />
         ) : (
           <MediaEntryDetailPage
-            libraryEntryId={route.id}
+            mediaTitleId={route.id}
             embedded
             onNavigateBack={() => startTransition(() => setRoute({ kind: 'library' }))}
           />

@@ -369,7 +369,7 @@ public class MediaObservationMatchingService(
         var relatedTvTitles = titles
             .Where(title => title.MediaKind == MediaKinds.Anime
                 && title.StartYear is not null
-                && IsTvSeries(title.CanonicalMetadata)
+                && IsTvSeries(title.Format)
                 && ComputeTitleScore(normalizedSeriesTitle, title) >= LowConfidenceThreshold)
             .OrderBy(title => title.StartYear)
             .ThenBy(title => title.CanonicalTitle, StringComparer.OrdinalIgnoreCase)
@@ -381,31 +381,8 @@ public class MediaObservationMatchingService(
             : null;
     }
 
-    private static bool IsTvSeries(string? canonicalMetadata)
-    {
-        if (string.IsNullOrWhiteSpace(canonicalMetadata))
-        {
-            return true;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(canonicalMetadata);
-            var root = document.RootElement;
-            if (root.TryGetProperty("media", out var media)
-                && media.ValueKind == JsonValueKind.Object)
-            {
-                root = media;
-            }
-
-            return !root.TryGetProperty("format", out var format)
-                || string.Equals(format.GetString(), "TV", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (JsonException)
-        {
-            return true;
-        }
-    }
+    private static bool IsTvSeries(string? format) =>
+        string.Equals(format, "TV", StringComparison.OrdinalIgnoreCase);
 
     private static void AddTitle(List<string> titles, string? title)
     {

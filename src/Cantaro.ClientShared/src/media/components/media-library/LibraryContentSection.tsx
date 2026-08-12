@@ -126,7 +126,7 @@ export function LibraryContentSection({
                         key={entry.id}
                         entry={entry}
                         density={density}
-                        onClick={() => onNavigateEntry(entry.id)}
+                        onClick={() => onNavigateEntry(entry.mediaTitleId)}
                     />
                 ))}
             </div>

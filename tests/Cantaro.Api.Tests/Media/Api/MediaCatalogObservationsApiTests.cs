@@ -480,7 +480,7 @@ public class MediaCatalogObservationsApiTests
                 MediaKind = MediaKinds.Anime,
                 EpisodeCount = episodeCount,
                 StartYear = startYear,
-                CanonicalMetadata = format is null ? null : JsonSerializer.Serialize(new { format }),
+                Format = format,
                 SupportsEpisodeProgress = true,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
@@ -498,9 +498,6 @@ public class MediaCatalogObservationsApiTests
                 Id = Guid.NewGuid(),
                 UserId = UserId,
                 MediaTitleId = title.Id,
-                Provider = "anilist",
-                ProviderAccountId = "catalog-test-account",
-                ProviderMediaId = providerMediaId,
                 Status = MediaLibraryStatuses.Current,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow

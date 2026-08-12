@@ -27,114 +27,81 @@ public class MediaLibraryImportService(
             .Where(link => link.Provider == importResult.ProviderId && mediaIds.Contains(link.ExternalId))
             .ToDictionaryAsync(link => link.ExternalId, StringComparer.Ordinal, cancellationToken);
 
-        var existingEntries = await _dbContext.MediaLibraryEntries
-            .Include(entry => entry.ProviderListMemberships)
-            .Where(entry => entry.UserId == userId
-                && entry.Provider == importResult.ProviderId
-                && entry.ProviderAccountId == account.ExternalAccountId
-                && mediaIds.Contains(entry.ProviderMediaId))
-            .ToDictionaryAsync(entry => entry.ProviderMediaId, StringComparer.Ordinal, cancellationToken);
+        var existingBindings = await _dbContext.MediaLibraryProviderBindings
+            .Include(binding => binding.MediaLibraryEntry)
+            .Include(binding => binding.MediaProviderLink)
+            .Include(binding => binding.ProviderListMemberships)
+            .Where(binding => binding.MediaLibraryEntry!.UserId == userId
+                && binding.MediaProviderLink!.Provider == importResult.ProviderId
+                && binding.ProviderAccountId == account.ExternalAccountId
+                && mediaIds.Contains(binding.MediaProviderLink.ExternalId))
+            .ToDictionaryAsync(
+                binding => binding.MediaProviderLink!.ExternalId,
+                StringComparer.Ordinal,
+                cancellationToken);
+
+        var knownTitleIds = existingLinks.Values
+            .Select(link => link.MediaTitleId)
+            .Distinct()
+            .ToList();
+        var entriesByTitleId = await _dbContext.MediaLibraryEntries
+            .Where(entry => entry.UserId == userId && knownTitleIds.Contains(entry.MediaTitleId))
+            .ToDictionaryAsync(entry => entry.MediaTitleId, cancellationToken);
 
         var createdTitles = 0;
         var createdEntries = 0;
         var updatedEntries = 0;
+        var createdBindings = 0;
 
         foreach (var item in importResult.Items)
         {
-            if (!existingLinks.TryGetValue(item.ProviderMediaId, out var link))
-            {
-                var title = CreateMediaTitle(item, importResult.ImportedAt);
-                link = new MediaProviderLink
-                {
-                    Id = Guid.NewGuid(),
-                    MediaTitleId = title.Id,
-                    Provider = importResult.ProviderId,
-                    ExternalId = item.ProviderMediaId,
-                    ExternalUrl = item.ExternalUrl,
-                    LinkSource = MediaMappingSources.Imported,
-                    RawMetadata = item.RawMetadata,
-                    LastVerifiedAt = importResult.ImportedAt,
-                    CreatedAt = importResult.ImportedAt,
-                    UpdatedAt = importResult.ImportedAt,
-                    MediaTitle = title
-                };
+            var link = GetOrCreateProviderLink(item, importResult, existingLinks, ref createdTitles);
 
-                _dbContext.MediaTitles.Add(title);
-                _dbContext.MediaProviderLinks.Add(link);
-                existingLinks[item.ProviderMediaId] = link;
-                createdTitles++;
-            }
-            else if (link.MediaTitle is not null)
+            if (!entriesByTitleId.TryGetValue(link.MediaTitleId, out var entry))
             {
-                ApplyToMediaTitle(link.MediaTitle, item, importResult.ImportedAt);
-                link.ExternalUrl = item.ExternalUrl ?? link.ExternalUrl;
-                link.RawMetadata = item.RawMetadata ?? link.RawMetadata;
-                link.LastVerifiedAt = importResult.ImportedAt;
-                link.UpdatedAt = importResult.ImportedAt;
-            }
-
-            if (!existingEntries.TryGetValue(item.ProviderMediaId, out var entry))
-            {
-                entry = new MediaLibraryEntry
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = userId,
-                    MediaTitleId = link.MediaTitleId,
-                    ConnectedServiceAccountId = account.Id,
-                    Provider = importResult.ProviderId,
-                    ProviderAccountId = account.ExternalAccountId,
-                    ProviderMediaId = item.ProviderMediaId,
-                    ProviderLibraryEntryId = item.ProviderLibraryEntryId,
-                    Status = item.Status,
-                    ProgressEpisodes = item.ProgressEpisodes,
-                    ProgressChapters = item.ProgressChapters,
-                    ProgressVolumes = item.ProgressVolumes,
-                    LastSyncedAt = importResult.ImportedAt,
-                    LastRemoteUpdateAt = item.LastRemoteUpdateAt,
-                    LastMutationSource = MediaMutationSources.ProviderImport,
-                    RawMetadata = item.RawMetadata,
-                    CreatedAt = importResult.ImportedAt,
-                    UpdatedAt = importResult.ImportedAt
-                };
-
+                entry = CreateLibraryEntry(userId, link.MediaTitleId, item, importResult.ImportedAt);
                 _dbContext.MediaLibraryEntries.Add(entry);
-                existingEntries[item.ProviderMediaId] = entry;
+                entriesByTitleId[link.MediaTitleId] = entry;
                 createdEntries++;
+            }
+
+            if (!existingBindings.TryGetValue(item.ProviderMediaId, out var binding))
+            {
+                binding = CreateProviderBinding(entry, link, account, item, importResult.ImportedAt);
+                _dbContext.MediaLibraryProviderBindings.Add(binding);
+                existingBindings[item.ProviderMediaId] = binding;
+                ApplyRemoteLibraryState(entry, item, importResult.ImportedAt);
+                createdBindings++;
             }
             else
             {
-                entry.MediaTitleId = link.MediaTitleId;
-                entry.ConnectedServiceAccountId = account.Id;
-                entry.ProviderLibraryEntryId = item.ProviderLibraryEntryId;
-                var shouldApplyRemoteLibraryState = ShouldApplyRemoteLibraryState(entry, item);
-                if (shouldApplyRemoteLibraryState)
+                binding.ConnectedServiceAccountId = account.Id;
+                binding.ProviderLibraryEntryId = item.ProviderLibraryEntryId;
+                if (ShouldApplyRemoteLibraryState(entry, binding, item))
                 {
-                    entry.Status = item.Status;
-                    entry.ProgressEpisodes = item.ProgressEpisodes;
-                    entry.ProgressChapters = item.ProgressChapters;
-                    entry.ProgressVolumes = item.ProgressVolumes;
-                    entry.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
-                    entry.LastMutationSource = MediaMutationSources.ProviderImport;
-                    entry.RawMetadata = item.RawMetadata;
+                    ApplyRemoteLibraryState(entry, item, importResult.ImportedAt);
                 }
 
-                entry.LastSyncedAt = importResult.ImportedAt;
-                entry.UpdatedAt = importResult.ImportedAt;
+                binding.LastSyncedAt = importResult.ImportedAt;
+                binding.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
+                binding.RawMetadata = item.RawMetadata;
+                binding.UpdatedAt = importResult.ImportedAt;
                 updatedEntries++;
             }
 
-            ReplaceProviderListMemberships(entry, item.ProviderListNames);
+            ReplaceProviderListMemberships(binding, item.ProviderListNames);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Imported {Count} {Provider} media items for user {UserId}. Created titles: {CreatedTitles}, created entries: {CreatedEntries}, updated entries: {UpdatedEntries}",
+            "Imported {Count} {Provider} media items for user {UserId}. Created titles: {CreatedTitles}, created entries: {CreatedEntries}, created bindings: {CreatedBindings}, updated entries: {UpdatedEntries}",
             importResult.Items.Count,
             importResult.ProviderId,
             userId,
             createdTitles,
             createdEntries,
+            createdBindings,
             updatedEntries);
 
         return new MediaLibraryImportPersistenceResult
@@ -148,8 +115,97 @@ public class MediaLibraryImportService(
         };
     }
 
-    private void ReplaceProviderListMemberships(
+    private MediaProviderLink GetOrCreateProviderLink(
+        MediaProviderLibraryItem item,
+        MediaProviderLibraryImportResult importResult,
+        IDictionary<string, MediaProviderLink> existingLinks,
+        ref int createdTitles)
+    {
+        if (existingLinks.TryGetValue(item.ProviderMediaId, out var existingLink))
+        {
+            if (existingLink.MediaTitle is not null)
+            {
+                ApplyToMediaTitle(existingLink.MediaTitle, item, importResult.ImportedAt);
+            }
+
+            existingLink.ExternalUrl = item.ExternalUrl ?? existingLink.ExternalUrl;
+            existingLink.RawMetadata = item.RawMetadata ?? existingLink.RawMetadata;
+            existingLink.LastVerifiedAt = importResult.ImportedAt;
+            existingLink.UpdatedAt = importResult.ImportedAt;
+            return existingLink;
+        }
+
+        var title = CreateMediaTitle(item, importResult.ImportedAt);
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = importResult.ProviderId,
+            ExternalId = item.ProviderMediaId,
+            ExternalUrl = item.ExternalUrl,
+            LinkSource = MediaMappingSources.Imported,
+            RawMetadata = item.RawMetadata,
+            LastVerifiedAt = importResult.ImportedAt,
+            CreatedAt = importResult.ImportedAt,
+            UpdatedAt = importResult.ImportedAt,
+            MediaTitle = title
+        };
+
+        _dbContext.MediaTitles.Add(title);
+        _dbContext.MediaProviderLinks.Add(link);
+        existingLinks[item.ProviderMediaId] = link;
+        createdTitles++;
+        return link;
+    }
+
+    private static MediaLibraryEntry CreateLibraryEntry(
+        int userId,
+        Guid mediaTitleId,
+        MediaProviderLibraryItem item,
+        DateTimeOffset timestamp)
+    {
+        return new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            MediaTitleId = mediaTitleId,
+            Status = item.Status,
+            ProgressEpisodes = item.ProgressEpisodes,
+            ProgressChapters = item.ProgressChapters,
+            ProgressVolumes = item.ProgressVolumes,
+            LastMutationSource = MediaMutationSources.ProviderImport,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp
+        };
+    }
+
+    private static MediaLibraryProviderBinding CreateProviderBinding(
         MediaLibraryEntry entry,
+        MediaProviderLink link,
+        ConnectedServiceAccount account,
+        MediaProviderLibraryItem item,
+        DateTimeOffset timestamp)
+    {
+        return new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = entry.Id,
+            MediaProviderLinkId = link.Id,
+            ConnectedServiceAccountId = account.Id,
+            ProviderAccountId = account.ExternalAccountId,
+            ProviderLibraryEntryId = item.ProviderLibraryEntryId,
+            LastSyncedAt = timestamp,
+            LastRemoteUpdateAt = item.LastRemoteUpdateAt,
+            RawMetadata = item.RawMetadata,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp,
+            MediaLibraryEntry = entry,
+            MediaProviderLink = link
+        };
+    }
+
+    private void ReplaceProviderListMemberships(
+        MediaLibraryProviderBinding binding,
         IReadOnlyList<string> providerListNames)
     {
         var desiredNames = providerListNames
@@ -158,12 +214,12 @@ public class MediaLibraryImportService(
             .Distinct(StringComparer.Ordinal)
             .ToHashSet(StringComparer.Ordinal);
 
-        var removedMemberships = entry.ProviderListMemberships
+        var removedMemberships = binding.ProviderListMemberships
             .Where(membership => !desiredNames.Contains(membership.Name))
             .ToList();
         _dbContext.MediaProviderListMemberships.RemoveRange(removedMemberships);
 
-        var existingNames = entry.ProviderListMemberships
+        var existingNames = binding.ProviderListMemberships
             .Except(removedMemberships)
             .Select(membership => membership.Name)
             .ToHashSet(StringComparer.Ordinal);
@@ -171,9 +227,9 @@ public class MediaLibraryImportService(
         {
             if (!existingNames.Contains(name))
             {
-                entry.ProviderListMemberships.Add(new MediaProviderListMembership
+                binding.ProviderListMemberships.Add(new MediaProviderListMembership
                 {
-                    MediaLibraryEntryId = entry.Id,
+                    MediaLibraryProviderBindingId = binding.Id,
                     Name = name
                 });
             }
@@ -182,61 +238,20 @@ public class MediaLibraryImportService(
 
     private static MediaTitle CreateMediaTitle(MediaProviderLibraryItem item, DateTimeOffset timestamp)
     {
-        return new MediaTitle
+        var title = new MediaTitle
         {
             Id = Guid.NewGuid(),
             CanonicalTitle = item.Title,
             SortTitle = item.Title,
             OriginalTitle = item.OriginalTitle ?? item.NativeTitle,
             MediaKind = item.MediaKind,
-            Synopsis = item.Synopsis,
-            StartYear = item.StartYear,
-            EpisodeCount = item.EpisodeCount,
-            ChapterCount = item.ChapterCount,
-            VolumeCount = item.VolumeCount,
-            SupportsEpisodeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Episode,
-            SupportsChapterProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Chapter,
-            SupportsVolumeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Volume,
-            IsCompletionOnly = item.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly,
             PrimaryProgressDimension = item.PrimaryProgressDimension,
             ReleaseStatusDimension = item.ReleaseStatusDimension,
-            CanonicalMetadata = item.RawMetadata,
             CreatedAt = timestamp,
             UpdatedAt = timestamp
         };
-    }
-
-    private static bool ShouldApplyRemoteLibraryState(MediaLibraryEntry entry, MediaProviderLibraryItem item)
-    {
-        if (entry.LastRemoteUpdateAt is null || item.LastRemoteUpdateAt is null)
-        {
-            return true;
-        }
-
-        if (item.LastRemoteUpdateAt > entry.LastRemoteUpdateAt)
-        {
-            return true;
-        }
-
-        if (item.LastRemoteUpdateAt < entry.LastRemoteUpdateAt)
-        {
-            return false;
-        }
-
-        return !HasLocalMutationAtOrAfterRemoteSnapshot(entry);
-    }
-
-    private static bool HasLocalMutationAtOrAfterRemoteSnapshot(MediaLibraryEntry entry)
-    {
-        if (entry.LastLocalEditAt is null || entry.LastRemoteUpdateAt is null)
-        {
-            return false;
-        }
-
-        return entry.LastLocalEditAt >= entry.LastRemoteUpdateAt
-            && entry.LastMutationSource is MediaMutationSources.UserProgressUpdate
-                or MediaMutationSources.UserStatusUpdate
-                or MediaMutationSources.ObservationAutoProgress;
+        ApplyToMediaTitle(title, item, timestamp);
+        return title;
     }
 
     private static void ApplyToMediaTitle(MediaTitle title, MediaProviderLibraryItem item, DateTimeOffset timestamp)
@@ -246,17 +261,58 @@ public class MediaLibraryImportService(
         title.OriginalTitle = item.OriginalTitle ?? item.NativeTitle ?? title.OriginalTitle;
         title.MediaKind = item.MediaKind;
         title.Synopsis = item.Synopsis ?? title.Synopsis;
+        title.Format = item.Format ?? title.Format;
+        title.PosterUrl = item.PosterUrl ?? title.PosterUrl;
+        title.BackgroundUrl = item.BackgroundUrl ?? title.BackgroundUrl;
         title.StartYear = item.StartYear ?? title.StartYear;
         title.EpisodeCount = item.EpisodeCount ?? title.EpisodeCount;
         title.ChapterCount = item.ChapterCount ?? title.ChapterCount;
         title.VolumeCount = item.VolumeCount ?? title.VolumeCount;
+        title.ReleasedCount = item.ReleasedCount ?? title.ReleasedCount;
+        title.NextReleaseAt = item.NextReleaseAt;
+        title.NextReleaseLabel = item.NextReleaseLabel;
         title.SupportsEpisodeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Episode;
         title.SupportsChapterProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Chapter;
         title.SupportsVolumeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Volume;
         title.IsCompletionOnly = item.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly;
         title.PrimaryProgressDimension = item.PrimaryProgressDimension;
         title.ReleaseStatusDimension = item.ReleaseStatusDimension;
-        title.CanonicalMetadata = item.RawMetadata ?? title.CanonicalMetadata;
         title.UpdatedAt = timestamp;
+    }
+
+    private static bool ShouldApplyRemoteLibraryState(
+        MediaLibraryEntry entry,
+        MediaLibraryProviderBinding binding,
+        MediaProviderLibraryItem item)
+    {
+        if (binding.LastRemoteUpdateAt is null || item.LastRemoteUpdateAt is null)
+        {
+            return true;
+        }
+
+        if (item.LastRemoteUpdateAt > binding.LastRemoteUpdateAt)
+        {
+            return true;
+        }
+
+        if (item.LastRemoteUpdateAt < binding.LastRemoteUpdateAt)
+        {
+            return false;
+        }
+
+        return entry.LastLocalEditAt is null || entry.LastLocalEditAt < binding.LastRemoteUpdateAt;
+    }
+
+    private static void ApplyRemoteLibraryState(
+        MediaLibraryEntry entry,
+        MediaProviderLibraryItem item,
+        DateTimeOffset timestamp)
+    {
+        entry.Status = item.Status;
+        entry.ProgressEpisodes = item.ProgressEpisodes;
+        entry.ProgressChapters = item.ProgressChapters;
+        entry.ProgressVolumes = item.ProgressVolumes;
+        entry.LastMutationSource = MediaMutationSources.ProviderImport;
+        entry.UpdatedAt = timestamp;
     }
 }

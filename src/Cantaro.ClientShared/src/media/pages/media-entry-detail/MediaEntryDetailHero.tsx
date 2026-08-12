@@ -4,7 +4,7 @@ import { DetailArtwork, SanitizedSynopsis } from '../../components/media-entry-d
 import { SearchLinkDialog } from '../../components/SearchLinkDialog';
 import { GradientButton } from '../../../ui';
 import { formatNextReleaseDisplay, mediaKindLabel } from '../../services/mediaFormatting';
-import type { MediaLibraryEntryDetailDto, MediaProviderLinkSummaryDto } from '../../services/mediaApi';
+import type { MediaEntryDetailModel, MediaProviderLinkSummaryDto } from '../../services/mediaApi';
 import { progressKindLabel } from './mediaEntryDetailModel';
 
 export function DetailPageLayout({ children, className = '', embedded = false }: { children: ReactNode; className?: string; embedded?: boolean }) {
@@ -57,7 +57,7 @@ export function DetailErrorState({
 
 export function EntryLinkDialog({
   showLinkDialog,
-  libraryEntryId,
+  mediaTitleId,
   mediaKind,
   existingLinks,
   currentTitle,
@@ -65,7 +65,7 @@ export function EntryLinkDialog({
   onLinked,
 }: {
   showLinkDialog: boolean;
-  libraryEntryId: string;
+  mediaTitleId: string;
   mediaKind: string;
   existingLinks: MediaProviderLinkSummaryDto[];
   currentTitle: string;
@@ -78,7 +78,7 @@ export function EntryLinkDialog({
 
   return (
     <SearchLinkDialog
-      libraryEntryId={libraryEntryId}
+      mediaTitleId={mediaTitleId}
       currentTitle={currentTitle}
       mediaKind={mediaKind}
       existingLinks={existingLinks}
@@ -98,7 +98,7 @@ function DetailTopBar({ onNavigateBack }: { onNavigateBack: () => void }) {
   );
 }
 
-function getTitleCountLabels(title: MediaLibraryEntryDetailDto['title']): string[] {
+function getTitleCountLabels(title: MediaEntryDetailModel['title']): string[] {
   return [
     title.episodeCount ? `${title.episodeCount} Episodes` : null,
     title.chapterCount ? `${title.chapterCount} Chapters` : null,
@@ -112,7 +112,7 @@ function HeroBackdrop({ posterUrl }: { posterUrl?: string }) {
     : null;
 }
 
-function HeroTitleMeta({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+function HeroTitleMeta({ entry }: { entry: MediaEntryDetailModel }) {
   const { title } = entry;
   const nextRelease = formatNextReleaseDisplay(entry.nextReleaseAt);
   const titleCounts = getTitleCountLabels(title);
@@ -132,7 +132,7 @@ function HeroTitleMeta({ entry }: { entry: MediaLibraryEntryDetailDto }) {
   );
 }
 
-function HeroDescription({ entry }: { entry: MediaLibraryEntryDetailDto }) {
+function HeroDescription({ entry }: { entry: MediaEntryDetailModel }) {
   const { title } = entry;
   return (
     <>
@@ -147,7 +147,7 @@ export function MediaHero({
   entry,
   onNavigateBack,
 }: {
-  entry: MediaLibraryEntryDetailDto;
+  entry: MediaEntryDetailModel;
   onNavigateBack: () => void;
 }) {
   const { title } = entry;

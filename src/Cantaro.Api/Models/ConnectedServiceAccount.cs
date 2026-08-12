@@ -89,13 +89,11 @@ public class ConnectedServiceAccount
     public User? User { get; set; }
 
     /// <summary>
-    /// Media library entries that are currently attached to this live account.
-    /// Historical rows can outlive the account and will then have a null
-    /// ConnectedServiceAccountId.
+    /// Media provider bindings currently attached to this live account.
+    /// Historical bindings can outlive the account and retain the provider's
+    /// account identifier after this navigation becomes null.
     /// </summary>
-    public ICollection<MediaLibraryEntry> MediaLibraryEntries { get; set; } = [];
-
-    public ICollection<MediaProviderOperation> MediaProviderOperations { get; set; } = [];
+    public ICollection<MediaLibraryProviderBinding> MediaLibraryProviderBindings { get; set; } = [];
 
     public ICollection<ServicePlaylistMapping> ServicePlaylistMappings { get; set; } = [];
 }
