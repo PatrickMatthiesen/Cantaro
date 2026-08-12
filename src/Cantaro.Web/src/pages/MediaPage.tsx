@@ -92,23 +92,21 @@ export function MediaLibraryRoutePage() {
   };
 
   return (
-    <RequireAuth>
-      <MediaLibraryPage
-        embedded
-        searchQuery={searchQuery}
-        searchMode={searchMode}
-        filterDefaults={filterDefaults}
-        onSearchQueryChange={(query) => updateSearchState({ query })}
-        onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
-        onHeadingChange={setHeading}
-        onNavigateProviders={() => void navigate({ to: '/media/providers' })}
-        onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}
-        onNavigateCatalogResult={(providerId, providerMediaId) => void navigate({
-          to: '/media/catalog/$providerId/$providerMediaId',
-          params: { providerId, providerMediaId },
-        })}
-      />
-    </RequireAuth>
+    <MediaLibraryPage
+      embedded
+      searchQuery={searchQuery}
+      searchMode={searchMode}
+      filterDefaults={filterDefaults}
+      onSearchQueryChange={(query) => updateSearchState({ query })}
+      onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
+      onHeadingChange={setHeading}
+      onNavigateProviders={() => void navigate({ to: '/media/providers' })}
+      onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}
+      onNavigateCatalogResult={(providerId, providerMediaId) => void navigate({
+        to: '/media/catalog/$providerId/$providerMediaId',
+        params: { providerId, providerMediaId },
+      })}
+    />
   );
 }
 

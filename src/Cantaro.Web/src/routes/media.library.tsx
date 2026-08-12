@@ -1,5 +1,6 @@
 import { mainMediaProviderId, mediaApi } from '@cantaro/client-shared/media';
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
+import { RequireAuth } from '../components/AppShell';
 import { shouldRedirectEmptyLibraryToProviders } from '../media/mediaLibraryRouting';
 
 export const Route = createFileRoute('/media/library')({
@@ -17,5 +18,9 @@ export const Route = createFileRoute('/media/library')({
       throw redirect({ to: '/media/providers', replace: true });
     }
   },
-  component: () => <Outlet />,
+  component: () => (
+    <RequireAuth>
+      <Outlet />
+    </RequireAuth>
+  ),
 });
