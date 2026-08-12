@@ -1509,7 +1509,6 @@
   grid-template-columns: minmax(12rem, 1fr) minmax(14rem, 0.8fr);
   align-items: center;
   gap: 1rem;
-  border-top: 1px solid rgba(226, 232, 240, 0.1);
 }
 
 .media-detail-score-row div div {
@@ -1652,11 +1651,16 @@
   min-height: 4rem;
   cursor: pointer;
   place-items: center;
-  border-left: 1px solid rgba(255, 255, 255, 0.28);
+  border-left: 1px solid color-mix(in srgb, var(--color-action-content) 28%, transparent);
   border-radius: 0 16px 16px 0;
-  color: #fff;
-  background: #4f46e5;
+  color: var(--color-action-content);
+  background: var(--color-action);
   list-style: none;
+}
+
+.media-detail-streaming-menu > summary:hover,
+.media-detail-streaming-menu[open] > summary {
+  background: var(--color-action-hover);
 }
 
 .media-detail-streaming-menu > summary::-webkit-details-marker {
