@@ -26,6 +26,8 @@ Calm, personal, interesting.
 
 Cantaro should make a user's existing collection feel a little magical: not flashy magic, but the satisfying sense that years of saved music and watched stories have become organized, alive, and ready to be explored again. The voice should be warm and clear, with enough personality to make collecting feel exciting, while staying precise around sync, matching, provider state, and review workflows.
 
+Personality should emerge through artwork and interaction rather than constant decoration: the interface stays calm at rest, then becomes more expressive when the user engages with it.
+
 ## Anti-references
 
 Cantaro should not look or feel like YouTube, Spotify, AniList, Trakt, or any other connected platform clone. It should not feel cold, business-like, enterprise, workplace, workspace, gray, or boring.

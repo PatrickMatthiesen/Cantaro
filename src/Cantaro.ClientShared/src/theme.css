@@ -36,6 +36,10 @@
   --color-action-hover: #1e293b;
   --color-action-content: #ffffff;
   --color-focus: #7c3aed;
+  --color-personal-accent: #d89a2b;
+  --color-personal-accent-strong: #8a5700;
+  --color-personal-accent-hover: #e6ad45;
+  --color-personal-accent-content: #241704;
 
   --color-info-surface: #e0f2fe;
   --color-info-content: #0369a1;
@@ -87,6 +91,10 @@
     --color-action-hover: #6d28d9;
     --color-action-content: #ffffff;
     --color-focus: #a78bfa;
+    --color-personal-accent: #f2b84b;
+    --color-personal-accent-strong: #ffd477;
+    --color-personal-accent-hover: #ffd477;
+    --color-personal-accent-content: #181106;
 
     --color-info-surface: rgb(6 182 212 / 18%);
     --color-info-content: #67e8f9;
