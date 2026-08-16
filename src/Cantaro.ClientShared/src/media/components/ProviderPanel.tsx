@@ -1,4 +1,3 @@
-import { GlassCard } from '../../ui';
 import type { ReactNode } from 'react';
 import {
     ProviderPanelActions,
@@ -12,11 +11,10 @@ export interface ProviderPanelProps {
     providerId: string;
     name: string;
     icon: ReactNode;
-    gradient: string;
     description: string;
 }
 
-export function ProviderPanel({ providerId, name, icon, gradient, description }: ProviderPanelProps) {
+export function ProviderPanel({ providerId, name, icon, description }: ProviderPanelProps) {
     const {
         status,
         isLoadingStatus,
@@ -27,10 +25,11 @@ export function ProviderPanel({ providerId, name, icon, gradient, description }:
         handleConnect,
         handleDisconnect,
         handleImport,
+        reloadStatus,
     } = useProviderPanelState(providerId);
 
     return (
-        <GlassCard className="p-6">
+        <article className="py-7 sm:py-9">
             <ProviderPanelHeader
                 name={name}
                 icon={icon}
@@ -42,19 +41,26 @@ export function ProviderPanel({ providerId, name, icon, gradient, description }:
             <ProviderPanelError error={error} />
             <ProviderPanelImportSummary lastImport={lastImport} />
 
-            <div className="mt-5 flex flex-wrap gap-3">
+            <div className="mt-6 flex flex-wrap gap-3 sm:pl-16">
                 <ProviderPanelActions
                     name={name}
-                    gradient={gradient}
                     isLoadingStatus={isLoadingStatus}
+                    hasStatus={status !== null}
                     isConnected={Boolean(status?.isConnected)}
                     isImporting={isImporting}
                     isDisconnecting={isDisconnecting}
                     onConnect={handleConnect}
                     onImport={handleImport}
-                    onDisconnect={handleDisconnect}
+                    onDisconnect={() => {
+                        if (!window.confirm(`Disconnect ${name}? Your saved Cantaro library will remain available.`)) {
+                            return Promise.resolve();
+                        }
+
+                        return handleDisconnect();
+                    }}
+                    onRetryStatus={reloadStatus}
                 />
             </div>
-        </GlassCard>
+        </article>
     );
 }

@@ -17,10 +17,6 @@ function clearConnectSearchParams(): void {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-function getErrorMessage(error: unknown, fallbackMessage: string): string {
-  return error instanceof Error ? error.message : fallbackMessage;
-}
-
 function useProviderStatus(providerId: string) {
   const [status, setStatus] = useState<MediaProviderAccountStatusDto | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
@@ -32,8 +28,8 @@ function useProviderStatus(providerId: string) {
 
     try {
       setStatus(await mediaApi.getProviderStatus(providerId));
-    } catch (loadError) {
-      setError(getErrorMessage(loadError, 'Failed to load status'));
+    } catch {
+      setError('Cantaro couldn’t check this connection. Retry when the provider is available.');
     } finally {
       setIsLoadingStatus(false);
     }
@@ -49,6 +45,7 @@ function useProviderStatus(providerId: string) {
     isLoadingStatus,
     error,
     setError,
+    reloadStatus: loadStatus,
   };
 }
 
@@ -89,7 +86,7 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
         }
 
         if (event.status === 'failed') {
-          setError(event.errorMessage || 'Import failed');
+          setError('The provider couldn’t be refreshed. Cantaro will keep using your saved library data.');
           setIsImporting(false);
         }
       },
@@ -114,8 +111,8 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
 
     try {
       return await mediaApi.importLibrary(providerId);
-    } catch (importError) {
-      setError(getErrorMessage(importError, 'Import failed'));
+    } catch {
+      setError('The provider couldn’t be refreshed. Cantaro will keep using your saved library data.');
       setIsImporting(false);
       return null;
     }
@@ -148,8 +145,8 @@ function useProviderDisconnect(
       setStatus((previous) => (previous ? { ...previous, isConnected: false, displayName: undefined } : null));
       setLastImport(null);
       clearStoredValue(remoteCheckTimestampKey(providerId));
-    } catch (disconnectError) {
-      setError(getErrorMessage(disconnectError, 'Failed to disconnect'));
+    } catch {
+      setError('Cantaro couldn’t disconnect this provider. Please try again.');
     } finally {
       setIsDisconnecting(false);
     }
@@ -181,7 +178,7 @@ function useAutoImportAfterConnect(
 
 export function useProviderPanelState(providerId: string) {
   const hasTriggeredConnectedImport = useRef(false);
-  const { status, setStatus, isLoadingStatus, error, setError } = useProviderStatus(providerId);
+  const { status, setStatus, isLoadingStatus, error, setError, reloadStatus } = useProviderStatus(providerId);
   const { isImporting, lastImport, setLastImport, handleImport } = useProviderImport(providerId, setError);
   const { isDisconnecting, handleDisconnect } = useProviderDisconnect(
     providerId,
@@ -210,5 +207,6 @@ export function useProviderPanelState(providerId: string) {
     handleConnect,
     handleDisconnect,
     handleImport,
+    reloadStatus,
   };
 }

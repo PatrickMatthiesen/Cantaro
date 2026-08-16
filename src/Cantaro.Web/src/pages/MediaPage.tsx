@@ -108,6 +108,7 @@ export function MediaProvidersRoutePage() {
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
     title: 'Media providers',
+    hidden: true,
   }), []);
   useStaticMediaHeading(heading);
 
