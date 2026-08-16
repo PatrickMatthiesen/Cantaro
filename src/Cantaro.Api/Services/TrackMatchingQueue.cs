@@ -21,6 +21,7 @@ public sealed class TrackMatchingQueue
 
 public sealed class TrackMatchingWorker(
     TrackMatchingQueue queue,
+    MusicBrainzRequestGate musicBrainzRequestGate,
     IServiceScopeFactory scopeFactory,
     ILogger<TrackMatchingWorker> logger) : BackgroundService
 {
@@ -29,18 +30,28 @@ public sealed class TrackMatchingWorker(
         while (!stoppingToken.IsCancellationRequested)
         {
             var observationId = await queue.DequeueAsync(stoppingToken);
+            var retryAfterCooldown = false;
+            var cooldownRevision = musicBrainzRequestGate.CooldownRevision;
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<TrackMatchingService>()
+                var observation = await scope.ServiceProvider.GetRequiredService<TrackMatchingService>()
                     .ProcessObservationAsync(observationId, stoppingToken);
+                retryAfterCooldown = musicBrainzRequestGate.CooldownRevision > cooldownRevision
+                    && musicBrainzRequestGate.IsCoolingDown
+                    && observation.MatchStatus == TrackMatchingStatuses.Pending
+                    && observation.LastMatchError != null;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
             catch (Exception exception)
             {
                 logger.LogError(exception, "Background matching failed for track observation {ObservationId}", observationId);
             }
-            finally { queue.Complete(observationId); }
+            finally
+            {
+                queue.Complete(observationId);
+                if (retryAfterCooldown) queue.Enqueue(observationId);
+            }
         }
     }
 }

@@ -10,11 +10,11 @@ namespace Cantaro.Api.Tests;
 public sealed class MusicBrainzHttpClientRegistrationTests
 {
     [Theory]
-    [InlineData(0, 2)]
-    [InlineData(30, 1)]
-    public async Task MusicBrainzPipeline_RetriesShortDelayOnceAndRejectsLongWait(
+    [InlineData(0, false)]
+    [InlineData(30, true)]
+    public async Task MusicBrainzClient_DoesNotRetryBelowThePackageRateLimiter(
         int retryAfterSeconds,
-        int expectedRequestCount)
+        bool expectCooldown)
     {
         var handler = new UnavailableHandler(retryAfterSeconds);
         var services = new ServiceCollection();
@@ -29,7 +29,30 @@ public sealed class MusicBrainzHttpClientRegistrationTests
         await Assert.ThrowsAnyAsync<Exception>(() =>
             client.FindRecordingsAsync("recording:Test", 1, CancellationToken.None));
 
-        Assert.Equal(expectedRequestCount, handler.RequestCount);
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Equal(expectCooldown, serviceProvider.GetRequiredService<MusicBrainzRequestGate>().IsCoolingDown);
+    }
+
+    [Fact]
+    public void MusicBrainzRequestGate_HonorsTheEntireRetryAfterDelay()
+    {
+        var now = new DateTimeOffset(2026, 8, 15, 12, 0, 0, TimeSpan.Zero);
+        var gate = new MusicBrainzRequestGate(new FixedTimeProvider(now));
+
+        var delay = gate.Defer(new RetryConditionHeaderValue(TimeSpan.FromMinutes(2)));
+
+        Assert.Equal(TimeSpan.FromMinutes(2), delay);
+        Assert.True(gate.IsCoolingDown);
+    }
+
+    [Fact]
+    public void MusicBrainzRequestGate_UsesIncreasingFallbackWhenRetryAfterIsMissing()
+    {
+        var now = new DateTimeOffset(2026, 8, 15, 12, 0, 0, TimeSpan.Zero);
+        var gate = new MusicBrainzRequestGate(new FixedTimeProvider(now));
+
+        Assert.Equal(TimeSpan.FromSeconds(30), gate.Defer(retryAfter: null));
+        Assert.Equal(TimeSpan.FromMinutes(1), gate.Defer(retryAfter: null));
     }
 
     private sealed class UnavailableHandler(int retryAfterSeconds) : HttpMessageHandler
@@ -46,5 +69,10 @@ public sealed class MusicBrainzHttpClientRegistrationTests
                 TimeSpan.FromSeconds(retryAfterSeconds));
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using MetaBrainz.Common;
 using MetaBrainz.MusicBrainz;
 using MetaBrainz.MusicBrainz.Interfaces.Entities;
 using MetaBrainz.MusicBrainz.Interfaces.Searches;
@@ -9,12 +10,15 @@ namespace Cantaro.Api.Services;
 public class MusicBrainzQueryClient : IMusicBrainzQueryClient
 {
     private readonly Query _query;
+    private readonly MusicBrainzRequestGate _requestGate;
 
-    public MusicBrainzQueryClient(HttpClient httpClient)
+    public MusicBrainzQueryClient(HttpClient httpClient, MusicBrainzRequestGate requestGate)
     {
+        _requestGate = requestGate;
         if (httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
         {
-            httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Cantaro", "0.1.0"));
+            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
         }
 
         _query = new Query(httpClient, takeOwnership: false);
@@ -25,7 +29,20 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
         int limit,
         CancellationToken cancellationToken)
     {
-        var searchResults = await _query.FindRecordingsAsync(query, limit, offset: null, simple: false, cancellationToken);
+        await _requestGate.WaitAsync(cancellationToken);
+
+        ISearchResults<ISearchResult<IRecording>> searchResults;
+        try
+        {
+            searchResults = await _query.FindRecordingsAsync(query, limit, offset: null, simple: false, cancellationToken);
+            _requestGate.RecordSuccess();
+        }
+        catch (HttpError exception) when (FindServiceUnavailable(exception) is { } unavailable)
+        {
+            _requestGate.Defer(unavailable.ResponseHeaders?.RetryAfter);
+            throw;
+        }
+
         var matches = new List<MusicBrainzRecordingMatch>(limit);
 
         foreach (var searchResult in searchResults.Results.Take(limit))
@@ -34,6 +51,19 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
         }
 
         return matches;
+    }
+
+    private static HttpError? FindServiceUnavailable(HttpError exception)
+    {
+        for (Exception? current = exception; current != null; current = current.InnerException)
+        {
+            if (current is HttpError { Status: System.Net.HttpStatusCode.ServiceUnavailable } unavailable)
+            {
+                return unavailable;
+            }
+        }
+
+        return null;
     }
 
     private static MusicBrainzRecordingMatch MapMatch(ISearchResult<IRecording> searchResult)
