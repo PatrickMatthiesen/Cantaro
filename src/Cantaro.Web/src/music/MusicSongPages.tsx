@@ -140,19 +140,27 @@ function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: 
   return (
     <section className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content">
       {song.thumbnailUrl ? (
-        <img src={song.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl dark:opacity-55" aria-hidden />
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-50 dark:opacity-65"
+          style={{ backgroundImage: `url(${song.thumbnailUrl})` }}
+          aria-hidden
+        />
       ) : null}
       <div className="absolute inset-0 bg-linear-to-r from-immersive-scrim-strong via-immersive-scrim-medium to-immersive-scrim-soft" aria-hidden />
       <div className="absolute inset-0 bg-linear-to-t from-immersive-scrim-base via-transparent to-immersive-scrim-soft" aria-hidden />
 
-      <div className="relative z-10 flex min-h-[27rem] items-end gap-7 px-4 py-8 sm:px-7 md:px-9">
-        <SongArtwork song={song} className="hidden w-48 shrink-0 bg-surface md:block xl:w-56" />
+      <Link
+        to="/music/songs"
+        aria-label="Back to songs"
+        className="absolute left-4 top-4 z-30 inline-flex size-11 items-center justify-center bg-black/35 text-white transition-colors hover:bg-black/60 focus-visible:outline-2 focus-visible:outline-focus sm:left-6 sm:top-6"
+      >
+        <MusicUiIcon name="arrowLeft" className="h-5 w-5" />
+      </Link>
+
+      <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
+        <SongArtwork song={song} className="hidden w-56 shrink-0 bg-surface md:block xl:w-64" />
         <div className="min-w-0 max-w-4xl">
-          <div className="flex items-center gap-4 md:hidden">
-            <SongArtwork song={song} className="w-24 shrink-0 bg-surface sm:w-32" />
-            <SongIdentityStatus metadata={metadata} />
-          </div>
-          <div className="hidden md:block"><SongIdentityStatus metadata={metadata} /></div>
+          <SongIdentityStatus metadata={metadata} />
           <h1 className="mt-4 max-w-[22ch] text-3xl leading-[1.06] font-black tracking-[-0.03em] text-balance sm:text-4xl xl:text-5xl">
             {song.title}
           </h1>
@@ -536,9 +544,6 @@ export function MusicSongDetailPage({ library, songId }: { library: MusicLibrary
   return (
     <MusicPageShell library={library}>
       <div className="mx-auto max-w-360">
-        <Link to="/music/songs" className="mb-5 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-content-muted transition-colors hover:text-personal-accent-strong focus-visible:outline-2 focus-visible:outline-focus">
-          <MusicUiIcon name="arrowLeft" className="h-4 w-4" />Back to songs
-        </Link>
         <SongDetailHero song={song} metadata={metadata} />
         <div className="px-4 sm:px-7 md:px-9">
           <div className="grid gap-x-12 xl:grid-cols-[minmax(0,1.55fr)_minmax(19rem,0.75fr)]">
