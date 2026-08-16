@@ -41,12 +41,13 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
     );
 }
 
-function LibraryErrorState({ error, onRetry }: { error: string; onRetry: () => Promise<void> }) {
+function LibraryErrorState({ onRetry }: { onRetry: () => Promise<void> }) {
     return (
         <GlassCard className="p-6">
-            <p className="text-sm text-danger-content">{error}</p>
+            <p className="font-semibold text-danger-content">Cantaro couldn’t load your saved library.</p>
+            <p className="mt-1 text-sm text-content-muted">Your library data is still stored in Cantaro. Try loading it again.</p>
             <div className="mt-3">
-                <GradientButton tone="soft" onClick={() => void onRetry()}>Retry</GradientButton>
+                <GradientButton tone="soft" onClick={() => void onRetry()}>Try again</GradientButton>
             </div>
         </GlassCard>
     );
@@ -107,7 +108,7 @@ export function LibraryContentSection({
     density = 'comfortable',
 }: LibraryContentSectionProps) {
     if (error) {
-        return <LibraryErrorState error={error} onRetry={onRetry} />;
+        return <LibraryErrorState onRetry={onRetry} />;
     }
 
     if (isLoading) {
