@@ -6,7 +6,7 @@ import {
 
 export function StreamingServiceIcon({
   serviceId,
-  className,
+  className = 'h-5 w-5',
   style,
   ...props
 }: SVGProps<SVGSVGElement> & { serviceId: StreamingServiceId }) {

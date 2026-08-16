@@ -68,7 +68,9 @@ function nodeMetadata(node: MediaFranchiseNodeDto): string {
 function NodeState({ node }: { node: MediaFranchiseNodeDto }) {
   if (!node.isInLibrary) {
     return (
-      <span className="block text-xs text-content-subtle">Not in library</span>
+      <span className="block truncate text-xs text-white/65">
+        Not in library
+      </span>
     );
   }
   const status = libraryStatusLabel(node.viewerStatus) ?? "In your library";
@@ -77,12 +79,12 @@ function NodeState({ node }: { node: MediaFranchiseNodeDto }) {
       ? `${node.progressEpisodes}${node.episodeCount ? `/${node.episodeCount}` : ""} episodes`
       : null;
   return (
-    <span className="block text-xs text-success-content">
+    <span className="block truncate text-xs text-white">
       <span className="inline-flex items-center gap-1 font-semibold">
         <Check size={13} aria-hidden /> {status}
       </span>
       {progress ? (
-        <span className="ml-2 text-content-subtle">{progress}</span>
+        <span className="ml-2 text-white/70">{progress}</span>
       ) : null}
     </span>
   );
@@ -90,26 +92,24 @@ function NodeState({ node }: { node: MediaFranchiseNodeDto }) {
 
 function NodeCardContent({ node }: { node: MediaFranchiseNodeDto }) {
   return (
-    <>
-      <span className="block aspect-[3/4] overflow-hidden bg-surface-subtle">
-        <DetailArtwork
-          posterUrl={node.posterUrl}
-          title={node.canonicalTitle}
-          className="object-cover transition duration-200 group-hover:scale-[1.025] group-hover:saturate-125 motion-reduce:transition-none"
-        />
-      </span>
-      <span className="mt-3 block min-w-0 text-left">
-        <strong className="block truncate text-content group-hover:text-personal-accent-strong">
+    <span className="relative block aspect-[3/4] overflow-hidden bg-surface-subtle">
+      <DetailArtwork
+        posterUrl={node.posterUrl}
+        title={node.canonicalTitle}
+        className="object-cover transition duration-200 group-hover:scale-[1.025] group-hover:saturate-125 motion-reduce:transition-none"
+      />
+      <span className="absolute inset-x-0 bottom-0 block min-w-0 bg-linear-to-t from-black/95 via-black/65 to-transparent px-3 pb-3 pt-16 text-left text-white">
+        <strong className="block truncate group-hover:text-[#ffd679]">
           {node.canonicalTitle}
         </strong>
-        <span className="mt-1 block truncate text-xs text-content-muted">
+        <span className="mt-1 block truncate text-xs text-white/70">
           {nodeMetadata(node)}
         </span>
         <span className="mt-1 block">
           <NodeState node={node} />
         </span>
       </span>
-    </>
+    </span>
   );
 }
 

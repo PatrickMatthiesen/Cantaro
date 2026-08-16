@@ -1,7 +1,7 @@
 import {
   Clock3,
+  ExternalLink,
   Minus,
-  MoreVertical,
   Play,
   Plus,
   RotateCw,
@@ -411,26 +411,35 @@ function ContinueDestinationLink({
   onSelect: (serviceId: StreamingServiceId) => void;
 }) {
   const service = STREAMING_SERVICES[action.serviceId];
+  const ActionIcon = action.kind === "episode" ? Play : ExternalLink;
   return (
     <a
       className={
         primary
           ? actionClassName({ tone: "personal" })
-          : "inline-flex size-11 items-center justify-center bg-black/30 text-white transition-colors hover:bg-black/55 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          : actionClassName({
+              tone: "secondary",
+              className:
+                "border-white/15 bg-black/30 text-white hover:bg-black/55",
+            })
       }
       href={action.url}
       target="_blank"
       rel="noopener noreferrer"
-      aria-label={primary ? action.label : `Open on ${service.displayName}`}
-      title={primary ? undefined : service.displayName}
+      aria-label={action.label}
       onClick={() => onSelect(action.serviceId)}
     >
-      <StreamingServiceIcon
-        serviceId={action.serviceId}
-        style={{ color: "currentColor", fill: "currentColor" }}
-        aria-hidden
-      />
-      {primary ? <span>{action.label}</span> : null}
+      {primary ? (
+        <ActionIcon size={18} aria-hidden />
+      ) : (
+        <StreamingServiceIcon
+          serviceId={action.serviceId}
+          className="h-5 w-5"
+          style={{ color: "currentColor", fill: "currentColor" }}
+          aria-hidden
+        />
+      )}
+      <span>{primary ? action.label : service.displayName}</span>
     </a>
   );
 }
@@ -600,12 +609,6 @@ export function ActionRail({
           nextReleaseLabel={nextReleaseLabel}
         />
       )}
-      <IconButton
-        label="More title actions"
-        className="bg-black/25 text-white hover:bg-black/55 hover:text-white"
-      >
-        <MoreVertical size={19} aria-hidden />
-      </IconButton>
     </div>
   );
 }

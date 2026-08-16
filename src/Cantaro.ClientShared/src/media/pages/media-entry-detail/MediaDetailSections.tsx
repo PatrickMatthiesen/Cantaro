@@ -245,9 +245,10 @@ export function StreamingDestinationsSection({
                   onClick={() => onSelect(destination.serviceId)}
                   className="group flex min-h-18 items-center gap-3 py-4 focus-visible:outline-2 focus-visible:outline-focus"
                 >
-                  <span className="inline-flex size-11 shrink-0 items-center justify-center bg-surface-subtle text-content transition-colors group-hover:text-personal-accent-strong">
+                  <span className="inline-flex size-11 shrink-0 items-center justify-center text-content">
                     <StreamingServiceIcon
                       serviceId={destination.serviceId}
+                      className="h-8 w-8"
                       aria-hidden
                     />
                   </span>
@@ -416,7 +417,7 @@ function CharacterGrid({
 }) {
   if (characters.length === 0) return null;
   return (
-    <ul className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+    <ul className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
       {characters.map((character) => (
         <li key={character.characterId} className="min-w-0">
           <CharacterTile character={character} />
