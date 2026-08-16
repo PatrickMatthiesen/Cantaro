@@ -381,16 +381,43 @@ export function CharactersSection(props: CharactersSectionProps) {
   const canToggle = data.characters.length > 6;
 
   return (
+    <CharacterSectionContent
+      data={data}
+      characters={visibleCharacters}
+      action={canToggle ? (showAll ? "Show primary" : "See all") : undefined}
+      onAction={
+        canToggle ? () => setShowAll((current) => !current) : undefined
+      }
+    />
+  );
+}
+
+export function ExpandedCharactersSection(props: CharactersSectionProps) {
+  const data = getCharacterSectionData(props);
+  return <CharacterSectionContent data={data} characters={data.characters} />;
+}
+
+function CharacterSectionContent({
+  data,
+  characters,
+  action,
+  onAction,
+}: {
+  data: CharacterSectionData;
+  characters: MediaProviderCharacterCreditDto[];
+  action?: string;
+  onAction?: () => void;
+}) {
+
+  return (
     <section id="characters" className="py-9">
       <DetailSectionHeading
         title="Main characters"
-        action={canToggle ? (showAll ? "Show primary" : "See all") : undefined}
-        onAction={
-          canToggle ? () => setShowAll((current) => !current) : undefined
-        }
+        action={action}
+        onAction={onAction}
       />
       <CharacterSectionMessage message={data.message} isError={data.isError} />
-      <CharacterGrid characters={visibleCharacters} />
+      <CharacterGrid characters={characters} />
     </section>
   );
 }

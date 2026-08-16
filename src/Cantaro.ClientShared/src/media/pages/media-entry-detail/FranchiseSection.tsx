@@ -140,11 +140,15 @@ function getNodeAction(
 
 function NodeCard({
   node,
-  ...navigation
-}: { node: MediaFranchiseNodeDto } & FranchiseNavigation) {
+  fill = false,
+  onNavigateTitle,
+}: {
+  node: MediaFranchiseNodeDto;
+  fill?: boolean;
+} & FranchiseNavigation) {
   const content = <NodeCardContent node={node} />;
-  const className = `group block w-44 min-w-0 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:w-48 ${node.isCurrent ? "cursor-default" : ""}`;
-  const action = getNodeAction(node, navigation);
+  const className = `group block min-w-0 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${fill ? "w-full" : "w-44 sm:w-48"} ${node.isCurrent ? "cursor-default" : ""}`;
+  const action = getNodeAction(node, { onNavigateTitle });
   if (action.kind === "title") {
     return (
       <button
@@ -248,16 +252,16 @@ function FranchiseBranches({
           <p className="text-sm text-content-muted">
             From <strong>{group.source.canonicalTitle}</strong>
           </p>
-          <ul className="mt-3 flex gap-4 overflow-x-auto pb-3">
+          <ul className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
             {group.branches.map((branch: FranchiseBranch) => (
               <li
                 key={`${branch.displayRelationType}:${branch.node.mediaTitleId}`}
-                className="shrink-0"
+                className="min-w-0"
               >
                 <span className="mb-2 block text-xs font-semibold text-content-subtle">
                   {relationLabel(branch.displayRelationType)}
                 </span>
-                <NodeCard node={branch.node} {...navigation} />
+                <NodeCard node={branch.node} fill {...navigation} />
               </li>
             ))}
           </ul>

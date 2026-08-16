@@ -22,6 +22,7 @@ import { EpisodesSection } from "./EpisodesSection";
 import {
   CharactersSection,
   CommunitySection,
+  ExpandedCharactersSection,
   InformationSection,
   ProviderSection,
   StreamingDestinationsSection,
@@ -99,18 +100,6 @@ function MediaDetailTabPanel({
         onRefresh={props.onReloadEpisodes}
       />
     ),
-    progress: (
-      <div
-        role="tabpanel"
-        id="media-detail-panel-progress"
-        aria-labelledby="media-detail-tab-progress"
-      >
-        <CommunitySection
-          entry={props.entry}
-          progressSummary={progressSummary}
-        />
-      </div>
-    ),
     providers: (
       <div
         role="tabpanel"
@@ -151,7 +140,7 @@ function MediaDetailTabPanel({
         id="media-detail-panel-characters"
         aria-labelledby="media-detail-tab-characters"
       >
-        <CharactersSection
+        <ExpandedCharactersSection
           entry={props.entry}
           availabilityByProviderLink={props.availabilityByProviderLink}
         />

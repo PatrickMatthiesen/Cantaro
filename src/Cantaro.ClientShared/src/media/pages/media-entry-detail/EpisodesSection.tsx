@@ -43,6 +43,12 @@ function getEpisodeProgressLabel(
   return "Not watched";
 }
 
+function episodeProgressClassName(progressLabel: string) {
+  if (progressLabel === "Watched") return "text-info-content";
+  if (progressLabel === "Up next") return "text-success-content";
+  return "text-warning-content";
+}
+
 function EpisodeAvailabilityLabel({
   destination,
 }: {
@@ -166,8 +172,10 @@ function EpisodeRow({
         <strong className="block truncate text-content">
           {destination?.title || `Episode ${episodeNumber}`}
         </strong>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-content-muted">
-          <span>{progressLabel}</span>
+        <div className="mt-1 grid grid-cols-[5.5rem_minmax(0,1fr)] items-baseline gap-x-3 text-sm">
+          <span className={episodeProgressClassName(progressLabel)}>
+            {progressLabel}
+          </span>
           <EpisodeAvailabilityLabel destination={destination} />
         </div>
       </div>
