@@ -59,7 +59,7 @@ function ConfiguredMusicPage(props: Pick<MusicPageProps, 'activeTabContext'>) {
           value={page.query}
           onChange={(event) => page.setQuery(event.target.value)}
           placeholder="Search songs, artists, albums…"
-          className="w-full rounded-xl border border-border-subtle bg-surface px-3 py-2.5 text-sm text-content outline-none placeholder:text-content-muted focus:border-focus"
+          className="min-h-11 w-full border border-border-subtle bg-surface px-3 text-sm text-content outline-none placeholder:text-content-muted focus:border-focus"
         />
       </label>
       <MusicResults

@@ -18,8 +18,8 @@ export function TabContextSummary({ context }: { context: ActiveTabContextState 
   const detail = contextDetail(context.snapshot);
 
   return (
-    <div className="mt-2 flex min-h-9 items-center gap-2 rounded-xl bg-surface-subtle px-3 text-xs text-content-muted" aria-live="polite">
-      <span className="size-2 rounded-full bg-accent" aria-hidden />
+    <div className="flex min-h-10 items-center gap-2 border-b border-border-subtle bg-surface-subtle px-4 text-xs text-content-muted" aria-live="polite">
+      <span className="size-2 rounded-full bg-personal-accent" aria-hidden />
       <span className="font-semibold text-content">Current tab</span>
       <span className="truncate">{provider} · {detail || `${pageKind} page`}</span>
     </div>

@@ -24,7 +24,7 @@ export function SettingsPage({ controller, onClose }: SettingsPageProps) {
         </div>
         <button
           type="button"
-          className="min-h-9 rounded-xl px-3 text-sm font-semibold text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="min-h-9 border border-border-subtle px-3 text-sm font-semibold text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           onClick={onClose}
         >
           Close
@@ -68,7 +68,7 @@ function ConnectionSettings({ controller }: { controller: SettingsController }) 
 
 function SessionRow({ controller }: { controller: SettingsController }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-subtle p-3">
+    <div className="flex items-center justify-between gap-4 border-y border-border-subtle py-3">
       <div className="min-w-0">
         <p className="text-sm font-semibold text-content">Browser authentication</p>
         <p className="mt-0.5 truncate text-xs text-content-muted"><SessionDescription controller={controller} /></p>
@@ -167,7 +167,7 @@ function UrlField({ id, label, detail, value, placeholder, disabled, onChange }:
         placeholder={placeholder}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-border-subtle bg-surface px-3 py-2.5 text-sm font-normal text-content outline-none transition-colors placeholder:text-content-muted focus:border-focus focus:ring-2 focus:ring-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-2 min-h-11 w-full border border-border-subtle bg-surface px-3 text-sm font-normal text-content outline-none transition-colors placeholder:text-content-muted focus:border-focus disabled:cursor-not-allowed disabled:opacity-60"
       />
       <span className="mt-1.5 block font-normal leading-5 text-content-muted">{detail}</span>
     </label>
@@ -182,7 +182,7 @@ function SettingToggle({ label, detail, checked, disabled, onChange }: {
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="mt-3 flex cursor-pointer items-start justify-between gap-4 rounded-xl py-2 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus">
+    <label className="mt-3 flex cursor-pointer items-start justify-between gap-4 border-t border-border-subtle py-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus">
       <span>
         <span className="block text-sm font-semibold text-content">{label}</span>
         <span className="mt-1 block max-w-xl text-xs leading-5 text-content-muted">{detail}</span>
@@ -195,7 +195,7 @@ function SettingToggle({ label, detail, checked, disabled, onChange }: {
           disabled={disabled}
           onChange={(event) => onChange(event.target.checked)}
         />
-        <span className="h-6 w-11 rounded-full bg-border-strong transition-colors peer-checked:bg-accent peer-disabled:cursor-not-allowed peer-disabled:opacity-60 after:absolute after:top-0.5 after:left-0.5 after:size-5 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-5" aria-hidden />
+        <span className="h-6 w-11 rounded-full bg-border-strong transition-colors peer-checked:bg-personal-accent peer-disabled:cursor-not-allowed peer-disabled:opacity-60 after:absolute after:top-0.5 after:left-0.5 after:size-5 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-5" aria-hidden />
       </span>
     </label>
   );

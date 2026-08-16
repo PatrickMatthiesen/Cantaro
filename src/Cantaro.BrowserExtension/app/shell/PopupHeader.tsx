@@ -13,18 +13,18 @@ export function PopupHeader({ section, configured, loading, onSelectSection, onO
   const primarySection = section === 'settings' ? undefined : section;
 
   return (
-    <header className="flex min-h-12 items-center gap-2 rounded-xl border border-border-subtle bg-surface p-1.5">
+    <header className="flex min-h-14 items-center gap-3 border-b border-border-subtle bg-canvas px-4">
       <AppNavigation activeSection={primarySection} onSelect={onSelectSection} />
-      <span className="min-w-0 flex-1 truncate pl-1 text-sm font-semibold text-content">Cantaro</span>
+      <span className="min-w-0 flex-1 truncate text-sm font-bold text-content">Cantaro</span>
       {!loading && !configured ? (
-        <span className="rounded-lg bg-warning-surface px-2 py-1 text-xs font-semibold text-warning-content">
+        <span className="bg-warning-surface px-2 py-1 text-xs font-semibold text-warning-content">
           Setup needed
         </span>
       ) : null}
       <button
         type="button"
-        className={`inline-flex size-9 items-center justify-center rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${section === 'settings'
-          ? 'bg-accent-soft text-accent-strong'
+        className={`inline-flex size-10 items-center justify-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${section === 'settings'
+          ? 'bg-surface-hover text-personal-accent-strong'
           : 'text-content-muted hover:bg-surface-hover'}`}
         onClick={onOpenSettings}
         aria-label="Open extension settings"
