@@ -1,7 +1,8 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
-  --font-display: "Space Grotesk", "Inter", "SF Pro Display", system-ui, sans-serif;
+  --font-display:
+    "Space Grotesk", "Inter", "SF Pro Display", system-ui, sans-serif;
 
   --color-brand-50: oklch(92.76% 0.03 21.7);
   --color-brand-100: oklch(87.67% 0.05 21.1);
@@ -40,6 +41,14 @@
   --color-personal-accent-strong: #8a5700;
   --color-personal-accent-hover: #e6ad45;
   --color-personal-accent-content: #241704;
+
+  --color-immersive-canvas: #d7dde3;
+  --color-immersive-content: #111827;
+  --color-immersive-content-muted: #374151;
+  --color-immersive-scrim-strong: rgb(223 228 232 / 95%);
+  --color-immersive-scrim-medium: rgb(217 223 229 / 72%);
+  --color-immersive-scrim-soft: rgb(201 209 217 / 20%);
+  --color-immersive-scrim-base: rgb(213 219 225 / 70%);
 
   --color-info-surface: #e0f2fe;
   --color-info-content: #0369a1;
@@ -95,6 +104,14 @@
     --color-personal-accent-strong: #ffd477;
     --color-personal-accent-hover: #ffd477;
     --color-personal-accent-content: #181106;
+
+    --color-immersive-canvas: #090b10;
+    --color-immersive-content: #ffffff;
+    --color-immersive-content-muted: rgb(255 255 255 / 78%);
+    --color-immersive-scrim-strong: #090b10;
+    --color-immersive-scrim-medium: rgb(9 11 16 / 82%);
+    --color-immersive-scrim-soft: rgb(9 11 16 / 25%);
+    --color-immersive-scrim-base: #090b10;
 
     --color-info-surface: rgb(6 182 212 / 18%);
     --color-info-content: #67e8f9;

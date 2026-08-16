@@ -1,17 +1,22 @@
-import { Check, ChevronRight, RotateCcw } from 'lucide-react';
-import { DetailArtwork } from '../../components/media-entry-detail/EntryDisplayPrimitives';
-import { mediaKindLabel } from '../../services/mediaFormatting';
-import type { MediaFranchiseGraphDto, MediaFranchiseNodeDto } from '../../services/mediaApi';
-import type { FranchiseGraphState } from './mediaEntryDetailTypes';
+import { Check, ChevronRight, RotateCcw } from "lucide-react";
+import { ActionButton } from "../../../ui";
+import { DetailArtwork } from "../../components/media-entry-detail/EntryDisplayPrimitives";
+import { mediaKindLabel } from "../../services/mediaFormatting";
+import type {
+  MediaFranchiseGraphDto,
+  MediaFranchiseNodeDto,
+} from "../../services/mediaApi";
+import { DetailSectionHeading } from "./MediaDetailSections";
+import type { FranchiseGraphState } from "./mediaEntryDetailTypes";
 import {
   buildFranchisePresentation,
   continuityRelationLabel,
   relationLabel,
   type FranchiseBranch,
   type FranchisePresentation,
-} from './franchiseGraph';
+} from "./franchiseGraph";
 
-type FranchiseVariant = 'preview' | 'full';
+type FranchiseVariant = "preview" | "full";
 
 interface FranchiseSectionProps {
   state: FranchiseGraphState;
@@ -21,123 +26,171 @@ interface FranchiseSectionProps {
   onNavigateTitle?: (mediaTitleId: string) => void;
 }
 
-type FranchiseNavigation = Pick<FranchiseSectionProps, 'onNavigateTitle'>;
+type FranchiseNavigation = Pick<FranchiseSectionProps, "onNavigateTitle">;
 
 function libraryStatusLabel(status?: string): string | null {
   if (!status) return null;
   const labels: Record<string, string> = {
-    completed: 'Completed',
-    current: 'Watching',
-    dropped: 'Dropped',
-    paused: 'Paused',
-    planned: 'Planning',
-    repeating: 'Rewatching',
+    completed: "Completed",
+    current: "Watching",
+    dropped: "Dropped",
+    paused: "Paused",
+    planned: "Planning",
+    repeating: "Rewatching",
   };
   return labels[status.toLowerCase()] ?? status;
 }
 
 function nodeMetadata(node: MediaFranchiseNodeDto): string {
   const formatLabels: Record<string, string> = {
-    manga: 'Manga', movie: 'Movie', music: 'Music', novel: 'Novel',
-    ona: 'ONA', one_shot: 'One-shot', ova: 'OVA', special: 'Special',
-    tv: 'TV', tv_short: 'TV short',
+    manga: "Manga",
+    movie: "Movie",
+    music: "Music",
+    novel: "Novel",
+    ona: "ONA",
+    one_shot: "One-shot",
+    ova: "OVA",
+    special: "Special",
+    tv: "TV",
+    tv_short: "TV short",
   };
-  const values = [
-    node.mediaFormat ? (formatLabels[node.mediaFormat] ?? node.mediaFormat) : mediaKindLabel(node.mediaKind),
+  return [
+    node.mediaFormat
+      ? (formatLabels[node.mediaFormat] ?? node.mediaFormat)
+      : mediaKindLabel(node.mediaKind),
     node.episodeCount ? `${node.episodeCount} episodes` : null,
     node.startYear ? String(node.startYear) : null,
-  ];
-  return values.filter(Boolean).join(' · ');
-}
-
-function libraryProgress(node: MediaFranchiseNodeDto): string | null {
-  return node.progressEpisodes != null
-    ? `${node.progressEpisodes}${node.episodeCount ? `/${node.episodeCount}` : ''} episodes`
-    : null;
-}
-
-const libraryStatusTones: Record<string, string> = {
-  completed: 'is-completed',
-  current: 'is-active',
-  dropped: 'is-dropped',
-  paused: 'is-pending',
-  planned: 'is-pending',
-  repeating: 'is-active',
-};
-
-function libraryStatusTone(status?: string): string {
-  if (!status) return '';
-  return libraryStatusTones[status.toLowerCase()] ?? 'is-custom';
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function NodeState({ node }: { node: MediaFranchiseNodeDto }) {
-  if (node.isInLibrary) {
-    const status = libraryStatusLabel(node.viewerStatus) ?? 'In your library';
-    const progress = libraryProgress(node);
-    const tone = libraryStatusTone(node.viewerStatus);
+  if (!node.isInLibrary) {
     return (
-      <span className={`media-detail-franchise-state is-tracked ${tone}`.trim()}>
-        <span className="media-detail-franchise-status-line">
-          <Check aria-hidden />
-          <span>{status}</span>
-        </span>
-        {progress ? <span className="media-detail-franchise-progress">{progress}</span> : null}
-      </span>
+      <span className="block text-xs text-content-subtle">Not in library</span>
     );
   }
-
-  return <span className="media-detail-franchise-state">Not in library</span>;
+  const status = libraryStatusLabel(node.viewerStatus) ?? "In your library";
+  const progress =
+    node.progressEpisodes != null
+      ? `${node.progressEpisodes}${node.episodeCount ? `/${node.episodeCount}` : ""} episodes`
+      : null;
+  return (
+    <span className="block text-xs text-success-content">
+      <span className="inline-flex items-center gap-1 font-semibold">
+        <Check size={13} aria-hidden /> {status}
+      </span>
+      {progress ? (
+        <span className="ml-2 text-content-subtle">{progress}</span>
+      ) : null}
+    </span>
+  );
 }
 
 function NodeCardContent({ node }: { node: MediaFranchiseNodeDto }) {
   return (
     <>
-      <div className="media-detail-franchise-thumb">
-        <DetailArtwork posterUrl={node.posterUrl} title={node.canonicalTitle} />
-      </div>
-      <span className="media-detail-franchise-copy">
-        <strong>{node.canonicalTitle}</strong>
-        <span>{nodeMetadata(node)}</span>
-        <NodeState node={node} />
+      <span className="block aspect-[3/4] overflow-hidden bg-surface-subtle">
+        <DetailArtwork
+          posterUrl={node.posterUrl}
+          title={node.canonicalTitle}
+          className="object-cover transition duration-200 group-hover:scale-[1.025] group-hover:saturate-125 motion-reduce:transition-none"
+        />
+      </span>
+      <span className="mt-3 block min-w-0 text-left">
+        <strong className="block truncate text-content group-hover:text-personal-accent-strong">
+          {node.canonicalTitle}
+        </strong>
+        <span className="mt-1 block truncate text-xs text-content-muted">
+          {nodeMetadata(node)}
+        </span>
+        <span className="mt-1 block">
+          <NodeState node={node} />
+        </span>
       </span>
     </>
   );
 }
 
 type NodeAction =
-  | { kind: 'title'; mediaTitleId: string; navigate: (mediaTitleId: string) => void }
-  | { kind: 'external'; url: string }
-  | { kind: 'static' };
+  | {
+      kind: "title";
+      mediaTitleId: string;
+      navigate: (mediaTitleId: string) => void;
+    }
+  | { kind: "external"; url: string }
+  | { kind: "static" };
 
-function getNodeAction(node: MediaFranchiseNodeDto, navigation: FranchiseNavigation): NodeAction {
-  if (node.isCurrent) return { kind: 'static' };
+function getNodeAction(
+  node: MediaFranchiseNodeDto,
+  navigation: FranchiseNavigation,
+): NodeAction {
+  if (node.isCurrent) return { kind: "static" };
   if (navigation.onNavigateTitle) {
-    return { kind: 'title', mediaTitleId: node.mediaTitleId, navigate: navigation.onNavigateTitle };
+    return {
+      kind: "title",
+      mediaTitleId: node.mediaTitleId,
+      navigate: navigation.onNavigateTitle,
+    };
   }
-  if (node.externalUrl) return { kind: 'external', url: node.externalUrl };
-  return { kind: 'static' };
+  if (node.externalUrl) return { kind: "external", url: node.externalUrl };
+  return { kind: "static" };
 }
 
-function NodeCard({ node, ...navigation }: { node: MediaFranchiseNodeDto } & FranchiseNavigation) {
+function NodeCard({
+  node,
+  ...navigation
+}: { node: MediaFranchiseNodeDto } & FranchiseNavigation) {
   const content = <NodeCardContent node={node} />;
-  const className = `media-detail-franchise-node${node.isCurrent ? ' is-current' : ''}`;
+  const className = `group block w-44 min-w-0 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:w-48 ${node.isCurrent ? "cursor-default" : ""}`;
   const action = getNodeAction(node, navigation);
-
-  if (action.kind === 'title') {
-    return <button type="button" className={className} onClick={() => action.navigate(action.mediaTitleId)}>{content}</button>;
+  if (action.kind === "title") {
+    return (
+      <button
+        type="button"
+        className={className}
+        onClick={() => action.navigate(action.mediaTitleId)}
+      >
+        {content}
+      </button>
+    );
   }
-
-  if (action.kind === 'external') {
-    return <a className={className} href={action.url} target="_blank" rel="noreferrer">{content}</a>;
+  if (action.kind === "external") {
+    return (
+      <a
+        className={className}
+        href={action.url}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {content}
+      </a>
+    );
   }
-
-  return <article className={className} aria-current={node.isCurrent ? 'page' : undefined}>{content}</article>;
+  return (
+    <article
+      className={className}
+      aria-current={node.isCurrent ? "page" : undefined}
+    >
+      {content}
+    </article>
+  );
 }
 
 function LoadingFranchise() {
   return (
-    <div className="media-detail-franchise-loading" aria-busy="true" aria-label="Loading franchise connections">
-      {[0, 1, 2].map((index) => <span key={index} className="media-detail-franchise-skeleton" />)}
+    <div
+      className="mt-5 flex gap-4 overflow-hidden"
+      aria-busy="true"
+      aria-label="Loading franchise connections"
+    >
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className="block aspect-[3/4] w-44 shrink-0 animate-pulse bg-surface-subtle"
+        />
+      ))}
     </div>
   );
 }
@@ -152,13 +205,22 @@ function ContinuityLane({
   navigation: FranchiseNavigation;
 }) {
   return (
-    <ol className="media-detail-franchise-sequence" aria-label="Episode continuity order">
+    <ol
+      className="mt-5 flex items-start gap-3 overflow-x-auto pb-3"
+      aria-label="Episode continuity order"
+    >
       {nodes.map((node, index) => (
-        <li key={node.mediaTitleId} className="media-detail-franchise-step">
+        <li key={node.mediaTitleId} className="flex shrink-0 items-start gap-3">
           {index > 0 ? (
-            <span className="media-detail-franchise-connector">
-              <ChevronRight aria-hidden />
-              <span>{continuityRelationLabel(graph, nodes[index - 1].mediaTitleId, node.mediaTitleId)}</span>
+            <span className="mt-28 inline-flex w-12 shrink-0 flex-col items-center gap-1 text-center text-[0.65rem] text-content-subtle">
+              <ChevronRight size={18} aria-hidden />
+              <span>
+                {continuityRelationLabel(
+                  graph,
+                  nodes[index - 1].mediaTitleId,
+                  node.mediaTitleId,
+                )}
+              </span>
             </span>
           ) : null}
           <NodeCard node={node} {...navigation} />
@@ -166,71 +228,6 @@ function ContinuityLane({
       ))}
     </ol>
   );
-}
-
-function BranchCard({
-  branch,
-  navigation,
-}: {
-  branch: FranchiseBranch;
-  navigation: FranchiseNavigation;
-}) {
-  return (
-    <li>
-      <span className="media-detail-franchise-relation">{relationLabel(branch.displayRelationType)}</span>
-      <NodeCard node={branch.node} {...navigation} />
-    </li>
-  );
-}
-
-function FranchiseHeading({ onViewAll }: { onViewAll?: () => void }) {
-  return (
-    <div className="media-detail-section-heading">
-      <div>
-        <h3>Franchise order</h3>
-        <p>Direct episode continuity, followed by related stories.</p>
-      </div>
-      {onViewAll ? <button type="button" onClick={onViewAll}>View full graph</button> : null}
-    </div>
-  );
-}
-
-function LoadingSection() {
-  return (
-    <section className="media-detail-section">
-      <FranchiseHeading />
-      <LoadingFranchise />
-    </section>
-  );
-}
-
-function ErrorSection({ onRetry }: { onRetry: () => void }) {
-  return (
-    <section className="media-detail-section">
-      <FranchiseHeading />
-      <div className="media-detail-franchise-message" role="alert">
-        <p>Couldn’t load franchise connections from AniList.</p>
-        <button type="button" onClick={onRetry}><RotateCcw aria-hidden />Retry</button>
-      </div>
-    </section>
-  );
-}
-
-function FranchiseSummary({
-  variant,
-  hasRelations,
-  relatedTitleCount,
-}: {
-  variant: FranchiseVariant;
-  hasRelations: boolean;
-  relatedTitleCount: number;
-}) {
-  if (!hasRelations) {
-    return <p className="media-detail-franchise-empty">AniList lists no prequels, sequels, or related titles for this entry.</p>;
-  }
-  if (variant !== 'preview' || relatedTitleCount === 0) return null;
-  const noun = relatedTitleCount === 1 ? 'title' : 'titles';
-  return <p className="media-detail-franchise-summary">{relatedTitleCount} related {noun} in the full graph.</p>;
 }
 
 function FranchiseBranches({
@@ -242,23 +239,112 @@ function FranchiseBranches({
 }) {
   if (presentation.branchGroups.length === 0) return null;
   return (
-    <div className="media-detail-franchise-branches">
-      <h4>Related stories and adaptations</h4>
+    <div className="mt-9">
+      <h3 className="text-lg font-bold text-content">
+        Related stories and adaptations
+      </h3>
       {presentation.branchGroups.map((group) => (
-        <section key={group.source.mediaTitleId}>
-          <p>From <strong>{group.source.canonicalTitle}</strong></p>
-          <ul>
-            {group.branches.map((branch) => (
-              <BranchCard
+        <section key={group.source.mediaTitleId} className="mt-5">
+          <p className="text-sm text-content-muted">
+            From <strong>{group.source.canonicalTitle}</strong>
+          </p>
+          <ul className="mt-3 flex gap-4 overflow-x-auto pb-3">
+            {group.branches.map((branch: FranchiseBranch) => (
+              <li
                 key={`${branch.displayRelationType}:${branch.node.mediaTitleId}`}
-                branch={branch}
-                navigation={navigation}
-              />
+                className="shrink-0"
+              >
+                <span className="mb-2 block text-xs font-semibold text-content-subtle">
+                  {relationLabel(branch.displayRelationType)}
+                </span>
+                <NodeCard node={branch.node} {...navigation} />
+              </li>
             ))}
           </ul>
         </section>
       ))}
     </div>
+  );
+}
+
+function FranchiseHeading({ onViewAll }: { onViewAll?: () => void }) {
+  return (
+    <DetailSectionHeading
+      title="Franchise order"
+      detail="Direct episode continuity, followed by related stories."
+      action={onViewAll ? "View full graph" : undefined}
+      onAction={onViewAll}
+    />
+  );
+}
+
+function LoadingSection() {
+  return (
+    <section className="py-9">
+      <FranchiseHeading />
+      <LoadingFranchise />
+    </section>
+  );
+}
+
+function ErrorSection({ onRetry }: { onRetry: () => void }) {
+  return (
+    <section className="py-9">
+      <FranchiseHeading />
+      <div
+        className="mt-5 flex flex-wrap items-center justify-between gap-4 py-5"
+        role="alert"
+      >
+        <p className="text-content-muted">
+          Couldn’t load franchise connections from AniList.
+        </p>
+        <ActionButton tone="secondary" onClick={onRetry}>
+          <RotateCcw size={17} aria-hidden /> Retry
+        </ActionButton>
+      </div>
+    </section>
+  );
+}
+
+function FranchiseRelations({
+  graph,
+  presentation,
+  navigation,
+}: {
+  graph: MediaFranchiseGraphDto;
+  presentation: ReturnType<typeof buildFranchisePresentation>;
+  navigation: FranchiseNavigation;
+}) {
+  const hasRelations = graph.relations.length > 0 || graph.nodes.length > 1;
+  if (!hasRelations) {
+    return (
+      <p className="mt-5 py-4 text-content-muted">
+        AniList lists no prequels, sequels, or related titles for this entry.
+      </p>
+    );
+  }
+  return (
+    <ContinuityLane
+      graph={graph}
+      nodes={presentation.continuityNodes}
+      navigation={navigation}
+    />
+  );
+}
+
+function FranchisePreviewSummary({
+  variant,
+  relatedTitleCount,
+}: {
+  variant: FranchiseVariant;
+  relatedTitleCount: number;
+}) {
+  if (variant !== "preview" || relatedTitleCount === 0) return null;
+  return (
+    <p className="mt-3 text-sm text-content-muted">
+      {relatedTitleCount} related {relatedTitleCount === 1 ? "title" : "titles"}{" "}
+      in the full graph.
+    </p>
   );
 }
 
@@ -268,25 +354,13 @@ function FullFranchiseBranches({
   navigation,
 }: {
   variant: FranchiseVariant;
-  presentation: FranchisePresentation;
+  presentation: ReturnType<typeof buildFranchisePresentation>;
   navigation: FranchiseNavigation;
 }) {
-  if (variant !== 'full') return null;
-  return <FranchiseBranches presentation={presentation} navigation={navigation} />;
-}
-
-function FranchiseSource({ graph }: { graph: MediaFranchiseGraphDto }) {
-  const providerName = graph.sourceProvider === 'anilist' ? 'AniList' : graph.sourceProvider;
-  const continuityNote = graph.continuity.isComplete ? '' : ' · Continuity may be incomplete';
-  return <p className="media-detail-franchise-source">Relations from {providerName}{continuityNote}</p>;
-}
-
-function getViewAllAction(
-  variant: FranchiseVariant,
-  relatedTitleCount: number,
-  onViewAll?: () => void,
-) {
-  return variant === 'preview' && relatedTitleCount > 0 ? onViewAll : undefined;
+  if (variant !== "full") return null;
+  return (
+    <FranchiseBranches presentation={presentation} navigation={navigation} />
+  );
 }
 
 function LoadedSection({
@@ -301,35 +375,48 @@ function LoadedSection({
   navigation: FranchiseNavigation;
 }) {
   const presentation = buildFranchisePresentation(graph);
-  const hasRelations = graph.relations.length > 0 || graph.nodes.length > 1;
-  const viewAllAction = getViewAllAction(variant, presentation.relatedTitleCount, onViewAll);
+  const viewAllAction =
+    variant === "preview" && presentation.relatedTitleCount > 0
+      ? onViewAll
+      : undefined;
+  const providerName =
+    graph.sourceProvider === "anilist" ? "AniList" : graph.sourceProvider;
 
   return (
-    <section className="media-detail-section">
+    <section className="py-9">
       <FranchiseHeading onViewAll={viewAllAction} />
-      <ContinuityLane graph={graph} nodes={presentation.continuityNodes} navigation={navigation} />
-      <FranchiseSummary
+      <FranchiseRelations
+        graph={graph}
+        presentation={presentation}
+        navigation={navigation}
+      />
+      <FranchisePreviewSummary
         variant={variant}
-        hasRelations={hasRelations}
         relatedTitleCount={presentation.relatedTitleCount}
       />
-      <FullFranchiseBranches variant={variant} presentation={presentation} navigation={navigation} />
-      <FranchiseSource graph={graph} />
+      <FullFranchiseBranches
+        variant={variant}
+        presentation={presentation}
+        navigation={navigation}
+      />
+      <p className="mt-5 text-xs text-content-subtle">
+        Relations from {providerName}
+        {graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}
+      </p>
     </section>
   );
 }
 
 export function FranchiseSection(props: FranchiseSectionProps) {
-  if (props.state.status === 'loading') return <LoadingSection />;
-  if (props.state.status === 'error') return <ErrorSection onRetry={props.onRetry} />;
+  if (props.state.status === "loading") return <LoadingSection />;
+  if (props.state.status === "error")
+    return <ErrorSection onRetry={props.onRetry} />;
   return (
     <LoadedSection
       graph={props.state.value}
       variant={props.variant}
       onViewAll={props.onViewAll}
-      navigation={{
-        onNavigateTitle: props.onNavigateTitle,
-      }}
+      navigation={{ onNavigateTitle: props.onNavigateTitle }}
     />
   );
 }

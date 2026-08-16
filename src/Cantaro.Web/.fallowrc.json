@@ -1,14 +1,10 @@
 {
-    "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-    "health": {
-        "maxCyclomatic": 12,
-        "maxCognitive": 13,
-        "maxCrap": 50
-    },
-    "ignoreDependencies": [
-        "@cantaro/client-shared"
-    ],
-    "ignorePatterns": [
-        "src/routeTree.gen.ts"
-    ]
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "health": {
+    "maxCyclomatic": 12,
+    "maxCognitive": 13,
+    "maxCrap": 50
+  },
+  "ignoreDependencies": ["@cantaro/client-shared"],
+  "ignorePatterns": ["src/design/**", "src/routeTree.gen.ts"]
 }

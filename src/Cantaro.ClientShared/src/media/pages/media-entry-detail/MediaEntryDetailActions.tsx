@@ -1,6 +1,4 @@
 import {
-  CheckCircle2,
-  ChevronDown,
   Clock3,
   Minus,
   MoreVertical,
@@ -9,15 +7,21 @@ import {
   RotateCw,
   Save,
   Star,
-} from 'lucide-react';
-import { formatNextReleaseDisplay } from '../../services/mediaFormatting';
-import type { MediaContinueWatchingDto } from '../../services/mediaApi';
-import type { StreamingDestination } from '../../services/streamingDestinations';
+} from "lucide-react";
+import {
+  ActionButton,
+  IconButton,
+  SelectField,
+  actionClassName,
+} from "../../../ui";
+import { formatNextReleaseDisplay } from "../../services/mediaFormatting";
+import type { MediaContinueWatchingDto } from "../../services/mediaApi";
+import type { StreamingDestination } from "../../services/streamingDestinations";
 import {
   STREAMING_SERVICES,
   type StreamingServiceId,
-} from '../../services/streamingServices';
-import { StreamingServiceIcon } from '../../components/StreamingServiceIcon';
+} from "../../services/streamingServices";
+import { StreamingServiceIcon } from "../../components/StreamingServiceIcon";
 import {
   clampProgressValue,
   getEntryStatusChanged,
@@ -25,20 +29,23 @@ import {
   getPrimaryProgressSummary,
   getStatusSaveLabel,
   isStatusRefreshDisabled,
-} from './mediaEntryDetailModel';
-import { getContinueLinkActions, type ContinueLinkAction } from './continueWatchingAction';
+} from "./mediaEntryDetailModel";
+import {
+  getContinueLinkActions,
+  type ContinueLinkAction,
+} from "./continueWatchingAction";
 import type {
   ContinueWatchingState,
   MediaEntryDetailContentProps,
-} from './mediaEntryDetailTypes';
+} from "./mediaEntryDetailTypes";
 
 const NORMALIZED_STATUSES = [
-  { value: 'current', label: 'Watching / Reading' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'planned', label: 'Planning' },
-  { value: 'paused', label: 'Paused' },
-  { value: 'dropped', label: 'Dropped' },
-  { value: 'repeating', label: 'Rewatching / Rereading' },
+  { value: "current", label: "Watching / Reading" },
+  { value: "completed", label: "Completed" },
+  { value: "planned", label: "Planning" },
+  { value: "paused", label: "Paused" },
+  { value: "dropped", label: "Dropped" },
+  { value: "repeating", label: "Rewatching / Rereading" },
 ];
 
 function ProgressStepper({
@@ -56,66 +63,119 @@ function ProgressStepper({
   const sliderMax = Math.max(max ?? 100, currentValue, 1);
   const canDecrease = currentValue > 0;
   const canIncrease = max ? currentValue < max : true;
-  const setProgressValue = (nextValue: number) => onChange(clampProgressValue(nextValue, max));
+  const progressPercent = Math.min((currentValue / sliderMax) * 100, 100);
+  const setProgressValue = (nextValue: number) =>
+    onChange(clampProgressValue(nextValue, max));
 
   return (
-    <div className="media-detail-stepper">
-      <div className="media-detail-stepper-row">
-        <button
-          type="button"
-          onClick={() => setProgressValue(currentValue - 1)}
-          disabled={!canDecrease}
-          aria-label={`Decrease ${label.toLowerCase()}`}
-        >
-          <Minus aria-hidden />
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={sliderMax}
-          step={1}
-          value={currentValue}
-          onChange={(event) => setProgressValue(Number(event.target.value))}
-          aria-label={`${label} progress`}
-        />
-        <button
-          type="button"
-          onClick={() => setProgressValue(currentValue + 1)}
-          disabled={!canIncrease}
-          aria-label={`Increase ${label.toLowerCase()}`}
-        >
-          <Plus aria-hidden />
-        </button>
-      </div>
+    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+      <IconButton
+        label={`Decrease ${label.toLowerCase()}`}
+        onClick={() => setProgressValue(currentValue - 1)}
+        disabled={!canDecrease}
+        className="hover:bg-danger-surface hover:text-danger-content"
+      >
+        <Minus size={18} aria-hidden />
+      </IconButton>
+      <input
+        type="range"
+        min={0}
+        max={sliderMax}
+        step={1}
+        value={currentValue}
+        onChange={(event) => setProgressValue(Number(event.target.value))}
+        aria-label={`${label} progress`}
+        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none bg-surface-subtle accent-personal-accent outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-personal-accent [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-personal-accent"
+        style={{
+          background: `linear-gradient(to right, var(--color-personal-accent) ${progressPercent}%, var(--color-surface-subtle) ${progressPercent}%)`,
+        }}
+      />
+      <IconButton
+        label={`Increase ${label.toLowerCase()}`}
+        onClick={() => setProgressValue(currentValue + 1)}
+        disabled={!canIncrease}
+        className="hover:bg-success-surface hover:text-success-content"
+      >
+        <Plus size={18} aria-hidden />
+      </IconButton>
     </div>
   );
 }
 
 type ProgressCockpitProps = Pick<
   MediaEntryDetailContentProps,
-  'entry'
-  | 'selectedStatus'
-  | 'progressEpisodes'
-  | 'progressChapters'
-  | 'progressVolumes'
-  | 'isRefreshingProgress'
-  | 'isSavingStatus'
-  | 'isAddingToLibrary'
-  | 'onSetSelectedStatus'
-  | 'onSetProgressEpisodes'
-  | 'onSetProgressChapters'
-  | 'onSetProgressVolumes'
-  | 'onRefreshProgress'
-  | 'onSaveStatus'
-  | 'onAddToLibrary'
+  | "entry"
+  | "selectedStatus"
+  | "progressEpisodes"
+  | "progressChapters"
+  | "progressVolumes"
+  | "isRefreshingProgress"
+  | "isSavingStatus"
+  | "isAddingToLibrary"
+  | "onSetSelectedStatus"
+  | "onSetProgressEpisodes"
+  | "onSetProgressChapters"
+  | "onSetProgressVolumes"
+  | "onRefreshProgress"
+  | "onAddToLibrary"
 >;
 
-function ProgressSyncStatus({ hasStatusChanged }: { hasStatusChanged: boolean }) {
+function StatusSelect({
+  value,
+  onChange,
+  visuallyHiddenLabel = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  visuallyHiddenLabel?: boolean;
+}) {
   return (
-    <span className={`media-detail-sync-chip ${hasStatusChanged ? 'media-detail-sync-chip--pending' : 'media-detail-sync-chip--ok'}`}>
-      {hasStatusChanged ? <Clock3 aria-hidden /> : <CheckCircle2 aria-hidden />}
-      {hasStatusChanged ? 'Unsaved' : 'Synced'}
-    </span>
+    <SelectField
+      label="Library status"
+      visuallyHiddenLabel={visuallyHiddenLabel}
+      name="status"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      containerClassName="min-w-44"
+    >
+      {NORMALIZED_STATUSES.map((status) => (
+        <option key={status.value} value={status.value}>
+          {status.label}
+        </option>
+      ))}
+    </SelectField>
+  );
+}
+
+export function AddToLibraryActions({
+  selectedStatus,
+  isAddingToLibrary,
+  onSetSelectedStatus,
+  onAddToLibrary,
+}: Pick<
+  ProgressCockpitProps,
+  | "selectedStatus"
+  | "isAddingToLibrary"
+  | "onSetSelectedStatus"
+  | "onAddToLibrary"
+>) {
+  return (
+    <>
+      <StatusSelect
+        value={selectedStatus}
+        onChange={onSetSelectedStatus}
+        visuallyHiddenLabel
+      />
+      <ActionButton
+        tone="personal"
+        onClick={onAddToLibrary}
+        disabled={isAddingToLibrary}
+        aria-busy={isAddingToLibrary}
+        busyLabel="Adding…"
+      >
+        <Plus size={18} aria-hidden /> Add to library
+      </ActionButton>
+    </>
   );
 }
 
@@ -127,64 +187,95 @@ function ProgressControls({
   capabilities: ReturnType<typeof getProgressCapabilities>;
 }) {
   return (
-    <>
+    <div className="grid min-w-0 flex-1 gap-2">
       {capabilities.supportsEpisodes ? (
-        <ProgressStepper label="Episodes" value={props.progressEpisodes} max={props.entry.title.episodeCount} onChange={props.onSetProgressEpisodes} />
+        <ProgressStepper
+          label="Episodes"
+          value={props.progressEpisodes}
+          max={props.entry.title.episodeCount}
+          onChange={props.onSetProgressEpisodes}
+        />
       ) : null}
       {capabilities.supportsChapters ? (
-        <ProgressStepper label="Chapters" value={props.progressChapters} max={props.entry.title.chapterCount} onChange={props.onSetProgressChapters} />
+        <ProgressStepper
+          label="Chapters"
+          value={props.progressChapters}
+          max={props.entry.title.chapterCount}
+          onChange={props.onSetProgressChapters}
+        />
       ) : null}
       {capabilities.supportsVolumes ? (
-        <ProgressStepper label="Volumes" value={props.progressVolumes} max={props.entry.title.volumeCount} onChange={props.onSetProgressVolumes} />
+        <ProgressStepper
+          label="Volumes"
+          value={props.progressVolumes}
+          max={props.entry.title.volumeCount}
+          onChange={props.onSetProgressVolumes}
+        />
       ) : null}
-    </>
-  );
-}
-
-function StatusSelect({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <select name="status" value={value} onChange={(event) => onChange(event.target.value)}>
-      {NORMALIZED_STATUSES.map((status) => (
-        <option key={status.value} value={status.value}>{status.label}</option>
-      ))}
-    </select>
-  );
-}
-
-function ProgressScoreRow({ props }: { props: ProgressCockpitProps }) {
-  return (
-    <div className="media-detail-score-row">
-      <div className="media-detail-status-control">
-        <StatusSelect value={props.selectedStatus} onChange={props.onSetSelectedStatus} />
-        <button
-          type="button"
-          className="media-detail-refresh-status"
-          onClick={props.onRefreshProgress}
-          disabled={isStatusRefreshDisabled(props.entry.isConnected, props.isSavingStatus, props.isRefreshingProgress)}
-          aria-busy={props.isRefreshingProgress}
-          aria-label="Refresh progress from provider"
-          title="Refresh progress from provider"
-        >
-          <RotateCw className={props.isRefreshingProgress ? 'media-detail-spin' : ''} aria-hidden />
-        </button>
-      </div>
-      <div className="media-detail-score">
-        <p>Your score</p>
-        <div aria-label="User score unavailable">
-          {[1, 2, 3, 4, 5].map((star) => <Star key={star} aria-hidden />)}
-        </div>
-      </div>
     </div>
   );
 }
 
-export function ProgressCockpit(props: ProgressCockpitProps) {
+function EmptyScore() {
+  return (
+    <div className="flex gap-1 text-content-subtle" aria-label="No score set">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          aria-label={`Set score to ${star} stars`}
+          className="inline-flex size-8 items-center justify-center hover:text-personal-accent-strong focus-visible:outline-2 focus-visible:outline-focus"
+        >
+          <Star size={18} aria-hidden />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ProgressStateMessage({ status }: { status: "loading" | "error" }) {
+  return (
+    <section
+      className="border-b border-border-subtle px-4 py-7 sm:px-7 xl:px-9"
+      aria-busy={status === "loading"}
+    >
+      <h2 className="font-bold text-content">
+        {status === "loading"
+          ? "Loading your progress…"
+          : "Couldn't load your progress"}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-content-muted">
+        Public title information stays available while Cantaro loads your
+        private library state.
+      </p>
+    </section>
+  );
+}
+
+function NotInLibraryProgress({ total }: { total?: number }) {
+  return (
+    <section className="grid gap-6 border-b border-border-subtle px-4 py-7 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center sm:px-7 xl:px-9">
+      <div className="min-w-36">
+        <h2 className="text-sm font-semibold text-content-muted">
+          Your progress
+        </h2>
+        <p className="mt-2 text-2xl font-black tabular-nums text-content">
+          <span className="text-personal-accent-strong">0</span>
+          <span className="text-content-subtle"> / {total ?? "?"}</span>
+        </p>
+      </div>
+      <p className="text-sm text-content-muted sm:text-center">
+        Add this title to track progress.
+      </p>
+      <div>
+        <p className="mb-1.5 text-sm text-content-muted">Your score</p>
+        <EmptyScore />
+      </div>
+    </section>
+  );
+}
+
+function TrackedProgressCockpit(props: ProgressCockpitProps) {
   const capabilities = getProgressCapabilities(props.entry.title);
   const progressSummary = getPrimaryProgressSummary(
     props.entry.title,
@@ -194,55 +285,80 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
   );
   const hasStatusChanged = getEntryStatusChanged(props);
 
-  if (props.entry.viewerStateStatus !== 'loaded') {
-    return (
-      <section className="media-detail-progress-card media-detail-add-card" aria-busy={props.entry.viewerStateStatus === 'loading'}>
-        <div>
-          <p className="media-detail-add-kicker">Your library</p>
-          <h2>{props.entry.viewerStateStatus === 'loading' ? 'Loading your progress…' : "Couldn't load your progress"}</h2>
-          <p>The media details are available independently while Cantaro loads your private library state.</p>
-        </div>
-      </section>
-    );
-  }
-
-  if (!props.entry.isInLibrary) {
-    return (
-      <section className="media-detail-progress-card media-detail-add-card">
-        <div>
-          <p className="media-detail-add-kicker">Not in your library</p>
-          <h2>Track this title</h2>
-          <p>The title and its provider links are already part of Cantaro. Adding it only creates your personal progress state.</p>
-        </div>
-        <StatusSelect value={props.selectedStatus} onChange={props.onSetSelectedStatus} />
-        <button
-          type="button"
-          className="media-detail-primary-action"
-          onClick={props.onAddToLibrary}
-          disabled={props.isAddingToLibrary}
-          aria-busy={props.isAddingToLibrary}
-        >
-          <Plus aria-hidden />
-          <span>{props.isAddingToLibrary ? 'Adding…' : 'Add to your library'}</span>
-        </button>
-      </section>
-    );
-  }
-
   return (
-    <section className="media-detail-progress-card">
-      <div className="media-detail-progress-next">
-        <div className="media-detail-progress-next-head">
-          <div>
-            <p>{progressSummary.progressLabel}</p>
-          </div>
-          <ProgressSyncStatus hasStatusChanged={hasStatusChanged} />
-        </div>
-        <ProgressControls props={props} capabilities={capabilities} />
+    <section
+      aria-labelledby="media-progress-heading"
+      className="flex flex-col gap-6 border-b border-border-subtle px-4 py-7 sm:px-7 xl:flex-row xl:items-center xl:px-9"
+    >
+      <div className="min-w-36">
+        <h2
+          id="media-progress-heading"
+          className="text-sm font-semibold text-content-muted"
+        >
+          Your progress
+        </h2>
+        <p className="mt-2 text-2xl font-black tabular-nums text-content">
+          <span className="text-personal-accent-strong">
+            {progressSummary.value ?? 0}
+          </span>
+          <span className="text-content-subtle">
+            {" "}
+            / {progressSummary.total ?? "?"}
+          </span>
+        </p>
+        {hasStatusChanged ? (
+          <p className="mt-1 text-xs font-semibold text-warning-content">
+            Unsaved changes
+          </p>
+        ) : null}
       </div>
-      <ProgressScoreRow props={props} />
+
+      <ProgressControls props={props} capabilities={capabilities} />
+
+      <div className="flex flex-wrap items-end gap-4 xl:ml-auto xl:justify-end">
+        <div>
+          <p className="mb-1.5 text-sm text-content-muted">Your score</p>
+          <EmptyScore />
+        </div>
+        <StatusSelect
+          value={props.selectedStatus}
+          onChange={props.onSetSelectedStatus}
+        />
+        <IconButton
+          label="Refresh progress from provider"
+          onClick={props.onRefreshProgress}
+          disabled={isStatusRefreshDisabled(
+            props.entry.isConnected,
+            props.isSavingStatus,
+            props.isRefreshingProgress,
+          )}
+          aria-busy={props.isRefreshingProgress}
+        >
+          <RotateCw
+            size={18}
+            className={props.isRefreshingProgress ? "animate-spin" : ""}
+            aria-hidden
+          />
+        </IconButton>
+      </div>
     </section>
   );
+}
+
+export function ProgressCockpit(props: ProgressCockpitProps) {
+  if (props.entry.viewerStateStatus !== "loaded") {
+    return <ProgressStateMessage status={props.entry.viewerStateStatus} />;
+  }
+  const progressSummary = getPrimaryProgressSummary(
+    props.entry.title,
+    props.progressEpisodes,
+    props.progressChapters,
+    props.progressVolumes,
+  );
+  if (!props.entry.isInLibrary) {
+    return <NotInLibraryProgress total={progressSummary.total} />;
+  }
+  return <TrackedProgressCockpit {...props} />;
 }
 
 function SaveProgressAction({
@@ -255,63 +371,66 @@ function SaveProgressAction({
   onSaveStatus: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className="media-detail-primary-action"
+    <ActionButton
+      tone="personal"
       onClick={onSaveStatus}
       disabled={isSavingStatus || isRefreshingProgress}
       aria-busy={isSavingStatus}
+      busyLabel="Saving…"
     >
-      <Save aria-hidden />
-      <span>{getStatusSaveLabel(isSavingStatus)}</span>
-    </button>
+      <Save size={18} aria-hidden /> {getStatusSaveLabel(isSavingStatus)}
+    </ActionButton>
   );
 }
 
 function getContinueWatchingLabel(state: ContinueWatchingState): string {
-  if (state.status === 'loading') return 'Finding episode...';
-  if (state.status === 'error') return "Couldn't load streaming links";
+  if (state.status === "loading") return "Finding episode…";
+  if (state.status === "error") return "Couldn't load streaming links";
 
-  const labels: Record<Exclude<MediaContinueWatchingDto['outcome'], 'direct'>, string> = {
-    series_fallback: 'Open streaming service',
-    completed: 'Completed',
-    conflict: 'Episode link needs review',
-    unavailable: 'Streaming link not available',
+  const labels: Record<
+    Exclude<MediaContinueWatchingDto["outcome"], "direct">,
+    string
+  > = {
+    series_fallback: "Open streaming service",
+    completed: "Completed",
+    conflict: "Episode link needs review",
+    unavailable: "Streaming link not available",
   };
-  return state.value.outcome === 'direct'
-    ? `Continue episode ${state.value.episodeNumber ?? ''}`.trim()
+  return state.value.outcome === "direct"
+    ? `Play episode ${state.value.episodeNumber ?? ""}`.trim()
     : labels[state.value.outcome];
 }
 
 function ContinueDestinationLink({
   action,
-  className,
+  primary,
   onSelect,
-  menuItem = false,
 }: {
   action: ContinueLinkAction;
-  className?: string;
+  primary: boolean;
   onSelect: (serviceId: StreamingServiceId) => void;
-  menuItem?: boolean;
 }) {
+  const service = STREAMING_SERVICES[action.serviceId];
   return (
     <a
-      className={className}
+      className={
+        primary
+          ? actionClassName({ tone: "personal" })
+          : "inline-flex size-11 items-center justify-center bg-black/30 text-white transition-colors hover:bg-black/55 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      }
       href={action.url}
       target="_blank"
       rel="noopener noreferrer"
-      style={menuItem ? { color: STREAMING_SERVICES[action.serviceId].buttonColor } : undefined}
-      onClick={(event) => {
-        onSelect(action.serviceId);
-        if (menuItem) event.currentTarget.closest('details')?.removeAttribute('open');
-      }}
+      aria-label={primary ? action.label : `Open on ${service.displayName}`}
+      title={primary ? undefined : service.displayName}
+      onClick={() => onSelect(action.serviceId)}
     >
       <StreamingServiceIcon
         serviceId={action.serviceId}
-        style={{ color: 'currentColor', fill: 'currentColor' }}
+        style={{ color: "currentColor", fill: "currentColor" }}
         aria-hidden
       />
-      <span>{action.label}</span>
+      {primary ? <span>{action.label}</span> : null}
     </a>
   );
 }
@@ -323,48 +442,35 @@ function ContinueDestinationMenu({
   actions: ContinueLinkAction[];
   onSelect: (serviceId: StreamingServiceId) => void;
 }) {
-  const primary = actions[0];
-  if (!primary) return null;
   return (
-    <div className="media-detail-streaming-action">
-      <ContinueDestinationLink
-        action={primary}
-        className="media-detail-primary-action media-detail-streaming-primary"
-        onSelect={onSelect}
-      />
-      {actions.length > 1 ? (
-        <details className="media-detail-streaming-menu">
-          <summary aria-label="Choose streaming service">
-            <ChevronDown aria-hidden />
-          </summary>
-          <div>
-            {actions.map(action => (
-              <ContinueDestinationLink
-                key={`${action.serviceId}:${action.kind}`}
-                action={action}
-                onSelect={onSelect}
-                menuItem
-              />
-            ))}
-          </div>
-        </details>
-      ) : null}
+    <div className="flex flex-wrap gap-2">
+      {actions.map((action, index) => (
+        <ContinueDestinationLink
+          key={`${action.serviceId}:${action.kind}`}
+          action={action}
+          primary={index === 0}
+          onSelect={onSelect}
+        />
+      ))}
     </div>
   );
 }
 
-function ContinueUnavailableAction({ state }: { state: ContinueWatchingState }) {
+function ContinueUnavailableAction({
+  state,
+}: {
+  state: ContinueWatchingState;
+}) {
   return (
-    <button type="button" className="media-detail-primary-action" disabled>
-      <Play aria-hidden />
-      <span>{getContinueWatchingLabel(state)}</span>
-    </button>
+    <ActionButton tone="personal" disabled>
+      <Play size={18} aria-hidden /> {getContinueWatchingLabel(state)}
+    </ActionButton>
   );
 }
 
-const UPCOMING_RELEASE_OUTCOMES = new Set<MediaContinueWatchingDto['outcome']>([
-  'series_fallback',
-  'unavailable',
+const UPCOMING_RELEASE_OUTCOMES = new Set<MediaContinueWatchingDto["outcome"]>([
+  "series_fallback",
+  "unavailable",
 ]);
 
 function isFutureRelease(timestamp?: string): timestamp is string {
@@ -372,7 +478,7 @@ function isFutureRelease(timestamp?: string): timestamp is string {
 }
 
 function readReleaseEpisodeNumber(label?: string): number | null {
-  const value = /\b(?:episode|ep|e)\s*(\d+)\b/i.exec(label ?? '')?.[1];
+  const value = /\b(?:episode|ep|e)\s*(\d+)\b/i.exec(label ?? "")?.[1];
   return value ? Number(value) : null;
 }
 
@@ -381,13 +487,16 @@ function getUpcomingRelease(
   nextReleaseAt?: string,
   nextReleaseLabel?: string,
 ) {
-  if (state.status !== 'loaded') return null;
+  if (state.status !== "loaded") return null;
   if (!UPCOMING_RELEASE_OUTCOMES.has(state.value.outcome)) return null;
   if (!isFutureRelease(nextReleaseAt)) return null;
-
   const releaseEpisodeNumber = readReleaseEpisodeNumber(nextReleaseLabel);
-  if (releaseEpisodeNumber !== null && releaseEpisodeNumber !== state.value.episodeNumber) return null;
-
+  if (
+    releaseEpisodeNumber !== null &&
+    releaseEpisodeNumber !== state.value.episodeNumber
+  ) {
+    return null;
+  }
   return formatNextReleaseDisplay(nextReleaseAt);
 }
 
@@ -410,18 +519,20 @@ function ContinueWatchingAction({
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
 }) {
-  const upcomingRelease = getUpcomingRelease(state, nextReleaseAt, nextReleaseLabel);
+  const upcomingRelease = getUpcomingRelease(
+    state,
+    nextReleaseAt,
+    nextReleaseLabel,
+  );
   if (upcomingRelease) {
     return (
-      <button
-        type="button"
-        className="media-detail-primary-action"
+      <ActionButton
+        tone="personal"
         disabled
-        title={`${nextReleaseLabel ?? 'Next episode'} expected ${upcomingRelease.absolute}`}
+        title={`${nextReleaseLabel ?? "Next episode"} expected ${upcomingRelease.absolute}`}
       >
-        <Clock3 aria-hidden />
-        <span>Come back {upcomingRelease.relative}</span>
-      </button>
+        <Clock3 size={18} aria-hidden /> Come back {upcomingRelease.relative}
+      </ActionButton>
     );
   }
 
@@ -432,11 +543,14 @@ function ContinueWatchingAction({
     preferredServiceId,
     canonicalTitle,
   );
-  if (linkActions.length > 0) {
-    return <ContinueDestinationMenu actions={linkActions} onSelect={onSelectStreamingService} />;
-  }
-
-  return <ContinueUnavailableAction state={state} />;
+  return linkActions.length > 0 ? (
+    <ContinueDestinationMenu
+      actions={linkActions}
+      onSelect={onSelectStreamingService}
+    />
+  ) : (
+    <ContinueUnavailableAction state={state} />
+  );
 }
 
 export function ActionRail({
@@ -467,7 +581,7 @@ export function ActionRail({
   nextReleaseLabel?: string;
 }) {
   return (
-    <div className="media-detail-action-rail">
+    <div className="flex flex-wrap items-center gap-2">
       {hasStatusChanged ? (
         <SaveProgressAction
           isSavingStatus={isSavingStatus}
@@ -486,9 +600,12 @@ export function ActionRail({
           nextReleaseLabel={nextReleaseLabel}
         />
       )}
-      <button type="button" className="media-detail-more-action" aria-label="More actions">
-        <MoreVertical aria-hidden />
-      </button>
+      <IconButton
+        label="More title actions"
+        className="bg-black/25 text-white hover:bg-black/55 hover:text-white"
+      >
+        <MoreVertical size={19} aria-hidden />
+      </IconButton>
     </div>
   );
 }

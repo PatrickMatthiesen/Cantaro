@@ -1,30 +1,33 @@
-import type { MediaEntryDetailModel } from '../../services/mediaApi';
-import type { MediaEntryDetailContentProps, ProgressSummary } from './mediaEntryDetailTypes';
+import type { MediaEntryDetailModel } from "../../services/mediaApi";
+import type {
+  MediaEntryDetailContentProps,
+  ProgressSummary,
+} from "./mediaEntryDetailTypes";
 
 export function releaseStatusLabel(dimension: string): string {
   const map: Record<string, string> = {
-    airing: 'Currently Airing',
-    finished: 'Finished',
-    notYetAired: 'Not Yet Aired',
-    not_yet_aired: 'Not Yet Aired',
-    cancelled: 'Cancelled',
-    hiatus: 'On Hiatus',
-    unknown: 'Unknown',
+    airing: "Currently Airing",
+    finished: "Finished",
+    notYetAired: "Not Yet Aired",
+    not_yet_aired: "Not Yet Aired",
+    cancelled: "Cancelled",
+    hiatus: "On Hiatus",
+    unknown: "Unknown",
   };
   return map[dimension] ?? dimension;
 }
 
-export function progressKindLabel(title: MediaEntryDetailModel['title']) {
-  if (title.primaryProgressDimension === 'episode') {
-    return title.episodeCount ? 'TV Series' : 'Episode tracking';
+export function progressKindLabel(title: MediaEntryDetailModel["title"]) {
+  if (title.primaryProgressDimension === "episode") {
+    return title.episodeCount ? "TV Series" : "Episode tracking";
   }
 
-  if (title.primaryProgressDimension === 'chapter') {
-    return 'Manga';
+  if (title.primaryProgressDimension === "chapter") {
+    return "Manga";
   }
 
-  if (title.primaryProgressDimension === 'volume') {
-    return 'Volumes';
+  if (title.primaryProgressDimension === "volume") {
+    return "Volumes";
   }
 
   return releaseStatusLabel(title.releaseStatusDimension);
@@ -39,8 +42,8 @@ function displayProgressValue(value: number | undefined): number {
   return value ?? 0;
 }
 
-function displayProgressTotal(total: number | undefined): number | '?' {
-  return total ?? '?';
+function displayProgressTotal(total: number | undefined): number | "?" {
+  return total ?? "?";
 }
 
 function createProgressSummary(
@@ -61,60 +64,83 @@ function createProgressSummary(
 }
 
 export function getPrimaryProgressSummary(
-  title: MediaEntryDetailModel['title'],
+  title: MediaEntryDetailModel["title"],
   progressEpisodes: number | undefined,
   progressChapters: number | undefined,
   progressVolumes: number | undefined,
 ): ProgressSummary {
-  if (title.primaryProgressDimension === 'chapter') {
-    return createProgressSummary('Chapters read', 'chapters', 'Read', 'Chapter', progressChapters, title.chapterCount);
+  if (title.primaryProgressDimension === "chapter") {
+    return createProgressSummary(
+      "Chapters read",
+      "chapters",
+      "Read",
+      "Chapter",
+      progressChapters,
+      title.chapterCount,
+    );
   }
 
-  if (title.primaryProgressDimension === 'volume') {
-    return createProgressSummary('Volumes read', 'volumes', 'Read', 'Volume', progressVolumes, title.volumeCount);
+  if (title.primaryProgressDimension === "volume") {
+    return createProgressSummary(
+      "Volumes read",
+      "volumes",
+      "Read",
+      "Volume",
+      progressVolumes,
+      title.volumeCount,
+    );
   }
 
-  return createProgressSummary('Watched', 'episodes', 'Watched', 'Episode', progressEpisodes, title.episodeCount);
-}
-
-export function getProgressPercent(summary: ProgressSummary) {
-  if (!summary.total || summary.total <= 0) {
-    return 0;
-  }
-
-  return Math.round((Math.min(summary.value ?? 0, summary.total) / summary.total) * 100);
+  return createProgressSummary(
+    "Watched",
+    "episodes",
+    "Watched",
+    "Episode",
+    progressEpisodes,
+    title.episodeCount,
+  );
 }
 
 export function getRemainingLabel(summary: ProgressSummary) {
   if (!summary.total) {
-    return 'Total unknown';
+    return "Total unknown";
   }
 
   const remaining = Math.max(summary.total - (summary.value ?? 0), 0);
-  return remaining === 1 ? `1 ${summary.noun.slice(0, -1)} left` : `${remaining} ${summary.noun} left`;
+  return remaining === 1
+    ? `1 ${summary.noun.slice(0, -1)} left`
+    : `${remaining} ${summary.noun} left`;
 }
 
-export function getProgressCapabilities(title: MediaEntryDetailModel['title']) {
+export function getProgressCapabilities(title: MediaEntryDetailModel["title"]) {
   const dim = title.primaryProgressDimension;
   return {
-    supportsEpisodes: dim === 'episode',
-    supportsChapters: dim === 'chapter',
-    supportsVolumes: dim === 'volume' || dim === 'chapter',
+    supportsEpisodes: dim === "episode",
+    supportsChapters: dim === "chapter",
+    supportsVolumes: dim === "volume" || dim === "chapter",
   };
 }
 
-export function getEntryStatusChanged(props: Pick<
-  MediaEntryDetailContentProps,
-  'entry' | 'selectedStatus' | 'progressEpisodes' | 'progressChapters' | 'progressVolumes'
->) {
-  return props.selectedStatus !== props.entry.status
-    || props.progressEpisodes !== props.entry.progressEpisodes
-    || props.progressChapters !== props.entry.progressChapters
-    || props.progressVolumes !== props.entry.progressVolumes;
+export function getEntryStatusChanged(
+  props: Pick<
+    MediaEntryDetailContentProps,
+    | "entry"
+    | "selectedStatus"
+    | "progressEpisodes"
+    | "progressChapters"
+    | "progressVolumes"
+  >,
+) {
+  return (
+    props.selectedStatus !== props.entry.status ||
+    props.progressEpisodes !== props.entry.progressEpisodes ||
+    props.progressChapters !== props.entry.progressChapters ||
+    props.progressVolumes !== props.entry.progressVolumes
+  );
 }
 
 export function getStatusSaveLabel(isSavingStatus: boolean) {
-  return isSavingStatus ? 'Saving...' : 'Save progress';
+  return isSavingStatus ? "Saving..." : "Save progress";
 }
 
 export function isStatusRefreshDisabled(
@@ -122,5 +148,7 @@ export function isStatusRefreshDisabled(
   isSavingStatus: boolean,
   isRefreshingProgress: boolean,
 ) {
-  return [!canRefreshProgress, isSavingStatus, isRefreshingProgress].some(Boolean);
+  return [!canRefreshProgress, isSavingStatus, isRefreshingProgress].some(
+    Boolean,
+  );
 }

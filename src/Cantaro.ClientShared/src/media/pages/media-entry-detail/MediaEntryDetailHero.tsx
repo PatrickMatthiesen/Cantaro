@@ -1,34 +1,58 @@
-import { type ReactNode } from 'react';
-import { CalendarDays, Clock3, Tv } from 'lucide-react';
-import { DetailArtwork, SanitizedSynopsis } from '../../components/media-entry-detail/EntryDisplayPrimitives';
-import { SearchLinkDialog } from '../../components/SearchLinkDialog';
-import { GradientButton } from '../../../ui';
-import { formatNextReleaseDisplay, mediaKindLabel } from '../../services/mediaFormatting';
-import type { MediaEntryDetailModel, MediaProviderLinkSummaryDto } from '../../services/mediaApi';
-import { progressKindLabel } from './mediaEntryDetailModel';
+import { useRef, type ReactNode, type RefObject } from "react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  Clock3,
+  Maximize2,
+  Tv,
+  X,
+} from "lucide-react";
+import {
+  DetailArtwork,
+  SanitizedSynopsis,
+} from "../../components/media-entry-detail/EntryDisplayPrimitives";
+import { SearchLinkDialog } from "../../components/SearchLinkDialog";
+import { ActionButton, IconButton } from "../../../ui";
+import {
+  formatNextReleaseDisplay,
+  mediaKindLabel,
+} from "../../services/mediaFormatting";
+import type {
+  MediaEntryDetailModel,
+  MediaProviderLinkSummaryDto,
+} from "../../services/mediaApi";
+import { progressKindLabel } from "./mediaEntryDetailModel";
 
-export function DetailPageLayout({ children, className = '', embedded = false }: { children: ReactNode; className?: string; embedded?: boolean }) {
-  if (embedded) {
-    return (
-      <div className={`media-detail-shell ${className}`}>
-        {children}
-      </div>
-    );
-  }
-
+export function DetailPageLayout({
+  children,
+  className = "",
+  embedded = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  embedded?: boolean;
+}) {
   return (
-    <div className="media-detail-standalone">
-      <div className={`media-detail-shell ${className}`}>
-        {children}
-      </div>
+    <div
+      className={`${embedded ? "" : "min-h-screen bg-canvas px-4 py-6 sm:px-8"} ${className}`}
+    >
+      {children}
     </div>
   );
 }
 
-export function DetailLoadingState({ embedded = false }: { embedded?: boolean }) {
+export function DetailLoadingState({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
   return (
     <DetailPageLayout embedded={embedded}>
-      <div className="media-detail-skeleton" />
+      <div
+        className="mx-auto min-h-[34rem] w-full max-w-360 animate-pulse bg-surface-subtle"
+        aria-label="Loading media details"
+        aria-busy="true"
+      />
     </DetailPageLayout>
   );
 }
@@ -45,12 +69,25 @@ export function DetailErrorState({
   onRetry: () => Promise<void>;
 }) {
   return (
-    <DetailPageLayout className="space-y-4" embedded={embedded}>
-      <GradientButton tone="soft" onClick={onNavigateBack}>Back to library</GradientButton>
-      <div className="media-detail-empty-panel">
-        <p>{error ?? 'Entry not found'}</p>
-        <button type="button" onClick={() => void onRetry()}>Retry</button>
-      </div>
+    <DetailPageLayout embedded={embedded}>
+      <section className="mx-auto grid min-h-[28rem] max-w-3xl content-center gap-5 text-center">
+        <div>
+          <h1 className="text-2xl font-bold text-content">
+            Media details unavailable
+          </h1>
+          <p className="mt-2 text-content-muted">
+            {error ?? "Entry not found"}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <ActionButton tone="secondary" onClick={onNavigateBack}>
+            <ArrowLeft size={18} aria-hidden /> Back to library
+          </ActionButton>
+          <ActionButton tone="personal" onClick={() => void onRetry()}>
+            Try again
+          </ActionButton>
+        </div>
+      </section>
     </DetailPageLayout>
   );
 }
@@ -72,9 +109,7 @@ export function EntryLinkDialog({
   onClose: () => void;
   onLinked: () => void;
 }) {
-  if (!showLinkDialog) {
-    return null;
-  }
+  if (!showLinkDialog) return null;
 
   return (
     <SearchLinkDialog
@@ -88,96 +123,230 @@ export function EntryLinkDialog({
   );
 }
 
-function DetailTopBar({ onNavigateBack }: { onNavigateBack: () => void }) {
-  return (
-    <header className="media-detail-topbar">
-      <button type="button" className="media-detail-icon-button" onClick={onNavigateBack} aria-label="Back to library">
-        <span aria-hidden>←</span>
-      </button>
-    </header>
-  );
-}
-
-function getTitleCountLabels(title: MediaEntryDetailModel['title']): string[] {
+function getTitleCountLabels(title: MediaEntryDetailModel["title"]): string[] {
   return [
-    title.episodeCount ? `${title.episodeCount} Episodes` : null,
-    title.chapterCount ? `${title.chapterCount} Chapters` : null,
-    title.volumeCount ? `${title.volumeCount} Volumes` : null,
+    title.episodeCount ? `${title.episodeCount} episodes` : null,
+    title.chapterCount ? `${title.chapterCount} chapters` : null,
+    title.volumeCount ? `${title.volumeCount} volumes` : null,
   ].filter((value): value is string => Boolean(value));
 }
 
-function HeroBackdrop({ posterUrl }: { posterUrl?: string }) {
-  return posterUrl
-    ? <img className="media-detail-hero-bg" src={posterUrl} alt="" aria-hidden />
-    : null;
-}
-
 function HeroTitleMeta({ entry }: { entry: MediaEntryDetailModel }) {
-  const { title } = entry;
   const nextRelease = formatNextReleaseDisplay(entry.nextReleaseAt);
-  const titleCounts = getTitleCountLabels(title);
-
   return (
-    <>
-      <div className="media-detail-meta-row">
-        {title.startYear ? (
-          <span><CalendarDays aria-hidden />{title.startYear}</span>
-        ) : null}
-        {titleCounts.map((count) => (
-          <span key={count}><Tv aria-hidden />{count}</span>
-        ))}
-        {nextRelease ? <span><Clock3 aria-hidden />{nextRelease.relative}</span> : null}
-      </div>
-    </>
+    <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-immersive-content-muted">
+      {entry.title.startYear ? (
+        <span className="inline-flex items-center gap-1.5">
+          <CalendarDays size={16} aria-hidden /> {entry.title.startYear}
+        </span>
+      ) : null}
+      {getTitleCountLabels(entry.title).map((count) => (
+        <span key={count} className="inline-flex items-center gap-1.5">
+          <Tv size={16} aria-hidden /> {count}
+        </span>
+      ))}
+      {nextRelease ? (
+        <span className="inline-flex items-center gap-1.5">
+          <Clock3 size={16} aria-hidden /> {nextRelease.relative}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
-function HeroDescription({ entry }: { entry: MediaEntryDetailModel }) {
-  const { title } = entry;
+function PosterDialog({
+  dialogRef,
+  posterUrl,
+  title,
+}: {
+  dialogRef: RefObject<HTMLDialogElement | null>;
+  posterUrl?: string;
+  title: string;
+}) {
   return (
-    <>
-      {title.synopsis ? (
-        <SanitizedSynopsis html={title.synopsis} className="media-detail-synopsis" />
+    <dialog
+      ref={dialogRef}
+      aria-label={`${title} poster`}
+      className="m-auto max-h-[92dvh] max-w-[min(92vw,44rem)] bg-transparent p-0 backdrop:bg-black/80"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) event.currentTarget.close();
+      }}
+    >
+      <div className="relative max-h-[92dvh]">
+        <DetailArtwork
+          posterUrl={posterUrl}
+          title={title}
+          className="max-h-[92dvh] w-auto object-contain"
+        />
+        <IconButton
+          label="Close poster"
+          onClick={() => dialogRef.current?.close()}
+          className="absolute right-3 top-3 bg-black/70 text-white hover:bg-black/90 hover:text-white"
+        >
+          <X size={20} aria-hidden />
+        </IconButton>
+      </div>
+    </dialog>
+  );
+}
+
+function HeroBackdrop({ url }: { url?: string }) {
+  if (!url) return null;
+  return (
+    <div
+      className="absolute inset-0 bg-cover bg-center opacity-50 dark:opacity-65"
+      style={{ backgroundImage: `url(${url})` }}
+      aria-hidden
+    />
+  );
+}
+
+function MobilePosterTrigger({
+  posterUrl,
+  onOpen,
+}: {
+  posterUrl?: string;
+  onOpen: () => void;
+}) {
+  if (!posterUrl) return null;
+  return (
+    <button
+      type="button"
+      aria-label="View full poster"
+      onClick={onOpen}
+      className="group absolute inset-x-0 top-0 z-10 h-44 text-right outline-none md:hidden"
+    >
+      <Maximize2
+        size={18}
+        className="absolute right-5 top-5 text-immersive-content/55 transition-transform group-hover:scale-110 group-focus-visible:text-immersive-content motion-reduce:transition-none"
+        aria-hidden
+      />
+    </button>
+  );
+}
+
+function DesktopPoster({
+  posterUrl,
+  title,
+  onOpen,
+}: {
+  posterUrl?: string;
+  title: string;
+  onOpen: () => void;
+}) {
+  if (!posterUrl) return null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label="View full poster"
+      className="group relative hidden w-48 shrink-0 overflow-hidden bg-white/75 p-2 outline-none focus-visible:ring-2 focus-visible:ring-focus md:block dark:bg-[#11141a] xl:w-56"
+    >
+      <DetailArtwork
+        posterUrl={posterUrl}
+        title={title}
+        className="h-auto w-full object-contain transition duration-200 group-hover:scale-[1.025] group-hover:saturate-125 group-focus-visible:scale-[1.025] motion-reduce:transition-none"
+      />
+      <span className="absolute right-4 top-4 inline-flex size-9 items-center justify-center bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        <Maximize2 size={16} aria-hidden />
+      </span>
+    </button>
+  );
+}
+
+function HeroCopy({
+  entry,
+  actions,
+}: {
+  entry: MediaEntryDetailModel;
+  actions?: ReactNode;
+}) {
+  const { title } = entry;
+  const showOriginalTitle =
+    title.originalTitle && title.originalTitle !== title.canonicalTitle;
+  return (
+    <div className="min-w-0 max-w-3xl pb-1">
+      <p className="font-semibold text-immersive-content-muted">
+        {mediaKindLabel(title.mediaKind)} · {progressKindLabel(title)}
+      </p>
+      <h1
+        id="media-detail-title"
+        className="mt-3 text-4xl font-black leading-[1.04] tracking-[-0.04em] text-immersive-content text-balance sm:text-5xl xl:text-6xl"
+      >
+        {title.canonicalTitle}
+      </h1>
+      {showOriginalTitle ? (
+        <p className="mt-2 text-sm text-immersive-content-muted">
+          {title.originalTitle}
+        </p>
       ) : null}
-    </>
+      <HeroTitleMeta entry={entry} />
+      {title.synopsis ? (
+        <SanitizedSynopsis
+          html={title.synopsis}
+          className="mt-6 max-h-36 max-w-[68ch] overflow-hidden text-base leading-7 text-immersive-content-muted"
+        />
+      ) : null}
+      {actions ? (
+        <div className="mt-7 flex flex-wrap items-center gap-3">{actions}</div>
+      ) : null}
+    </div>
   );
 }
 
 export function MediaHero({
   entry,
+  actions,
   onNavigateBack,
 }: {
   entry: MediaEntryDetailModel;
+  actions?: ReactNode;
   onNavigateBack: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const { title } = entry;
+  const openPoster = () => dialogRef.current?.showModal();
 
   return (
-    <section className="media-detail-hero">
-      <HeroBackdrop posterUrl={title.posterUrl} />
-      <div className="media-detail-hero-scrim" aria-hidden />
-      <div className="media-detail-hero-content">
-        <DetailTopBar onNavigateBack={onNavigateBack} />
-        <div className="media-detail-hero-grid">
-          <div className="media-detail-poster">
-            <DetailArtwork posterUrl={title.posterUrl} title={title.canonicalTitle} />
-          </div>
-          <div className="media-detail-title-stack">
-            <h2>{title.canonicalTitle}</h2>
-            {title.originalTitle && title.originalTitle !== title.canonicalTitle ? (
-              <p className="media-detail-original-title">{title.originalTitle}</p>
-            ) : null}
-            <div className="media-detail-tag-row">
-              <span className="media-detail-dot media-detail-dot--violet" />
-              <span>{mediaKindLabel(title.mediaKind)}</span>
-              <span className="media-detail-dot media-detail-dot--blue" />
-              <span>{progressKindLabel(title)}</span>
-            </div>
-            <HeroTitleMeta entry={entry} />
-            <HeroDescription entry={entry} />
-          </div>
+    <>
+      <section
+        aria-labelledby="media-detail-title"
+        className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content"
+      >
+        <HeroBackdrop url={title.backgroundUrl ?? title.posterUrl} />
+        <div
+          className="absolute inset-0 bg-linear-to-r from-immersive-scrim-strong via-immersive-scrim-medium to-immersive-scrim-soft"
+          aria-hidden
+        />
+        <div
+          className="absolute inset-0 bg-linear-to-t from-immersive-scrim-base via-transparent to-immersive-scrim-soft"
+          aria-hidden
+        />
+
+        <MobilePosterTrigger posterUrl={title.posterUrl} onOpen={openPoster} />
+
+        <IconButton
+          label="Back to library"
+          onClick={onNavigateBack}
+          className="absolute left-4 top-4 z-30 bg-black/35 text-white hover:bg-black/60 hover:text-white sm:left-6 sm:top-6"
+        >
+          <ArrowLeft size={19} aria-hidden />
+        </IconButton>
+
+        <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
+          <DesktopPoster
+            posterUrl={title.posterUrl}
+            title={title.canonicalTitle}
+            onOpen={openPoster}
+          />
+          <HeroCopy entry={entry} actions={actions} />
         </div>
-      </div>
-    </section>
+      </section>
+      <PosterDialog
+        dialogRef={dialogRef}
+        posterUrl={title.posterUrl}
+        title={title.canonicalTitle}
+      />
+    </>
   );
 }
