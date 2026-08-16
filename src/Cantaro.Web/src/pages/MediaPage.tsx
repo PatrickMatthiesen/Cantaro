@@ -77,15 +77,14 @@ export function MediaLibraryRoutePage() {
   const { setHeading } = useMediaShell();
   const search = location.search as Record<string, unknown>;
   const searchQuery = typeof search.q === 'string' ? search.q : '';
-  const searchMode = typeof search.searchMode === 'string' ? search.searchMode : 'library';
   const filterDefaults = useMemo(() => getMediaFilterDefaults(search), [search]);
-  const updateSearchState = (next: { query?: string; mode?: string }) => {
+  const updateSearchQuery = (query: string) => {
     void navigate({
       to: '/media/library',
       search: {
         ...search,
-        q: next.query || undefined,
-        searchMode: next.mode ?? searchMode,
+        q: query || undefined,
+        searchMode: undefined,
       },
       replace: true,
     });
@@ -95,17 +94,11 @@ export function MediaLibraryRoutePage() {
     <MediaLibraryPage
       embedded
       searchQuery={searchQuery}
-      searchMode={searchMode}
       filterDefaults={filterDefaults}
-      onSearchQueryChange={(query) => updateSearchState({ query })}
-      onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
+      onSearchQueryChange={updateSearchQuery}
       onHeadingChange={setHeading}
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
       onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}
-      onNavigateCatalogResult={(providerId, providerMediaId) => void navigate({
-        to: '/media/catalog/$providerId/$providerMediaId',
-        params: { providerId, providerMediaId },
-      })}
     />
   );
 }

@@ -186,7 +186,7 @@ export function PageSideNavigation({
           <img
             src="/icon-192.png"
             alt=""
-            className="h-11 w-11 border border-border-subtle"
+            className="h-11 w-11"
           />
           <div className="sm:hidden lg:block group-data-[sidebar=compact]/sidebar:lg:hidden">
             <p className="text-lg font-black tracking-[0.04em] text-content">

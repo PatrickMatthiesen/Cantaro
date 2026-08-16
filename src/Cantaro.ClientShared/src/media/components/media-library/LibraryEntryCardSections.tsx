@@ -95,12 +95,12 @@ function LibraryEntryCompletionBar({ progress, density }: { progress: LibraryEnt
         <>
             {progress.releasedUnwatched > 0 ? (
                 <span
-                    className="absolute inset-y-0 left-0 bg-amber-300 transition-[width] duration-500 motion-reduce:transition-none"
+                    className="absolute inset-y-0 left-0 bg-rose-400 transition-[width] duration-500 motion-reduce:transition-none"
                     style={{ width: `${releasedPercent}%` }}
                 />
             ) : null}
             <span
-                className="absolute inset-y-0 left-0 bg-personal-accent transition-[width] duration-500 motion-reduce:transition-none"
+                className="absolute inset-y-0 left-0 bg-linear-to-r from-cyan-300 to-sky-300 transition-[width] duration-500 motion-reduce:transition-none"
                 style={{ width: `${watchedPercent}%` }}
             />
         </>

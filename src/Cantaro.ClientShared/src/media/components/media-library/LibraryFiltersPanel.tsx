@@ -1,4 +1,5 @@
-import { ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, Search, SlidersHorizontal } from 'lucide-react';
 import {
     LibraryFilterFields,
     LibraryRefreshAction,
@@ -30,11 +31,13 @@ interface FilterOption {
 }
 
 export interface LibraryFiltersPanelProps {
+    searchQuery: string;
     filters: MediaLibraryQueryParams;
     availableProviderListNames: string[];
     providerStatus: MediaProviderAccountStatusDto | null;
     isRefreshing: boolean;
     isPrimaryProviderSelected: boolean;
+    onSearchQueryChange: (query: string) => void;
     onUpdateFilter: <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => void;
     onUpdateProviderFilter: (provider: string | undefined) => void;
     onToggleSortDir: () => void;
@@ -44,17 +47,20 @@ export interface LibraryFiltersPanelProps {
 
 // fallow-ignore-next-line complexity
 export function LibraryFiltersPanel({
+    searchQuery,
     filters,
     availableProviderListNames,
     providerStatus,
     isRefreshing,
     isPrimaryProviderSelected,
+    onSearchQueryChange,
     onUpdateFilter,
     onUpdateProviderFilter,
     onToggleSortDir,
     onRefreshFromRemote,
     onNavigateProviders,
 }: LibraryFiltersPanelProps) {
+    const [filtersOpen, setFiltersOpen] = useState(false);
     const providerOptions: FilterOption[] = [
         { value: '', label: 'All providers' },
         ...mediaProviderCatalog.map((provider) => ({ value: provider.id, label: provider.name })),
@@ -101,23 +107,37 @@ export function LibraryFiltersPanel({
 
     return (
         <section className="border-y border-border-subtle">
-            <details className="group lg:hidden">
-                <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 text-sm font-semibold text-content marker:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-                    <SlidersHorizontal className="size-4 text-content-muted" aria-hidden />
+            <div className="flex items-center gap-2 py-3">
+                <label className="relative min-w-0 flex-1">
+                    <span className="sr-only">Search library</span>
+                    <Search className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-content-subtle" aria-hidden />
+                    <input
+                        type="search"
+                        value={searchQuery}
+                        onChange={(event) => onSearchQueryChange(event.target.value)}
+                        placeholder="Search library…"
+                        className="h-11 w-full border border-border-strong bg-surface pr-4 pl-10 text-sm text-content outline-none transition-colors placeholder:text-content-subtle hover:bg-surface-hover focus:border-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    />
+                </label>
+                <button
+                    type="button"
+                    aria-expanded={filtersOpen}
+                    aria-controls="library-filter-controls"
+                    className="inline-flex min-h-11 shrink-0 items-center gap-2 px-3 text-sm font-semibold text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                >
+                    <SlidersHorizontal className="size-4" aria-hidden />
                     <span>Filters</span>
-                    <span className="ml-auto text-xs font-normal text-content-muted">
-                        {activeFilterCount > 0 ? `${activeFilterCount} active` : 'All titles'}
-                    </span>
-                    <ChevronDown className="size-4 text-content-muted transition-transform group-open:rotate-180" aria-hidden />
-                </summary>
-                <div className="flex flex-col gap-4 border-t border-border-subtle py-4">
-                    <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">{filterFields}</div>
-                    {refreshAction}
-                </div>
-            </details>
+                    {activeFilterCount > 0 ? <span className="text-xs font-normal">{activeFilterCount}</span> : null}
+                    <ChevronDown className={`size-4 transition-transform ${filtersOpen ? 'rotate-180' : ''}`} aria-hidden />
+                </button>
+            </div>
 
-            <div className="hidden flex-wrap items-end gap-x-3 gap-y-4 py-4 lg:flex">
-                {filterFields}
+            <div
+                id="library-filter-controls"
+                className={`${filtersOpen ? 'flex' : 'hidden'} flex-col gap-4 border-t border-border-subtle py-4 lg:flex lg:flex-row lg:flex-wrap lg:items-end lg:gap-x-3 lg:gap-y-4`}
+            >
+                <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1 lg:contents">{filterFields}</div>
                 {refreshAction}
             </div>
         </section>
