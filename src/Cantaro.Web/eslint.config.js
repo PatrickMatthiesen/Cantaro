@@ -27,7 +27,12 @@ export default defineConfig([
       },
     },
     rules: {
+      // The current beta plugin does not load Cantaro's CSS-first Tailwind v4
+      // theme correctly. Use the official Tailwind formatter for ordering once
+      // it is introduced instead of emitting hundreds of unreliable warnings.
+      'tailwindcss/classnames-order': 'off',
       'tailwindcss/no-custom-classname': 'off',
+      'tailwindcss/no-contradicting-classname': 'error',
       'react-hooks/set-state-in-effect': 'off',
       'react-refresh/only-export-components': ['error', { allowConstantExport: true, extraHOCs: ['createFileRoute'] }],
     },

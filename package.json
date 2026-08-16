@@ -15,15 +15,19 @@
         "check:web": "cd src/Cantaro.Web && bun run check",
         "check:extension": "cd src/Cantaro.BrowserExtension && bun run check",
         "check": "bun run check:shared && bun run check:web && bun run check:extension",
+        "check:css": "bun scripts/check-css-structure.ts",
         "check:source-size": "bun scripts/check-source-file-sizes.ts",
         "check:fallow:shared": "cd src/Cantaro.ClientShared && bun run check:fallow",
         "check:fallow:web": "cd src/Cantaro.Web && bun run check:fallow",
         "check:fallow:extension": "cd src/Cantaro.BrowserExtension && bun run check:fallow",
-        "check:fallow": "bun run check:source-size && bun run check:fallow:shared && bun run check:fallow:web && bun run check:fallow:extension",
+        "check:fallow": "bun run check:source-size && bun run check:css && bun run check:fallow:shared && bun run check:fallow:web && bun run check:fallow:extension",
         "build": "bun run build:web && bun run build:extension",
         "build:web": "cd src/Cantaro.Web && bun run build",
         "build:extension": "cd src/Cantaro.BrowserExtension && bun run build",
         "extension:dev": "cd src/Cantaro.BrowserExtension && bun run dev",
         "compose:up": "docker compose -p cantaro up"
+    },
+    "devDependencies": {
+        "postcss": "^8.5.15"
     }
 }

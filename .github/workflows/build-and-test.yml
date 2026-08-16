@@ -102,6 +102,9 @@ jobs:
       - name: Lint frontend
         run: cd src/Cantaro.Web && bun run lint
 
+      - name: Audit authored CSS
+        run: bun run check:css
+
       - name: Build Frontend
         run: bun run build:web
 
@@ -125,6 +128,9 @@ jobs:
 
       - name: Check shared package
         run: bun run check:shared
+
+      - name: Audit authored CSS
+        run: bun run check:css
 
       - name: Check extension
         run: bun run check:extension

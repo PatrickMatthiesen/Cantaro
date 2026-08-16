@@ -1,0 +1,6 @@
+{
+  "unusedClassAllowlist": [
+    "^app-side-nav-item--(indigo|sky|red|rose|pink|emerald|amber|slate)$",
+    "^ui-pill--(neutral|info|success|warning)$"
+  ]
+}

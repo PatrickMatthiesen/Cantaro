@@ -82,7 +82,6 @@
 }
 
 .cantaro-extension-media .media-detail-meta-row span,
-.cantaro-extension-media .media-detail-rating-pill,
 .cantaro-extension-media .media-detail-sync-chip {
   display: inline-flex;
   min-height: 1.75rem;
@@ -92,11 +91,6 @@
   padding: 0 0.65rem;
   font-size: 0.72rem;
   font-weight: 700;
-}
-
-.cantaro-extension-media .media-detail-rating-pill {
-  color: var(--color-accent-strong);
-  background: var(--color-accent-soft);
 }
 
 .cantaro-extension-media .media-detail-sync-chip--ok {
@@ -186,15 +180,9 @@
 }
 
 .cantaro-extension-media .media-detail-meta-row svg,
-.cantaro-extension-media .media-detail-rating-pill svg,
 .cantaro-extension-media .media-detail-sync-chip svg {
   width: 0.85rem;
   height: 0.85rem;
-}
-
-.cantaro-extension-media .media-detail-rating-pill {
-  width: fit-content;
-  margin-top: 0.55rem;
 }
 
 .cantaro-extension-media .media-detail-synopsis {
