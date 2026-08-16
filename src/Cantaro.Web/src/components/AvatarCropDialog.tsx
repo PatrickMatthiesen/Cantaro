@@ -129,14 +129,14 @@ export function AvatarCropDialog({ file, imageUrl, isSaving, onCancel, onConfirm
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="avatar-crop-title">
-      <div ref={dialogRef} className="settings-card w-full max-w-xl overflow-hidden rounded-[2rem] border shadow-[0_32px_120px_rgba(2,6,23,.45)]">
+      <div ref={dialogRef} className="w-full max-w-xl overflow-hidden border border-border-strong bg-surface shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-border-subtle px-6 py-5">
           <div>
             <p className="text-[10px] font-black tracking-[.25em] text-violet-600 uppercase">Profile picture</p>
             <h2 id="avatar-crop-title" className="mt-1 text-xl font-black text-content">Choose what people see</h2>
             <p className="mt-1 text-sm text-content-muted">Drag the image and zoom until the portrait feels right.</p>
           </div>
-          <button ref={cancelButtonRef} type="button" disabled={isSaving} onClick={onCancel} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-content-muted transition hover:bg-surface-subtle hover:text-content disabled:opacity-50" aria-label="Close image cropper">
+          <button ref={cancelButtonRef} type="button" disabled={isSaving} onClick={onCancel} className="flex h-10 w-10 shrink-0 items-center justify-center text-content-muted transition hover:bg-surface-subtle hover:text-content disabled:opacity-50" aria-label="Close image cropper">
             <X className="h-5 w-5" />
           </button>
         </header>
@@ -166,8 +166,8 @@ export function AvatarCropDialog({ file, imageUrl, isSaving, onCancel, onConfirm
           </label>
           {error ? <p className="text-sm font-semibold text-rose-600" role="alert">{error}</p> : null}
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <button type="button" disabled={isSaving} onClick={onCancel} className="rounded-2xl px-5 py-3 text-sm font-black text-content-muted transition hover:bg-surface-subtle disabled:opacity-50">Cancel</button>
-            <button type="button" disabled={isSaving || !croppedArea} onClick={() => void confirm()} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-violet-500/20 transition hover:-translate-y-0.5 hover:bg-violet-700 disabled:translate-y-0 disabled:opacity-50">
+            <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-11 border border-border-strong px-5 text-sm font-black text-content-muted transition hover:bg-surface-subtle disabled:opacity-50">Cancel</button>
+            <button type="button" disabled={isSaving || !croppedArea} onClick={() => void confirm()} className="inline-flex min-h-11 items-center justify-center gap-2 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover disabled:opacity-50">
               <ImageIcon className="h-4 w-4" />
               {isSaving ? 'Uploading…' : 'Use this crop'}
             </button>

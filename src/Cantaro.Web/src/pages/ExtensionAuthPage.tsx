@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { loginSchema, type LoginFormData } from '@cantaro/client-shared/auth';
 import { AuthInputField } from '@cantaro/client-shared/auth';
 import { submitAuthForm } from '@cantaro/client-shared/auth';
-import { GlassCard, GradientButton } from '@cantaro/client-shared/ui';
+import { GradientButton } from '@cantaro/client-shared/ui';
 
 type AuthPhase = 'checking' | 'ready' | 'submitting';
 
@@ -134,26 +134,23 @@ export function ExtensionAuthPage() {
   };
 
   return (
-    <div className="app-gradient-shell relative min-h-screen overflow-hidden bg-linear-to-br from-slate-100 via-cyan-50 to-white text-content">
-      <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-cyan-300/35 blur-3xl" aria-hidden />
-      <div className="absolute right-0 bottom-0 h-96 w-96 rounded-full bg-orange-200/30 blur-3xl" aria-hidden />
-
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-4xl items-center justify-center px-6 py-10">
-        <GlassCard className="w-full max-w-xl p-8">
-          <p className="text-xs tracking-[0.32em] text-content-muted uppercase">Cantaro extension auth</p>
+    <div className="min-h-screen bg-canvas text-content">
+      <div className="mx-auto flex min-h-screen max-w-4xl items-center justify-center px-6 py-10">
+        <section className="w-full max-w-xl border-y border-border-subtle py-8">
+          <p className="text-xs tracking-[0.32em] text-personal-accent-strong uppercase">Cantaro extension auth</p>
           <h1 className="mt-3 text-3xl font-bold text-content">Finish sign-in for the browser extension</h1>
           <p className="mt-3 text-sm text-content-muted">
             This page signs you into the Cantaro API origin, then hands control back to the extension’s PKCE authorization flow.
           </p>
 
           {authTarget ? (
-            <p className="mt-4 rounded-2xl bg-surface-translucent px-4 py-3 text-xs text-content-muted">
+            <p className="mt-4 border-y border-border-subtle bg-surface-subtle px-4 py-3 text-xs text-content-muted">
               API origin: <span className="font-semibold text-content">{authTarget.baseUrl}</span>
             </p>
           ) : null}
 
           {phase === 'checking' ? (
-            <div className="mt-8 rounded-2xl border border-border-subtle bg-surface-translucent px-4 py-5 text-sm text-content-muted">
+            <div className="mt-8 border-y border-border-subtle px-4 py-5 text-sm text-content-muted">
               Checking whether the API session is already active…
             </div>
           ) : (
@@ -181,7 +178,7 @@ export function ExtensionAuthPage() {
               />
 
               {error ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <div className="border-y border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-content">
                   {error}
                 </div>
               ) : null}
@@ -196,7 +193,7 @@ export function ExtensionAuthPage() {
               </div>
             </form>
           )}
-        </GlassCard>
+        </section>
       </div>
     </div>
   );

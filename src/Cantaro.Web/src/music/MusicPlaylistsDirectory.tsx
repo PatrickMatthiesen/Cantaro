@@ -1,11 +1,9 @@
+import { MusicPlatformIcon, MusicUiIcon, type MusicLibraryResponse } from '@cantaro/client-shared/music';
+import { actionClassName } from '@cantaro/client-shared/ui';
 import { Link } from '@tanstack/react-router';
-import {
-  MusicPlatformIcon,
-  type MusicLibraryResponse,
-} from '@cantaro/client-shared/music';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { formatTimestamp, isPlatformId, platformHoverClass, platformName, playlistArtwork, playlistLastSyncedAt } from './musicPresentation';
+import { formatTimestamp, isPlatformId, platformName, playlistArtwork, playlistLastSyncedAt } from './musicPresentation';
 
 export function MusicPlaylistsDirectory({ library }: { library: MusicLibraryResponse }) {
   const syncedPlaylistCount = library.playlists.filter((playlist) => playlist.services.length > 0).length;
@@ -13,92 +11,64 @@ export function MusicPlaylistsDirectory({ library }: { library: MusicLibraryResp
 
   return (
     <MusicPageShell library={library}>
-      <section className="space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="mx-auto max-w-360">
+        <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border-subtle pb-7">
           <div>
-            <p className="text-xs font-black tracking-[0.22em] text-accent uppercase">Archive management</p>
-            <h1 className="mt-2 text-4xl font-black text-content">Playlists</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 font-semibold text-content-muted">
-              Browse what Cantaro knows before deciding which playlists should stay aligned across platforms.
+            <h1 className="text-3xl font-black tracking-[-0.03em] text-content sm:text-4xl">Playlists</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-content-muted">
+              Canonical collections and the platform copies Cantaro keeps aligned.
             </p>
           </div>
-          <Link
-            to="/music/platforms/sync"
-            className="rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover"
-          >
-            Create playlist sync
+          <Link to="/music/platforms/sync" className={actionClassName({ tone: 'personal' })}>
+            <MusicUiIcon name="refresh" className="size-4" /> Create playlist sync
           </Link>
-        </div>
+        </header>
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-[1.35rem] border border-border-subtle bg-surface-translucent p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)]">
-            <p className="text-xs font-black tracking-[0.14em] text-content-muted uppercase">Known playlists</p>
-            <p className="mt-2 text-2xl font-black text-content">{library.summary.playlistCount.toLocaleString()}</p>
-          </div>
-          <div className="rounded-[1.35rem] border border-border-subtle bg-surface-translucent p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)]">
-            <p className="text-xs font-black tracking-[0.14em] text-content-muted uppercase">Mapped for sync</p>
-            <p className="mt-2 text-2xl font-black text-content">{syncedPlaylistCount.toLocaleString()}</p>
-          </div>
-          <div className="rounded-[1.35rem] border border-border-subtle bg-surface-translucent p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)]">
-            <p className="text-xs font-black tracking-[0.14em] text-content-muted uppercase">Platforms seen</p>
-            <p className="mt-2 text-2xl font-black text-content">{connectedPlatformCount.toLocaleString()}</p>
-          </div>
-        </div>
+        <dl className="flex flex-wrap gap-x-8 gap-y-4 border-b border-border-subtle py-5">
+          <div><dt className="text-sm text-content-muted">Known playlists</dt><dd className="mt-1 text-xl font-bold text-personal-accent-strong">{library.summary.playlistCount.toLocaleString()}</dd></div>
+          <div><dt className="text-sm text-content-muted">Mapped for sync</dt><dd className="mt-1 text-xl font-bold text-content">{syncedPlaylistCount.toLocaleString()}</dd></div>
+          <div><dt className="text-sm text-content-muted">Platforms seen</dt><dd className="mt-1 text-xl font-bold text-content">{connectedPlatformCount.toLocaleString()}</dd></div>
+        </dl>
 
         {library.playlists.length > 0 ? (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-4 2xl:grid-cols-4">
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-7 py-7 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
             {library.playlists.map((playlist, index) => {
               const lastSyncedAt = playlistLastSyncedAt(playlist) ?? undefined;
-
               return (
-                <Link
-                  key={playlist.id}
-                  to="/music/playlists/$playlistId"
-                  params={{ playlistId: playlist.id }}
-                  className="music-playlist-card group overflow-hidden rounded-[1.25rem] border border-border-subtle bg-surface-translucent shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur transition hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                >
-                  <div className="relative h-28 overflow-hidden">
-                    <img src={playlistArtwork(playlist, index)} alt="" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
-                    <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-slate-950/28 via-transparent to-white/10" />
-                    <span className="absolute right-3 bottom-3 rounded-full bg-action/72 px-3 py-1 text-xs font-black text-action-content backdrop-blur">
-                      {playlist.entryCount.toLocaleString()}
+                <li key={playlist.id} className="min-w-0">
+                  <Link
+                    to="/music/playlists/$playlistId"
+                    params={{ playlistId: playlist.id }}
+                    className="group block focus-visible:outline-2 focus-visible:outline-focus"
+                  >
+                    <span className="relative block aspect-square overflow-hidden bg-surface-subtle">
+                      <img src={playlistArtwork(playlist, index)} alt="" className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.025] motion-reduce:transition-none" />
+                      <span className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/90 via-black/62 to-transparent px-3 pt-10 pb-3 text-white">
+                        <strong className="block truncate text-base font-bold">{playlist.name}</strong>
+                        <span className="mt-1 block text-xs text-white/78">{playlist.entryCount.toLocaleString()} songs</span>
+                      </span>
                     </span>
-                  </div>
-                  <div className="p-4">
-                    <div className="min-w-0">
-                      <h2 className="line-clamp-1 text-lg font-black text-content">{playlist.name}</h2>
-                      {playlist.description ? <p className="mt-1 line-clamp-2 text-sm font-semibold text-content-muted">{playlist.description}</p> : null}
-                    </div>
-                    <div className="mt-3 flex min-h-7 flex-wrap gap-1.5">
-                      {playlist.services.length > 0 ? playlist.services.map((service) => {
-                        const servicePlatformId = isPlatformId(service.service) ? service.service : null;
-                        const hoverClass = servicePlatformId
-                          ? platformHoverClass(servicePlatformId)
-                          : 'hover:border-border-subtle hover:bg-accent-soft hover:text-accent-strong';
-
+                    <span className="mt-3 flex min-h-6 flex-wrap items-center gap-2 text-xs text-content-muted">
+                      {playlist.services.length > 0 ? playlist.services.slice(0, 3).map((service) => {
+                        const platformId = isPlatformId(service.service) ? service.service : null;
                         return (
-                          <span
-                            key={`${playlist.id}-${service.service}-${service.servicePlaylistId}`}
-                            className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-border-subtle bg-surface-translucent px-2.5 text-[0.68rem] font-black text-content-muted transition ${hoverClass}`}
-                          >
-                            {servicePlatformId ? <MusicPlatformIcon platformId={servicePlatformId} className="h-3.5 w-3.5 shrink-0" /> : null}
-                            {platformName(service.service)}
+                          <span key={`${service.service}-${service.servicePlaylistId}`} className="inline-flex items-center gap-1.5" title={platformName(service.service)}>
+                            {platformId ? <MusicPlatformIcon platformId={platformId} className="size-4" /> : null}
+                            <span className="sr-only">{platformName(service.service)}</span>
                           </span>
                         );
-                      }) : (
-                        <span className="rounded-full bg-surface-subtle px-3 py-1 text-xs font-black text-content-muted">Cantaro only</span>
-                      )}
-                    </div>
-                    {lastSyncedAt ? <p className="mt-3 text-xs font-semibold text-content-subtle">Updated {formatTimestamp(lastSyncedAt)}</p> : null}
-                  </div>
-                </Link>
+                      }) : <span>Cantaro only</span>}
+                      {lastSyncedAt ? <span className="ml-auto truncate">{formatTimestamp(lastSyncedAt)}</span> : null}
+                    </span>
+                  </Link>
+                </li>
               );
             })}
-          </div>
+          </ul>
         ) : (
-          <MusicEmptyPanel title="No playlists yet" detail="Your playlists will appear here once Cantaro has music to work with." />
+          <div className="py-8"><MusicEmptyPanel title="No playlists yet" detail="Your playlists will appear here once Cantaro has music to work with." /></div>
         )}
-      </section>
+      </div>
     </MusicPageShell>
   );
 }

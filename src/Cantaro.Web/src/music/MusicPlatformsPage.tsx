@@ -64,13 +64,13 @@ function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPl
         aria-expanded={isOpen}
         aria-haspopup="menu"
         onClick={onToggle}
-        className="inline-flex h-12 items-center gap-2 rounded-2xl border border-border-subtle bg-surface px-5 text-sm font-black text-accent-strong transition hover:border-border-strong hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none"
+        className="inline-flex min-h-11 items-center gap-2 border border-border-strong bg-surface px-4 text-sm font-bold text-content transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus"
       >
         <MusicUiIcon name="plus" className="h-5 w-5" />
         Add platform
       </button>
       {isOpen ? (
-        <div className="absolute right-0 z-20 mt-2 w-64 rounded-2xl border border-border-subtle bg-surface-translucent p-2 shadow-lg backdrop-blur">
+        <div className="absolute right-0 z-20 mt-2 w-64 border border-border-strong bg-surface p-2 shadow-lg">
           {platformsToAdd.length === 0 ? (
             <p className="px-3 py-2 text-xs font-semibold text-content-muted">All platforms are already added.</p>
           ) : (
@@ -215,25 +215,25 @@ function MetricCard({
   tone?: 'violet' | 'emerald' | 'amber' | 'rose';
 }) {
   const toneClass = {
-    violet: 'bg-accent-soft text-accent-strong',
-    emerald: 'bg-emerald-100 text-emerald-700',
-    amber: 'bg-amber-100 text-amber-700',
-    rose: 'bg-rose-100 text-rose-700',
+    violet: 'bg-surface-subtle text-personal-accent-strong',
+    emerald: 'bg-success-surface text-success-content',
+    amber: 'bg-warning-surface text-warning-content',
+    rose: 'bg-danger-surface text-danger-content',
   }[tone];
 
   return (
-    <GlassCard className="p-5">
+    <div className="border-b border-border-subtle py-4">
       <div className="flex items-center gap-4">
-        <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${toneClass}`}>
+        <span className={`flex h-11 w-11 items-center justify-center ${toneClass}`}>
           <MusicUiIcon name={icon} className="h-5 w-5" />
         </span>
         <div className="min-w-0">
-          <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">{label}</p>
+          <p className="text-sm text-content-muted">{label}</p>
           <p className="mt-1 text-2xl font-black text-content">{value}</p>
           <p className="truncate text-xs font-semibold text-content-muted">{detail}</p>
         </div>
       </div>
-    </GlassCard>
+    </div>
   );
 }
 
@@ -242,8 +242,8 @@ function PlaylistStatusIcon({ status }: { status?: string | null }) {
   const isProblem = status === 'partial_failure' || status === 'error';
 
   return (
-    <span className={`flex h-8 w-8 items-center justify-center rounded-full ${
-      isHealthy ? 'bg-emerald-100 text-emerald-700' : isProblem ? 'bg-amber-100 text-amber-700' : 'bg-surface-subtle text-content-muted'
+    <span className={`flex h-8 w-8 items-center justify-center ${
+      isHealthy ? 'bg-success-surface text-success-content' : isProblem ? 'bg-warning-surface text-warning-content' : 'bg-surface-subtle text-content-muted'
     }`}>
       <MusicUiIcon name={isHealthy ? 'squareCheck' : isProblem ? 'warning' : 'clock'} className="h-4 w-4" />
     </span>
@@ -260,13 +260,13 @@ function PlatformGroupedView({
   const connectedPlatformIdSet = new Set(connectedPlatformIds);
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-4">
+    <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
       {platformCatalog.map((platform) => {
         const playlists = library.playlists.filter((playlist) => playlist.services.some((service) => service.service === platform.id));
         const isConnected = connectedPlatformIdSet.has(platform.id);
 
         return (
-          <GlassCard key={platform.id} className="flex min-h-[300px] flex-col p-4">
+          <GlassCard key={platform.id} className="flex min-h-[260px] flex-col border-x-0 p-4">
             <div className="mb-4 flex items-start gap-3">
               <MusicPlatformIcon platformId={platform.iconId} className="h-12 w-12 shrink-0 text-content" />
               <div className="min-w-0 flex-1">
@@ -288,7 +288,7 @@ function PlatformGroupedView({
                     key={`${platform.id}-${playlist.id}`}
                     to="/music/playlists/$playlistId"
                     params={{ playlistId: playlist.id }}
-                    className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-2xl bg-surface-translucent px-3 py-2.5 transition hover:bg-surface"
+                    className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-border-subtle px-1 py-2.5 transition-colors hover:bg-surface-hover"
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-black text-content">{playlist.name}</span>
@@ -301,7 +301,7 @@ function PlatformGroupedView({
                 );
               })}
               {playlists.length === 0 ? (
-                <div className="flex min-h-32 flex-col items-center justify-center rounded-2xl bg-surface-translucent px-4 text-center">
+                <div className="flex min-h-32 flex-col items-center justify-center border-y border-border-subtle px-4 text-center">
                   <MusicUiIcon name="cloudSync" className="h-8 w-8 text-content-subtle" />
                   <p className="mt-2 text-sm font-black text-content">No synced playlists</p>
                   <p className="mt-1 text-xs font-semibold text-content-muted">Create a sync to pull playlists into Cantaro.</p>
@@ -320,7 +320,7 @@ function SyncGroupView({ library }: { library: MusicLibraryResponse }) {
 
   if (syncedPlaylists.length === 0) {
     return (
-      <GlassCard className="p-8 text-center">
+      <GlassCard className="border-x-0 p-8 text-center">
         <MusicUiIcon name="repeat" className="mx-auto h-10 w-10 text-accent" />
         <h3 className="mt-3 text-xl font-black text-content">No sync groups yet</h3>
         <p className="mx-auto mt-2 max-w-xl text-sm leading-6 font-semibold text-content-muted">
@@ -337,7 +337,7 @@ function SyncGroupView({ library }: { library: MusicLibraryResponse }) {
         const hasProblem = playlist.services.some((service) => service.lastSyncStatus === 'partial_failure' || service.lastSyncStatus === 'error');
 
         return (
-          <GlassCard key={playlist.id} className="p-4">
+          <GlassCard key={playlist.id} className="border-x-0 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <Link to="/music/playlists/$playlistId" params={{ playlistId: playlist.id }} className="text-lg font-black text-content transition hover:text-accent-strong">
@@ -354,7 +354,7 @@ function SyncGroupView({ library }: { library: MusicLibraryResponse }) {
               {playlist.services.map((service) => {
                 const platformId = asPlatformId(service.service);
                 return (
-                  <div key={`${playlist.id}-${service.service}-${service.servicePlaylistId}`} className="flex items-center gap-3 rounded-2xl bg-surface-translucent px-3 py-2.5">
+                  <div key={`${playlist.id}-${service.service}-${service.servicePlaylistId}`} className="flex items-center gap-3 border-t border-border-subtle px-1 py-2.5">
                     {platformId
                       ? <MusicPlatformIcon platformId={platformId} className="h-8 w-8 shrink-0 text-content" />
                       : <MusicUiIcon name="cable" className="h-8 w-8 shrink-0 p-1.5 text-content-muted" />}
@@ -375,9 +375,9 @@ function SyncGroupView({ library }: { library: MusicLibraryResponse }) {
 
 function progressStatusClassName(phase: PlaylistSyncProgress['phase']): string {
   const statusStyles = {
-    syncing: 'bg-accent-soft text-accent-strong',
-    completed: 'bg-emerald-100 text-emerald-700',
-    failed: 'bg-rose-100 text-rose-700',
+    syncing: 'bg-info-surface text-info-content',
+    completed: 'bg-success-surface text-success-content',
+    failed: 'bg-danger-surface text-danger-content',
   };
 
   return statusStyles[phase];
@@ -447,7 +447,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
   };
 
   return (
-    <div className="music-sync-progress grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl border border-border-subtle bg-accent-soft px-3 py-3 shadow-[0_14px_34px_rgba(88,74,150,0.08)] dark:border-[rgba(167,139,250,0.28)] dark:bg-[rgba(91,33,182,0.18)] dark:shadow-none">
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-y border-info-border bg-info-surface px-3 py-3">
       <span className="relative flex h-10 w-10 shrink-0 items-center justify-center">
         <MusicPlatformIcon platformId={progress.sourcePlatformId} className="h-8 w-8 text-content" />
         <ProgressSpinner phase={progress.phase} />
@@ -461,7 +461,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
         </span>
         <ProgressCurrentSong progress={progress} />
       </span>
-      <span className={`rounded-full px-3 py-1.5 text-right text-xs font-black ${statusStyles.className}`}>{statusStyles.label}</span>
+      <span className={`px-3 py-1.5 text-right text-xs font-bold ${statusStyles.className}`}>{statusStyles.label}</span>
     </div>
   );
 }
@@ -493,7 +493,7 @@ function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLi
   }, [library.playlists, syncStatus?.playlists]);
 
   return (
-    <GlassCard className="p-5">
+    <GlassCard className="border-x-0 p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-black text-content">Recent sync activity</h2>
@@ -507,7 +507,7 @@ function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLi
         {activities.length > 0 ? activities.map((activity) => {
           const platformId = asPlatformId(activity.service);
           return (
-            <div key={activity.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl bg-surface-translucent px-3 py-2.5">
+            <div key={activity.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-t border-border-subtle px-1 py-2.5">
               {platformId
                 ? <MusicPlatformIcon platformId={platformId} className="h-8 w-8 shrink-0 text-content" />
                 : <MusicUiIcon name="cable" className="h-8 w-8 shrink-0 p-1.5 text-content-muted" />}
@@ -521,7 +521,7 @@ function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLi
             </div>
           );
         }) : !syncProgress ? (
-          <div className="rounded-2xl bg-surface-translucent p-4 text-sm font-semibold text-content-muted">No sync activity yet.</div>
+          <div className="border-y border-border-subtle py-4 text-sm font-semibold text-content-muted">No sync activity yet.</div>
         ) : null}
       </div>
     </GlassCard>
@@ -539,7 +539,7 @@ function HealthPanel({ library, syncStatus }: { library: MusicLibraryResponse; s
   ];
 
   return (
-    <GlassCard className="p-5">
+    <GlassCard className="border-x-0 p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-black text-content">Sync health</h2>
@@ -577,10 +577,9 @@ function OverviewHeader({
   onSelectPlatform: (platform: (typeof platformCatalog)[number]) => void;
 }) {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4">
+    <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border-subtle pb-7">
       <div>
-        <p className="text-xs font-black tracking-[0.22em] text-accent uppercase">Archive sync</p>
-        <h1 className="mt-2 text-4xl font-black text-content">Playlist sync</h1>
+        <h1 className="text-3xl font-black tracking-[-0.03em] text-content sm:text-4xl">Playlist sync</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 font-semibold text-content-muted">
           Cantaro keeps the canonical playlist copy here, then tracks which connected platforms have a mapped version.
         </p>
@@ -588,7 +587,7 @@ function OverviewHeader({
       <div className="flex flex-wrap items-center gap-3">
         <Link
           to="/music/platforms/sync"
-          className="inline-flex h-12 items-center gap-2 rounded-2xl bg-action px-5 text-sm font-black text-action-content shadow-[0_16px_40px_rgba(15,23,42,0.18)] transition hover:bg-action-hover"
+          className="inline-flex min-h-11 items-center gap-2 bg-personal-accent px-4 text-sm font-bold text-personal-accent-content transition-colors hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
         >
           <MusicUiIcon name="refresh" className="h-5 w-5" />
           Add playlist sync
@@ -625,7 +624,7 @@ function OverviewMetrics({
   lastSync: string | null;
 }) {
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section className="grid grid-cols-2 gap-x-6 md:grid-cols-4">
       <MetricCard icon="cable" label="Connected platforms" value={isCheckingConnectedAccounts ? '...' : connectedPlatformCount.toString()} detail={`${platformCatalog.length} platforms configured`} />
       <MetricCard icon="listMusic" label="Synced playlists" value={syncedPlaylistCount.toString()} detail={`${totalPlaylistCount.toLocaleString()} total Cantaro playlists`} />
       <MetricCard icon="shieldCheck" label="Sync health" value={healthValue} detail={statusMessage ?? 'Current systems normal'} tone={healthTone} />

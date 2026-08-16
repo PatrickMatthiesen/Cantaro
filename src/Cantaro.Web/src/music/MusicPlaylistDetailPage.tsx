@@ -2,7 +2,6 @@ import { type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/clien
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { useMusicQueue } from './useMusicQueue';
 import { platformName, playlistArtwork, playlistLastSyncedAt, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
 
 function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
@@ -52,7 +51,6 @@ export function MusicPlaylistDetailPage({
   const playlist = library.playlists.find((item) => item.id === playlistId);
   const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
   const baseTracks = playlistSongEntries.map(({ song }, index) => mapSongToCollectionTrack(song, index));
-  const queue = useMusicQueue(baseTracks, playlistId);
 
   if (!playlist) {
     return (
@@ -62,12 +60,10 @@ export function MusicPlaylistDetailPage({
     );
   }
 
-  const activeSong = playlistSongEntries.find(({ song }) => song.id === queue.activeTrackId)?.song;
-  const tracks = baseTracks.map((track) => ({ ...track, isPlaying: track.id === queue.activeTrackId }));
   const chips = playlist.services.length > 0 ? playlist.services.map((service) => platformName(service.service)) : ['Cantaro'];
 
   return (
-    <MusicPageShell library={library} activeSong={activeSong} onStopActiveSong={queue.stop}>
+    <MusicPageShell library={library}>
       <MusicCollectionDetailPage
         eyebrow="Playlist"
         title={playlist.name}
@@ -79,16 +75,9 @@ export function MusicPlaylistDetailPage({
         updatedAt={playlistLastSyncedAt(playlist) ?? undefined}
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}
         chips={chips}
-        tracks={tracks}
+        tracks={baseTracks}
         emptyTrackLabel="This playlist has no songs yet"
-        activeTrack={queue.activeTrack}
-        queuedTracks={queue.queuedTracks}
         suggestions={getSuggestions(library, playlist.id)}
-        onPlayAll={queue.playAll}
-        onShuffle={queue.shuffle}
-        onPlayTrack={queue.playTrack}
-        onQueueTrack={queue.queueTrack}
-        onClearQueue={queue.clearQueue}
       />
     </MusicPageShell>
   );

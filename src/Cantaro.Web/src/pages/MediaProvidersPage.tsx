@@ -67,11 +67,8 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
   }
 
   return (
-    <div className="app-gradient-shell relative min-h-screen overflow-hidden bg-linear-to-br from-indigo-50 via-purple-50 to-pink-50 text-content">
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-linear-to-br from-blue-300 to-purple-400 opacity-30 blur-3xl" aria-hidden />
-      <div className="absolute -right-20 -bottom-40 h-96 w-96 rounded-full bg-linear-to-br from-pink-300 to-orange-300 opacity-30 blur-3xl" aria-hidden />
-
-      <div className="relative z-10 mx-auto max-w-5xl px-6 pt-8 pb-16">
+    <div className="min-h-screen bg-canvas text-content">
+      <div className="mx-auto max-w-5xl px-6 pt-8 pb-16">
         {content}
       </div>
     </div>

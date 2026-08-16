@@ -10,7 +10,6 @@ import {
 } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
-import { useMusicQueue } from './useMusicQueue';
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -165,7 +164,7 @@ function SpotifyAttribution({ compact = false }: { compact?: boolean }) {
       href="https://open.spotify.com/"
       target="_blank"
       rel="noopener noreferrer"
-      className={`inline-flex items-center gap-2 rounded-full bg-action text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none ${
+      className={`inline-flex items-center gap-2 bg-personal-accent text-personal-accent-contrast transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
         compact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
       } font-black`}
       aria-label="Open Spotify"
@@ -196,7 +195,7 @@ function SpotifyHeader({
   const description = getSpotifyHeaderDescription({ accountName, isConnected, needsReconnect, playlistCount });
 
   return (
-    <section className="rounded-3xl bg-surface-subtle p-6 shadow-[0_28px_90px_rgba(88,74,150,0.12)]">
+    <section className="border-y border-border-subtle bg-surface-subtle p-6">
       <div className="flex flex-wrap items-end justify-between gap-5">
         <div className="max-w-2xl">
           <div className="flex items-center gap-3">
@@ -254,16 +253,16 @@ function SpotifyHeaderActions({
   return (
     <div className="flex flex-wrap gap-2">
       {isConnected && !needsReconnect ? (
-        <button type="button" className="rounded-2xl bg-surface px-5 py-3 text-sm font-black text-content transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none" onClick={onRefresh}>
+        <button type="button" className="min-h-11 border border-border-strong bg-surface px-5 text-sm font-black text-content transition hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus" onClick={onRefresh}>
           Refresh
         </button>
       ) : (
-        <button type="button" className="rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onConnect}>
+        <button type="button" className="min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus" onClick={onConnect}>
           {needsReconnect ? 'Reconnect Spotify' : 'Connect Spotify'}
         </button>
       )}
       {isConnected ? (
-        <button type="button" className="rounded-2xl bg-action px-5 py-3 text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onDisconnect}>
+        <button type="button" className="min-h-11 border border-danger-border bg-surface px-5 text-sm font-black text-danger-content transition hover:bg-danger-surface focus-visible:outline-2 focus-visible:outline-focus" onClick={onDisconnect}>
           Disconnect
         </button>
       ) : null}
@@ -279,7 +278,7 @@ function SpotifyPlaylistCard({
   onSelect: (playlist: PlatformPlaylist) => void;
 }) {
   return (
-    <article className="overflow-hidden rounded-3xl bg-surface-translucent shadow-[0_16px_45px_rgba(88,74,150,0.08)]">
+    <article className="overflow-hidden bg-surface-subtle">
       <button
         type="button"
         onClick={() => onSelect(playlist)}
@@ -345,8 +344,6 @@ function SpotifyPlaylistDetail({
   isLoadingSongs: boolean;
 }) {
   const tracks = songs.map(mapSong);
-  const queue = useMusicQueue(tracks, playlist.id);
-  const displayTracks = tracks.map((track) => ({ ...track, isPlaying: track.id === queue.activeTrackId }));
   const suggestions: MusicCollectionSuggestion[] = playlists
     .filter((candidate) => candidate.id !== playlist.id)
     .slice(0, 4)
@@ -373,28 +370,21 @@ function SpotifyPlaylistDetail({
       updatedAt={playlist.publishedAt}
       songsLabel={`${playlist.itemCount.toLocaleString()} tracks`}
       chips={['Spotify', 'Platform playlist']}
-      tracks={displayTracks}
+      tracks={tracks}
       isLoadingTracks={isLoadingSongs}
       emptyTrackLabel="This Spotify playlist has no available tracks"
-      activeTrack={queue.activeTrack}
-      queuedTracks={queue.queuedTracks}
       suggestions={suggestions}
       actionSlot={playlist.externalUrl ? (
         <a
           href={playlist.externalUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex h-11 items-center gap-2 rounded-full bg-surface px-4 text-sm font-black text-content transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="inline-flex h-11 items-center gap-2 border border-border-strong bg-surface px-4 text-sm font-black text-content transition hover:bg-surface-hover hover:text-personal-accent-strong focus-visible:outline-2 focus-visible:outline-focus"
         >
           <MusicPlatformIcon platformId="spotify" className="h-8 w-8 text-[#1ed760]" />
           Open on Spotify
         </a>
       ) : <SpotifyAttribution />}
-      onPlayAll={queue.playAll}
-      onShuffle={queue.shuffle}
-      onPlayTrack={queue.playTrack}
-      onQueueTrack={queue.queueTrack}
-      onClearQueue={queue.clearQueue}
     />
   );
 }
@@ -408,7 +398,7 @@ function SpotifyPlaylistGrid({
 }) {
   if (playlists.length === 0) {
     return (
-      <section className="rounded-2xl bg-surface-translucent p-6">
+      <section className="border-y border-border-subtle py-6">
         <h2 className="text-xl font-black text-content">No playlists available</h2>
         <p className="mt-2 text-sm font-semibold text-content-muted">Spotify did not return any playlists for this account.</p>
       </section>
@@ -434,7 +424,7 @@ function SpotifyPageBody({
   onSelectPlaylist: (playlist: PlatformPlaylist) => void;
 }) {
   if (browser.isLoading) {
-    return <section className="rounded-2xl bg-surface-translucent p-6 text-sm font-semibold text-content-muted">Loading Spotify connection…</section>;
+    return <section className="border-y border-border-subtle py-6 text-sm font-semibold text-content-muted">Loading Spotify connection…</section>;
   }
 
   if (browser.selectedPlaylist) {
@@ -517,7 +507,7 @@ export function SpotifyMusicPlatformPage({ playlistId = null }: { playlistId?: s
         ) : null}
 
         {browser.error ? (
-          <section className="rounded-2xl bg-rose-50 p-4 text-sm font-semibold text-rose-800" role="alert">
+          <section className="border-y border-danger-border bg-danger-surface p-4 text-sm font-semibold text-danger-content" role="alert">
             {browser.error}
           </section>
         ) : null}
