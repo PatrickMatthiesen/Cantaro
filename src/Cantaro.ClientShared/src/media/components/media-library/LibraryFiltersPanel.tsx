@@ -1,4 +1,4 @@
-import { GlassCard } from '../../../ui';
+import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import {
     LibraryFilterFields,
     LibraryRefreshAction,
@@ -63,37 +63,63 @@ export function LibraryFiltersPanel({
         { value: '', label: 'All lists' },
         ...availableProviderListNames.map((listName) => ({ value: listName, label: listName })),
     ];
+    const activeFilterCount = [
+        filters.status,
+        filters.mediaKind,
+        filters.provider,
+        filters.providerListName,
+    ].filter(Boolean).length;
+    const filterFields = (
+        <LibraryFilterFields
+            statusValue={filters.status ?? ''}
+            mediaKindValue={filters.mediaKind ?? ''}
+            providerValue={filters.provider ?? ''}
+            providerListNameValue={filters.providerListName ?? ''}
+            providerOptions={providerOptions}
+            listOptions={listOptions}
+            statusOptions={STATUS_OPTIONS}
+            mediaKindOptions={MEDIA_KIND_OPTIONS}
+            isListDisabled={availableProviderListNames.length === 0 || !isPrimaryProviderSelected}
+            sortBy={filters.sortBy ?? 'updatedAt'}
+            sortDir={filters.sortDir ?? 'desc'}
+            onStatusChange={(value) => onUpdateFilter('status', value)}
+            onMediaKindChange={(value) => onUpdateFilter('mediaKind', value)}
+            onProviderChange={onUpdateProviderFilter}
+            onProviderListChange={(value) => onUpdateFilter('providerListName', value)}
+            onSortByChange={(value) => onUpdateFilter('sortBy', value)}
+            onToggleSortDir={onToggleSortDir}
+        />
+    );
+    const refreshAction = (
+        <LibraryRefreshAction
+            isConnected={Boolean(providerStatus?.isConnected)}
+            isRefreshing={isRefreshing}
+            onRefresh={onRefreshFromRemote}
+            onNavigateProviders={onNavigateProviders}
+        />
+    );
 
     return (
-        <GlassCard className="p-3">
-            <div className="flex flex-wrap items-end gap-2">
-                <LibraryFilterFields
-                    statusValue={filters.status ?? ''}
-                    mediaKindValue={filters.mediaKind ?? ''}
-                    providerValue={filters.provider ?? ''}
-                    providerListNameValue={filters.providerListName ?? ''}
-                    providerOptions={providerOptions}
-                    listOptions={listOptions}
-                    statusOptions={STATUS_OPTIONS}
-                    mediaKindOptions={MEDIA_KIND_OPTIONS}
-                    isListDisabled={availableProviderListNames.length === 0 || !isPrimaryProviderSelected}
-                    sortBy={filters.sortBy ?? 'updatedAt'}
-                    sortDir={filters.sortDir ?? 'desc'}
-                    onStatusChange={(value) => onUpdateFilter('status', value)}
-                    onMediaKindChange={(value) => onUpdateFilter('mediaKind', value)}
-                    onProviderChange={onUpdateProviderFilter}
-                    onProviderListChange={(value) => onUpdateFilter('providerListName', value)}
-                    onSortByChange={(value) => onUpdateFilter('sortBy', value)}
-                    onToggleSortDir={onToggleSortDir}
-                />
+        <section className="border-y border-border-subtle">
+            <details className="group lg:hidden">
+                <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 text-sm font-semibold text-content marker:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+                    <SlidersHorizontal className="size-4 text-content-muted" aria-hidden />
+                    <span>Filters</span>
+                    <span className="ml-auto text-xs font-normal text-content-muted">
+                        {activeFilterCount > 0 ? `${activeFilterCount} active` : 'All titles'}
+                    </span>
+                    <ChevronDown className="size-4 text-content-muted transition-transform group-open:rotate-180" aria-hidden />
+                </summary>
+                <div className="flex flex-col gap-4 border-t border-border-subtle py-4">
+                    <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">{filterFields}</div>
+                    {refreshAction}
+                </div>
+            </details>
 
-                <LibraryRefreshAction
-                    isConnected={Boolean(providerStatus?.isConnected)}
-                    isRefreshing={isRefreshing}
-                    onRefresh={onRefreshFromRemote}
-                    onNavigateProviders={onNavigateProviders}
-                />
+            <div className="hidden flex-wrap items-end gap-x-3 gap-y-4 py-4 lg:flex">
+                {filterFields}
+                {refreshAction}
             </div>
-        </GlassCard>
+        </section>
     );
 }

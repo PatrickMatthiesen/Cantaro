@@ -154,10 +154,11 @@ function MediaLibraryContent({
 }) {
   useEffect(() => {
     onHeadingChange?.({
-      eyebrow: 'Cantaro · Media',
-      title: 'My Library',
+      eyebrow: 'Media',
+      title: 'Library',
+      details: library.isLoading ? undefined : [`${library.totalCount} ${library.totalCount === 1 ? 'title' : 'titles'}`],
     });
-  }, [onHeadingChange]);
+  }, [library.isLoading, library.totalCount, onHeadingChange]);
 
   return (
     <>
@@ -210,7 +211,7 @@ export function MediaLibraryPage({
     onSearchQueryChange,
     onSearchModeChange,
   });
-  const contentClassName = `space-y-4 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-6 pt-8 pb-16'}`;
+  const contentClassName = `space-y-6 ${embedded ? '' : 'relative z-10 mx-auto max-w-384 px-4 pt-6 pb-16 sm:px-6 sm:pt-8'}`;
 
   const content = (
     <div className={contentClassName}>

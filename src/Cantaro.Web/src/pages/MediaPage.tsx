@@ -45,10 +45,10 @@ function MediaSectionHeader({ heading }: { heading: GlobalHeadingState }) {
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <p className="text-xs font-black tracking-[0.22em] text-violet-600 uppercase">{heading.eyebrow}</p>
-        <h1 className="mt-2 text-4xl font-black text-content">{heading.title}</h1>
+        <p className="text-sm font-semibold text-content-muted">{heading.eyebrow}</p>
+        <h1 className="mt-1 text-3xl font-black text-content sm:text-4xl">{heading.title}</h1>
         {heading.details?.map((detail) => (
-          <p key={detail} className="mt-1 text-sm font-semibold text-content-muted">{detail}</p>
+          <p key={detail} className="mt-1 text-sm text-content-muted">{detail}</p>
         ))}
       </div>
     </header>

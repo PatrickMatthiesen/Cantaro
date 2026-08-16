@@ -163,13 +163,6 @@ html {
   border-color: var(--color-warning-border);
 }
 
-.segmented-switch--embedded {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
 :root[data-theme="dark"] .glass-surface {
   box-shadow:
     0 20px 55px rgba(0, 0, 0, 0.2),

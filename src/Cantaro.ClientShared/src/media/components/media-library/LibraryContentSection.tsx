@@ -1,5 +1,5 @@
 import { LibraryEntryCard } from '../LibraryEntryCard';
-import { GlassCard, GradientButton } from '../../../ui';
+import { ActionButton } from '../../../ui';
 import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
 import type { MediaLibraryListItemDto, MediaLibraryQueryParams } from '../../services/mediaApi';
 
@@ -20,8 +20,8 @@ export interface LibraryContentSectionProps {
 
 function libraryGridClassName(density: MediaLibraryDensity) {
     return density === 'compact'
-        ? 'grid grid-cols-[repeat(auto-fill,minmax(min(7rem,100%),1fr))] gap-2'
-        : 'grid grid-cols-[repeat(auto-fill,minmax(min(9rem,100%),1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] md:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))]';
+        ? 'grid grid-cols-3 gap-x-2 gap-y-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8'
+        : 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6';
 }
 
 function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
@@ -32,10 +32,8 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
             {Array.from({ length: skeletonCount }).map((_, index) => (
                 <div
                     key={index}
-                    className={`aspect-[0.72] animate-pulse overflow-hidden bg-surface-subtle shadow-[0_18px_45px_rgba(15,23,42,0.10)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}
-                >
-                    <div className="h-full w-full bg-surface-hover" />
-                </div>
+                    className="aspect-[0.72] animate-pulse border border-border-subtle bg-surface-subtle"
+                />
             ))}
         </div>
     );
@@ -43,20 +41,20 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
 
 function LibraryErrorState({ onRetry }: { onRetry: () => Promise<void> }) {
     return (
-        <GlassCard className="p-6">
+        <section className="border-y border-danger-border bg-danger-surface px-4 py-6">
             <p className="font-semibold text-danger-content">Cantaro couldn’t load your saved library.</p>
             <p className="mt-1 text-sm text-content-muted">Your library data is still stored in Cantaro. Try loading it again.</p>
             <div className="mt-3">
-                <GradientButton tone="soft" onClick={() => void onRetry()}>Try again</GradientButton>
+                <ActionButton tone="secondary" onClick={() => void onRetry()}>Try again</ActionButton>
             </div>
-        </GlassCard>
+        </section>
     );
 }
 
 function LibraryEmptyState({ hasActiveFilters, onNavigateProviders }: { hasActiveFilters: boolean; onNavigateProviders?: () => void }) {
     return (
-        <GlassCard className="p-8 text-center">
-            <p className="text-content-muted">No library entries found.</p>
+        <section className="border-y border-border-subtle py-12 text-center">
+            <p className="font-semibold text-content">No library entries found</p>
             <p className="mt-1 text-sm text-content-subtle">
                 {hasActiveFilters
                     ? 'Try removing some filters.'
@@ -64,12 +62,12 @@ function LibraryEmptyState({ hasActiveFilters, onNavigateProviders }: { hasActiv
             </p>
             {!hasActiveFilters && onNavigateProviders ? (
                 <div className="mt-4">
-                    <GradientButton gradient="from-blue-500 to-cyan-500" onClick={onNavigateProviders}>
+                    <ActionButton tone="personal" onClick={onNavigateProviders}>
                         Go to Providers
-                    </GradientButton>
+                    </ActionButton>
                 </div>
             ) : null}
-        </GlassCard>
+        </section>
     );
 }
 
@@ -79,17 +77,17 @@ function LibraryPagination({ filters, totalPages, onPreviousPage, onNextPage }: 
     }
 
     return (
-        <div className="flex items-center justify-center gap-2">
-            <GradientButton tone="soft" disabled={filters.page === 1} onClick={onPreviousPage}>
+        <nav className="flex flex-wrap items-center justify-center gap-2 border-t border-border-subtle pt-6" aria-label="Library pages">
+            <ActionButton tone="ghost" disabled={filters.page === 1} onClick={onPreviousPage}>
                 ← Previous
-            </GradientButton>
+            </ActionButton>
             <span className="text-sm text-content-muted">
                 Page {filters.page ?? 1} of {totalPages}
             </span>
-            <GradientButton tone="soft" disabled={(filters.page ?? 1) >= totalPages} onClick={onNextPage}>
+            <ActionButton tone="ghost" disabled={(filters.page ?? 1) >= totalPages} onClick={onNextPage}>
                 Next →
-            </GradientButton>
-        </div>
+            </ActionButton>
+        </nav>
     );
 }
 

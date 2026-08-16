@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { GlassCard, GradientButton } from '../../../ui';
+import { ActionButton } from '../../../ui';
 import { mediaKindLabel } from '../../services/mediaFormatting';
 import type { MediaProviderSearchResultDto } from '../../services/mediaApi';
 
-const CATALOG_RESULTS_GRID_CLASS_NAME = 'grid grid-cols-[repeat(auto-fill,minmax(min(9rem,100%),1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))]';
+const CATALOG_RESULTS_GRID_CLASS_NAME = 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6';
 
 export interface CatalogSearchSectionProps {
     providerName: string;
@@ -33,7 +33,8 @@ function CatalogPoster({ posterUrl, title }: { posterUrl?: string; title: string
             src={posterUrl}
             alt={`${title} cover art`}
             loading="lazy"
-            className="h-full w-full object-cover"
+            decoding="async"
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.025] group-hover:saturate-125 motion-reduce:transition-none"
             onError={() => setFailed(true)}
         />
     );
@@ -49,12 +50,12 @@ function catalogResultMetadata(result: MediaProviderSearchResultDto): string[] {
 
 function CatalogResultBadges({ mediaKind, isInLibrary }: { mediaKind: string; isInLibrary: boolean }) {
     return (
-        <div className="absolute top-3 left-3 flex flex-wrap gap-2">
-            <span className="rounded-full bg-surface-translucent px-2.5 py-1 text-xs font-semibold text-content">
+        <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-linear-to-b from-black/78 to-transparent p-3 pb-9">
+            <span className="text-xs font-semibold text-white">
                 {mediaKindLabel(mediaKind)}
             </span>
             {isInLibrary ? (
-                <span className="rounded-full bg-success-surface px-2.5 py-1 text-xs font-semibold text-success-content">
+                <span className="text-xs font-semibold text-emerald-300">
                     In library
                 </span>
             ) : null}
@@ -84,14 +85,14 @@ function CatalogLibraryAction({
     if (!mediaTitleId) return null;
 
     return (
-        <div className="border-t border-border-subtle bg-surface-translucent p-3">
-            <GradientButton
-                tone="soft"
-                className="w-full justify-center"
+        <div className="border-t border-border-subtle">
+            <ActionButton
+                tone="ghost"
+                fullWidth
                 onClick={() => onNavigateEntry(mediaTitleId)}
             >
                 Open library entry
-            </GradientButton>
+            </ActionButton>
         </div>
     );
 }
@@ -110,13 +111,14 @@ function CatalogResultCard({
     const metadata = catalogResultMetadata(result);
 
     return (
-        <GlassCard interactive className="overflow-hidden p-0">
+        <article className="group overflow-hidden border border-border-subtle bg-surface transition-colors hover:border-border-strong">
             <button
                 type="button"
-                className="flex h-full w-full flex-col text-left"
+                className="block w-full text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
                 onClick={() => onNavigateCatalogResult(result.providerId, result.providerMediaId)}
+                aria-label={`Open ${result.title} from ${result.providerId}`}
             >
-                <div className="relative aspect-[0.72] overflow-hidden md:min-h-76">
+                <div className="relative aspect-[0.72] overflow-hidden">
                     <CatalogPoster posterUrl={result.posterUrl} title={result.title} />
                     <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-900/30 to-transparent" aria-hidden />
                     <CatalogResultBadges mediaKind={result.mediaKind} isInLibrary={isInLibrary} />
@@ -124,7 +126,7 @@ function CatalogResultCard({
                 </div>
             </button>
             <CatalogLibraryAction mediaTitleId={isInLibrary ? mediaTitleId : undefined} onNavigateEntry={onNavigateEntry} />
-        </GlassCard>
+        </article>
     );
 }
 
@@ -141,12 +143,12 @@ export function CatalogSearchSection({
 }: CatalogSearchSectionProps) {
     if (error) {
         return (
-            <GlassCard className="p-6">
+            <section className="border-y border-danger-border bg-danger-surface px-4 py-6">
                 <p className="text-sm text-danger-content">{error}</p>
                 <div className="mt-3">
-                    <GradientButton tone="soft" onClick={onRetry}>Retry</GradientButton>
+                    <ActionButton tone="secondary" onClick={onRetry}>Retry</ActionButton>
                 </div>
-            </GlassCard>
+            </section>
         );
     }
 
@@ -154,7 +156,7 @@ export function CatalogSearchSection({
         return (
             <div className={CATALOG_RESULTS_GRID_CLASS_NAME}>
                 {Array.from({ length: 10 }).map((_, index) => (
-                    <GlassCard key={index} className="aspect-[0.72] animate-pulse bg-surface-translucent" />
+                    <div key={index} className="aspect-[0.72] animate-pulse border border-border-subtle bg-surface-subtle" />
                 ))}
             </div>
         );
@@ -162,17 +164,17 @@ export function CatalogSearchSection({
 
     if (!hasSearched) {
         return (
-            <GlassCard className="p-8 text-center">
+            <section className="border-y border-border-subtle py-12 text-center">
                 <p className="font-medium text-content-muted">Search {providerName} for something new to watch or read.</p>
-            </GlassCard>
+            </section>
         );
     }
 
     if (results.length === 0) {
         return (
-            <GlassCard className="p-8 text-center">
+            <section className="border-y border-border-subtle py-12 text-center">
                 <p className="text-content-muted">No {providerName} results found for "{query}".</p>
-            </GlassCard>
+            </section>
         );
     }
 
