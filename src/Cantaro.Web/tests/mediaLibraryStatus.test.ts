@@ -65,16 +65,15 @@ describe('media library lifecycle filters', () => {
     }
   });
 
-  test('preserves explicitly requested canonical status and provider list filters', () => {
+  test('preserves canonical status while ignoring provider-list route filters', () => {
     const routeDefaults = getMediaFilterDefaults({
       status: 'completed',
       providerListName: 'Favorites',
     });
 
-    expect(createInitialMediaLibraryFilters(routeDefaults)).toMatchObject({
-      status: 'completed',
-      providerListName: 'Favorites',
-    });
+    const filters = createInitialMediaLibraryFilters(routeDefaults);
+    expect(filters.status).toBe('completed');
+    expect(filters).not.toHaveProperty('providerListName');
   });
 });
 

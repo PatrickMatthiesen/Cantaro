@@ -285,7 +285,7 @@ function MobileNavigationDrawer({
 
   return (
     <div
-      className="fixed inset-0 z-50 sm:hidden"
+      className="fixed inset-0 z-50 lg:hidden"
       role="dialog"
       aria-modal="true"
       aria-label="Navigation menu"
@@ -298,7 +298,8 @@ function MobileNavigationDrawer({
       />
       <div
         ref={drawerRef}
-        className="relative h-full w-[min(86vw,22rem)] overflow-hidden bg-canvas shadow-2xl"
+        className="group/navigation-drawer relative h-full w-[min(86vw,22rem)] overflow-hidden bg-canvas shadow-2xl"
+        data-navigation-drawer="expanded"
       >
         <button
           ref={closeButtonRef}
@@ -324,15 +325,26 @@ function DesktopSidebar({
   sidebar,
   isFolded,
   onToggle,
+  onOpenCompact,
 }: {
   sidebar: ReactNode;
   isFolded: boolean;
   onToggle: () => void;
+  onOpenCompact: () => void;
 }) {
   const label = isFolded ? "Expand sidebar" : "Fold sidebar";
   return (
     <div className="relative hidden sm:block">
       {sidebar}
+      <button
+        type="button"
+        className="fixed bottom-4 left-4 z-20 hidden h-11 w-11 items-center justify-center border border-border-subtle bg-canvas text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-focus sm:flex lg:hidden"
+        aria-label="Expand sidebar"
+        title="Expand sidebar"
+        onClick={onOpenCompact}
+      >
+        <PanelLeftOpen className="h-5 w-5" aria-hidden />
+      </button>
       <button
         type="button"
         className="fixed bottom-4 left-3 z-20 hidden h-11 items-center gap-3 border border-border-subtle bg-canvas px-3 text-sm font-semibold text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-focus lg:flex"
@@ -407,6 +419,7 @@ export function PageShell({
           sidebar={sidebar}
           isFolded={isSidebarFolded}
           onToggle={() => setIsSidebarFolded((current) => !current)}
+          onOpenCompact={() => setIsMobileNavigationOpen(true)}
         />
 
         <div className="flex min-w-0 flex-col pb-28">

@@ -56,16 +56,13 @@ export function MediaLibraryPage({
       <LibraryFiltersPanel
         searchQuery={search.searchQuery}
         filters={library.filters}
-        availableProviderListNames={library.availableProviderListNames}
         providerStatus={library.providerStatus}
         isRefreshing={library.isRefreshing}
-        isPrimaryProviderSelected={library.isPrimaryProviderSelected}
         onSearchQueryChange={search.setSearchQuery}
         onUpdateFilter={library.updateFilter}
         onUpdateProviderFilter={library.updateProviderFilter}
         onToggleSortDir={library.toggleSortDir}
         onRefreshFromRemote={library.refreshFromRemote}
-        onNavigateProviders={onNavigateProviders}
       />
       <LibraryContentSection
         error={library.error}

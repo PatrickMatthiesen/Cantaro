@@ -33,65 +33,50 @@ interface FilterOption {
 export interface LibraryFiltersPanelProps {
     searchQuery: string;
     filters: MediaLibraryQueryParams;
-    availableProviderListNames: string[];
     providerStatus: MediaProviderAccountStatusDto | null;
     isRefreshing: boolean;
-    isPrimaryProviderSelected: boolean;
     onSearchQueryChange: (query: string) => void;
     onUpdateFilter: <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => void;
     onUpdateProviderFilter: (provider: string | undefined) => void;
     onToggleSortDir: () => void;
     onRefreshFromRemote: () => Promise<void>;
-    onNavigateProviders?: () => void;
 }
 
 // fallow-ignore-next-line complexity
 export function LibraryFiltersPanel({
     searchQuery,
     filters,
-    availableProviderListNames,
     providerStatus,
     isRefreshing,
-    isPrimaryProviderSelected,
     onSearchQueryChange,
     onUpdateFilter,
     onUpdateProviderFilter,
     onToggleSortDir,
     onRefreshFromRemote,
-    onNavigateProviders,
 }: LibraryFiltersPanelProps) {
     const [filtersOpen, setFiltersOpen] = useState(false);
     const providerOptions: FilterOption[] = [
         { value: '', label: 'All providers' },
         ...mediaProviderCatalog.map((provider) => ({ value: provider.id, label: provider.name })),
     ];
-    const listOptions: FilterOption[] = [
-        { value: '', label: 'All lists' },
-        ...availableProviderListNames.map((listName) => ({ value: listName, label: listName })),
-    ];
     const activeFilterCount = [
         filters.status,
         filters.mediaKind,
         filters.provider,
-        filters.providerListName,
     ].filter(Boolean).length;
     const filterFields = (
         <LibraryFilterFields
             statusValue={filters.status ?? ''}
             mediaKindValue={filters.mediaKind ?? ''}
             providerValue={filters.provider ?? ''}
-            providerListNameValue={filters.providerListName ?? ''}
             providerOptions={providerOptions}
-            listOptions={listOptions}
             statusOptions={STATUS_OPTIONS}
             mediaKindOptions={MEDIA_KIND_OPTIONS}
-            isListDisabled={availableProviderListNames.length === 0 || !isPrimaryProviderSelected}
             sortBy={filters.sortBy ?? 'updatedAt'}
             sortDir={filters.sortDir ?? 'desc'}
             onStatusChange={(value) => onUpdateFilter('status', value)}
             onMediaKindChange={(value) => onUpdateFilter('mediaKind', value)}
             onProviderChange={onUpdateProviderFilter}
-            onProviderListChange={(value) => onUpdateFilter('providerListName', value)}
             onSortByChange={(value) => onUpdateFilter('sortBy', value)}
             onToggleSortDir={onToggleSortDir}
         />
@@ -101,7 +86,6 @@ export function LibraryFiltersPanel({
             isConnected={Boolean(providerStatus?.isConnected)}
             isRefreshing={isRefreshing}
             onRefresh={onRefreshFromRemote}
-            onNavigateProviders={onNavigateProviders}
         />
     );
 

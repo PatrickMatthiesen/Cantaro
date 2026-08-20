@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, RefreshCw, Settings2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react';
 import { ActionButton, IconButton, SelectField } from '../../../ui';
 
 interface FilterOption {
@@ -25,18 +25,14 @@ export interface LibraryFilterFieldsProps {
     statusValue: string;
     mediaKindValue: string;
     providerValue: string;
-    providerListNameValue: string;
     providerOptions: FilterOption[];
-    listOptions: FilterOption[];
     statusOptions: FilterOption[];
     mediaKindOptions: FilterOption[];
-    isListDisabled: boolean;
     sortBy: string;
     sortDir: 'asc' | 'desc';
     onStatusChange: (value: string | undefined) => void;
     onMediaKindChange: (value: string | undefined) => void;
     onProviderChange: (value: string | undefined) => void;
-    onProviderListChange: (value: string | undefined) => void;
     onSortByChange: (value: string) => void;
     onToggleSortDir: () => void;
 }
@@ -45,7 +41,6 @@ export interface LibraryRefreshActionProps {
     isConnected: boolean;
     isRefreshing: boolean;
     onRefresh: () => Promise<void>;
-    onNavigateProviders?: () => void;
 }
 
 function FilterSelect({ label, value, options, onChange, disabled = false }: FilterSelectProps) {
@@ -101,18 +96,14 @@ export function LibraryFilterFields({
     statusValue,
     mediaKindValue,
     providerValue,
-    providerListNameValue,
     providerOptions,
-    listOptions,
     statusOptions,
     mediaKindOptions,
-    isListDisabled,
     sortBy,
     sortDir,
     onStatusChange,
     onMediaKindChange,
     onProviderChange,
-    onProviderListChange,
     onSortByChange,
     onToggleSortDir,
 }: LibraryFilterFieldsProps) {
@@ -121,29 +112,16 @@ export function LibraryFilterFields({
             <FilterSelect label="Status" value={statusValue} options={statusOptions} onChange={onStatusChange} />
             <FilterSelect label="Type" value={mediaKindValue} options={mediaKindOptions} onChange={onMediaKindChange} />
             <FilterSelect label="Provider" value={providerValue} options={providerOptions} onChange={onProviderChange} />
-            <FilterSelect
-                label="Provider list"
-                value={providerListNameValue}
-                options={listOptions}
-                onChange={onProviderListChange}
-                disabled={isListDisabled}
-            />
             <SortControls sortBy={sortBy} sortDir={sortDir} onSortByChange={onSortByChange} onToggleSortDir={onToggleSortDir} />
         </>
     );
 }
 
-export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onNavigateProviders }: LibraryRefreshActionProps) {
+export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh }: LibraryRefreshActionProps) {
     return (
         <div className="grid min-w-fit gap-1.5 text-sm text-content-muted lg:ml-auto">
             <span>Providers</span>
             <div className="flex flex-wrap gap-1.5">
-                {onNavigateProviders ? (
-                    <ActionButton tone="ghost" onClick={onNavigateProviders}>
-                        <Settings2 className="size-4" aria-hidden />
-                        Manage
-                    </ActionButton>
-                ) : null}
                 {isConnected ? (
                     <ActionButton
                         tone="ghost"

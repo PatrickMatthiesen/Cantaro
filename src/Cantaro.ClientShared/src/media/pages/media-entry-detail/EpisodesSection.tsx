@@ -126,7 +126,6 @@ function EpisodeDestinationActions({
           >
             <StreamingServiceIcon
               serviceId={destination.serviceId}
-              style={{ color: "currentColor", fill: "currentColor" }}
               aria-hidden
             />
             <span>{service.displayName}</span>

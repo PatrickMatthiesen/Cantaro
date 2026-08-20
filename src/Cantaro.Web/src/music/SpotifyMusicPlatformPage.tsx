@@ -164,9 +164,9 @@ function SpotifyAttribution({ compact = false }: { compact?: boolean }) {
       href="https://open.spotify.com/"
       target="_blank"
       rel="noopener noreferrer"
-      className={`inline-flex items-center gap-2 bg-personal-accent text-personal-accent-contrast transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
+      className={`inline-flex items-center gap-2 border border-border-strong bg-surface font-black text-content transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
         compact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
-      } font-black`}
+      }`}
       aria-label="Open Spotify"
     >
       <MusicPlatformIcon platformId="spotify" className="h-8 w-8 text-[#1ed760]" />
@@ -305,7 +305,7 @@ function SpotifyPlaylistCard({
             href={playlist.externalUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs font-black text-accent-strong hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            className="inline-flex min-h-9 items-center bg-personal-accent px-3 text-xs font-black text-personal-accent-contrast transition-colors hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             Open playlist
           </a>

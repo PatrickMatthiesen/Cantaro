@@ -435,7 +435,6 @@ function ContinueDestinationLink({
         <StreamingServiceIcon
           serviceId={action.serviceId}
           className="h-5 w-5"
-          style={{ color: "currentColor", fill: "currentColor" }}
           aria-hidden
         />
       )}
