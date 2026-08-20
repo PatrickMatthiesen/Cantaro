@@ -1,12 +1,12 @@
-import { useState, type ReactNode } from 'react';
-import { matchingApi } from '@cantaro/client-shared/music';
-import type { MatchingCandidateComparisonResponse, MatchingQueueCandidateResponse } from '@cantaro/client-shared/music';
+import { useState } from 'react';
+import { matchingApi, type MatchingCandidateComparisonResponse, type MatchingQueueCandidateResponse } from '@cantaro/client-shared/music';
 import { formatClusterReason, formatDuration, formatPercent } from './matchingReviewPresentation';
 import { MarkerList } from './MarkerList';
 
 type MatchingActionHandler = (observationId: string, action: () => Promise<void>) => Promise<void>;
 interface TrackVersionOption { label: string; value: number }
 interface SuggestedTrackVersion { label: string; value: number }
+type ScoreTone = 'match' | 'close' | 'miss' | 'neutral';
 
 const trackVersionOptions: readonly TrackVersionOption[] = [
   ['Acoustic', 1], ['Live', 2], ['Instrumental', 4], ['Orchestral', 8], ['Remix', 16], ['Radio edit', 32],
@@ -14,111 +14,82 @@ const trackVersionOptions: readonly TrackVersionOption[] = [
   ['Re-recorded', 4096], ['Clean', 8192], ['Explicit', 16384], ['Slowed', 32768], ['Sped up', 65536], ['Alternate take', 131072],
 ].map(([label, value]) => ({ label: String(label), value: Number(value) }));
 
-function getSuggestedTrackVersion(versionFlags: number): SuggestedTrackVersion | undefined {
-  if (versionFlags === 0) return undefined;
-  const labels = trackVersionOptions.filter((option) => (versionFlags & option.value) === option.value).map((option) => option.label);
-  return { label: labels.length > 0 ? labels.join(' + ') : 'Inferred', value: versionFlags };
+function suggestedTrackVersion(flags: number): SuggestedTrackVersion | undefined {
+  if (flags === 0) return undefined;
+  const labels = trackVersionOptions.filter((option) => (flags & option.value) === option.value).map((option) => option.label);
+  return { label: labels.length > 0 ? labels.join(' + ') : 'Inferred', value: flags };
 }
 
-export function CandidateList({ candidates, disabled, observationId, onAction, suggestedVersionFlags }: { candidates: MatchingQueueCandidateResponse[]; disabled: boolean; observationId: string; onAction: MatchingActionHandler; suggestedVersionFlags: number }) {
-  if (candidates.length === 0) return <p className="mt-3 text-sm text-content-muted">No candidates were stored for this observation yet.</p>;
-  const rows = Array.from({ length: Math.ceil(candidates.length / 2) }, (_, index) => candidates.slice(index * 2, index * 2 + 2));
-  const detectedVersion = getSuggestedTrackVersion(suggestedVersionFlags);
-  return <div className="matching-candidate-grid mt-4">{rows.map((row) => <CandidateRow key={row.map((candidate) => candidate.candidateId).join('-')} row={row} detectedVersion={detectedVersion} disabled={disabled} observationId={observationId} onAction={onAction} />)}</div>;
-}
-
-function CandidateRow({ row, detectedVersion, disabled, observationId, onAction }: { row: MatchingQueueCandidateResponse[]; detectedVersion?: SuggestedTrackVersion; disabled: boolean; observationId: string; onAction: MatchingActionHandler }) {
-  return <div className="matching-candidate-row">
-    <CandidateChoice candidate={row[0]} detectedVersion={detectedVersion} disabled={disabled} observationId={observationId} onAction={onAction} />
-    {row[1] ? <><div className="matching-candidate-column-divider" aria-hidden="true" /><CandidateChoice candidate={row[1]} detectedVersion={detectedVersion} disabled={disabled} observationId={observationId} onAction={onAction} /></> : null}
-  </div>;
-}
-
-function CandidateChoice({ candidate, detectedVersion, disabled, observationId, onAction }: { candidate: MatchingQueueCandidateResponse; detectedVersion?: SuggestedTrackVersion; disabled: boolean; observationId: string; onAction: MatchingActionHandler }) {
-  return <CandidateCard candidate={candidate} detectedVersion={detectedVersion} disabled={disabled}
-    onUseExact={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, candidate.candidateId))}
-    onUseAsVersion={(versionFlags) => void onAction(observationId, () => matchingApi.selectCandidateAsVersion(observationId, candidate.candidateId, versionFlags))} />;
-}
-
-type ScoreTone = 'match' | 'close' | 'miss' | 'neutral';
 function scoreTone(value?: number): ScoreTone {
   if (value === undefined || value === null) return 'neutral';
   if (value >= 0.9) return 'match';
   return value >= 0.65 ? 'close' : 'miss';
 }
-function scoreToneClasses(tone: ScoreTone): string {
-  const classes: Record<ScoreTone, string> = { match: 'score-tone--match', close: 'score-tone--close', miss: 'score-tone--miss', neutral: 'score-tone--neutral' };
+
+function scoreClasses(tone: ScoreTone): string {
+  const classes: Record<ScoreTone, string> = {
+    match: 'border-success-border bg-success-surface text-success-content',
+    close: 'border-warning-border bg-warning-surface text-warning-content',
+    miss: 'border-danger-border bg-danger-surface text-danger-content',
+    neutral: 'border-border-subtle bg-surface-subtle text-content-muted',
+  };
   return classes[tone];
 }
-function CandidateConfidence({ score }: { score: number }) {
-  return <span className={`matching-candidate-confidence ${scoreToneClasses(scoreTone(score))}`}>{Math.round(score * 100)}%</span>;
+
+export function CandidateList({ candidates, disabled, observationId, onAction, suggestedVersionFlags }: { candidates: MatchingQueueCandidateResponse[]; disabled: boolean; observationId: string; onAction: MatchingActionHandler; suggestedVersionFlags: number }) {
+  if (candidates.length === 0) return <p className="mt-3 text-sm text-content-muted">No candidates were stored for this observation yet.</p>;
+  const detectedVersion = suggestedTrackVersion(suggestedVersionFlags);
+  return <div className="mt-4 grid border-y border-border-subtle xl:grid-cols-2 xl:divide-x xl:divide-border-subtle">{candidates.map((candidate) => <CandidateCard key={candidate.candidateId} candidate={candidate} detectedVersion={detectedVersion} disabled={disabled} onUseExact={() => void onAction(observationId, () => matchingApi.selectCandidate(observationId, candidate.candidateId))} onUseAsVersion={(flags) => void onAction(observationId, () => matchingApi.selectCandidateAsVersion(observationId, candidate.candidateId, flags))} />)}</div>;
 }
-function formatCandidateSource(source?: string): string {
-  if (!source) return 'Unknown';
-  return source === 'musicbrainz' ? 'MusicBrainz' : source.replace(/_/g, ' ');
+
+function candidateSource(candidate: MatchingQueueCandidateResponse) {
+  const sourceLabel = candidate.candidateSource === 'musicbrainz' ? 'MusicBrainz' : candidate.candidateSource?.replace(/_/g, ' ') ?? 'Unknown';
+  return candidate.mbidRecording && candidate.candidateSource === 'musicbrainz'
+    ? <a href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`} target="_blank" rel="noreferrer" className="underline decoration-personal-accent underline-offset-4 hover:text-personal-accent-strong">{sourceLabel}</a>
+    : sourceLabel;
 }
+
 function CandidateMeta({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
   const duration = formatDuration(candidate.durationSeconds);
-  const sourceLabel = formatCandidateSource(candidate.candidateSource);
-  const source = candidate.mbidRecording && candidate.candidateSource === 'musicbrainz'
-    ? <a href={`https://musicbrainz.org/recording/${candidate.mbidRecording}`} target="_blank" rel="noreferrer" className="matching-candidate-source-link">{sourceLabel}</a>
-    : sourceLabel;
-  return <p className="matching-candidate-meta"><span>{candidate.artist ?? 'Unknown artist'}</span>{duration ? <span>{duration}</span> : null}<span>{source}</span></p>;
-}
-function CandidateMarkers({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
-  return <><MarkerList markers={candidate.versionMarkers} tone="version" /><MarkerList markers={candidate.playbackModifiers} tone="playback" /></>;
+  return <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs font-semibold text-content-muted"><span>{candidate.artist ?? 'Unknown artist'}</span>{duration ? <span>{duration}</span> : null}<span>{candidateSource(candidate)}</span></p>;
 }
 
-interface CandidateEvidenceItem { label: string; value: ReactNode }
-function getCandidateEvidenceItems(candidate: MatchingQueueCandidateResponse): CandidateEvidenceItem[] {
-  const clusterReason = formatClusterReason(candidate.clusterReason);
-  const show = Boolean(clusterReason && (candidate.clusterSize > 1 || candidate.clusterReason !== 'representative'));
-  return show ? [{ label: 'Cluster', value: `${clusterReason} (${candidate.clusterSize})` }] : [];
-}
-function CandidateEvidenceTable({ candidate }: { candidate: MatchingQueueCandidateResponse }) {
-  const items = getCandidateEvidenceItems(candidate);
-  if (items.length === 0) return null;
-  return <dl className="matching-evidence-table">{items.map((item) => <div key={item.label} className="matching-evidence-row"><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>;
+function formattedScore(comparison: MatchingCandidateComparisonResponse): string {
+  return comparison.scoreLabel ?? (comparison.score === undefined || comparison.score === null ? '-' : formatPercent(comparison.score) ?? '-');
 }
 
-function formatComparisonScore(comparison: MatchingCandidateComparisonResponse): string {
-  if (comparison.scoreLabel) return comparison.scoreLabel;
-  return comparison.score === undefined || comparison.score === null ? '-' : formatPercent(comparison.score) ?? '-';
+const diffGrid = 'grid gap-1 border-t border-border-subtle py-2 text-xs sm:grid-cols-[minmax(4.8rem,.72fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(4.4rem,.62fr)] sm:gap-0 sm:py-0 sm:[&>span]:border-r sm:[&>span]:border-border-subtle sm:[&>span]:p-2 sm:[&>span:last-child]:border-r-0';
+
+function DiffRow({ comparison }: { comparison: MatchingCandidateComparisonResponse }) {
+  return <div className={diffGrid} role="row"><span className="text-[0.65rem] font-black tracking-wider text-content-muted uppercase" role="cell">{comparison.label}</span><span role="cell">{comparison.observationValue ?? 'None'}</span><span role="cell">{comparison.candidateValue ?? 'None'}</span><span role="cell"><span className={`inline-flex min-h-6 min-w-13 items-center justify-center border px-2 text-[0.68rem] font-black ${scoreClasses(comparison.tone)}`}>{formattedScore(comparison)}</span></span></div>;
 }
-function CandidateDiffRow({ comparison }: { comparison: MatchingCandidateComparisonResponse }) {
-  return <div className="matching-diff-row" role="row"><span className="matching-diff-label" role="cell">{comparison.label}</span><span role="cell">{comparison.observationValue ?? 'None'}</span><span role="cell">{comparison.candidateValue ?? 'None'}</span><span role="cell"><span className={`matching-diff-score ${scoreToneClasses(comparison.tone)}`}>{formatComparisonScore(comparison)}</span></span></div>;
-}
-function CandidateDiffTable({ comparisons }: { comparisons: MatchingCandidateComparisonResponse[] }) {
+
+function DiffTable({ comparisons }: { comparisons: MatchingCandidateComparisonResponse[] }) {
   if (comparisons.length === 0) return null;
-  const hiddenMatches = comparisons.filter((comparison) => comparison.scoreLabel === 'Match');
-  const visibleComparisons = comparisons.filter((comparison) => comparison.scoreLabel !== 'Match');
-  return <div className="matching-diff-table" role="table" aria-label="Candidate differences">
-    <div className="matching-diff-header" role="row"><span role="columnheader">Field</span><span role="columnheader">Observation</span><span role="columnheader">Candidate</span><span role="columnheader">Match</span></div>
-    {visibleComparisons.map((comparison) => <CandidateDiffRow key={comparison.label} comparison={comparison} />)}
-    {hiddenMatches.length > 0 ? <details className="matching-diff-matches"><summary>{hiddenMatches.length} matching {hiddenMatches.length === 1 ? 'field' : 'fields'} hidden</summary><div className="matching-diff-matches-body">{hiddenMatches.map((comparison) => <CandidateDiffRow key={comparison.label} comparison={comparison} />)}</div></details> : null}
+  const matches = comparisons.filter((comparison) => comparison.scoreLabel === 'Match');
+  return <div className="mt-3 border-y border-border-subtle" role="table" aria-label="Candidate differences">
+    <div className="hidden bg-surface-subtle text-[0.62rem] font-black tracking-wider text-content-muted uppercase sm:grid sm:grid-cols-[minmax(4.8rem,.72fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(4.4rem,.62fr)] sm:[&>span]:border-r sm:[&>span]:border-border-subtle sm:[&>span]:p-2 sm:[&>span:last-child]:border-r-0" role="row"><span role="columnheader">Field</span><span role="columnheader">Observation</span><span role="columnheader">Candidate</span><span role="columnheader">Match</span></div>
+    {comparisons.filter((comparison) => comparison.scoreLabel !== 'Match').map((comparison) => <DiffRow key={comparison.label} comparison={comparison} />)}
+    {matches.length > 0 ? <details className="border-t border-border-subtle"><summary className="cursor-pointer list-none px-2 py-2 text-xs font-bold text-content-muted hover:text-content [&::-webkit-details-marker]:hidden">{matches.length} matching {matches.length === 1 ? 'field' : 'fields'} hidden</summary><div>{matches.map((comparison) => <DiffRow key={comparison.label} comparison={comparison} />)}</div></details> : null}
   </div>;
 }
 
-interface CandidateSelectionActionProps { candidateId: string; detectedVersion?: SuggestedTrackVersion; disabled: boolean; onUseAsVersion: (versionFlags: number) => void; onUseExact: () => void }
-function CandidatePrimaryAction({ detectedVersion, disabled, onUseAsVersion, onUseExact }: Omit<CandidateSelectionActionProps, 'candidateId'>) {
-  if (!detectedVersion) return <button type="button" className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none" onClick={onUseExact} disabled={disabled}>Use match</button>;
-  return <button type="button" className="matching-candidate-action w-full focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none" onClick={() => onUseAsVersion(detectedVersion.value)} disabled={disabled}>Add as {detectedVersion.label.toLowerCase()} version</button>;
+interface ActionProps { candidateId: string; detectedVersion?: SuggestedTrackVersion; disabled: boolean; onUseAsVersion: (flags: number) => void; onUseExact: () => void }
+
+function PrimaryAction({ detectedVersion, disabled, onUseAsVersion, onUseExact }: Omit<ActionProps, 'candidateId'>) {
+  return <button type="button" className="min-h-10 w-full bg-personal-accent px-3 text-sm font-black text-personal-accent-content hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50" onClick={detectedVersion ? () => onUseAsVersion(detectedVersion.value) : onUseExact} disabled={disabled}>{detectedVersion ? `Add as ${detectedVersion.label.toLowerCase()} version` : 'Use match'}</button>;
 }
-function CandidateAdditionalOptions({ candidateId, detectedVersion, disabled, onUseAsVersion, onUseExact }: CandidateSelectionActionProps) {
+
+function AdditionalOptions({ candidateId, detectedVersion, disabled, onUseAsVersion, onUseExact }: ActionProps) {
   const initialFlag = trackVersionOptions.some((option) => option.value === detectedVersion?.value) ? detectedVersion?.value ?? 0 : 0;
-  const [selectedVersionFlag, setSelectedVersionFlag] = useState(initialFlag);
-  const selectedVersion = trackVersionOptions.find((option) => option.value === selectedVersionFlag);
+  const [selectedFlag, setSelectedFlag] = useState(initialFlag);
+  const selected = trackVersionOptions.find((option) => option.value === selectedFlag);
   const selectId = `candidate-version-${candidateId}`;
-  return <details className="rounded-xl border border-border-subtle bg-surface-translucent p-2"><summary className="cursor-pointer list-none rounded-lg px-2 py-1.5 text-sm font-semibold text-content transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&::-webkit-details-marker]:hidden">Additional options</summary><div className="mt-2 space-y-2 px-2 pb-1">
-    <label htmlFor={selectId} className="block text-xs font-semibold text-content-muted">Version type</label>
-    <select id={selectId} value={selectedVersionFlag} onChange={(event) => setSelectedVersionFlag(Number(event.target.value))} disabled={disabled} className="min-h-10 w-full rounded-lg border border-border-subtle bg-surface px-3 text-sm font-semibold text-content focus:border-accent focus:ring-2 focus:ring-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"><option value={0}>Choose a version type</option>{trackVersionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-    <button type="button" className="w-full rounded-lg border border-border-subtle bg-accent-soft px-3 py-2 text-sm font-semibold text-accent-strong transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" onClick={() => onUseAsVersion(selectedVersionFlag)} disabled={disabled || !selectedVersion}>{selectedVersion ? `Add as ${selectedVersion.label.toLowerCase()} version` : 'Choose a version type'}</button>
-    <button type="button" className="w-full rounded-lg px-3 py-2 text-sm font-semibold text-content transition hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50" onClick={onUseExact} disabled={disabled}>Use as exact recording</button>
-  </div></details>;
+  return <details className="border border-border-subtle p-2"><summary className="cursor-pointer list-none px-2 py-1.5 text-sm font-semibold text-content hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">Additional options</summary><div className="mt-2 space-y-2 px-2 pb-1"><label htmlFor={selectId} className="block text-xs font-semibold text-content-muted">Version type</label><select id={selectId} value={selectedFlag} onChange={(event) => setSelectedFlag(Number(event.target.value))} disabled={disabled} className="min-h-10 w-full border border-border-subtle bg-surface px-3 text-sm font-semibold text-content focus:border-focus focus:outline-none disabled:opacity-50"><option value={0}>Choose a version type</option>{trackVersionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><button type="button" className="min-h-10 w-full border border-border-strong px-3 text-sm font-semibold text-content hover:bg-surface-hover disabled:opacity-50" onClick={() => onUseAsVersion(selectedFlag)} disabled={disabled || !selected}>{selected ? `Add as ${selected.label.toLowerCase()} version` : 'Choose a version type'}</button><button type="button" className="min-h-10 w-full px-3 text-sm font-semibold text-content hover:bg-surface-hover disabled:opacity-50" onClick={onUseExact} disabled={disabled}>Use as exact recording</button></div></details>;
 }
-function CandidateSelectionActions(props: CandidateSelectionActionProps) {
-  return <div className="flex w-full shrink-0 flex-col gap-2 sm:w-56"><CandidatePrimaryAction {...props} /><CandidateAdditionalOptions {...props} /></div>;
-}
-function CandidateCard({ candidate, detectedVersion, disabled, onUseAsVersion, onUseExact }: { candidate: MatchingQueueCandidateResponse; detectedVersion?: SuggestedTrackVersion; disabled: boolean; onUseAsVersion: (versionFlags: number) => void; onUseExact: () => void }) {
-  return <div className="matching-candidate-card"><div className="matching-candidate-shell"><div className="matching-candidate-header"><div className="min-w-0"><div className="matching-candidate-title-row"><h3>{candidate.title}</h3><CandidateConfidence score={candidate.score} /></div><CandidateMeta candidate={candidate} /></div><CandidateSelectionActions candidateId={candidate.candidateId} detectedVersion={detectedVersion} disabled={disabled} onUseAsVersion={onUseAsVersion} onUseExact={onUseExact} /></div><CandidateMarkers candidate={candidate} /><CandidateDiffTable comparisons={candidate.comparisons ?? []} /><CandidateEvidenceTable candidate={candidate} /></div></div>;
+
+function CandidateCard({ candidate, detectedVersion, disabled, onUseAsVersion, onUseExact }: { candidate: MatchingQueueCandidateResponse; detectedVersion?: SuggestedTrackVersion; disabled: boolean; onUseAsVersion: (flags: number) => void; onUseExact: () => void }) {
+  const clusterReason = formatClusterReason(candidate.clusterReason);
+  const showCluster = Boolean(clusterReason && (candidate.clusterSize > 1 || candidate.clusterReason !== 'representative'));
+  return <article className="border-t border-border-subtle p-4 first:border-0 xl:nth-[2]:border-t-0"><div className="flex min-h-full flex-col gap-3"><div className="flex flex-col items-start justify-between gap-3 sm:flex-row"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="m-0 text-base font-extrabold text-content">{candidate.title}</h3><span className={`inline-flex min-h-6 items-center border px-2 text-[0.68rem] font-black ${scoreClasses(scoreTone(candidate.score))}`}>{Math.round(candidate.score * 100)}%</span></div><CandidateMeta candidate={candidate} /></div><div className="flex w-full shrink-0 flex-col gap-2 sm:w-56"><PrimaryAction detectedVersion={detectedVersion} disabled={disabled} onUseAsVersion={onUseAsVersion} onUseExact={onUseExact} /><AdditionalOptions candidateId={candidate.candidateId} detectedVersion={detectedVersion} disabled={disabled} onUseAsVersion={onUseAsVersion} onUseExact={onUseExact} /></div></div><MarkerList markers={candidate.versionMarkers} tone="version" /><MarkerList markers={candidate.playbackModifiers} tone="playback" /><DiffTable comparisons={candidate.comparisons ?? []} />{showCluster ? <dl className="mt-1 border-y border-border-subtle"><div className="grid gap-1 py-2 sm:grid-cols-[7rem_1fr]"><dt className="text-[0.65rem] font-black tracking-wider text-content-muted uppercase">Cluster</dt><dd className="m-0 text-xs font-semibold text-content">{clusterReason} ({candidate.clusterSize})</dd></div></dl> : null}</div></article>;
 }

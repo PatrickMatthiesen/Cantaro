@@ -23,7 +23,7 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
 
   return (
     <div className="h-screen overflow-hidden bg-canvas text-content">
-      <div className="flex h-full flex-col px-3 pt-3">
+      <div className="flex h-full flex-col">
         <PopupHeader
           section={navigation.section}
           configured={settings.configured}
@@ -32,7 +32,7 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
           onOpenSettings={navigation.openSettings}
         />
         {navigation.section === 'media' ? <TabContextSummary context={activeTabContext.state} /> : null}
-        <main className="mt-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-t-xl bg-surface-translucent" aria-label={`${navigation.section} content`}>
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-canvas" aria-label={`${navigation.section} content`}>
           {settings.loading ? (
             <PopupLoadingState />
           ) : navigation.section === 'settings' ? (
@@ -64,9 +64,9 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
 function PopupLoadingState() {
   return (
     <div className="space-y-3 p-5" aria-label="Loading extension">
-      <div className="cantaro-popup-loading-line h-5 w-40 rounded-md" />
-      <div className="cantaro-popup-loading-line h-3 w-72 rounded-md" />
-      <div className="cantaro-popup-loading-line h-20 w-full rounded-xl" />
+      <div className="cantaro-popup-loading-line h-5 w-40" />
+      <div className="cantaro-popup-loading-line h-3 w-72" />
+      <div className="cantaro-popup-loading-line h-20 w-full" />
     </div>
   );
 }

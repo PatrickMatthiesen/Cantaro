@@ -7,7 +7,6 @@ import type { ActiveTabContextState } from '../shell/extensionAppTypes';
 import { EpisodeTrackingControls } from './EpisodeTrackingControls';
 import { MediaSetup } from './MediaSetup';
 import { useEpisodeTracking } from './useEpisodeTracking';
-import './mediaDetail.css';
 
 type MediaRoute = { kind: 'library' } | { kind: 'title'; id: string };
 

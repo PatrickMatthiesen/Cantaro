@@ -57,7 +57,7 @@ function ResultArtwork({ item, compact }: { item: SearchResultItem; compact: boo
 
   if (!item.artworkUrl || imageFailed) {
     return (
-      <span className={`flex shrink-0 items-center justify-center rounded-xl bg-surface-subtle text-accent-strong ${sizeClass}`}>
+      <span className={`flex shrink-0 items-center justify-center bg-surface-subtle text-personal-accent-strong ${sizeClass}`}>
         <EntityIcon entityType={item.entityType} />
       </span>
     );
@@ -67,7 +67,7 @@ function ResultArtwork({ item, compact }: { item: SearchResultItem; compact: boo
     <img
       src={item.artworkUrl}
       alt=""
-      className={`shrink-0 rounded-xl bg-surface-subtle object-cover ${sizeClass}`}
+      className={`shrink-0 bg-surface-subtle object-cover ${sizeClass}`}
       onError={() => setImageFailed(true)}
     />
   );
@@ -98,7 +98,7 @@ function ResultContent({
         </span>
       </span>
       {!compact ? (
-        <span className="hidden rounded-full bg-accent-soft px-2.5 py-1 text-[0.68rem] font-black text-accent-strong capitalize sm:inline">
+        <span className="hidden bg-surface-subtle px-2.5 py-1 text-[0.68rem] font-semibold text-content-muted capitalize sm:inline">
           {item.entityType}
         </span>
       ) : null}
@@ -129,7 +129,7 @@ function SearchResultRow({
 
   if (!canonicalRoute) {
     return (
-      <div className="flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 opacity-70" title="This result does not have a safe Cantaro destination yet">
+      <div className="flex min-w-0 items-center gap-3 px-2 py-2 opacity-70" title="This result does not have a safe Cantaro destination yet">
         <ResultContent item={item} compact={compact} showArrow={false} showEntityType={showEntityType} />
       </div>
     );
@@ -142,7 +142,7 @@ function SearchResultRow({
       id={asOption ? searchResultDomId(item) : undefined}
       role={asOption ? 'option' : undefined}
       aria-selected={asOption ? false : undefined}
-      className="group flex min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none data-[active=true]:bg-accent-soft"
+      className="group flex min-w-0 items-center gap-3 px-2 py-2 transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus data-[active=true]:bg-surface-hover"
       onClick={(event) => {
         if (onNavigate?.(canonicalRoute)) event.preventDefault();
       }}
@@ -156,8 +156,8 @@ function SearchLoadingRows({ compact = false }: { compact?: boolean }) {
   return (
     <div className="global-search-loading space-y-1" role="status" aria-label="Loading search results">
       {[0, 1, 2].map((index) => (
-        <div key={index} className="flex animate-pulse items-center gap-3 rounded-xl px-2 py-2">
-          <span className={`shrink-0 rounded-xl bg-surface-subtle ${compact ? 'h-10 w-10' : 'h-12 w-12 sm:h-14 sm:w-14'}`} />
+        <div key={index} className="flex animate-pulse items-center gap-3 px-2 py-2">
+          <span className={`shrink-0 bg-surface-subtle ${compact ? 'h-10 w-10' : 'h-12 w-12 sm:h-14 sm:w-14'}`} />
           <span className="min-w-0 flex-1 space-y-2">
             <span className="block h-3 w-2/5 rounded-full bg-surface-subtle" />
             <span className="block h-2.5 w-1/4 rounded-full bg-surface-subtle" />
@@ -182,8 +182,8 @@ function SearchStatusMessage({
   compact?: boolean;
 }) {
   return (
-    <div className={`flex items-start gap-3 rounded-xl bg-surface-subtle ${compact ? 'px-3 py-3' : 'px-4 py-4'}`}>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface text-accent-strong">
+    <div className={`flex items-start gap-3 border-y border-border-subtle ${compact ? 'px-3 py-3' : 'px-4 py-4'}`}>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center bg-surface text-personal-accent-strong">
         <Icon className="h-4 w-4" aria-hidden />
       </span>
       <div className="min-w-0">
@@ -296,7 +296,7 @@ function ResolvedGroup({
         action={(
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-xl bg-surface px-3 py-2 text-xs font-black text-content transition hover:text-accent-strong focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            className="inline-flex min-h-10 items-center gap-2 border border-border-strong bg-surface px-3 text-xs font-black text-content transition hover:bg-surface-hover hover:text-personal-accent-strong focus-visible:outline-2 focus-visible:outline-focus"
             onClick={onRetry}
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
@@ -344,7 +344,7 @@ function SearchGroup({
 }) {
   return (
     <section
-      className={compact ? 'py-2' : 'rounded-2xl bg-surface-translucent p-3 sm:p-4'}
+      className={compact ? 'py-2' : 'border-b border-border-subtle py-4'}
       aria-labelledby={`${idPrefix}-group-${presentation.id}`}
       role={asListbox ? 'group' : undefined}
     >
@@ -393,7 +393,7 @@ function SearchGroupHeader({
   return (
     <header className={`flex items-start justify-between gap-3 px-2 ${compact ? 'mb-1' : 'mb-2 pt-1'}`}>
       <div className="flex min-w-0 items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-strong">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center bg-surface-subtle text-personal-accent-strong">
           <SearchGroupIcon groupId={presentation.id} />
         </span>
         <div className="min-w-0">
@@ -405,7 +405,7 @@ function SearchGroupHeader({
         <Link
           to="/search"
           search={{ q: query, group: presentation.id }}
-          className="shrink-0 rounded-xl px-2.5 py-1.5 text-xs font-black text-accent-strong transition hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="shrink-0 px-2.5 py-1.5 text-xs font-bold text-content-muted transition-colors hover:bg-surface-hover hover:text-personal-accent-strong focus-visible:outline-2 focus-visible:outline-focus"
           onClick={(event) => {
             if (onNavigate?.('/search')) event.preventDefault();
           }}
@@ -465,7 +465,7 @@ function WholeSearchError({ message, onRetry, compact }: { message: string; onRe
       action={(
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-xl bg-action px-3 py-2 text-xs font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="inline-flex min-h-10 items-center gap-2 bg-personal-accent px-3 text-xs font-black text-personal-accent-content transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
           onClick={onRetry}
         >
           <RotateCcw className="h-3.5 w-3.5" aria-hidden />

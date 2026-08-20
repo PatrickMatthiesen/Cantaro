@@ -4,9 +4,13 @@ import {
   type StreamingServiceId,
 } from '../services/streamingServices';
 
+function getOpticalClassName(serviceId: StreamingServiceId): string {
+  return serviceId === 'apple-tv' ? ' dark:invert' : '';
+}
+
 export function StreamingServiceIcon({
   serviceId,
-  className,
+  className = 'h-5 w-5',
   style,
   ...props
 }: SVGProps<SVGSVGElement> & { serviceId: StreamingServiceId }) {
@@ -26,7 +30,7 @@ export function StreamingServiceIcon({
   const iconColor = style?.color ?? service.brandColor;
   return (
     <Icon
-      className={className}
+      className={`${className}${getOpticalClassName(serviceId)}`}
       style={{ color: iconColor, fill: style?.fill ?? iconColor, ...style }}
       {...props}
     />

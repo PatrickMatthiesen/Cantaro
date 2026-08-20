@@ -1,3 +1,6 @@
+import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react';
+import { ActionButton, IconButton, SelectField } from '../../../ui';
+
 interface FilterOption {
     value: string;
     label: string;
@@ -22,18 +25,14 @@ export interface LibraryFilterFieldsProps {
     statusValue: string;
     mediaKindValue: string;
     providerValue: string;
-    providerListNameValue: string;
     providerOptions: FilterOption[];
-    listOptions: FilterOption[];
     statusOptions: FilterOption[];
     mediaKindOptions: FilterOption[];
-    isListDisabled: boolean;
     sortBy: string;
     sortDir: 'asc' | 'desc';
     onStatusChange: (value: string | undefined) => void;
     onMediaKindChange: (value: string | undefined) => void;
     onProviderChange: (value: string | undefined) => void;
-    onProviderListChange: (value: string | undefined) => void;
     onSortByChange: (value: string) => void;
     onToggleSortDir: () => void;
 }
@@ -42,50 +41,52 @@ export interface LibraryRefreshActionProps {
     isConnected: boolean;
     isRefreshing: boolean;
     onRefresh: () => Promise<void>;
-    onNavigateProviders?: () => void;
 }
 
 function FilterSelect({ label, value, options, onChange, disabled = false }: FilterSelectProps) {
+    const containerClassName = label === 'Status' ? 'min-w-40 flex-[1.25]' : 'min-w-28 flex-1';
+
     return (
-        <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium tracking-wide text-content-muted uppercase">{label}</label>
-            <select
-                className="h-9 rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm text-content focus:ring-2 focus:ring-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                value={value}
-                onChange={(event) => onChange(event.target.value || undefined)}
-                disabled={disabled}
-            >
+        <SelectField
+            label={label}
+            containerClassName={containerClassName}
+            className="w-full"
+            value={value}
+            onChange={(event) => onChange(event.target.value || undefined)}
+            disabled={disabled}
+        >
                 {options.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-            </select>
-        </div>
+        </SelectField>
     );
 }
 
 function SortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: SortControlsProps) {
     return (
-        <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium tracking-wide text-content-muted uppercase">Sort by</label>
-            <div className="flex gap-1">
-                <select
-                    className="h-9 rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm text-content focus:ring-2 focus:ring-focus focus:outline-none"
+        <div className="grid min-w-40 flex-1 gap-1.5 text-sm text-content-muted">
+            <span>Sort by</span>
+            <div className="flex gap-1.5">
+                <SelectField
+                    label="Sort library"
+                    visuallyHiddenLabel
+                    containerClassName="min-w-0 flex-1"
+                    className="w-full"
                     value={sortBy}
                     onChange={(event) => onSortByChange(event.target.value)}
                 >
-                    <option value="updatedAt">Last updated</option>
+                    <option value="updatedAt">Updated</option>
                     <option value="title">Title</option>
                     <option value="status">Status</option>
                     <option value="progress">Progress</option>
-                </select>
-                <button
-                    type="button"
-                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-border-subtle bg-surface-translucent text-sm text-content-muted transition hover:bg-surface-hover"
+                </SelectField>
+                <IconButton
+                    label={sortDir === 'asc' ? 'Sort ascending; switch to descending' : 'Sort descending; switch to ascending'}
+                    className="border border-border-strong bg-surface"
                     onClick={onToggleSortDir}
-                    title={sortDir === 'asc' ? 'Ascending - click to switch' : 'Descending - click to switch'}
                 >
-                    {sortDir === 'asc' ? '↑' : '↓'}
-                </button>
+                    {sortDir === 'asc' ? <ArrowUp className="size-4" aria-hidden /> : <ArrowDown className="size-4" aria-hidden />}
+                </IconButton>
             </div>
         </div>
     );
@@ -95,18 +96,14 @@ export function LibraryFilterFields({
     statusValue,
     mediaKindValue,
     providerValue,
-    providerListNameValue,
     providerOptions,
-    listOptions,
     statusOptions,
     mediaKindOptions,
-    isListDisabled,
     sortBy,
     sortDir,
     onStatusChange,
     onMediaKindChange,
     onProviderChange,
-    onProviderListChange,
     onSortByChange,
     onToggleSortDir,
 }: LibraryFilterFieldsProps) {
@@ -115,43 +112,28 @@ export function LibraryFilterFields({
             <FilterSelect label="Status" value={statusValue} options={statusOptions} onChange={onStatusChange} />
             <FilterSelect label="Type" value={mediaKindValue} options={mediaKindOptions} onChange={onMediaKindChange} />
             <FilterSelect label="Provider" value={providerValue} options={providerOptions} onChange={onProviderChange} />
-            <FilterSelect
-                label="Provider list"
-                value={providerListNameValue}
-                options={listOptions}
-                onChange={onProviderListChange}
-                disabled={isListDisabled}
-            />
             <SortControls sortBy={sortBy} sortDir={sortDir} onSortByChange={onSortByChange} onToggleSortDir={onToggleSortDir} />
         </>
     );
 }
 
-export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh, onNavigateProviders }: LibraryRefreshActionProps) {
+export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh }: LibraryRefreshActionProps) {
     return (
-        <div className="ml-auto flex flex-col gap-1">
-            <span className="text-xs font-medium tracking-wide text-content-muted uppercase">Providers</span>
-            <div className="flex gap-1.5">
-                {onNavigateProviders ? (
-                    <button
-                        type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm font-medium text-content transition hover:bg-surface-hover"
-                        onClick={onNavigateProviders}
-                    >
-                        Manage
-                    </button>
-                ) : null}
+        <div className="grid min-w-fit gap-1.5 text-sm text-content-muted lg:ml-auto">
+            <span>Providers</span>
+            <div className="flex flex-wrap gap-1.5">
                 {isConnected ? (
-                    <button
-                        type="button"
-                        className="inline-flex h-9 items-center justify-center rounded-xl border border-border-subtle bg-surface-translucent px-3 text-sm font-medium text-content transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+                    <ActionButton
+                        tone="ghost"
                         onClick={() => void onRefresh()}
                         disabled={isRefreshing}
                         aria-busy={isRefreshing}
+                        busyLabel="Reloading…"
                         title="Reload the primary provider library"
                     >
-                        {isRefreshing ? 'Reloading...' : 'Reload'}
-                    </button>
+                        <RefreshCw className="size-4" aria-hidden />
+                        Reload
+                    </ActionButton>
                 ) : null}
             </div>
         </div>

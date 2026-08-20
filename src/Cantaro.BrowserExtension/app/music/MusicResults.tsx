@@ -14,18 +14,18 @@ export function MusicResults({ songs, hasLibrarySongs, onSelect }: {
   }
 
   return (
-    <ul className="space-y-1.5">
+    <ul className="divide-y divide-border-subtle border-y border-border-subtle">
       {songs.map((song) => (
         <li key={song.id}>
           <button
             type="button"
-            className="group flex w-full items-center gap-3 rounded-xl border border-transparent bg-surface-translucent p-2 text-left transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-accent-soft focus-visible:outline-none"
+            className="group flex min-h-16 w-full items-center gap-3 px-2 py-2 text-left transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
             onClick={() => onSelect(song)}
           >
             {song.thumbnailUrl ? (
-              <img src={song.thumbnailUrl} alt="" className="size-11 rounded-lg object-cover" />
+              <img src={song.thumbnailUrl} alt="" className="size-11 object-cover" />
             ) : (
-              <div className="size-11 rounded-lg bg-accent-soft" />
+              <div className="size-11 bg-surface-subtle" />
             )}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-bold text-content">{song.title}</span>
@@ -33,7 +33,7 @@ export function MusicResults({ songs, hasLibrarySongs, onSelect }: {
                 {song.artist || 'Unknown artist'} · {song.playlists.length} playlist{song.playlists.length === 1 ? '' : 's'}
               </span>
             </span>
-            <span className="text-lg text-accent opacity-0 transition-opacity group-hover:opacity-100" aria-hidden>›</span>
+            <span className="text-lg text-personal-accent opacity-0 transition-opacity group-hover:opacity-100" aria-hidden>›</span>
           </button>
         </li>
       ))}

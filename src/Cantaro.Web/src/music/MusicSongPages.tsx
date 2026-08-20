@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   MusicPlatformIcon,
   MusicUiIcon,
@@ -9,21 +9,19 @@ import {
   type MusicLibrarySong,
   type PlatformId,
 } from '@cantaro/client-shared/music';
-import { MusicEmptyPanel } from './MusicEmptyPanel';
+import { ActionButton, SelectField, actionClassName } from '@cantaro/client-shared/ui';
 import { MusicPageShell } from './MusicPageShell';
 import { lyricsForDisplay } from './musicLyrics';
-import { formatDuration, isPlatformId, platformName, songArtist, songArtwork } from './musicPresentation';
-
+import { formatDuration, isPlatformId, platformName, songArtist } from './musicPresentation';
 
 interface SongDerivedMetadata {
   platformIds: PlatformId[];
-  hasMusicBrainzSource: boolean;
   matchLabel: string;
   matchTone: 'ready' | 'warning' | 'neutral';
+  isObservation: boolean;
 }
 
 type SongPlaylistMembership = MusicLibrarySong['playlists'][number];
-type LibraryPlaylist = MusicLibraryResponse['playlists'][number];
 
 function mutationErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -39,201 +37,181 @@ function ensureYouTubeVersionSelected(youtubeIds: string[], selectedYouTubeId: s
 
 function getMatchTone(matchStatus?: string): SongDerivedMetadata['matchTone'] {
   const normalizedStatus = matchStatus?.toLowerCase() ?? '';
-
   if (/ambiguous|candidate|no[_ -]?match|review|unmatched/.test(normalizedStatus)) return 'warning';
   if (/match/.test(normalizedStatus)) return 'ready';
   return 'neutral';
 }
 
 function getSongMetadata(song: MusicLibrarySong): SongDerivedMetadata {
-  const normalizedStatus = song.matchStatus?.toLowerCase() ?? '';
-
+  const matchTone = getMatchTone(song.matchStatus);
   return {
     platformIds: song.sourcePlatforms.filter(isPlatformId),
-    hasMusicBrainzSource: song.sourcePlatforms.includes('musicbrainz'),
-    matchLabel: song.matchStatus ? song.matchStatus.replace(/[-_]/g, ' ') : 'Library track',
-    matchTone: getMatchTone(normalizedStatus),
+    matchLabel: matchTone === 'warning'
+      ? 'Needs matching'
+      : song.matchStatus?.replace(/[-_]/g, ' ') ?? 'Library track',
+    matchTone,
+    isObservation: song.id.startsWith('observation:'),
   };
 }
 
 function matchToneClassName(tone: SongDerivedMetadata['matchTone']) {
-  if (tone === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-700';
-  return 'border-border-subtle bg-surface-subtle text-content-muted';
-}
-
-function panelClassName(extra = '') {
-  return `rounded-[1.35rem] border border-border-subtle bg-surface-translucent shadow-[0_20px_70px_rgba(88,74,150,0.08)] backdrop-blur-xl ${extra}`;
+  if (tone === 'ready') return 'text-success-content';
+  if (tone === 'warning') return 'text-warning-content';
+  return 'text-immersive-content-muted';
 }
 
 function SectionHeader({ title, detail, action }: { title: string; detail?: string; action?: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <h2 className="text-base font-black text-content">{title}</h2>
-        {detail ? <p className="mt-1 text-sm font-semibold text-content-muted">{detail}</p> : null}
+        <h2 className="text-xl font-bold text-content">{title}</h2>
+        {detail ? <p className="mt-1 max-w-[70ch] text-sm leading-6 text-content-muted">{detail}</p> : null}
       </div>
       {action}
     </div>
   );
 }
 
-function SongArtworkBlock({ song, index = 0, className = '' }: { song: MusicLibrarySong; index?: number; className?: string }) {
-  return (
-    <div className={`relative overflow-hidden rounded-[1.35rem] bg-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.18)] sm:rounded-[1.6rem] ${className}`}>
-      <img src={songArtwork(song, index)} alt="" className="aspect-square w-full object-cover" />
-      <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-slate-950/30 via-transparent to-white/5" />
-    </div>
-  );
-}
-
-function SongStatusBadge({ metadata }: { metadata: SongDerivedMetadata }) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-black capitalize ${matchToneClassName(metadata.matchTone)}`}>
-      <MusicUiIcon name={metadata.matchTone === 'ready' ? 'checkCircle' : metadata.matchTone === 'warning' ? 'warning' : 'database'} className="h-3.5 w-3.5" />
-      {metadata.matchLabel}
-    </span>
-  );
-}
-
-function DetailMetric({ label, value, compact = false }: { label: string; value: ReactNode; compact?: boolean }) {
-  return (
-    <div className={`rounded-2xl bg-surface-translucent ${compact ? 'p-2.5' : 'p-3 sm:p-4'}`}>
-      <p className="text-[0.66rem] font-black tracking-[0.14em] text-content-muted uppercase">{label}</p>
-      <div className={`${compact ? 'mt-0.5' : 'mt-1'} text-sm font-black text-content`}>{value}</div>
-    </div>
-  );
-}
-
-function DetailActionButton({
-  children,
-  icon,
-  onClick,
-  compactOnNarrow = false,
-  primary = false,
-}: {
-  children: ReactNode;
-  icon: ReactNode;
-  onClick?: () => void;
-  compactOnNarrow?: boolean;
-  primary?: boolean;
-}) {
-  const label = typeof children === 'string' ? children : undefined;
-
-  return (
-    <button
-      type="button"
-      className={`inline-flex h-10 items-center justify-center gap-2 rounded-2xl text-sm font-black transition sm:h-11 ${
-        compactOnNarrow ? 'w-10 px-0 sm:w-11 sm:px-0 xl:w-auto xl:px-4' : 'px-3 sm:px-4'
-      } ${
-        primary
-          ? 'bg-action text-action-content shadow-[0_16px_34px_rgba(15,23,42,0.18)] hover:bg-action-hover'
-          : 'border border-border-subtle bg-surface/74 text-content hover:bg-surface'
-      }`}
-      aria-label={label}
-      onClick={onClick}
-    >
-      {icon}
-      <span className={compactOnNarrow ? 'sr-only xl:not-sr-only' : undefined}>{children}</span>
-    </button>
-  );
-}
-
-function SongMetrics({ song, metadata, className = '' }: { song: MusicLibrarySong; metadata: SongDerivedMetadata; className?: string }) {
-  return (
-    <div className={`grid grid-cols-3 gap-2 sm:gap-3 ${className}`}>
-      <DetailMetric compact label="Duration" value={formatDuration(song.durationSeconds)} />
-      <DetailMetric compact label="Playlists" value={song.playlists.length.toLocaleString()} />
-      <DetailMetric compact label="Sources" value={(metadata.platformIds.length + (metadata.hasMusicBrainzSource ? 1 : 0)).toLocaleString()} />
-    </div>
-  );
-}
-
-function SongHeroActions({ onPlayPreview, className = '' }: { onPlayPreview: () => void; className?: string }) {
-  return (
-    <div className={`flex flex-wrap gap-2 ${className}`}>
-      <DetailActionButton primary icon={<MusicUiIcon name="play" className="h-4 w-4" />} onClick={onPlayPreview}>
-        Play preview
-      </DetailActionButton>
-      <DetailActionButton compactOnNarrow icon={<MusicUiIcon name="sparkles" className="h-4 w-4" />}>
-        Match
-      </DetailActionButton>
-      <DetailActionButton compactOnNarrow icon={<MusicUiIcon name="heart" className="h-4 w-4" />}>
-        Favorite
-      </DetailActionButton>
-      <DetailActionButton compactOnNarrow icon={<MusicUiIcon name="more" className="h-4 w-4" />}>
-        More
-      </DetailActionButton>
-    </div>
-  );
-}
-
-function SongDetailHero({
-  song,
-  metadata,
-  songIndex,
-  onPlayPreview,
-}: {
-  song: MusicLibrarySong;
-  metadata: SongDerivedMetadata;
-  songIndex: number;
-  onPlayPreview: () => void;
-}) {
-  return (
-    <section className="music-detail-hero relative overflow-visible rounded-[1.5rem] bg-surface-subtle px-4 pt-4 pb-3 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:pt-5 sm:pb-4 md:px-6 md:pt-6 md:pb-5 xl:px-7 xl:pt-7">
-      <div className="music-detail-hero__wash absolute inset-0 overflow-hidden rounded-[inherit] bg-[radial-gradient(circle_at_16%_12%,rgba(255,255,255,0.96),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(199,210,254,0.84),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.72),rgba(224,231,255,0.72))]" />
-      <div className="absolute top-0 right-5 z-20 -translate-y-1/2 sm:right-7">
-        <SongStatusBadge metadata={metadata} />
+function SongArtwork({ song, className = '' }: { song: MusicLibrarySong; className?: string }) {
+  if (!song.thumbnailUrl) {
+    return (
+      <div className={`flex aspect-square items-center justify-center bg-surface-subtle text-content-subtle ${className}`}>
+        <MusicUiIcon name="music" className="h-12 w-12" />
       </div>
-      <div className="relative">
-        <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-x-4 gap-y-4 sm:grid-cols-[136px_minmax(0,1fr)] sm:gap-x-5 md:grid-cols-[168px_minmax(0,1fr)] xl:grid-cols-[184px_minmax(0,1fr)]">
-          <SongArtworkBlock song={song} index={songIndex} className="w-full" />
-          <div className="min-w-0">
-            <h1 className="text-2xl leading-tight font-black text-content sm:text-4xl xl:text-5xl">{song.title}</h1>
-            <p className="mt-1.5 text-base font-black text-accent-strong sm:mt-2 sm:text-xl">{songArtist(song)}</p>
-          </div>
-          <div className="col-span-2 flex min-w-0 flex-wrap items-center justify-end gap-3 md:gap-4">
-            <SongMetrics song={song} metadata={metadata} className="w-full max-w-[24rem] sm:w-auto sm:flex-1" />
-            <SongHeroActions onPlayPreview={onPlayPreview} className="justify-end" />
-          </div>
+    );
+  }
+
+  return <img src={song.thumbnailUrl} alt="" className={`aspect-square object-cover ${className}`} />;
+}
+
+function SongIdentityStatus({ metadata }: { metadata: SongDerivedMetadata }) {
+  const icon = metadata.matchTone === 'ready' ? 'checkCircle' : metadata.matchTone === 'warning' ? 'warning' : 'database';
+  return (
+    <p className={`inline-flex items-center gap-2 text-sm font-semibold capitalize ${matchToneClassName(metadata.matchTone)}`}>
+      <MusicUiIcon name={icon} className="h-4 w-4" />
+      {metadata.matchLabel}
+    </p>
+  );
+}
+
+function SongMetrics({ song }: { song: MusicLibrarySong }) {
+  const sourceCount = song.sourceIdentities.length || song.sourcePlatforms.length;
+  const metrics = [
+    ['Duration', formatDuration(song.durationSeconds)],
+    ['Playlists', song.playlists.length.toLocaleString()],
+    ['Sources', sourceCount.toLocaleString()],
+  ];
+
+  return (
+    <dl className="mt-6 flex flex-wrap gap-x-8 gap-y-3 text-sm text-immersive-content-muted">
+      {metrics.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd className="mt-1 text-base font-bold text-immersive-content">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
+  const primaryLink = song.platformLinks[0];
+  if (!primaryLink && metadata.matchTone !== 'warning') return null;
+
+  return (
+    <div className="mt-7 flex flex-wrap gap-3">
+      {primaryLink ? (
+        <a href={primaryLink.url} target="_blank" rel="noreferrer" className={actionClassName({ tone: 'personal' })}>
+          <MusicUiIcon name="externalLink" className="h-4 w-4" />
+          {primaryLink.label}
+        </a>
+      ) : null}
+      {metadata.matchTone === 'warning' ? (
+        <Link to="/music/matching" className={actionClassName({ tone: 'secondary' })}>
+          <MusicUiIcon name="sparkles" className="h-4 w-4" />
+          Review match
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
+  return (
+    <section className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content">
+      {song.thumbnailUrl ? (
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-50 dark:opacity-65"
+          style={{ backgroundImage: `url(${song.thumbnailUrl})` }}
+          aria-hidden
+        />
+      ) : null}
+      <div className="absolute inset-0 bg-linear-to-r from-immersive-scrim-strong via-immersive-scrim-medium to-immersive-scrim-soft" aria-hidden />
+      <div className="absolute inset-0 bg-linear-to-t from-immersive-scrim-base via-transparent to-immersive-scrim-soft" aria-hidden />
+
+      <Link
+        to="/music/songs"
+        aria-label="Back to songs"
+        className="absolute left-4 top-4 z-30 inline-flex size-11 items-center justify-center bg-black/35 text-white transition-colors hover:bg-black/60 focus-visible:outline-2 focus-visible:outline-focus sm:left-6 sm:top-6"
+      >
+        <MusicUiIcon name="arrowLeft" className="h-5 w-5" />
+      </Link>
+
+      <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
+        <SongArtwork song={song} className="hidden w-56 shrink-0 bg-surface md:block xl:w-64" />
+        <div className="min-w-0 max-w-4xl">
+          <SongIdentityStatus metadata={metadata} />
+          <h1 className="mt-4 max-w-[22ch] text-3xl leading-[1.06] font-black tracking-[-0.03em] text-balance sm:text-4xl xl:text-5xl">
+            {song.title}
+          </h1>
+          <p className="mt-3 text-lg font-semibold text-immersive-content-muted sm:text-xl">{songArtist(song)}</p>
+          <SongMetrics song={song} />
+          <SongHeroActions song={song} metadata={metadata} />
         </div>
       </div>
     </section>
   );
 }
 
-function PlatformAvailabilityCard({ song }: { song: MusicLibrarySong }) {
+function PlatformAvailabilitySection({ song }: { song: MusicLibrarySong }) {
   const metadata = getSongMetadata(song);
-  const visiblePlatforms = metadata.platformIds.length > 0 ? metadata.platformIds : [];
+  const visiblePlatforms = metadata.platformIds;
 
   return (
-    <section className={panelClassName('p-5')}>
-      <SectionHeader title="Platform availability" detail="Where Cantaro has seen this song so far." />
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {song.platformLinks.map((link) => {
-          const platformId = link.platform === 'youtube-music' ? 'youtube' : link.platform;
-          return (
-          <a key={link.url} href={link.url} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 rounded-2xl bg-surface-translucent p-3 transition hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
-            <span className="flex min-w-0 items-center gap-2 text-sm font-black text-content">
-              {isPlatformId(platformId) ? <MusicPlatformIcon platformId={platformId} className="h-5 w-5" /> : <MusicUiIcon name="externalLink" className="h-5 w-5" />}
-              {link.label}
-            </span>
-            <MusicUiIcon name="externalLink" className="h-4 w-4 text-content-subtle" />
-          </a>
-          );
-        })}
-        {song.platformLinks.length === 0 && visiblePlatforms.map((platformId) => (
-          <div key={platformId} className="flex items-center gap-2 rounded-2xl bg-surface-translucent p-3 text-sm font-black text-content">
-            <MusicPlatformIcon platformId={platformId} className="h-5 w-5" />
-            {platformName(platformId)} source known; no outbound link available
-          </div>
-        ))}
-        {song.platformLinks.length === 0 && visiblePlatforms.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border-strong bg-surface-translucent p-4 text-sm font-semibold text-content-muted">
-            No connected platform source is attached to this song yet.
-          </div>
-        ) : null}
-      </div>
+    <section className="border-b border-border-subtle py-9">
+      <SectionHeader title="Listen on" detail="Direct destinations Cantaro has recorded for this song." />
+      {song.platformLinks.length > 0 ? (
+        <ul className="mt-5 grid gap-x-10 sm:grid-cols-2">
+          {song.platformLinks.map((link) => {
+            const platformId = link.platform === 'youtube-music' ? 'youtube' : link.platform;
+            return (
+              <li key={link.url} className="border-t border-border-subtle first:border-t-0 sm:[&:nth-child(2)]:border-t-0">
+                <a href={link.url} target="_blank" rel="noreferrer" className="group flex min-h-18 items-center gap-3 py-4 focus-visible:outline-2 focus-visible:outline-focus">
+                  <span className="inline-flex size-11 shrink-0 items-center justify-center text-content">
+                    {isPlatformId(platformId) ? <MusicPlatformIcon platformId={platformId} className="h-8 w-8" /> : <MusicUiIcon name="externalLink" className="h-6 w-6" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <strong className="block truncate text-content">{link.label}</strong>
+                    <span className="mt-0.5 block text-sm text-content-muted">Open external destination</span>
+                  </span>
+                  <MusicUiIcon name="externalLink" className="h-4 w-4 text-content-subtle transition-colors group-hover:text-personal-accent-strong" />
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      ) : visiblePlatforms.length > 0 ? (
+        <ul className="mt-5 divide-y divide-border-subtle">
+          {visiblePlatforms.map((platformId) => (
+            <li key={platformId} className="flex items-center gap-3 py-4 text-sm text-content-muted">
+              <MusicPlatformIcon platformId={platformId} className="h-7 w-7" />
+              {platformName(platformId)} identity known; no external destination is available.
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-5 py-4 text-content-muted">No platform destination is attached to this song yet.</p>
+      )}
     </section>
   );
 }
@@ -256,9 +234,9 @@ const lyricsNotices = {
 function LyricsLoading() {
   return (
     <div className="mt-5 space-y-3" aria-label="Loading lyrics" role="status">
-      <div className="bg-surface-hover h-3 w-11/12 rounded motion-safe:animate-pulse" />
-      <div className="bg-surface-hover h-3 w-4/5 rounded motion-safe:animate-pulse" />
-      <div className="bg-surface-hover h-3 w-9/12 rounded motion-safe:animate-pulse" />
+      <div className="h-3 w-11/12 bg-surface-hover motion-safe:animate-pulse" />
+      <div className="h-3 w-4/5 bg-surface-hover motion-safe:animate-pulse" />
+      <div className="h-3 w-9/12 bg-surface-hover motion-safe:animate-pulse" />
     </div>
   );
 }
@@ -266,10 +244,10 @@ function LyricsLoading() {
 function LyricsNotice({ result }: { result: LyricsResult }) {
   const notice = lyricsNotices[result.state];
   return (
-    <div className="bg-surface-subtle mt-5 rounded-2xl p-4">
-      <p className="text-content text-sm font-black">{notice.title}</p>
-      <p className="text-content-muted mt-1 max-w-[70ch] text-sm leading-6 font-semibold">{result.explanation || notice.fallback}</p>
-      {result.attribution ? <p className="text-content-subtle mt-3 text-xs font-semibold">{result.attribution}</p> : null}
+    <div className="mt-5 border-y border-border-subtle py-5">
+      <p className="font-bold text-content">{notice.title}</p>
+      <p className="mt-1 max-w-[70ch] text-sm leading-6 text-content-muted">{result.explanation || notice.fallback}</p>
+      {result.attribution ? <p className="mt-3 text-xs text-content-subtle">{result.attribution}</p> : null}
     </div>
   );
 }
@@ -281,16 +259,13 @@ function lyricsMatchLabel(matchStatus: string) {
 
 function AvailableLyrics({ result, text, synchronized }: { result: LyricsResult; text: string; synchronized: boolean }) {
   const confidence = result.confidence === undefined ? undefined : `${Math.round(result.confidence * 100)}% confidence`;
-
   return (
     <div className="mt-5">
-      <div className="text-content-muted flex flex-wrap items-center gap-2 text-xs font-black">
-        <span className="bg-accent-soft text-accent-strong rounded-full px-3 py-1">{synchronized ? 'Timed lyrics' : 'Plain lyrics'}</span>
-        <span className="bg-surface-subtle rounded-full px-3 py-1 capitalize">{lyricsMatchLabel(result.matchStatus)}</span>
-        {confidence ? <span>{confidence}</span> : null}
-      </div>
-      <pre className="text-content mt-4 max-w-[70ch] font-sans text-[0.95rem] leading-7 font-medium break-words whitespace-pre-wrap">{text}</pre>
-      <p className="border-border-subtle text-content-subtle mt-5 border-t pt-3 text-xs font-semibold">{result.attribution}</p>
+      <p className="text-sm font-semibold text-content-muted">
+        {synchronized ? 'Timed lyrics' : 'Plain lyrics'} · {lyricsMatchLabel(result.matchStatus)}{confidence ? ` · ${confidence}` : ''}
+      </p>
+      <pre className="mt-5 max-w-[70ch] font-sans text-[0.95rem] leading-7 font-medium break-words whitespace-pre-wrap text-content">{text}</pre>
+      <p className="mt-5 border-t border-border-subtle pt-3 text-xs text-content-subtle">{result.attribution}</p>
     </div>
   );
 }
@@ -300,7 +275,7 @@ function LyricsResultContent({ result }: { result: LyricsResult }) {
   return selected ? <AvailableLyrics result={result} {...selected} /> : <LyricsNotice result={result} />;
 }
 
-function LyricsCard({ song }: { song: MusicLibrarySong }) {
+function LyricsSection({ song }: { song: MusicLibrarySong }) {
   const [view, setView] = useState<LyricsView>({ kind: 'closed' });
   const requestId = useRef(0);
   const requestController = useRef<AbortController | null>(null);
@@ -319,15 +294,12 @@ function LyricsCard({ song }: { song: MusicLibrarySong }) {
     requestController.current = controller;
     const currentRequest = ++requestId.current;
     setView({ kind: 'loading' });
-
     void musicLibraryApi.getLyrics(song.id, controller.signal)
       .then((result) => {
         if (requestId.current === currentRequest && !controller.signal.aborted) setView({ kind: 'ready', result });
       })
-      .catch((error: unknown) => {
-        if (requestId.current === currentRequest && !controller.signal.aborted) {
-          setView({ kind: 'error', message: error instanceof Error ? error.message : 'Lyrics could not be loaded right now.' });
-        }
+      .catch(() => {
+        if (requestId.current === currentRequest && !controller.signal.aborted) setView({ kind: 'error', message: 'Lyrics could not be loaded right now.' });
       });
   };
 
@@ -339,31 +311,21 @@ function LyricsCard({ song }: { song: MusicLibrarySong }) {
   };
 
   const action = view.kind === 'closed' ? (
-    <button type="button" onClick={load} className="bg-action text-action-content hover:bg-action-hover focus-visible:ring-focus inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-black transition focus-visible:ring-2 focus-visible:outline-none">
-      <MusicUiIcon name="listMusic" className="h-4 w-4" />
-      Show lyrics
-    </button>
+    <ActionButton tone="secondary" onClick={load}><MusicUiIcon name="listMusic" className="h-4 w-4" />Show lyrics</ActionButton>
   ) : (
-    <button type="button" onClick={close} className="border-border-subtle bg-surface text-content hover:bg-surface-hover focus-visible:ring-focus inline-flex h-10 items-center gap-2 rounded-2xl border px-4 text-sm font-black transition focus-visible:ring-2 focus-visible:outline-none">
-      Hide lyrics
-    </button>
+    <ActionButton tone="ghost" onClick={close}>Hide lyrics</ActionButton>
   );
 
   return (
-    <section className={panelClassName('p-5')}>
-      <SectionHeader title="Lyrics" detail="Words, match status, and source attribution for this recording." action={action} />
-      {view.kind === 'closed' ? (
-        <p className="text-content-muted mt-4 max-w-[65ch] text-sm leading-6 font-semibold">Lyrics are loaded only when you ask for them.</p>
-      ) : view.kind === 'loading' ? (
+    <section className="border-b border-border-subtle py-9">
+      <SectionHeader title="Lyrics" detail="Loaded on demand with match confidence and source attribution." action={action} />
+      {view.kind === 'closed' ? null : view.kind === 'loading' ? (
         <LyricsLoading />
       ) : view.kind === 'error' ? (
-        <div className="bg-danger-surface mt-5 rounded-2xl p-4">
-          <p className="text-danger-content text-sm font-black">Lyrics could not be loaded</p>
-          <p className="text-danger-content mt-1 text-sm leading-6 font-semibold">{view.message}</p>
-          <button type="button" onClick={load} className="bg-surface text-content hover:bg-surface-hover focus-visible:ring-focus mt-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition focus-visible:ring-2 focus-visible:outline-none">
-            <MusicUiIcon name="refresh" className="h-3.5 w-3.5" />
-            Try again
-          </button>
+        <div className="mt-5 border-y border-danger-border py-5">
+          <p className="font-bold text-danger-content">Lyrics could not be loaded</p>
+          <p className="mt-1 text-sm text-danger-content">{view.message}</p>
+          <ActionButton tone="secondary" className="mt-4" onClick={load}><MusicUiIcon name="refresh" className="h-4 w-4" />Try again</ActionButton>
         </div>
       ) : (
         <LyricsResultContent result={view.result} />
@@ -372,163 +334,166 @@ function LyricsCard({ song }: { song: MusicLibrarySong }) {
   );
 }
 
-function PlaylistAppearancesCard({ song, library }: { song: MusicLibrarySong; library: MusicLibraryResponse }) {
+function PlaylistAppearancesSection({ song, library }: { song: MusicLibrarySong; library: MusicLibraryResponse }) {
   const [memberships, setMemberships] = useState(song.playlists);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [confirming, setConfirming] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [message, setMessage] = useState<string>();
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
   const youtubeIds = song.sourceIdentities.filter((identity) => identity.source === 'youtube').map((identity) => identity.externalId);
   const [selectedYouTubeId, setSelectedYouTubeId] = useState(youtubeIds.length === 1 ? youtubeIds[0] : '');
-  useEffect(() => { setMemberships(song.playlists); setConfirming(undefined); setPickerOpen(false); }, [song]);
   const available = library.playlists.filter((playlist) => !memberships.some((item) => item.playlistId === playlist.id));
+
+  useEffect(() => {
+    setMemberships(song.playlists);
+    setConfirming(undefined);
+    setSelectedPlaylistId('');
+    setMessage(undefined);
+  }, [song]);
+
   const add = async (playlistId: string) => {
     const playlist = library.playlists.find((item) => item.id === playlistId);
     if (!playlist) return;
-    setBusy(playlistId); setMessage(undefined);
+    setBusy(playlistId);
+    setMessage(undefined);
     try {
       ensureYouTubeVersionSelected(youtubeIds, selectedYouTubeId);
       await musicLibraryApi.addSongToPlaylist(song.id, playlistId, selectedSourceId(selectedYouTubeId));
       setMemberships((current) => [...current, { playlistId, playlistName: playlist.name, position: playlist.entryCount }]);
-      setMessage(`Added to ${playlist.name} and synced.`); setPickerOpen(false);
-    } catch (error) { setMessage(mutationErrorMessage(error, 'Could not add this song.')); }
-    finally { setBusy(undefined); }
+      setMessage(`Added to ${playlist.name} and synced.`);
+      setSelectedPlaylistId('');
+    } catch (error) {
+      setMessage(mutationErrorMessage(error, 'Could not add this song.'));
+    } finally {
+      setBusy(undefined);
+    }
   };
+
   const remove = async (playlistId: string) => {
     const playlist = memberships.find((item) => item.playlistId === playlistId);
-    setBusy(playlistId); setMessage(undefined);
+    setBusy(playlistId);
+    setMessage(undefined);
     try {
       await musicLibraryApi.removeSongFromPlaylist(song.id, playlistId, selectedSourceId(selectedYouTubeId));
       setMemberships((current) => current.filter((item) => item.playlistId !== playlistId));
-      setMessage(`Removed from ${playlist?.playlistName ?? 'playlist'} and synced.`); setConfirming(undefined);
-    } catch (error) { setMessage(mutationErrorMessage(error, 'Could not remove this song.')); }
-    finally { setBusy(undefined); }
+      setMessage(`Removed from ${playlist?.playlistName ?? 'playlist'} and synced.`);
+      setConfirming(undefined);
+    } catch (error) {
+      setMessage(mutationErrorMessage(error, 'Could not remove this song.'));
+    } finally {
+      setBusy(undefined);
+    }
   };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (selectedPlaylistId) void add(selectedPlaylistId);
+  };
+
   return (
-    <section className={panelClassName('p-5')}>
-      <PlaylistAppearancesHeader available={available} pickerOpen={pickerOpen} onToggle={() => setPickerOpen((value) => !value)} />
-      <YouTubeVersionPicker youtubeIds={youtubeIds} selected={selectedYouTubeId} onSelect={setSelectedYouTubeId} />
-      <PlaylistPicker playlists={available} visible={pickerOpen} busy={busy} onAdd={add} />
+    <section className="border-b border-border-subtle py-9">
+      <SectionHeader title="Playlists" detail="Synced playlists that currently contain this song." />
+      {available.length > 0 ? (
+        <form onSubmit={submit} className="mt-5 flex flex-wrap items-end gap-3">
+          <SelectField label="Add to playlist" value={selectedPlaylistId} onChange={(event) => setSelectedPlaylistId(event.target.value)} containerClassName="min-w-[15rem] flex-1 sm:max-w-sm">
+            <option value="">Choose a playlist…</option>
+            {available.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+          </SelectField>
+          {youtubeIds.length > 1 ? (
+            <SelectField label="YouTube version" value={selectedYouTubeId} onChange={(event) => setSelectedYouTubeId(event.target.value)} containerClassName="min-w-[15rem] flex-1 sm:max-w-sm">
+              <option value="">Choose a version…</option>
+              {youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+            </SelectField>
+          ) : null}
+          <ActionButton tone="personal" type="submit" disabled={!selectedPlaylistId || Boolean(busy)} aria-busy={Boolean(busy)} busyLabel="Adding…">Add to playlist</ActionButton>
+        </form>
+      ) : null}
       <PlaylistMembershipList memberships={memberships} confirming={confirming} busy={busy} onConfirm={setConfirming} onRemove={remove} />
-      {message ? <p className="mt-3 text-sm font-semibold text-content-muted" role="status">{message}</p> : null}
+      {message ? <p className="mt-4 text-sm font-semibold text-content-muted" role="status">{message}</p> : null}
     </section>
   );
-}
-
-function PlaylistAppearancesHeader({ available, pickerOpen, onToggle }: { available: LibraryPlaylist[]; pickerOpen: boolean; onToggle: () => void }) {
-  const action = available.length > 0
-    ? <button type="button" onClick={onToggle} className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-xl font-black text-accent-strong transition hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none" aria-expanded={pickerOpen} aria-label="Add to another playlist">+</button>
-    : undefined;
-  return <SectionHeader title="Playlist appearances" detail="The tracked playlists that contain this song." action={action} />;
-}
-
-function YouTubeVersionPicker({ youtubeIds, selected, onSelect }: { youtubeIds: string[]; selected: string; onSelect: (value: string) => void }) {
-  if (youtubeIds.length <= 1) return null;
-  return <label className="mt-4 block text-xs font-black text-content-muted">YouTube version<select value={selected} onChange={(event) => onSelect(event.target.value)} className="mt-1 block w-full rounded-xl border border-border-subtle bg-surface px-3 py-2 text-sm"><option value="">Choose a version to sync…</option>{youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}</select></label>;
-}
-
-function PlaylistPicker({ playlists, visible, busy, onAdd }: { playlists: LibraryPlaylist[]; visible: boolean; busy?: string; onAdd: (playlistId: string) => Promise<void> }) {
-  if (!visible) return null;
-  return <div className="mt-4 flex flex-wrap gap-2 rounded-xl bg-accent-soft p-3">{playlists.map((playlist) => <button key={playlist.id} type="button" disabled={Boolean(busy)} onClick={() => void onAdd(playlist.id)} className="rounded-lg bg-surface px-3 py-2 text-xs font-black text-accent-strong transition hover:bg-accent-soft disabled:opacity-50">{busy === playlist.id ? 'Adding…' : playlist.name}</button>)}</div>;
 }
 
 function PlaylistMembershipList({ memberships, confirming, busy, onConfirm, onRemove }: { memberships: SongPlaylistMembership[]; confirming?: string; busy?: string; onConfirm: (playlistId?: string) => void; onRemove: (playlistId: string) => Promise<void> }) {
-  if (memberships.length === 0) {
-    return <div className="mt-4 space-y-2"><p className="rounded-2xl border border-dashed border-border-strong bg-surface-translucent p-4 text-sm font-semibold text-content-muted">This song is not attached to a synced playlist yet.</p></div>;
-  }
-  return <div className="mt-4 space-y-2">{memberships.map((playlist) => <PlaylistMembershipRow key={`${playlist.playlistId}-${playlist.position}`} playlist={playlist} confirming={confirming === playlist.playlistId} busy={busy} onConfirm={onConfirm} onRemove={onRemove} />)}</div>;
+  if (memberships.length === 0) return <p className="mt-5 py-4 text-content-muted">This song is not in a synced playlist yet.</p>;
+  return (
+    <ul className="mt-5 divide-y divide-border-subtle border-t border-border-subtle">
+      {memberships.map((playlist) => (
+        <PlaylistMembershipRow key={`${playlist.playlistId}-${playlist.position}`} playlist={playlist} confirming={confirming === playlist.playlistId} busy={busy} onConfirm={onConfirm} onRemove={onRemove} />
+      ))}
+    </ul>
+  );
 }
 
 function PlaylistMembershipRow({ playlist, confirming, busy, onConfirm, onRemove }: { playlist: SongPlaylistMembership; confirming: boolean; busy?: string; onConfirm: (playlistId?: string) => void; onRemove: (playlistId: string) => Promise<void> }) {
-  return <div className="group flex items-center gap-2 rounded-2xl bg-surface-translucent p-2 transition hover:bg-surface">
-    <Link to="/music/playlists/$playlistId" params={{ playlistId: playlist.playlistId }} className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl p-1 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"><span className="min-w-0"><span className="block truncate text-sm font-black text-content">{playlist.playlistName}</span><span className="block text-xs font-semibold text-content-muted">Position {playlist.position.toLocaleString()}</span></span><MusicUiIcon name="arrowRight" className="h-4 w-4 text-content-subtle" /></Link>
-    {confirming ? <div className="flex items-center gap-1"><span className="text-xs font-bold text-rose-700">Remove?</span><button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(playlist.playlistId)} className="rounded-lg bg-rose-700 px-2 py-1 text-xs font-black text-content-inverse disabled:opacity-50">{busy === playlist.playlistId ? 'Removing…' : 'Confirm'}</button><button type="button" onClick={() => onConfirm(undefined)} className="rounded-lg px-2 py-1 text-xs font-black text-content-muted">Cancel</button></div> : <button type="button" onClick={() => onConfirm(playlist.playlistId)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-rose-700 opacity-0 transition group-hover:opacity-100 hover:bg-rose-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none" aria-label={`Remove from ${playlist.playlistName}`}><MusicUiIcon name="trash" className="h-4 w-4" /></button>}
-  </div>;
+  return (
+    <li className="flex min-w-0 flex-col items-stretch gap-2 py-4 sm:flex-row sm:items-center sm:gap-3">
+      <Link to="/music/playlists/$playlistId" params={{ playlistId: playlist.playlistId }} className="flex min-w-0 flex-1 items-center justify-between gap-3 focus-visible:outline-2 focus-visible:outline-focus">
+        <span className="min-w-0">
+          <strong className="block truncate text-content">{playlist.playlistName}</strong>
+          <span className="mt-0.5 block text-sm text-content-muted">Position {playlist.position.toLocaleString()}</span>
+        </span>
+        <MusicUiIcon name="arrowRight" className="h-4 w-4 text-content-subtle" />
+      </Link>
+      {confirming ? (
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <span className="text-sm font-semibold text-danger-content">Remove?</span>
+          <ActionButton tone="danger" disabled={Boolean(busy)} onClick={() => void onRemove(playlist.playlistId)}>{busy ? 'Removing…' : 'Confirm'}</ActionButton>
+          <ActionButton tone="ghost" onClick={() => onConfirm(undefined)}>Cancel</ActionButton>
+        </div>
+      ) : (
+        <ActionButton tone="ghost" className="self-start hover:bg-danger-surface hover:text-danger-content sm:self-auto" onClick={() => onConfirm(playlist.playlistId)}>Remove</ActionButton>
+      )}
+    </li>
+  );
 }
 
-function MetadataReadinessCard({ song }: { song: MusicLibrarySong }) {
+function ArchiveMetadataSection({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
   const rows = [
     ...(song.albums.length > 0 ? [{ label: 'Albums', value: song.albums.join(', ') }] : []),
+    ...(song.artistCredits.length > 0 ? [{ label: 'Artists', value: song.artistCredits.map((credit) => `${credit.creditedName || credit.name} · ${credit.role}`).join(', ') }] : []),
     ...song.sourceIdentities.map((identity) => ({ label: identity.source === 'musicbrainz' ? 'MusicBrainz recording' : identity.source.toUpperCase(), value: identity.externalId })),
-    { label: 'Credits', value: 'Waiting on richer metadata' },
-    { label: 'Platform links', value: song.platformLinks.length > 0 ? `${song.platformLinks.length} available` : 'No platform link yet' },
+    { label: 'Identity', value: metadata.isObservation ? 'Unresolved library observation' : 'Canonical track' },
   ];
 
   return (
-    <section className={panelClassName('p-5')}>
-      <SectionHeader title="Archive metadata" detail="What Cantaro knows now, and what is still waiting on richer sources." />
-      <div className="mt-4 divide-y divide-border-subtle overflow-hidden rounded-2xl bg-surface-translucent">
+    <section className="border-b border-border-subtle py-9 xl:border-b-0">
+      <SectionHeader title="Archive metadata" detail="Identifiers and credits Cantaro currently knows for this recording." />
+      <dl className="mt-5 divide-y divide-border-subtle border-t border-border-subtle">
         {rows.map((row) => (
-          <div key={row.label} className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[180px_1fr]">
-            <span className="font-black text-content-muted">{row.label}</span>
-            <span className="font-semibold text-content-muted">{row.value}</span>
+          <div key={`${row.label}:${row.value}`} className="grid gap-1 py-4 text-sm sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
+            <dt className="text-content-subtle">{row.label}</dt>
+            <dd className="min-w-0 break-words font-semibold text-content">{row.value}</dd>
           </div>
         ))}
-      </div>
+      </dl>
     </section>
   );
 }
 
-function VersionsCard({ song }: { song: MusicLibrarySong }) {
-  const metadata = getSongMetadata(song);
-  const versionRows = metadata.platformIds.length > 0
-    ? metadata.platformIds.map((platformId) => ({
-        id: platformId,
-        source: platformName(platformId),
-        version: 'Library version',
-        status: 'Observed',
-      }))
-    : [{ id: 'library', source: 'Cantaro', version: 'Library version', status: 'Observed' }];
-
-  return (
-    <section className={panelClassName('p-5')}>
-      <SectionHeader title="Versions and variants" detail="A first version view; remix, live, cover, and acoustic variants can land here later." />
-      <div className="mt-4 overflow-hidden rounded-2xl bg-surface-translucent">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_96px] gap-3 border-b border-border-subtle px-4 py-3 text-[0.68rem] font-black tracking-[0.14em] text-content-muted uppercase">
-          <span>Source</span>
-          <span>Version</span>
-          <span>Status</span>
-        </div>
-        {versionRows.map((row) => (
-          <div key={row.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_96px] gap-3 border-b border-border-subtle px-4 py-3 text-sm last:border-b-0">
-            <span className="truncate font-black text-content">{row.source}</span>
-            <span className="truncate font-semibold text-content-muted">{row.version}</span>
-            <span className="text-xs font-black text-emerald-700">{row.status}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function RelatedSongsCard({ library, song }: { library: MusicLibraryResponse; song: MusicLibrarySong }) {
+function RelatedSongsSection({ library, song }: { library: MusicLibraryResponse; song: MusicLibrarySong }) {
   const artist = song.artist?.toLowerCase();
-  const relatedSongs = library.songs
-    .filter((candidate) => candidate.id !== song.id && (artist ? candidate.artist?.toLowerCase() === artist : true))
-    .slice(0, 4);
-
+  if (!artist) return null;
+  const relatedSongs = library.songs.filter((candidate) => candidate.id !== song.id && candidate.artist?.toLowerCase() === artist).slice(0, 4);
   if (relatedSongs.length === 0) return null;
 
   return (
-    <section className={panelClassName('p-5')}>
-      <SectionHeader title="Related songs" detail="Nearby tracks from the current library." />
-      <div className="mt-4 space-y-2">
-        {relatedSongs.map((relatedSong, index) => (
-          <Link
-            key={relatedSong.id}
-            to="/music/songs/$songId"
-            params={{ songId: relatedSong.id }}
-            className="flex items-center gap-3 rounded-2xl p-2 transition hover:bg-surface-translucent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-          >
-            <img src={songArtwork(relatedSong, index)} alt="" className="h-12 w-12 rounded-xl object-cover" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-black text-content">{relatedSong.title}</span>
-              <span className="block truncate text-xs font-semibold text-content-muted">{songArtist(relatedSong)}</span>
-            </span>
-            <span className="font-mono text-xs text-content-muted">{formatDuration(relatedSong.durationSeconds)}</span>
-          </Link>
+    <section className="border-b border-border-subtle py-9 xl:border-b-0">
+      <SectionHeader title={`More from ${songArtist(song)}`} />
+      <ul className="mt-5 divide-y divide-border-subtle border-t border-border-subtle">
+        {relatedSongs.map((relatedSong) => (
+          <li key={relatedSong.id}>
+            <Link to="/music/songs/$songId" params={{ songId: relatedSong.id }} className="flex items-center gap-3 py-4 focus-visible:outline-2 focus-visible:outline-focus">
+              <SongArtwork song={relatedSong} className="h-12 w-12 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-sm text-content">{relatedSong.title}</strong>
+                <span className="block truncate text-xs text-content-muted">{songArtist(relatedSong)}</span>
+              </span>
+              <span className="font-mono text-xs text-content-muted">{formatDuration(relatedSong.durationSeconds)}</span>
+            </Link>
+          </li>
         ))}
-      </div>
+      </ul>
     </section>
   );
 }
@@ -536,77 +501,60 @@ function RelatedSongsCard({ library, song }: { library: MusicLibraryResponse; so
 function MissingSongPage({ library, detail = 'Cantaro could not find this song in the current library snapshot.' }: { library: MusicLibraryResponse; detail?: string }) {
   return (
     <MusicPageShell library={library}>
-      <div className="mx-auto max-w-2xl">
-        <MusicEmptyPanel
-          title="Song not found"
-          detail={detail}
-        />
-        <Link
-          to="/music/songs"
-          className="mt-4 inline-flex items-center gap-2 text-sm font-black text-accent transition hover:text-accent"
-        >
-          <MusicUiIcon name="arrowLeft" className="h-4 w-4" />
-          Back to songs
-        </Link>
-      </div>
+      <section className="mx-auto grid min-h-[28rem] max-w-2xl content-center gap-5 text-center">
+        <div>
+          <h1 className="text-2xl font-bold text-content">Song details unavailable</h1>
+          <p className="mt-2 text-content-muted">{detail}</p>
+        </div>
+        <div><Link to="/music/songs" className={actionClassName({ tone: 'secondary' })}><MusicUiIcon name="arrowLeft" className="h-4 w-4" />Back to songs</Link></div>
+      </section>
     </MusicPageShell>
   );
 }
 
 // fallow-ignore-next-line complexity
 export function MusicSongDetailPage({ library, songId }: { library: MusicLibraryResponse; songId: string }) {
-  const [activeSongId, setActiveSongId] = useState<string | undefined>();
   const [canonicalSong, setCanonicalSong] = useState<MusicLibrarySong | undefined>();
   const [canonicalState, setCanonicalState] = useState<'idle' | 'loading' | 'error'>('idle');
   const librarySong = library.songs.find((candidate) => candidate.id === songId);
+
   useEffect(() => {
     setCanonicalSong(undefined);
-    if (librarySong) { setCanonicalState('idle'); return; }
+    if (librarySong) {
+      setCanonicalState('idle');
+      return;
+    }
     let active = true;
     setCanonicalState('loading');
-    void musicLibraryApi.getCanonicalSong(songId).then((song) => { if (active) { setCanonicalSong(song); setCanonicalState('idle'); } }).catch(() => { if (active) setCanonicalState('error'); });
+    void musicLibraryApi.getCanonicalSong(songId)
+      .then((song) => { if (active) { setCanonicalSong(song); setCanonicalState('idle'); } })
+      .catch(() => { if (active) setCanonicalState('error'); });
     return () => { active = false; };
   }, [librarySong, songId]);
-  const song = librarySong ?? canonicalSong;
-  const activeSong = library.songs.find((candidate) => candidate.id === activeSongId);
 
-  if (!song && canonicalState === 'loading') return <MusicPageShell library={library}><div className="mx-auto max-w-2xl rounded-2xl bg-surface-translucent p-6 text-sm font-bold text-content-muted" role="status">Loading song details…</div></MusicPageShell>;
+  const song = librarySong ?? canonicalSong;
+  if (!song && canonicalState === 'loading') {
+    return <MusicPageShell library={library}><div className="mx-auto min-h-[34rem] max-w-6xl animate-pulse bg-surface-subtle" aria-label="Loading song details" aria-busy="true" /></MusicPageShell>;
+  }
   if (!song) {
     return <MissingSongPage library={library} detail={canonicalState === 'error' ? 'Cantaro could not load this canonical song. Check the connection and try again.' : undefined} />;
   }
 
   const metadata = getSongMetadata(song);
-  const songIndex = Math.max(library.songs.findIndex((candidate) => candidate.id === song.id), 0);
-
   return (
-    <MusicPageShell library={library} activeSong={activeSong} onStopActiveSong={() => setActiveSongId(undefined)}>
-      <div>
-        <Link
-          to="/music/songs"
-          className="inline-flex items-center gap-2 text-sm font-black text-accent transition hover:text-accent"
-        >
-          <MusicUiIcon name="arrowLeft" className="h-4 w-4" />
-          Back to song library
-        </Link>
-
-        <div className="mt-5 space-y-3">
-          <SongDetailHero
-            song={song}
-            metadata={metadata}
-            songIndex={songIndex}
-            onPlayPreview={() => setActiveSongId(song.id)}
-          />
-
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="min-w-0 space-y-5">
-              <LyricsCard song={song} />
-              <PlatformAvailabilityCard song={song} />
-              <VersionsCard song={song} />
-              <PlaylistAppearancesCard song={song} library={library} />
-            </div>
-            <aside className="space-y-5">
-              <MetadataReadinessCard song={song} />
-              <RelatedSongsCard library={library} song={song} />
+    <MusicPageShell library={library}>
+      <div className="mx-auto max-w-360">
+        <SongDetailHero song={song} metadata={metadata} />
+        <div className="px-4 sm:px-7 md:px-9">
+          <div className="grid gap-x-12 xl:grid-cols-[minmax(0,1.55fr)_minmax(19rem,0.75fr)]">
+            <main className="min-w-0">
+              <LyricsSection song={song} />
+              <PlatformAvailabilitySection song={song} />
+              <PlaylistAppearancesSection song={song} library={library} />
+            </main>
+            <aside className="min-w-0">
+              <ArchiveMetadataSection song={song} metadata={metadata} />
+              <RelatedSongsSection library={library} song={song} />
             </aside>
           </div>
         </div>

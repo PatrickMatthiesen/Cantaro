@@ -100,3 +100,6 @@ coverage/
 
 # Playwright
 .playwright-cli
+
+# Chrome Web Store review assets
+src/Cantaro.BrowserExtension/store-assets/

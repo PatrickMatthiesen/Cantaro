@@ -15,8 +15,8 @@ export function SongDetail({ song, playlists, onBack }: {
   const controller = usePlaylistController(song, playlists);
 
   return (
-    <article className="space-y-3 p-1">
-      <button type="button" onClick={onBack} className="rounded-lg px-2 py-1 text-xs font-bold text-accent-strong hover:bg-surface-hover">← Back to music</button>
+    <article className="p-1">
+      <button type="button" onClick={onBack} className="min-h-9 px-2 text-xs font-bold text-content-muted hover:bg-surface-hover hover:text-content">← Back to music</button>
       <SongSummary song={song} />
       <PlatformLinks song={song} />
       <SongLyrics trackId={controller.trackId} />
@@ -32,12 +32,16 @@ function SongSummary({ song }: { song: MusicLibrarySong }) {
     ? ` · ${Math.floor(song.durationSeconds / 60)}:${String(song.durationSeconds % 60).padStart(2, '0')}`
     : '';
   return (
-    <div className="flex gap-3 rounded-xl bg-surface p-3">
-      {song.thumbnailUrl ? <img src={song.thumbnailUrl} alt="" className="size-20 rounded-xl object-cover" /> : <div className="size-20 rounded-xl bg-accent-soft" />}
-      <div className="min-w-0">
+    <div className="relative isolate mt-1 overflow-hidden border-y border-border-subtle bg-surface-subtle px-3 py-4">
+      {song.thumbnailUrl ? <img src={song.thumbnailUrl} alt="" className="absolute inset-0 -z-20 size-full scale-110 object-cover opacity-15 blur-xl" /> : null}
+      <div className="absolute inset-0 -z-10 bg-linear-to-r from-canvas via-canvas/90 to-canvas/60" aria-hidden />
+      <div className="flex gap-3">
+        {song.thumbnailUrl ? <img src={song.thumbnailUrl} alt="" className="size-20 object-cover" /> : <div className="size-20 bg-surface" />}
+        <div className="min-w-0">
         <h1 className="text-lg font-bold text-content">{song.title}</h1>
         <p className="text-sm text-content-muted">{song.artist || 'Unknown artist'}</p>
         <p className="mt-1 text-xs text-content-muted">{song.albums.join(', ') || 'No album'}{duration}</p>
+        </div>
       </div>
     </div>
   );
@@ -49,7 +53,7 @@ function PlatformLinks({ song }: { song: MusicLibrarySong }) {
     <SongSection title="Listen">
       <div className="flex flex-wrap gap-2">
         {song.platformLinks.map((link) => (
-          <a key={`${link.platform}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-bold text-white">
+          <a key={`${link.platform}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className="min-h-9 border border-border-strong bg-surface px-3 py-2 text-xs font-bold text-content hover:bg-surface-hover hover:text-personal-accent-strong">
             {link.label}
           </a>
         ))}
@@ -78,7 +82,7 @@ function YouTubeVersion({ controller }: { controller: PlaylistController }) {
       <select
         value={controller.selectedYouTubeId}
         onChange={(event) => controller.setSelectedYouTubeId(event.target.value)}
-        className="w-full rounded-lg border border-border-strong bg-surface px-2 py-1.5 text-xs text-content"
+        className="min-h-10 w-full border border-border-strong bg-surface px-2 text-xs text-content"
       >
         <option value="">Choose a version to sync…</option>
         {controller.youtubeIds.map((id) => <option key={id} value={id}>{id}</option>)}
@@ -107,7 +111,7 @@ function PlaylistHeader({ controller }: { controller: PlaylistController }) {
         <button
           type="button"
           onClick={() => controller.setShowPicker((value) => !value)}
-          className="flex size-7 items-center justify-center rounded-full bg-accent-soft text-lg font-bold text-accent-strong hover:bg-surface-hover"
+          className="flex size-8 items-center justify-center border border-border-strong bg-surface text-lg font-bold text-personal-accent-strong hover:bg-surface-hover"
           aria-label="Add to another playlist"
         >+</button>
       ) : null}
@@ -118,7 +122,7 @@ function PlaylistHeader({ controller }: { controller: PlaylistController }) {
 function MembershipList({ controller }: { controller: PlaylistController }) {
   if (controller.memberships.length === 0) return <p className="text-xs text-content-muted">Not currently in a playlist.</p>;
   return (
-    <div className="space-y-1">
+    <div className="divide-y divide-border-subtle border-y border-border-subtle">
       {controller.memberships.map((membership) => (
         <MembershipRow key={membership.playlistId} membership={membership} controller={controller} />
       ))}
@@ -132,13 +136,13 @@ function MembershipRow({ membership, controller }: {
 }) {
   const confirming = controller.confirmingRemoval === membership.playlistId;
   return (
-    <div className="group flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm text-content hover:bg-danger-surface">
+    <div className="group flex min-h-10 items-center gap-2 px-2 text-sm text-content hover:bg-danger-surface">
       <span className="min-w-0 flex-1 truncate">{membership.playlistName} <span className="text-xs text-content-subtle">#{membership.position + 1}</span></span>
       {confirming ? <RemovalConfirmation membership={membership} controller={controller} /> : (
         <button
           type="button"
           onClick={() => controller.setConfirmingRemoval(membership.playlistId)}
-          className="flex size-7 items-center justify-center rounded-md text-danger-content opacity-0 transition-opacity hover:bg-danger-surface group-hover:opacity-100 focus:opacity-100"
+          className="flex size-7 items-center justify-center text-danger-content opacity-0 transition-opacity hover:bg-danger-surface group-hover:opacity-100 focus:opacity-100"
           aria-label={`Remove from ${membership.playlistName}`}
         >×</button>
       )}
@@ -153,8 +157,8 @@ function RemovalConfirmation({ membership, controller }: {
   return (
     <div className="flex items-center gap-1">
       <span className="text-[11px] font-semibold text-danger-content">Remove?</span>
-      <button type="button" disabled={controller.busy !== null} onClick={() => void controller.removeFromPlaylist(membership.playlistId)} className="rounded bg-danger-action px-2 py-1 text-[11px] font-bold text-danger-action-content hover:bg-danger-action-hover">Confirm</button>
-      <button type="button" onClick={() => controller.setConfirmingRemoval(null)} className="rounded px-2 py-1 text-[11px] font-bold text-content-muted">Cancel</button>
+      <button type="button" disabled={controller.busy !== null} onClick={() => void controller.removeFromPlaylist(membership.playlistId)} className="bg-danger-action px-2 py-1 text-[11px] font-bold text-danger-action-content hover:bg-danger-action-hover">Confirm</button>
+      <button type="button" onClick={() => controller.setConfirmingRemoval(null)} className="px-2 py-1 text-[11px] font-bold text-content-muted">Cancel</button>
     </div>
   );
 }
@@ -169,7 +173,7 @@ function PlaylistPicker({ controller }: { controller: PlaylistController }) {
           type="button"
           disabled={controller.busy !== null}
           onClick={() => void controller.addToPlaylist(playlist)}
-          className="rounded-lg bg-accent-soft px-3 py-1.5 text-xs font-bold text-accent-strong hover:bg-surface-hover disabled:opacity-50"
+          className="min-h-9 border border-border-strong bg-surface px-3 text-xs font-bold text-content hover:bg-surface-hover hover:text-personal-accent-strong disabled:opacity-50"
         >
           {controller.busy === playlist.id ? 'Adding…' : playlist.name}
         </button>

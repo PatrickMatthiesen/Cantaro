@@ -77,7 +77,7 @@ function CollectionArtwork({
       <img
         src={artworkUrl}
         alt=""
-        className={`aspect-square w-full rounded-[1.75rem] bg-surface shadow-[0_24px_60px_rgba(17,24,39,0.18)] ${
+        className={`aspect-square w-full bg-surface ${
           preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'
         }`}
       />
@@ -88,7 +88,7 @@ function CollectionArtwork({
         href={artworkExternalUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="rounded-[1.75rem] focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none"
+        className="focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         aria-label={`Open ${title} on its music platform`}
       >
         {artwork}
@@ -98,7 +98,7 @@ function CollectionArtwork({
 
   return (
     <div
-      className="flex aspect-square w-full items-center justify-center rounded-[1.75rem] bg-[radial-gradient(circle_at_25%_20%,#a78bfa,transparent_30%),linear-gradient(135deg,#111827,#4338ca_48%,#f472b6)] text-5xl font-black text-content-inverse shadow-[0_24px_60px_rgba(17,24,39,0.18)]"
+      className="flex aspect-square w-full items-center justify-center bg-surface-subtle text-5xl font-black text-personal-accent-strong"
       aria-hidden
     >
       {title.charAt(0)}
@@ -108,7 +108,7 @@ function CollectionArtwork({
 
 function Pill({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded-full bg-surface-translucent px-3 py-1 text-xs font-black text-content shadow-[inset_0_1px_0_rgba(255,255,255,0.74)]">
+    <span className="border-l border-border-strong pl-2 text-xs font-bold text-content-muted first:border-0 first:pl-0">
       {children}
     </span>
   );
@@ -153,7 +153,7 @@ function HeaderActions({
     <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="inline-flex h-10 items-center gap-2 rounded-full bg-action px-4 text-sm font-black text-action-content shadow-[0_16px_34px_rgba(15,23,42,0.18)] transition hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-6"
+        className="inline-flex h-10 items-center gap-2 bg-personal-accent px-4 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-6"
         disabled={!hasTracks || !onPlayAll}
         onClick={onPlayAll}
       >
@@ -162,7 +162,7 @@ function HeaderActions({
       </button>
       <button
         type="button"
-        className="inline-flex h-10 items-center gap-2 rounded-full bg-surface-translucent px-4 text-sm font-black text-content shadow-[0_14px_34px_rgba(88,74,150,0.09)] transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-5"
+        className="inline-flex h-10 items-center gap-2 border border-border-strong bg-surface px-4 text-sm font-black text-content transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-5"
         disabled={!hasTracks || !onShuffle}
         onClick={onShuffle}
       >
@@ -180,7 +180,7 @@ function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: nu
       <img
         src={track.artworkUrl}
         alt=""
-        className={`h-10 w-10 shrink-0 rounded-xl bg-surface ${track.preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'}`}
+        className={`h-10 w-10 shrink-0 bg-surface ${track.preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'}`}
       />
     );
 
@@ -189,7 +189,7 @@ function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: nu
         href={track.artworkExternalUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="shrink-0 rounded-xl focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        className="shrink-0 focus-visible:outline-2 focus-visible:outline-focus"
         aria-label={`Open artwork for ${track.title}`}
       >
         {artwork}
@@ -199,7 +199,7 @@ function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: nu
 
   return (
     <div
-      className="h-10 w-10 shrink-0 rounded-xl bg-[linear-gradient(135deg,#172554,#7c3aed_52%,#fb7185)]"
+      className="h-10 w-10 shrink-0 bg-surface-subtle"
       aria-label={`Track ${index + 1}`}
     />
   );
@@ -217,7 +217,7 @@ function TrackHoverControls({
       {onPlayTrack ? (
         <button
           type="button"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-action text-action-content shadow-[0_8px_18px_rgba(15,23,42,0.18)] transition hover:bg-action-hover"
+          className="inline-flex h-7 w-7 items-center justify-center bg-personal-accent text-personal-accent-content transition-colors hover:bg-personal-accent-hover"
           aria-label={`Play ${track.title}`}
           onClick={() => onPlayTrack(track)}
         >
@@ -253,7 +253,7 @@ function NowPlayingBadge({ isPlaying }: { isPlaying?: boolean }) {
   if (!isPlaying) return null;
 
   return (
-    <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[0.62rem] font-black text-accent-strong">
+    <span className="ml-2 bg-info-surface px-2 py-0.5 text-[0.62rem] font-bold text-info-content">
       Now playing
     </span>
   );
@@ -273,7 +273,7 @@ function MoreTrackActions({
   return (
     <button
       type="button"
-      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-content-muted transition hover:bg-surface hover:text-content"
+      className="inline-flex h-8 w-8 items-center justify-center text-content-muted transition-colors hover:bg-surface-hover hover:text-content"
       aria-label={`Add ${title} up next`}
       onClick={() => onQueueTrack(track)}
     >
@@ -317,7 +317,7 @@ function TrackIdentity({ track, index, artist }: { track: MusicCollectionTrack; 
     <Link
       to="/music/songs/$songId"
       params={{ songId: track.detailSongId }}
-      className="group/identity flex min-w-0 items-center gap-2.5 rounded-xl focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none sm:gap-3"
+      className="group/identity flex min-w-0 items-center gap-2.5 focus-visible:outline-2 focus-visible:outline-focus sm:gap-3"
     >
       {content}
     </Link>
@@ -381,11 +381,11 @@ function TrackRow({
 }) {
   const artist = track.artist ?? 'Unknown artist';
   const albums = track.albums?.join(', ') ?? '';
-  const rowStateClassName = track.isPlaying ? 'song-track-row--playing' : 'song-track-row--idle';
+  const rowStateClassName = track.isPlaying ? 'bg-info-surface' : 'hover:bg-surface-hover';
 
   return (
     <li
-      className={`song-track-row group grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] items-center gap-2 px-3 py-3 text-sm text-content sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
+      className={`group grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] items-center gap-2 px-3 py-3 text-sm text-content transition-colors sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
     >
       <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} />
       <TrackIdentity track={track} index={index} artist={artist} />
@@ -419,7 +419,7 @@ export function MusicTrackTable({
 }) {
   if (isLoadingTracks) {
     return (
-      <section className="rounded-[1.75rem] border border-border-subtle bg-surface-translucent p-6 text-sm font-semibold text-content-muted shadow-[0_20px_70px_rgba(88,74,150,0.08)]">
+      <section className="border-y border-border-subtle bg-surface py-6 text-sm font-semibold text-content-muted">
         Loading tracks...
       </section>
     );
@@ -427,7 +427,7 @@ export function MusicTrackTable({
 
   if (tracks.length === 0) {
     return (
-      <section className="rounded-[1.75rem] border border-dashed border-border-subtle bg-surface-translucent p-6">
+      <section className="border-y border-border-subtle bg-surface py-6">
         <p className="font-black text-content">{emptyTrackLabel}</p>
         <p className="mt-1 text-sm font-medium text-content-muted">{emptyTrackDetail}</p>
       </section>
@@ -437,8 +437,8 @@ export function MusicTrackTable({
   const showAlbums = tracks.some((track) => (track.albums?.length ?? 0) > 0);
 
   return (
-    <section className="song-track-table overflow-hidden rounded-[1.35rem] border border-border-subtle bg-surface-translucent shadow-[0_20px_70px_rgba(88,74,150,0.07)] backdrop-blur sm:rounded-[1.75rem]">
-      <div className={`song-track-header grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] gap-2 border-b border-border-subtle px-3 py-3 text-[0.68rem] font-black tracking-[0.14em] text-content-muted uppercase sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)}`}>
+    <section className="overflow-hidden border-y border-border-subtle bg-surface">
+      <div className={`grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] gap-2 border-b border-border-subtle px-3 py-3 text-[0.68rem] font-bold tracking-[0.12em] text-content-muted uppercase sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)}`}>
         <span>#</span>
         <span>Title</span>
         <span className="max-xl:hidden">Artist</span>
@@ -447,7 +447,7 @@ export function MusicTrackTable({
         <span>Time</span>
         <span />
       </div>
-      <ol className="song-track-list divide-y divide-[#eeeafa]">
+      <ol className="divide-y divide-border-subtle">
         {tracks.map((track, index) => (
           <TrackRow key={track.id} track={track} index={index} showAlbums={showAlbums} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
         ))}
@@ -458,10 +458,10 @@ export function MusicTrackTable({
 
 function SuggestionThumb({ suggestion }: { suggestion: MusicCollectionSuggestion }) {
   if (suggestion.artworkUrl) {
-    return <img src={suggestion.artworkUrl} alt="" className="h-12 w-12 rounded-xl object-cover" />;
+    return <img src={suggestion.artworkUrl} alt="" className="h-12 w-12 object-cover" />;
   }
 
-  return <div className="h-12 w-12 rounded-xl bg-surface-subtle" aria-hidden />;
+  return <div className="h-12 w-12 bg-surface-subtle" aria-hidden />;
 }
 
 function SuggestionLink({
@@ -512,7 +512,7 @@ function SuggestionsPanel({ suggestions, className = '' }: { suggestions?: Music
   if (!suggestions || suggestions.length === 0) return null;
 
   return (
-    <section className={`rounded-[1.75rem] border border-border-subtle bg-surface-translucent p-5 shadow-[0_18px_60px_rgba(88,74,150,0.07)] backdrop-blur ${className}`}>
+    <section className={`border-y border-border-subtle py-5 ${className}`}>
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-black text-content">More like this</h2>
       </div>
@@ -521,7 +521,7 @@ function SuggestionsPanel({ suggestions, className = '' }: { suggestions?: Music
           <SuggestionLink
             key={suggestion.id}
             suggestion={suggestion}
-            className="flex items-center gap-3 rounded-2xl p-2 transition hover:bg-surface-translucent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            className="flex items-center gap-3 border-t border-border-subtle p-2 transition first:border-0 hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus"
           >
             <SuggestionContent suggestion={suggestion} />
           </SuggestionLink>
@@ -546,12 +546,14 @@ function RightRail({
 }) {
   return (
     <aside className="space-y-4">
-      <MusicUpNextPanel
-        activeTrack={activeTrack}
-        queuedTracks={queuedTracks}
-        title={rightRailTitle}
-        onClearQueue={onClearQueue}
-      />
+      {activeTrack || queuedTracks.length > 0 || onClearQueue ? (
+        <MusicUpNextPanel
+          activeTrack={activeTrack}
+          queuedTracks={queuedTracks}
+          title={rightRailTitle}
+          onClearQueue={onClearQueue}
+        />
+      ) : null}
       <SuggestionsPanel suggestions={suggestions} className="hidden 2xl:block" />
     </aside>
   );
@@ -623,8 +625,9 @@ function CollectionHeroMeta({
 
 function CollectionHero(props: CollectionHeroProps) {
   return (
-    <section className="music-detail-hero relative overflow-hidden rounded-[1.5rem] bg-surface-subtle px-4 py-4 shadow-[0_28px_90px_rgba(88,74,150,0.12)] sm:rounded-[2rem] sm:px-5 sm:py-5 md:px-7">
-      <div className="music-detail-hero__wash absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.95),transparent_32%),radial-gradient(circle_at_82%_26%,rgba(199,210,254,0.9),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.64),rgba(221,214,254,0.74))]" />
+    <section className="relative isolate overflow-hidden border-y border-border-subtle bg-surface-subtle px-4 py-5 sm:px-5 md:px-7">
+      {props.artworkUrl ? <img src={props.artworkUrl} alt="" className="absolute inset-0 -z-20 size-full scale-110 object-cover opacity-15 blur-3xl" /> : null}
+      <div className="absolute inset-0 -z-10 bg-linear-to-r from-canvas via-canvas/90 to-canvas/55" aria-hidden />
       <div className="relative grid grid-cols-[76px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[minmax(132px,180px)_1fr] sm:gap-5 md:grid-cols-[minmax(180px,270px)_1fr] md:items-end md:gap-6">
         <CollectionArtwork
           artworkUrl={props.artworkUrl}
@@ -653,7 +656,7 @@ function MobileSuggestions({ suggestions }: Pick<MusicCollectionDetailPageProps,
           <SuggestionLink
             key={suggestion.id}
             suggestion={suggestion}
-            className="overflow-hidden rounded-2xl bg-surface-translucent shadow-[0_16px_45px_rgba(88,74,150,0.08)] transition hover:-translate-y-0.5 hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            className="group relative overflow-hidden bg-surface-subtle transition hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus"
           >
             {suggestion.artworkUrl ? <img src={suggestion.artworkUrl} alt="" className="h-24 w-full object-cover" /> : null}
             <div className="p-3">
@@ -673,7 +676,7 @@ export function MusicCollectionDetailPage(props: MusicCollectionDetailPageProps)
       <Link
         to={props.backTo}
         params={props.backParams as never}
-        className="inline-flex items-center gap-2 text-sm font-black text-accent transition hover:text-accent"
+        className="inline-flex min-h-10 items-center gap-2 text-sm font-black text-content-muted transition hover:text-personal-accent-strong"
       >
         <span aria-hidden>‹</span>
         {props.backLabel}

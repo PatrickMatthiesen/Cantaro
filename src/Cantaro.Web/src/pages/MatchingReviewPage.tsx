@@ -180,10 +180,9 @@ function MatchingReviewLayout({ children, embedded }: { children: ReactNode; emb
 
 function MatchingReviewHeader({ onRefresh }: { onRefresh: () => void }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3">
+    <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border-subtle pb-6">
       <div>
-        <p className="text-xs tracking-[0.32em] text-content-muted uppercase">Matching review</p>
-        <h1 className="mt-1 text-3xl font-bold">Resolve track identity</h1>
+        <h1 className="text-3xl font-black tracking-[-0.03em] text-content">Resolve track identity</h1>
         <p className="mt-2 text-sm text-content-muted">
           Review ambiguous and unmatched imports before they become canonical Cantaro tracks.
         </p>
@@ -197,10 +196,10 @@ function MatchingReviewHeader({ onRefresh }: { onRefresh: () => void }) {
 
 function getMatchingSummaryStats(summary: MatchingSummaryResponse) {
   return [
-    { label: 'Unresolved', value: summary.totalUnresolved, tint: 'from-indigo-500 to-purple-500' },
-    { label: 'Pending', value: summary.pending, tint: 'from-sky-500 to-indigo-500' },
-    { label: 'Ambiguous', value: summary.ambiguous, tint: 'from-amber-500 to-orange-500' },
-    { label: 'No match', value: summary.noMatch, tint: 'from-rose-500 to-pink-500' },
+    { label: 'Unresolved', value: summary.totalUnresolved, tone: 'text-personal-accent-strong' },
+    { label: 'Pending', value: summary.pending, tone: 'text-info-content' },
+    { label: 'Ambiguous', value: summary.ambiguous, tone: 'text-warning-content' },
+    { label: 'No match', value: summary.noMatch, tone: 'text-danger-content' },
   ];
 }
 
@@ -210,16 +209,16 @@ function MatchingSummaryStats({ summary }: { summary: MatchingSummaryResponse | 
   }
 
   return (
-    <section className="grid gap-4 md:grid-cols-4">
+    <dl className="grid grid-cols-2 border-y border-border-subtle md:grid-cols-4">
       {getMatchingSummaryStats(summary).map((stat) => (
-        <GlassCard key={stat.label} className="p-5">
-          <p className="text-xs tracking-[0.2em] text-content-muted uppercase">{stat.label}</p>
-          <p className={`mt-3 bg-linear-to-r ${stat.tint} bg-clip-text text-3xl font-bold text-transparent`}>
+        <div key={stat.label} className="py-5 md:border-r md:border-border-subtle md:px-5 md:last:border-r-0">
+          <dt className="text-sm text-content-muted">{stat.label}</dt>
+          <dd className={`mt-2 text-3xl font-bold ${stat.tone}`}>
             {stat.value}
-          </p>
-        </GlassCard>
+          </dd>
+        </div>
       ))}
-    </section>
+    </dl>
   );
 }
 
@@ -229,20 +228,20 @@ function MatchingReviewError({ error }: { error: string | null }) {
   }
 
   return (
-    <GlassCard className="border-rose-300 bg-rose-50 p-4 text-sm text-rose-700">
+    <div className="border-y border-danger-border bg-danger-surface p-4 text-sm text-danger-content">
       {error}
-    </GlassCard>
+    </div>
   );
 }
 
 function MatchingQueueEmptyState() {
   return (
-    <GlassCard className="p-8">
+    <div className="border-y border-border-subtle py-8">
       <h2 className="text-2xl font-semibold">Queue is clear</h2>
       <p className="mt-2 text-sm text-content-muted">
         Imported songs are either matched already or there are no playlists waiting for review.
       </p>
-    </GlassCard>
+    </div>
   );
 }
 
@@ -285,7 +284,7 @@ function MatchingQueuePagination({
   if (!pageData || pageData.totalPages <= 1) return null;
   const firstItem = (pageData.page - 1) * pageData.pageSize + 1;
   const lastItem = Math.min(pageData.page * pageData.pageSize, pageData.totalCount);
-  return <nav className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-translucent px-4 py-3" aria-label={`${label} pages`}><p className="text-sm font-medium text-content-muted">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm font-semibold text-accent-strong transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-content-muted">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="rounded-lg bg-action px-3 py-2 text-sm font-semibold text-action-content transition hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
+  return <nav className="mt-3 flex flex-wrap items-center justify-between gap-3 border-y border-border-subtle py-3" aria-label={`${label} pages`}><p className="text-sm font-medium text-content-muted">Reviewing {firstItem}–{lastItem} of {pageData.totalCount}</p><div className="flex items-center gap-2"><button type="button" disabled={pageData.page <= 1} onClick={() => onPageChange(pageData.page - 1)} className="min-h-10 border border-border-strong bg-surface px-3 text-sm font-semibold text-content transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40">Previous</button><span className="min-w-20 text-center text-sm text-content-muted">Page {pageData.page} of {pageData.totalPages}</span><button type="button" disabled={pageData.page >= pageData.totalPages} onClick={() => onPageChange(pageData.page + 1)} className="min-h-10 bg-personal-accent px-3 text-sm font-semibold text-personal-accent-content transition-colors hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></nav>;
 }
 
 function MatchingReviewTabs({
@@ -315,11 +314,11 @@ function MatchingReviewTabs({
   };
 
   return (
-    <div className="overflow-x-auto pb-1">
+    <div className="overflow-x-auto">
       <div
         role="tablist"
         aria-label="Matching review type"
-        className="inline-flex min-w-full rounded-2xl border border-border-subtle bg-surface-translucent p-1 sm:min-w-0"
+        className="inline-flex min-w-full border-b border-border-subtle sm:min-w-0"
       >
         {matchingReviewTabs.map((tab, index) => {
           const isActive = activeTab === tab.id;
@@ -337,10 +336,10 @@ function MatchingReviewTabs({
               tabIndex={isActive ? 0 : -1}
               onClick={() => selectTab(tab.id)}
               onKeyDown={handleKeyDown}
-              className={`min-h-11 flex-1 rounded-xl px-4 py-2.5 text-sm font-black whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:outline-none ${
+              className={`min-h-11 flex-1 border-b-2 px-4 py-2.5 text-sm font-bold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
                 isActive
-                  ? 'bg-action text-action-content shadow-sm'
-                  : 'text-content hover:bg-accent-soft hover:text-accent-strong'
+                  ? 'border-personal-accent text-content'
+                  : 'border-transparent text-content-muted hover:bg-surface-hover hover:text-content'
               }`}
             >
               {tab.label}
@@ -421,11 +420,11 @@ interface QueueObservationItemProps {
 
 function ObservationArtwork({ item }: { item: MatchingQueueItemResponse }) {
   if (item.thumbnailUrl) {
-    return <img src={item.thumbnailUrl} alt="" className="h-28 w-28 shrink-0 rounded-2xl object-cover" />;
+    return <img src={item.thumbnailUrl} alt="" className="h-28 w-28 shrink-0 object-cover" />;
   }
 
   return (
-    <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-surface-translucent text-sm text-content-muted">
+    <div className="flex h-28 w-28 shrink-0 items-center justify-center bg-surface-subtle text-sm text-content-muted">
       No art
     </div>
   );
@@ -456,8 +455,8 @@ function ObservationDiagnostics({ item }: { item: MatchingQueueItemResponse }) {
 
 function DiagnosticTile({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-border-subtle bg-surface-translucent px-3 py-2">
-      <p className="text-[11px] tracking-[0.2em] text-content-muted uppercase">{label}</p>
+    <div className="border-t border-border-subtle py-2">
+      <p className="text-xs text-content-muted">{label}</p>
       <p className="mt-1 text-lg font-semibold text-content">{value}</p>
     </div>
   );
@@ -470,7 +469,7 @@ function ObservationSummary({ item }: { item: MatchingQueueItemResponse }) {
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-xl font-semibold text-content">{item.title}</h2>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(item.matchStatus)}`}>
+        <span className={`px-3 py-1 text-xs font-semibold ${statusClasses(item.matchStatus)}`}>
           {formatStatus(item.matchStatus)}
         </span>
       </div>
@@ -516,7 +515,7 @@ function ObservationActions({
       </GradientButton>
       <button
         type="button"
-        className="flex-1 rounded-2xl bg-surface px-5 py-3 text-sm font-semibold text-content transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-60 lg:flex-none"
+        className="min-h-11 flex-1 px-5 text-sm font-semibold text-content transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60 lg:flex-none"
         onClick={() => void onAction(item.observationId, () => matchingApi.markNoMatch(item.observationId))}
         disabled={isBusy}
       >
@@ -528,13 +527,13 @@ function ObservationActions({
 
 function PlaylistAppearances({ playlists }: { playlists: MatchingQueuePlaylistResponse[] }) {
   return (
-    <div className="matching-playlist-appearances">
-      <p>Appears in</p>
-      <ul>
+    <div className="flex min-w-0 flex-col items-start gap-2 py-1 text-content-muted sm:flex-row sm:items-center">
+      <p className="shrink-0 text-[0.65rem] font-black tracking-wider uppercase">Appears in</p>
+      <ul className="flex min-w-0 flex-wrap gap-x-3 gap-y-1">
         {playlists.map((playlist) => (
-          <li key={`${playlist.playlistId}-${playlist.position}`}>
-            <span>{playlist.playlistName}</span>
-            <span>#{playlist.position + 1}</span>
+          <li key={`${playlist.playlistId}-${playlist.position}`} className="inline-flex min-w-0 items-baseline gap-1 text-xs font-semibold text-content">
+            <span className="truncate">{playlist.playlistName}</span>
+            <span className="text-content-subtle">#{playlist.position + 1}</span>
           </li>
         ))}
       </ul>
@@ -556,10 +555,10 @@ function CandidateSection({
   suggestedVersionFlags: number;
 }) {
   return (
-    <div className="rounded-2xl bg-surface-translucent p-4">
+    <div className="border-t border-border-subtle pt-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs tracking-[0.2em] text-content-muted uppercase">Suggested candidates</p>
-        <span className="rounded-full bg-surface px-2 py-1 text-[11px] font-semibold text-content-muted">
+        <span className="bg-surface-subtle px-2 py-1 text-[11px] font-semibold text-content-muted">
           {candidates.length} stored
         </span>
       </div>
@@ -578,7 +577,7 @@ function QueueObservationItem({ item, activeObservationId, onAction }: QueueObse
   const isBusy = activeObservationId === item.observationId;
 
   return (
-    <GlassCard className="p-5" data-matching-observation-id={item.observationId}>
+    <GlassCard className="border-x-0 p-5" data-matching-observation-id={item.observationId}>
       <div className="flex flex-col gap-4 lg:flex-row">
         <div className="flex min-w-0 flex-1 gap-4">
           <ObservationArtwork item={item} />

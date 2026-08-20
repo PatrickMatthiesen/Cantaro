@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AlertTriangle, CheckCircle2, RefreshCw, XCircle } from 'lucide-react';
+import { ActionButton } from '../../ui';
 import { mediaApi } from '../services/mediaApi';
 import type {
   MediaObservationCandidateDto,
@@ -14,11 +16,11 @@ const emptySummary: MediaObservationSummaryDto = {
 };
 
 const statusStyles: Record<string, string> = {
-  pending: 'bg-surface-subtle text-content ring-border-subtle',
-  ambiguous: 'bg-warning-surface text-warning-content ring-warning-border',
-  no_match: 'bg-danger-surface text-danger-content ring-danger-border',
-  matched: 'bg-success-surface text-success-content ring-success-border',
-  rejected: 'bg-surface-subtle text-content-muted ring-border-subtle',
+  pending: 'text-content-muted',
+  ambiguous: 'text-warning-content',
+  no_match: 'text-danger-content',
+  matched: 'text-success-content',
+  rejected: 'text-content-muted',
 };
 
 function formatStatus(status: string) {
@@ -48,14 +50,14 @@ function SummaryStrip({ summary = emptySummary }: { summary?: MediaObservationSu
   ];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-4">
+    <dl className="grid border-y border-border-subtle sm:grid-cols-4 sm:divide-x sm:divide-border-subtle">
       {items.map((item) => (
-        <div key={item.label} className="rounded-lg border border-border-subtle bg-surface-translucent px-4 py-3 shadow-sm">
-          <p className="text-xs font-semibold tracking-wide text-content-muted uppercase">{item.label}</p>
-          <p className="mt-1 text-2xl font-semibold text-content">{item.value}</p>
+        <div key={item.label} className="flex items-baseline justify-between gap-4 border-b border-border-subtle px-4 py-4 last:border-b-0 sm:block sm:border-b-0">
+          <dt className="text-sm font-semibold text-content-muted">{item.label}</dt>
+          <dd className="text-2xl font-black tabular-nums text-content sm:mt-1">{item.value}</dd>
         </div>
       ))}
-    </div>
+    </dl>
   );
 }
 
@@ -74,10 +76,11 @@ function ObservationHeader({
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-semibold text-content">{observation.observedTitle}</h2>
-          <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusClassName}`}>
+          <h2 className="text-lg font-black text-content">{observation.observedTitle}</h2>
+          <span className={`inline-flex items-center gap-1.5 text-xs font-bold ${statusClassName}`}>
+            {observation.matchStatus === 'ambiguous' ? <AlertTriangle className="size-3.5" aria-hidden /> : null}
             {formatStatus(observation.matchStatus)}
           </span>
         </div>
@@ -89,22 +92,22 @@ function ObservationHeader({
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
+        <ActionButton
+          tone="ghost"
           disabled={isBusy}
           onClick={() => onRetry(observation.observationId)}
-          className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm font-semibold text-content transition hover:border-focus disabled:cursor-not-allowed disabled:opacity-60"
         >
+          <RefreshCw className="size-4" aria-hidden />
           Retry
-        </button>
-        <button
-          type="button"
+        </ActionButton>
+        <ActionButton
+          tone="danger"
           disabled={isBusy}
           onClick={() => onReject(observation.observationId)}
-          className="rounded-md border border-danger-border bg-danger-surface px-3 py-2 text-sm font-semibold text-danger-content transition hover:border-danger-content disabled:cursor-not-allowed disabled:opacity-60"
         >
+          <XCircle className="size-4" aria-hidden />
           No match
-        </button>
+        </ActionButton>
       </div>
     </div>
   );
@@ -121,7 +124,7 @@ function ObservationCandidates({
 }) {
   if (observation.candidates.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-border-strong bg-surface-subtle px-4 py-5 text-sm text-content-muted">
+      <p className="border-t border-border-subtle py-5 text-sm text-content-muted">
         No candidates are stored for this observation.
       </p>
     );
@@ -147,7 +150,7 @@ function CandidateCard({
   onResolve: () => void;
 }) {
   return (
-    <article className="rounded-lg border border-border-subtle bg-surface p-4 shadow-sm">
+    <article className="border-t border-border-subtle py-5 lg:px-5 lg:[&:nth-child(2n)]:border-l lg:[&:nth-child(2n)]:border-l-border-subtle">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-content">{candidate.title}</p>
@@ -155,20 +158,21 @@ function CandidateCard({
             {candidate.mediaKind} · {candidate.candidateSource.replace(/_/g, ' ')}
           </p>
         </div>
-        <span className="rounded-full bg-action px-3 py-1 text-xs font-semibold text-action-content">
-          {formatScore(candidate.score)}
+        <span className="text-sm font-black tabular-nums text-content">
+          {formatScore(candidate.score)} match
         </span>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2 text-xs text-content-muted">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-content-muted">
         {candidate.provider ? (
-          <span className="rounded-full bg-surface-subtle px-2.5 py-1">{candidate.provider}</span>
+          <span>{candidate.provider}</span>
         ) : null}
         {candidate.providerMediaId ? (
-          <span className="rounded-full bg-surface-subtle px-2.5 py-1">{candidate.providerMediaId}</span>
+          <><span aria-hidden>·</span><span>{candidate.providerMediaId}</span></>
         ) : null}
         {candidate.isAccepted ? (
-          <span className="rounded-full bg-success-surface px-2.5 py-1 font-semibold text-success-content">
+          <span className="inline-flex items-center gap-1 font-semibold text-success-content">
+            <CheckCircle2 className="size-3.5" aria-hidden />
             Confirmed
           </span>
         ) : null}
@@ -178,14 +182,14 @@ function CandidateCard({
         <p className="mt-3 text-sm text-content-muted">{candidate.explanation}</p>
       ) : null}
 
-      <button
-        type="button"
+      <ActionButton
+        tone="personal"
         disabled={isBusy}
         onClick={onResolve}
-        className="mt-4 rounded-md bg-action px-4 py-2 text-sm font-semibold text-action-content transition hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-4"
       >
         Use match
-      </button>
+      </ActionButton>
     </article>
   );
 }
@@ -206,7 +210,7 @@ function ObservationCard({
   const isBusy = busyObservationId === observation.observationId;
 
   return (
-    <article className="rounded-lg border border-border-subtle bg-surface-translucent p-5 shadow-sm">
+    <article className="py-7 first:pt-0 last:pb-0">
       <ObservationHeader
         observation={observation}
         isBusy={isBusy}
@@ -215,14 +219,14 @@ function ObservationCard({
       />
 
       {observation.resolutionNotes ? (
-        <p className="mt-4 rounded-md bg-surface-subtle px-3 py-2 text-sm text-content-muted">{observation.resolutionNotes}</p>
+        <p className="mt-4 bg-warning-surface px-3 py-2 text-sm font-semibold text-warning-content">{observation.resolutionNotes}</p>
       ) : null}
 
       {observation.lastMatchError ? (
-        <p className="mt-3 rounded-md bg-danger-surface px-3 py-2 text-sm text-danger-content">{observation.lastMatchError}</p>
+        <p className="mt-3 bg-danger-surface px-3 py-2 text-sm font-semibold text-danger-content">{observation.lastMatchError}</p>
       ) : null}
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+      <div className="mt-5 grid lg:grid-cols-2">
         <ObservationCandidates observation={observation} isBusy={isBusy} onResolve={onResolve} />
       </div>
     </article>
@@ -300,22 +304,22 @@ function ObservationReviewContent({
 }) {
   if (state.isLoading) {
     return (
-      <div className="rounded-lg border border-border-subtle bg-surface-translucent px-5 py-8 text-sm text-content-muted shadow-sm">
-        Loading media observations...
+      <div className="border-y border-border-subtle py-8 text-sm font-semibold text-content-muted" aria-live="polite">
+        Loading media observations…
       </div>
     );
   }
 
   if (state.sortedObservations.length === 0) {
     return (
-      <div className="rounded-lg border border-border-subtle bg-surface-translucent px-5 py-8 text-sm text-content-muted shadow-sm">
+      <div className="border-y border-border-subtle py-8 text-sm font-semibold text-content-muted">
         No media observations need review.
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="divide-y divide-border-subtle border-y border-border-subtle">
       {state.sortedObservations.map((observation) => (
         <ObservationCard
           key={observation.observationId}
@@ -346,8 +350,8 @@ function ReviewPageIntro({ embedded, navigation }: { embedded: boolean; navigati
 
   return (
     <section>
-      <p className="text-sm font-semibold tracking-wide text-content-muted uppercase">Observation review</p>
-      <h1 className="mt-2 text-3xl font-semibold text-content">Resolve media matches</h1>
+      <p className="text-sm font-semibold text-content-muted">Cantaro · Media</p>
+      <h1 className="mt-1 text-3xl font-black text-content sm:text-4xl">Resolve media matches</h1>
       <p className="mt-2 max-w-3xl text-sm text-content-muted">
         Choose a candidate when Cantaro is unsure, or mark the observation as no match. Confirmed choices apply to your account only.
       </p>
@@ -364,7 +368,7 @@ export function MediaObservationReviewPage({
 }) {
   const state = useMediaObservationReviewState();
 
-  const contentClassName = `space-y-5 ${embedded ? '' : 'relative z-10 mx-auto max-w-320 px-6 pt-8 pb-16'}`;
+  const contentClassName = `space-y-6 ${embedded ? '' : 'relative z-10 mx-auto max-w-320 px-6 pt-8 pb-16'}`;
 
   const content = (
     <div className={contentClassName}>
@@ -373,7 +377,7 @@ export function MediaObservationReviewPage({
       <SummaryStrip summary={state.summary} />
 
       {state.error ? (
-        <div className="rounded-lg border border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-content">{state.error}</div>
+        <div className="border-y border-danger-border bg-danger-surface px-4 py-3 text-sm font-semibold text-danger-content" role="alert">{state.error}</div>
       ) : null}
 
       <ObservationReviewContent state={state} />

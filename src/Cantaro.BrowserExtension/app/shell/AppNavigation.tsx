@@ -12,15 +12,15 @@ const sections: ReadonlyArray<{ id: PrimaryAppSection; label: string }> = [
 
 export function AppNavigation({ activeSection, onSelect }: AppNavigationProps) {
   return (
-    <nav className="flex rounded-xl bg-slate-950 p-0.5" aria-label="Extension section">
+    <nav className="flex self-stretch" aria-label="Extension section">
       {sections.map((section) => (
         <button
           key={section.id}
           type="button"
           onClick={() => onSelect(section.id)}
-          className={`min-h-9 rounded-[0.625rem] px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${section.id === activeSection
-            ? 'bg-surface text-content'
-            : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
+          className={`min-h-14 border-b-2 px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-focus ${section.id === activeSection
+            ? 'border-personal-accent text-content'
+            : 'border-transparent text-content-muted hover:bg-surface-hover hover:text-content'}`}
           aria-current={section.id === activeSection ? 'page' : undefined}
         >
           {section.label}

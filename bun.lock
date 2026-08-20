@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "cantaro-repo",
+      "devDependencies": {
+        "postcss": "^8.5.15",
+      },
     },
     "src/Cantaro.BrowserExtension": {
       "name": "cantaro-browser-extension",

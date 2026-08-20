@@ -9,14 +9,14 @@ function readSortDir(search: Record<string, unknown>) {
 }
 
 function hasMediaFilterDefaults(search: Record<string, unknown>) {
-  return ['status', 'mediaKind', 'provider', 'providerListName', 'sortBy', 'sortDir'].some((key) => key in search);
+  return ['status', 'mediaKind', 'provider', 'sortBy', 'sortDir'].some((key) => key in search);
 }
 
 export function getMediaFilterDefaults(search: Record<string, unknown>): Partial<MediaLibraryQueryParams> | undefined {
   if (!hasMediaFilterDefaults(search)) return undefined;
 
   const filters: Partial<MediaLibraryQueryParams> = { page: 1 };
-  const stringKeys = ['status', 'mediaKind', 'provider', 'providerListName', 'sortBy'] as const;
+  const stringKeys = ['status', 'mediaKind', 'provider', 'sortBy'] as const;
 
   for (const key of stringKeys) {
     const value = readOptionalSearchString(search, key);

@@ -155,6 +155,8 @@ The palette is a restrained lavender-and-slate product system with violet as the
 
 **The No Enterprise Gray Rule.** Neutral surfaces must remain lavender-tinted or slate-anchored; flat gray dashboards are prohibited.
 
+**The Color Must Earn It Rule.** Color must identify an action, interaction, state, category, or provider context. Keep static structure and inactive content neutral so primary actions, contextual hover states, progress, sync, warnings, and provider destinations can become expressive without making the page noisy. Do not assign unrelated accent colors to headings, metadata, or containers for decoration.
+
 ## 3. Typography
 
 **Display Font:** Space Grotesk with Inter, SF Pro Display, system-ui, sans-serif fallbacks.
@@ -212,6 +214,8 @@ Cantaro currently uses a hybrid of translucent panels, soft borders, backdrop bl
 - **Border:** Prefer soft full borders using Panel Border or white alpha. No colored side stripes.
 - **Internal Padding:** Compact panels use `12px` to `16px`; cards and settings sections use `20px` to `32px`.
 
+**The Border Budget Rule.** Prefer proximity, spacing, alignment, and tonal surface changes to communicate grouping. Add a divider or perimeter border only when removing it would make hierarchy or ownership ambiguous; do not outline every row, subsection, or nested region by default.
+
 ### Inputs / Fields
 - **Style:** Rounded rectangles (`16px`), white or translucent white background, soft lavender border, slate text, medium weight.
 - **Focus:** Border shifts to violet and may add a soft violet ring on form-heavy surfaces.
@@ -230,6 +234,8 @@ Music tables are dense but warm: translucent table shell, uppercase header row, 
 
 ### Media Library Card
 Media cards are artwork-led with poster aspect ratios, dark gradient overlays, progress metadata, and status badges. The card hover scale is acceptable because it is attached to artwork browsing, not routine form controls.
+
+**The Artwork Is the Affordance Rule.** Clickable posters, covers, and banners should communicate direct manipulation through a restrained hover or focus treatment such as a slight scale, crop shift, saturation change, focus ring, or contextual overlay icon. Do not add persistent instructional text such as “open artwork” when the image itself is the control. Keep an accessible name and an equally clear keyboard focus state; touch behavior must not depend on hover.
 
 ## 6. Do's and Don'ts
 
@@ -260,6 +266,7 @@ Use the same utility names in every theme:
 - **Borders and focus:** `border-border-subtle`, `border-border-strong`, and `ring-focus`/`outline-focus`.
 - **Selection and emphasis:** `bg-accent`, `bg-accent-soft`, `text-accent`, and `text-accent-strong`.
 - **Primary actions:** `bg-action`, `hover:bg-action-hover`, and `text-action-content`. These remain a deliberately high-contrast pair in both themes; do not derive button backgrounds from `content`.
+- **Personal accent:** `bg-personal-accent`, `hover:bg-personal-accent-hover`, `text-personal-accent-strong`, and `text-personal-accent-content` provide the restrained warm accent for playback, progress, and collection emphasis. Use the stronger text role on light surfaces; keep the role semantic so it can become user-configurable without changing component markup.
 - **Statuses:** use the `*-surface`, `*-content`, and `*-border` roles for `info`, `success`, `warning`, and `danger`.
 - **Destructive actions:** `bg-danger-action`, `hover:bg-danger-action-hover`, and `text-danger-action-content`. Filled controls must not use a status text color as their background.
 

@@ -31,7 +31,9 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
         <img
             src={posterUrl}
             alt={`${title} cover art`}
-            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.025] group-hover:saturate-125 motion-reduce:transition-none"
             onError={() => setFailed(true)}
         />
     );
@@ -53,11 +55,11 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: Li
         <button
             type="button"
             onClick={onClick}
-            className="group h-full w-full text-left transition-transform duration-300 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            aria-label={`Open ${entry.canonicalTitle}`}
+            className="group h-full w-full border border-border-subtle bg-surface-subtle text-left transition-colors hover:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
-            <div className={`relative aspect-[0.72] overflow-hidden bg-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.22)] ${density === 'compact' ? 'rounded-2xl' : 'rounded-[1.75rem]'}`}>
+            <div className="relative aspect-[0.72] overflow-hidden bg-surface-subtle">
                 <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />
-                <div className="absolute inset-0 bg-linear-to-t from-slate-950/55 via-slate-900/20 to-transparent" aria-hidden />
 
                 <LibraryEntryCardBadges
                     topLeftBadge={topLeftBadge}

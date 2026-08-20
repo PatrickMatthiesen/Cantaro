@@ -1,6 +1,5 @@
 import { Outlet } from '@tanstack/react-router';
 import type { PlatformId } from '@cantaro/client-shared/music';
-import { StatusBadge } from '@cantaro/client-shared/ui';
 import { RequireAuth } from '../components/AppShell';
 import { MatchingReviewPage } from './MatchingReviewPage';
 import { MusicHomeDashboard } from '../music/MusicHomeDashboard';
@@ -47,9 +46,9 @@ export function MusicRootPage() {
   if (isCheckingConnectedAccounts) {
     return (
       <MusicPageShell>
-        <div className="flex min-h-[360px] items-center justify-center rounded-[1.5rem] border border-border-subtle bg-surface-translucent shadow-[0_12px_34px_rgba(82,70,140,0.06)] backdrop-blur">
+        <div className="flex min-h-[360px] items-center justify-center border-y border-border-subtle bg-surface">
           <div className="flex items-center gap-3 text-sm font-semibold text-content-muted">
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-violet-500" aria-hidden />
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-personal-accent" aria-hidden />
             Checking connected platforms
           </div>
         </div>
@@ -79,10 +78,6 @@ export function MusicPlaylistPage({ playlistId }: { playlistId: string }) {
 export function MusicMatchingPage() {
   return (
     <MusicPageShell>
-      <div className="mb-5 flex items-center gap-2">
-        <StatusBadge status="warning" />
-        <h1 className="text-2xl font-black text-content">Library attention</h1>
-      </div>
       <MatchingReviewPage embedded />
     </MusicPageShell>
   );

@@ -45,10 +45,10 @@ function MediaSectionHeader({ heading }: { heading: GlobalHeadingState }) {
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <p className="text-xs font-black tracking-[0.22em] text-violet-600 uppercase">{heading.eyebrow}</p>
-        <h1 className="mt-2 text-4xl font-black text-content">{heading.title}</h1>
+        <p className="text-sm font-semibold text-content-muted">{heading.eyebrow}</p>
+        <h1 className="mt-1 text-3xl font-black text-content sm:text-4xl">{heading.title}</h1>
         {heading.details?.map((detail) => (
-          <p key={detail} className="mt-1 text-sm font-semibold text-content-muted">{detail}</p>
+          <p key={detail} className="mt-1 text-sm text-content-muted">{detail}</p>
         ))}
       </div>
     </header>
@@ -77,15 +77,14 @@ export function MediaLibraryRoutePage() {
   const { setHeading } = useMediaShell();
   const search = location.search as Record<string, unknown>;
   const searchQuery = typeof search.q === 'string' ? search.q : '';
-  const searchMode = typeof search.searchMode === 'string' ? search.searchMode : 'library';
   const filterDefaults = useMemo(() => getMediaFilterDefaults(search), [search]);
-  const updateSearchState = (next: { query?: string; mode?: string }) => {
+  const updateSearchQuery = (query: string) => {
     void navigate({
       to: '/media/library',
       search: {
         ...search,
-        q: next.query || undefined,
-        searchMode: next.mode ?? searchMode,
+        q: query || undefined,
+        searchMode: undefined,
       },
       replace: true,
     });
@@ -95,17 +94,11 @@ export function MediaLibraryRoutePage() {
     <MediaLibraryPage
       embedded
       searchQuery={searchQuery}
-      searchMode={searchMode}
       filterDefaults={filterDefaults}
-      onSearchQueryChange={(query) => updateSearchState({ query })}
-      onSearchModeChange={(mode) => updateSearchState({ query: searchQuery, mode })}
+      onSearchQueryChange={updateSearchQuery}
       onHeadingChange={setHeading}
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
       onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}
-      onNavigateCatalogResult={(providerId, providerMediaId) => void navigate({
-        to: '/media/catalog/$providerId/$providerMediaId',
-        params: { providerId, providerMediaId },
-      })}
     />
   );
 }
@@ -115,6 +108,7 @@ export function MediaProvidersRoutePage() {
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
     title: 'Media providers',
+    hidden: true,
   }), []);
   useStaticMediaHeading(heading);
 

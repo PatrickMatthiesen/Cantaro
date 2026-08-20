@@ -1,6 +1,5 @@
 import type { MediaLibraryListItemDto } from '../../services/mediaApi';
 import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
-import { Pill } from '../../../ui';
 import { mediaLibraryStatusClassName, mediaLibraryStatusLabel } from './mediaLibraryStatus';
 
 interface TopLeftBadge {
@@ -9,22 +8,19 @@ interface TopLeftBadge {
 }
 
 const DETAILS_CLASS_NAMES: Record<MediaLibraryDensity, {
-    container: string;
     panel: string;
     title: string;
-    originalTitle: string;
+    meta: string;
 }> = {
     comfortable: {
-        container: '',
-        panel: 'px-3 py-2.5 sm:px-4 sm:py-3',
-        title: 'text-base sm:text-lg md:text-xl',
-        originalTitle: 'mt-0.5 text-xs sm:text-sm',
+        panel: 'px-3 pt-10 pb-3 sm:px-4 sm:pb-4',
+        title: 'text-sm sm:text-base',
+        meta: 'text-xs',
     },
     compact: {
-        container: '',
-        panel: 'px-2 py-1.5',
+        panel: 'px-2 pt-8 pb-2',
         title: 'text-xs',
-        originalTitle: 'text-[0.65rem]',
+        meta: 'text-[0.65rem]',
     },
 };
 
@@ -49,54 +45,42 @@ export interface LibraryEntryProgressSegments {
     visualTotal: number;
 }
 
-function LibraryEntryReleaseBadge({ badge, density }: { badge: TopLeftBadge | null; density: MediaLibraryDensity }) {
-    if (!badge) {
-        return <span />;
-    }
-
-    const compact = density === 'compact';
+function LibraryReleaseNote({ badge, compact }: { badge: TopLeftBadge | null; compact: boolean }) {
+    if (!badge) return null;
 
     return (
-        <Pill tone="info" size={compact ? 'compact' : 'regular'} className="min-w-0 max-w-40 gap-x-1 text-left shadow-lg">
-            <span className="max-w-fit whitespace-nowrap font-semibold">{badge.label}</span>
-            {!compact && badge.detail ? <span className="max-w-fit whitespace-nowrap opacity-75">{badge.detail}</span> : null}
-        </Pill>
+        <div className="min-w-0 text-white">
+            <p className={`${compact ? 'text-[0.65rem]' : 'text-xs'} line-clamp-1 font-semibold`}>{badge.label}</p>
+            {!compact && badge.detail ? <p className="mt-0.5 text-xs text-white/70">{badge.detail}</p> : null}
+        </div>
     );
 }
 
-function LibraryEntryProgressBadges({ progress, isConnected, density }: { progress: string; isConnected: boolean; density: MediaLibraryDensity }) {
-    const compact = density === 'compact';
-
+function LibraryProgressNote({ progress, isConnected, compact }: { progress: string; isConnected: boolean; compact: boolean }) {
     return (
-        <div className={`flex flex-col items-end ${compact ? 'gap-1' : 'gap-2'}`}>
-            {progress ? (
-                <Pill size={compact ? 'compact' : 'regular'} className="max-w-fit whitespace-nowrap shadow-lg">
-                    {progress}
-                </Pill>
-            ) : null}
-            {!isConnected ? (
-                <Pill tone="warning" size={compact ? 'compact' : 'regular'} className="tracking-wide uppercase shadow-lg">
-                    Not synced
-                </Pill>
-            ) : null}
+        <div className="shrink-0 text-right">
+            {progress ? <p className={`${compact ? 'text-[0.65rem]' : 'text-xs'} font-semibold text-white`}>{progress}</p> : null}
+            {!isConnected ? <p className="mt-0.5 text-[0.65rem] font-semibold text-amber-200">Sync unavailable</p> : null}
         </div>
     );
 }
 
 export function LibraryEntryCardBadges({ topLeftBadge, progress, isConnected, density }: LibraryEntryCardBadgesProps) {
-    const paddingClassName = density === 'compact' ? 'p-2' : 'p-3 sm:p-4';
+    if (!topLeftBadge && !progress && isConnected) {
+        return null;
+    }
+
+    const compact = density === 'compact';
 
     return (
-        <div className={`absolute inset-x-0 top-0 flex items-start justify-between gap-1 ${paddingClassName}`}>
-            <LibraryEntryReleaseBadge badge={topLeftBadge} density={density} />
-            <LibraryEntryProgressBadges progress={progress} isConnected={isConnected} density={density} />
+        <div className={`absolute inset-x-0 top-0 flex items-start justify-between gap-2 bg-linear-to-b from-black/78 to-transparent ${compact ? 'p-2 pb-7' : 'p-3 pb-10'}`}>
+            <LibraryReleaseNote badge={topLeftBadge} compact={compact} />
+            <LibraryProgressNote progress={progress} isConnected={isConnected} compact={compact} />
         </div>
     );
 }
 
 function LibraryEntryCompletionBar({ progress, density }: { progress: LibraryEntryProgressSegments | null; density: MediaLibraryDensity }) {
-    const className = density === 'compact' ? 'mt-1.5 h-1.5' : 'mt-2 h-2 sm:mt-2.5 sm:h-2.5';
-
     if (!progress) {
         return null;
     }
@@ -106,16 +90,17 @@ function LibraryEntryCompletionBar({ progress, density }: { progress: LibraryEnt
     const description = progress.total === null
         ? `${progress.watched} watched, ${progress.releasedUnwatched} released and unwatched, total unknown`
         : `${progress.watched} watched, ${progress.releasedUnwatched} released and unwatched, ${progress.remaining} not yet released, ${progress.total} total`;
+    const className = density === 'compact' ? 'mt-2 h-1' : 'mt-3 h-1.5';
     const segments = (
         <>
             {progress.releasedUnwatched > 0 ? (
-                <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-rose-400 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                <span
+                    className="absolute inset-y-0 left-0 bg-rose-400 transition-[width] duration-500 motion-reduce:transition-none"
                     style={{ width: `${releasedPercent}%` }}
                 />
             ) : null}
-            <div
-                className="absolute inset-y-0 left-0 rounded-full bg-linear-to-r from-cyan-300 to-sky-300 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+            <span
+                className="absolute inset-y-0 left-0 bg-linear-to-r from-cyan-300 to-sky-300 transition-[width] duration-500 motion-reduce:transition-none"
                 style={{ width: `${watchedPercent}%` }}
             />
         </>
@@ -125,61 +110,46 @@ function LibraryEntryCompletionBar({ progress, density }: { progress: LibraryEnt
         const fadeMask = 'linear-gradient(to right, black 0%, black 90%, transparent 100%)';
 
         return (
-            <div
+            <span
                 role="img"
-                aria-label={`Episode progress: ${description}`}
+                aria-label={`Title progress: ${description}`}
                 title={description}
-                className={`${className} relative overflow-hidden rounded-l-full bg-slate-700/65 shadow-[inset_0_1px_2px_rgba(15,23,42,0.24)]`}
+                className={`${className} relative block overflow-hidden bg-white/25`}
                 style={{ maskImage: fadeMask, WebkitMaskImage: fadeMask }}
             >
                 {segments}
-            </div>
+            </span>
         );
     }
 
     return (
-        <div
+        <span
             role="progressbar"
-            aria-label="Episode progress"
+            aria-label="Title progress"
             aria-valuemin={0}
             aria-valuemax={progress.total}
             aria-valuenow={progress.watched}
             aria-valuetext={description}
             title={description}
-            className={`${className} relative overflow-hidden rounded-full bg-slate-700/65 shadow-[inset_0_1px_2px_rgba(15,23,42,0.24)]`}
+            className={`${className} relative block overflow-hidden bg-white/25`}
         >
             {segments}
-        </div>
+        </span>
     );
 }
 
-export function LibraryEntryCardDetails({
-    entry,
-    progress,
-    density,
-}: LibraryEntryCardDetailsProps) {
+export function LibraryEntryCardDetails({ entry, progress, density }: LibraryEntryCardDetailsProps) {
     const classNames = DETAILS_CLASS_NAMES[density];
 
     return (
-        <div className={`absolute inset-x-0 bottom-0 ${classNames.container}`}>
-            <div className={`${classNames.panel} bg-black/30 backdrop-blur-md`}>
-                <span
-                    className={`${mediaLibraryStatusClassName(entry.status)} mb-1.5 inline-flex max-w-fit rounded-full px-2 py-0.5 text-[0.65rem] leading-none font-semibold shadow-sm ${density === 'compact' ? 'mb-1 px-1.5 text-[0.55rem]' : ''}`}
-                >
-                    {mediaLibraryStatusLabel(entry.status, entry.mediaKind)}
-                </span>
-                <p className={`${classNames.title} line-clamp-2 leading-tight font-semibold text-white transition-colors group-hover:text-cyan-100`}>
-                    {entry.canonicalTitle}
-                </p>
-                {/* Show original title if it's different from canonical title
-                    TODO: Add a setting and only show if the user has enabled it, as it can add a lot of visual noise for some media with long titles
-                */}
-                {entry.originalTitle && entry.originalTitle !== entry.canonicalTitle ? (
-                    <p className={`${classNames.originalTitle} line-clamp-1 text-white/64`}>{entry.originalTitle}</p>
-                ) : null}
-
-                <LibraryEntryCompletionBar progress={progress} density={density} />
-            </div>
+        <div className={`absolute inset-x-0 bottom-0 bg-linear-to-t from-black/95 via-black/76 to-transparent ${classNames.panel}`}>
+            <p className={`${mediaLibraryStatusClassName(entry.status)} ${classNames.meta} mb-1 font-semibold`}>
+                {mediaLibraryStatusLabel(entry.status, entry.mediaKind)}
+            </p>
+            <p className={`${classNames.title} line-clamp-2 leading-tight font-bold text-white transition-colors group-hover:text-amber-200`}>
+                {entry.canonicalTitle}
+            </p>
+            <LibraryEntryCompletionBar progress={progress} density={density} />
         </div>
     );
 }

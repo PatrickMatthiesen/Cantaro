@@ -229,7 +229,7 @@ interface MobileGlobalSearchProps {
 
 function MobileSearchHeader({ activeOptionId, draft, mobileInputRef, onClear, onClose, onDraft, onKeyDown, onOpenDesktop, onOpenMobile, onSubmit }: MobileSearchHeaderProps) {
   return <header className="sticky top-0 z-10 flex items-center gap-2 border-b border-border-subtle bg-canvas px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
-    <button type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-content focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none" aria-label="Close search" onClick={onClose}><ArrowLeft className="h-5 w-5" aria-hidden /></button>
+    <button type="button" className="flex h-11 w-11 shrink-0 items-center justify-center text-content focus-visible:outline-2 focus-visible:outline-focus" aria-label="Close search" onClick={onClose}><ArrowLeft className="h-5 w-5" aria-hidden /></button>
     <form className="min-w-0 flex-1" onSubmit={onSubmit}><SearchComboboxInput inputRef={mobileInputRef} helpId="mobile-search-help" mobileSurface expanded activeOptionId={activeOptionId} draft={draft} isMobileViewport onDraft={onDraft} onOpenDesktop={onOpenDesktop} onOpenMobile={onOpenMobile} onClear={onClear} onKeyDown={onKeyDown} /></form>
   </header>;
 }
@@ -240,7 +240,7 @@ function ExpandedSearchTabs({ activeGroup, normalizedDraft, visible }: { activeG
 
 function MobileSearchFooter({ isExpandedSurface, normalizedDraft }: { isExpandedSurface: boolean; normalizedDraft: string }) {
   if (isExpandedSurface || !normalizedDraft) return null;
-  return <div className="border-t border-border-subtle bg-canvas px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><Link to="/search" search={createGlobalSearchState(normalizedDraft)} replace className="flex h-12 w-full items-center justify-center rounded-xl bg-action text-sm font-black text-action-content transition hover:bg-action-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">See all results</Link></div>;
+  return <div className="border-t border-border-subtle bg-canvas px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><Link to="/search" search={createGlobalSearchState(normalizedDraft)} replace className="flex h-12 w-full items-center justify-center bg-personal-accent text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus">See all results</Link></div>;
 }
 
 function OptionalSearchSurface({ children, visible }: { children: React.ReactNode; visible: boolean }) {
@@ -333,15 +333,15 @@ function trapDialogFocus(event: ReactKeyboardEvent<HTMLDivElement>, dialog: HTML
 function MobileSearchTabs({ activeGroup, query }: { activeGroup: SearchGroupId; query: string }) {
   return (
     <nav className="overflow-x-auto px-4 py-2" aria-label="Search result groups">
-      <div className="flex min-w-max gap-1 rounded-2xl bg-surface-subtle p-1">
+      <div className="flex min-w-max border-b border-border-subtle">
         {searchTabs.map((tab) => (
           <Link
             key={tab.id}
             to="/search"
             search={{ q: normalizeSearchQuery(query), group: tab.id }}
             replace
-            className={`rounded-xl px-3 py-2 text-sm font-black transition focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none ${
-              activeGroup === tab.id ? 'bg-action text-action-content' : 'text-content-muted hover:bg-surface-hover'
+            className={`border-b-2 px-3 py-2 text-sm font-black transition focus-visible:outline-2 focus-visible:outline-focus ${
+              activeGroup === tab.id ? 'border-personal-accent text-content' : 'border-transparent text-content-muted hover:bg-surface-hover'
             }`}
             aria-current={activeGroup === tab.id ? 'page' : undefined}
           >
@@ -387,7 +387,7 @@ function SearchComboboxInput({
       <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-content-muted" aria-hidden />
       <input
         ref={inputRef}
-        className="app-top-search-input h-12 w-full rounded-2xl border border-border-subtle bg-surface-translucent pr-10 pl-11 text-base font-medium text-content transition outline-none placeholder:text-content-subtle focus:border-focus focus:bg-surface focus:ring-2 focus:ring-focus/20 md:text-sm"
+        className="app-top-search-input h-12 w-full border border-border-subtle bg-surface-translucent pr-10 pl-11 text-base font-medium text-content transition outline-none placeholder:text-content-subtle focus:border-focus focus:bg-surface md:text-sm"
         placeholder="Search music and media..."
         type="search"
         role="combobox"
@@ -417,7 +417,7 @@ function SearchComboboxInput({
       {draft ? (
         <button
           type="button"
-          className="absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl text-content-muted hover:text-content"
+          className="absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center text-content-muted hover:bg-surface-hover hover:text-content"
           aria-label="Clear search"
           onClick={onClear}
         >
@@ -501,7 +501,7 @@ function DesktopSearchSurface({
     <div
       ref={panelRef}
       style={panelStyle}
-      className="global-search-surface fixed z-50 max-h-[min(70vh,42rem)] overflow-y-auto rounded-2xl border border-border-subtle bg-surface p-2 shadow-[0_8px_24px_rgba(15,23,42,0.16)]"
+      className="global-search-surface fixed z-50 max-h-[min(70vh,42rem)] overflow-y-auto border border-border-subtle bg-surface p-2 shadow-xl"
     >
       {children}
       {query ? (
@@ -509,7 +509,7 @@ function DesktopSearchSurface({
           to="/search"
           search={createGlobalSearchState(query)}
           data-search-result
-          className="mt-2 flex w-full items-center justify-center rounded-xl bg-accent-soft px-4 py-3 text-sm font-black text-accent-strong focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="mt-2 flex min-h-11 w-full items-center justify-center bg-personal-accent px-4 text-sm font-black text-personal-accent-content hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
           onClick={onClose}
         >
           See all results

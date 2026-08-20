@@ -1,37 +1,11 @@
-import { GlassCard } from '../../../ui';
-import type { ReactNode } from 'react';
-
-export interface MediaLibraryHeaderProps {
-    navigation?: ReactNode;
-}
-
-export function MediaLibraryHeader({
-    navigation,
-}: MediaLibraryHeaderProps) {
-    return (
-        <header className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <p className="text-xs tracking-[0.32em] text-content-muted uppercase">Cantaro · Media</p>
-                <h1 className="mt-1 text-3xl font-bold">My Library</h1>
-            </div>
-
-            {navigation ? (
-                <div className="flex flex-wrap items-center gap-3">
-                    {navigation}
-                </div>
-            ) : null}
-        </header>
-    );
-}
-
 export function MediaLibraryRefreshErrorNotice({ error }: { error: string | null }) {
     if (!error) {
         return null;
     }
 
     return (
-        <GlassCard className="p-4">
-            <p className="text-sm text-danger-content">{error}</p>
-        </GlassCard>
+        <div className="border-y border-danger-border bg-danger-surface px-4 py-3" role="status">
+            <p className="text-sm font-medium text-danger-content">{error}</p>
+        </div>
     );
 }

@@ -3,10 +3,10 @@ import { formatDuration } from './musicPresentation';
 
 function QueueArtwork({ track }: { track: MusicQueueTrack }) {
   if (track.artworkUrl) {
-    return <img src={track.artworkUrl} alt="" className="h-11 w-11 rounded-xl object-cover" />;
+    return <img src={track.artworkUrl} alt="" className="h-11 w-11 object-cover" />;
   }
 
-  return <div className="h-11 w-11 rounded-xl bg-[linear-gradient(135deg,#172554,#7c3aed_52%,#fb7185)]" aria-hidden />;
+  return <div className="h-11 w-11 bg-surface-subtle" aria-hidden />;
 }
 
 function QueueRow({ track, label, active }: { track: MusicQueueTrack; label: string; active?: boolean }) {
@@ -14,7 +14,7 @@ function QueueRow({ track, label, active }: { track: MusicQueueTrack; label: str
     <div className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3">
       <QueueArtwork track={track} />
       <div className="min-w-0">
-        <p className={`text-[0.66rem] font-black tracking-[0.14em] uppercase ${active ? 'text-accent' : 'text-content-muted'}`}>
+        <p className={`text-[0.66rem] font-black tracking-[0.14em] uppercase ${active ? 'text-personal-accent-strong' : 'text-content-muted'}`}>
           {label}
         </p>
         <p className="mt-0.5 truncate text-sm font-black text-content">{track.title}</p>
@@ -39,13 +39,13 @@ export function MusicUpNextPanel({
   const hasContent = Boolean(activeTrack || queuedTracks.length > 0);
 
   return (
-    <section className="rounded-[1.5rem] border border-border-subtle bg-surface-translucent p-4 shadow-[0_12px_34px_rgba(88,74,150,0.05)] backdrop-blur">
+    <section className="border-y border-border-subtle py-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="font-black text-content">{title}</h2>
         {onClearQueue ? (
           <button
             type="button"
-            className="text-xs font-black text-accent transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+            className="text-xs font-black text-content-muted transition hover:text-personal-accent-strong disabled:cursor-not-allowed disabled:opacity-45"
             disabled={queuedTracks.length === 0}
             onClick={onClearQueue}
           >

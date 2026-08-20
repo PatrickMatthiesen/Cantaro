@@ -1,6 +1,6 @@
-import { Link } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
-import type { AppRouteTo } from '../routerTypes';
+import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import type { AppRouteTo } from "../routerTypes";
 
 export interface PageNavigationItem {
   label: string;
@@ -8,7 +8,16 @@ export interface PageNavigationItem {
   hash?: string;
   detail?: string;
   icon?: ReactNode;
-  tone?: 'violet' | 'indigo' | 'sky' | 'red' | 'rose' | 'pink' | 'emerald' | 'amber' | 'slate';
+  tone?:
+    | "violet"
+    | "indigo"
+    | "sky"
+    | "red"
+    | "rose"
+    | "pink"
+    | "emerald"
+    | "amber"
+    | "slate";
   exact?: boolean;
   matchPrefix?: string;
   params?: Record<string, string>;
@@ -41,11 +50,19 @@ function isPathActive(pathname: string, path: string): boolean {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
-function isHashNavigationItemActive(pathname: string, item: PageNavigationItem, hash?: string): boolean {
+function isHashNavigationItemActive(
+  pathname: string,
+  item: PageNavigationItem,
+  hash?: string,
+): boolean {
   return pathname === item.to && hash === item.hash;
 }
 
-function isNavigationItemActive(pathname: string, item: PageNavigationItem, hash?: string): boolean {
+function isNavigationItemActive(
+  pathname: string,
+  item: PageNavigationItem,
+  hash?: string,
+): boolean {
   if (item.hash) return isHashNavigationItemActive(pathname, item, hash);
   if (item.exact) {
     return pathname === item.to;
@@ -58,31 +75,55 @@ function isNavigationItemActive(pathname: string, item: PageNavigationItem, hash
   return isPathActive(pathname, item.to);
 }
 
-function NavigationIcon({ icon, label }: { icon?: ReactNode; label: string }) {
+function NavigationIcon({
+  icon,
+  label,
+  isActive,
+}: {
+  icon?: ReactNode;
+  label: string;
+  isActive: boolean;
+}) {
   return (
-    <span className="app-side-nav-icon flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-violet-600 transition [&_svg]:h-5 [&_svg]:w-5">
+    <span
+      className={`flex h-7 w-7 shrink-0 items-center justify-center transition-colors [&_svg]:h-5 [&_svg]:w-5 ${
+        isActive
+          ? "text-personal-accent-strong"
+          : "text-content-muted group-hover/item:text-content"
+      }`}
+    >
       {icon ?? label.charAt(0)}
     </span>
   );
 }
 
-function NavigationItemContent({ item }: { item: PageNavigationItem }) {
+function NavigationItemContent({
+  item,
+  isActive,
+}: {
+  item: PageNavigationItem;
+  isActive: boolean;
+}) {
   return (
     <>
-      <NavigationIcon icon={item.icon} label={item.label} />
-      <span className="min-w-0 flex-1">
+      <NavigationIcon icon={item.icon} label={item.label} isActive={isActive} />
+      <span className="min-w-0 flex-1 sm:hidden lg:block group-data-[sidebar=compact]/sidebar:lg:hidden group-data-[navigation-drawer=expanded]/navigation-drawer:block">
         <span className="block truncate">{item.label}</span>
-        {item.detail ? <span className="block truncate text-xs font-semibold text-slate-400">{item.detail}</span> : null}
+        {item.detail ? (
+          <span className="block truncate text-xs font-semibold text-slate-400">
+            {item.detail}
+          </span>
+        ) : null}
       </span>
     </>
   );
 }
 
-function getNavigationItemClassName(item: PageNavigationItem, isActive: boolean): string {
-  const itemTone = item.tone ?? 'violet';
-
-  return `app-side-nav-item app-side-nav-item--${itemTone} group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm font-semibold transition ${
-    isActive ? 'app-side-nav-item--active text-content' : 'text-content-muted'
+function getNavigationItemClassName(isActive: boolean): string {
+  return `group/item flex min-h-11 w-full items-center gap-3 border-l-2 px-3 py-2.5 text-left text-sm font-semibold transition-colors sm:justify-center sm:gap-0 sm:px-0 lg:justify-start lg:gap-3 lg:px-3 group-data-[sidebar=compact]/sidebar:lg:justify-center group-data-[sidebar=compact]/sidebar:lg:gap-0 group-data-[sidebar=compact]/sidebar:lg:px-0 group-data-[navigation-drawer=expanded]/navigation-drawer:justify-start group-data-[navigation-drawer=expanded]/navigation-drawer:gap-3 group-data-[navigation-drawer=expanded]/navigation-drawer:px-3 ${
+    isActive
+      ? "border-personal-accent bg-personal-accent/10 text-content"
+      : "border-transparent text-content-muted hover:bg-surface-hover hover:text-content"
   }`;
 }
 
@@ -96,7 +137,7 @@ function PageSideNavigationItem({
   item: PageNavigationItem;
 }) {
   const isActive = isNavigationItemActive(activePathname, item, activeHash);
-  const itemClassName = getNavigationItemClassName(item, isActive);
+  const itemClassName = getNavigationItemClassName(isActive);
 
   if (item.disabled) {
     return (
@@ -104,9 +145,10 @@ function PageSideNavigationItem({
         key={`${item.to}-${item.label}`}
         type="button"
         className={`${itemClassName} cursor-not-allowed opacity-55`}
+        title={item.label}
         disabled
       >
-        <NavigationItemContent item={item} />
+        <NavigationItemContent item={item} isActive={isActive} />
       </button>
     );
   }
@@ -119,9 +161,10 @@ function PageSideNavigationItem({
       params={item.params as never}
       search={item.search as never}
       className={itemClassName}
-      aria-current={isActive ? 'page' : undefined}
+      aria-current={isActive ? "page" : undefined}
+      title={item.label}
     >
-      <NavigationItemContent item={item} />
+      <NavigationItemContent item={item} isActive={isActive} />
     </Link>
   );
 }
@@ -134,24 +177,31 @@ export function PageSideNavigation({
   footer,
 }: PageSideNavigationProps) {
   return (
-    <aside className="app-sidebar hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-border-subtle bg-surface/55 px-5 py-6 shadow-[12px_0_40px_rgba(88,74,150,0.05)] backdrop-blur-xl">
-      <div className="min-h-full pb-32">
-        <Link to="/" className="flex items-center gap-3">
+    <aside className="hidden-scrollbar-until-hover sticky top-0 h-screen w-full overflow-y-auto border-r border-border-subtle bg-canvas px-4 py-5 sm:px-3 lg:px-4 group-data-[sidebar=compact]/sidebar:lg:px-3 group-data-[navigation-drawer=expanded]/navigation-drawer:px-4">
+      <div className="min-h-full pb-20">
+        <Link
+          to="/"
+          className="flex items-center gap-3 sm:justify-center lg:justify-start group-data-[sidebar=compact]/sidebar:lg:justify-center group-data-[navigation-drawer=expanded]/navigation-drawer:justify-start"
+        >
           <img
             src="/icon-192.png"
             alt=""
-            className="h-12 w-12 rounded-2xl shadow-[0_12px_30px_rgba(124,92,255,0.24)]"
+            className="h-11 w-11"
           />
-          <div>
-            <p className="text-lg font-black tracking-[0.04em] text-content">CANTARO</p>
-            <p className="text-xs font-bold tracking-[0.32em] text-content-muted uppercase">{subtitle}</p>
+          <div className="sm:hidden lg:block group-data-[sidebar=compact]/sidebar:lg:hidden group-data-[navigation-drawer=expanded]/navigation-drawer:block">
+            <p className="text-lg font-black tracking-[0.04em] text-content">
+              CANTARO
+            </p>
+            <p className="text-xs font-bold tracking-[0.32em] text-content-muted uppercase">
+              {subtitle}
+            </p>
           </div>
         </Link>
 
         <div className="mt-8 space-y-8">
           {sections.map((section) => (
             <section key={section.title}>
-              <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="mb-3 flex items-center justify-between gap-2 sm:hidden lg:flex group-data-[sidebar=compact]/sidebar:lg:hidden group-data-[navigation-drawer=expanded]/navigation-drawer:flex">
                 <h2 className="text-xs font-black tracking-[0.22em] text-content-muted uppercase">
                   {section.title}
                 </h2>
@@ -160,10 +210,16 @@ export function PageSideNavigation({
                     to={section.titleAction.to}
                     params={section.titleAction.params as never}
                     search={section.titleAction.search as never}
-                    className="flex h-7 items-center justify-center gap-1.5 rounded-xl px-2.5 text-[11px] leading-none font-black text-accent transition hover:bg-surface hover:text-accent-strong"
-                    aria-label={section.titleAction.ariaLabel ?? section.titleAction.label}
+                    className="flex h-7 items-center justify-center gap-1.5 px-2.5 text-[11px] leading-none font-black text-personal-accent-strong transition-colors hover:bg-surface-hover"
+                    aria-label={
+                      section.titleAction.ariaLabel ?? section.titleAction.label
+                    }
                   >
-                    {section.titleAction.icon ? <span className="shrink-0">{section.titleAction.icon}</span> : null}
+                    {section.titleAction.icon ? (
+                      <span className="shrink-0">
+                        {section.titleAction.icon}
+                      </span>
+                    ) : null}
                     {section.titleAction.label}
                   </Link>
                 ) : null}
@@ -182,7 +238,11 @@ export function PageSideNavigation({
           ))}
         </div>
 
-        {footer ? <div className="mt-8">{footer}</div> : null}
+        {footer ? (
+          <div className="mt-8 sm:hidden lg:block group-data-[sidebar=compact]/sidebar:lg:hidden group-data-[navigation-drawer=expanded]/navigation-drawer:block">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </aside>
   );

@@ -1,5 +1,3 @@
-import type { CSSProperties } from 'react';
-
 export interface SegmentedSwitchOption<TValue extends string> {
   value: TValue;
   label: string;
@@ -22,35 +20,20 @@ export function SegmentedSwitch<TValue extends string>({
 }: SegmentedSwitchProps<TValue>) {
   if (options.length === 0) return null;
 
-  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
-  const trackStyle: CSSProperties = {
-    gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))`,
-  };
-  const indicatorStyle: CSSProperties = {
-    width: `calc((100% - 0.5rem) / ${options.length})`,
-    transform: `translateX(${selectedIndex * 100}%)`,
-  };
-
   return (
-    <div className={`segmented-switch flex items-center gap-2 rounded-3xl border border-border-subtle bg-surface-translucent p-1.5 shadow-[0_14px_40px_rgba(88,74,150,0.08)] ${className}`}>
-      {label ? (
-        <span className="px-3 text-xs font-black tracking-[0.14em] text-content-muted uppercase">{label}</span>
-      ) : null}
-      <div className="segmented-switch__track relative grid rounded-[1.35rem] bg-surface-subtle p-1 ring-1 ring-border-subtle" style={trackStyle}>
-        <span
-          className="segmented-switch__indicator absolute top-1 bottom-1 left-1 rounded-2xl bg-action shadow-[0_14px_34px_rgba(15,23,42,0.18)] transition-transform duration-300 ease-out"
-          style={indicatorStyle}
-          aria-hidden
-        />
+    <div className={`flex min-w-0 items-end gap-3 border-b border-border-subtle ${className}`}>
+      {label ? <span className="shrink-0 py-3 text-xs font-semibold text-content-muted">{label}</span> : null}
+      <div className="flex min-w-0 overflow-x-auto">
         {options.map((option) => {
           const isSelected = option.value === value;
-
           return (
             <button
               key={option.value}
               type="button"
-              className={`segmented-switch__option relative z-10 inline-flex h-10 min-w-28 items-center justify-center rounded-2xl px-4 text-sm font-black transition-colors duration-200 ${
-                isSelected ? 'segmented-switch__option--selected text-action-content' : 'text-content-muted hover:text-content'
+              className={`min-h-11 shrink-0 border-b-2 px-4 text-sm font-bold transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
+                isSelected
+                  ? 'border-personal-accent text-content'
+                  : 'border-transparent text-content-muted hover:bg-surface-hover hover:text-content'
               }`}
               aria-pressed={isSelected}
               onClick={() => onChange(option.value)}

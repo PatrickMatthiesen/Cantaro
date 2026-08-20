@@ -10,11 +10,12 @@ const STATUS_LABELS: Record<string, { watching: string; reading: string }> = {
 };
 
 const STATUS_CLASS_NAMES: Record<string, string> = {
-  current: 'bg-violet-600 text-white',
-  completed: 'bg-emerald-600 text-white',
-  paused: 'bg-amber-500 text-slate-950',
-  dropped: 'bg-rose-600 text-white',
-  repeating: 'bg-cyan-600 text-white',
+  current: 'text-sky-300',
+  completed: 'text-emerald-300',
+  planned: 'text-amber-200',
+  paused: 'text-amber-200',
+  dropped: 'text-rose-300',
+  repeating: 'text-cyan-300',
 };
 
 export function mediaLibraryStatusLabel(status: string, mediaKind: string): string {
@@ -25,5 +26,5 @@ export function mediaLibraryStatusLabel(status: string, mediaKind: string): stri
 }
 
 export function mediaLibraryStatusClassName(status: string): string {
-  return STATUS_CLASS_NAMES[status] ?? 'bg-slate-700 text-white';
+  return STATUS_CLASS_NAMES[status] ?? 'text-white/75';
 }

@@ -10,7 +10,6 @@ import type {
 export const DETAIL_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'episodes', label: 'Episodes' },
-  { id: 'progress', label: 'Progress' },
   { id: 'providers', label: 'Providers' },
   { id: 'franchise', label: 'Franchise' },
   { id: 'characters', label: 'Characters' },

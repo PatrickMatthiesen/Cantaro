@@ -9,15 +9,6 @@ const fallbackArtwork = [
   'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?auto=format&fit=crop&w=640&q=80',
 ];
 
-export const playlistGradients = [
-  'from-[#ff9a8b] via-[#ff6a88] to-[#8054ff]',
-  'from-[#ffd166] via-[#8bd3dd] to-[#3d5afe]',
-  'from-[#6ee7b7] via-[#60a5fa] to-[#7c3aed]',
-  'from-[#fca5a5] via-[#fdba74] to-[#92400e]',
-  'from-[#93c5fd] via-[#c4b5fd] to-[#312e81]',
-  'from-[#f0abfc] via-[#c084fc] to-[#be123c]',
-];
-
 export function formatDuration(seconds?: number): string {
   if (!seconds) return '0:00';
   const minutes = Math.floor(seconds / 60);
@@ -66,24 +57,8 @@ export function platformName(platformId: string): string {
   return platformCatalog.find((platform) => platform.id === platformId)?.name ?? platformId;
 }
 
-export function platformHoverClass(platformId?: PlatformId | null, fallback = 'hover:border-border-subtle hover:bg-accent-soft hover:text-accent-strong'): string {
-  if (platformId === 'youtube') return 'hover:border-red-300 hover:bg-red-50 hover:text-red-700';
-  if (platformId === 'spotify') return 'hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700';
-  if (platformId === 'apple') return 'hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700';
-  if (platformId === 'tidal') return 'hover:border-slate-400 hover:bg-surface-subtle hover:text-content';
-  return fallback;
-}
-
 export function playlistLastSyncedAt(playlist: MusicLibraryPlaylist): string | null {
   return latestTimestamp(playlist.services.map((service) => service.lastSyncedAt));
-}
-
-export function visiblePlatformNames(song: MusicLibrarySong): string[] {
-  const names = song.sourcePlatforms
-    .filter((source) => source !== 'musicbrainz')
-    .map(platformName);
-
-  return names.length > 0 ? names : ['Library'];
 }
 
 export function visiblePlatformIds(song: MusicLibrarySong): PlatformId[] {

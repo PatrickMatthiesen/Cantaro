@@ -28,7 +28,7 @@ export function AuthInputField({ id, label, className = '', ...rest }: AuthInput
       </label>
       <input
         id={id}
-        className={`w-full rounded-2xl border border-border-subtle bg-surface px-4 py-3 text-base text-content placeholder:text-content-subtle focus:border-focus focus:ring-2 focus:ring-focus/20 focus:outline-none ${className}`}
+        className={`min-h-12 w-full border border-border-subtle bg-surface px-4 text-base text-content placeholder:text-content-subtle focus:border-focus focus:outline-none ${className}`}
         {...rest}
       />
     </div>
@@ -61,7 +61,7 @@ interface AuthErrorBannerProps {
 
 function AuthErrorBanner({ message }: AuthErrorBannerProps) {
   return (
-    <div className="rounded-2xl border border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-content">
+    <div className="border-y border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-content">
       {message}
     </div>
   );
@@ -84,7 +84,7 @@ function AuthSubmitButton({
     <button
       type="submit"
       disabled={isLoading}
-      className={`inline-flex w-full items-center justify-center rounded-2xl bg-action px-4 py-3 text-base font-semibold text-action-content shadow-[0_18px_40px_rgba(99,102,241,0.35)] transition hover:translate-y-0.5 hover:bg-action-hover disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
+      className={`inline-flex min-h-12 w-full items-center justify-center bg-personal-accent px-4 text-base font-semibold text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
       {...rest}
     >
       {isLoading ? loadingLabel : idleLabel}
@@ -105,7 +105,7 @@ function AuthSwitchPrompt({ prompt, actionLabel, onAction }: AuthSwitchPromptPro
       <button
         type="button"
         onClick={onAction}
-        className="font-semibold text-accent-strong underline-offset-4 transition hover:text-accent"
+        className="font-semibold text-content underline decoration-personal-accent underline-offset-4 transition hover:text-personal-accent-strong"
       >
         {actionLabel}
       </button>
