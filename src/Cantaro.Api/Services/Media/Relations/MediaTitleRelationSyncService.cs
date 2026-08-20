@@ -188,6 +188,7 @@ public sealed class MediaTitleRelationSyncService(
             CanonicalTitle = node.Title,
             SortTitle = node.Title,
             OriginalTitle = node.NativeTitle,
+            Synonyms = [.. node.Synonyms],
             MediaKind = node.MediaKind,
             Format = node.Format,
             Synopsis = node.Synopsis,
@@ -217,6 +218,7 @@ public sealed class MediaTitleRelationSyncService(
         title.CanonicalTitle = node.Title;
         title.SortTitle = node.Title;
         title.OriginalTitle = node.NativeTitle ?? title.OriginalTitle;
+        title.Synonyms = [.. node.Synonyms];
         title.MediaKind = node.MediaKind;
         title.Format = node.Format ?? title.Format;
         title.Synopsis = node.Synopsis ?? title.Synopsis;

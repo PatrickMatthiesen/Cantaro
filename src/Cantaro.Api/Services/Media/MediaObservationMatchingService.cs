@@ -368,6 +368,7 @@ public class MediaObservationMatchingService(
             .Distinct()
             .ToListAsync(cancellationToken);
         libraryTitles = libraryTitles
+            .Where(title => IsCompatibleWithObservationSource(observation, title))
             .Select(title => new
             {
                 Title = title,
@@ -414,12 +415,16 @@ public class MediaObservationMatchingService(
             candidates.AddRange(await _dbContext.MediaTitles
                 .Where(t =>
                     EF.Functions.Like(t.CanonicalTitle.ToLower(), $"%{leadWord}%") ||
-                    (t.OriginalTitle != null && EF.Functions.Like(t.OriginalTitle.ToLower(), $"%{leadWord}%")))
+                    (t.OriginalTitle != null && EF.Functions.Like(t.OriginalTitle.ToLower(), $"%{leadWord}%")) ||
+                    t.Synonyms.Any(synonym => EF.Functions.Like(synonym.ToLower(), $"%{leadWord}%")))
                 .Take(50)
                 .ToListAsync(cancellationToken));
         }
 
-        var distinctCandidates = candidates.DistinctBy(title => title.Id).ToList();
+        var distinctCandidates = candidates
+            .DistinctBy(title => title.Id)
+            .Where(title => IsCompatibleWithObservationSource(observation, title))
+            .ToList();
         var anchorIds = distinctCandidates
             .Select(title => new
             {
@@ -479,6 +484,11 @@ public class MediaObservationMatchingService(
             .ToHashSet();
         foreach (var title in candidateTitles)
         {
+            if (!IsCompatibleWithObservationSource(observation, title))
+            {
+                continue;
+            }
+
             if (catalogEvidence?.HighestEpisodeNumber is > 0
                 && title.EpisodeCount is > 0
                 && !candidateOffsets.ContainsKey(title.Id))
@@ -499,7 +509,8 @@ public class MediaObservationMatchingService(
                 score = Math.Max(score, Math.Min(0.94m, score + 0.45m));
             }
 
-            if (ambiguousContinuityTitleIds.Contains(title.Id))
+            if (ambiguousContinuityTitleIds.Contains(title.Id)
+                && !normalizedQueries.Any(query => IsExactSynonymMatch(query, title)))
             {
                 // Title text may discover a franchise candidate, but it cannot
                 // establish which provider season maps to which graph node.
@@ -927,31 +938,49 @@ public class MediaObservationMatchingService(
 
     private static decimal ComputeTitleScore(string observedNorm, MediaTitle title)
     {
-        var canonicalNorm = NormalizeTitle(title.CanonicalTitle);
-        var originalNorm = title.OriginalTitle is not null
-            ? NormalizeTitle(title.OriginalTitle)
-            : null;
-
-        var bestScore = JaccardWordSimilarity(observedNorm, canonicalNorm);
-
-        if (originalNorm is not null)
-        {
-            var origScore = JaccardWordSimilarity(observedNorm, originalNorm);
-            if (origScore > bestScore)
-            {
-                bestScore = origScore;
-            }
-        }
+        var normalizedTitles = GetNormalizedTitles(title);
+        var bestScore = normalizedTitles
+            .Select(candidate => JaccardWordSimilarity(observedNorm, candidate))
+            .DefaultIfEmpty(0m)
+            .Max();
 
         // Exact match bonus.
-        if (string.Equals(observedNorm, canonicalNorm, StringComparison.Ordinal) ||
-            (originalNorm is not null && string.Equals(observedNorm, originalNorm, StringComparison.Ordinal)))
+        if (normalizedTitles.Contains(observedNorm, StringComparer.Ordinal))
         {
             bestScore = Math.Min(1.0m, bestScore + 0.05m);
         }
 
         return Math.Round(bestScore, 4);
     }
+
+    private static bool IsExactSynonymMatch(string observedNorm, MediaTitle title)
+        => title.Synonyms
+            .Select(NormalizeTitle)
+            .Contains(observedNorm, StringComparer.Ordinal);
+
+    private static IReadOnlyList<string> GetNormalizedTitles(MediaTitle title)
+    {
+        var titles = new List<string>();
+        AddTitle(titles, title.CanonicalTitle);
+        AddTitle(titles, title.OriginalTitle);
+        foreach (var synonym in title.Synonyms)
+        {
+            AddTitle(titles, synonym);
+        }
+
+        return titles.Select(NormalizeTitle).ToList();
+    }
+
+    private static bool IsCompatibleWithObservationSource(
+        MediaObservation observation,
+        MediaTitle title)
+        => !MediaObservationSiteIdentifiers.IsStreamingService(observation.SiteIdentifier)
+            || !(string.Equals(title.MediaKind, MediaKinds.Manga, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(title.Format, MediaFormats.Manga, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(title.Format, MediaFormats.Novel, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(title.Format, MediaFormats.OneShot, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(title.PrimaryProgressDimension, MediaProgressDimensions.Chapter, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(title.PrimaryProgressDimension, MediaProgressDimensions.Volume, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Jaccard similarity on word sets: |A ∩ B| / |A ∪ B|.
@@ -985,6 +1014,8 @@ public class MediaObservationMatchingService(
             .Replace(":", " ", StringComparison.Ordinal)
             .Replace(".", " ", StringComparison.Ordinal)
             .Replace("-", " ", StringComparison.Ordinal)
+            .Replace("—", " ", StringComparison.Ordinal)
+            .Replace("–", " ", StringComparison.Ordinal)
             .Replace("'", string.Empty, StringComparison.Ordinal)
             .Replace("\"", string.Empty, StringComparison.Ordinal);
 

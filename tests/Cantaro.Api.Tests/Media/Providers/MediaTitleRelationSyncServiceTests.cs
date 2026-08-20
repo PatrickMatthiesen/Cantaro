@@ -40,6 +40,7 @@ public sealed class MediaTitleRelationSyncServiceTests
             .SingleAsync();
         Assert.Equal(MediaFormats.Tv, relatedTitle.Format);
         Assert.Equal(12, relatedTitle.EpisodeCount);
+        Assert.Equal(["Example First Season"], relatedTitle.Synonyms);
         Assert.Equal(MediaRelationTypes.Prequel, (await dbContext.MediaTitleRelations.SingleAsync()).RelationType);
 
         var repeated = await service.SyncAsync(42, provider, "200", CancellationToken.None);
@@ -118,6 +119,7 @@ public sealed class MediaTitleRelationSyncServiceTests
                 {
                     ProviderMediaId = "100",
                     Title = "Example",
+                    Synonyms = ["Example First Season"],
                     MediaKind = MediaKinds.Anime,
                     Format = MediaFormats.Tv,
                     EpisodeCount = 12,

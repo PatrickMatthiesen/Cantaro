@@ -173,6 +173,64 @@ public class MediaObservationMatchingServiceTests
         Assert.NotEmpty(persisted.Candidates);
     }
 
+    [Fact]
+    public async Task ProcessObservation_UsesAniListSynonymAndExcludesMangaForStreamingSource()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var anime = fixture.SeedTitle(
+            "Honzuki no Gekokujou: Shisho ni Naru Tame ni wa Shudan wo Erandeiraremasen 4th Season",
+            MediaKinds.Anime,
+            synonyms: ["Ascendance of a Bookworm Season 4"]);
+        fixture.SeedTitle("Ascendance of a Bookworm: Part 2", MediaKinds.Manga);
+
+        var observation = fixture.SeedObservation(
+            siteIdentifier: MediaObservationSiteIdentifiers.Crunchyroll,
+            siteMediaId: null,
+            observedTitle: "Ascendance of a Bookworm — Season 4",
+            rawPayload: """{"seriesTitle":"Ascendance of a Bookworm Season 4"}""");
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(anime.Id, persisted.MediaTitleId);
+        Assert.All(persisted.Candidates, candidate => Assert.NotEqual(MediaKinds.Manga, candidate.MediaKind));
+    }
+
+    [Fact]
+    public async Task ProcessObservation_ExcludesReadingMediaForNetflixSource()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+        fixture.SeedTitle("Blue Period", MediaKinds.Manga);
+        var observation = fixture.SeedObservation("netflix", null, "Blue Period");
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+        Assert.Equal(MediaObservationStatuses.NoMatch, persisted.MatchStatus);
+        Assert.Empty(persisted.Candidates);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_AllowsMangaForUnrestrictedSource()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+        var manga = fixture.SeedTitle("Blue Period", MediaKinds.Manga);
+        var observation = fixture.SeedObservation(MediaObservationSiteIdentifiers.Unknown, null, "Blue Period");
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations.SingleAsync(item => item.Id == observation.Id);
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(manga.Id, persisted.MediaTitleId);
+    }
+
     // -----------------------------------------------------------------------
     // No match
     // -----------------------------------------------------------------------
@@ -392,12 +450,17 @@ public class MediaObservationMatchingServiceTests
             return new ObservationTestFixture(connection, dbContext, service);
         }
 
-        public MediaTitle SeedTitle(string canonicalTitle, string mediaKind, string? aniListId = null)
+        public MediaTitle SeedTitle(
+            string canonicalTitle,
+            string mediaKind,
+            string? aniListId = null,
+            IReadOnlyList<string>? synonyms = null)
         {
             var title = new MediaTitle
             {
                 Id = Guid.NewGuid(),
                 CanonicalTitle = canonicalTitle,
+                Synonyms = synonyms is null ? [] : [.. synonyms],
                 MediaKind = mediaKind,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,

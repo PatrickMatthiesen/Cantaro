@@ -467,6 +467,7 @@ public class AniListMediaProvider(
             Title = title,
             NativeTitle = entry.Media.Title?.Native,
             OriginalTitle = entry.Media.Title?.Native,
+            Synonyms = NormalizeSynonyms(entry.Media.Synonyms),
             MediaKind = mediaKind,
             Synopsis = entry.Media.Description,
             Format = entry.Media.Format,
@@ -503,6 +504,7 @@ public class AniListMediaProvider(
             ProviderMediaId = media.Id.ToString(CultureInfo.InvariantCulture),
             Title = SelectCanonicalTitle(media.Title),
             NativeTitle = media.Title?.Native,
+            Synonyms = NormalizeSynonyms(media.Synonyms),
             MediaKind = mediaKind,
             Synopsis = media.Description,
             PosterUrl = SelectPosterUrl(media.CoverImage),
@@ -529,6 +531,7 @@ public class AniListMediaProvider(
             ProviderMediaId = media.Id.ToString(CultureInfo.InvariantCulture),
             Title = SelectCanonicalTitle(media.Title),
             NativeTitle = media.Title?.Native,
+            Synonyms = NormalizeSynonyms(media.Synonyms),
             MediaKind = mediaKind,
             Synopsis = media.Description,
             Format = media.Format,
@@ -557,6 +560,7 @@ public class AniListMediaProvider(
             ProviderMediaId = media.Id.ToString(CultureInfo.InvariantCulture),
             Title = SelectCanonicalTitle(media.Title),
             NativeTitle = media.Title?.Native,
+            Synonyms = NormalizeSynonyms(media.Synonyms),
             MediaKind = mediaKind,
             Format = MapMediaFormat(media.Format),
             Synopsis = media.Description,
@@ -572,6 +576,7 @@ public class AniListMediaProvider(
                 type = media.Type,
                 format = media.Format,
                 status = media.Status,
+                synonyms = NormalizeSynonyms(media.Synonyms),
                 coverImage = media.CoverImage
             })
         };
@@ -884,6 +889,15 @@ public class AniListMediaProvider(
             ?? "Unknown title";
     }
 
+    private static IReadOnlyList<string> NormalizeSynonyms(IEnumerable<string>? synonyms)
+    {
+        return (synonyms ?? [])
+            .Where(synonym => !string.IsNullOrWhiteSpace(synonym))
+            .Select(synonym => synonym.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static string? SelectPosterUrl(AniListCoverImage? coverImage)
     {
         return coverImage?.ExtraLarge
@@ -938,6 +952,7 @@ public class AniListMediaProvider(
                     english
                     native
                   }
+                  synonyms
                   coverImage {
                     extraLarge
                     medium
@@ -976,6 +991,7 @@ public class AniListMediaProvider(
                 english
                 native
               }
+              synonyms
               coverImage {
                 extraLarge
                 medium
@@ -1011,6 +1027,7 @@ public class AniListMediaProvider(
                 english
                 native
             }
+            synonyms
             coverImage {
                 extraLarge
                 medium
@@ -1063,6 +1080,7 @@ public class AniListMediaProvider(
               bannerImage
               startDate { year }
               title { romaji english native }
+              synonyms
               coverImage { extraLarge medium large }
               relations {
                 edges {
@@ -1081,6 +1099,7 @@ public class AniListMediaProvider(
                     bannerImage
                     startDate { year }
                     title { romaji english native }
+                    synonyms
                     coverImage { extraLarge medium large }
                   }
                 }
@@ -1234,6 +1253,9 @@ public class AniListMedia
 
     [JsonPropertyName("title")]
     public AniListTitle? Title { get; set; }
+
+    [JsonPropertyName("synonyms")]
+    public List<string>? Synonyms { get; set; }
 
     [JsonPropertyName("coverImage")]
     public AniListCoverImage? CoverImage { get; set; }

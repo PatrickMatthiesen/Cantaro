@@ -680,6 +680,7 @@ public class MediaProvidersController(
             CanonicalTitle = details.Title,
             SortTitle = details.Title,
             OriginalTitle = details.NativeTitle,
+            Synonyms = [.. details.Synonyms],
             MediaKind = details.MediaKind,
             Synopsis = details.Synopsis,
             Format = details.Format,
@@ -724,6 +725,7 @@ public class MediaProvidersController(
         title.CanonicalTitle = details.Title;
         title.SortTitle = details.Title;
         title.OriginalTitle = details.NativeTitle ?? title.OriginalTitle;
+        title.Synonyms = [.. details.Synonyms];
         title.MediaKind = details.MediaKind;
         title.Synopsis = details.Synopsis ?? title.Synopsis;
         title.Format = details.Format ?? title.Format;

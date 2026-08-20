@@ -43,6 +43,7 @@ public class MediaTitleDetailDto
     public Guid Id { get; set; }
     public required string CanonicalTitle { get; set; }
     public string? OriginalTitle { get; set; }
+    public IReadOnlyList<string> Synonyms { get; set; } = [];
     public required string MediaKind { get; set; }
     public string? Format { get; set; }
     public string? Synopsis { get; set; }

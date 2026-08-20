@@ -21,6 +21,7 @@ import {
 } from './mediaLibraryFilters';
 
 const PRIMARY_PROVIDER_ID = mainMediaProviderId;
+const ANILIST_REFRESH_ERROR = 'AniList couldn’t be refreshed. Cantaro will keep using your saved library data; use Reload to try again.';
 export type MediaLibraryFilterDefaults = Partial<MediaLibraryQueryParams>;
 
 function serializeFilterDefaults(filterDefaults?: MediaLibraryFilterDefaults) {
@@ -204,20 +205,20 @@ function useProviderRefresh(
           }
 
           if (event.status === 'failed') {
-            setRefreshError(event.errorMessage || 'Failed to refresh from AniList');
+            setRefreshError(ANILIST_REFRESH_ERROR);
             setIsRefreshing(false);
           }
         },
         () => {
           activeImportEventsRef.current?.close();
           activeImportEventsRef.current = null;
-          setRefreshError('Lost the AniList reload connection');
+          setRefreshError(ANILIST_REFRESH_ERROR);
           setIsRefreshing(false);
         },
       );
       activeImportEventsRef.current = eventSource;
-    } catch (err) {
-      setRefreshError(err instanceof Error ? err.message : 'Failed to refresh from AniList');
+    } catch {
+      setRefreshError(ANILIST_REFRESH_ERROR);
       setIsRefreshing(false);
     }
   }, [filtersRef, loadLibrary]);
@@ -236,9 +237,9 @@ function useProviderRefresh(
         if (shouldRefreshPrimaryProvider(status)) {
           await refreshFromRemote();
         }
-      } catch (err) {
+      } catch {
         if (!isCancelled) {
-          setRefreshError(err instanceof Error ? err.message : 'Failed to check AniList status');
+          setRefreshError(ANILIST_REFRESH_ERROR);
         }
       }
     };
