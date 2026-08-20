@@ -6,5 +6,5 @@
     "maxCrap": 50
   },
   "ignoreDependencies": ["@cantaro/client-shared"],
-  "ignorePatterns": ["src/design/**", "src/routeTree.gen.ts"]
+  "ignorePatterns": ["src/routeTree.gen.ts"]
 }

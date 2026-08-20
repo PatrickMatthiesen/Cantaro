@@ -62,7 +62,7 @@ function MatchedSong({ song, onSelect, recognized = false }: {
         {recognized ? <p className="mt-0.5 text-xs text-success-content">Matched by Cantaro</p> : null}
       </div>
       <div className="flex shrink-0 gap-2">
-        <button type="button" className="min-h-9 bg-personal-accent px-3 text-xs font-bold text-personal-accent-contrast hover:bg-personal-accent-hover" onClick={() => onSelect(song)}>View</button>
+        <button type="button" className="min-h-9 bg-personal-accent px-3 text-xs font-bold text-personal-accent-content hover:bg-personal-accent-hover" onClick={() => onSelect(song)}>View</button>
         <button type="button" className="min-h-9 border border-border-strong bg-surface px-3 text-xs font-bold text-content hover:bg-surface-hover" onClick={() => void openCantaroPage(`/music/songs/${encodeURIComponent(song.id)}`)}>Open in Cantaro</button>
       </div>
     </div>
@@ -93,7 +93,7 @@ function MusicNeedsReview({ recognition }: { recognition: MusicRecognitionResult
         <p className="text-xs text-content-muted">{detail}</p>
         {recognition.title ? <p className="mt-1 truncate text-xs font-semibold text-content">{recognition.title}{recognition.artist ? ` · ${recognition.artist}` : ''}</p> : null}
       </div>
-      <button type="button" className="min-h-9 shrink-0 bg-personal-accent px-3 text-xs font-bold text-personal-accent-contrast hover:bg-personal-accent-hover" onClick={() => void openCantaroPage('/music/matching')}>Review matching</button>
+      <button type="button" className="min-h-9 shrink-0 bg-personal-accent px-3 text-xs font-bold text-personal-accent-content hover:bg-personal-accent-hover" onClick={() => void openCantaroPage('/music/matching')}>Review matching</button>
     </div>
   );
 }
@@ -107,7 +107,7 @@ function RecognitionFailure({ error, onRetry }: { error: string | null; onRetry:
       </div>
       <div className="flex shrink-0 gap-2">
         <button type="button" className="min-h-9 border border-border-strong bg-surface px-3 text-xs font-bold text-content hover:bg-surface-hover" onClick={onRetry}>Try again</button>
-        <button type="button" className="min-h-9 bg-personal-accent px-3 text-xs font-bold text-personal-accent-contrast hover:bg-personal-accent-hover" onClick={() => void openCantaroPage('/music/platforms/youtube')}>Reconnect</button>
+        <button type="button" className="min-h-9 bg-personal-accent px-3 text-xs font-bold text-personal-accent-content hover:bg-personal-accent-hover" onClick={() => void openCantaroPage('/music/platforms/youtube')}>Reconnect</button>
       </div>
     </div>
   );

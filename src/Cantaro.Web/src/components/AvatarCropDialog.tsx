@@ -167,7 +167,7 @@ export function AvatarCropDialog({ file, imageUrl, isSaving, onCancel, onConfirm
           {error ? <p className="text-sm font-semibold text-rose-600" role="alert">{error}</p> : null}
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-11 border border-border-strong px-5 text-sm font-black text-content-muted transition hover:bg-surface-subtle disabled:opacity-50">Cancel</button>
-            <button type="button" disabled={isSaving || !croppedArea} onClick={() => void confirm()} className="inline-flex min-h-11 items-center justify-center gap-2 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover disabled:opacity-50">
+            <button type="button" disabled={isSaving || !croppedArea} onClick={() => void confirm()} className="inline-flex min-h-11 items-center justify-center gap-2 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:opacity-50">
               <ImageIcon className="h-4 w-4" />
               {isSaving ? 'Uploading…' : 'Use this crop'}
             </button>

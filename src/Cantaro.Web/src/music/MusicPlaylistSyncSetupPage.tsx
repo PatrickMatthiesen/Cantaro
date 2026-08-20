@@ -273,7 +273,7 @@ function PlaylistPickerRow({
       }`}
       onClick={() => onTogglePlaylist(playlist.id)}
     >
-      <span className={`flex h-5 w-5 items-center justify-center border ${isSelected ? 'border-personal-accent bg-personal-accent text-personal-accent-contrast' : 'border-border-strong bg-surface text-transparent'}`}>
+      <span className={`flex h-5 w-5 items-center justify-center border ${isSelected ? 'border-personal-accent bg-personal-accent text-personal-accent-content' : 'border-border-strong bg-surface text-transparent'}`}>
         <MusicUiIcon name="squareCheck" className="h-3.5 w-3.5" />
       </span>
       <PlaylistArtworkThumbnail playlist={playlist} sourcePlatformId={sourcePlatformId} />
@@ -690,7 +690,7 @@ function SyncSetupHeader({
           type="button"
           disabled={!canSync}
           onClick={onSync}
-          className="inline-flex h-12 items-center gap-2 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-content-muted"
+          className="inline-flex h-12 items-center gap-2 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-content-muted"
         >
           <MusicUiIcon name={isSyncing ? 'loader' : 'refresh'} className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
           {isSyncing ? 'Syncing' : 'Sync playlists'}

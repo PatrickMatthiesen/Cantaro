@@ -254,8 +254,8 @@ function ProgressStateMessage({ status }: { status: "loading" | "error" }) {
 
 function NotInLibraryProgress({ total }: { total?: number }) {
   return (
-    <section className="grid gap-6 border-b border-border-subtle px-4 py-7 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center sm:px-7 xl:px-9">
-      <div className="min-w-36">
+    <section className="grid gap-4 border-b border-border-subtle px-4 py-5 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center sm:px-5 xl:px-7">
+      <div className="min-w-28">
         <h2 className="text-sm font-semibold text-content-muted">
           Your progress
         </h2>
@@ -288,9 +288,9 @@ function TrackedProgressCockpit(props: ProgressCockpitProps) {
   return (
     <section
       aria-labelledby="media-progress-heading"
-      className="flex flex-col gap-6 border-b border-border-subtle px-4 py-7 sm:px-7 xl:flex-row xl:items-center xl:px-9"
+      className="flex flex-col gap-4 border-b border-border-subtle px-4 py-5 sm:px-5 xl:flex-row xl:items-center xl:px-7"
     >
-      <div className="min-w-36">
+      <div className="min-w-28">
         <h2
           id="media-progress-heading"
           className="text-sm font-semibold text-content-muted"

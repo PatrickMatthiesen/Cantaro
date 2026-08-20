@@ -465,7 +465,7 @@ function WholeSearchError({ message, onRetry, compact }: { message: string; onRe
       action={(
         <button
           type="button"
-          className="inline-flex min-h-10 items-center gap-2 bg-personal-accent px-3 text-xs font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
+          className="inline-flex min-h-10 items-center gap-2 bg-personal-accent px-3 text-xs font-black text-personal-accent-content transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
           onClick={onRetry}
         >
           <RotateCcw className="h-3.5 w-3.5" aria-hidden />

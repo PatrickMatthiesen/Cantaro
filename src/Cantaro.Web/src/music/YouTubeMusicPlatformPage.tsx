@@ -217,7 +217,7 @@ function YouTubeReconnectPanel({ accountName, onConnect }: { accountName?: strin
       </p>
       <button
         type="button"
-        className="mt-5 min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover"
+        className="mt-5 min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover"
         onClick={onConnect}
       >
         Reconnect YouTube
@@ -236,7 +236,7 @@ function YouTubeDisconnectedPanel({ onConnect }: { onConnect: () => void }) {
       </p>
       <button
         type="button"
-        className="mt-5 min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover"
+        className="mt-5 min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover"
         onClick={onConnect}
       >
         Connect YouTube

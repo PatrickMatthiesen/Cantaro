@@ -326,17 +326,20 @@ function DesktopSidebar({
   isFolded,
   onToggle,
   onOpenCompact,
+  compactButtonRef,
 }: {
   sidebar: ReactNode;
   isFolded: boolean;
   onToggle: () => void;
   onOpenCompact: () => void;
+  compactButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   const label = isFolded ? "Expand sidebar" : "Fold sidebar";
   return (
     <div className="relative hidden sm:block">
       {sidebar}
       <button
+        ref={compactButtonRef}
         type="button"
         className="fixed bottom-4 left-4 z-20 hidden h-11 w-11 items-center justify-center border border-border-subtle bg-canvas text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-focus sm:flex lg:hidden"
         aria-label="Expand sidebar"
@@ -387,11 +390,21 @@ export function PageShell({
     readSidebarFoldedPreference,
   );
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
+  const compactNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
+  const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const openMobileNavigation = useCallback(
+    (trigger: HTMLButtonElement | null) => {
+      navigationTriggerRef.current = trigger;
+      setIsMobileNavigationOpen(true);
+    },
+    [],
+  );
 
   const closeMobileNavigation = useCallback(() => {
     setIsMobileNavigationOpen(false);
     window.requestAnimationFrame(() => {
-      mobileNavigationButtonRef.current?.focus();
+      navigationTriggerRef.current?.focus();
     });
   }, []);
 
@@ -419,7 +432,10 @@ export function PageShell({
           sidebar={sidebar}
           isFolded={isSidebarFolded}
           onToggle={() => setIsSidebarFolded((current) => !current)}
-          onOpenCompact={() => setIsMobileNavigationOpen(true)}
+          compactButtonRef={compactNavigationButtonRef}
+          onOpenCompact={() =>
+            openMobileNavigation(compactNavigationButtonRef.current)
+          }
         />
 
         <div className="flex min-w-0 flex-col pb-28">
@@ -429,7 +445,9 @@ export function PageShell({
             avatarUrl={user?.avatarUrl}
             onLogout={() => void logout()}
             navigationButtonRef={mobileNavigationButtonRef}
-            onOpenNavigation={() => setIsMobileNavigationOpen(true)}
+            onOpenNavigation={() =>
+              openMobileNavigation(mobileNavigationButtonRef.current)
+            }
           />
 
           <main

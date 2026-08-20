@@ -92,7 +92,11 @@ export function normalizeAndOrder(
     .sort((left, right) => compareDestinations(left, right, preferredServiceId));
   const seen = new Set<string>();
   return ordered.filter(item => {
-    const key = `${item.serviceId}:${normalizeUrl(item.url)}`;
+    // A destination is an action for a streaming service. Providers can report
+    // more than one valid URL for the same title, but rendering each URL would
+    // present indistinguishable duplicate actions. Ordering above keeps the
+    // strongest observation, then this collapses the rest per service.
+    const key = item.serviceId;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

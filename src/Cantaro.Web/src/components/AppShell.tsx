@@ -45,7 +45,7 @@ function LandingPage() {
                 'Run sync and manage playlist updates from Cantaro.',
               ].map((item, index) => (
                 <li key={item} className="flex items-start gap-3 border-t border-border-subtle py-4 first:border-0">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-personal-accent text-xs font-semibold text-personal-accent-contrast">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-personal-accent text-xs font-semibold text-personal-accent-content">
                     {index + 1}
                   </span>
                   <span className="text-sm text-content-muted">{item}</span>

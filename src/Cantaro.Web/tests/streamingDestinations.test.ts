@@ -35,6 +35,23 @@ describe('streaming destination resolution', () => {
     expect(result.seriesDestinations.map(item => item.serviceId)).toEqual(['netflix', 'crunchyroll']);
   });
 
+  it('keeps one strongest series destination per service', () => {
+    const result = resolveStreamingDestinations([
+      { serviceId: 'crunchyroll', displayName: 'Crunchyroll', url: 'https://www.crunchyroll.com/series/OLDER/show', availabilityKind: 'streaming' },
+    ], {
+      seriesDestinations: [{
+        serviceId: 'crunchyroll',
+        url: 'https://www.crunchyroll.com/series/STRONGER/show',
+        seenCount: 4,
+        lastSeenAt: '2026-08-20T00:00:00Z',
+      }],
+      episodes: [],
+    });
+
+    expect(result.seriesDestinations).toHaveLength(1);
+    expect(result.seriesDestinations[0]?.url).toContain('/series/STRONGER/');
+  });
+
   it('does not promote an episode-shaped availability link to a series destination', () => {
     const result = resolveStreamingDestinations([{
       serviceId: 'crunchyroll',

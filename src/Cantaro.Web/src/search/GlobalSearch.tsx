@@ -240,7 +240,7 @@ function ExpandedSearchTabs({ activeGroup, normalizedDraft, visible }: { activeG
 
 function MobileSearchFooter({ isExpandedSurface, normalizedDraft }: { isExpandedSurface: boolean; normalizedDraft: string }) {
   if (isExpandedSurface || !normalizedDraft) return null;
-  return <div className="border-t border-border-subtle bg-canvas px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><Link to="/search" search={createGlobalSearchState(normalizedDraft)} replace className="flex h-12 w-full items-center justify-center bg-personal-accent text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus">See all results</Link></div>;
+  return <div className="border-t border-border-subtle bg-canvas px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"><Link to="/search" search={createGlobalSearchState(normalizedDraft)} replace className="flex h-12 w-full items-center justify-center bg-personal-accent text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus">See all results</Link></div>;
 }
 
 function OptionalSearchSurface({ children, visible }: { children: React.ReactNode; visible: boolean }) {
@@ -509,7 +509,7 @@ function DesktopSearchSurface({
           to="/search"
           search={createGlobalSearchState(query)}
           data-search-result
-          className="mt-2 flex min-h-11 w-full items-center justify-center bg-personal-accent px-4 text-sm font-black text-personal-accent-contrast hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
+          className="mt-2 flex min-h-11 w-full items-center justify-center bg-personal-accent px-4 text-sm font-black text-personal-accent-content hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus"
           onClick={onClose}
         >
           See all results

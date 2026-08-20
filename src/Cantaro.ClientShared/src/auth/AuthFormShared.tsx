@@ -84,7 +84,7 @@ function AuthSubmitButton({
     <button
       type="submit"
       disabled={isLoading}
-      className={`inline-flex min-h-12 w-full items-center justify-center bg-personal-accent px-4 text-base font-semibold text-personal-accent-contrast transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
+      className={`inline-flex min-h-12 w-full items-center justify-center bg-personal-accent px-4 text-base font-semibold text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
       {...rest}
     >
       {isLoading ? loadingLabel : idleLabel}

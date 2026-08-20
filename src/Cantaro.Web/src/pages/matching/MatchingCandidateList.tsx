@@ -77,7 +77,7 @@ function DiffTable({ comparisons }: { comparisons: MatchingCandidateComparisonRe
 interface ActionProps { candidateId: string; detectedVersion?: SuggestedTrackVersion; disabled: boolean; onUseAsVersion: (flags: number) => void; onUseExact: () => void }
 
 function PrimaryAction({ detectedVersion, disabled, onUseAsVersion, onUseExact }: Omit<ActionProps, 'candidateId'>) {
-  return <button type="button" className="min-h-10 w-full bg-personal-accent px-3 text-sm font-black text-personal-accent-contrast hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50" onClick={detectedVersion ? () => onUseAsVersion(detectedVersion.value) : onUseExact} disabled={disabled}>{detectedVersion ? `Add as ${detectedVersion.label.toLowerCase()} version` : 'Use match'}</button>;
+  return <button type="button" className="min-h-10 w-full bg-personal-accent px-3 text-sm font-black text-personal-accent-content hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50" onClick={detectedVersion ? () => onUseAsVersion(detectedVersion.value) : onUseExact} disabled={disabled}>{detectedVersion ? `Add as ${detectedVersion.label.toLowerCase()} version` : 'Use match'}</button>;
 }
 
 function AdditionalOptions({ candidateId, detectedVersion, disabled, onUseAsVersion, onUseExact }: ActionProps) {

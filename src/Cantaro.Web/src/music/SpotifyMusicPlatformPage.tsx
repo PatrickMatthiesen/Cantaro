@@ -257,7 +257,7 @@ function SpotifyHeaderActions({
           Refresh
         </button>
       ) : (
-        <button type="button" className="min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus" onClick={onConnect}>
+        <button type="button" className="min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus" onClick={onConnect}>
           {needsReconnect ? 'Reconnect Spotify' : 'Connect Spotify'}
         </button>
       )}
@@ -305,7 +305,7 @@ function SpotifyPlaylistCard({
             href={playlist.externalUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-h-9 items-center bg-personal-accent px-3 text-xs font-black text-personal-accent-contrast transition-colors hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            className="inline-flex min-h-9 items-center bg-personal-accent px-3 text-xs font-black text-personal-accent-content transition-colors hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             Open playlist
           </a>

@@ -153,7 +153,7 @@ function HeaderActions({
     <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="inline-flex h-10 items-center gap-2 bg-personal-accent px-4 text-sm font-black text-personal-accent-contrast transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-6"
+        className="inline-flex h-10 items-center gap-2 bg-personal-accent px-4 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-6"
         disabled={!hasTracks || !onPlayAll}
         onClick={onPlayAll}
       >
