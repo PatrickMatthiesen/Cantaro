@@ -244,6 +244,7 @@ public class MediaLibraryImportService(
             CanonicalTitle = item.Title,
             SortTitle = item.Title,
             OriginalTitle = item.OriginalTitle ?? item.NativeTitle,
+            Synonyms = [.. item.Synonyms],
             MediaKind = item.MediaKind,
             PrimaryProgressDimension = item.PrimaryProgressDimension,
             ReleaseStatusDimension = item.ReleaseStatusDimension,
@@ -259,6 +260,7 @@ public class MediaLibraryImportService(
         title.CanonicalTitle = item.Title;
         title.SortTitle = item.Title;
         title.OriginalTitle = item.OriginalTitle ?? item.NativeTitle ?? title.OriginalTitle;
+        title.Synonyms = [.. item.Synonyms];
         title.MediaKind = item.MediaKind;
         title.Synopsis = item.Synopsis ?? title.Synopsis;
         title.Format = item.Format ?? title.Format;

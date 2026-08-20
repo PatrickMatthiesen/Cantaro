@@ -17,6 +17,11 @@ public class MediaTitle
     public string? OriginalTitle { get; set; }
 
     /// <summary>
+    /// Provider-supplied alternate titles used for identity matching.
+    /// </summary>
+    public List<string> Synonyms { get; set; } = [];
+
+    /// <summary>
     /// Broad media kind such as anime, manga, movie, or series.
     /// </summary>
     public required string MediaKind { get; set; }

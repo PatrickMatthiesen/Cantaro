@@ -40,6 +40,7 @@ export interface MediaTitleDetailDto {
     id: string;
     canonicalTitle: string;
     originalTitle?: string;
+    synonyms: string[];
     mediaKind: string;
     format?: string;
     synopsis?: string;

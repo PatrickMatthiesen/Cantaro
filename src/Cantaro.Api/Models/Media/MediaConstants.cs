@@ -152,4 +152,20 @@ public static class MediaObservationSiteIdentifiers
     public const string MyAnimeList = "myanimelist";
     public const string Crunchyroll = "crunchyroll";
     public const string Unknown = "unknown";
+
+    public static bool IsStreamingService(string? siteIdentifier)
+    {
+        return siteIdentifier?.Trim().ToLowerInvariant() is
+            Crunchyroll or
+            "hidive" or
+            "netflix" or
+            "hulu" or
+            "disney-plus" or
+            "prime-video" or
+            "max" or
+            "apple-tv" or
+            "paramount-plus" or
+            "peacock" or
+            "youtube";
+    }
 }

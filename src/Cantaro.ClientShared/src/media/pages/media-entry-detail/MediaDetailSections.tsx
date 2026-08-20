@@ -508,10 +508,52 @@ export function CommunitySection({
   );
 }
 
+function getDisplaySynonyms(
+  title: MediaEntryDetailModel["title"],
+  showSynonyms: boolean,
+) {
+  if (!showSynonyms) return [];
+  const seen = new Set(
+    [title.canonicalTitle, title.originalTitle]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .map((value) => value.trim().toLowerCase()),
+  );
+
+  return (title.synonyms ?? [])
+    .map((synonym) => synonym.trim())
+    .filter((synonym) => {
+      const key = synonym.toLowerCase();
+      if (!synonym || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function SynonymsInformationRow({ synonyms }: { synonyms: string[] }) {
+  if (synonyms.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-[6rem_1fr] gap-3 text-sm sm:col-span-2">
+      <dt className="text-content-subtle">Synonyms</dt>
+      <dd className="min-w-0">
+        <ul className="space-y-1.5 text-content">
+          {synonyms.map((synonym) => (
+            <li key={synonym} className="break-words font-semibold leading-6">
+              {synonym}
+            </li>
+          ))}
+        </ul>
+      </dd>
+    </div>
+  );
+}
+
 export function InformationSection({
   entry,
+  showSynonyms = false,
 }: {
   entry: MediaEntryDetailModel;
+  showSynonyms?: boolean;
 }) {
   const { title } = entry;
   const progress = getPrimaryProgressSummary(
@@ -531,6 +573,7 @@ export function InformationSection({
     ],
     ["Original title", title.originalTitle ?? "Not provided"],
   ];
+  const synonyms = getDisplaySynonyms(title, showSynonyms);
 
   return (
     <section className="py-9" aria-labelledby="media-information-heading">
@@ -549,6 +592,7 @@ export function InformationSection({
             </dd>
           </div>
         ))}
+        <SynonymsInformationRow synonyms={synonyms} />
       </dl>
     </section>
   );

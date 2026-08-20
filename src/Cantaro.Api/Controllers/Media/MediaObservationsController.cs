@@ -597,11 +597,73 @@ public class MediaObservationsController(
             return "provider_search_failed";
         }
 
+        if (await RefreshKnownTitleSynonymsAsync(provider.ProviderId, results, cancellationToken))
+        {
+            observation = await _matchingService.ProcessObservationAsync(observation, cancellationToken);
+            if (observation.MatchStatus == MediaObservationStatuses.Matched)
+            {
+                observation.ProviderChoicesPayload = null;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                return null;
+            }
+        }
+
         var choices = await MapProviderChoicesAsync(observation.UserId, provider.ProviderId, results, cancellationToken);
         observation.ProviderChoicesPayload = JsonSerializer.Serialize(choices, RawPayloadJsonOptions);
         observation.UpdatedAt = DateTimeOffset.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
         return null;
+    }
+
+    private async Task<bool> RefreshKnownTitleSynonymsAsync(
+        string providerId,
+        IReadOnlyCollection<MediaProviderSearchResult> results,
+        CancellationToken cancellationToken)
+    {
+        var synonymsByProviderMediaId = results
+            .Where(result => result.Synonyms.Count > 0)
+            .GroupBy(result => result.ProviderMediaId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .SelectMany(result => result.Synonyms)
+                    .Where(synonym => !string.IsNullOrWhiteSpace(synonym))
+                    .Select(synonym => synonym.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                StringComparer.Ordinal);
+        if (synonymsByProviderMediaId.Count == 0)
+        {
+            return false;
+        }
+
+        var providerMediaIds = synonymsByProviderMediaId.Keys.ToList();
+        var links = await _dbContext.MediaProviderLinks
+            .Include(link => link.MediaTitle)
+            .Where(link => link.Provider == providerId
+                && providerMediaIds.Contains(link.ExternalId))
+            .ToListAsync(cancellationToken);
+        var changed = false;
+        foreach (var link in links)
+        {
+            if (link.MediaTitle is not { } title
+                || !synonymsByProviderMediaId.TryGetValue(link.ExternalId, out var synonyms)
+                || title.Synonyms.SequenceEqual(synonyms, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            title.Synonyms = synonyms;
+            title.UpdatedAt = DateTimeOffset.UtcNow;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return changed;
     }
 
     private async Task<List<MediaObservationProviderChoiceDto>> MapProviderChoicesAsync(
@@ -840,6 +902,7 @@ public class MediaObservationsController(
             CanonicalTitle = details.Title,
             SortTitle = details.Title,
             OriginalTitle = details.NativeTitle,
+            Synonyms = [.. details.Synonyms],
             MediaKind = details.MediaKind,
             Synopsis = details.Synopsis,
             Format = details.Format,
@@ -885,6 +948,7 @@ public class MediaObservationsController(
         title.CanonicalTitle = details.Title;
         title.SortTitle = details.Title;
         title.OriginalTitle = details.NativeTitle ?? title.OriginalTitle;
+        title.Synonyms = [.. details.Synonyms];
         title.MediaKind = details.MediaKind;
         title.Synopsis = details.Synopsis ?? title.Synopsis;
         title.Format = details.Format ?? title.Format;

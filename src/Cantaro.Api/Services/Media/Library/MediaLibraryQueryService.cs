@@ -259,6 +259,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             Id = title.Id,
             CanonicalTitle = title.CanonicalTitle,
             OriginalTitle = title.OriginalTitle,
+            Synonyms = title.Synonyms,
             MediaKind = title.MediaKind,
             Format = title.Format,
             Synopsis = title.Synopsis,

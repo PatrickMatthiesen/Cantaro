@@ -152,7 +152,7 @@ function MediaDetailTabPanel({
         id="media-detail-panel-details"
         aria-labelledby="media-detail-tab-details"
       >
-        <InformationSection entry={props.entry} />
+        <InformationSection entry={props.entry} showSynonyms />
       </div>
     ),
   };

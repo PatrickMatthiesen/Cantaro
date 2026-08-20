@@ -38,6 +38,7 @@ public class MediaLibraryApiTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var title = fixture.MakeTitle("One Piece");
+        title.Synonyms = ["ワンピース", "Wan Pīsu"];
         fixture.Db.Add(title);
         await fixture.Db.SaveChangesAsync();
 
@@ -46,6 +47,7 @@ public class MediaLibraryApiTests
         var dto = Assert.IsType<MediaTitleDetailDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(title.Id, dto.Id);
         Assert.Equal("One Piece", dto.CanonicalTitle);
+        Assert.Equal(["ワンピース", "Wan Pīsu"], dto.Synonyms);
         Assert.Empty(fixture.Db.MediaLibraryEntries);
     }
 

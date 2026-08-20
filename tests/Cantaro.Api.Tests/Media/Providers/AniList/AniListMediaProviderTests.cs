@@ -160,6 +160,7 @@ public class AniListMediaProviderTests
                                         "english": "Spy x Family",
                                         "native": "SPY x FAMILY"
                                     },
+                                    "synonyms": ["SPY×FAMILY", "Spy Family"],
                                     "coverImage": {
                                         "extraLarge": "https://example.test/poster-extra-large.jpg",
                                         "medium": "https://example.test/poster-medium.jpg",
@@ -224,11 +225,14 @@ public class AniListMediaProviderTests
                         }
                         """;
 
-        var provider = CreateProvider(dbContext, new StubHttpMessageHandler(graphQlResponse), dataProtectionProvider);
+        var handler = new StubHttpMessageHandler(graphQlResponse);
+        var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
 
         var details = await provider.GetTitleDetailsAsync(user.Id, "140960", CancellationToken.None);
 
         Assert.NotNull(details);
+        Assert.Equal(["SPY×FAMILY", "Spy Family"], details.Synonyms);
+        Assert.Contains("synonyms", handler.LastRequestBody, StringComparison.Ordinal);
         Assert.Equal("https://example.test/poster-extra-large.jpg", details.PosterUrl);
         using (var rawMetadata = JsonDocument.Parse(details.RawMetadata!))
         {

@@ -34,6 +34,7 @@ public class MediaLibraryImportServiceTests
             .Include(item => item.ProviderListMemberships)
             .SingleAsync();
         Assert.Equal("Frieren", title.CanonicalTitle);
+        Assert.Equal(["Frieren: Beyond Journey's End", "Sousou no Frieren"], title.Synonyms);
         Assert.Equal("TV", title.Format);
         Assert.Equal("https://example.test/poster.jpg", title.PosterUrl);
         Assert.Equal(title.Id, link.MediaTitleId);
@@ -112,6 +113,7 @@ public class MediaLibraryImportServiceTests
                 ProviderLibraryEntryId = "list-154587",
                 Title = "Frieren",
                 NativeTitle = "Sousou no Frieren",
+                Synonyms = ["Frieren: Beyond Journey's End", "Sousou no Frieren"],
                 MediaKind = MediaKinds.Anime,
                 Format = "TV",
                 PosterUrl = "https://example.test/poster.jpg",

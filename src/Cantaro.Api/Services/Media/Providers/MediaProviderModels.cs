@@ -30,6 +30,8 @@ public class MediaProviderLibraryItem
 
     public string? OriginalTitle { get; set; }
 
+    public IReadOnlyList<string> Synonyms { get; set; } = [];
+
     public required string MediaKind { get; set; }
 
     public string? Synopsis { get; set; }
@@ -85,6 +87,8 @@ public class MediaProviderSearchResult
 
     public string? NativeTitle { get; set; }
 
+    public IReadOnlyList<string> Synonyms { get; set; } = [];
+
     public required string MediaKind { get; set; }
 
     public string? Synopsis { get; set; }
@@ -117,6 +121,8 @@ public class MediaProviderTitleDetails
     public required string Title { get; set; }
 
     public string? NativeTitle { get; set; }
+
+    public IReadOnlyList<string> Synonyms { get; set; } = [];
 
     public required string MediaKind { get; set; }
 
@@ -278,6 +284,8 @@ public sealed class MediaProviderRelationGraphNode
     public required string Title { get; set; }
 
     public string? NativeTitle { get; set; }
+
+    public IReadOnlyList<string> Synonyms { get; set; } = [];
 
     public required string MediaKind { get; set; }
 

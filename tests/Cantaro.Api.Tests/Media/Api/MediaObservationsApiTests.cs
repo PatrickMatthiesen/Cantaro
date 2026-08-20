@@ -336,6 +336,68 @@ public class MediaObservationsApiTests
     }
 
     [Fact]
+    public async Task Submit_RefreshesKnownAniListSynonymsAndRetriesMatching()
+    {
+        var provider = new SearchOnlyMediaProvider(searchResults:
+        [
+            new MediaProviderSearchResult
+            {
+                ProviderId = "anilist",
+                ProviderMediaId = "209974",
+                Title = "Honzuki no Gekokujou 4th Season",
+                Synonyms = ["Ascendance of a Bookworm Season 4"],
+                MediaKind = MediaKinds.Anime,
+                EpisodeCount = 12,
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode
+            }
+        ]);
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Honzuki no Gekokujou 4th Season",
+            MediaKind = MediaKinds.Anime,
+            EpisodeCount = 12,
+            SupportsEpisodeProgress = true,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.Db.AddRange(
+            title,
+            new MediaProviderLink
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = title.Id,
+                Provider = "anilist",
+                ExternalId = "209974",
+                LinkSource = MediaMappingSources.Imported,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/series/BOOKWORM/ascendance-of-a-bookworm",
+            ObservedTitle = "Ascendance of a Bookworm — Season 4",
+            SeriesTitle = "Ascendance of a Bookworm Season 4",
+            ObservedAt = now
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
+        Assert.False(response.RequiresResolution);
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Equal(title.Id.ToString(), response.MatchedMediaTitleId);
+        Assert.Equal(["Ascendance of a Bookworm Season 4"], (await fixture.Db.MediaTitles.SingleAsync()).Synonyms);
+    }
+
+    [Fact]
     public async Task Submit_WhenNoMatchAndProviderNotConnected_StoresObservationWithoutChoices()
     {
         await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(new SearchOnlyMediaProvider(connected: false)));
@@ -763,13 +825,15 @@ public class MediaObservationsApiTests
         public IReadOnlyCollection<string> GetSupportedProviderIds() => [provider.ProviderId];
     }
 
-    private sealed class SearchOnlyMediaProvider(bool connected = true) : IMediaProvider
+    private sealed class SearchOnlyMediaProvider(
+        bool connected = true,
+        IReadOnlyList<MediaProviderSearchResult>? searchResults = null) : IMediaProvider
     {
         public string ProviderId => "anilist";
 
         public Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken)
         {
-            IReadOnlyList<MediaProviderSearchResult> results =
+            IReadOnlyList<MediaProviderSearchResult> results = searchResults ??
             [
                 new MediaProviderSearchResult
                 {
