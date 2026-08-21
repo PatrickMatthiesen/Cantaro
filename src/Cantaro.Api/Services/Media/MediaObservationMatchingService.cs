@@ -473,6 +473,25 @@ public class MediaObservationMatchingService(
         var rawPayload = DeserializeRawPayload(observation.RawPayload);
         var hasProviderSeasonContext = !string.IsNullOrWhiteSpace(rawPayload?.ProviderSeasonId)
             || rawPayload?.SeasonNumber is > 0;
+        var normalizedObservedTitle = NormalizeTitle(observation.ObservedTitle);
+        var normalizedSeriesTitle = NormalizeTitle(rawPayload?.SeriesTitle ?? string.Empty);
+        var hasSeasonSpecificObservedTitle = hasProviderSeasonContext
+            && !string.IsNullOrWhiteSpace(normalizedObservedTitle)
+            && (string.IsNullOrWhiteSpace(normalizedSeriesTitle)
+                ? HasExplicitSeasonQualifier(normalizedObservedTitle)
+                : !string.Equals(normalizedObservedTitle, normalizedSeriesTitle, StringComparison.Ordinal));
+        var strongSeasonTitleIds = candidateTitles
+            .Where(title => IsCompatibleWithObservationSource(observation, title))
+            .Where(title => HasStrongSeasonTitleEvidence(
+                hasProviderSeasonContext,
+                hasSeasonSpecificObservedTitle,
+                rawPayload,
+                normalizedObservedTitle,
+                normalizedSeriesTitle,
+                title,
+                catalogEvidence))
+            .Select(title => title.Id)
+            .ToHashSet();
         var candidateOffsets = await FindCandidateEpisodeOffsetsAsync(
             observation.UserId,
             candidateTitles.Select(title => title.Id).ToList(),
@@ -500,6 +519,15 @@ public class MediaObservationMatchingService(
                 .Select(query => ComputeTitleScore(query, title))
                 .DefaultIfEmpty(0m)
                 .Max();
+            var hasStrongSeasonTitleEvidence = strongSeasonTitleIds.Contains(title.Id);
+
+            if (hasStrongSeasonTitleEvidence)
+            {
+                // Strong evidence is an exact provider-to-catalog equivalence,
+                // even when their surface forms differ (for example,
+                // "Dr. STONE Season 2" and the AniList synonym "Dr. STONE 2").
+                score = Math.Max(score, 0.95m);
+            }
 
             if (catalogEvidence?.HighestEpisodeNumber is > 0
                 && candidateOffsets.TryGetValue(title.Id, out var offsetEvidence)
@@ -510,7 +538,7 @@ public class MediaObservationMatchingService(
             }
 
             if (ambiguousContinuityTitleIds.Contains(title.Id)
-                && !normalizedQueries.Any(query => IsExactSynonymMatch(query, title)))
+                && !hasStrongSeasonTitleEvidence)
             {
                 // Title text may discover a franchise candidate, but it cannot
                 // establish which provider season maps to which graph node.
@@ -519,10 +547,22 @@ public class MediaObservationMatchingService(
 
             if (hasProviderSeasonContext
                 && catalogEvidence?.HighestEpisodeNumber is > 0
-                && title.EpisodeCount is null)
+                && title.EpisodeCount is null
+                && !hasStrongSeasonTitleEvidence)
             {
                 // Unknown bounds cannot prove that provider episode numbers map
                 // into this canonical title, so do not establish a mapping yet.
+                score = Math.Min(score, HighConfidenceThreshold - 0.01m);
+            }
+
+            if (hasProviderSeasonContext
+                && strongSeasonTitleIds.Count > 0
+                && !hasStrongSeasonTitleEvidence)
+            {
+                // A provider's base series title is useful for discovering the
+                // franchise, but it must not outrank the season-specific title.
+                // Season ordinals alone are not stable enough to identify a
+                // canonical graph node.
                 score = Math.Min(score, HighConfidenceThreshold - 0.01m);
             }
 
@@ -953,10 +993,163 @@ public class MediaObservationMatchingService(
         return Math.Round(bestScore, 4);
     }
 
-    private static bool IsExactSynonymMatch(string observedNorm, MediaTitle title)
-        => title.Synonyms
-            .Select(NormalizeTitle)
-            .Contains(observedNorm, StringComparer.Ordinal);
+    private static bool IsExactTitleMatch(string observedNorm, MediaTitle title)
+        => GetNormalizedTitles(title).Contains(observedNorm, StringComparer.Ordinal);
+
+    private static bool HasStrongSeasonTitleEvidence(
+        bool hasProviderSeasonContext,
+        bool hasSeasonSpecificObservedTitle,
+        ObservationRawPayload? rawPayload,
+        string normalizedObservedTitle,
+        string normalizedSeriesTitle,
+        MediaTitle title,
+        CatalogEvidence? catalogEvidence)
+        => hasProviderSeasonContext
+            && ((hasSeasonSpecificObservedTitle && IsExactTitleMatch(normalizedObservedTitle, title))
+                || IsFirstSeasonBaseTitleMatch(
+                    rawPayload,
+                    normalizedObservedTitle,
+                    normalizedSeriesTitle,
+                    title)
+                || IsExplicitNumberedSeasonAliasMatch(
+                    rawPayload,
+                    normalizedObservedTitle,
+                    normalizedSeriesTitle,
+                    title)
+                || IsEpisodeRangeSegmentMatch(
+                    rawPayload,
+                    normalizedObservedTitle,
+                    normalizedSeriesTitle,
+                    title,
+                    catalogEvidence));
+
+    private static bool IsFirstSeasonBaseTitleMatch(
+        ObservationRawPayload? rawPayload,
+        string normalizedObservedTitle,
+        string normalizedSeriesTitle,
+        MediaTitle title)
+    {
+        if (rawPayload?.SeasonNumber != 1
+            || !IsTvAnime(title)
+            || string.IsNullOrWhiteSpace(normalizedSeriesTitle)
+            || !IsExactTitleMatch(normalizedSeriesTitle, title))
+        {
+            return false;
+        }
+
+        return TryRemoveSeasonOneSuffix(normalizedObservedTitle, out var observedBaseTitle)
+            && string.Equals(observedBaseTitle, normalizedSeriesTitle, StringComparison.Ordinal);
+    }
+
+    private static bool HasExplicitSeasonQualifier(string normalizedTitle)
+        => normalizedTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Contains("season", StringComparer.Ordinal);
+
+    private static bool IsExplicitNumberedSeasonAliasMatch(
+        ObservationRawPayload? rawPayload,
+        string normalizedObservedTitle,
+        string normalizedSeriesTitle,
+        MediaTitle title)
+    {
+        if (rawPayload?.SeasonNumber is not > 1
+            || !IsTvAnime(title)
+            || string.IsNullOrWhiteSpace(normalizedSeriesTitle))
+        {
+            return false;
+        }
+
+        var seasonNumber = rawPayload.SeasonNumber.Value;
+        var providerSeasonTitle = $"{normalizedSeriesTitle} season {seasonNumber}";
+        if (!string.Equals(normalizedObservedTitle, providerSeasonTitle, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var numberedCatalogAlias = $"{normalizedSeriesTitle} {seasonNumber}";
+        return GetNormalizedTitles(title).Contains(numberedCatalogAlias, StringComparer.Ordinal);
+    }
+
+    private static bool IsEpisodeRangeSegmentMatch(
+        ObservationRawPayload? rawPayload,
+        string normalizedObservedTitle,
+        string normalizedSeriesTitle,
+        MediaTitle title,
+        CatalogEvidence? catalogEvidence)
+    {
+        if (string.IsNullOrWhiteSpace(rawPayload?.ProviderSeasonId)
+            || string.IsNullOrWhiteSpace(rawPayload.SeasonTitle)
+            || catalogEvidence?.LowestEpisodeNumber is not > 0
+            || catalogEvidence.HighestEpisodeNumber is not > 0
+            || !IsTvAnime(title)
+            || string.IsNullOrWhiteSpace(normalizedSeriesTitle)
+            || !IsExactTitleMatch(normalizedSeriesTitle, title))
+        {
+            return false;
+        }
+
+        var reconstructedObservedTitle = NormalizeTitle(
+            $"{rawPayload.SeriesTitle} {rawPayload.SeasonTitle}");
+        if (!string.Equals(normalizedObservedTitle, reconstructedObservedTitle, StringComparison.Ordinal)
+            || !TryReadEpisodeRange(rawPayload.SeasonTitle, out var rangeStart, out var rangeEnd))
+        {
+            return false;
+        }
+
+        return catalogEvidence.LowestEpisodeNumber.Value >= rangeStart
+            && (rangeEnd is null || catalogEvidence.HighestEpisodeNumber.Value <= rangeEnd.Value);
+    }
+
+    private static bool TryReadEpisodeRange(
+        string seasonTitle,
+        out int rangeStart,
+        out int? rangeEnd)
+    {
+        rangeStart = 0;
+        rangeEnd = null;
+
+        var openParen = seasonTitle.LastIndexOf('(');
+        var closeParen = seasonTitle.LastIndexOf(')');
+        if (openParen < 0 || closeParen != seasonTitle.Length - 1 || closeParen <= openParen + 1)
+        {
+            return false;
+        }
+
+        var rangeParts = seasonTitle[(openParen + 1)..closeParen]
+            .Split('-', 2, StringSplitOptions.TrimEntries);
+        if (rangeParts.Length != 2
+            || !int.TryParse(rangeParts[0], out rangeStart)
+            || rangeStart <= 0)
+        {
+            return false;
+        }
+
+        if (string.Equals(rangeParts[1], "current", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!int.TryParse(rangeParts[1], out var parsedEnd) || parsedEnd < rangeStart)
+        {
+            rangeStart = 0;
+            return false;
+        }
+
+        rangeEnd = parsedEnd;
+        return true;
+    }
+
+    private static bool TryRemoveSeasonOneSuffix(string normalizedTitle, out string baseTitle)
+    {
+        const string seasonOneSuffix = " season 1";
+        if (normalizedTitle.EndsWith(seasonOneSuffix, StringComparison.Ordinal))
+        {
+            baseTitle = normalizedTitle[..^seasonOneSuffix.Length].TrimEnd();
+            return !string.IsNullOrWhiteSpace(baseTitle);
+        }
+
+        baseTitle = string.Empty;
+        return false;
+    }
 
     private static IReadOnlyList<string> GetNormalizedTitles(MediaTitle title)
     {
@@ -1017,6 +1210,8 @@ public class MediaObservationMatchingService(
             .Replace("—", " ", StringComparison.Ordinal)
             .Replace("–", " ", StringComparison.Ordinal)
             .Replace("'", string.Empty, StringComparison.Ordinal)
+            .Replace("’", string.Empty, StringComparison.Ordinal)
+            .Replace("‘", string.Empty, StringComparison.Ordinal)
             .Replace("\"", string.Empty, StringComparison.Ordinal);
 
         return string.Join(' ', chars.Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -1100,6 +1295,8 @@ public class MediaObservationMatchingService(
         public string? ProviderSeasonId { get; set; }
 
         public int? SeasonNumber { get; set; }
+
+        public string? SeasonTitle { get; set; }
 
         public int? EpisodeNumber { get; set; }
 

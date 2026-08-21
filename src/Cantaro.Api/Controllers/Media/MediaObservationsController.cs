@@ -416,6 +416,13 @@ public class MediaObservationsController(
         observation.ResolvedProgress = null;
 
         observation = await _matchingService.ProcessObservationAsync(observation, cancellationToken);
+        if (observation.MatchStatus == MediaObservationStatuses.Matched)
+        {
+            // Re-run catalog recording after a rematch so untrusted provider
+            // episode identities follow the newly selected canonical season.
+            await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
+            await _progressService.TryEnqueueAutoProgressAsync(observation, cancellationToken);
+        }
         await EnsureProviderChoicesAsync(observation, cancellationToken);
         return Ok(MapToDto(observation));
     }
@@ -891,6 +898,8 @@ public class MediaObservationsController(
         {
             ApplyProviderDetails(linkedTitle, details, now);
             existingLink.RawMetadata = details.RawMetadata ?? existingLink.RawMetadata;
+            existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
+            existingLink.AvailabilityLastVerifiedAt = now;
             existingLink.LastVerifiedAt = now;
             existingLink.UpdatedAt = now;
             return linkedTitle;
@@ -936,6 +945,8 @@ public class MediaObservationsController(
             LinkedByUserId = userId,
             LastVerifiedAt = now,
             RawMetadata = details.RawMetadata,
+            AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
+            AvailabilityLastVerifiedAt = now,
             CreatedAt = now,
             UpdatedAt = now
         });

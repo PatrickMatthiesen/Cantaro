@@ -21,6 +21,13 @@ import type { EpisodeCatalogState } from "./mediaEntryDetailTypes";
 
 const EPISODE_WINDOW_SIZE = 100;
 
+export type EpisodeProviderAvailabilityState =
+  | "loading"
+  | "fresh"
+  | "stale"
+  | "unavailable"
+  | "error";
+
 function getInitialEpisodeWindowStart(
   rows: ReturnType<typeof getEpisodeRows>,
   watchedThrough: number,
@@ -87,11 +94,13 @@ function EpisodeDestinationActions({
   episodeNumber,
   episodeDestinations,
   seriesDestinations,
+  providerAvailabilityState,
   onSelectStreamingService,
 }: {
   episodeNumber: number;
   episodeDestinations: readonly StreamingDestination[];
   seriesDestinations: readonly StreamingDestination[];
+  providerAvailabilityState: EpisodeProviderAvailabilityState;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const destinations = getEpisodeServiceDestinations(
@@ -99,8 +108,15 @@ function EpisodeDestinationActions({
     seriesDestinations,
   );
   if (destinations.length === 0) {
+    const label = providerAvailabilityState === "loading"
+      ? "Checking streaming links…"
+      : providerAvailabilityState === "error"
+        ? "Streaming links unavailable"
+        : providerAvailabilityState === "stale"
+          ? "No fresh streaming link"
+          : "No streaming link";
     return (
-      <span className="text-sm text-content-subtle">No streaming link</span>
+      <span className="text-sm text-content-subtle">{label}</span>
     );
   }
 
@@ -146,12 +162,14 @@ function EpisodeRow({
   destination,
   watchedThrough,
   seriesDestinations,
+  providerAvailabilityState,
   onSelectStreamingService,
 }: {
   episodeNumber: number;
   destination?: MediaStreamingDestinations["episodes"][number];
   watchedThrough: number;
   seriesDestinations: readonly StreamingDestination[];
+  providerAvailabilityState: EpisodeProviderAvailabilityState;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const isNext = episodeNumber === watchedThrough + 1;
@@ -182,6 +200,7 @@ function EpisodeRow({
         episodeNumber={episodeNumber}
         episodeDestinations={destination?.destinations ?? []}
         seriesDestinations={seriesDestinations}
+        providerAvailabilityState={providerAvailabilityState}
         onSelectStreamingService={onSelectStreamingService}
       />
     </li>
@@ -195,6 +214,7 @@ function EpisodeSectionContent({
   totalRowCount,
   windowStart,
   seriesDestinations,
+  providerAvailabilityState,
   onSelectStreamingService,
   onRefresh,
   onShowEarlier,
@@ -206,6 +226,7 @@ function EpisodeSectionContent({
   totalRowCount: number;
   windowStart: number;
   seriesDestinations: readonly StreamingDestination[];
+  providerAvailabilityState: EpisodeProviderAvailabilityState;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
   onShowEarlier: () => void;
@@ -227,6 +248,7 @@ function EpisodeSectionContent({
       totalRowCount={totalRowCount}
       windowStart={windowStart}
       seriesDestinations={seriesDestinations}
+      providerAvailabilityState={providerAvailabilityState}
       onSelectStreamingService={onSelectStreamingService}
       onShowEarlier={onShowEarlier}
       onShowLater={onShowLater}
@@ -262,12 +284,33 @@ function EpisodeEmpty() {
   );
 }
 
+function EpisodeAvailabilityNotice() {
+  return (
+    <p className="mt-5 border border-border-subtle bg-surface-subtle px-4 py-3 text-sm text-content-muted">
+      Showing cached streaming destinations; availability may be out of date.
+    </p>
+  );
+}
+
+function EpisodeAvailabilityNoticeIfNeeded({
+  providerAvailabilityState,
+  destinationCount,
+}: {
+  providerAvailabilityState: EpisodeProviderAvailabilityState;
+  destinationCount: number;
+}) {
+  return providerAvailabilityState === "stale" && destinationCount > 0
+    ? <EpisodeAvailabilityNotice />
+    : null;
+}
+
 function EpisodeWindow({
   entry,
   rows,
   totalRowCount,
   windowStart,
   seriesDestinations,
+  providerAvailabilityState,
   onSelectStreamingService,
   onShowEarlier,
   onShowLater,
@@ -277,6 +320,7 @@ function EpisodeWindow({
   totalRowCount: number;
   windowStart: number;
   seriesDestinations: readonly StreamingDestination[];
+  providerAvailabilityState: EpisodeProviderAvailabilityState;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onShowEarlier: () => void;
   onShowLater: () => void;
@@ -302,6 +346,7 @@ function EpisodeWindow({
             destination={row.destination}
             watchedThrough={entry.progressEpisodes ?? 0}
             seriesDestinations={seriesDestinations}
+            providerAvailabilityState={providerAvailabilityState}
             onSelectStreamingService={onSelectStreamingService}
           />
         ))}
@@ -331,10 +376,36 @@ function getEpisodeSectionData(
   };
 }
 
+function orderSeriesDestinations(
+  destinations: readonly StreamingDestination[],
+  preferredServiceId: StreamingServiceId | null,
+) {
+  if (!preferredServiceId) return destinations;
+  return [...destinations].sort((left, right) => {
+    if (left.serviceId === preferredServiceId) return -1;
+    if (right.serviceId === preferredServiceId) return 1;
+    return 0;
+  });
+}
+
+function getEpisodeSummary(
+  state: EpisodeCatalogState,
+  availableCount: number,
+  providerAvailabilityState: EpisodeProviderAvailabilityState,
+) {
+  if (state.status !== "loaded") return "Loading collected episode links…";
+  const releaseSummary = formatReleaseAvailability(state.value.releaseAvailability)
+    ?? `${availableCount} episode links collected`;
+  return providerAvailabilityState === "stale"
+    ? `${releaseSummary} · cached streaming destinations`
+    : releaseSummary;
+}
+
 export function EpisodesSection({
   entry,
   state,
   streamingDestinations,
+  providerAvailabilityState,
   preferredServiceId,
   onSelectStreamingService,
   onRefresh,
@@ -342,6 +413,7 @@ export function EpisodesSection({
   entry: MediaEntryDetailModel;
   state: EpisodeCatalogState;
   streamingDestinations: MediaStreamingDestinations;
+  providerAvailabilityState: EpisodeProviderAvailabilityState;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
@@ -365,19 +437,12 @@ export function EpisodesSection({
     windowStart,
     windowStart + EPISODE_WINDOW_SIZE,
   );
-  const orderedSeriesDestinations = preferredServiceId
-    ? [...streamingDestinations.seriesDestinations].sort((left, right) => {
-        if (left.serviceId === preferredServiceId) return -1;
-        if (right.serviceId === preferredServiceId) return 1;
-        return 0;
-      })
-    : streamingDestinations.seriesDestinations;
+  const orderedSeriesDestinations = orderSeriesDestinations(
+    streamingDestinations.seriesDestinations,
+    preferredServiceId,
+  );
   const isLoading = state.status === "loading";
-  const summary =
-    state.status === "loaded"
-      ? (formatReleaseAvailability(state.value.releaseAvailability) ??
-        `${availableCount} episode links collected`)
-      : "Loading collected episode links…";
+  const summary = getEpisodeSummary(state, availableCount, providerAvailabilityState);
 
   return (
     <section
@@ -397,6 +462,10 @@ export function EpisodesSection({
           Refresh links
         </ActionButton>
       </div>
+      <EpisodeAvailabilityNoticeIfNeeded
+        providerAvailabilityState={providerAvailabilityState}
+        destinationCount={orderedSeriesDestinations.length}
+      />
       <EpisodeSectionContent
         entry={entry}
         state={state}
@@ -404,6 +473,7 @@ export function EpisodesSection({
         totalRowCount={rows.length}
         windowStart={windowStart}
         seriesDestinations={orderedSeriesDestinations}
+        providerAvailabilityState={providerAvailabilityState}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={onRefresh}
         onShowEarlier={() =>

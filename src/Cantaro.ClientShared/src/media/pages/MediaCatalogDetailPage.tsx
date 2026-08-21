@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { mediaApi } from '../services/mediaApi';
+import { getProviderTitleDetails } from '../components/media-entry-detail/providerAvailability';
 import { DetailErrorState, DetailLoadingState } from './media-entry-detail/MediaEntryDetailHero';
 
 interface MediaCatalogDetailPageProps {
@@ -31,7 +31,10 @@ export function MediaCatalogDetailPage({
 
   useEffect(() => {
     let cancelled = false;
-    void mediaApi.getTitleDetails(providerId, providerMediaId)
+    void getProviderTitleDetails(
+      { provider: providerId, externalId: providerMediaId },
+      revision > 0,
+    )
       .then((details) => {
         if (!cancelled) onNavigateTitle(details.mediaTitleId);
       })

@@ -18,7 +18,10 @@ import {
   EntryLinkDialog,
   MediaHero,
 } from "./MediaEntryDetailHero";
-import { EpisodesSection } from "./EpisodesSection";
+import {
+  EpisodesSection,
+  type EpisodeProviderAvailabilityState,
+} from "./EpisodesSection";
 import {
   CharactersSection,
   CommunitySection,
@@ -40,6 +43,22 @@ import {
   type MediaEntryDetailPageViewProps,
   type ProgressSummary,
 } from "./mediaEntryDetailTypes";
+
+function getEpisodeProviderAvailabilityState(
+  availabilityByProviderLink: MediaEntryDetailContentProps["availabilityByProviderLink"],
+): EpisodeProviderAvailabilityState {
+  const states = Object.values(availabilityByProviderLink);
+  const hasLinks = states.some((state) => state.links.length > 0);
+  if (hasLinks) {
+    return states.some((state) =>
+      state.isStale || state.status === "error" || state.status === "unavailable")
+      ? "stale"
+      : "fresh";
+  }
+  if (states.some((state) => state.status === "loading")) return "loading";
+  if (states.some((state) => state.status === "error")) return "error";
+  return "unavailable";
+}
 
 function MediaDetailTabPanel({
   activeTab,
@@ -68,6 +87,9 @@ function MediaDetailTabPanel({
       >
         <StreamingDestinationsSection
           destinations={streamingDestinations.seriesDestinations}
+          isStale={Object.values(props.availabilityByProviderLink).some(
+            (availability) => availability.isStale || availability.status === "unavailable",
+          )}
           onSelect={onSelectStreamingService}
         />
         <FranchiseSection
@@ -95,6 +117,9 @@ function MediaDetailTabPanel({
         entry={props.entry}
         state={props.episodeCatalog}
         streamingDestinations={streamingDestinations}
+        providerAvailabilityState={getEpisodeProviderAvailabilityState(
+          props.availabilityByProviderLink,
+        )}
         preferredServiceId={preferredServiceId}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={props.onReloadEpisodes}
@@ -172,9 +197,11 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
   const hasStatusChanged = getEntryStatusChanged(props);
   const [preferredServiceId, setPreferredServiceId] =
     useStreamingServicePreference();
-  const availabilityLinks = Object.values(
+  const availabilityStates = Object.values(
     props.availabilityByProviderLink,
-  ).flatMap((state) => (state.status === "loaded" ? state.links : []));
+  );
+  const availabilityLinks = availabilityStates.flatMap((state) =>
+    state.status !== "loading" ? state.links : []);
   const episodeCatalog =
     props.episodeCatalog.status === "loaded"
       ? props.episodeCatalog.value

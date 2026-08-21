@@ -16,6 +16,9 @@ const EPISODE_CARD_SELECTOR = '[data-t^="episode-card"]';
 const WATCH_LINK_SELECTOR = 'a[href*="/watch/"]';
 const EPISODE_LINK_LABEL_RE = /^(?:(?:play|watch again)\s+)?(?:s\d+\s+)?(?:episode|ep|e)[- _]?\d+\b/i;
 const SEASON_LABEL_RE = /^(?:(?:ova|special)\s+)?season\s+\d+(?:\s+part\s+\d+)?$/i;
+const SEASON_PREFIX_RE = /^(?:s|season)\s*(\d+)\s*[:|–—-]\s*/i;
+const EPISODE_SEASON_PREFIX_RE = /^(?:(?:play|watch again)\s+)?(?:s|season)\s*(\d+)\b/i;
+const LANGUAGE_SUFFIX_RE = /\s*\([^()]+?\s+(?:dub|sub)\)\s*$/i;
 
 export type SeriesExtractionIssue =
   | 'invalid_series_url'
@@ -45,6 +48,12 @@ interface SeriesPageState extends Omit<SeriesExtractionDiagnostics, 'issue' | 'o
   providerSeasonId?: string;
   seasonNumber?: number;
   episodes: CatalogEpisodeObservation[];
+}
+
+interface SeasonMetadata {
+  rawTitle?: string;
+  seasonTitle?: string;
+  seasonNumber?: number;
 }
 
 export function inspectSeriesPage(
@@ -109,17 +118,23 @@ function readSeriesPageState(
 ): SeriesPageState {
   const rawUrl = typeof locationLike === 'string' ? locationLike : locationLike.href;
   const identity = readSeriesIdentity(rawUrl);
+  const seriesTitle = readSeriesTitle(doc);
   const links = Array.from(doc.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR));
-  const seasonTitle = readSeasonTitle(doc);
-  const languageAvailability = readSeasonLanguageAvailability(seasonTitle);
+  const season = readSeasonMetadata(doc, seriesTitle);
+  const seasonNumber = season.seasonNumber ?? readConsistentEpisodeSeasonNumber(doc);
+  const providerSeasonId = readProviderSeasonId(doc)
+    ?? (seasonNumber === undefined && season.seasonTitle
+      ? syntheticSeasonSegmentId(season.seasonTitle)
+      : undefined);
+  const languageAvailability = readSeasonLanguageAvailability(season.rawTitle);
   return {
     pageUrl: identity?.pageUrl.href ?? rawUrl,
     pageUrlValue: identity?.pageUrl ?? null,
     providerSeriesId: identity?.providerSeriesId,
-    seriesTitle: readSeriesTitle(doc),
-    seasonTitle,
-    providerSeasonId: readProviderSeasonId(doc),
-    seasonNumber: readSeasonNumber(doc),
+    seriesTitle,
+    seasonTitle: season.seasonTitle,
+    providerSeasonId,
+    seasonNumber,
     episodes: identity
       ? readRenderedEpisodes(doc, identity.pageUrl).map(episode => ({ ...episode, ...languageAvailability }))
       : [],
@@ -175,39 +190,143 @@ function readSeriesTitle(doc: Document): string | undefined {
     .find((value): value is string => Boolean(value));
 }
 
-function readSeasonTitle(doc: Document): string | undefined {
+function readSeasonMetadata(doc: Document, seriesTitle?: string): SeasonMetadata {
   const attributedTitle = normalizeText(doc.querySelector('[seasontitle]')?.getAttribute('seasontitle'));
-  if (attributedTitle) return attributedTitle;
-  const seasonInfo = readSeasonLabel(doc.querySelector('.season-info'));
-  if (seasonInfo) return seasonInfo;
-  const selected = readSeasonLabel(doc.querySelector('[role="option"][aria-selected="true"]'));
-  if (selected) return selected;
-  return Array.from(doc.querySelectorAll('button'))
-    .map(button => normalizeText(button.textContent))
-    .find((value): value is string => Boolean(value && SEASON_LABEL_RE.test(value)));
+  if (attributedTitle) {
+    return {
+      rawTitle: attributedTitle,
+      seasonTitle: attributedTitle,
+      seasonNumber: readExplicitSeasonNumber(doc) ?? readSeasonNumberFromText(attributedTitle),
+    };
+  }
+
+  const rawTitle = [
+    readSeasonRawLabel(doc.querySelector('.season-info')),
+    readSeasonRawLabel(doc.querySelector('[role="option"][aria-selected="true"]')),
+    ...Array.from(doc.querySelectorAll('button, [role="button"]'))
+      .filter(button => isTrustedSeasonSelector(button, seriesTitle))
+      .map(button => readSeasonRawLabel(button)),
+  ].find((value): value is string => Boolean(value));
+  const seasonTitle = normalizeFallbackSeasonLabel(rawTitle, seriesTitle);
+  return {
+    rawTitle,
+    seasonTitle,
+    seasonNumber: readExplicitSeasonNumber(doc)
+      ?? readSeasonNumberFromText(rawTitle)
+      ?? readSeasonNumberFromText(seasonTitle),
+  };
 }
 
 function readProviderSeasonId(doc: Document): string | undefined {
   return normalizeText(doc.querySelector('[currentseasonid]')?.getAttribute('currentseasonid'));
 }
 
-function readSeasonNumber(doc: Document): number | undefined {
+function readExplicitSeasonNumber(doc: Document): number | undefined {
   const displayNumber = normalizeText(doc.querySelector('[seasondisplaynumber]')?.getAttribute('seasondisplaynumber'));
-  if (displayNumber && /^\d+$/.test(displayNumber)) return Number.parseInt(displayNumber, 10);
-  const title = readSeasonTitle(doc);
-  return title ? extractSeasonNumber(title) : undefined;
+  return displayNumber && /^\d+$/.test(displayNumber) ? Number.parseInt(displayNumber, 10) : undefined;
 }
 
-function readSeasonLabel(element: Element | null): string | undefined {
+function readSeasonNumberFromText(text?: string): number | undefined {
+  if (!text) return undefined;
+  const prefixed = SEASON_PREFIX_RE.exec(text)?.[1];
+  if (prefixed) return Number.parseInt(prefixed, 10);
+  return extractSeasonNumber(text);
+}
+
+function readSeasonRawLabel(element: Element | null): string | undefined {
   if (!element) return undefined;
-  const childLabel = Array.from(element.children)
-    .map(child => normalizeText(child.textContent))
-    .find((value): value is string => Boolean(value && SEASON_LABEL_RE.test(value)));
-  if (childLabel) return childLabel;
+  const candidates = [element, ...Array.from(element.querySelectorAll('*'))]
+    .map(candidate => normalizeText(candidate.textContent))
+    .filter((value): value is string => Boolean(value && !/^\d+\s+episodes?$/i.test(value)))
+    .sort((left, right) => left.length - right.length);
+  const value = candidates[0];
+  return value?.replace(/\s*\d+\s+episodes?\s*$/i, '').trim() || undefined;
+}
+
+function isTrustedSeasonSelector(element: Element, seriesTitle?: string): boolean {
+  if (element.matches('[aria-haspopup="listbox"], [aria-label="Seasons"]')) return true;
   const value = normalizeText(element.textContent);
+  if (!value) return false;
+  if (element.matches('[role="button"]')) return false;
+  const normalizedValue = value.toLocaleLowerCase();
+  const normalizedSeriesTitle = seriesTitle?.toLocaleLowerCase();
+  return Boolean(
+    SEASON_LABEL_RE.test(value)
+      || (normalizedSeriesTitle
+        && normalizedValue.startsWith(normalizedSeriesTitle)
+        && normalizedValue.length > normalizedSeriesTitle.length),
+  );
+}
+
+function readConsistentEpisodeSeasonNumber(doc: Document): number | undefined {
+  const cards = Array.from(doc.querySelectorAll(EPISODE_CARD_SELECTOR));
+  const labels = cards.length > 0
+    ? cards.map(card => readEpisodeLabelFromContainer(card))
+    : Array.from(doc.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR))
+      .filter(isLabelledEpisodeLink)
+      .map(link => readEpisodeLabel(link, link));
+  const numbers = labels.map(label => label ? readEpisodeSeasonNumber(label) : undefined);
+  if (numbers.length === 0 || numbers.some(number => number === undefined)) return undefined;
+  const [first] = numbers;
+  return numbers.every(number => number === first) ? first : undefined;
+}
+
+function readEpisodeSeasonNumber(text: string): number | undefined {
+  const value = EPISODE_SEASON_PREFIX_RE.exec(text)?.[1];
+  return value ? Number.parseInt(value, 10) : undefined;
+}
+
+function readEpisodeLabelFromContainer(container: Element): string | undefined {
+  const link = Array.from(container.querySelectorAll<HTMLAnchorElement>(WATCH_LINK_SELECTOR))
+    .find(candidate => parseWatchLink(candidate.getAttribute('href'), new URL('https://www.crunchyroll.com/')));
+  return link ? readEpisodeLabel(link, container) : undefined;
+}
+
+function syntheticSeasonSegmentId(seasonTitle: string): string {
+  const languageInsensitiveTitle = seasonTitle.replace(LANGUAGE_SUFFIX_RE, '').trim();
+  return `label:${languageInsensitiveTitle}`.slice(0, 256);
+}
+
+function normalizeFallbackSeasonLabel(
+  value: string | undefined,
+  seriesTitle?: string,
+): string | undefined {
   if (!value) return undefined;
-  if (SEASON_LABEL_RE.test(value)) return value;
-  return /^((?:(?:ova|special)\s+)?season\s+\d+(?:\s+part\s+\d+)?)\s*\d+\s+episodes?$/i.exec(value)?.[1];
+  const { label, seasonNumber } = stripSeasonLabelDecorations(value);
+  if (SEASON_LABEL_RE.test(label)) return label;
+  return normalizeSeriesQualifiedSeasonLabel(label, seriesTitle, seasonNumber);
+}
+
+function stripSeasonLabelDecorations(value: string): { label: string; seasonNumber?: number } {
+  const languageInsensitiveValue = value.replace(LANGUAGE_SUFFIX_RE, '').trim();
+  const prefix = SEASON_PREFIX_RE.exec(languageInsensitiveValue);
+  return {
+    label: prefix
+      ? languageInsensitiveValue.slice(prefix[0].length).trim()
+      : languageInsensitiveValue,
+    seasonNumber: prefix?.[1] ? Number.parseInt(prefix[1], 10) : undefined,
+  };
+}
+
+function normalizeSeriesQualifiedSeasonLabel(
+  label: string,
+  seriesTitle: string | undefined,
+  seasonNumber: number | undefined,
+): string | undefined {
+  const fallback = label || numberedSeasonLabel(seasonNumber);
+  if (!seriesTitle) return fallback;
+
+  const normalizedSeriesTitle = seriesTitle?.toLocaleLowerCase();
+  const comparableValue = label.toLocaleLowerCase();
+  if (comparableValue === normalizedSeriesTitle) return numberedSeasonLabel(seasonNumber) ?? 'Season 1';
+  if (!comparableValue.startsWith(normalizedSeriesTitle)) return fallback;
+
+  const suffix = label.slice(seriesTitle.length).replace(/^[\s:|–—-]+/, '').trim();
+  return suffix || numberedSeasonLabel(seasonNumber) || 'Season 1';
+}
+
+function numberedSeasonLabel(seasonNumber: number | undefined): string | undefined {
+  return seasonNumber ? `Season ${seasonNumber}` : undefined;
 }
 
 function readRenderedEpisodes(doc: Document, pageUrl: URL): CatalogEpisodeObservation[] {

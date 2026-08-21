@@ -284,11 +284,26 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                     ExternalId = link.ExternalId,
                     ExternalUrl = link.ExternalUrl,
                     LinkSource = link.LinkSource,
-                    LastVerifiedAt = link.LastVerifiedAt
+                    LastVerifiedAt = link.LastVerifiedAt,
+                    AvailabilityLinks = MediaProviderAvailabilitySnapshotCodec.Deserialize(link.AvailabilitySnapshot)
+                        .Select(MapAvailabilityLink)
+                        .ToList(),
+                    AvailabilityLastVerifiedAt = link.AvailabilityLastVerifiedAt
                 })
                 .ToList()
         };
     }
+
+    private static MediaProviderAvailabilityLinkDto MapAvailabilityLink(MediaProviderAvailabilityLink link)
+        => new()
+        {
+            ServiceId = link.ServiceId,
+            DisplayName = link.DisplayName,
+            Url = link.Url,
+            AvailabilityKind = link.AvailabilityKind,
+            Notes = link.Notes,
+            IconUrl = link.IconUrl
+        };
 
     private static MediaViewerStateDto MapViewerState(MediaLibraryEntry entry)
     {

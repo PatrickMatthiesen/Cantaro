@@ -95,6 +95,27 @@ public class MediaLibraryImportServiceTests
         Assert.Equal("{\"progress\":5}", binding.RawMetadata);
     }
 
+    [Fact]
+    public async Task ImportAsync_ClampsImpossibleRemoteEpisodeProgressToKnownTotal()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var (user, account) = await SeedAccountAsync(db, 205);
+        var now = DateTimeOffset.UtcNow;
+
+        await MakeService(db).ImportAsync(
+            user.Id,
+            account,
+            MakeImport(now, progress: 35),
+            CancellationToken.None);
+
+        var entry = await db.MediaLibraryEntries.SingleAsync();
+        var binding = await db.MediaLibraryProviderBindings.SingleAsync();
+        Assert.Equal(28, entry.ProgressEpisodes);
+        Assert.Equal("{\"progress\":35}", binding.RawMetadata);
+    }
+
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
         new(db, NullLogger<MediaLibraryImportService>.Instance);
 

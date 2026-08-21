@@ -314,7 +314,29 @@ public class MediaProvidersController(
 
         var userId = await GetCurrentUserIdAsync();
         var provider = _mediaProviderRegistry.GetRequired(providerId);
-        var details = await provider.GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
+        var cachedLink = await _dbContext.MediaProviderLinks
+            .Include(link => link.MediaTitle)
+            .FirstOrDefaultAsync(
+                link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId,
+                cancellationToken);
+        MediaProviderTitleDetails? details;
+        try
+        {
+            details = await provider.GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
+        }
+        catch (Exception ex) when (
+            !cancellationToken.IsCancellationRequested
+            && cachedLink?.MediaTitle is not null
+            && cachedLink.AvailabilitySnapshot is not null)
+        {
+            _logger.LogWarning(
+                ex,
+                "Provider {ProviderId} title details for {ProviderMediaId} failed; serving the last verified availability snapshot.",
+                provider.ProviderId,
+                providerMediaId);
+            var cachedLibraryState = await GetLibraryStateAsync(userId, cachedLink.MediaTitleId, cancellationToken);
+            return Ok(MapCachedTitleDetails(cachedLink, cachedLibraryState));
+        }
         if (details is null)
         {
             return NotFound();
@@ -330,7 +352,7 @@ public class MediaProvidersController(
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);
-        return Ok(MapTitleDetails(details, title.Id, libraryState));
+        return Ok(MapTitleDetails(details, title.Id, libraryState, "fresh", now));
     }
 
     [HttpGet("providers/{providerId}/titles/{providerMediaId}/release")]
@@ -525,7 +547,9 @@ public class MediaProvidersController(
     private static MediaProviderTitleDetailsDto MapTitleDetails(
         MediaProviderTitleDetails details,
         Guid mediaTitleId,
-        MediaCatalogLibraryStateDto? libraryState = null)
+        MediaCatalogLibraryStateDto? libraryState = null,
+        string availabilityStatus = "fresh",
+        DateTimeOffset? availabilityLastVerifiedAt = null)
     {
         return new MediaProviderTitleDetailsDto
         {
@@ -544,6 +568,8 @@ public class MediaProvidersController(
             VolumeCount = details.VolumeCount,
             PrimaryProgressDimension = details.PrimaryProgressDimension,
             ReleaseStatusDimension = details.ReleaseStatusDimension,
+            AvailabilityStatus = availabilityStatus,
+            AvailabilityLastVerifiedAt = availabilityLastVerifiedAt,
             AvailabilityLinks = details.AvailabilityLinks.Select(link => new MediaProviderAvailabilityLinkDto
             {
                 ServiceId = link.ServiceId,
@@ -565,6 +591,50 @@ public class MediaProvidersController(
             LibraryState = libraryState ?? new MediaCatalogLibraryStateDto()
         };
     }
+
+    private static MediaProviderTitleDetailsDto MapCachedTitleDetails(
+        MediaProviderLink link,
+        MediaCatalogLibraryStateDto libraryState)
+    {
+        var title = link.MediaTitle
+            ?? throw new InvalidOperationException("Cached provider link is missing its media title.");
+        var availability = MediaProviderAvailabilitySnapshotCodec.Deserialize(link.AvailabilitySnapshot);
+
+        return new MediaProviderTitleDetailsDto
+        {
+            MediaTitleId = title.Id,
+            ProviderId = link.Provider,
+            ProviderMediaId = link.ExternalId,
+            Title = title.CanonicalTitle,
+            NativeTitle = title.OriginalTitle,
+            MediaKind = title.MediaKind,
+            Synopsis = title.Synopsis,
+            PosterUrl = title.PosterUrl,
+            BackgroundUrl = title.BackgroundUrl,
+            StartYear = title.StartYear,
+            EpisodeCount = title.EpisodeCount,
+            ChapterCount = title.ChapterCount,
+            VolumeCount = title.VolumeCount,
+            PrimaryProgressDimension = title.PrimaryProgressDimension,
+            ReleaseStatusDimension = title.ReleaseStatusDimension,
+            AvailabilityStatus = "stale",
+            AvailabilityLastVerifiedAt = link.AvailabilityLastVerifiedAt,
+            AvailabilityLinks = availability.Select(MapAvailabilityLink).ToList(),
+            Characters = [],
+            LibraryState = libraryState
+        };
+    }
+
+    private static MediaProviderAvailabilityLinkDto MapAvailabilityLink(MediaProviderAvailabilityLink link)
+        => new()
+        {
+            ServiceId = link.ServiceId,
+            DisplayName = link.DisplayName,
+            Url = link.Url,
+            AvailabilityKind = link.AvailabilityKind,
+            Notes = link.Notes,
+            IconUrl = link.IconUrl
+        };
 
     private static MediaReleaseMetadataDto MapReleaseMetadata(MediaReleaseMetadata metadata)
     {
@@ -669,6 +739,8 @@ public class MediaProvidersController(
         {
             ApplyProviderDetails(linkedTitle, details, now);
             existingLink.RawMetadata = details.RawMetadata ?? existingLink.RawMetadata;
+            existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
+            existingLink.AvailabilityLastVerifiedAt = now;
             existingLink.LastVerifiedAt = now;
             existingLink.UpdatedAt = now;
             return linkedTitle;
@@ -713,6 +785,8 @@ public class MediaProvidersController(
             LinkSource = MediaMappingSources.Imported,
             LastVerifiedAt = now,
             RawMetadata = details.RawMetadata,
+            AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
+            AvailabilityLastVerifiedAt = now,
             CreatedAt = now,
             UpdatedAt = now
         });

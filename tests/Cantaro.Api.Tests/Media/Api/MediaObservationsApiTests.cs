@@ -258,6 +258,132 @@ public class MediaObservationsApiTests
         Assert.Equal(MediaObservationStatuses.NoMatch, observation.MatchStatus);
     }
 
+    [Fact]
+    public async Task Retry_RemapsUntrustedCatalogIdentitiesToTheRematchedSeason()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var seasonOne = CreateWistoriaTitle("Wistoria: Wand and Sword", 2024, now);
+        var seasonTwo = CreateWistoriaTitle("Wistoria: Wand and Sword Season 2", 2026, now);
+        var relationSnapshotId = Guid.NewGuid();
+        var catalogRequest = new SubmitMediaCatalogObservationRequest
+        {
+            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+            SeriesUrl = "https://www.crunchyroll.com/series/GW4HM7WK9/wistoria-wand-and-sword",
+            ProviderSeriesId = "GW4HM7WK9",
+            SeriesTitle = seasonOne.CanonicalTitle,
+            ProviderSeasonId = "WISTORIA2",
+            SeasonTitle = "Season 2",
+            SeasonNumber = 2,
+            Episodes = Enumerable.Range(1, 2)
+                .Select(number => new MediaCatalogEpisodeObservationDto
+                {
+                    ProviderEpisodeId = $"WISTORIA{number}",
+                    ProviderUrl = $"https://www.crunchyroll.com/watch/WISTORIA{number}/episode-{number}",
+                    EpisodeNumber = number,
+                    EpisodeTitle = $"Episode {number}"
+                })
+                .ToList()
+        };
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            SiteMediaId = "catalog:wistoria-season-2",
+            ObservedUrl = catalogRequest.SeriesUrl,
+            ObservedTitle = "Wistoria: Wand and Sword — Season 2",
+            RawPayload = JsonSerializer.Serialize(catalogRequest, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            MatchStatus = MediaObservationStatuses.Matched,
+            MediaTitleId = seasonOne.Id,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var staleCandidate = new MediaObservationCandidate
+        {
+            Id = Guid.NewGuid(),
+            MediaObservationId = observation.Id,
+            CandidateSource = MediaObservationCandidateSources.CatalogTitleSearch,
+            MediaTitleId = seasonOne.Id,
+            Title = seasonOne.CanonicalTitle,
+            MediaKind = seasonOne.MediaKind,
+            Score = 1m,
+            IsAccepted = true,
+            CreatedAt = now
+        };
+        observation.AcceptedCandidateId = staleCandidate.Id;
+
+        var wrongSeasonEpisodes = Enumerable.Range(1, 2)
+            .Select(number => new MediaEpisode
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = seasonOne.Id,
+                EpisodeNumber = number,
+                CreatedAt = now,
+                UpdatedAt = now
+            })
+            .ToList();
+        var wrongSeasonIdentities = wrongSeasonEpisodes
+            .Select((episode, index) => new MediaEpisodeProviderIdentity
+            {
+                Id = Guid.NewGuid(),
+                MediaEpisodeId = episode.Id,
+                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+                ProviderSeriesId = catalogRequest.ProviderSeriesId,
+                ProviderSeasonId = catalogRequest.ProviderSeasonId,
+                ProviderEpisodeId = $"WISTORIA{index + 1}",
+                ProviderSeasonNumber = catalogRequest.SeasonNumber,
+                ProviderEpisodeNumber = index + 1,
+                ProviderUrlPath = $"/watch/WISTORIA{index + 1}/episode-{index + 1}",
+                SeenCount = 1,
+                FirstSeenAt = now,
+                LastSeenAt = now,
+                IsTrusted = false
+            })
+            .ToList();
+
+        fixture.Db.MediaTitles.AddRange(seasonOne, seasonTwo);
+        fixture.Db.MediaProviderLinks.AddRange(
+            CreateWistoriaProviderLink(seasonOne, "wistoria-1", relationSnapshotId, now),
+            CreateWistoriaProviderLink(seasonTwo, "wistoria-2", relationSnapshotId, now));
+        fixture.Db.MediaLibraryEntries.AddRange(
+            CreateWistoriaEntry(fixture.UserId, seasonOne, now),
+            CreateWistoriaEntry(fixture.UserId, seasonTwo, now));
+        fixture.Db.MediaTitleRelations.Add(new MediaTitleRelation
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = seasonOne.Id,
+            RelatedMediaTitleId = seasonTwo.Id,
+            RelationType = MediaRelationTypes.Sequel,
+            SourceProvider = "anilist",
+            FirstSeenAt = now,
+            LastVerifiedAt = now
+        });
+        fixture.Db.MediaEpisodes.AddRange(wrongSeasonEpisodes);
+        fixture.Db.MediaEpisodeProviderIdentities.AddRange(wrongSeasonIdentities);
+        fixture.Db.MediaObservations.Add(observation);
+        fixture.Db.MediaObservationCandidates.Add(staleCandidate);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Retry(observation.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<MediaObservationDto>(ok.Value);
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Equal(seasonTwo.Id.ToString(), response.MediaTitleId);
+
+        var persistedIdentities = await fixture.Db.MediaEpisodeProviderIdentities
+            .Include(identity => identity.MediaEpisode)
+            .ToListAsync();
+        Assert.Equal(2, persistedIdentities.Count);
+        Assert.All(persistedIdentities, identity =>
+            Assert.Equal(seasonTwo.Id, identity.MediaEpisode!.MediaTitleId));
+        Assert.All(persistedIdentities, identity => Assert.False(identity.IsTrusted));
+        Assert.Empty(await fixture.Db.MediaEpisodeProviderIdentities
+            .Where(identity => identity.MediaEpisode!.MediaTitleId == seasonOne.Id)
+            .ToListAsync());
+    }
+
     private static MediaTitle CreateWistoriaTitle(string title, int startYear, DateTimeOffset now) => new()
     {
         Id = Guid.NewGuid(),

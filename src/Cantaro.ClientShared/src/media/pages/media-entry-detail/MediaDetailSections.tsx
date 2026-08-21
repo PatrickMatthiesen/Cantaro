@@ -71,10 +71,31 @@ export function DetailSectionHeading({
 function availabilityText(availability?: ProviderAvailabilityState) {
   if (!availability || availability.status === "loading")
     return "Checking availability";
+  const destinationCount = formatDestinationCount(availability.links.length);
+  if (availability.links.length > 0)
+    return availabilityWithLinksText(availability, destinationCount);
+  return availabilityWithoutLinksText(availability);
+}
+
+function formatDestinationCount(count: number) {
+  return `${count} destination${count === 1 ? "" : "s"}`;
+}
+
+function availabilityWithLinksText(
+  availability: ProviderAvailabilityState,
+  destinationCount: string,
+) {
+  if (availability.status === "error") return `${destinationCount} · unavailable`;
+  if (availability.isStale || availability.status === "unavailable")
+    return `${destinationCount} · cached`;
+  return destinationCount;
+}
+
+function availabilityWithoutLinksText(availability: ProviderAvailabilityState) {
   if (availability.status === "error") return "Availability unavailable";
-  return availability.links.length > 0
-    ? `${availability.links.length} destination${availability.links.length === 1 ? "" : "s"}`
-    : "Identity linked";
+  if (availability.status === "unavailable") return "No destination confirmed";
+  if (availability.isStale) return "Availability may be out of date";
+  return "Identity linked";
 }
 
 function ProviderRow({
@@ -210,9 +231,11 @@ export function ProviderSection({
 
 export function StreamingDestinationsSection({
   destinations,
+  isStale = false,
   onSelect,
 }: {
   destinations: readonly StreamingDestination[];
+  isStale?: boolean;
   onSelect: (serviceId: StreamingServiceId) => void;
 }) {
   return (
@@ -223,7 +246,9 @@ export function StreamingDestinationsSection({
     >
       <DetailSectionHeading
         title="Where to watch"
-        detail="Verified streaming destinations linked to this title."
+        detail={isStale
+          ? "Showing cached destinations; availability may be out of date."
+          : "Verified streaming destinations linked to this title."}
       />
       {destinations.length === 0 ? (
         <p className="mt-5 py-4 text-content-muted">
@@ -298,9 +323,9 @@ function getCharacterSectionMessage(
   if (states.some((state) => !state || state.status === "loading"))
     return "Loading character credits…";
   if (states.every((state) => state?.status === "error"))
-    return "Character credits could not be loaded from AniList.";
+    return "Character credits could not be loaded.";
   if (characterCount === 0)
-    return "AniList has no character credits for this title.";
+    return "No character credits are available for this title.";
   return null;
 }
 
@@ -319,7 +344,8 @@ function getCharacterSectionData({
   );
   const characters = states
     .filter(
-      (state): state is ProviderAvailabilityState => state?.status === "loaded",
+      (state): state is ProviderAvailabilityState =>
+        state?.status === "loaded" || state?.status === "unavailable",
     )
     .flatMap((state) => state.characters)
     .sort((left, right) => left.order - right.order);

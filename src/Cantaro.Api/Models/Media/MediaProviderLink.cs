@@ -20,6 +20,15 @@ public class MediaProviderLink
     public string? RawMetadata { get; set; }
 
     /// <summary>
+    /// Last successfully fetched normalized streaming availability snapshot.
+    /// Null means availability has never been checked; an empty JSON array
+    /// means the provider explicitly returned no supported destinations.
+    /// </summary>
+    public string? AvailabilitySnapshot { get; set; }
+
+    public DateTimeOffset? AvailabilityLastVerifiedAt { get; set; }
+
+    /// <summary>
     /// Tracks whether the mapping was imported, automatic, or user-confirmed.
     /// </summary>
     public required string LinkSource { get; set; }
