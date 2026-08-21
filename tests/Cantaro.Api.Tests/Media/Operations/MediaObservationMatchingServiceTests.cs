@@ -174,6 +174,311 @@ public class MediaObservationMatchingServiceTests
     }
 
     [Fact]
+    public async Task ProcessObservation_UsesObservedSeasonOrdinal_WhenRawSeriesTitleIsTheBaseTitle()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var baseTitle = fixture.SeedTitle(
+            "Wistoria: Wand and Sword",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        var seasonThree = fixture.SeedTitle(
+            "Wistoria: Wand and Sword Season 3",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        fixture.SeedSequel(baseTitle, seasonThree);
+
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "Wistoria: Wand and Sword — Season 3",
+            rawPayload: """
+            {
+              "seriesTitle": "Wistoria: Wand and Sword",
+              "seasonNumber": 3,
+              "observedEpisodes": [
+                {"episodeNumber": 1}, {"episodeNumber": 2}, {"episodeNumber": 3}, {"episodeNumber": 4},
+                {"episodeNumber": 5}, {"episodeNumber": 6}, {"episodeNumber": 7}, {"episodeNumber": 8}
+              ]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(seasonThree.Id, persisted.MediaTitleId);
+        Assert.NotEqual(baseTitle.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_TreatsSeasonOneAsTheUnsuffixedBaseTitle()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var baseTitle = fixture.SeedTitle(
+            "BOFURI: I Don't Want to Get Hurt, so I'll Max Out My Defense.",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        var seasonTwo = fixture.SeedTitle(
+            "BOFURI: I Don't Want to Get Hurt, so I'll Max Out My Defense. Season 2",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        fixture.SeedSequel(baseTitle, seasonTwo);
+
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense. — Season 1",
+            rawPayload: """
+            {
+              "seriesTitle": "BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense.",
+              "seasonNumber": 1,
+              "observedEpisodes": [
+                {"episodeNumber": 1}, {"episodeNumber": 2}, {"episodeNumber": 3}, {"episodeNumber": 4},
+                {"episodeNumber": 5}, {"episodeNumber": 6}, {"episodeNumber": 7}, {"episodeNumber": 8}
+              ]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(baseTitle.Id, persisted.MediaTitleId);
+        Assert.NotEqual(seasonTwo.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_PrefersSeasonEvidence_WhenCorrectSeasonHasUnknownEpisodeCount()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var baseTitle = fixture.SeedTitle(
+            "Wistoria: Wand and Sword",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        var seasonFour = fixture.SeedTitle(
+            "Wistoria: Wand and Sword Season 4",
+            MediaKinds.Anime,
+            episodeCount: null,
+            format: MediaFormats.Tv);
+        fixture.SeedSequel(baseTitle, seasonFour);
+
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "Wistoria: Wand and Sword — Season 4",
+            rawPayload: """
+            {
+              "seriesTitle": "Wistoria: Wand and Sword",
+              "seasonNumber": 4,
+              "observedEpisodes": [
+                {"episodeNumber": 1}, {"episodeNumber": 2}, {"episodeNumber": 3}, {"episodeNumber": 4},
+                {"episodeNumber": 5}, {"episodeNumber": 6}, {"episodeNumber": 7}, {"episodeNumber": 8}
+              ]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(seasonFour.Id, persisted.MediaTitleId);
+        Assert.NotEqual(baseTitle.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_DoesNotForceASeasonFromAnOrdinalWithoutTitleEvidence()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var seasonTwo = fixture.SeedTitle(
+            "Wistoria: Wand and Sword Season 2",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        var seasonThree = fixture.SeedTitle(
+            "Wistoria: Wand and Sword Season 3",
+            MediaKinds.Anime,
+            episodeCount: 8,
+            format: MediaFormats.Tv);
+        fixture.SeedSequel(seasonTwo, seasonThree);
+
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "Season 3",
+            rawPayload: """
+            {
+              "seriesTitle": "An unrelated show",
+              "seasonNumber": 3
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.NotEqual(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Null(persisted.MediaTitleId);
+        Assert.Null(persisted.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_MatchesDrStoneSeasonTwo_WhenSeasonSynonymProvidesCanonicalEvidence()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var baseTitle = fixture.SeedTitle(
+            "Dr. STONE",
+            MediaKinds.Anime,
+            episodeCount: 11,
+            format: MediaFormats.Tv);
+        var seasonTwo = fixture.SeedTitle(
+            "STONE WARS",
+            MediaKinds.Anime,
+            synonyms: ["Dr. STONE 2"],
+            episodeCount: 11,
+            format: MediaFormats.Tv);
+        fixture.SeedSequel(baseTitle, seasonTwo);
+
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "Dr. STONE — Season 2",
+            rawPayload: $$"""
+            {
+              "seriesTitle": "Dr. STONE",
+              "seasonNumber": 2,
+              "observedEpisodes": [{{EpisodeEvidence(Enumerable.Range(1, 11))}}]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(seasonTwo.Id, persisted.MediaTitleId);
+        Assert.NotEqual(baseTitle.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_MatchesOnePieceEastBlueRange_WhenEpisodeCountIsUnknown()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var onePiece = fixture.SeedTitle(
+            "ONE PIECE",
+            MediaKinds.Anime,
+            episodeCount: null,
+            format: MediaFormats.Tv);
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "ONE PIECE — East Blue (1-61)",
+            rawPayload: $$"""
+            {
+              "seriesTitle": "ONE PIECE",
+              "providerSeasonId": "label:east-blue-1-61",
+              "seasonTitle": "East Blue (1-61)",
+              "observedEpisodes": [{{EpisodeEvidence(Enumerable.Range(1, 28))}}]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(onePiece.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_DoesNotAutoMatchOnePiece_WhenSeasonRangeDoesNotContainObservedEpisodes()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        fixture.SeedTitle(
+            "ONE PIECE",
+            MediaKinds.Anime,
+            episodeCount: null,
+            format: MediaFormats.Tv);
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "ONE PIECE — Alabasta (62-143)",
+            rawPayload: $$"""
+            {
+              "seriesTitle": "ONE PIECE",
+              "providerSeasonId": "label:alabasta-62-143",
+              "seasonTitle": "Alabasta (62-143)",
+              "observedEpisodes": [{{EpisodeEvidence(Enumerable.Range(1, 28))}}]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.NotEqual(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Null(persisted.MediaTitleId);
+        Assert.Null(persisted.AcceptedCandidateId);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_MatchesOnePieceOpenEndedElbaphRange_WhenObservedEpisodesAreInRange()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+
+        var onePiece = fixture.SeedTitle(
+            "ONE PIECE",
+            MediaKinds.Anime,
+            episodeCount: null,
+            format: MediaFormats.Tv);
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            null,
+            "ONE PIECE — Elbaph (1156-current)",
+            rawPayload: $$"""
+            {
+              "seriesTitle": "ONE PIECE",
+              "providerSeasonId": "label:elbaph-1156-current",
+              "seasonTitle": "Elbaph (1156-current)",
+              "observedEpisodes": [{{EpisodeEvidence(Enumerable.Range(1156, 19))}}]
+            }
+            """);
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .SingleAsync(item => item.Id == observation.Id);
+
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(onePiece.Id, persisted.MediaTitleId);
+    }
+
+    [Fact]
     public async Task ProcessObservation_UsesAniListSynonymAndExcludesMangaForStreamingSource()
     {
         await using var fixture = await ObservationTestFixture.CreateAsync();
@@ -405,6 +710,9 @@ public class MediaObservationMatchingServiceTests
     // Fixture helpers
     // -----------------------------------------------------------------------
 
+    private static string EpisodeEvidence(IEnumerable<int> episodeNumbers)
+        => string.Join(", ", episodeNumbers.Select(number => $"{{\"episodeNumber\":{number}}}"));
+
     private sealed class ObservationTestFixture : IAsyncDisposable
     {
         private const int UserId = 501;
@@ -454,7 +762,9 @@ public class MediaObservationMatchingServiceTests
             string canonicalTitle,
             string mediaKind,
             string? aniListId = null,
-            IReadOnlyList<string>? synonyms = null)
+            IReadOnlyList<string>? synonyms = null,
+            int? episodeCount = null,
+            string? format = null)
         {
             var title = new MediaTitle
             {
@@ -462,6 +772,8 @@ public class MediaObservationMatchingServiceTests
                 CanonicalTitle = canonicalTitle,
                 Synonyms = synonyms is null ? [] : [.. synonyms],
                 MediaKind = mediaKind,
+                Format = format,
+                EpisodeCount = episodeCount,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
                 SupportsEpisodeProgress = mediaKind == MediaKinds.Anime,
@@ -487,6 +799,49 @@ public class MediaObservationMatchingServiceTests
 
             DbContext.SaveChanges();
             return title;
+        }
+
+        public void SeedSequel(MediaTitle earlier, MediaTitle later)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var snapshotId = Guid.NewGuid();
+            foreach (var title in new[] { earlier, later })
+            {
+                var link = DbContext.MediaProviderLinks
+                    .SingleOrDefault(item => item.MediaTitleId == title.Id && item.Provider == "anilist");
+                if (link is null)
+                {
+                    DbContext.MediaProviderLinks.Add(new MediaProviderLink
+                    {
+                        Id = Guid.NewGuid(),
+                        MediaTitleId = title.Id,
+                        Provider = "anilist",
+                        ExternalId = $"test-{title.Id:N}",
+                        LinkSource = MediaMappingSources.Imported,
+                        CreatedAt = now,
+                        UpdatedAt = now,
+                        RelationsLastVerifiedAt = now,
+                        RelationsSnapshotId = snapshotId
+                    });
+                }
+                else
+                {
+                    link.RelationsLastVerifiedAt = now;
+                    link.RelationsSnapshotId = snapshotId;
+                }
+            }
+
+            DbContext.MediaTitleRelations.Add(new MediaTitleRelation
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = earlier.Id,
+                RelatedMediaTitleId = later.Id,
+                RelationType = MediaRelationTypes.Sequel,
+                SourceProvider = "anilist",
+                FirstSeenAt = now,
+                LastVerifiedAt = now
+            });
+            DbContext.SaveChanges();
         }
 
         public void SeedLibraryEntry(MediaTitle title, int userId = UserId)

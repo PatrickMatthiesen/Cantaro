@@ -144,6 +144,8 @@ public class MediaProviderLinkSummaryDto
     public string? ExternalUrl { get; set; }
     public required string LinkSource { get; set; }
     public DateTimeOffset? LastVerifiedAt { get; set; }
+    public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
+    public DateTimeOffset? AvailabilityLastVerifiedAt { get; set; }
 }
 
 public class MediaLinkRequestDto

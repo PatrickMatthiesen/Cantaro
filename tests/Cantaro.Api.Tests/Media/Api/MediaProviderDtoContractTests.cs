@@ -121,6 +121,8 @@ public class MediaProviderDtoContractTests
         Assert.Equal("Crunchyroll", availability.DisplayName);
         Assert.Equal("streaming", availability.AvailabilityKind);
         Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", availability.Url);
+        Assert.Equal("fresh", payload.AvailabilityStatus);
+        Assert.NotNull(payload.AvailabilityLastVerifiedAt);
         var character = Assert.Single(payload.Characters);
         Assert.Equal("170732", character.CharacterId);
         Assert.Equal("Anya Forger", character.Name);
@@ -136,6 +138,141 @@ public class MediaProviderDtoContractTests
         Assert.Equal(canonicalTitle.Id, providerLink.MediaTitleId);
         Assert.Equal("140960", providerLink.ExternalId);
         Assert.Equal(MediaMappingSources.Imported, providerLink.LinkSource);
+        Assert.NotNull(providerLink.AvailabilitySnapshot);
+        Assert.Equal(
+            "[{\"serviceId\":\"crunchyroll\",\"displayName\":\"Crunchyroll\",\"url\":\"https://www.crunchyroll.com/series/GEXH3W8XG\",\"availabilityKind\":\"streaming\",\"notes\":\"Legal streaming\",\"iconUrl\":\"https://example.test/crunchyroll.png\"}]",
+            providerLink.AvailabilitySnapshot);
+        var persistedAvailability = Assert.Single(
+            MediaProviderAvailabilitySnapshotCodec.Deserialize(providerLink.AvailabilitySnapshot));
+        Assert.Equal("crunchyroll", persistedAvailability.ServiceId);
+        Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", persistedAvailability.Url);
+        Assert.Equal(payload.AvailabilityLastVerifiedAt, providerLink.AvailabilityLastVerifiedAt);
+        Assert.Equal(payload.AvailabilityLastVerifiedAt, providerLink.LastVerifiedAt);
+    }
+
+    [Fact]
+    public async Task GetTitleDetails_WhenProviderFails_ServesCachedAvailabilityAsStale()
+    {
+        var provider = new StubMediaProvider
+        {
+            TitleDetails = CreateTitleDetails(
+                new MediaProviderAvailabilityLink
+                {
+                    ServiceId = "crunchyroll",
+                    DisplayName = "Crunchyroll",
+                    Url = "https://www.crunchyroll.com/series/GEXH3W8XG",
+                    AvailabilityKind = "streaming"
+                })
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+
+        var firstResult = await fixture.Controller.GetTitleDetails("anilist", "140960", CancellationToken.None);
+        var firstPayload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(firstResult.Result).Value);
+        var verifiedAt = firstPayload.AvailabilityLastVerifiedAt;
+        Assert.NotNull(verifiedAt);
+
+        provider.ThrowOnTitleDetails = true;
+        var secondResult = await fixture.Controller.GetTitleDetails("anilist", "140960", CancellationToken.None);
+
+        var stalePayload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(secondResult.Result).Value);
+        Assert.Equal("stale", stalePayload.AvailabilityStatus);
+        Assert.Equal(verifiedAt, stalePayload.AvailabilityLastVerifiedAt);
+        var cachedLink = Assert.Single(stalePayload.AvailabilityLinks);
+        Assert.Equal("crunchyroll", cachedLink.ServiceId);
+        Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", cachedLink.Url);
+
+        var persistedLink = await fixture.DbContext.MediaProviderLinks.SingleAsync();
+        Assert.Equal(verifiedAt, persistedLink.AvailabilityLastVerifiedAt);
+    }
+
+    [Fact]
+    public async Task GetTitleDetails_ExplicitEmptyAvailabilitySnapshotFallsBackButNeverCheckedDoesNot()
+    {
+        var provider = new StubMediaProvider
+        {
+            TitleDetails = CreateTitleDetails()
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+
+        var firstResult = await fixture.Controller.GetTitleDetails("anilist", "140960", CancellationToken.None);
+        var firstPayload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(firstResult.Result).Value);
+        var verifiedAt = firstPayload.AvailabilityLastVerifiedAt;
+        Assert.NotNull(verifiedAt);
+
+        var verifiedEmptyLink = await fixture.DbContext.MediaProviderLinks.SingleAsync();
+        Assert.Equal("[]", verifiedEmptyLink.AvailabilitySnapshot);
+        Assert.Equal(verifiedAt, verifiedEmptyLink.AvailabilityLastVerifiedAt);
+
+        provider.ThrowOnTitleDetails = true;
+        var staleResult = await fixture.Controller.GetTitleDetails("anilist", "140960", CancellationToken.None);
+        var stalePayload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(staleResult.Result).Value);
+        Assert.Equal("stale", stalePayload.AvailabilityStatus);
+        Assert.Empty(stalePayload.AvailabilityLinks);
+        Assert.Equal(verifiedAt, stalePayload.AvailabilityLastVerifiedAt);
+
+        var neverCheckedProvider = new StubMediaProvider { ThrowOnTitleDetails = true };
+        await using var neverCheckedFixture = await MediaControllerFixture.CreateAsync(neverCheckedProvider);
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Never Checked",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        neverCheckedFixture.DbContext.MediaTitles.Add(title);
+        neverCheckedFixture.DbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "anilist",
+            ExternalId = "never-checked",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await neverCheckedFixture.DbContext.SaveChangesAsync();
+
+        var neverCheckedLink = await neverCheckedFixture.DbContext.MediaProviderLinks.SingleAsync();
+        Assert.Null(neverCheckedLink.AvailabilitySnapshot);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            neverCheckedFixture.Controller.GetTitleDetails("anilist", "never-checked", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task LibraryTitleDetails_ExposeCachedProviderAvailability()
+    {
+        var provider = new StubMediaProvider
+        {
+            TitleDetails = CreateTitleDetails(
+                new MediaProviderAvailabilityLink
+                {
+                    ServiceId = "crunchyroll",
+                    DisplayName = "Crunchyroll",
+                    Url = "https://www.crunchyroll.com/series/GEXH3W8XG",
+                    AvailabilityKind = "streaming"
+                })
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+
+        var result = await fixture.Controller.GetTitleDetails("anilist", "140960", CancellationToken.None);
+        var titleDetails = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var libraryTitle = await new MediaLibraryQueryService(fixture.DbContext)
+            .GetMediaTitleAsync(titleDetails.MediaTitleId, CancellationToken.None);
+
+        var providerLink = Assert.Single(Assert.IsType<MediaTitleDetailDto>(libraryTitle).ProviderLinks);
+        var availability = Assert.Single(providerLink.AvailabilityLinks);
+        Assert.Equal("crunchyroll", availability.ServiceId);
+        Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", availability.Url);
+        Assert.Equal(titleDetails.AvailabilityLastVerifiedAt, providerLink.AvailabilityLastVerifiedAt);
     }
 
     [Fact]
@@ -467,7 +604,7 @@ public class MediaProviderDtoContractTests
 
         public IReadOnlyList<MediaProviderSearchResult> SearchResults { get; init; } = [];
 
-        public MediaProviderTitleDetails? TitleDetails { get; init; }
+        public MediaProviderTitleDetails? TitleDetails { get; set; }
 
         public MediaReleaseMetadata? ReleaseMetadata { get; init; }
 
@@ -480,6 +617,8 @@ public class MediaProviderDtoContractTests
         public bool ThrowOnProgressUpdate { get; init; }
 
         public bool ThrowOnStatusUpdate { get; init; }
+
+        public bool ThrowOnTitleDetails { get; set; }
 
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
         {
@@ -518,6 +657,11 @@ public class MediaProviderDtoContractTests
 
         public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
         {
+            if (ThrowOnTitleDetails)
+            {
+                throw new InvalidOperationException("Simulated title details failure.");
+            }
+
             return Task.FromResult(TitleDetails);
         }
 
@@ -617,6 +761,19 @@ public class MediaProviderDtoContractTests
             services: new ServiceCollection().BuildServiceProvider(),
             logger: NullLogger<UserManager<User>>.Instance);
     }
+
+    private static MediaProviderTitleDetails CreateTitleDetails(params MediaProviderAvailabilityLink[] availabilityLinks)
+        => new()
+        {
+            ProviderId = "anilist",
+            ProviderMediaId = "140960",
+            Title = "Spy x Family",
+            NativeTitle = "SPY x FAMILY",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            AvailabilityLinks = availabilityLinks
+        };
 
     private static async Task<MediaLibraryEntry> SeedMediaEntryAsync(MediaControllerFixture fixture)
     {

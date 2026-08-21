@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { providerAvailabilityKey, type ProviderAvailabilityMap } from '../../components/media-entry-detail/providerAvailability';
+import {
+  getProviderTitleDetails,
+  isAvailabilityStale,
+  isAvailabilityUnavailable,
+  providerAvailabilityKey,
+  readAvailabilityMetadata,
+  type ProviderAvailabilityMap,
+} from '../../components/media-entry-detail/providerAvailability';
 import { type ShowSnackbar, type SnackbarNotification } from '../../../ui';
 import { mediaApi } from '../../services/mediaApi';
 import { mainMediaProviderId } from '../../services/mediaProviders';
@@ -13,6 +20,7 @@ import type {
   MediaEntryDetailModel,
   MediaLibraryImportEventDto,
   MediaProviderLinkSummaryDto,
+  MediaProviderTitleDetailsDto,
   MediaTitleDetailDto,
   MediaViewerProviderBindingDto,
   MediaViewerStateDto,
@@ -39,32 +47,47 @@ function buildAvailabilityMap(
   return next;
 }
 
-async function loadAvailabilityStates(providerLinks: MediaProviderLinkSummaryDto[]) {
+async function loadAvailabilityStates(
+  providerLinks: MediaProviderLinkSummaryDto[],
+  forceRefresh = false,
+) {
   return Promise.all(providerLinks.map(async (link) => {
     const key = providerAvailabilityKey(link.provider, link.externalId);
 
     try {
-      const details = await mediaApi.getTitleDetails(link.provider, link.externalId);
-      return {
-        key,
-        state: {
-          status: 'loaded' as const,
-          links: details.availabilityLinks ?? [],
-          characters: details.characters ?? [],
-        },
-      };
+      const details = await getProviderTitleDetails(link, forceRefresh);
+      return { key, state: buildLoadedAvailabilityState(details) };
     } catch (error) {
-      return {
-        key,
-        state: {
-          status: 'error' as const,
-          links: [],
-          characters: [],
-          error: getErrorMessage(error, 'Failed to load availability'),
-        },
-      };
+      return { key, state: buildFailedAvailabilityState(link, error) };
     }
   }));
+}
+
+function buildLoadedAvailabilityState(details: MediaProviderTitleDetailsDto) {
+  const metadata = readAvailabilityMetadata(details);
+  const links = details.availabilityLinks ?? [];
+  const confirmedNoLinks = metadata.status === 'fresh' && links.length === 0;
+  return {
+    status: (isAvailabilityUnavailable(details) || confirmedNoLinks)
+      ? 'unavailable' as const
+      : 'loaded' as const,
+    links,
+    characters: details.characters ?? [],
+    isStale: isAvailabilityStale(details),
+    refreshedAt: metadata.refreshedAt,
+  };
+}
+
+function buildFailedAvailabilityState(link: MediaProviderLinkSummaryDto, error: unknown) {
+  const links = link.availabilityLinks ?? [];
+  return {
+    status: 'error' as const,
+    links,
+    characters: [],
+    isStale: links.length > 0,
+    refreshedAt: link.availabilityLastVerifiedAt,
+    error: getErrorMessage(error, 'Failed to load availability'),
+  };
 }
 
 export function useTimedSnackbar(timeoutMs = 3000) {
@@ -241,6 +264,13 @@ export function useEntryDetailState(mediaTitleId: string) {
 
 export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
   const [availabilityByProviderLink, setAvailabilityByProviderLink] = useState<ProviderAvailabilityMap>({});
+  const [refreshRevision, setRefreshRevision] = useState(0);
+  const forceRefreshRef = useRef(false);
+
+  const reload = useCallback(() => {
+    forceRefreshRef.current = true;
+    setRefreshRevision((revision) => revision + 1);
+  }, []);
 
   useEffect(() => {
     if (!entry || entry.providerLinks.length === 0) {
@@ -249,10 +279,12 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     }
 
     let isCancelled = false;
+    const forceRefresh = forceRefreshRef.current;
+    forceRefreshRef.current = false;
     setAvailabilityByProviderLink((current) => buildAvailabilityMap(entry.providerLinks, current));
 
     const loadAvailability = async () => {
-      const results = await loadAvailabilityStates(entry.providerLinks);
+      const results = await loadAvailabilityStates(entry.providerLinks, forceRefresh);
       if (isCancelled) {
         return;
       }
@@ -272,9 +304,9 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     return () => {
       isCancelled = true;
     };
-  }, [entry]);
+  }, [entry, refreshRevision]);
 
-  return availabilityByProviderLink;
+  return { availabilityByProviderLink, reload };
 }
 
 function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {

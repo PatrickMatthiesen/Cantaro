@@ -48,7 +48,10 @@ export function MediaEntryDetailPage({
     selectedStatus,
     setSelectedStatus,
   } = useEntryDetailState(mediaTitleId);
-  const availabilityByProviderLink = useProviderAvailability(entry);
+  const {
+    availabilityByProviderLink,
+    reload: reloadProviderAvailability,
+  } = useProviderAvailability(entry);
   const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
   const { state: franchiseGraph, reload: reloadFranchise } = useFranchiseGraph(entry);
   const continueWatching = useContinueWatching(entry, episodeCatalog);
@@ -135,7 +138,10 @@ export function MediaEntryDetailPage({
       onSaveStatus={() => void handleSaveStatus()}
       onAddToLibrary={() => void handleAddToLibrary()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
-      onReloadEpisodes={reloadEpisodes}
+      onReloadEpisodes={() => {
+        reloadEpisodes();
+        reloadProviderAvailability();
+      }}
       onReloadFranchise={reloadFranchise}
     />
   );

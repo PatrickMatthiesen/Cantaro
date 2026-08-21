@@ -103,6 +103,12 @@ public class MediaProviderTitleDetailsDto
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
     public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
+    /// <summary>
+    /// fresh when returned by the provider, stale when served from the last
+    /// successful snapshot after a provider failure.
+    /// </summary>
+    public required string AvailabilityStatus { get; set; }
+    public DateTimeOffset? AvailabilityLastVerifiedAt { get; set; }
     public IReadOnlyList<MediaProviderCharacterCreditDto> Characters { get; set; } = [];
     public MediaCatalogLibraryStateDto? LibraryState { get; set; }
 }

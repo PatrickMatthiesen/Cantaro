@@ -170,7 +170,7 @@ public class MediaLibraryImportService(
             UserId = userId,
             MediaTitleId = mediaTitleId,
             Status = item.Status,
-            ProgressEpisodes = item.ProgressEpisodes,
+            ProgressEpisodes = ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount),
             ProgressChapters = item.ProgressChapters,
             ProgressVolumes = item.ProgressVolumes,
             LastMutationSource = MediaMutationSources.ProviderImport,
@@ -311,10 +311,20 @@ public class MediaLibraryImportService(
         DateTimeOffset timestamp)
     {
         entry.Status = item.Status;
-        entry.ProgressEpisodes = item.ProgressEpisodes;
+        entry.ProgressEpisodes = ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount);
         entry.ProgressChapters = item.ProgressChapters;
         entry.ProgressVolumes = item.ProgressVolumes;
         entry.LastMutationSource = MediaMutationSources.ProviderImport;
         entry.UpdatedAt = timestamp;
+    }
+
+    private static int? ClampEpisodeProgress(int? progress, int? episodeCount)
+    {
+        if (progress is null || episodeCount is null or <= 0)
+        {
+            return progress;
+        }
+
+        return Math.Clamp(progress.Value, 0, episodeCount.Value);
     }
 }

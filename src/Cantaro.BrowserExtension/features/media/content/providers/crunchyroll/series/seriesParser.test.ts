@@ -85,6 +85,139 @@ describe('Crunchyroll series catalog extraction', () => {
       .toMatchObject({ seasonTitle: 'OVA Season 1', seasonNumber: 1 });
   });
 
+  it('normalizes a season option whose label is prefixed with the series title', () => {
+    const { document } = parseHTML(`
+      <h1>BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense.</h1>
+      <div role="button" aria-label="Seasons">
+        <div class="season-info">
+          <span>BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense. Season 2</span>
+          <span><span>BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense. Season 2</span></span>
+        </div>
+      </div>
+      <article data-t="episode-card "><h3>E1 - Defense and First Battle</h3><a href="/watch/BOFURI2EP1/defense"></a></article>
+    `);
+
+    expect(inspectSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/GKEH2G428/bofuri-i-dont-want-to-get-hurt-so-ill-max-out-my-defense',
+    ).observation).toMatchObject({
+      seriesTitle: 'BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense.',
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+    });
+  });
+
+  it('treats an unnumbered season option equal to the series title as season 1', () => {
+    const { document } = parseHTML(`
+      <h1>BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense.</h1>
+      <button aria-haspopup="listbox">BOFURI: I Don’t Want to Get Hurt, so I’ll Max Out My Defense.</button>
+      <article data-t="episode-card "><h3>E1 - Defense and First Battle</h3><a href="/watch/BOFURI1EP1/defense"></a></article>
+    `);
+
+    expect(inspectSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/GKEH2G428/bofuri-i-dont-want-to-get-hurt-so-ill-max-out-my-defense',
+    ).observation).toMatchObject({
+      seasonTitle: 'Season 1',
+      seasonNumber: 1,
+    });
+  });
+
+  it('does not infer season 1 from an unrelated button that repeats the series title', () => {
+    const { document } = parseHTML(`
+      <h1>My Show</h1>
+      <button>My Show</button>
+      <article data-t="episode-card "><h3>E1 - One</h3><a href="/watch/MYSHOW1/one"></a></article>
+    `);
+
+    expect(inspectSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/MYSHOW/my-show',
+      ).diagnostics.issue).toBe('missing_season_title');
+  });
+
+  it.each([
+    {
+      name: 'Demon Slayer title-prefixed arc',
+      seriesTitle: 'Demon Slayer: Kimetsu no Yaiba',
+      seasonLabel: 'Demon Slayer: Kimetsu no Yaiba Hashira Training Arc',
+      seasonTitle: 'Hashira Training Arc',
+      providerSeasonId: 'label:Hashira Training Arc',
+    },
+    {
+      name: 'Fairy Tail S2 title-prefixed season',
+      seriesTitle: 'Fairy Tail',
+      seasonLabel: 'S2: Fairy Tail Series 2',
+      seasonTitle: 'Series 2',
+      seasonNumber: 2,
+    },
+    {
+      name: 'Fruit S2 dubbed title-prefixed season',
+      seriesTitle: 'The Fruit of Evolution: Before I Knew It, My Life Had It Made',
+      seasonLabel: 'S2: The Fruit of Evolution: Before I Knew It, My Life Had It Made Season 2 (English Dub)',
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+      audioLanguage: 'en',
+    },
+    {
+      name: 'Dr. Stone S2 title-prefixed season',
+      seriesTitle: 'Dr. STONE',
+      seasonLabel: 'S2: Dr. STONE Season 2',
+      seasonTitle: 'Season 2',
+      seasonNumber: 2,
+    },
+    {
+      name: 'One Piece East Blue range',
+      seriesTitle: 'One Piece',
+      seasonLabel: 'East Blue (1-61)',
+      seasonTitle: 'East Blue (1-61)',
+      providerSeasonId: 'label:East Blue (1-61)',
+    },
+    {
+      name: 'One Piece Elbaph range',
+      seriesTitle: 'One Piece',
+      seasonLabel: 'Elbaph (1156-current)',
+      seasonTitle: 'Elbaph (1156-current)',
+      providerSeasonId: 'label:Elbaph (1156-current)',
+    },
+  ])('normalizes trusted $name season labels', ({ seriesTitle, seasonLabel, seasonTitle, seasonNumber, providerSeasonId, audioLanguage }) => {
+    const { document } = parseHTML(`
+      <h1>${seriesTitle}</h1>
+      <div class="season-info"><span>${seasonLabel}</span><span>2 Episodes</span></div>
+      <article data-t="episode-card "><h3>E1 - One</h3><a href="/watch/SHAPE1/one"></a></article>
+    `);
+
+    const observation = inspectSeriesPage(
+      document,
+      'https://www.crunchyroll.com/series/SHAPES1/shapes',
+    ).observation;
+
+    expect(observation).toMatchObject({ seriesTitle, seasonTitle, seasonNumber, providerSeasonId });
+    if (audioLanguage) {
+      expect(observation?.episodes[0].availableAudioLanguageCodes).toEqual([audioLanguage]);
+    }
+  });
+
+  it('infers an episode season number only when every rendered episode agrees', () => {
+    const consistent = parseHTML(`
+      <h1>Fruit</h1><div class="season-info"><span>Cour</span></div>
+      <article data-t="episode-card "><h3>S2 E1 - One</h3><a href="/watch/CONSISTENT1/one"></a></article>
+      <article data-t="episode-card "><h3>S2 E2 - Two</h3><a href="/watch/CONSISTENT2/two"></a></article>
+    `).document;
+    expect(inspectSeriesPage(consistent, 'https://www.crunchyroll.com/series/CONSISTENT/fruit').observation)
+      .toMatchObject({ seasonTitle: 'Cour', seasonNumber: 2 });
+
+    const mixed = parseHTML(`
+      <h1>Fruit</h1><div class="season-info"><span>Cour</span></div>
+      <article data-t="episode-card "><h3>S2 E1 - One</h3><a href="/watch/MIXED1/one"></a></article>
+      <article data-t="episode-card "><h3>S3 E2 - Two</h3><a href="/watch/MIXED2/two"></a></article>
+    `).document;
+    expect(inspectSeriesPage(mixed, 'https://www.crunchyroll.com/series/MIXED/fruit').observation)
+      .toMatchObject({ seasonTitle: 'Cour', providerSeasonId: 'label:Cour' });
+    expect(inspectSeriesPage(mixed, 'https://www.crunchyroll.com/series/MIXED/fruit').observation?.seasonNumber)
+      .toBeUndefined();
+  });
+
   it('preserves a split-season label while extracting its base season number', () => {
     const { document } = parseHTML(`
       <h1>Black Clover</h1>
