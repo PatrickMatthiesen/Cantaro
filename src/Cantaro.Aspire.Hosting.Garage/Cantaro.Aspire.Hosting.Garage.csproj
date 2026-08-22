@@ -5,6 +5,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" Version="13.5.0-preview.1.26381.2" />
+    <PackageReference Include="Aspire.Hosting" Version="13.6.0-preview.1.26421.15" />
   </ItemGroup>
 </Project>
