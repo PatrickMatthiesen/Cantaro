@@ -19,6 +19,7 @@ public class MediaLibraryListItemDto
     public string? PosterUrl { get; set; }
     public required string MediaKind { get; set; }
     public required string Status { get; set; }
+    public decimal? Score { get; set; }
     public int? ProgressEpisodes { get; set; }
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }
@@ -67,6 +68,7 @@ public class MediaViewerStateDto
     public Guid Id { get; set; }
     public Guid MediaTitleId { get; set; }
     public required string Status { get; set; }
+    public decimal? Score { get; set; }
     public int? ProgressEpisodes { get; set; }
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }

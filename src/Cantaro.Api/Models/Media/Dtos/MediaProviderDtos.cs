@@ -52,12 +52,18 @@ public class MediaStatusUpdateDto
     public required string Status { get; set; }
 }
 
+public class MediaScoreUpdateDto
+{
+    public required decimal? Score { get; set; }
+}
+
 public class MediaCatalogLibraryStateDto
 {
     public bool IsInLibrary { get; set; }
     public Guid? ViewerStateId { get; set; }
     public Guid? MediaTitleId { get; set; }
     public string? Status { get; set; }
+    public decimal? Score { get; set; }
     public int? ProgressEpisodes { get; set; }
     public int? ProgressChapters { get; set; }
     public int? ProgressVolumes { get; set; }

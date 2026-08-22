@@ -99,7 +99,10 @@ function NodeCardContent({ node }: { node: MediaFranchiseNodeDto }) {
         className="object-cover transition duration-200 group-hover:scale-[1.025] group-hover:saturate-125 motion-reduce:transition-none"
       />
       <span className="absolute inset-x-0 bottom-0 block min-w-0 bg-linear-to-t from-black/95 via-black/65 to-transparent px-3 pb-3 pt-16 text-left text-white">
-        <strong className="block truncate group-hover:text-[#ffd679]">
+        <strong
+          className="block text-pretty leading-5 group-hover:text-[#ffd679]"
+          title={node.canonicalTitle}
+        >
           {node.canonicalTitle}
         </strong>
         <span className="mt-1 block truncate text-xs text-white/70">

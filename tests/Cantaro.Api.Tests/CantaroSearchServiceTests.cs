@@ -697,6 +697,12 @@ public sealed class CantaroSearchServiceTests
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<MediaProviderMutationResult> UpdateScoreAsync(
+            int userId,
+            MediaScoreUpdateRequest request,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(
             int userId,
             string providerMediaId,

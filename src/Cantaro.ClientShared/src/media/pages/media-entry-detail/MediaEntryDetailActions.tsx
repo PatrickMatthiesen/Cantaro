@@ -1,6 +1,7 @@
 import {
   Clock3,
   ExternalLink,
+  LoaderCircle,
   Minus,
   Play,
   Plus,
@@ -111,6 +112,7 @@ type ProgressCockpitProps = Pick<
   | "progressVolumes"
   | "isRefreshingProgress"
   | "isSavingStatus"
+  | "isSavingScore"
   | "isAddingToLibrary"
   | "onSetSelectedStatus"
   | "onSetProgressEpisodes"
@@ -118,6 +120,7 @@ type ProgressCockpitProps = Pick<
   | "onSetProgressVolumes"
   | "onRefreshProgress"
   | "onAddToLibrary"
+  | "onScoreChange"
 >;
 
 function StatusSelect({
@@ -216,19 +219,95 @@ function ProgressControls({
   );
 }
 
-function EmptyScore() {
+function formatScore(score: number | null): string {
+  if (score === null) return "Unrated";
+  const value = (score / 10).toFixed(1).replace(/\.0$/, "");
+  return `${value}/10`;
+}
+
+function ScoreControl({
+  score,
+  onChange,
+  disabled = false,
+  isSaving = false,
+  readOnlyHint,
+}: {
+  score: number | null;
+  onChange?: (score: number | null) => void;
+  disabled?: boolean;
+  isSaving?: boolean;
+  readOnlyHint?: string;
+}) {
   return (
-    <div className="flex gap-1 text-content-subtle" aria-label="No score set">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          type="button"
-          aria-label={`Set score to ${star} stars`}
-          className="inline-flex size-8 items-center justify-center hover:text-personal-accent-strong focus-visible:outline-2 focus-visible:outline-focus"
+    <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-2" aria-busy={isSaving}>
+        <div
+          role="group"
+          aria-label="Your score, choose half-star increments"
+          className={`flex gap-0.5 ${disabled ? "text-content-subtle" : "text-personal-accent-strong"}`}
         >
-          <Star size={18} aria-hidden />
-        </button>
-      ))}
+          {[0, 1, 2, 3, 4].map((starIndex) => {
+            const fillPercent = Math.min(
+              Math.max(((score ?? 0) - starIndex * 20) / 20, 0),
+              1,
+            ) * 100;
+            return (
+              <span key={starIndex} className="relative size-8 shrink-0">
+                <Star
+                  className="absolute inset-0 size-8 text-content-subtle/55"
+                  strokeWidth={1.7}
+                  aria-hidden
+                />
+                <span
+                  className="absolute inset-0 overflow-hidden"
+                  style={{ width: `${fillPercent}%` }}
+                  aria-hidden
+                >
+                  <Star
+                    className="size-8 min-w-8 fill-current"
+                    strokeWidth={1.7}
+                  />
+                </span>
+                {[0, 1].map((half) => {
+                  const value = (starIndex * 2 + half + 1) * 10;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={disabled || !onChange}
+                      aria-label={`Set score to ${formatScore(value)}`}
+                      aria-pressed={score === value}
+                      onClick={() => onChange?.(value)}
+                      className={`absolute inset-y-0 ${half === 0 ? "left-0 rounded-l" : "right-0 rounded-r"} w-1/2 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus ${disabled ? "cursor-not-allowed" : "hover:bg-personal-accent/15"}`}
+                    />
+                  );
+                })}
+              </span>
+            );
+          })}
+        </div>
+        <span className="min-w-12 text-sm font-semibold tabular-nums text-content" aria-live="polite">
+          {isSaving ? (
+            <span className="inline-flex items-center gap-1.5 text-content-muted">
+              <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden />
+              Saving
+            </span>
+          ) : formatScore(score)}
+        </span>
+        {score !== null ? (
+          <button
+            type="button"
+            disabled={disabled || !onChange}
+            onClick={() => onChange?.(null)}
+            className="min-h-8 px-1 text-xs font-semibold text-content-muted underline decoration-border-strong underline-offset-2 transition-colors hover:text-content focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            Clear score
+          </button>
+        ) : null}
+      </div>
+      {readOnlyHint ? (
+        <p className="text-xs text-content-muted">{readOnlyHint}</p>
+      ) : null}
     </div>
   );
 }
@@ -269,7 +348,11 @@ function NotInLibraryProgress({ total }: { total?: number }) {
       </p>
       <div>
         <p className="mb-1.5 text-sm text-content-muted">Your score</p>
-        <EmptyScore />
+        <ScoreControl
+          score={null}
+          disabled
+          readOnlyHint="Add this title to your library to rate it."
+        />
       </div>
     </section>
   );
@@ -318,7 +401,12 @@ function TrackedProgressCockpit(props: ProgressCockpitProps) {
       <div className="flex flex-wrap items-end gap-4 xl:ml-auto xl:justify-end">
         <div>
           <p className="mb-1.5 text-sm text-content-muted">Your score</p>
-          <EmptyScore />
+          <ScoreControl
+            score={props.entry.score}
+            onChange={props.onScoreChange}
+            disabled={props.isSavingScore}
+            isSaving={props.isSavingScore}
+          />
         </div>
         <StatusSelect
           value={props.selectedStatus}

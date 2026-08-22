@@ -622,6 +622,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Score).HasPrecision(5, 2);
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_MediaLibraryEntries_Score",
+                "\"Score\" IS NULL OR (CAST(\"Score\" AS NUMERIC) >= 1 AND CAST(\"Score\" AS NUMERIC) <= 100)"));
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.MediaLibraryEntries)

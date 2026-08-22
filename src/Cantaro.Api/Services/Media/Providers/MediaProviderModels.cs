@@ -60,6 +60,8 @@ public class MediaProviderLibraryItem
 
     public required string Status { get; set; }
 
+    public decimal? Score { get; set; }
+
     public IReadOnlyList<string> ProviderListNames { get; set; } = [];
 
     public int? ProgressEpisodes { get; set; }
@@ -202,6 +204,18 @@ public class MediaStatusUpdateRequest
     public required string ProviderMediaId { get; set; }
 
     public required string Status { get; set; }
+
+    public DateTimeOffset? LastKnownRemoteUpdateAt { get; set; }
+}
+
+public class MediaScoreUpdateRequest
+{
+    public required string ProviderMediaId { get; set; }
+
+    /// <summary>
+    /// Canonical Cantaro score in the inclusive range 1..100; null clears it.
+    /// </summary>
+    public decimal? Score { get; set; }
 
     public DateTimeOffset? LastKnownRemoteUpdateAt { get; set; }
 }

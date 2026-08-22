@@ -73,6 +73,7 @@ public static class MediaMutationSources
     public const string ProviderImport = "provider_import";
     public const string UserProgressUpdate = "user_progress_update";
     public const string UserStatusUpdate = "user_status_update";
+    public const string UserScoreUpdate = "user_score_update";
     public const string UserProviderIdentityCorrection = "user_provider_identity_correction";
     public const string ProviderDisconnect = "provider_disconnect";
 
@@ -87,6 +88,7 @@ public static class MediaProviderOperationTypes
 {
     public const string UpdateProgress = "update_progress";
     public const string UpdateStatus = "update_status";
+    public const string UpdateScore = "update_score";
 
     /// <summary>
     /// Progress update triggered automatically by a matched observation.

@@ -454,6 +454,60 @@ public class MediaProviderDtoContractTests
     }
 
     [Fact]
+    public async Task UpdateScore_PersistsCanonicalScoreLocally()
+    {
+        await using var fixture = await MediaControllerFixture.CreateAsync(new StubMediaProvider());
+        var entry = await SeedMediaEntryAsync(fixture);
+
+        var result = await fixture.Controller.UpdateScore(
+            entry.MediaTitleId,
+            new MediaScoreUpdateDto { Score = 87.5m },
+            CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync();
+        Assert.Equal(87.5m, persistedEntry.Score);
+        Assert.Equal(MediaMutationSources.UserScoreUpdate, persistedEntry.LastMutationSource);
+        Assert.NotNull(persistedEntry.LastLocalEditAt);
+    }
+
+    [Fact]
+    public async Task UpdateScore_PersistsLocallyWhenProviderOperationIsQueued()
+    {
+        var provider = new StubMediaProvider { ThrowOnStatusUpdate = true };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var entry = await SeedMediaEntryAsync(fixture);
+
+        var result = await fixture.Controller.UpdateScore(
+            entry.MediaTitleId,
+            new MediaScoreUpdateDto { Score = 75m },
+            CancellationToken.None);
+
+        Assert.IsType<AcceptedResult>(result);
+        Assert.Equal(75m, (await fixture.DbContext.MediaLibraryEntries.SingleAsync()).Score);
+        var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
+        Assert.Equal(MediaProviderOperationTypes.UpdateScore, queuedOperation.OperationType);
+        Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100.01)]
+    public async Task UpdateScore_RejectsScoresOutsideCanonicalRange(decimal score)
+    {
+        await using var fixture = await MediaControllerFixture.CreateAsync(new StubMediaProvider());
+        var entry = await SeedMediaEntryAsync(fixture);
+
+        var result = await fixture.Controller.UpdateScore(
+            entry.MediaTitleId,
+            new MediaScoreUpdateDto { Score = score },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Null((await fixture.DbContext.MediaLibraryEntries.SingleAsync()).Score);
+    }
+
+    [Fact]
     public async Task UpdateStatus_ReturnsAcceptedWhenOperationRemainsQueued()
     {
         var provider = new StubMediaProvider
@@ -612,6 +666,8 @@ public class MediaProviderDtoContractTests
 
         public MediaProviderMutationResult? StatusMutationResult { get; init; }
 
+        public MediaProviderMutationResult? ScoreMutationResult { get; init; }
+
         public ConnectedServiceAccount? ConnectedAccount { get; init; }
 
         public bool ThrowOnProgressUpdate { get; init; }
@@ -694,6 +750,22 @@ public class MediaProviderDtoContractTests
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow,
+            });
+        }
+
+        public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken)
+        {
+            if (ThrowOnStatusUpdate)
+            {
+                throw new InvalidOperationException("Simulated provider write failure.");
+            }
+
+            return Task.FromResult(ScoreMutationResult ?? new MediaProviderMutationResult
+            {
+                ProviderId = ProviderId,
+                ProviderMediaId = request.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow,
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
             });
         }
 

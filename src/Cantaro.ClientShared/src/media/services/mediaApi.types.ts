@@ -17,6 +17,7 @@ export interface MediaLibraryListItemDto {
     posterUrl?: string;
     mediaKind: string;
     status: string;
+    score: number | null;
     progressEpisodes?: number;
     progressChapters?: number;
     progressVolumes?: number;
@@ -63,6 +64,7 @@ export interface MediaViewerStateDto {
     id: string;
     mediaTitleId: string;
     status: string;
+    score: number | null;
     progressEpisodes?: number;
     progressChapters?: number;
     progressVolumes?: number;
@@ -95,6 +97,7 @@ export interface MediaEntryDetailModel {
     provider: string;
     providerMediaId: string;
     status: string;
+    score: number | null;
     providerListNames: string[];
     progressEpisodes?: number;
     progressChapters?: number;
@@ -261,6 +264,10 @@ export interface MediaStatusUpdateDto {
     status: string;
 }
 
+export interface MediaScoreUpdateDto {
+    score: number | null;
+}
+
 export interface MediaViewerStateCreateDto {
     status: string;
 }
@@ -313,6 +320,7 @@ export interface MediaCatalogLibraryStateDto {
     viewerStateId?: string;
     mediaTitleId?: string;
     status?: string;
+    score?: number | null;
     progressEpisodes?: number;
     progressChapters?: number;
     progressVolumes?: number;
