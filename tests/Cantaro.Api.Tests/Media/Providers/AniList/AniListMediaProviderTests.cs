@@ -32,6 +32,7 @@ public class AniListMediaProviderTests
                 ClientId = "client-id",
                 ClientSecret = "client-secret"
             }),
+            new AniListRequestGate(TimeProvider.System, TimeSpan.Zero),
             NullLogger<AniListApiClient>.Instance);
 
         var exception = await Assert.ThrowsAsync<AniListRequestException>(() =>
@@ -605,6 +606,7 @@ public class AniListMediaProviderTests
                 ClientId = "client-id",
                 ClientSecret = "client-secret"
             }),
+            new AniListRequestGate(TimeProvider.System, TimeSpan.Zero),
             NullLogger<AniListApiClient>.Instance);
         dataProtectionProvider ??= DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
         var tokenEncryption = new TokenEncryptionService(dataProtectionProvider);

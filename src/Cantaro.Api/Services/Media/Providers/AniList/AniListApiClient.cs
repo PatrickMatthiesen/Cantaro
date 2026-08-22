@@ -12,11 +12,13 @@ namespace Cantaro.Api.Services;
 public class AniListApiClient(
     HttpClient httpClient,
     IOptions<AniListOptions> options,
+    AniListRequestGate requestGate,
     ILogger<AniListApiClient> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient = httpClient;
     private readonly AniListOptions _options = options.Value;
+    private readonly AniListRequestGate _requestGate = requestGate;
     private readonly ILogger<AniListApiClient> _logger = logger;
 
     public string BuildAuthorizationUrl(string redirectUri, string state, string codeChallenge)
@@ -95,7 +97,9 @@ public class AniListApiClient(
 
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
+        using var requestLease = await _requestGate.AcquireAsync(cancellationToken);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var retryAfter = _requestGate.ObserveResponse(response);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -103,7 +107,7 @@ public class AniListApiClient(
             _logger.LogWarning("AniList GraphQL request failed with status {StatusCode}: {Body}", response.StatusCode, responseBody);
             throw new AniListRequestException(
                 response.StatusCode,
-                GetRetryAfter(response));
+                retryAfter);
         }
 
         var graphQlResponse = JsonSerializer.Deserialize<AniListGraphQlResponse<TData>>(responseBody, SerializerOptions)
@@ -116,21 +120,6 @@ public class AniListApiClient(
         }
 
         return graphQlResponse.Data ?? throw new InvalidOperationException("AniList returned an empty GraphQL response.");
-    }
-
-    private static TimeSpan? GetRetryAfter(HttpResponseMessage response)
-    {
-        if (response.Headers.RetryAfter?.Delta is { } delta)
-        {
-            return delta;
-        }
-
-        if (response.Headers.RetryAfter?.Date is { } date)
-        {
-            return date - DateTimeOffset.UtcNow;
-        }
-
-        return null;
     }
 
     public static string GenerateCodeVerifier()

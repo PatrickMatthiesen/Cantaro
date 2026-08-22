@@ -10,7 +10,6 @@ public sealed class MediaRelationGraphRefreshWorker(
 {
     private static readonly TimeSpan Freshness = TimeSpan.FromHours(6);
     private static readonly TimeSpan MinimumDelayBetweenRefreshes = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan MaximumRetryDelay = TimeSpan.FromSeconds(30);
     private const int MaximumAttempts = 3;
     private readonly MediaRelationGraphRefreshQueue _queue = queue;
     private readonly IServiceScopeFactory _serviceScopeFactory = serviceScopeFactory;
@@ -66,16 +65,7 @@ public sealed class MediaRelationGraphRefreshWorker(
             }
             catch (Exception exception) when (attempt < MaximumAttempts)
             {
-                var exponentialDelay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
-                var requestedDelay = exception is AniListRequestException { RetryAfter: { } retryAfter }
-                    ? retryAfter
-                    : TimeSpan.Zero;
-                var retryDelay = requestedDelay > exponentialDelay ? requestedDelay : exponentialDelay;
-                retryDelay = retryDelay < TimeSpan.Zero
-                    ? exponentialDelay
-                    : retryDelay > MaximumRetryDelay
-                        ? MaximumRetryDelay
-                        : retryDelay;
+                var retryDelay = GetRetryDelay(exception, attempt);
                 _logger.LogWarning(
                     exception,
                     "Relation graph refresh attempt {Attempt}/{MaximumAttempts} failed for {Provider}/{ProviderMediaId}; retrying in {RetryDelay}.",
@@ -87,6 +77,16 @@ public sealed class MediaRelationGraphRefreshWorker(
                 await Task.Delay(retryDelay, cancellationToken);
             }
         }
+    }
+
+    internal static TimeSpan GetRetryDelay(Exception exception, int attempt)
+    {
+        var exponentialDelay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
+        var requestedDelay = exception is AniListRequestException { RetryAfter: { } retryAfter }
+            ? retryAfter
+            : TimeSpan.Zero;
+        var retryDelay = requestedDelay > exponentialDelay ? requestedDelay : exponentialDelay;
+        return retryDelay < TimeSpan.Zero ? exponentialDelay : retryDelay;
     }
 
     private async Task ProcessAsync(
