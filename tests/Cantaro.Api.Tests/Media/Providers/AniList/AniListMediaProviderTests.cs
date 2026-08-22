@@ -502,6 +502,64 @@ public class AniListMediaProviderTests
     }
 
     [Fact]
+    public async Task UpdateScoreAsync_WritesRoundedScoreRawAndClearsWithZero()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(307, "anilist-score@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(
+            new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 907,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "307",
+            DisplayName = "Score Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        const string graphQlResponse = """
+            { "data": { "SaveMediaListEntry": {
+              "id": 44, "status": "CURRENT", "score": 82.0, "updatedAt": 1780776000,
+              "media": { "id": 154587 }
+            } } }
+            """;
+        var handler = new StubHttpMessageHandler(graphQlResponse);
+        var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
+
+        await provider.UpdateScoreAsync(
+            user.Id,
+            new MediaScoreUpdateRequest { ProviderMediaId = "154587", Score = 82.5m },
+            CancellationToken.None);
+
+        using (var firstRequest = JsonDocument.Parse(handler.LastRequestBody!))
+        {
+            var variables = firstRequest.RootElement.GetProperty("variables");
+            Assert.Contains("scoreRaw: $scoreRaw", firstRequest.RootElement.GetProperty("query").GetString());
+            Assert.Equal(83, variables.GetProperty("scoreRaw").GetInt32());
+        }
+
+        await provider.UpdateScoreAsync(
+            user.Id,
+            new MediaScoreUpdateRequest { ProviderMediaId = "154587", Score = null },
+            CancellationToken.None);
+
+        using var clearRequest = JsonDocument.Parse(handler.LastRequestBody!);
+        Assert.Equal(0, clearRequest.RootElement.GetProperty("variables").GetProperty("scoreRaw").GetInt32());
+    }
+
+    [Fact]
     public async Task ImportLibraryAsync_AggregatesDuplicateGroupsAndKeepsOnlyCustomLists()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -543,6 +601,7 @@ public class AniListMediaProviderTests
                       "entries": [{
                         "id": 42,
                         "status": "REPEATING",
+                        "score": 82.3,
                         "progress": 6,
                         "progressVolumes": null,
                         "updatedAt": 1780776000,
@@ -561,6 +620,7 @@ public class AniListMediaProviderTests
                       "entries": [{
                         "id": 42,
                         "status": "REPEATING",
+                        "score": 82.3,
                         "progress": 6,
                         "progressVolumes": null,
                         "updatedAt": 1780776000,
@@ -579,16 +639,19 @@ public class AniListMediaProviderTests
             }
             """;
 
+        var handler = new StubHttpMessageHandler(graphQlResponse);
         var provider = CreateProvider(
             dbContext,
-            new StubHttpMessageHandler(graphQlResponse),
+            handler,
             dataProtectionProvider);
 
         var import = await provider.ImportLibraryAsync(user.Id, CancellationToken.None);
 
         var item = Assert.Single(import.Items);
         Assert.Equal(MediaLibraryStatuses.Repeating, item.Status);
+        Assert.Equal(82.3m, item.Score);
         Assert.Equal(["Favorites"], item.ProviderListNames);
+        Assert.Contains("score(format: POINT_100)", handler.LastRequestBody);
         using var rawMetadata = JsonDocument.Parse(item.RawMetadata!);
         Assert.Equal("REPEATING", rawMetadata.RootElement.GetProperty("status").GetString());
         Assert.True(rawMetadata.RootElement.TryGetProperty("media", out _));

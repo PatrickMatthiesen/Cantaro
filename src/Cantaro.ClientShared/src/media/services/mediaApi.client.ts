@@ -18,6 +18,7 @@ import type {
     MediaObservationDto,
     MediaObservationSummaryDto,
     MediaProgressUpdateDto,
+    MediaScoreUpdateDto,
     MediaProviderAccountStatusDto,
     MediaProviderSearchParams,
     MediaProviderSearchResultDto,
@@ -252,6 +253,14 @@ export class MediaApiClient {
             body: JSON.stringify(request),
         });
         await this.ensureOk(response, 'Failed to update media status');
+    }
+
+    async updateScore(mediaTitleId: string, request: MediaScoreUpdateDto): Promise<void> {
+        const response = await this.request(`/api/media/titles/${encodeURIComponent(mediaTitleId)}/viewer/score`, {
+            method: 'POST',
+            body: JSON.stringify(request),
+        });
+        await this.ensureOk(response, 'Failed to update media score');
     }
 
     async getObservationSummary(): Promise<MediaObservationSummaryDto> {

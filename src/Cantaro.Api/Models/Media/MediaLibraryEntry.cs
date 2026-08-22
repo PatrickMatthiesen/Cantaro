@@ -14,6 +14,12 @@ public class MediaLibraryEntry
 
     public required string Status { get; set; }
 
+    /// <summary>
+    /// Cantaro's canonical personal score in the inclusive range 1..100.
+    /// Null means that the user has not rated this title.
+    /// </summary>
+    public decimal? Score { get; set; }
+
     public int? ProgressEpisodes { get; set; }
 
     public int? ProgressChapters { get; set; }

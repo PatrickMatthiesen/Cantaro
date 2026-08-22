@@ -54,6 +54,7 @@ export interface MediaEntryDetailContentProps {
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingProgress: boolean;
   isSavingStatus: boolean;
+  isSavingScore: boolean;
   isAddingToLibrary: boolean;
   showLinkDialog: boolean;
   unlinkingId: string | null;
@@ -74,6 +75,7 @@ export interface MediaEntryDetailContentProps {
   onSetSelectedStatus: (value: string) => void;
   onRefreshProgress: () => void;
   onSaveStatus: () => void;
+  onScoreChange: (score: number | null) => void;
   onAddToLibrary: () => void;
   onUnlink: (providerId: string) => void;
   onReloadEpisodes: () => void;

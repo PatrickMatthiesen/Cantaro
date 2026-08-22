@@ -59,6 +59,40 @@ public class MediaProviderOperationProcessorTests
     }
 
     [Fact]
+    public async Task ProcessOperationAsync_UpdatesEntryOnSuccessfulScoreWrite()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 413, "score-success@example.com");
+        var processor = new MediaProviderOperationProcessor(
+            dbContext,
+            new MediaProviderRegistry([new FakeMediaProvider("anilist")]),
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+
+        var operation = await processor.EnqueueScoreUpdateAsync(
+            entry.UserId,
+            binding,
+            new MediaScoreUpdateRequest
+            {
+                ProviderMediaId = "140960",
+                Score = 82.5m,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            },
+            CancellationToken.None);
+
+        var processed = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, processed.Outcome);
+        Assert.Equal(82.5m, (await dbContext.MediaLibraryEntries.SingleAsync()).Score);
+        Assert.Equal(MediaMutationSources.UserScoreUpdate, (await dbContext.MediaLibraryEntries.SingleAsync()).LastMutationSource);
+        Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+    }
+
+    [Fact]
     public async Task ProcessOperationAsync_SetsRetryStateWhenProviderWriteFails()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -470,6 +504,24 @@ public class MediaProviderOperationProcessorTests
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow,
                 RawMetadata = $"{{\"status\":\"{request.Status}\"}}"
+            });
+        }
+
+        public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken)
+        {
+            if (_failure is not null) throw _failure;
+            if (_shouldThrow)
+            {
+                throw new InvalidOperationException("Simulated provider write failure.");
+            }
+
+            return Task.FromResult(new MediaProviderMutationResult
+            {
+                ProviderId = "anilist",
+                ProviderMediaId = request.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow,
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow,
+                RawMetadata = "{\"score\":80}"
             });
         }
 

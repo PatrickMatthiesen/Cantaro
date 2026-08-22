@@ -127,6 +127,7 @@ function composeViewerProjection(viewer: MediaViewerStateDto | null) {
       id: '',
       isInLibrary: false,
       status: 'planned',
+      score: null,
       providerListNames: [] as string[],
       isConnected: false,
     };
@@ -136,6 +137,7 @@ function composeViewerProjection(viewer: MediaViewerStateDto | null) {
     id: viewer.id,
     isInLibrary: true,
     status: viewer.status,
+    score: viewer.score ?? null,
     providerListNames: viewer.providerBindings.flatMap((binding) => binding.providerListNames),
     progressEpisodes: viewer.progressEpisodes,
     progressChapters: viewer.progressChapters,
@@ -238,6 +240,7 @@ export function useEntryDetailState(mediaTitleId: string) {
   const reloadEntry = useCallback(async () => {
     const data = await loadComposedEntry(mediaTitleId);
     applyEntryData(data);
+    return data;
   }, [applyEntryData, mediaTitleId]);
 
   useEffect(() => {
@@ -410,7 +413,7 @@ export function useFranchiseGraph(entry: MediaEntryDetailModel | null) {
 
 export function useRemoteEntryRefresh(
   entry: MediaEntryDetailModel | null,
-  reloadEntry: () => Promise<void>,
+  reloadEntry: () => Promise<MediaEntryDetailModel>,
   showSnackbar: ShowSnackbar,
 ) {
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
@@ -499,7 +502,7 @@ export function useRemoteEntryRefresh(
 
 export function useManualRemoteRefresh(
   entry: MediaEntryDetailModel | null,
-  reloadEntry: () => Promise<void>,
+  reloadEntry: () => Promise<MediaEntryDetailModel>,
   showSnackbar: ShowSnackbar,
 ) {
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
@@ -637,6 +640,80 @@ export function useStatusSaveAction(
   ]);
 
   return { isSavingStatus, handleSaveStatus };
+}
+
+function applySavedScore(
+  current: MediaEntryDetailModel | null,
+  score: number | null,
+) {
+  return current ? { ...current, score } : current;
+}
+
+async function reconcileScoreSaveFailure(
+  reloadEntry: () => Promise<MediaEntryDetailModel>,
+  score: number | null,
+  previousScore: number | null,
+  setEntry: Dispatch<SetStateAction<MediaEntryDetailModel | null>>,
+  showSnackbar: ShowSnackbar,
+  saveError: unknown,
+) {
+  try {
+    const reconciledEntry = await reloadEntry();
+    const providerSyncPending = reconciledEntry.isInLibrary && reconciledEntry.score === score;
+    showSnackbar(providerSyncPending
+      ? {
+        message: 'Score saved in Cantaro; provider sync may still be pending.',
+        variant: 'info',
+      }
+      : {
+        message: 'Score sync failed; showing the latest saved value.',
+        variant: 'error',
+      });
+  } catch {
+    setEntry((current) => applySavedScore(current, previousScore));
+    showSnackbar({
+      message: getPrefixedErrorMessage(saveError, 'Could not confirm score sync; score reverted'),
+      variant: 'error',
+    });
+  }
+}
+
+export function useScoreSaveAction(
+  mediaTitleId: string,
+  entry: MediaEntryDetailModel | null,
+  setEntry: Dispatch<SetStateAction<MediaEntryDetailModel | null>>,
+  reloadEntry: () => Promise<MediaEntryDetailModel>,
+  showSnackbar: ShowSnackbar,
+) {
+  const [isSavingScore, setIsSavingScore] = useState(false);
+
+  const handleScoreChange = useCallback(async (score: number | null) => {
+    if (!entry || isSavingScore || score === entry.score) return;
+
+    const previousScore = entry.score;
+    setEntry((current) => applySavedScore(current, score));
+    setIsSavingScore(true);
+
+    try {
+      await mediaApi.updateScore(mediaTitleId, { score });
+      showSnackbar({ message: 'Score saved', variant: 'success' });
+    } catch (saveError) {
+      // The API persists the local viewer state before attempting provider sync.
+      // Reload first so a provider error cannot erase a score Cantaro already saved.
+      await reconcileScoreSaveFailure(
+        reloadEntry,
+        score,
+        previousScore,
+        setEntry,
+        showSnackbar,
+        saveError,
+      );
+    } finally {
+      setIsSavingScore(false);
+    }
+  }, [entry, isSavingScore, mediaTitleId, reloadEntry, setEntry, showSnackbar]);
+
+  return { isSavingScore, handleScoreChange };
 }
 
 export function useProviderUnlinkAction(

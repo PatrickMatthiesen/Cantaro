@@ -71,6 +71,20 @@ public class MediaProviderOperationProcessor(
             cancellationToken);
     }
 
+    public async Task<MediaProviderOperation> EnqueueScoreUpdateAsync(
+        int userId,
+        MediaLibraryProviderBinding binding,
+        MediaScoreUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await EnqueueAsync(
+            userId,
+            binding,
+            MediaProviderOperationTypes.UpdateScore,
+            request,
+            cancellationToken);
+    }
+
     public async Task<MediaProviderOperationExecutionResult> ProcessOperationAsync(Guid operationId, CancellationToken cancellationToken)
     {
         DetachTrackedOperation(operationId);
@@ -250,6 +264,10 @@ public class MediaProviderOperationProcessor(
                 operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
                 DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
+            MediaProviderOperationTypes.UpdateScore => await provider.UpdateScoreAsync(
+                operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
+                DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson),
+                cancellationToken),
             MediaProviderOperationTypes.AutoProgressUpdate => await ExecuteAutoProgressAsync(
                 provider,
                 operation,
@@ -374,6 +392,13 @@ public class MediaProviderOperationProcessor(
                 var request = DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson);
                 entry.Status = request.Status;
                 entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
+                break;
+            }
+            case MediaProviderOperationTypes.UpdateScore:
+            {
+                var request = DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson);
+                entry.Score = request.Score;
+                entry.LastMutationSource = MediaMutationSources.UserScoreUpdate;
                 break;
             }
             case MediaProviderOperationTypes.AutoProgressUpdate:

@@ -170,6 +170,7 @@ public class MediaLibraryImportService(
             UserId = userId,
             MediaTitleId = mediaTitleId,
             Status = item.Status,
+            Score = NormalizeScore(item.Score),
             ProgressEpisodes = ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount),
             ProgressChapters = item.ProgressChapters,
             ProgressVolumes = item.ProgressVolumes,
@@ -311,6 +312,7 @@ public class MediaLibraryImportService(
         DateTimeOffset timestamp)
     {
         entry.Status = item.Status;
+        entry.Score = NormalizeScore(item.Score);
         entry.ProgressEpisodes = ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount);
         entry.ProgressChapters = item.ProgressChapters;
         entry.ProgressVolumes = item.ProgressVolumes;
@@ -327,4 +329,7 @@ public class MediaLibraryImportService(
 
         return Math.Clamp(progress.Value, 0, episodeCount.Value);
     }
+
+    private static decimal? NormalizeScore(decimal? score)
+        => score is >= 1m and <= 100m ? score : null;
 }

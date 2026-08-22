@@ -467,6 +467,49 @@ public class MediaProvidersController(
         return BuildOperationResult(results);
     }
 
+    [HttpPost("titles/{mediaTitleId:guid}/viewer/score")]
+    public async Task<ActionResult> UpdateScore(Guid mediaTitleId, [FromBody] MediaScoreUpdateDto request, CancellationToken cancellationToken)
+    {
+        if (request.Score is < 1m or > 100m)
+        {
+            return BadRequest(new { error = "Score must be null or between 1 and 100." });
+        }
+
+        var userId = await GetCurrentUserIdAsync();
+        var entry = await LoadLibraryEntryAsync(mediaTitleId, userId, cancellationToken);
+        if (entry is null)
+        {
+            return NotFound(new { error = "Media library entry not found." });
+        }
+
+        var connectedBindings = entry.ProviderBindings
+            .Where(binding => binding.ConnectedServiceAccountId is not null && binding.MediaProviderLink is not null)
+            .ToList();
+        ApplyLocalScoreUpdate(entry, request);
+        if (connectedBindings.Count == 0)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return NoContent();
+        }
+
+        var results = new List<MediaProviderOperationExecutionResult>();
+        foreach (var binding in connectedBindings)
+        {
+            var operation = await _mediaProviderOperationProcessor.EnqueueScoreUpdateAsync(
+                userId,
+                binding,
+                new MediaScoreUpdateRequest
+                {
+                    ProviderMediaId = binding.MediaProviderLink!.ExternalId,
+                    Score = request.Score,
+                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+                },
+                cancellationToken);
+            results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
+        }
+        return BuildOperationResult(results);
+    }
+
     private static void ApplyLocalProgressUpdate(MediaLibraryEntry entry, MediaProgressUpdateDto request)
     {
         var now = DateTimeOffset.UtcNow;
@@ -484,6 +527,15 @@ public class MediaProvidersController(
         entry.Status = request.Status;
         entry.LastLocalEditAt = now;
         entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
+        entry.UpdatedAt = now;
+    }
+
+    private static void ApplyLocalScoreUpdate(MediaLibraryEntry entry, MediaScoreUpdateDto request)
+    {
+        var now = DateTimeOffset.UtcNow;
+        entry.Score = request.Score;
+        entry.LastLocalEditAt = now;
+        entry.LastMutationSource = MediaMutationSources.UserScoreUpdate;
         entry.UpdatedAt = now;
     }
 
@@ -718,6 +770,7 @@ public class MediaProvidersController(
             ViewerStateId = entry.Id,
             MediaTitleId = entry.MediaTitleId,
             Status = entry.Status,
+            Score = entry.Score,
             ProgressEpisodes = entry.ProgressEpisodes,
             ProgressChapters = entry.ProgressChapters,
             ProgressVolumes = entry.ProgressVolumes

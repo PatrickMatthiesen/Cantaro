@@ -320,7 +320,8 @@ public class AniListMediaProvider(
             mediaId,
             progress: request.ProgressEpisodes ?? request.ProgressChapters,
             progressVolumes: request.ProgressVolumes,
-            status: null);
+            status: null,
+            scoreRaw: null);
 
         var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
             accessToken,
@@ -342,7 +343,33 @@ public class AniListMediaProvider(
             mediaId,
             progress: null,
             progressVolumes: null,
-            status);
+            status,
+            scoreRaw: null);
+
+        var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
+            accessToken,
+            mutation.Query,
+            mutation.Variables,
+            cancellationToken);
+
+        var savedEntry = data.SaveMediaListEntry ?? throw new InvalidOperationException("AniList did not return the saved media list entry.");
+        return MapMutationResult(savedEntry);
+    }
+
+    public async Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken)
+    {
+        var account = await RequireConnectedAccountAsync(userId, cancellationToken);
+        var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
+        var mediaId = ParseProviderMediaId(request.ProviderMediaId);
+        var scoreRaw = request.Score is null
+            ? 0
+            : decimal.ToInt32(decimal.Round(request.Score.Value, 0, MidpointRounding.AwayFromZero));
+        var mutation = BuildSaveMediaListEntryMutation(
+            mediaId,
+            progress: null,
+            progressVolumes: null,
+            status: null,
+            scoreRaw);
 
         var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
             accessToken,
@@ -482,6 +509,7 @@ public class AniListMediaProvider(
             NextReleaseAt = releaseMetadata.NextReleaseAt,
             NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             Status = MapStatus(entry.Status),
+            Score = entry.Score is > 0 and <= 100 ? entry.Score : null,
             ProviderListNames = providerListNames,
             ProgressEpisodes = mediaKind == MediaKinds.Anime ? entry.Progress : null,
             ProgressChapters = mediaKind == MediaKinds.Manga ? entry.Progress : null,
@@ -707,7 +735,8 @@ public class AniListMediaProvider(
         int mediaId,
         int? progress,
         int? progressVolumes,
-        string? status)
+        string? status,
+        int? scoreRaw)
     {
         var variableDefinitions = new List<string> { "$mediaId: Int" };
         var arguments = new List<string> { "mediaId: $mediaId" };
@@ -737,11 +766,19 @@ public class AniListMediaProvider(
             variables["status"] = status;
         }
 
+        if (scoreRaw.HasValue)
+        {
+            variableDefinitions.Add("$scoreRaw: Int");
+            arguments.Add("scoreRaw: $scoreRaw");
+            variables["scoreRaw"] = scoreRaw.Value;
+        }
+
         var query = $$"""
             mutation ({{string.Join(", ", variableDefinitions)}}) {
               SaveMediaListEntry({{string.Join(", ", arguments)}}) {
                 id
                 status
+                score
                 progress
                 progressVolumes
                 updatedAt
@@ -930,6 +967,7 @@ public class AniListMediaProvider(
               entries {
                 id
                 status
+                score(format: POINT_100)
                 progress
                 progressVolumes
                 updatedAt
@@ -1176,6 +1214,9 @@ public class AniListMediaListEntry
     [JsonPropertyName("status")]
     public string? Status { get; set; }
 
+    [JsonPropertyName("score")]
+    public decimal? Score { get; set; }
+
     [JsonPropertyName("progress")]
     public int? Progress { get; set; }
 
@@ -1202,6 +1243,9 @@ public class AniListSavedMediaListEntry
 
     [JsonPropertyName("status")]
     public string? Status { get; set; }
+
+    [JsonPropertyName("score")]
+    public decimal? Score { get; set; }
 
     [JsonPropertyName("progress")]
     public int? Progress { get; set; }

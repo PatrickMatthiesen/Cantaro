@@ -40,6 +40,7 @@ public class MediaLibraryImportServiceTests
         Assert.Equal(title.Id, link.MediaTitleId);
         Assert.Equal(title.Id, entry.MediaTitleId);
         Assert.Equal(12, entry.ProgressEpisodes);
+        Assert.Equal(87.5m, entry.Score);
         Assert.Equal(entry.Id, binding.MediaLibraryEntryId);
         Assert.Equal(link.Id, binding.MediaProviderLinkId);
         Assert.Equal(account.Id, binding.ConnectedServiceAccountId);
@@ -122,7 +123,8 @@ public class MediaLibraryImportServiceTests
     private static MediaProviderLibraryImportResult MakeImport(
         DateTimeOffset importedAt,
         int progress,
-        DateTimeOffset? remoteUpdatedAt = null) => new()
+        DateTimeOffset? remoteUpdatedAt = null,
+        decimal? score = 87.5m) => new()
     {
         ProviderId = "anilist",
         ImportedAt = importedAt,
@@ -141,6 +143,7 @@ public class MediaLibraryImportServiceTests
                 EpisodeCount = 28,
                 ReleasedCount = 28,
                 Status = MediaLibraryStatuses.Current,
+                Score = score,
                 ProviderListNames = ["Favorites"],
                 ProgressEpisodes = progress,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,

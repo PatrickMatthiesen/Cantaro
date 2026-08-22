@@ -11,6 +11,7 @@ import {
   useProviderAvailability,
   useProviderUnlinkAction,
   useRemoteEntryRefresh,
+  useScoreSaveAction,
   useStatusSaveAction,
   useTimedSnackbar,
 } from './media-entry-detail/useMediaEntryDetailState';
@@ -71,6 +72,13 @@ export function MediaEntryDetailPage({
     setEntry,
     showSnackbar,
   );
+  const { isSavingScore, handleScoreChange } = useScoreSaveAction(
+    mediaTitleId,
+    entry,
+    setEntry,
+    reloadEntry,
+    showSnackbar,
+  );
   const { unlinkingId, handleUnlink } = useProviderUnlinkAction(mediaTitleId, setEntry, showSnackbar);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [isAddingToLibrary, setIsAddingToLibrary] = useState(false);
@@ -119,6 +127,7 @@ export function MediaEntryDetailPage({
       snackbar={snackbar}
       isRefreshingProgress={isRefreshingProgress}
       isSavingStatus={isSavingStatus}
+      isSavingScore={isSavingScore}
       isAddingToLibrary={isAddingToLibrary}
       showLinkDialog={showLinkDialog}
       unlinkingId={unlinkingId}
@@ -136,6 +145,7 @@ export function MediaEntryDetailPage({
       onSetSelectedStatus={setSelectedStatus}
       onRefreshProgress={() => void handleRefreshFromProvider()}
       onSaveStatus={() => void handleSaveStatus()}
+      onScoreChange={(score) => void handleScoreChange(score)}
       onAddToLibrary={() => void handleAddToLibrary()}
       onUnlink={(providerId) => void handleUnlink(providerId)}
       onReloadEpisodes={() => {
