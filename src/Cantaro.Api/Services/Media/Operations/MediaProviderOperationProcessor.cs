@@ -425,7 +425,7 @@ public class MediaProviderOperationProcessor(
             ? MediaProviderOperationStatuses.Retrying
             : MediaProviderOperationStatuses.Failed;
         operation.NextAttemptAt = shouldRetry
-            ? now.Add(GetRetryDelay(operation.AttemptCount))
+            ? now.Add(GetRetryDelay(operation.AttemptCount, exception))
             : null;
         operation.LastError = exception.Message;
         operation.UpdatedAt = now;
@@ -438,14 +438,19 @@ public class MediaProviderOperationProcessor(
             operation.Status);
     }
 
-    private static TimeSpan GetRetryDelay(int attemptCount)
+    private static TimeSpan GetRetryDelay(int attemptCount, Exception exception)
     {
-        return attemptCount switch
+        var scheduledDelay = attemptCount switch
         {
             1 => TimeSpan.FromMinutes(1),
             2 => TimeSpan.FromMinutes(5),
             3 => TimeSpan.FromMinutes(15),
             _ => TimeSpan.FromMinutes(30)
         };
+
+        return exception is AniListRequestException { RetryAfter: { } retryAfter }
+            && retryAfter > scheduledDelay
+                ? retryAfter
+                : scheduledDelay;
     }
 }

@@ -82,7 +82,7 @@ builder.Services.AddScoped<IPlatformRegistry, PlatformRegistry>();
 builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
 builder.Services.AddMusicBrainzQueryClient();
-builder.Services.AddHttpClient<AniListApiClient>();
+builder.Services.AddAniListApiClient();
 builder.Services.AddHttpClient<AnimeScheduleApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {

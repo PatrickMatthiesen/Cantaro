@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Net;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -95,6 +96,45 @@ public class MediaProviderOperationProcessorTests
         Assert.Equal(1, queuedOperation.AttemptCount);
         Assert.NotNull(queuedOperation.NextAttemptAt);
         Assert.Contains("simulated", queuedOperation.LastError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_DoesNotScheduleBeforeAniListRetryAfter()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 412, "rate-limit@example.com");
+        var failure = new AniListRequestException(
+            HttpStatusCode.TooManyRequests,
+            TimeSpan.FromMinutes(3));
+        var registry = new MediaProviderRegistry([new FakeMediaProvider("anilist", failure: failure)]);
+        var processor = new MediaProviderOperationProcessor(
+            dbContext,
+            registry,
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        var operation = await processor.EnqueueStatusUpdateAsync(
+            entry.UserId,
+            binding,
+            new MediaStatusUpdateRequest
+            {
+                ProviderMediaId = "140960",
+                Status = MediaLibraryStatuses.Completed,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            },
+            CancellationToken.None);
+
+        await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        var queuedOperation = await dbContext.MediaProviderOperations.SingleAsync();
+        Assert.Equal(
+            TimeSpan.FromMinutes(3),
+            queuedOperation.NextAttemptAt!.Value - queuedOperation.UpdatedAt);
     }
 
     [Fact]
@@ -343,11 +383,13 @@ public class MediaProviderOperationProcessorTests
     {
         private readonly string _providerId;
         private readonly bool _shouldThrow;
+        private readonly Exception? _failure;
 
-        public FakeMediaProvider(string providerId, bool shouldThrow = false)
+        public FakeMediaProvider(string providerId, bool shouldThrow = false, Exception? failure = null)
         {
             _providerId = providerId;
             _shouldThrow = shouldThrow;
+            _failure = failure;
         }
 
         public string ProviderId => _providerId;
@@ -395,6 +437,7 @@ public class MediaProviderOperationProcessorTests
         {
             ProgressUpdateCallCount += 1;
 
+            if (_failure is not null) throw _failure;
             if (_shouldThrow)
             {
                 throw new InvalidOperationException("Simulated provider write failure.");
@@ -414,6 +457,7 @@ public class MediaProviderOperationProcessorTests
         {
             StatusUpdateCallCount += 1;
 
+            if (_failure is not null) throw _failure;
             if (_shouldThrow)
             {
                 throw new InvalidOperationException("Simulated provider write failure.");
