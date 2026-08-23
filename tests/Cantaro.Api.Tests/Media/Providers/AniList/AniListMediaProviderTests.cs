@@ -235,12 +235,6 @@ public class AniListMediaProviderTests
         Assert.Equal(["SPY×FAMILY", "Spy Family"], details.Synonyms);
         Assert.Contains("synonyms", handler.LastRequestBody, StringComparison.Ordinal);
         Assert.Equal("https://example.test/poster-extra-large.jpg", details.PosterUrl);
-        using (var rawMetadata = JsonDocument.Parse(details.RawMetadata!))
-        {
-            Assert.Equal(
-                "https://example.test/poster-extra-large.jpg",
-                rawMetadata.RootElement.GetProperty("coverImage").GetProperty("extraLarge").GetString());
-        }
         var availabilityLinks = Assert.IsAssignableFrom<IReadOnlyList<MediaProviderAvailabilityLink>>(details.AvailabilityLinks);
         Assert.Collection(
                 availabilityLinks,
@@ -652,9 +646,6 @@ public class AniListMediaProviderTests
         Assert.Equal(82.3m, item.Score);
         Assert.Equal(["Favorites"], item.ProviderListNames);
         Assert.Contains("score(format: POINT_100)", handler.LastRequestBody);
-        using var rawMetadata = JsonDocument.Parse(item.RawMetadata!);
-        Assert.Equal("REPEATING", rawMetadata.RootElement.GetProperty("status").GetString());
-        Assert.True(rawMetadata.RootElement.TryGetProperty("media", out _));
     }
 
     private static AniListMediaProvider CreateProvider(

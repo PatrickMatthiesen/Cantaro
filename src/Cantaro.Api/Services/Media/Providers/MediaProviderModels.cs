@@ -54,6 +54,8 @@ public class MediaProviderLibraryItem
 
     public int? ReleasedCount { get; set; }
 
+    public int? TotalKnownCount { get; set; }
+
     public DateTimeOffset? NextReleaseAt { get; set; }
 
     public string? NextReleaseLabel { get; set; }
@@ -75,8 +77,6 @@ public class MediaProviderLibraryItem
     public required string ReleaseStatusDimension { get; set; }
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
-
-    public string? RawMetadata { get; set; }
 }
 
 public class MediaProviderSearchResult
@@ -110,8 +110,6 @@ public class MediaProviderSearchResult
     public required string PrimaryProgressDimension { get; set; }
 
     public required string ReleaseStatusDimension { get; set; }
-
-    public string? RawMetadata { get; set; }
 }
 
 public class MediaProviderTitleDetails
@@ -146,6 +144,8 @@ public class MediaProviderTitleDetails
 
     public int? ReleasedCount { get; set; }
 
+    public int? TotalKnownCount { get; set; }
+
     public DateTimeOffset? NextReleaseAt { get; set; }
 
     public string? NextReleaseLabel { get; set; }
@@ -157,8 +157,6 @@ public class MediaProviderTitleDetails
     public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
 
     public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
-
-    public string? RawMetadata { get; set; }
 }
 
 public class MediaProviderCharacterCredit
@@ -229,8 +227,6 @@ public class MediaProviderMutationResult
     public DateTimeOffset AppliedAt { get; set; }
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
-
-    public string? RawMetadata { get; set; }
 }
 
 public class MediaReleaseMetadata
@@ -248,8 +244,6 @@ public class MediaReleaseMetadata
     public DateTimeOffset? NextReleaseAt { get; set; }
 
     public string? NextReleaseLabel { get; set; }
-
-    public string? RawMetadata { get; set; }
 }
 
 public class MediaLibraryImportPersistenceResult
@@ -320,8 +314,6 @@ public sealed class MediaProviderRelationGraphNode
     public int? ChapterCount { get; set; }
 
     public int? VolumeCount { get; set; }
-
-    public string? RawMetadata { get; set; }
 }
 
 public sealed class MediaProviderRelationGraphEdge

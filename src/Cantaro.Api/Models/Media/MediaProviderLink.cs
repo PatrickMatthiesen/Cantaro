@@ -17,8 +17,6 @@ public class MediaProviderLink
 
     public decimal? Confidence { get; set; }
 
-    public string? RawMetadata { get; set; }
-
     /// <summary>
     /// Last successfully fetched normalized streaming availability snapshot.
     /// Null means availability has never been checked; an empty JSON array

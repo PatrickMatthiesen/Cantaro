@@ -47,6 +47,8 @@ public class MediaTitle
 
     public int? ReleasedCount { get; set; }
 
+    public int? TotalKnownCount { get; set; }
+
     public DateTimeOffset? NextReleaseAt { get; set; }
 
     public string? NextReleaseLabel { get; set; }

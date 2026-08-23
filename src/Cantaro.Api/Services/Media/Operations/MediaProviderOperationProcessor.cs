@@ -430,7 +430,6 @@ public class MediaProviderOperationProcessor(
         entry.UpdatedAt = now;
         binding.LastSyncedAt = now;
         binding.LastRemoteUpdateAt = result.LastRemoteUpdateAt ?? now;
-        binding.RawMetadata = result.RawMetadata ?? binding.RawMetadata;
         binding.UpdatedAt = now;
         _logger.LogInformation(
             "Media provider operation {OperationId} ({OperationType}) succeeded for user {UserId} on provider {Provider}.",

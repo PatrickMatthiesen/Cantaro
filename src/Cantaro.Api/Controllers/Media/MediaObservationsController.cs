@@ -874,7 +874,6 @@ public class MediaObservationsController(
             ProviderAccountId = account.ExternalAccountId,
             LastSyncedAt = now,
             LastRemoteUpdateAt = mutationResult.LastRemoteUpdateAt ?? now,
-            RawMetadata = mutationResult.RawMetadata ?? details.RawMetadata,
             CreatedAt = now,
             UpdatedAt = now
         });
@@ -897,7 +896,6 @@ public class MediaObservationsController(
         if (existingLink?.MediaTitle is { } linkedTitle)
         {
             ApplyProviderDetails(linkedTitle, details, now);
-            existingLink.RawMetadata = details.RawMetadata ?? existingLink.RawMetadata;
             existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
             existingLink.AvailabilityLastVerifiedAt = now;
             existingLink.LastVerifiedAt = now;
@@ -922,6 +920,7 @@ public class MediaObservationsController(
             ChapterCount = details.ChapterCount,
             VolumeCount = details.VolumeCount,
             ReleasedCount = details.ReleasedCount,
+            TotalKnownCount = details.TotalKnownCount,
             NextReleaseAt = details.NextReleaseAt,
             NextReleaseLabel = details.NextReleaseLabel,
             SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
@@ -944,7 +943,6 @@ public class MediaObservationsController(
             LinkSource = MediaMappingSources.UserConfirmed,
             LinkedByUserId = userId,
             LastVerifiedAt = now,
-            RawMetadata = details.RawMetadata,
             AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
             AvailabilityLastVerifiedAt = now,
             CreatedAt = now,
@@ -970,6 +968,7 @@ public class MediaObservationsController(
         title.ChapterCount = details.ChapterCount ?? title.ChapterCount;
         title.VolumeCount = details.VolumeCount ?? title.VolumeCount;
         title.ReleasedCount = details.ReleasedCount ?? title.ReleasedCount;
+        title.TotalKnownCount = details.TotalKnownCount ?? title.TotalKnownCount;
         title.NextReleaseAt = details.NextReleaseAt;
         title.NextReleaseLabel = details.NextReleaseLabel;
         title.SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode;

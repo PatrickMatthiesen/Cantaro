@@ -25,6 +25,7 @@ export interface MediaLibraryListItemDto {
     chapterCount?: number;
     volumeCount?: number;
     releasedCount?: number;
+    totalKnownCount?: number;
     availableReleasedCount?: number;
     primaryProgressDimension: string;
     provider: string;
@@ -52,6 +53,7 @@ export interface MediaTitleDetailDto {
     chapterCount?: number;
     volumeCount?: number;
     releasedCount?: number;
+    totalKnownCount?: number;
     nextReleaseAt?: string;
     nextReleaseLabel?: string;
     primaryProgressDimension: string;

@@ -77,8 +77,7 @@ public class MediaProvidersController(
         var normalizedProviderId = providerId.ToLowerInvariant();
         var userId = await GetCurrentUserIdAsync();
         var safeReturnRoute = SanitizeReturnUrl(route, "/");
-        var codeVerifier = AniListApiClient.GenerateCodeVerifier();
-        var codeChallenge = AniListApiClient.BuildCodeChallenge(codeVerifier);
+        var codeVerifier = MediaProviderPkce.GenerateCodeVerifier();
 
         var state = new MediaProviderOAuthState
         {
@@ -95,6 +94,7 @@ public class MediaProvidersController(
         try
         {
             var provider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
+            var codeChallenge = provider.BuildCodeChallenge(codeVerifier);
             var redirectUri = provider.ResolveRedirectUri(
                 _urlResolver.GetCallbackUrls($"api/media/providers/{normalizedProviderId}/callback"));
             var authorizationUrl = provider.GetAuthorizationUrl(redirectUri, protectedState, codeChallenge);
@@ -791,7 +791,6 @@ public class MediaProvidersController(
         if (existingLink?.MediaTitle is { } linkedTitle)
         {
             ApplyProviderDetails(linkedTitle, details, now);
-            existingLink.RawMetadata = details.RawMetadata ?? existingLink.RawMetadata;
             existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
             existingLink.AvailabilityLastVerifiedAt = now;
             existingLink.LastVerifiedAt = now;
@@ -816,6 +815,7 @@ public class MediaProvidersController(
             ChapterCount = details.ChapterCount,
             VolumeCount = details.VolumeCount,
             ReleasedCount = details.ReleasedCount,
+            TotalKnownCount = details.TotalKnownCount,
             NextReleaseAt = details.NextReleaseAt,
             NextReleaseLabel = details.NextReleaseLabel,
             SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
@@ -837,7 +837,6 @@ public class MediaProvidersController(
             ExternalId = providerMediaId,
             LinkSource = MediaMappingSources.Imported,
             LastVerifiedAt = now,
-            RawMetadata = details.RawMetadata,
             AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
             AvailabilityLastVerifiedAt = now,
             CreatedAt = now,
@@ -863,6 +862,7 @@ public class MediaProvidersController(
         title.ChapterCount = details.ChapterCount ?? title.ChapterCount;
         title.VolumeCount = details.VolumeCount ?? title.VolumeCount;
         title.ReleasedCount = details.ReleasedCount ?? title.ReleasedCount;
+        title.TotalKnownCount = details.TotalKnownCount ?? title.TotalKnownCount;
         title.NextReleaseAt = details.NextReleaseAt;
         title.NextReleaseLabel = details.NextReleaseLabel;
         title.SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode;

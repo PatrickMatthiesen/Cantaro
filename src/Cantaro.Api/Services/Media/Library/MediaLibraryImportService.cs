@@ -84,7 +84,6 @@ public class MediaLibraryImportService(
 
                 binding.LastSyncedAt = importResult.ImportedAt;
                 binding.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
-                binding.RawMetadata = item.RawMetadata;
                 binding.UpdatedAt = importResult.ImportedAt;
                 updatedEntries++;
             }
@@ -129,7 +128,6 @@ public class MediaLibraryImportService(
             }
 
             existingLink.ExternalUrl = item.ExternalUrl ?? existingLink.ExternalUrl;
-            existingLink.RawMetadata = item.RawMetadata ?? existingLink.RawMetadata;
             existingLink.LastVerifiedAt = importResult.ImportedAt;
             existingLink.UpdatedAt = importResult.ImportedAt;
             return existingLink;
@@ -144,7 +142,6 @@ public class MediaLibraryImportService(
             ExternalId = item.ProviderMediaId,
             ExternalUrl = item.ExternalUrl,
             LinkSource = MediaMappingSources.Imported,
-            RawMetadata = item.RawMetadata,
             LastVerifiedAt = importResult.ImportedAt,
             CreatedAt = importResult.ImportedAt,
             UpdatedAt = importResult.ImportedAt,
@@ -197,7 +194,6 @@ public class MediaLibraryImportService(
             ProviderLibraryEntryId = item.ProviderLibraryEntryId,
             LastSyncedAt = timestamp,
             LastRemoteUpdateAt = item.LastRemoteUpdateAt,
-            RawMetadata = item.RawMetadata,
             CreatedAt = timestamp,
             UpdatedAt = timestamp,
             MediaLibraryEntry = entry,
@@ -272,6 +268,7 @@ public class MediaLibraryImportService(
         title.ChapterCount = item.ChapterCount ?? title.ChapterCount;
         title.VolumeCount = item.VolumeCount ?? title.VolumeCount;
         title.ReleasedCount = item.ReleasedCount ?? title.ReleasedCount;
+        title.TotalKnownCount = item.TotalKnownCount ?? title.TotalKnownCount;
         title.NextReleaseAt = item.NextReleaseAt;
         title.NextReleaseLabel = item.NextReleaseLabel;
         title.SupportsEpisodeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Episode;

@@ -61,7 +61,6 @@ public sealed class MediaTitleRelationSyncService(
                     Provider = snapshot.ProviderId,
                     ExternalId = externalId,
                     ExternalUrl = node.ExternalUrl,
-                    RawMetadata = node.RawMetadata,
                     LinkSource = MediaMappingSources.Automatic,
                     LastVerifiedAt = now,
                     CreatedAt = now,
@@ -77,7 +76,6 @@ public sealed class MediaTitleRelationSyncService(
             {
                 ApplyNode(existingTitle, node, now);
                 link.ExternalUrl = node.ExternalUrl ?? link.ExternalUrl;
-                link.RawMetadata ??= node.RawMetadata;
                 link.LastVerifiedAt = now;
                 link.UpdatedAt = now;
             }

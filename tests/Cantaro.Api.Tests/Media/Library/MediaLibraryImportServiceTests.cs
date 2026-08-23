@@ -93,7 +93,6 @@ public class MediaLibraryImportServiceTests
         Assert.Equal(11, (await db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
         var binding = await db.MediaLibraryProviderBindings.SingleAsync();
         Assert.Equal(now.AddMinutes(-1), binding.LastRemoteUpdateAt);
-        Assert.Equal("{\"progress\":5}", binding.RawMetadata);
     }
 
     [Fact]
@@ -112,9 +111,8 @@ public class MediaLibraryImportServiceTests
             CancellationToken.None);
 
         var entry = await db.MediaLibraryEntries.SingleAsync();
-        var binding = await db.MediaLibraryProviderBindings.SingleAsync();
         Assert.Equal(28, entry.ProgressEpisodes);
-        Assert.Equal("{\"progress\":35}", binding.RawMetadata);
+        Assert.Equal(28, (await db.MediaTitles.SingleAsync()).TotalKnownCount);
     }
 
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
@@ -142,14 +140,14 @@ public class MediaLibraryImportServiceTests
                 PosterUrl = "https://example.test/poster.jpg",
                 EpisodeCount = 28,
                 ReleasedCount = 28,
+                TotalKnownCount = 28,
                 Status = MediaLibraryStatuses.Current,
                 Score = score,
                 ProviderListNames = ["Favorites"],
                 ProgressEpisodes = progress,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
-                LastRemoteUpdateAt = remoteUpdatedAt ?? importedAt,
-                RawMetadata = $"{{\"progress\":{progress}}}"
+                LastRemoteUpdateAt = remoteUpdatedAt ?? importedAt
             }
         ]
     };
