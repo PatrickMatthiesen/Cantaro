@@ -797,6 +797,89 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
+    public async Task ProcessObservationAsync_YouTubePaddingAndMissingDurationDuplicatesPreferPlainRecording()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "rescue-me-video",
+            Title = "Rescue Me",
+            Artist = "OneRepublic",
+            DurationSeconds = 209,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeTrackMetadataSearchProvider(
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "malibu-version",
+                Title = "Rescue Me (from One Night in Malibu)",
+                Artist = "OneRepublic",
+                ArtistCredits = ["OneRepublic"],
+                DurationSeconds = 178
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "plain-unknown-duration",
+                Title = "Rescue Me",
+                Artist = "OneRepublic",
+                ArtistCredits = ["OneRepublic"],
+                DurationSeconds = null
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "studio-recording",
+                Title = "Rescue Me",
+                Artist = "OneRepublic",
+                ArtistCredits = ["OneRepublic"],
+                DurationSeconds = 160
+            },
+            new TrackMatchSearchCandidate
+            {
+                CandidateSource = "musicbrainz",
+                ExternalId = "remix",
+                Title = "Rescue Me (BUNT. remix)",
+                Artist = "OneRepublic",
+                ArtistCredits = ["OneRepublic"],
+                DurationSeconds = 175
+            });
+
+        var service = new TrackMatchingService(
+            dbContext,
+            [provider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        var accepted = await dbContext.TrackResolutionCandidates.SingleAsync(candidate => candidate.IsAccepted);
+        Assert.Equal("studio-recording", accepted.ExternalId);
+
+        var storedObservation = await dbContext.TrackObservations.SingleAsync(item => item.Id == observation.Id);
+        var storedMetadata = JsonSerializer.Deserialize<TrackObservationMetadata>(storedObservation.RawMetadata!);
+        Assert.Equal(3, storedMetadata?.Matching?.DistinctClusterCount);
+    }
+
+    [Fact]
     public async Task ProcessObservationAsync_AcousticCandidateBeatsPlainVariant()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -996,7 +1079,7 @@ public class TrackMatchingServiceTests
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
-            SourceType = "youtube",
+            SourceType = "spotify",
             ExternalId = "custom-policy-threshold",
             Title = "All Time Low (Acoustic)",
             Artist = "Jon Bellion",

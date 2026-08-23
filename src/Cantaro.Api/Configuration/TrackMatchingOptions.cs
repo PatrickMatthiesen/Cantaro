@@ -43,7 +43,19 @@ public sealed class TrackMatchingOptions
     public double DurationLongerHalfLifeSeconds { get; set; } = 13d;
 
     [Range(typeof(double), "0.1", "120", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
-    public double DurationShorterHalfLifeSeconds { get; set; } = 5d;
+    public double DurationShorterHalfLifeSeconds { get; set; } = 8d;
+
+    [Range(0, 120)]
+    public int YouTubeDurationPaddingGraceSeconds { get; set; } = 20;
+
+    [Range(typeof(double), "0.1", "120", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
+    public double YouTubeDurationPaddingHalfLifeSeconds { get; set; } = 35d;
+
+    [Range(0, 300)]
+    public int YouTubeUnmarkedPaddingMaxSeconds { get; set; } = 60;
+
+    [Range(typeof(decimal), "1", "10", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
+    public decimal YouTubeUnmarkedPaddingMaxRatio { get; set; } = 1.35m;
 
     [Range(0, 600)]
     public int OfficialVideoPaddingMinSeconds { get; set; } = 30;

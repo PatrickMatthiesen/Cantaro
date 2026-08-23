@@ -11,7 +11,14 @@ internal static class TrackMatchClusterer
 
         var clusters = new List<TrackMatchCluster>();
 
-        foreach (var candidate in rankedCandidates)
+        var rankByCandidate = rankedCandidates
+            .Select((candidate, index) => (candidate, index))
+            .ToDictionary(item => item.candidate, item => item.index);
+        var clusteringOrder = rankedCandidates
+            .Where(candidate => candidate.Candidate.DurationSeconds.HasValue)
+            .Concat(rankedCandidates.Where(candidate => !candidate.Candidate.DurationSeconds.HasValue));
+
+        foreach (var candidate in clusteringOrder)
         {
             TrackMatchCluster? matchingCluster = null;
             foreach (var cluster in clusters)
@@ -47,7 +54,9 @@ internal static class TrackMatchClusterer
             clusters[existingIndex] = matchingCluster;
         }
 
-        return clusters;
+        return clusters
+            .OrderBy(cluster => cluster.Members.Min(member => rankByCandidate[member]))
+            .ToArray();
     }
 
     private static bool TryGetClusterReason(
@@ -76,12 +85,20 @@ internal static class TrackMatchClusterer
             ? candidateCredits.SequenceEqual(representativeCredits, StringComparer.Ordinal)
             : normalizedArtist == representativeArtist;
 
+        var candidateDuration = candidate.Candidate.DurationSeconds;
+        var representativeDuration = representative.Candidate.DurationSeconds;
+        var oneDurationIsMissing = candidateDuration.HasValue != representativeDuration.HasValue;
+        var durationsSupportSameCluster = oneDurationIsMissing
+            || AreDurationsClose(candidateDuration, representativeDuration, clusterDurationToleranceSeconds);
+
         if (normalizedTitle == representativeTitle
             && artistsMatch
             && HaveEquivalentTitleSemantics(candidate.CandidateMetadata, representative.CandidateMetadata)
-            && AreDurationsClose(candidate.Candidate.DurationSeconds, representative.Candidate.DurationSeconds, clusterDurationToleranceSeconds))
+            && durationsSupportSameCluster)
         {
-            clusterReason = "normalized-title-artist-duration";
+            clusterReason = oneDurationIsMissing
+                ? "normalized-title-artist-missing-duration"
+                : "normalized-title-artist-duration";
             return true;
         }
 

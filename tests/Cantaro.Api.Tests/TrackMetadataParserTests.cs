@@ -41,6 +41,16 @@ public class TrackMetadataParserTests
     }
 
     [Fact]
+    public void Parse_PreservesParentheticalSourceAsRecordingContext()
+    {
+        var parsed = TrackMetadataParser.Parse(
+            "Rescue Me (from One Night in Malibu)",
+            "OneRepublic");
+
+        Assert.Contains("source-context", parsed.VersionMarkers);
+    }
+
+    [Fact]
     public void Parse_TreatsTrailingDashVersionAsContextWhenArtistIsSupplied()
     {
         var parsed = TrackMetadataParser.Parse("Signal - Live", "The Artist");
