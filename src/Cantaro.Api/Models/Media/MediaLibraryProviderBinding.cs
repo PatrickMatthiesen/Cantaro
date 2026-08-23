@@ -26,8 +26,6 @@ public class MediaLibraryProviderBinding
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
 
-    public string? RawMetadata { get; set; }
-
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

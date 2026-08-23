@@ -27,6 +27,7 @@ public class MediaLibraryListItemDto
     public int? ChapterCount { get; set; }
     public int? VolumeCount { get; set; }
     public int? ReleasedCount { get; set; }
+    public int? TotalKnownCount { get; set; }
     public int? AvailableReleasedCount { get; set; }
     public required string PrimaryProgressDimension { get; set; }
     public required string Provider { get; set; }
@@ -55,6 +56,7 @@ public class MediaTitleDetailDto
     public int? ChapterCount { get; set; }
     public int? VolumeCount { get; set; }
     public int? ReleasedCount { get; set; }
+    public int? TotalKnownCount { get; set; }
     public DateTimeOffset? NextReleaseAt { get; set; }
     public string? NextReleaseLabel { get; set; }
     public required string PrimaryProgressDimension { get; set; }

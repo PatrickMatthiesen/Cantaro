@@ -39,8 +39,7 @@ public class MediaProviderDtoContractTests
                     StartYear = 2022,
                     EpisodeCount = 25,
                     PrimaryProgressDimension = MediaProgressDimensions.Episode,
-                    ReleaseStatusDimension = MediaProgressDimensions.Episode,
-                    RawMetadata = "{\"provider\":\"internal\"}"
+                    ReleaseStatusDimension = MediaProgressDimensions.Episode
                 }
             ]
         };
@@ -56,7 +55,7 @@ public class MediaProviderDtoContractTests
         Assert.Equal("140960", item.ProviderMediaId);
         Assert.Equal("Spy x Family", item.Title);
         Assert.Equal(MediaProgressDimensions.Episode, item.PrimaryProgressDimension);
-        Assert.Null(typeof(MediaProviderSearchResultDto).GetProperty(nameof(MediaProviderSearchResult.RawMetadata)));
+        Assert.Null(typeof(MediaProviderSearchResultDto).GetProperty("RawMetadata"));
     }
 
     [Fact]
@@ -76,6 +75,8 @@ public class MediaProviderDtoContractTests
                 BackgroundUrl = "https://example.test/banner.jpg",
                 StartYear = 2022,
                 EpisodeCount = 25,
+                ReleasedCount = 25,
+                TotalKnownCount = 25,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
                 AvailabilityLinks =
@@ -101,8 +102,7 @@ public class MediaProviderDtoContractTests
                         ProviderUrl = "https://anilist.co/character/170732/Anya-Forger",
                         Order = 0
                     }
-                ],
-                RawMetadata = "{\"release\":\"internal\"}"
+                ]
             }
         };
 
@@ -130,10 +130,11 @@ public class MediaProviderDtoContractTests
         Assert.Equal("https://example.test/anya.jpg", character.ImageUrl);
         Assert.Equal("https://anilist.co/character/170732/Anya-Forger", character.ProviderUrl);
         Assert.Equal(0, character.Order);
-        Assert.Null(typeof(MediaProviderTitleDetailsDto).GetProperty(nameof(MediaProviderTitleDetails.RawMetadata)));
+        Assert.Null(typeof(MediaProviderTitleDetailsDto).GetProperty("RawMetadata"));
 
         var canonicalTitle = await fixture.DbContext.MediaTitles.SingleAsync();
         Assert.Equal(canonicalTitle.Id, payload.MediaTitleId);
+        Assert.Equal(25, canonicalTitle.TotalKnownCount);
         var providerLink = await fixture.DbContext.MediaProviderLinks.SingleAsync();
         Assert.Equal(canonicalTitle.Id, providerLink.MediaTitleId);
         Assert.Equal("140960", providerLink.ExternalId);
@@ -349,8 +350,7 @@ public class MediaProviderDtoContractTests
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
                 ReleasedCount = 25,
                 TotalKnownCount = 25,
-                NextReleaseLabel = "Finished",
-                RawMetadata = "{\"next\":\"internal\"}"
+                NextReleaseLabel = "Finished"
             }
         };
 
@@ -363,7 +363,7 @@ public class MediaProviderDtoContractTests
 
         Assert.Equal(25, payload.ReleasedCount);
         Assert.Equal("Finished", payload.NextReleaseLabel);
-        Assert.Null(typeof(MediaReleaseMetadataDto).GetProperty(nameof(MediaReleaseMetadata.RawMetadata)));
+        Assert.Null(typeof(MediaReleaseMetadataDto).GetProperty("RawMetadata"));
     }
 
     [Fact]

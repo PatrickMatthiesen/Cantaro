@@ -482,8 +482,7 @@ public class MediaProviderOperationProcessorTests
                 ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
-                LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawMetadata = "{\"status\":\"CURRENT\"}"
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
             });
         }
 
@@ -502,8 +501,7 @@ public class MediaProviderOperationProcessorTests
                 ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
-                LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawMetadata = $"{{\"status\":\"{request.Status}\"}}"
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
             });
         }
 
@@ -520,8 +518,7 @@ public class MediaProviderOperationProcessorTests
                 ProviderId = "anilist",
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
-                LastRemoteUpdateAt = DateTimeOffset.UtcNow,
-                RawMetadata = "{\"score\":80}"
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
             });
         }
 

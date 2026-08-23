@@ -11,6 +11,9 @@ public interface IMediaProvider
     string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
         => callbackUrls.Preferred;
 
+    string BuildCodeChallenge(string codeVerifier)
+        => MediaProviderPkce.BuildS256CodeChallenge(codeVerifier);
+
     string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge);
 
     Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(

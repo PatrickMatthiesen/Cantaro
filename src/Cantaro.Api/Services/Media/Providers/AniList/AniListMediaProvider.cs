@@ -389,17 +389,15 @@ public class AniListMediaProvider(
             return null;
         }
 
-        var raw = JsonSerializer.Deserialize<AniListReleaseMetadataRaw>(details.RawMetadata ?? "{}");
         return new MediaReleaseMetadata
         {
             ProviderId = ProviderName,
             ProviderMediaId = providerMediaId,
             ReleaseStatusDimension = details.ReleaseStatusDimension,
-            ReleasedCount = raw?.ReleasedCount,
-            TotalKnownCount = raw?.TotalKnownCount,
-            NextReleaseAt = raw?.NextReleaseAt,
-            NextReleaseLabel = raw?.NextReleaseLabel,
-            RawMetadata = details.RawMetadata
+            ReleasedCount = details.ReleasedCount,
+            TotalKnownCount = details.TotalKnownCount,
+            NextReleaseAt = details.NextReleaseAt,
+            NextReleaseLabel = details.NextReleaseLabel
         };
     }
 
@@ -506,6 +504,7 @@ public class AniListMediaProvider(
             ChapterCount = entry.Media.Chapters,
             VolumeCount = entry.Media.Volumes,
             ReleasedCount = releaseMetadata.ReleasedCount,
+            TotalKnownCount = releaseMetadata.TotalKnownCount,
             NextReleaseAt = releaseMetadata.NextReleaseAt,
             NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             Status = MapStatus(entry.Status),
@@ -516,8 +515,7 @@ public class AniListMediaProvider(
             ProgressVolumes = mediaKind == MediaKinds.Manga ? entry.ProgressVolumes : null,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
-            LastRemoteUpdateAt = ToDateTimeOffset(entry.UpdatedAt),
-            RawMetadata = JsonSerializer.Serialize(entry)
+            LastRemoteUpdateAt = ToDateTimeOffset(entry.UpdatedAt)
         };
     }
 
@@ -542,8 +540,7 @@ public class AniListMediaProvider(
             ChapterCount = media.Chapters,
             VolumeCount = media.Volumes,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
-            ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
-            RawMetadata = JsonSerializer.Serialize(media)
+            ReleaseStatusDimension = dimensions.ReleaseStatusDimension
         };
     }
 
@@ -570,13 +567,13 @@ public class AniListMediaProvider(
             ChapterCount = media.Chapters,
             VolumeCount = media.Volumes,
             ReleasedCount = releaseMetadata.ReleasedCount,
+            TotalKnownCount = releaseMetadata.TotalKnownCount,
             NextReleaseAt = releaseMetadata.NextReleaseAt,
             NextReleaseLabel = releaseMetadata.NextReleaseLabel,
             PrimaryProgressDimension = dimensions.PrimaryProgressDimension,
             ReleaseStatusDimension = dimensions.ReleaseStatusDimension,
             AvailabilityLinks = BuildAvailabilityLinks(media),
-            Characters = MapCharacters(media.Characters),
-            RawMetadata = JsonSerializer.Serialize(releaseMetadata)
+            Characters = MapCharacters(media.Characters)
         };
     }
 
@@ -598,15 +595,7 @@ public class AniListMediaProvider(
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
             ChapterCount = media.Chapters,
-            VolumeCount = media.Volumes,
-            RawMetadata = JsonSerializer.Serialize(new
-            {
-                type = media.Type,
-                format = media.Format,
-                status = media.Status,
-                synonyms = NormalizeSynonyms(media.Synonyms),
-                coverImage = media.CoverImage
-            })
+            VolumeCount = media.Volumes
         };
     }
 
@@ -724,8 +713,7 @@ public class AniListMediaProvider(
             ProviderMediaId = savedEntry.Media?.Id.ToString(CultureInfo.InvariantCulture)
                 ?? throw new InvalidOperationException("AniList did not return a media id for the saved entry."),
             AppliedAt = DateTimeOffset.UtcNow,
-            LastRemoteUpdateAt = ToDateTimeOffset(savedEntry.UpdatedAt),
-            RawMetadata = JsonSerializer.Serialize(savedEntry)
+            LastRemoteUpdateAt = ToDateTimeOffset(savedEntry.UpdatedAt)
         };
     }
 
@@ -792,7 +780,7 @@ public class AniListMediaProvider(
         return new AniListSaveMediaListEntryMutation(query, variables);
     }
 
-    private static AniListReleaseMetadataRaw BuildReleaseMetadata(AniListMedia media, string releaseStatusDimension)
+    private static AniListReleaseMetadata BuildReleaseMetadata(AniListMedia media, string releaseStatusDimension)
     {
         int? releasedCount = null;
         int? totalKnownCount = releaseStatusDimension switch
@@ -818,15 +806,14 @@ public class AniListMediaProvider(
             releasedCount = media.Chapters;
         }
 
-        return new AniListReleaseMetadataRaw
+        return new AniListReleaseMetadata
         {
             ReleasedCount = releasedCount,
             TotalKnownCount = totalKnownCount,
             NextReleaseAt = ToDateTimeOffset(media.NextAiringEpisode?.AiringAt),
             NextReleaseLabel = media.NextAiringEpisode?.Episode is int nextReleaseEpisode
                 ? $"Episode {nextReleaseEpisode}"
-                : null,
-            CoverImage = media.CoverImage
+                : null
         };
     }
 
@@ -1451,20 +1438,13 @@ public class AniListNextAiringEpisode
     public long? AiringAt { get; set; }
 }
 
-public class AniListReleaseMetadataRaw
+public class AniListReleaseMetadata
 {
-    [JsonPropertyName("releasedCount")]
     public int? ReleasedCount { get; set; }
 
-    [JsonPropertyName("totalKnownCount")]
     public int? TotalKnownCount { get; set; }
 
-    [JsonPropertyName("nextReleaseAt")]
     public DateTimeOffset? NextReleaseAt { get; set; }
 
-    [JsonPropertyName("nextReleaseLabel")]
     public string? NextReleaseLabel { get; set; }
-
-    [JsonPropertyName("coverImage")]
-    public AniListCoverImage? CoverImage { get; set; }
 }
