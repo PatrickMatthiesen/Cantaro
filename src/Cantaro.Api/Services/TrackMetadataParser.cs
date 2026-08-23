@@ -104,9 +104,18 @@ public static partial class TrackMetadataParser
         }
 
         var normalizedValue = NormalizeDashes(value);
+        var versionMarkers = ExtractMarkers(normalizedValue, VersionMarkerRegex()).ToList();
+        if (SourceVersionContextRegex().IsMatch(normalizedValue))
+        {
+            versionMarkers.Add("source-context");
+        }
+
         return new ParsedTitleSemantics
         {
-            VersionMarkers = ExtractMarkers(normalizedValue, VersionMarkerRegex()),
+            VersionMarkers = versionMarkers
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(marker => marker, StringComparer.Ordinal)
+                .ToArray(),
             PlaybackModifiers = ExtractMarkers(normalizedValue, PlaybackModifierRegex()),
             PresentationMarkers = ExtractMarkers(normalizedValue, PresentationMarkerRegex())
         };
@@ -427,6 +436,9 @@ public static partial class TrackMetadataParser
 
     [GeneratedRegex(@"\b(intro\s+dirty|acoustic|live|remix(?:ed)?|remaster(?:ed)?|instrumental|karaoke|demo|dirty|clean|intro|outro|radio(?:\s+(?:edit|version))?|vip\s+mix|extended(?:\s+mix)?|club\s+mix|original\s+mix|acapella|stripped|cover|edit)\b", RegexOptions.IgnoreCase)]
     private static partial Regex VersionMarkerRegex();
+
+    [GeneratedRegex(@"[\[(]\s*from\s+[^\])]+[\])]", RegexOptions.IgnoreCase)]
+    private static partial Regex SourceVersionContextRegex();
 
     [GeneratedRegex(@"\b(official\s+(?:music\s+)?video|lyric(?:s)?\s+video|visualizer)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PresentationMarkerRegex();
