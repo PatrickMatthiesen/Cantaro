@@ -69,36 +69,45 @@ function ProgressStepper({
     onChange(clampProgressValue(nextValue, max));
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-      <IconButton
-        label={`Decrease ${label.toLowerCase()}`}
-        onClick={() => setProgressValue(currentValue - 1)}
-        disabled={!canDecrease}
-        className="hover:bg-danger-surface hover:text-danger-content"
-      >
-        <Minus size={18} aria-hidden />
-      </IconButton>
-      <input
-        type="range"
-        min={0}
-        max={sliderMax}
-        step={1}
-        value={currentValue}
-        onChange={(event) => setProgressValue(Number(event.target.value))}
-        aria-label={`${label} progress`}
-        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none bg-surface-subtle accent-personal-accent outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-personal-accent [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-personal-accent"
-        style={{
-          background: `linear-gradient(to right, var(--color-personal-accent) ${progressPercent}%, var(--color-surface-subtle) ${progressPercent}%)`,
-        }}
-      />
-      <IconButton
-        label={`Increase ${label.toLowerCase()}`}
-        onClick={() => setProgressValue(currentValue + 1)}
-        disabled={!canIncrease}
-        className="hover:bg-success-surface hover:text-success-content"
-      >
-        <Plus size={18} aria-hidden />
-      </IconButton>
+    <div className="grid min-w-0 gap-2">
+      <div className="flex items-baseline justify-between gap-4">
+        <h3 className="text-sm font-semibold text-content-muted">{label}</h3>
+        <p className="text-lg font-black tabular-nums text-content">
+          <span className="text-personal-accent-strong">{currentValue}</span>
+          <span className="text-content-subtle"> / {max ?? "?"}</span>
+        </p>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <IconButton
+          label={`Decrease ${label.toLowerCase()}`}
+          onClick={() => setProgressValue(currentValue - 1)}
+          disabled={!canDecrease}
+          className="hover:bg-danger-surface hover:text-danger-content"
+        >
+          <Minus size={18} aria-hidden />
+        </IconButton>
+        <input
+          type="range"
+          min={0}
+          max={sliderMax}
+          step={1}
+          value={currentValue}
+          onChange={(event) => setProgressValue(Number(event.target.value))}
+          aria-label={`${label} progress`}
+          className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none bg-surface-subtle accent-personal-accent outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-personal-accent [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-personal-accent"
+          style={{
+            background: `linear-gradient(to right, var(--color-personal-accent) ${progressPercent}%, var(--color-surface-subtle) ${progressPercent}%)`,
+          }}
+        />
+        <IconButton
+          label={`Increase ${label.toLowerCase()}`}
+          onClick={() => setProgressValue(currentValue + 1)}
+          disabled={!canIncrease}
+          className="hover:bg-success-surface hover:text-success-content"
+        >
+          <Plus size={18} aria-hidden />
+        </IconButton>
+      </div>
     </div>
   );
 }
@@ -190,7 +199,7 @@ function ProgressControls({
   capabilities: ReturnType<typeof getProgressCapabilities>;
 }) {
   return (
-    <div className="grid min-w-0 flex-1 gap-2">
+    <div className="grid min-w-0 flex-1 gap-4">
       {capabilities.supportsEpisodes ? (
         <ProgressStepper
           label="Episodes"
@@ -331,12 +340,18 @@ function ProgressStateMessage({ status }: { status: "loading" | "error" }) {
   );
 }
 
-function NotInLibraryProgress({ total }: { total?: number }) {
+function NotInLibraryProgress({
+  label,
+  total,
+}: {
+  label: string;
+  total?: number;
+}) {
   return (
     <section className="grid gap-4 border-b border-border-subtle px-4 py-5 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center sm:px-5 xl:px-7">
       <div className="min-w-28">
         <h2 className="text-sm font-semibold text-content-muted">
-          Your progress
+          {label}
         </h2>
         <p className="mt-2 text-2xl font-black tabular-nums text-content">
           <span className="text-personal-accent-strong">0</span>
@@ -360,43 +375,21 @@ function NotInLibraryProgress({ total }: { total?: number }) {
 
 function TrackedProgressCockpit(props: ProgressCockpitProps) {
   const capabilities = getProgressCapabilities(props.entry.title);
-  const progressSummary = getPrimaryProgressSummary(
-    props.entry.title,
-    props.progressEpisodes,
-    props.progressChapters,
-    props.progressVolumes,
-  );
   const hasStatusChanged = getEntryStatusChanged(props);
 
   return (
     <section
-      aria-labelledby="media-progress-heading"
-      className="flex flex-col gap-4 border-b border-border-subtle px-4 py-5 sm:px-5 xl:flex-row xl:items-center xl:px-7"
+      aria-label="Progress"
+      className="grid gap-6 border-b border-border-subtle px-4 py-5 sm:px-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center xl:px-7"
     >
-      <div className="min-w-28">
-        <h2
-          id="media-progress-heading"
-          className="text-sm font-semibold text-content-muted"
-        >
-          Your progress
-        </h2>
-        <p className="mt-2 text-2xl font-black tabular-nums text-content">
-          <span className="text-personal-accent-strong">
-            {progressSummary.value ?? 0}
-          </span>
-          <span className="text-content-subtle">
-            {" "}
-            / {progressSummary.total ?? "?"}
-          </span>
-        </p>
+      <div className="min-w-0">
+        <ProgressControls props={props} capabilities={capabilities} />
         {hasStatusChanged ? (
-          <p className="mt-1 text-xs font-semibold text-warning-content">
+          <p className="mt-2 text-xs font-semibold text-warning-content">
             Unsaved changes
           </p>
         ) : null}
       </div>
-
-      <ProgressControls props={props} capabilities={capabilities} />
 
       <div className="flex flex-wrap items-end gap-4 xl:ml-auto xl:justify-end">
         <div>
@@ -444,7 +437,15 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
     props.progressVolumes,
   );
   if (!props.entry.isInLibrary) {
-    return <NotInLibraryProgress total={progressSummary.total} />;
+    return (
+      <NotInLibraryProgress
+        label={
+          progressSummary.noun.charAt(0).toUpperCase() +
+          progressSummary.noun.slice(1)
+        }
+        total={progressSummary.total}
+      />
+    );
   }
   return <TrackedProgressCockpit {...props} />;
 }
