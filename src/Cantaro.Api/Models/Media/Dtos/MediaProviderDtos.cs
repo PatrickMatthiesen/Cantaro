@@ -40,6 +40,48 @@ public class MediaLibraryImportEventDto
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public class MediaProviderInitialSyncTitleDto
+{
+    public Guid MediaTitleId { get; set; }
+    public required string Title { get; set; }
+    public required string MediaKind { get; set; }
+}
+
+public class MediaProviderInitialSyncPreviewDto
+{
+    public required string ProviderId { get; set; }
+    public required string Status { get; set; }
+    public string? Fingerprint { get; set; }
+    public IReadOnlyList<string> RefreshedProviderIds { get; set; } = [];
+    public int WillAdd { get; set; }
+    public int WillUpdate { get; set; }
+    public int AlreadyAligned { get; set; }
+    public int ProviderOnly { get; set; }
+    public int NeedsMatching { get; set; }
+    public int PendingOperations { get; set; }
+    public string? Message { get; set; }
+    public IReadOnlyList<MediaProviderInitialSyncTitleDto> UnresolvedTitles { get; set; } = [];
+    public DateTimeOffset GeneratedAt { get; set; }
+}
+
+public class MediaProviderInitialSyncApplyDto
+{
+    public required string Fingerprint { get; set; }
+}
+
+public class MediaProviderInitialSyncResultDto
+{
+    public required string ProviderId { get; set; }
+    public required string Status { get; set; }
+    public int Added { get; set; }
+    public int Updated { get; set; }
+    public int AlreadyAligned { get; set; }
+    public int ProviderOnly { get; set; }
+    public int NeedsMatching { get; set; }
+    public int QueuedOperations { get; set; }
+    public DateTimeOffset GeneratedAt { get; set; }
+}
+
 public class MediaProgressUpdateDto
 {
     public int? ProgressEpisodes { get; set; }

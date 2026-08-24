@@ -231,6 +231,31 @@ public class MediaScoreUpdateRequest
     public DateTimeOffset? LastKnownRemoteUpdateAt { get; set; }
 }
 
+/// <summary>
+/// Writes Cantaro's complete canonical library state to one provider title.
+/// Providers should apply this as a single create-or-update mutation whenever
+/// their API supports it.
+/// </summary>
+public class MediaLibraryStateSyncRequest
+{
+    public required string ProviderMediaId { get; set; }
+
+    public required string Status { get; set; }
+
+    /// <summary>
+    /// Canonical Cantaro score in the inclusive range 1..100; null clears it.
+    /// </summary>
+    public decimal? Score { get; set; }
+
+    public int? ProgressEpisodes { get; set; }
+
+    public int? ProgressChapters { get; set; }
+
+    public int? ProgressVolumes { get; set; }
+
+    public DateTimeOffset? LastKnownRemoteUpdateAt { get; set; }
+}
+
 public class MediaProviderMutationResult
 {
     public required string ProviderId { get; set; }

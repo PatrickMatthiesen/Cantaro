@@ -228,6 +228,44 @@ export interface MediaProviderAccountStatusDto {
     connectedAt?: string;
 }
 
+export interface MediaInitialSyncUnresolvedTitleDto {
+    mediaTitleId: string;
+    title: string;
+    mediaKind: string;
+}
+
+export interface MediaInitialSyncPreviewDto {
+    providerId: string;
+    status: 'ready' | 'settling' | 'blocked';
+    fingerprint?: string;
+    refreshedProviderIds: string[];
+    willAdd: number;
+    willUpdate: number;
+    alreadyAligned: number;
+    providerOnly: number;
+    needsMatching: number;
+    pendingOperations: number;
+    message?: string;
+    unresolvedTitles: MediaInitialSyncUnresolvedTitleDto[];
+    generatedAt: string;
+}
+
+export interface MediaInitialSyncApplyRequestDto {
+    fingerprint: string;
+}
+
+export interface MediaInitialSyncApplyResultDto {
+    providerId: string;
+    status: 'queued' | 'completed';
+    added: number;
+    updated: number;
+    alreadyAligned: number;
+    providerOnly: number;
+    needsMatching: number;
+    queuedOperations: number;
+    generatedAt: string;
+}
+
 export interface MediaImportDto {
     providerId: string;
     importedCount: number;

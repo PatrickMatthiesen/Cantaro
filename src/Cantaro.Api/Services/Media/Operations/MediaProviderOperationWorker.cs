@@ -25,7 +25,15 @@ public class MediaProviderOperationWorker(
                 }
 
                 var processor = scope.ServiceProvider.GetRequiredService<MediaProviderOperationProcessor>();
-                var processedCount = await processor.ProcessDueOperationsAsync(stoppingToken);
+                var processedCount = 0;
+                int batchCount;
+                do
+                {
+                    batchCount = await processor.ProcessDueOperationsAsync(stoppingToken);
+                    processedCount += batchCount;
+                }
+                while (batchCount == 10 && !stoppingToken.IsCancellationRequested);
+
                 if (processedCount > 0)
                 {
                     _logger.LogInformation("Processed {Count} queued media provider operations.", processedCount);

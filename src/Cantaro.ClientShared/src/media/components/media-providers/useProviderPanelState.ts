@@ -2,9 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { mediaApi } from '../../services/mediaApi';
 import { clearStoredValue, remoteCheckTimestampKey, writeStoredValue } from '../../services/mediaRefreshCache';
-import type { MediaImportDto, MediaImportRequestDto, MediaLibraryImportEventDto, MediaProviderAccountStatusDto } from '../../services/mediaApi';
+import type {
+  MediaImportDto,
+  MediaImportRequestDto,
+  MediaInitialSyncApplyResultDto,
+  MediaInitialSyncPreviewDto,
+  MediaLibraryImportEventDto,
+  MediaProviderAccountStatusDto,
+} from '../../services/mediaApi';
 
-function shouldAutoImportAfterConnect(providerId: string): boolean {
+function shouldAutoPreviewAfterConnect(providerId: string): boolean {
   const search = new URLSearchParams(window.location.search);
   return search.get('connected') === 'true' && search.get('provider') === providerId;
 }
@@ -126,19 +133,134 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
   };
 }
 
+function useProviderInitialSync(
+  providerId: string,
+  isConnected: boolean,
+  setError: (error: string | null) => void,
+  hasTriggeredConnectedPreview: MutableRefObject<boolean>,
+) {
+  const [initialSyncPreview, setInitialSyncPreview] = useState<MediaInitialSyncPreviewDto | null>(null);
+  const [initialSyncResult, setInitialSyncResult] = useState<MediaInitialSyncApplyResultDto | null>(null);
+  const [isPreviewingInitialSync, setIsPreviewingInitialSync] = useState(false);
+  const [isApplyingInitialSync, setIsApplyingInitialSync] = useState(false);
+  const previewRequestVersion = useRef(0);
+
+  const handlePreviewInitialSync = useCallback(async () => {
+    const requestVersion = ++previewRequestVersion.current;
+    setIsPreviewingInitialSync(true);
+    setInitialSyncResult(null);
+    setError(null);
+
+    try {
+      const preview = await mediaApi.previewInitialSync(providerId);
+      if (requestVersion !== previewRequestVersion.current) {
+        return null;
+      }
+      setInitialSyncPreview(preview);
+      return preview;
+    } catch {
+      if (requestVersion === previewRequestVersion.current) {
+        setError('Cantaro couldn’t prepare this sync. Your provider libraries have not been changed.');
+      }
+      return null;
+    } finally {
+      if (requestVersion === previewRequestVersion.current) {
+        setIsPreviewingInitialSync(false);
+      }
+    }
+  }, [providerId, setError]);
+
+  useEffect(() => {
+    if (initialSyncPreview?.status !== 'settling') {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void handlePreviewInitialSync();
+    }, 1500);
+    return () => window.clearTimeout(timeoutId);
+  }, [handlePreviewInitialSync, initialSyncPreview]);
+
+  useEffect(() => {
+    if (!isConnected || hasTriggeredConnectedPreview.current || !shouldAutoPreviewAfterConnect(providerId)) {
+      return;
+    }
+
+    hasTriggeredConnectedPreview.current = true;
+    void handlePreviewInitialSync();
+  }, [handlePreviewInitialSync, hasTriggeredConnectedPreview, isConnected, providerId]);
+
+  useEffect(() => {
+    if (isConnected) {
+      return;
+    }
+
+    previewRequestVersion.current++;
+    setInitialSyncPreview(null);
+    setInitialSyncResult(null);
+    setIsPreviewingInitialSync(false);
+    setIsApplyingInitialSync(false);
+  }, [isConnected]);
+
+  const handleApplyInitialSync = useCallback(async () => {
+    if (!initialSyncPreview || initialSyncPreview.status !== 'ready' || !initialSyncPreview.fingerprint) {
+      setError('This comparison is no longer current. Prepare a new preview before syncing.');
+      return null;
+    }
+
+    setIsApplyingInitialSync(true);
+    setError(null);
+    try {
+      const result = await mediaApi.applyInitialSync(providerId, {
+        fingerprint: initialSyncPreview.fingerprint,
+      });
+      setInitialSyncResult(result);
+      clearConnectSearchParams();
+      return result;
+    } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        void handlePreviewInitialSync();
+      } else {
+        setError('Cantaro couldn’t start this sync. Nothing new was sent to the provider.');
+      }
+      return null;
+    } finally {
+      setIsApplyingInitialSync(false);
+    }
+  }, [handlePreviewInitialSync, initialSyncPreview, providerId, setError]);
+
+  const handleDismissInitialSync = useCallback(() => {
+    previewRequestVersion.current++;
+    setInitialSyncPreview(null);
+    setInitialSyncResult(null);
+    setIsPreviewingInitialSync(false);
+    clearConnectSearchParams();
+  }, []);
+
+  return {
+    initialSyncPreview,
+    initialSyncResult,
+    isPreviewingInitialSync,
+    isApplyingInitialSync,
+    handlePreviewInitialSync,
+    handleApplyInitialSync,
+    handleDismissInitialSync,
+  };
+}
+
 function useProviderDisconnect(
   providerId: string,
   setError: (error: string | null) => void,
   setStatus: Dispatch<SetStateAction<MediaProviderAccountStatusDto | null>>,
   setLastImport: (value: MediaImportDto | null) => void,
-  hasTriggeredConnectedImport: MutableRefObject<boolean>,
+  hasTriggeredConnectedPreview: MutableRefObject<boolean>,
 ) {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   const handleDisconnect = useCallback(async () => {
     setIsDisconnecting(true);
     setError(null);
-    hasTriggeredConnectedImport.current = false;
+    hasTriggeredConnectedPreview.current = false;
 
     try {
       await mediaApi.disconnectProvider(providerId);
@@ -150,7 +272,7 @@ function useProviderDisconnect(
     } finally {
       setIsDisconnecting(false);
     }
-  }, [hasTriggeredConnectedImport, providerId, setError, setLastImport, setStatus]);
+  }, [hasTriggeredConnectedPreview, providerId, setError, setLastImport, setStatus]);
 
   return {
     isDisconnecting,
@@ -158,37 +280,23 @@ function useProviderDisconnect(
   };
 }
 
-function useAutoImportAfterConnect(
-  providerId: string,
-  isConnected: boolean,
-  handleImport: () => Promise<MediaImportRequestDto | null>,
-  hasTriggeredConnectedImport: MutableRefObject<boolean>,
-) {
-  useEffect(() => {
-    if (!isConnected || hasTriggeredConnectedImport.current || !shouldAutoImportAfterConnect(providerId)) {
-      return;
-    }
-
-    hasTriggeredConnectedImport.current = true;
-    void handleImport().finally(() => {
-      clearConnectSearchParams();
-    });
-  }, [handleImport, hasTriggeredConnectedImport, isConnected, providerId]);
-}
-
 export function useProviderPanelState(providerId: string) {
-  const hasTriggeredConnectedImport = useRef(false);
+  const hasTriggeredConnectedPreview = useRef(false);
   const { status, setStatus, isLoadingStatus, error, setError, reloadStatus } = useProviderStatus(providerId);
   const { isImporting, lastImport, setLastImport, handleImport } = useProviderImport(providerId, setError);
+  const initialSync = useProviderInitialSync(
+    providerId,
+    Boolean(status?.isConnected),
+    setError,
+    hasTriggeredConnectedPreview,
+  );
   const { isDisconnecting, handleDisconnect } = useProviderDisconnect(
     providerId,
     setError,
     setStatus,
     setLastImport,
-    hasTriggeredConnectedImport,
+    hasTriggeredConnectedPreview,
   );
-
-  useAutoImportAfterConnect(providerId, Boolean(status?.isConnected), handleImport, hasTriggeredConnectedImport);
 
   const handleConnect = useCallback(() => {
     mediaApi.connectProvider(providerId, {
@@ -208,5 +316,6 @@ export function useProviderPanelState(providerId: string) {
     handleDisconnect,
     handleImport,
     reloadStatus,
+    ...initialSync,
   };
 }

@@ -105,6 +105,65 @@ public sealed class MyAnimeListMediaProviderTests
     }
 
     [Fact]
+    public async Task SyncLibraryStateAsync_UpsertsCompleteAnimeStateWithOneMediaIdRequest()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(
+            _ => JsonResponse("{\"updated_at\":\"2026-08-23T12:00:00Z\"}"),
+            connectedUserId: 104);
+
+        var result = await fixture.Provider.SyncLibraryStateAsync(
+            104,
+            new MediaLibraryStateSyncRequest
+            {
+                ProviderMediaId = "anime:52991",
+                Status = MediaLibraryStatuses.Repeating,
+                Score = 84m,
+                ProgressEpisodes = 17
+            },
+            CancellationToken.None);
+
+        Assert.Equal("anime:52991", result.ProviderMediaId);
+        Assert.Equal(HttpMethod.Put, Assert.Single(fixture.Handler.Methods));
+        Assert.Equal("/v2/anime/52991/my_list_status", Assert.Single(fixture.Handler.Paths));
+        var body = Assert.Single(fixture.Handler.Bodies);
+        Assert.Contains("status=watching", body);
+        Assert.Contains("is_rewatching=true", body);
+        Assert.Contains("score=8", body);
+        Assert.Contains("num_watched_episodes=17", body);
+        Assert.DoesNotContain("num_chapters_read", body);
+        Assert.DoesNotContain("num_volumes_read", body);
+    }
+
+    [Fact]
+    public async Task SyncLibraryStateAsync_ClearsMangaScoreAndWritesBothProgressDimensions()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(
+            _ => JsonResponse("{\"updated_at\":\"2026-08-23T12:00:00Z\"}"),
+            connectedUserId: 105);
+
+        await fixture.Provider.SyncLibraryStateAsync(
+            105,
+            new MediaLibraryStateSyncRequest
+            {
+                ProviderMediaId = "manga:87610",
+                Status = MediaLibraryStatuses.Current,
+                Score = null,
+                ProgressChapters = 168,
+                ProgressVolumes = 23
+            },
+            CancellationToken.None);
+
+        Assert.Equal("/v2/manga/87610/my_list_status", Assert.Single(fixture.Handler.Paths));
+        var body = Assert.Single(fixture.Handler.Bodies);
+        Assert.Contains("status=reading", body);
+        Assert.Contains("is_rereading=false", body);
+        Assert.Contains("score=0", body);
+        Assert.Contains("num_chapters_read=168", body);
+        Assert.Contains("num_volumes_read=23", body);
+        Assert.DoesNotContain("num_watched_episodes", body);
+    }
+
+    [Fact]
     public async Task GetTitleDetailsAsync_FinishedAnimeReturnsNormalizedReleaseCounts()
     {
         await using var fixture = await ProviderFixture.CreateAsync(_ => JsonResponse("""
@@ -221,12 +280,14 @@ public sealed class MyAnimeListMediaProviderTests
     {
         public List<HttpMethod> Methods { get; } = [];
         public List<string> Bodies { get; } = [];
+        public List<string> Paths { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             Methods.Add(request.Method);
+            Paths.Add(request.RequestUri!.AbsolutePath);
             Bodies.Add(request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken));

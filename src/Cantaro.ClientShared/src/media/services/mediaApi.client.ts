@@ -10,6 +10,9 @@ import type {
     MediaTitleDetailDto,
     MediaViewerStateDto,
     MediaLibraryImportEventDto,
+    MediaInitialSyncApplyRequestDto,
+    MediaInitialSyncApplyResultDto,
+    MediaInitialSyncPreviewDto,
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
     MediaLinkRequestDto,
@@ -161,6 +164,30 @@ export class MediaApiClient {
             method: 'POST',
         });
         await this.ensureOk(response, 'Failed to disconnect media provider');
+    }
+
+    async previewInitialSync(providerId: string): Promise<MediaInitialSyncPreviewDto> {
+        const response = await this.request(
+            `/api/media/providers/${encodeURIComponent(providerId)}/initial-sync/preview`,
+            { method: 'POST' },
+        );
+        await this.ensureOk(response, 'Failed to prepare provider sync');
+        return response.json() as Promise<MediaInitialSyncPreviewDto>;
+    }
+
+    async applyInitialSync(
+        providerId: string,
+        request: MediaInitialSyncApplyRequestDto,
+    ): Promise<MediaInitialSyncApplyResultDto> {
+        const response = await this.request(
+            `/api/media/providers/${encodeURIComponent(providerId)}/initial-sync/apply`,
+            {
+                method: 'POST',
+                body: JSON.stringify(request),
+            },
+        );
+        await this.ensureOk(response, 'Failed to sync Cantaro to the provider');
+        return response.json() as Promise<MediaInitialSyncApplyResultDto>;
     }
 
     async importLibrary(providerId: string): Promise<MediaImportRequestDto> {

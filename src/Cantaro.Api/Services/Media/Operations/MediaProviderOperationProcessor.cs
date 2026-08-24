@@ -85,6 +85,20 @@ public class MediaProviderOperationProcessor(
             cancellationToken);
     }
 
+    public async Task<MediaProviderOperation> EnqueueLibraryStateSyncAsync(
+        int userId,
+        MediaLibraryProviderBinding binding,
+        MediaLibraryStateSyncRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await EnqueueAsync(
+            userId,
+            binding,
+            MediaProviderOperationTypes.SyncLibraryState,
+            request,
+            cancellationToken);
+    }
+
     public async Task<MediaProviderOperationExecutionResult> ProcessOperationAsync(Guid operationId, CancellationToken cancellationToken)
     {
         DetachTrackedOperation(operationId);
@@ -268,6 +282,10 @@ public class MediaProviderOperationProcessor(
                 operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
                 DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
+            MediaProviderOperationTypes.SyncLibraryState => await provider.SyncLibraryStateAsync(
+                operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
+                DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson),
+                cancellationToken),
             MediaProviderOperationTypes.AutoProgressUpdate => await ExecuteAutoProgressAsync(
                 provider,
                 operation,
@@ -424,10 +442,18 @@ public class MediaProviderOperationProcessor(
                     payload.ObservationMatchScore);
                 break;
             }
+            case MediaProviderOperationTypes.SyncLibraryState:
+                // Cantaro is the source of truth for a whole-state sync. The
+                // canonical entry already contains the desired values, so only
+                // provider synchronization metadata should change here.
+                break;
         }
 
-        entry.LastLocalEditAt = now;
-        entry.UpdatedAt = now;
+        if (operation.OperationType != MediaProviderOperationTypes.SyncLibraryState)
+        {
+            entry.LastLocalEditAt = now;
+            entry.UpdatedAt = now;
+        }
         binding.LastSyncedAt = now;
         binding.LastRemoteUpdateAt = result.LastRemoteUpdateAt ?? now;
         binding.UpdatedAt = now;

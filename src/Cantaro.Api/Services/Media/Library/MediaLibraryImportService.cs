@@ -17,7 +17,8 @@ public class MediaLibraryImportService(
         int userId,
         ConnectedServiceAccount account,
         MediaProviderLibraryImportResult importResult,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool fanOutChanges = true)
     {
         var mediaIds = importResult.Items
             .Select(item => item.ProviderMediaId)
@@ -141,7 +142,7 @@ public class MediaLibraryImportService(
             if (shouldApplyRemoteState)
             {
                 ApplyRemoteLibraryState(entry, item, importResult.ImportedAt);
-                if (!entryWasCreated)
+                if (!entryWasCreated && fanOutChanges)
                 {
                     fanOutOperations.AddRange(CreateFanOutOperations(
                         entry,

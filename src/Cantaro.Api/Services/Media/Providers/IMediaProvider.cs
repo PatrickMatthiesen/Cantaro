@@ -37,5 +37,11 @@ public interface IMediaProvider
 
     Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken);
 
+    Task<MediaProviderMutationResult> SyncLibraryStateAsync(
+        int userId,
+        MediaLibraryStateSyncRequest request,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException($"{ProviderId} does not support whole-library-state synchronization.");
+
     Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken);
 }
