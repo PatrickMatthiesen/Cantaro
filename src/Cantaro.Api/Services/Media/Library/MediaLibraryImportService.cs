@@ -262,6 +262,18 @@ public class MediaLibraryImportService(
     private static string BuildTitleProviderKey(Guid mediaTitleId, string providerId)
         => $"{mediaTitleId:N}\u001f{NormalizeProviderId(providerId)}";
 
+    private static bool ShouldApplyCanonicalMetadata(
+        Guid mediaTitleId,
+        string incomingProviderId,
+        IDictionary<string, MediaProviderLink> titleProviderLinks)
+    {
+        var normalizedProviderId = NormalizeProviderId(incomingProviderId);
+        return normalizedProviderId != MediaObservationSiteIdentifiers.MyAnimeList
+            || !titleProviderLinks.ContainsKey(BuildTitleProviderKey(
+                mediaTitleId,
+                MediaObservationSiteIdentifiers.AniList));
+    }
+
     private MediaProviderLink GetOrCreateProviderLink(
         MediaProviderLibraryItem item,
         MediaProviderLibraryImportResult importResult,
@@ -272,7 +284,11 @@ public class MediaLibraryImportService(
     {
         if (existingLinks.TryGetValue(item.ProviderMediaId, out var existingLink))
         {
-            if (existingLink.MediaTitle is not null)
+            if (existingLink.MediaTitle is not null
+                && ShouldApplyCanonicalMetadata(
+                    existingLink.MediaTitleId,
+                    importResult.ProviderId,
+                    titleProviderLinks))
             {
                 ApplyToMediaTitle(existingLink.MediaTitle, item, importResult.ImportedAt);
             }
@@ -312,7 +328,13 @@ public class MediaLibraryImportService(
             && crossReferenceAnchors[0].MediaTitle is { } anchoredTitle)
         {
             title = anchoredTitle;
-            ApplyToMediaTitle(title, item, importResult.ImportedAt);
+            if (ShouldApplyCanonicalMetadata(
+                    title.Id,
+                    importResult.ProviderId,
+                    titleProviderLinks))
+            {
+                ApplyToMediaTitle(title, item, importResult.ImportedAt);
+            }
         }
         else
         {
