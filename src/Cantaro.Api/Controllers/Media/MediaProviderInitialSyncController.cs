@@ -80,6 +80,24 @@ public sealed class MediaProviderInitialSyncController(
         }
     }
 
+    [HttpGet("batches/{batchId:guid}")]
+    public async Task<ActionResult<MediaProviderInitialSyncProgressDto>> GetProgress(
+        string providerId,
+        Guid batchId,
+        CancellationToken cancellationToken)
+    {
+        if (!_mediaProviderRegistry.IsSupported(providerId))
+        {
+            return NotFound(new { error = $"Media provider '{providerId}' is not implemented" });
+        }
+
+        return Ok(await _initialSyncService.GetProgressAsync(
+            await GetCurrentUserIdAsync(),
+            providerId,
+            batchId,
+            cancellationToken));
+    }
+
     private async Task<int> GetCurrentUserIdAsync()
     {
         var user = await _userManager.GetUserAsync(User);

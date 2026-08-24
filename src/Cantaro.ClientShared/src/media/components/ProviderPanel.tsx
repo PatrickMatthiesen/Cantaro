@@ -39,6 +39,7 @@ function InitialSyncPanelSlot({
             isApplying={state.isApplyingInitialSync}
             onApply={state.handleApplyInitialSync}
             onRetry={state.handlePreviewInitialSync}
+            onImport={state.handleImport}
             onDismiss={state.handleDismissInitialSync}
         />
     );

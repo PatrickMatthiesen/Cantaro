@@ -690,6 +690,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
             entity.HasIndex(e => e.MediaLibraryProviderBindingId);
+            entity.HasIndex(e => e.BatchId);
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

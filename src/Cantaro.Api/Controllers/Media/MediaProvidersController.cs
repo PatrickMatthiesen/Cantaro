@@ -786,11 +786,17 @@ public class MediaProvidersController(
     {
         var existingLink = await _dbContext.MediaProviderLinks
             .Include(link => link.MediaTitle)
+                .ThenInclude(title => title!.ProviderLinks)
             .FirstOrDefaultAsync(link => link.Provider == providerId && link.ExternalId == providerMediaId, cancellationToken);
 
         if (existingLink?.MediaTitle is { } linkedTitle)
         {
-            ApplyProviderDetails(linkedTitle, details, now);
+            if (MediaCanonicalMetadataPolicy.ShouldApply(
+                    providerId,
+                    linkedTitle.ProviderLinks.Select(link => link.Provider)))
+            {
+                ApplyProviderDetails(linkedTitle, details, now);
+            }
             await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
             existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
             existingLink.AvailabilityLastVerifiedAt = now;
@@ -806,6 +812,7 @@ public class MediaProvidersController(
             var normalizedMediaId = reference.ProviderMediaId.Trim();
             var crossReference = await _dbContext.MediaProviderLinks
                 .Include(link => link.MediaTitle)
+                    .ThenInclude(title => title!.ProviderLinks)
                 .FirstOrDefaultAsync(
                     link => link.Provider == normalizedProvider && link.ExternalId == normalizedMediaId,
                     cancellationToken);
@@ -838,7 +845,12 @@ public class MediaProvidersController(
         if (crossReferenceAnchors.Count == 1 && crossReferenceAnchors[0].MediaTitle is { } anchoredTitle)
         {
             title = anchoredTitle;
-            ApplyProviderDetails(title, details, now);
+            if (MediaCanonicalMetadataPolicy.ShouldApply(
+                    providerId,
+                    title.ProviderLinks.Select(link => link.Provider)))
+            {
+                ApplyProviderDetails(title, details, now);
+            }
         }
         else
         {

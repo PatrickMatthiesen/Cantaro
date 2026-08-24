@@ -10,11 +10,13 @@ namespace Cantaro.Api.Services;
 public sealed class MyAnimeListApiClient(
     HttpClient httpClient,
     IOptions<MyAnimeListOptions> options,
+    MyAnimeListRequestGate requestGate,
     ILogger<MyAnimeListApiClient> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient = httpClient;
     private readonly MyAnimeListOptions _options = options.Value;
+    private readonly MyAnimeListRequestGate _requestGate = requestGate;
     private readonly ILogger<MyAnimeListApiClient> _logger = logger;
 
     public string BuildAuthorizationUrl(string redirectUri, string state, string codeChallenge)
@@ -123,7 +125,9 @@ public sealed class MyAnimeListApiClient(
                     .Select(pair => new KeyValuePair<string, string>(pair.Key, pair.Value!)));
         }
 
+        using var requestLease = await _requestGate.AcquireAsync(cancellationToken);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var retryAfter = _requestGate.ObserveResponse(response);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -132,7 +136,7 @@ public sealed class MyAnimeListApiClient(
                 method,
                 request.RequestUri?.AbsolutePath,
                 response.StatusCode);
-            throw new MyAnimeListRequestException(response.StatusCode, ReadRetryAfter(response));
+            throw new MyAnimeListRequestException(response.StatusCode, retryAfter ?? ReadRetryAfter(response));
         }
 
         return JsonSerializer.Deserialize<T>(responseBody, SerializerOptions)

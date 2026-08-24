@@ -122,6 +122,32 @@ public sealed class MyAnimeListApiClientTests
         Assert.Single(handler.Methods);
     }
 
+    [Fact]
+    public async Task RequestGate_SerializesPhysicalRequests()
+    {
+        var gate = new MyAnimeListRequestGate(TimeProvider.System, TimeSpan.Zero);
+        using var firstLease = await gate.AcquireAsync(CancellationToken.None);
+
+        var secondLeaseTask = gate.AcquireAsync(CancellationToken.None);
+
+        Assert.False(secondLeaseTask.IsCompleted);
+    }
+
+    [Fact]
+    public async Task RequestGate_ObservesRetryAfterProviderWide()
+    {
+        var gate = new MyAnimeListRequestGate(TimeProvider.System, TimeSpan.Zero);
+        using (var lease = await gate.AcquireAsync(CancellationToken.None))
+        using (var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+        {
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromMinutes(1));
+            Assert.True(gate.ObserveResponse(response) > TimeSpan.Zero);
+        }
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => gate.AcquireAsync(cancellation.Token));
+    }
+
     private static MyAnimeListApiClient CreateClient(HttpMessageHandler handler)
     {
         return new MyAnimeListApiClient(
@@ -131,6 +157,7 @@ public sealed class MyAnimeListApiClientTests
                 ClientId = "client-id",
                 ClientSecret = "client-secret"
             }),
+            new MyAnimeListRequestGate(TimeProvider.System, TimeSpan.Zero),
             NullLogger<MyAnimeListApiClient>.Instance);
     }
 

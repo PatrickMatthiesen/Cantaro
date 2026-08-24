@@ -101,6 +101,7 @@ builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<IMediaProvider, MyAnimeListMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
 builder.Services.AddScoped<MediaProviderInitialSyncService>();
+builder.Services.AddSingleton<MediaProviderInitialSyncGate>();
 builder.Services.AddScoped<MediaTitleRelationSyncService>();
 builder.Services.AddScoped<MediaFranchiseGraphService>();
 builder.Services.AddSingleton<MediaRelationGraphRefreshQueue>();

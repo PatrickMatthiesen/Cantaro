@@ -838,6 +838,95 @@ public class MediaObservationsApiTests
         Assert.Single(await fixture.Db.MediaObservationEpisodeOffsets.ToListAsync());
     }
 
+    [Fact]
+    public async Task Resolve_MalCrossReference_PreservesAniListCanonicalMetadata()
+    {
+        var provider = new SearchOnlyMediaProvider(
+            providerId: MediaObservationSiteIdentifiers.MyAnimeList,
+            titleDetails: new MediaProviderTitleDetails
+            {
+                ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+                ProviderMediaId = "anime:154587",
+                Title = "MAL title",
+                MediaKind = MediaKinds.Anime,
+                PosterUrl = "https://example.test/mal.jpg",
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                CrossReferences =
+                [
+                    new MediaProviderCrossReference
+                    {
+                        ProviderId = MediaObservationSiteIdentifiers.AniList,
+                        ProviderMediaId = "154587"
+                    }
+                ]
+            });
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "AniList title",
+            PosterUrl = "https://example.test/anilist.jpg",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/MAL-CROSS-REF/episode-1",
+            ObservedTitle = "AniList title - Episode 1",
+            ProgressHint = "1",
+            ObservedAt = now,
+            MatchStatus = MediaObservationStatuses.NoMatch,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.Db.AddRange(
+            title,
+            observation,
+            new ConnectedServiceAccount
+            {
+                Id = 901,
+                UserId = fixture.UserId,
+                Service = MediaObservationSiteIdentifiers.MyAnimeList,
+                ExternalAccountId = "viewer-901",
+                CreatedAt = now.UtcDateTime,
+                UpdatedAt = now.UtcDateTime
+            },
+            new MediaProviderLink
+            {
+                Id = Guid.NewGuid(),
+                MediaTitleId = title.Id,
+                Provider = MediaObservationSiteIdentifiers.AniList,
+                ExternalId = "154587",
+                LinkSource = MediaMappingSources.Imported,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+            ProviderMediaId = "anime:154587",
+            AddToLibraryConfirmed = true
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var persisted = await fixture.Db.MediaTitles.SingleAsync();
+        Assert.Equal("AniList title", persisted.CanonicalTitle);
+        Assert.Equal("https://example.test/anilist.jpg", persisted.PosterUrl);
+        Assert.Contains(
+            await fixture.Db.MediaProviderLinks.ToListAsync(),
+            link => link.Provider == MediaObservationSiteIdentifiers.MyAnimeList);
+    }
+
     private sealed class MediaObservationFixture : IAsyncDisposable
     {
         private MediaObservationFixture(
@@ -953,9 +1042,11 @@ public class MediaObservationsApiTests
 
     private sealed class SearchOnlyMediaProvider(
         bool connected = true,
-        IReadOnlyList<MediaProviderSearchResult>? searchResults = null) : IMediaProvider
+        IReadOnlyList<MediaProviderSearchResult>? searchResults = null,
+        string providerId = MediaObservationSiteIdentifiers.AniList,
+        MediaProviderTitleDetails? titleDetails = null) : IMediaProvider
     {
-        public string ProviderId => "anilist";
+        public string ProviderId => providerId;
 
         public Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken)
         {
@@ -994,9 +1085,17 @@ public class MediaObservationsApiTests
         public Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(int userId, string authorizationCode, string redirectUri, string codeVerifier, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task DisconnectAsync(int userId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<MediaProviderLibraryImportResult> ImportLibraryAsync(int userId, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
+            => Task.FromResult(titleDetails);
         public Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new MediaProviderMutationResult
+            {
+                ProviderId = ProviderId,
+                ProviderMediaId = request.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow,
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
+            });
         public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken) => throw new NotSupportedException();
     }

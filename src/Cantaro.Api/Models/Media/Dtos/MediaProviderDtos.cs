@@ -79,7 +79,17 @@ public class MediaProviderInitialSyncResultDto
     public int ProviderOnly { get; set; }
     public int NeedsMatching { get; set; }
     public int QueuedOperations { get; set; }
+    public Guid? BatchId { get; set; }
     public DateTimeOffset GeneratedAt { get; set; }
+}
+
+public class MediaProviderInitialSyncProgressDto
+{
+    public required string ProviderId { get; set; }
+    public required string Status { get; set; }
+    public int PendingOperations { get; set; }
+    public int FailedOperations { get; set; }
+    public DateTimeOffset CheckedAt { get; set; }
 }
 
 public class MediaProgressUpdateDto

@@ -100,6 +100,7 @@ public sealed class MediaProviderInitialSyncServiceTests
     public async Task ApplyAsync_RemoteOnlyTarget_RemainsUnpersisted()
     {
         await using var fixture = await InitialSyncFixture.CreateAsync();
+        await fixture.SeedEntryAsync(includeTargetLink: false);
         fixture.Provider.Snapshot = Snapshot(RemoteItem());
 
         var preview = await fixture.Service.PreviewAsync(
@@ -118,9 +119,11 @@ public sealed class MediaProviderInitialSyncServiceTests
 
         Assert.Equal(1, result.ProviderOnly);
         Assert.Equal(0, result.QueuedOperations);
-        Assert.Empty(await fixture.Db.MediaTitles.ToListAsync());
-        Assert.Empty(await fixture.Db.MediaLibraryEntries.ToListAsync());
-        Assert.Empty(await fixture.Db.MediaProviderLinks.ToListAsync());
+        Assert.Single(await fixture.Db.MediaTitles.ToListAsync());
+        Assert.Single(await fixture.Db.MediaLibraryEntries.ToListAsync());
+        Assert.DoesNotContain(
+            await fixture.Db.MediaProviderLinks.ToListAsync(),
+            link => link.Provider == fixture.Provider.ProviderId);
         Assert.Empty(await fixture.Db.MediaLibraryProviderBindings.ToListAsync());
         Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
     }
@@ -336,6 +339,134 @@ public sealed class MediaProviderInitialSyncServiceTests
         Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
     }
 
+    [Fact]
+    public async Task PreviewAsync_EmptyCantaroLibrary_RequiresInboundImport()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        fixture.Provider.Snapshot = Snapshot(RemoteItem());
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+
+        Assert.Equal("import-required", preview.Status);
+        Assert.Equal(1, preview.ProviderOnly);
+        Assert.Null(preview.Fingerprint);
+        Assert.Empty(await fixture.Db.MediaTitles.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ApplyAsync_HistoricalFailure_DoesNotBlockFreshAttempt()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true);
+        var binding = await fixture.SeedTargetBindingAsync(entry);
+        fixture.Db.MediaProviderOperations.Add(new MediaProviderOperation
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryProviderBindingId = binding.Id,
+            OperationType = MediaProviderOperationTypes.SyncLibraryState,
+            PayloadJson = "{}",
+            Status = MediaProviderOperationStatuses.Failed,
+            AttemptCount = 4,
+            LastError = "Earlier failure",
+            CreatedAt = fixture.Now.AddHours(-1),
+            UpdatedAt = fixture.Now.AddHours(-1)
+        });
+        await fixture.Db.SaveChangesAsync();
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(progressEpisodes: 1));
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+        var result = await fixture.Service.ApplyAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint),
+            CancellationToken.None);
+
+        Assert.Equal("ready", preview.Status);
+        Assert.Equal(1, result.QueuedOperations);
+        Assert.Equal(2, await fixture.Db.MediaProviderOperations.CountAsync());
+        Assert.Single(await fixture.Db.MediaProviderOperations
+            .Where(operation => operation.Status == MediaProviderOperationStatuses.Pending)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task GetProgressAsync_TracksOnlyTheAppliedBatch()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        await fixture.SeedEntryAsync(includeTargetLink: true);
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(progressEpisodes: 1));
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+        var result = await fixture.Service.ApplyAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint),
+            CancellationToken.None);
+        var batchId = Assert.IsType<Guid>(result.BatchId);
+
+        var running = await fixture.Service.GetProgressAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            batchId,
+            CancellationToken.None);
+        Assert.Equal("running", running.Status);
+
+        var operation = await fixture.Db.MediaProviderOperations.SingleAsync();
+        operation.Status = MediaProviderOperationStatuses.Failed;
+        await fixture.Db.SaveChangesAsync();
+        var failed = await fixture.Service.GetProgressAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            batchId,
+            CancellationToken.None);
+        Assert.Equal("failed", failed.Status);
+        Assert.Equal(1, failed.FailedOperations);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ConcurrentRequests_QueuesOnlyOneBatch()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        await fixture.SeedEntryAsync(includeTargetLink: true);
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(progressEpisodes: 1));
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+        var fingerprint = Assert.IsType<string>(preview.Fingerprint);
+
+        async Task<string> ApplyOnceAsync()
+        {
+            try
+            {
+                await fixture.Service.ApplyAsync(
+                    fixture.User.Id,
+                    fixture.Provider.ProviderId,
+                    fingerprint,
+                    CancellationToken.None);
+                return "queued";
+            }
+            catch (MediaProviderInitialSyncNotReadyException)
+            {
+                return "not-ready";
+            }
+        }
+
+        var outcomes = await Task.WhenAll(ApplyOnceAsync(), ApplyOnceAsync());
+
+        Assert.Equal(1, outcomes.Count(outcome => outcome == "queued"));
+        Assert.Equal(1, outcomes.Count(outcome => outcome == "not-ready"));
+        Assert.Single(await fixture.Db.MediaProviderOperations.ToListAsync());
+    }
+
     private static MediaProviderLibraryImportResult Snapshot(params MediaProviderLibraryItem[] items)
         => SnapshotFor(InitialSyncFixture.TargetProviderId, items);
 
@@ -480,6 +611,7 @@ public sealed class MediaProviderInitialSyncServiceTests
                 db,
                 registry,
                 importService,
+                new MediaProviderInitialSyncGate(),
                 NullLogger<MediaProviderInitialSyncService>.Instance);
             return new InitialSyncFixture(
                 connection,
@@ -552,6 +684,27 @@ public sealed class MediaProviderInitialSyncServiceTests
                 MediaProviderLinkId = link.Id,
                 ConnectedServiceAccountId = account.Id,
                 ProviderAccountId = account.ExternalAccountId,
+                LastRemoteUpdateAt = Now.AddHours(-2),
+                CreatedAt = Now,
+                UpdatedAt = Now
+            };
+            Db.MediaLibraryProviderBindings.Add(binding);
+            await Db.SaveChangesAsync();
+            return binding;
+        }
+
+        public async Task<MediaLibraryProviderBinding> SeedTargetBindingAsync(MediaLibraryEntry entry)
+        {
+            var link = await Db.MediaProviderLinks.SingleAsync(candidate =>
+                candidate.MediaTitleId == entry.MediaTitleId
+                && candidate.Provider == TargetProviderId);
+            var binding = new MediaLibraryProviderBinding
+            {
+                Id = Guid.NewGuid(),
+                MediaLibraryEntryId = entry.Id,
+                MediaProviderLinkId = link.Id,
+                ConnectedServiceAccountId = Account.Id,
+                ProviderAccountId = Account.ExternalAccountId,
                 LastRemoteUpdateAt = Now.AddHours(-2),
                 CreatedAt = Now,
                 UpdatedAt = Now

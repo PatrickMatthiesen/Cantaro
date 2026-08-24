@@ -266,13 +266,11 @@ public class MediaLibraryImportService(
         Guid mediaTitleId,
         string incomingProviderId,
         IDictionary<string, MediaProviderLink> titleProviderLinks)
-    {
-        var normalizedProviderId = NormalizeProviderId(incomingProviderId);
-        return normalizedProviderId != MediaObservationSiteIdentifiers.MyAnimeList
-            || !titleProviderLinks.ContainsKey(BuildTitleProviderKey(
-                mediaTitleId,
-                MediaObservationSiteIdentifiers.AniList));
-    }
+        => MediaCanonicalMetadataPolicy.ShouldApply(
+            incomingProviderId,
+            titleProviderLinks.Values
+                .Where(link => link.MediaTitleId == mediaTitleId)
+                .Select(link => link.Provider));
 
     private MediaProviderLink GetOrCreateProviderLink(
         MediaProviderLibraryItem item,

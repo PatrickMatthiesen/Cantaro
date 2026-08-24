@@ -136,6 +136,7 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
 function useProviderInitialSync(
   providerId: string,
   isConnected: boolean,
+  handleImport: () => Promise<MediaImportRequestDto | null>,
   setError: (error: string | null) => void,
   hasTriggeredConnectedPreview: MutableRefObject<boolean>,
 ) {
@@ -144,21 +145,28 @@ function useProviderInitialSync(
   const [isPreviewingInitialSync, setIsPreviewingInitialSync] = useState(false);
   const [isApplyingInitialSync, setIsApplyingInitialSync] = useState(false);
   const previewRequestVersion = useRef(0);
+  const previewAbortController = useRef<AbortController | null>(null);
 
   const handlePreviewInitialSync = useCallback(async () => {
     const requestVersion = ++previewRequestVersion.current;
+    previewAbortController.current?.abort();
+    const abortController = new AbortController();
+    previewAbortController.current = abortController;
     setIsPreviewingInitialSync(true);
     setInitialSyncResult(null);
     setError(null);
 
     try {
-      const preview = await mediaApi.previewInitialSync(providerId);
+      const preview = await mediaApi.previewInitialSync(providerId, abortController.signal);
       if (requestVersion !== previewRequestVersion.current) {
         return null;
       }
       setInitialSyncPreview(preview);
       return preview;
-    } catch {
+    } catch (error) {
+      if ((error as { name?: string }).name === 'AbortError') {
+        return null;
+      }
       if (requestVersion === previewRequestVersion.current) {
         setError('Cantaro couldn’t prepare this sync. Your provider libraries have not been changed.');
       }
@@ -166,6 +174,7 @@ function useProviderInitialSync(
     } finally {
       if (requestVersion === previewRequestVersion.current) {
         setIsPreviewingInitialSync(false);
+        previewAbortController.current = null;
       }
     }
   }, [providerId, setError]);
@@ -187,8 +196,63 @@ function useProviderInitialSync(
     }
 
     hasTriggeredConnectedPreview.current = true;
-    void handlePreviewInitialSync();
-  }, [handlePreviewInitialSync, hasTriggeredConnectedPreview, isConnected, providerId]);
+    void handlePreviewInitialSync().then(async (preview) => {
+      if (preview?.status !== 'import-required') {
+        return;
+      }
+
+      await handleImport();
+      setInitialSyncPreview(null);
+      clearConnectSearchParams();
+    });
+  }, [handleImport, handlePreviewInitialSync, hasTriggeredConnectedPreview, isConnected, providerId]);
+
+  useEffect(() => {
+    const batchId = initialSyncResult?.status === 'queued' ? initialSyncResult.batchId : undefined;
+    if (!batchId) {
+      return;
+    }
+
+    let isCancelled = false;
+    let timeoutId: number | undefined;
+    // fallow-ignore-next-line complexity
+    const poll = async () => {
+      if (isCancelled) {
+        return;
+      }
+      try {
+        const progress = await mediaApi.getInitialSyncProgress(providerId, batchId);
+        if (isCancelled) {
+          return;
+        }
+        if (progress.status === 'completed') {
+          setInitialSyncResult((current) => current ? { ...current, status: 'completed' } : current);
+          return;
+        }
+        if (progress.status === 'failed') {
+          setInitialSyncResult((current) => current ? {
+            ...current,
+            status: 'failed',
+            failedOperations: progress.failedOperations,
+          } : current);
+          return;
+        }
+        timeoutId = window.setTimeout(() => void poll(), 2000);
+      } catch {
+        if (!isCancelled) {
+          timeoutId = window.setTimeout(() => void poll(), 5000);
+        }
+      }
+    };
+
+    void poll();
+    return () => {
+      isCancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [initialSyncResult?.batchId, initialSyncResult?.status, providerId]);
 
   useEffect(() => {
     if (isConnected) {
@@ -196,6 +260,8 @@ function useProviderInitialSync(
     }
 
     previewRequestVersion.current++;
+    previewAbortController.current?.abort();
+    previewAbortController.current = null;
     setInitialSyncPreview(null);
     setInitialSyncResult(null);
     setIsPreviewingInitialSync(false);
@@ -231,6 +297,8 @@ function useProviderInitialSync(
 
   const handleDismissInitialSync = useCallback(() => {
     previewRequestVersion.current++;
+    previewAbortController.current?.abort();
+    previewAbortController.current = null;
     setInitialSyncPreview(null);
     setInitialSyncResult(null);
     setIsPreviewingInitialSync(false);
@@ -287,6 +355,7 @@ export function useProviderPanelState(providerId: string) {
   const initialSync = useProviderInitialSync(
     providerId,
     Boolean(status?.isConnected),
+    handleImport,
     setError,
     hasTriggeredConnectedPreview,
   );
