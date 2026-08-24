@@ -44,6 +44,8 @@ public class MediaProviderLibraryItem
 
     public string? ExternalUrl { get; set; }
 
+    public IReadOnlyList<MediaProviderCrossReference> CrossReferences { get; set; } = [];
+
     public int? StartYear { get; set; }
 
     public int? EpisodeCount { get; set; }
@@ -134,6 +136,8 @@ public class MediaProviderTitleDetails
 
     public string? BackgroundUrl { get; set; }
 
+    public IReadOnlyList<MediaProviderCrossReference> CrossReferences { get; set; } = [];
+
     public int? StartYear { get; set; }
 
     public int? EpisodeCount { get; set; }
@@ -157,6 +161,15 @@ public class MediaProviderTitleDetails
     public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
 
     public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
+}
+
+public sealed class MediaProviderCrossReference
+{
+    public required string ProviderId { get; set; }
+
+    public required string ProviderMediaId { get; set; }
+
+    public string? ExternalUrl { get; set; }
 }
 
 public class MediaProviderCharacterCredit

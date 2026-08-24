@@ -472,9 +472,13 @@ public class MediaProviderOperationProcessor(
             _ => TimeSpan.FromMinutes(30)
         };
 
-        return exception is AniListRequestException { RetryAfter: { } retryAfter }
-            && retryAfter > scheduledDelay
-                ? retryAfter
-                : scheduledDelay;
+        var requestedDelay = exception switch
+        {
+            AniListRequestException { RetryAfter: { } retryAfter } => retryAfter,
+            MyAnimeListRequestException { RetryAfter: { } retryAfter } => retryAfter,
+            _ => TimeSpan.Zero
+        };
+
+        return requestedDelay > scheduledDelay ? requestedDelay : scheduledDelay;
     }
 }

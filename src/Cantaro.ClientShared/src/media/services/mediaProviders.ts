@@ -1,4 +1,4 @@
-export type MediaProviderId = 'anilist';
+export type MediaProviderId = 'anilist' | 'myanimelist';
 
 export interface MediaProviderCatalogEntry {
   id: MediaProviderId;
@@ -17,6 +17,14 @@ export const mediaProviderCatalog: MediaProviderCatalogEntry[] = [
     gradient: 'from-blue-500 to-cyan-500',
     implemented: true,
     description: 'Anime and manga tracking — import your list and keep progress in sync.',
+  },
+  {
+    id: 'myanimelist',
+    name: 'MyAnimeList',
+    iconId: 'myanimelist',
+    gradient: 'from-blue-700 to-blue-500',
+    implemented: true,
+    description: 'Anime and manga tracking — import your MAL lists and sync progress and scores.',
   },
 ];
 
