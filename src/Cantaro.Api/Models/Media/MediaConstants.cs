@@ -90,6 +90,8 @@ public static class MediaProviderOperationTypes
     public const string UpdateStatus = "update_status";
     public const string UpdateScore = "update_score";
 
+    public const string SyncLibraryState = "sync_library_state";
+
     /// <summary>
     /// Progress update triggered automatically by a matched observation.
     /// Carries an <see cref="AutoProgressUpdatePayload"/> in <c>PayloadJson</c>

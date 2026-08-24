@@ -291,6 +291,47 @@ public sealed class MyAnimeListMediaProvider(
             cancellationToken);
     }
 
+    public async Task<MediaProviderMutationResult> SyncLibraryStateAsync(
+        int userId,
+        MediaLibraryStateSyncRequest request,
+        CancellationToken cancellationToken)
+    {
+        var identity = ParseProviderMediaId(request.ProviderMediaId);
+        var isAnime = identity.MediaKind == MediaKinds.Anime;
+        var score = request.Score is null
+            ? 0
+            : Math.Clamp(
+                decimal.ToInt32(decimal.Round(request.Score.Value / 10m, 0, MidpointRounding.AwayFromZero)),
+                1,
+                10);
+        var form = new Dictionary<string, string?>
+        {
+            ["status"] = ToMyAnimeListStatus(request.Status, isAnime),
+            [isAnime ? "is_rewatching" : "is_rereading"] = request.Status == MediaLibraryStatuses.Repeating
+                ? "true"
+                : "false",
+            ["score"] = score.ToString(CultureInfo.InvariantCulture)
+        };
+
+        if (isAnime && request.ProgressEpisodes is { } episodes)
+        {
+            form["num_watched_episodes"] = episodes.ToString(CultureInfo.InvariantCulture);
+        }
+        else if (!isAnime)
+        {
+            if (request.ProgressChapters is { } chapters)
+            {
+                form["num_chapters_read"] = chapters.ToString(CultureInfo.InvariantCulture);
+            }
+            if (request.ProgressVolumes is { } volumes)
+            {
+                form["num_volumes_read"] = volumes.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        return await UpdateListStatusAsync(userId, identity, form, cancellationToken);
+    }
+
     public async Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(
         int userId,
         string providerMediaId,

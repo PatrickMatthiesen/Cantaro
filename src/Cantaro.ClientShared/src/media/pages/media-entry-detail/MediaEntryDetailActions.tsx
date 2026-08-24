@@ -70,7 +70,7 @@ function ProgressStepper({
 
   return (
     <div className="grid min-w-0 gap-2">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex items-baseline gap-2">
         <h3 className="text-sm font-semibold text-content-muted">{label}</h3>
         <p className="text-lg font-black tabular-nums text-content">
           <span className="text-personal-accent-strong">{currentValue}</span>

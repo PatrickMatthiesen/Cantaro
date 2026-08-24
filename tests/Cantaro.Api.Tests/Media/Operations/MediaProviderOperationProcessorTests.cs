@@ -93,6 +93,61 @@ public class MediaProviderOperationProcessorTests
     }
 
     [Fact]
+    public async Task ProcessOperationAsync_SyncLibraryState_UpdatesOnlyProviderBinding()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 414, "whole-state@example.com");
+        var originalLocalEditAt = DateTimeOffset.UtcNow.AddHours(-2);
+        var originalEntryUpdatedAt = DateTimeOffset.UtcNow.AddHours(-1);
+        entry.Score = 82.5m;
+        entry.LastLocalEditAt = originalLocalEditAt;
+        entry.LastMutationSource = MediaMutationSources.ProviderImport;
+        entry.UpdatedAt = originalEntryUpdatedAt;
+        await dbContext.SaveChangesAsync();
+
+        var provider = new FakeMediaProvider("anilist");
+        var processor = new MediaProviderOperationProcessor(
+            dbContext,
+            new MediaProviderRegistry([provider]),
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        var request = new MediaLibraryStateSyncRequest
+        {
+            ProviderMediaId = "140960",
+            Status = entry.Status,
+            Score = entry.Score,
+            ProgressEpisodes = entry.ProgressEpisodes,
+            LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+        };
+
+        var operation = await processor.EnqueueLibraryStateSyncAsync(
+            entry.UserId,
+            binding,
+            request,
+            CancellationToken.None);
+        var processed = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
+        var persistedBinding = await dbContext.MediaLibraryProviderBindings.SingleAsync();
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, processed.Outcome);
+        Assert.Equal(1, provider.LibraryStateSyncCallCount);
+        Assert.Equal(request.ProviderMediaId, provider.LastLibraryStateSyncRequest!.ProviderMediaId);
+        Assert.Equal(originalLocalEditAt, persistedEntry.LastLocalEditAt);
+        Assert.Equal(originalEntryUpdatedAt, persistedEntry.UpdatedAt);
+        Assert.Equal(MediaMutationSources.ProviderImport, persistedEntry.LastMutationSource);
+        Assert.Equal(82.5m, persistedEntry.Score);
+        Assert.NotNull(persistedBinding.LastSyncedAt);
+        Assert.NotNull(persistedBinding.LastRemoteUpdateAt);
+        Assert.NotNull(request.LastKnownRemoteUpdateAt);
+        Assert.True(persistedBinding.LastRemoteUpdateAt.Value > request.LastKnownRemoteUpdateAt.Value);
+        Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+    }
+
+    [Fact]
     public async Task ProcessOperationAsync_SetsRetryStateWhenProviderWriteFails()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -432,6 +487,10 @@ public class MediaProviderOperationProcessorTests
 
         public int StatusUpdateCallCount { get; private set; }
 
+        public int LibraryStateSyncCallCount { get; private set; }
+
+        public MediaLibraryStateSyncRequest? LastLibraryStateSyncRequest { get; private set; }
+
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
@@ -516,6 +575,29 @@ public class MediaProviderOperationProcessorTests
             return Task.FromResult(new MediaProviderMutationResult
             {
                 ProviderId = "anilist",
+                ProviderMediaId = request.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow,
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
+            });
+        }
+
+        public Task<MediaProviderMutationResult> SyncLibraryStateAsync(
+            int userId,
+            MediaLibraryStateSyncRequest request,
+            CancellationToken cancellationToken)
+        {
+            LibraryStateSyncCallCount += 1;
+            LastLibraryStateSyncRequest = request;
+
+            if (_failure is not null) throw _failure;
+            if (_shouldThrow)
+            {
+                throw new InvalidOperationException("Simulated provider write failure.");
+            }
+
+            return Task.FromResult(new MediaProviderMutationResult
+            {
+                ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow

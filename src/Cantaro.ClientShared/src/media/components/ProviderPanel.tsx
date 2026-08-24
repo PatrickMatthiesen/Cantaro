@@ -4,6 +4,7 @@ import {
     ProviderPanelError,
     ProviderPanelHeader,
     ProviderPanelImportSummary,
+    ProviderPanelInitialSync,
 } from './media-providers/ProviderPanelSections';
 import { useProviderPanelState } from './media-providers/useProviderPanelState';
 
@@ -14,7 +15,45 @@ export interface ProviderPanelProps {
     description: string;
 }
 
+type ProviderPanelState = ReturnType<typeof useProviderPanelState>;
+
+function InitialSyncPanelSlot({
+    name,
+    state,
+    isActive,
+}: {
+    name: string;
+    state: ProviderPanelState;
+    isActive: boolean;
+}) {
+    if (!isActive) {
+        return null;
+    }
+
+    return (
+        <ProviderPanelInitialSync
+            name={name}
+            preview={state.initialSyncPreview}
+            result={state.initialSyncResult}
+            isPreviewing={state.isPreviewingInitialSync}
+            isApplying={state.isApplyingInitialSync}
+            onApply={state.handleApplyInitialSync}
+            onRetry={state.handlePreviewInitialSync}
+            onDismiss={state.handleDismissInitialSync}
+        />
+    );
+}
+
+function confirmProviderDisconnect(name: string, disconnect: () => Promise<void>): Promise<void> {
+    if (!window.confirm(`Disconnect ${name}? Your saved Cantaro library will remain available.`)) {
+        return Promise.resolve();
+    }
+
+    return disconnect();
+}
+
 export function ProviderPanel({ providerId, name, icon, description }: ProviderPanelProps) {
+    const state = useProviderPanelState(providerId);
     const {
         status,
         isLoadingStatus,
@@ -22,11 +61,22 @@ export function ProviderPanel({ providerId, name, icon, description }: ProviderP
         isImporting,
         isDisconnecting,
         lastImport,
+        initialSyncPreview,
+        initialSyncResult,
+        isPreviewingInitialSync,
+        isApplyingInitialSync,
         handleConnect,
         handleDisconnect,
         handleImport,
+        handlePreviewInitialSync,
         reloadStatus,
-    } = useProviderPanelState(providerId);
+    } = state;
+    const isInitialSyncActive = [
+        initialSyncPreview,
+        initialSyncResult,
+        isPreviewingInitialSync,
+        isApplyingInitialSync,
+    ].some(Boolean);
 
     return (
         <article className="py-7 sm:py-9">
@@ -39,6 +89,7 @@ export function ProviderPanel({ providerId, name, icon, description }: ProviderP
             />
 
             <ProviderPanelError error={error} />
+            <InitialSyncPanelSlot name={name} state={state} isActive={isInitialSyncActive} />
             <ProviderPanelImportSummary lastImport={lastImport} />
 
             <div className="mt-6 flex flex-wrap gap-3 sm:pl-16">
@@ -47,18 +98,16 @@ export function ProviderPanel({ providerId, name, icon, description }: ProviderP
                     isLoadingStatus={isLoadingStatus}
                     hasStatus={status !== null}
                     isConnected={Boolean(status?.isConnected)}
-                    isImporting={isImporting}
-                    isDisconnecting={isDisconnecting}
                     onConnect={handleConnect}
-                    onImport={handleImport}
-                    onDisconnect={() => {
-                        if (!window.confirm(`Disconnect ${name}? Your saved Cantaro library will remain available.`)) {
-                            return Promise.resolve();
-                        }
-
-                        return handleDisconnect();
-                    }}
                     onRetryStatus={reloadStatus}
+                    connectedActions={{
+                        isImporting,
+                        isDisconnecting,
+                        isInitialSyncActive,
+                        onImport: handleImport,
+                        onPreviewInitialSync: handlePreviewInitialSync,
+                        onDisconnect: () => confirmProviderDisconnect(name, handleDisconnect),
+                    }}
                 />
             </div>
         </article>

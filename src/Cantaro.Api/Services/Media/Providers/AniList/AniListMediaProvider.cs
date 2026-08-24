@@ -381,6 +381,35 @@ public class AniListMediaProvider(
         return MapMutationResult(savedEntry);
     }
 
+    public async Task<MediaProviderMutationResult> SyncLibraryStateAsync(
+        int userId,
+        MediaLibraryStateSyncRequest request,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireConnectedAccountAsync(userId, cancellationToken);
+        var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
+        var mediaId = ParseProviderMediaId(request.ProviderMediaId);
+        var scoreRaw = request.Score is null
+            ? 0
+            : decimal.ToInt32(decimal.Round(request.Score.Value, 0, MidpointRounding.AwayFromZero));
+        var mutation = BuildSaveMediaListEntryMutation(
+            mediaId,
+            progress: request.ProgressEpisodes ?? request.ProgressChapters,
+            progressVolumes: request.ProgressVolumes,
+            status: ToAniListStatus(request.Status),
+            scoreRaw);
+
+        var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
+            accessToken,
+            mutation.Query,
+            mutation.Variables,
+            cancellationToken);
+
+        var savedEntry = data.SaveMediaListEntry
+            ?? throw new InvalidOperationException("AniList did not return the saved media list entry.");
+        return MapMutationResult(savedEntry);
+    }
+
     public async Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
     {
         var details = await GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);

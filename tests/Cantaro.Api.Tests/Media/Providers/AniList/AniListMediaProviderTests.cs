@@ -496,6 +496,77 @@ public class AniListMediaProviderTests
     }
 
     [Fact]
+    public async Task SyncLibraryStateAsync_UpsertsCompleteStateWithOneMediaIdMutation()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var user = TestUserFactory.Create(308, "anilist-whole-state@example.com");
+        var now = DateTime.UtcNow;
+        var dataProtectionProvider = DataProtectionProvider.Create(
+            new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))));
+        dbContext.Users.Add(user);
+        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        {
+            Id = 908,
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "308",
+            DisplayName = "Whole State Tester",
+            EncryptedRefreshToken = CreateEncryptedToken(dataProtectionProvider, "access-token"),
+            TokenExpiresAt = now.AddHours(1),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await dbContext.SaveChangesAsync();
+
+        const string graphQlResponse = """
+            { "data": { "SaveMediaListEntry": {
+              "id": 45, "status": "COMPLETED", "score": 0, "progress": 168,
+              "progressVolumes": 23, "updatedAt": 1780776000,
+              "media": { "id": 87610 }
+            } } }
+            """;
+        var handler = new StubHttpMessageHandler(graphQlResponse);
+        var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
+
+        var result = await provider.SyncLibraryStateAsync(
+            user.Id,
+            new MediaLibraryStateSyncRequest
+            {
+                ProviderMediaId = "87610",
+                Status = MediaLibraryStatuses.Completed,
+                Score = null,
+                ProgressChapters = 168,
+                ProgressVolumes = 23
+            },
+            CancellationToken.None);
+
+        Assert.Equal("87610", result.ProviderMediaId);
+        Assert.NotNull(handler.LastRequestBody);
+        using var document = JsonDocument.Parse(handler.LastRequestBody);
+        var root = document.RootElement;
+        var query = root.GetProperty("query").GetString();
+        var variables = root.GetProperty("variables");
+        Assert.Contains("SaveMediaListEntry", query);
+        Assert.Contains("progress: $progress", query);
+        Assert.Contains("progressVolumes: $progressVolumes", query);
+        Assert.Contains("status: $status", query);
+        Assert.Contains("scoreRaw: $scoreRaw", query);
+        Assert.Equal(87610, variables.GetProperty("mediaId").GetInt32());
+        Assert.Equal(168, variables.GetProperty("progress").GetInt32());
+        Assert.Equal(23, variables.GetProperty("progressVolumes").GetInt32());
+        Assert.Equal("COMPLETED", variables.GetProperty("status").GetString());
+        Assert.Equal(0, variables.GetProperty("scoreRaw").GetInt32());
+        Assert.False(variables.TryGetProperty("id", out _));
+    }
+
+    [Fact]
     public async Task UpdateScoreAsync_WritesRoundedScoreRawAndClearsWithZero()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
