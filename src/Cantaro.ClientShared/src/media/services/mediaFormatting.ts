@@ -6,6 +6,20 @@ const MEDIA_KIND_LABELS: Record<string, string> = {
   novel: 'Novel',
 };
 
+const MEDIA_FORMAT_LABELS: Record<string, string> = {
+  light_novel: 'Light Novel',
+  manga: 'Manga',
+  movie: 'Movie',
+  music: 'Music',
+  novel: 'Novel',
+  ona: 'ONA',
+  one_shot: 'One-shot',
+  ova: 'OVA',
+  special: 'Special',
+  tv: 'TV Series',
+  tv_short: 'TV Short',
+};
+
 function parseReleaseTimestamp(timestamp?: string): number | null {
   if (!timestamp) {
     return null;
@@ -50,6 +64,10 @@ export function formatRelativeReleaseTime(timestamp?: string): string | null {
 
 export function mediaKindLabel(kind: string): string {
   return MEDIA_KIND_LABELS[kind] ?? kind;
+}
+
+export function mediaFormatLabel(format: string): string {
+  return MEDIA_FORMAT_LABELS[format.toLowerCase()] ?? format;
 }
 
 export function formatNextReleaseDisplay(timestamp?: string): { relative: string; absolute: string } | null {

@@ -287,7 +287,7 @@ function EpisodeEmpty() {
 function EpisodeAvailabilityNotice() {
   return (
     <p className="mt-5 border border-border-subtle bg-surface-subtle px-4 py-3 text-sm text-content-muted">
-      Showing cached streaming destinations; availability may be out of date.
+      Some availability information is cached and may be out of date.
     </p>
   );
 }
@@ -391,14 +391,10 @@ function orderSeriesDestinations(
 function getEpisodeSummary(
   state: EpisodeCatalogState,
   availableCount: number,
-  providerAvailabilityState: EpisodeProviderAvailabilityState,
 ) {
   if (state.status !== "loaded") return "Loading collected episode links…";
-  const releaseSummary = formatReleaseAvailability(state.value.releaseAvailability)
+  return formatReleaseAvailability(state.value.releaseAvailability)
     ?? `${availableCount} episode links collected`;
-  return providerAvailabilityState === "stale"
-    ? `${releaseSummary} · cached streaming destinations`
-    : releaseSummary;
 }
 
 export function EpisodesSection({
@@ -442,7 +438,7 @@ export function EpisodesSection({
     preferredServiceId,
   );
   const isLoading = state.status === "loading";
-  const summary = getEpisodeSummary(state, availableCount, providerAvailabilityState);
+  const summary = getEpisodeSummary(state, availableCount);
 
   return (
     <section

@@ -1,4 +1,5 @@
 import type { MediaEntryDetailModel } from "../../services/mediaApi";
+import { mediaFormatLabel } from "../../services/mediaFormatting";
 import type {
   MediaEntryDetailContentProps,
   ProgressSummary,
@@ -18,6 +19,10 @@ export function releaseStatusLabel(dimension: string): string {
 }
 
 export function progressKindLabel(title: MediaEntryDetailModel["title"]) {
+  if (title.format) {
+    return mediaFormatLabel(title.format);
+  }
+
   if (title.primaryProgressDimension === "episode") {
     return title.episodeCount ? "TV Series" : "Episode tracking";
   }

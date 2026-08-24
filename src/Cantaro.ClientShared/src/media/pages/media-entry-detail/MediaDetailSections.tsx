@@ -68,45 +68,13 @@ export function DetailSectionHeading({
   );
 }
 
-function availabilityText(availability?: ProviderAvailabilityState) {
-  if (!availability || availability.status === "loading")
-    return "Checking availability";
-  const destinationCount = formatDestinationCount(availability.links.length);
-  if (availability.links.length > 0)
-    return availabilityWithLinksText(availability, destinationCount);
-  return availabilityWithoutLinksText(availability);
-}
-
-function formatDestinationCount(count: number) {
-  return `${count} destination${count === 1 ? "" : "s"}`;
-}
-
-function availabilityWithLinksText(
-  availability: ProviderAvailabilityState,
-  destinationCount: string,
-) {
-  if (availability.status === "error") return `${destinationCount} · unavailable`;
-  if (availability.isStale || availability.status === "unavailable")
-    return `${destinationCount} · cached`;
-  return destinationCount;
-}
-
-function availabilityWithoutLinksText(availability: ProviderAvailabilityState) {
-  if (availability.status === "error") return "Availability unavailable";
-  if (availability.status === "unavailable") return "No destination confirmed";
-  if (availability.isStale) return "Availability may be out of date";
-  return "Identity linked";
-}
-
 function ProviderRow({
   link,
-  availability,
   canManageLinks,
   isUnlinking,
   onUnlink,
 }: {
   link: MediaProviderLinkSummaryDto;
-  availability?: ProviderAvailabilityState;
   canManageLinks: boolean;
   isUnlinking: boolean;
   onUnlink: (providerId: string) => void;
@@ -128,7 +96,7 @@ function ProviderRow({
           {providerLabel(link.provider)}
         </strong>
         <span className="mt-0.5 block truncate text-sm text-content-muted">
-          {availabilityText(availability)}
+          Identity linked
         </span>
       </span>
       {link.externalUrl ? (
@@ -171,7 +139,6 @@ function ProviderRow({
 
 export function ProviderSection({
   providerLinks,
-  availabilityByProviderLink,
   unlinkingId,
   lastSyncedAt,
   canManageLinks,
@@ -179,7 +146,6 @@ export function ProviderSection({
   onUnlink,
 }: {
   providerLinks: MediaProviderLinkSummaryDto[];
-  availabilityByProviderLink: ProviderAvailabilityMap;
   unlinkingId: string | null;
   lastSyncedAt?: string;
   canManageLinks: boolean;
@@ -213,11 +179,6 @@ export function ProviderSection({
             <ProviderRow
               key={link.id}
               link={link}
-              availability={
-                availabilityByProviderLink[
-                  providerAvailabilityKey(link.provider, link.externalId)
-                ]
-              }
               canManageLinks={canManageLinks}
               isUnlinking={unlinkingId === link.provider}
               onUnlink={onUnlink}
@@ -589,7 +550,7 @@ export function InformationSection({
     entry.progressVolumes,
   );
   const rows = [
-    ["Format", title.format ?? progressKindLabel(title)],
+    ["Format", progressKindLabel(title)],
     ["Status", releaseStatusLabel(title.releaseStatusDimension)],
     ["Started", title.startYear ? String(title.startYear) : "Unknown"],
     ["Provider", providerLabel(entry.provider)],

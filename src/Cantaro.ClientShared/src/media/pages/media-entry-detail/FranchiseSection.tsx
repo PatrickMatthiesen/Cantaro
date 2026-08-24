@@ -1,7 +1,10 @@
 import { Check, ChevronRight, RotateCcw } from "lucide-react";
 import { ActionButton } from "../../../ui";
 import { DetailArtwork } from "../../components/media-entry-detail/EntryDisplayPrimitives";
-import { mediaKindLabel } from "../../services/mediaFormatting";
+import {
+  mediaFormatLabel,
+  mediaKindLabel,
+} from "../../services/mediaFormatting";
 import type {
   MediaFranchiseGraphDto,
   MediaFranchiseNodeDto,
@@ -42,21 +45,9 @@ function libraryStatusLabel(status?: string): string | null {
 }
 
 function nodeMetadata(node: MediaFranchiseNodeDto): string {
-  const formatLabels: Record<string, string> = {
-    manga: "Manga",
-    movie: "Movie",
-    music: "Music",
-    novel: "Novel",
-    ona: "ONA",
-    one_shot: "One-shot",
-    ova: "OVA",
-    special: "Special",
-    tv: "TV",
-    tv_short: "TV short",
-  };
   return [
     node.mediaFormat
-      ? (formatLabels[node.mediaFormat] ?? node.mediaFormat)
+      ? mediaFormatLabel(node.mediaFormat)
       : mediaKindLabel(node.mediaKind),
     node.episodeCount ? `${node.episodeCount} episodes` : null,
     node.startYear ? String(node.startYear) : null,

@@ -262,12 +262,18 @@ function HeroCopy({
   actions?: ReactNode;
 }) {
   const { title } = entry;
+  const kindLabel = mediaKindLabel(title.mediaKind);
+  const formatLabel = progressKindLabel(title);
+  const typeLabel =
+    kindLabel.toLowerCase() === formatLabel.toLowerCase()
+      ? kindLabel
+      : `${kindLabel} · ${formatLabel}`;
   const showOriginalTitle =
     title.originalTitle && title.originalTitle !== title.canonicalTitle;
   return (
     <div className="min-w-0 max-w-3xl pb-1">
       <p className="font-semibold text-immersive-content-muted">
-        {mediaKindLabel(title.mediaKind)} · {progressKindLabel(title)}
+        {typeLabel}
       </p>
       <h1
         id="media-detail-title"

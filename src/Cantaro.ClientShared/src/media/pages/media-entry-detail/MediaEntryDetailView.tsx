@@ -133,7 +133,6 @@ function MediaDetailTabPanel({
       >
         <ProviderSection
           providerLinks={props.entry.providerLinks}
-          availabilityByProviderLink={props.availabilityByProviderLink}
           unlinkingId={props.unlinkingId}
           lastSyncedAt={props.entry.lastSyncedAt}
           canManageLinks={
