@@ -1,4 +1,11 @@
-import { useRef, type ReactNode, type RefObject } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   ArrowLeft,
   CalendarDays,
@@ -254,6 +261,56 @@ function DesktopPoster({
   );
 }
 
+function ExpandableSynopsis({ html }: { html: string }) {
+  const synopsisId = useId();
+  const synopsisRef = useRef<HTMLDivElement | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+
+  useLayoutEffect(() => {
+    const synopsis = synopsisRef.current;
+    if (!synopsis || isExpanded) return;
+
+    const measureOverflow = () => {
+      setCanExpand(synopsis.scrollHeight > synopsis.clientHeight + 1);
+    };
+
+    measureOverflow();
+
+    if (typeof ResizeObserver === "undefined") return;
+
+    const resizeObserver = new ResizeObserver(measureOverflow);
+    resizeObserver.observe(synopsis);
+    return () => resizeObserver.disconnect();
+  }, [html, isExpanded]);
+
+  return (
+    <div className="mt-6 max-w-[68ch]">
+      <div
+        ref={synopsisRef}
+        id={synopsisId}
+        className={isExpanded ? undefined : "max-h-36 overflow-hidden"}
+      >
+        <SanitizedSynopsis
+          html={html}
+          className="text-base leading-7 text-immersive-content-muted"
+        />
+      </div>
+      {canExpand ? (
+        <button
+          type="button"
+          aria-controls={synopsisId}
+          aria-expanded={isExpanded}
+          onClick={() => setIsExpanded((expanded) => !expanded)}
+          className="mt-1 inline-flex min-h-11 items-center px-1 text-sm font-semibold text-immersive-content-muted underline decoration-immersive-content-muted underline-offset-4 transition-colors duration-200 hover:text-immersive-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none"
+        >
+          {isExpanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function HeroCopy({
   entry,
   actions,
@@ -288,9 +345,9 @@ function HeroCopy({
       ) : null}
       <HeroTitleMeta entry={entry} />
       {title.synopsis ? (
-        <SanitizedSynopsis
+        <ExpandableSynopsis
+          key={title.synopsis}
           html={title.synopsis}
-          className="mt-6 max-h-36 max-w-[68ch] overflow-hidden text-base leading-7 text-immersive-content-muted"
         />
       ) : null}
       {actions ? (
