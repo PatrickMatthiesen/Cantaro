@@ -236,7 +236,7 @@ export interface MediaInitialSyncUnresolvedTitleDto {
 
 export interface MediaInitialSyncPreviewDto {
     providerId: string;
-    status: 'ready' | 'settling' | 'blocked';
+    status: 'ready' | 'settling' | 'blocked' | 'import-required';
     fingerprint?: string;
     refreshedProviderIds: string[];
     willAdd: number;
@@ -256,14 +256,24 @@ export interface MediaInitialSyncApplyRequestDto {
 
 export interface MediaInitialSyncApplyResultDto {
     providerId: string;
-    status: 'queued' | 'completed';
+    status: 'queued' | 'completed' | 'failed';
     added: number;
     updated: number;
     alreadyAligned: number;
     providerOnly: number;
     needsMatching: number;
     queuedOperations: number;
+    batchId?: string;
+    failedOperations?: number;
     generatedAt: string;
+}
+
+export interface MediaInitialSyncProgressDto {
+    providerId: string;
+    status: 'running' | 'completed' | 'failed';
+    pendingOperations: number;
+    failedOperations: number;
+    checkedAt: string;
 }
 
 export interface MediaImportDto {

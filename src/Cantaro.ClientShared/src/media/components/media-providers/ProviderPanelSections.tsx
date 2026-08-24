@@ -44,6 +44,7 @@ interface ProviderPanelInitialSyncProps {
     isApplying: boolean;
     onApply: () => Promise<MediaInitialSyncApplyResultDto | null>;
     onRetry: () => Promise<MediaInitialSyncPreviewDto | null>;
+    onImport: () => Promise<MediaImportRequestDto | null>;
     onDismiss: () => void;
 }
 
@@ -136,44 +137,60 @@ function InitialSyncUnresolvedTitles({ preview }: { preview: MediaInitialSyncPre
         return null;
     }
 
-    const visibleTitles = preview.unresolvedTitles.slice(0, 5);
-    const remainingCount = preview.unresolvedTitles.length - visibleTitles.length;
     return (
         <details className="mt-4 text-sm text-content-muted">
             <summary className="w-fit cursor-pointer font-semibold text-content hover:text-personal-accent-strong">
                 Titles that need matching
             </summary>
-            <ul className="mt-2 grid gap-1.5 pl-5">
-                {visibleTitles.map((title) => (
+            <ul className="mt-2 grid max-h-64 gap-1.5 overflow-y-auto pl-5 pr-3">
+                {preview.unresolvedTitles.map((title) => (
                     <li key={title.mediaTitleId} className="list-disc">
                         <span className="text-content">{title.title}</span>
                         <span> · {title.mediaKind}</span>
                     </li>
                 ))}
             </ul>
-            {remainingCount > 0 ? <p className="mt-2">And {remainingCount} more.</p> : null}
         </details>
     );
 }
 
+// fallow-ignore-next-line complexity
+function getInitialSyncResultMessage(
+    result: MediaInitialSyncApplyResultDto,
+    name: string,
+    changedCount: number,
+): string {
+    if (result.status === 'failed') {
+        const failedOperations = result.failedOperations ?? 1;
+        return `${failedOperations} provider ${failedOperations === 1 ? 'update' : 'updates'} could not be completed. Retry to compare the latest state and send only what is still needed.`;
+    }
+    if (changedCount === 0) {
+        return `${name} was already aligned with Cantaro.`;
+    }
+    return `${changedCount} ${changedCount === 1 ? 'title' : 'titles'} ${result.status === 'queued' ? 'will be aligned' : 'were aligned'} with ${name}.`;
+}
+
+// fallow-ignore-next-line complexity
 function InitialSyncResult({
     name,
     result,
+    onRetry,
     onDismiss,
-}: Pick<ProviderPanelInitialSyncProps, 'name' | 'result' | 'onDismiss'> & {
+}: Pick<ProviderPanelInitialSyncProps, 'name' | 'result' | 'onRetry' | 'onDismiss'> & {
     result: MediaInitialSyncApplyResultDto;
 }) {
     const changedCount = result.added + result.updated;
+    const failed = result.status === 'failed';
+    const title = failed ? 'Sync needs attention' : result.status === 'queued' ? 'Syncing…' : 'Sync complete';
+    const message = getInitialSyncResultMessage(result, name, changedCount);
     return (
-        <section className="mt-6 border-y border-success-border py-4 sm:ml-16" aria-live="polite">
-            <p className="flex items-center gap-2 text-sm font-semibold text-success-content">
-                <Check className="h-4 w-4" aria-hidden />
-                {result.status === 'queued' ? 'Sync queued' : 'Sync complete'}
+        <section className={`mt-6 border-y py-4 sm:ml-16 ${failed ? 'border-warning-border' : 'border-success-border'}`} aria-live="polite">
+            <p className={`flex items-center gap-2 text-sm font-semibold ${failed ? 'text-warning-content' : 'text-success-content'}`}>
+                {result.status === 'queued' ? <RefreshCw className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
+                {title}
             </p>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-content-muted">
-                {changedCount > 0
-                    ? `${changedCount} ${changedCount === 1 ? 'title' : 'titles'} ${result.status === 'queued' ? 'will be aligned' : 'were aligned'} with ${name}.`
-                    : `${name} was already aligned with Cantaro.`}
+                {message}
             </p>
             <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
                 <div><dt className="text-content-muted">Added</dt><dd className="mt-0.5 font-bold text-content">{result.added}</dd></div>
@@ -184,7 +201,14 @@ function InitialSyncResult({
             <p className="mt-3 text-sm text-content-muted">
                 {result.providerOnly} {result.providerOnly === 1 ? 'title' : 'titles'} only in {name} were left unchanged.
             </p>
-            <ActionButton tone="ghost" className="mt-3" onClick={onDismiss}>Done</ActionButton>
+            <div className="mt-3 flex flex-wrap gap-3">
+                {failed ? (
+                    <ActionButton tone="secondary" onClick={() => void onRetry()}>
+                        <RefreshCw className="h-4 w-4" aria-hidden /> Try again
+                    </ActionButton>
+                ) : null}
+                <ActionButton tone="ghost" onClick={onDismiss}>{failed ? 'Close' : 'Done'}</ActionButton>
+            </div>
         </section>
     );
 }
@@ -192,8 +216,7 @@ function InitialSyncResult({
 function InitialSyncBusy({
     name,
     preview,
-    onDismiss,
-}: Pick<ProviderPanelInitialSyncProps, 'name' | 'preview' | 'onDismiss'>) {
+}: Pick<ProviderPanelInitialSyncProps, 'name' | 'preview'>) {
     const message = getInitialSyncBusyMessage(name, preview);
     return (
         <section className="mt-6 border-y border-info-border py-4 sm:ml-16" aria-live="polite" aria-busy="true">
@@ -204,7 +227,30 @@ function InitialSyncBusy({
             <p className="mt-2 max-w-2xl text-sm leading-6 text-content-muted">
                 {message}
             </p>
-            <ActionButton tone="ghost" className="mt-4" onClick={onDismiss}>Not now</ActionButton>
+        </section>
+    );
+}
+
+function InitialSyncImportRequired({
+    name,
+    preview,
+    onImport,
+    onDismiss,
+}: Pick<ProviderPanelInitialSyncProps, 'name' | 'preview' | 'onImport' | 'onDismiss'> & {
+    preview: MediaInitialSyncPreviewDto;
+}) {
+    return (
+        <section className="mt-6 border-y border-info-border py-4 sm:ml-16" aria-live="polite">
+            <p className="text-sm font-semibold text-content">Import your {name} library</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-content-muted">
+                Cantaro does not have any media yet. Import the {preview.providerOnly} {preview.providerOnly === 1 ? 'title' : 'titles'} from {name} first; nothing will be written back to {name}.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+                <ActionButton tone="personal" onClick={() => void onImport().then(onDismiss)}>
+                    <RefreshCw className="h-4 w-4" aria-hidden /> Import from {name}
+                </ActionButton>
+                <ActionButton tone="ghost" onClick={onDismiss}>Not now</ActionButton>
+            </div>
         </section>
     );
 }
@@ -285,18 +331,22 @@ function InitialSyncReady({
     );
 }
 
+// fallow-ignore-next-line complexity
 export function ProviderPanelInitialSync(props: ProviderPanelInitialSyncProps) {
     if (props.result) {
-        return <InitialSyncResult name={props.name} result={props.result} onDismiss={props.onDismiss} />;
+        return <InitialSyncResult name={props.name} result={props.result} onRetry={props.onRetry} onDismiss={props.onDismiss} />;
     }
     if (!props.preview) {
-        return <InitialSyncBusy name={props.name} preview={null} onDismiss={props.onDismiss} />;
+        return <InitialSyncBusy name={props.name} preview={null} />;
     }
     if (props.isPreviewing || props.preview.status === 'settling') {
-        return <InitialSyncBusy name={props.name} preview={props.preview} onDismiss={props.onDismiss} />;
+        return <InitialSyncBusy name={props.name} preview={props.preview} />;
     }
     if (props.preview.status === 'blocked') {
         return <InitialSyncBlocked {...props} preview={props.preview} />;
+    }
+    if (props.preview.status === 'import-required') {
+        return <InitialSyncImportRequired {...props} preview={props.preview} />;
     }
     return <InitialSyncReady {...props} preview={props.preview} />;
 }

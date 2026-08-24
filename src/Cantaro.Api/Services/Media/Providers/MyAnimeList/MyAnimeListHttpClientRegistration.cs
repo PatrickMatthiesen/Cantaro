@@ -11,6 +11,7 @@ public static class MyAnimeListHttpClientRegistration
     {
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<MyAnimeListTokenRefreshGate>();
+        services.TryAddSingleton<MyAnimeListRequestGate>();
         var httpClient = services.AddHttpClient<MyAnimeListApiClient>(client =>
         {
             client.Timeout = RequestTimeout;

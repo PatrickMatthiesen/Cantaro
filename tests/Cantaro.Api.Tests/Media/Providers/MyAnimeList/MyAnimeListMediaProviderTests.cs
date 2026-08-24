@@ -255,6 +255,7 @@ public sealed class MyAnimeListMediaProviderTests
                     ClientId = "client-id",
                     ClientSecret = "client-secret"
                 }),
+                new MyAnimeListRequestGate(TimeProvider.System, TimeSpan.Zero),
                 NullLogger<MyAnimeListApiClient>.Instance);
             var provider = new MyAnimeListMediaProvider(
                 db,

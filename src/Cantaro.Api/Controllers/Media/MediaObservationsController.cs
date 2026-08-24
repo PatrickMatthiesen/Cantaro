@@ -863,8 +863,11 @@ public class MediaObservationsController(
         };
 
         _dbContext.MediaLibraryEntries.Add(entry);
-        var providerLink = await _dbContext.MediaProviderLinks
-            .SingleAsync(link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId, cancellationToken);
+        var providerLink = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
+                link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId)
+            ?? await _dbContext.MediaProviderLinks.SingleAsync(
+                link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId,
+                cancellationToken);
         _dbContext.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
         {
             Id = Guid.NewGuid(),
@@ -891,11 +894,17 @@ public class MediaObservationsController(
     {
         var existingLink = await _dbContext.MediaProviderLinks
             .Include(link => link.MediaTitle)
+                .ThenInclude(title => title!.ProviderLinks)
             .FirstOrDefaultAsync(link => link.Provider == providerId && link.ExternalId == providerMediaId, cancellationToken);
 
         if (existingLink?.MediaTitle is { } linkedTitle)
         {
-            ApplyProviderDetails(linkedTitle, details, now);
+            if (MediaCanonicalMetadataPolicy.ShouldApply(
+                    providerId,
+                    linkedTitle.ProviderLinks.Select(link => link.Provider)))
+            {
+                ApplyProviderDetails(linkedTitle, details, now);
+            }
             await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
             existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
             existingLink.AvailabilityLastVerifiedAt = now;
@@ -911,6 +920,7 @@ public class MediaObservationsController(
             var mediaId = reference.ProviderMediaId.Trim();
             var crossReference = await _dbContext.MediaProviderLinks
                 .Include(link => link.MediaTitle)
+                    .ThenInclude(title => title!.ProviderLinks)
                 .FirstOrDefaultAsync(
                     link => link.Provider == provider && link.ExternalId == mediaId,
                     cancellationToken);
@@ -943,7 +953,12 @@ public class MediaObservationsController(
         if (crossReferenceAnchors.Count == 1 && crossReferenceAnchors[0].MediaTitle is { } anchoredTitle)
         {
             title = anchoredTitle;
-            ApplyProviderDetails(title, details, now);
+            if (MediaCanonicalMetadataPolicy.ShouldApply(
+                    providerId,
+                    title.ProviderLinks.Select(link => link.Provider)))
+            {
+                ApplyProviderDetails(title, details, now);
+            }
         }
         else
         {

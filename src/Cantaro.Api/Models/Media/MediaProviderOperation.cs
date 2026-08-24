@@ -10,6 +10,8 @@ public class MediaProviderOperation
 
     public Guid MediaLibraryProviderBindingId { get; set; }
 
+    public Guid? BatchId { get; set; }
+
     public required string OperationType { get; set; }
 
     public required string PayloadJson { get; set; }

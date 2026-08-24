@@ -152,6 +152,119 @@ public class MediaProviderDtoContractTests
     }
 
     [Fact]
+    public async Task GetTitleDetails_MalExistingLink_PreservesAniListCanonicalMetadata()
+    {
+        var provider = new StubMediaProvider
+        {
+            ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+            TitleDetails = new MediaProviderTitleDetails
+            {
+                ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+                ProviderMediaId = "anime:140960",
+                Title = "MAL title",
+                MediaKind = MediaKinds.Anime,
+                PosterUrl = "https://example.test/mal.jpg",
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode
+            }
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "AniList title",
+            PosterUrl = "https://example.test/anilist.jpg",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.DbContext.Add(title);
+        fixture.DbContext.MediaProviderLinks.AddRange(
+            new MediaProviderLink
+            {
+                Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = MediaObservationSiteIdentifiers.AniList,
+                ExternalId = "140960", LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+            },
+            new MediaProviderLink
+            {
+                Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = MediaObservationSiteIdentifiers.MyAnimeList,
+                ExternalId = "anime:140960", LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+            });
+        await fixture.DbContext.SaveChangesAsync();
+
+        await fixture.Controller.GetTitleDetails(
+            MediaObservationSiteIdentifiers.MyAnimeList,
+            "anime:140960",
+            CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaTitles.SingleAsync();
+        Assert.Equal("AniList title", persisted.CanonicalTitle);
+        Assert.Equal("https://example.test/anilist.jpg", persisted.PosterUrl);
+    }
+
+    [Fact]
+    public async Task GetTitleDetails_MalCrossReferenceAnchor_PreservesAniListCanonicalMetadata()
+    {
+        var provider = new StubMediaProvider
+        {
+            ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+            TitleDetails = new MediaProviderTitleDetails
+            {
+                ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+                ProviderMediaId = "anime:140960",
+                Title = "MAL title",
+                MediaKind = MediaKinds.Anime,
+                PosterUrl = "https://example.test/mal.jpg",
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                CrossReferences =
+                [
+                    new MediaProviderCrossReference
+                    {
+                        ProviderId = MediaObservationSiteIdentifiers.AniList,
+                        ProviderMediaId = "140960"
+                    }
+                ]
+            }
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "AniList title",
+            PosterUrl = "https://example.test/anilist.jpg",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        fixture.DbContext.Add(title);
+        fixture.DbContext.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = MediaObservationSiteIdentifiers.AniList,
+            ExternalId = "140960", LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        await fixture.Controller.GetTitleDetails(
+            MediaObservationSiteIdentifiers.MyAnimeList,
+            "anime:140960",
+            CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaTitles.SingleAsync();
+        Assert.Equal("AniList title", persisted.CanonicalTitle);
+        Assert.Equal("https://example.test/anilist.jpg", persisted.PosterUrl);
+        Assert.Contains(
+            await fixture.DbContext.MediaProviderLinks.ToListAsync(),
+            link => link.Provider == MediaObservationSiteIdentifiers.MyAnimeList);
+    }
+
+    [Fact]
     public async Task GetTitleDetails_WhenProviderFails_ServesCachedAvailabilityAsStale()
     {
         var provider = new StubMediaProvider
@@ -654,7 +767,7 @@ public class MediaProviderDtoContractTests
 
     private sealed class StubMediaProvider : IMediaProvider
     {
-        public string ProviderId => "anilist";
+        public string ProviderId { get; init; } = "anilist";
 
         public IReadOnlyList<MediaProviderSearchResult> SearchResults { get; init; } = [];
 

@@ -21,6 +21,7 @@ public sealed class MediaProviderInitialSyncService(
     ApplicationDbContext dbContext,
     IMediaProviderRegistry mediaProviderRegistry,
     MediaLibraryImportService importService,
+    MediaProviderInitialSyncGate initialSyncGate,
     ILogger<MediaProviderInitialSyncService> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -34,6 +35,7 @@ public sealed class MediaProviderInitialSyncService(
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly MediaLibraryImportService _importService = importService;
+    private readonly MediaProviderInitialSyncGate _initialSyncGate = initialSyncGate;
     private readonly ILogger<MediaProviderInitialSyncService> _logger = logger;
 
     public async Task<MediaProviderInitialSyncPreviewDto> PreviewAsync(
@@ -41,20 +43,12 @@ public sealed class MediaProviderInitialSyncService(
         string providerId,
         CancellationToken cancellationToken)
     {
+        using var syncLease = await _initialSyncGate.AcquireAsync(userId, cancellationToken);
         var normalizedProviderId = NormalizeProviderId(providerId);
         var targetProvider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
         _ = await RequireAccountAsync(targetProvider, userId, cancellationToken);
 
         var operationState = await ReadOperationStateAsync(userId, cancellationToken);
-        if (operationState.Failed > 0)
-        {
-            return StatusPreview(
-                normalizedProviderId,
-                "blocked",
-                operationState,
-                "An earlier provider update needs attention before Cantaro can prepare this sync.");
-        }
-
         if (operationState.Active > 0)
         {
             return StatusPreview(
@@ -113,7 +107,7 @@ public sealed class MediaProviderInitialSyncService(
         foreach (var (account, snapshot) in existingSnapshots)
         {
             var plan = await BuildPlanAsync(userId, snapshot, cancellationToken);
-            existingOperations += await QueuePlanAsync(account, plan, cancellationToken);
+            existingOperations += await QueuePlanAsync(account, plan, batchId: null, cancellationToken);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -133,6 +127,17 @@ public sealed class MediaProviderInitialSyncService(
 
         var targetSnapshot = await targetProvider.ImportLibraryAsync(userId, cancellationToken);
         var targetPlan = await BuildPlanAsync(userId, targetSnapshot, cancellationToken);
+        if (targetPlan.CantaroEntryCount == 0 && targetPlan.ProviderOnlyItems.Count > 0)
+        {
+            return new MediaProviderInitialSyncPreviewDto
+            {
+                ProviderId = normalizedProviderId,
+                Status = "import-required",
+                ProviderOnly = targetPlan.ProviderOnlyItems.Count,
+                Message = "Cantaro is empty, so this provider library should be imported before anything is synced out.",
+                GeneratedAt = DateTimeOffset.UtcNow
+            };
+        }
         return MapPreview(targetPlan, refreshedProviderIds);
     }
 
@@ -142,9 +147,10 @@ public sealed class MediaProviderInitialSyncService(
         string fingerprint,
         CancellationToken cancellationToken)
     {
+        using var syncLease = await _initialSyncGate.AcquireAsync(userId, cancellationToken);
         var normalizedProviderId = NormalizeProviderId(providerId);
         var operationState = await ReadOperationStateAsync(userId, cancellationToken);
-        if (operationState.Failed > 0 || operationState.Active > 0)
+        if (operationState.Active > 0)
         {
             throw new MediaProviderInitialSyncNotReadyException(
                 "Cantaro is still finishing provider updates. Create a fresh preview before applying this sync.");
@@ -161,7 +167,8 @@ public sealed class MediaProviderInitialSyncService(
             throw new MediaProviderInitialSyncChangedException();
         }
 
-        var queuedOperations = await QueuePlanAsync(account, plan, cancellationToken);
+        var batchId = Guid.NewGuid();
+        var queuedOperations = await QueuePlanAsync(account, plan, batchId, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new MediaProviderInitialSyncResultDto
@@ -174,7 +181,40 @@ public sealed class MediaProviderInitialSyncService(
             ProviderOnly = plan.ProviderOnlyItems.Count,
             NeedsMatching = plan.UnresolvedEntries.Count,
             QueuedOperations = queuedOperations,
+            BatchId = queuedOperations > 0 ? batchId : null,
             GeneratedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    public async Task<MediaProviderInitialSyncProgressDto> GetProgressAsync(
+        int userId,
+        string providerId,
+        Guid batchId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedProviderId = NormalizeProviderId(providerId);
+        _ = _mediaProviderRegistry.GetRequired(normalizedProviderId);
+        var states = await _dbContext.MediaProviderOperations
+            .Where(operation => operation.BatchId == batchId
+                && operation.MediaLibraryProviderBinding!.MediaLibraryEntry!.UserId == userId
+                && operation.MediaLibraryProviderBinding.MediaProviderLink!.Provider == normalizedProviderId)
+            .GroupBy(operation => operation.Status)
+            .Select(group => new { Status = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+        var active = states
+            .Where(state => ActiveOperationStatuses.Contains(state.Status))
+            .Sum(state => state.Count);
+        var failed = states
+            .Where(state => state.Status == MediaProviderOperationStatuses.Failed)
+            .Sum(state => state.Count);
+
+        return new MediaProviderInitialSyncProgressDto
+        {
+            ProviderId = normalizedProviderId,
+            Status = active > 0 ? "running" : failed > 0 ? "failed" : "completed",
+            PendingOperations = active,
+            FailedOperations = failed,
+            CheckedAt = DateTimeOffset.UtcNow
         };
     }
 
@@ -251,6 +291,7 @@ public sealed class MediaProviderInitialSyncService(
         return new InitialSyncPlan
         {
             ProviderId = providerId,
+            CantaroEntryCount = entries.Count,
             Matches = matches,
             ProviderOnlyItems = providerOnlyItems,
             UnresolvedEntries = unresolvedEntries,
@@ -261,6 +302,7 @@ public sealed class MediaProviderInitialSyncService(
     private async Task<int> QueuePlanAsync(
         ConnectedServiceAccount account,
         InitialSyncPlan plan,
+        Guid? batchId,
         CancellationToken cancellationToken)
     {
         var activeBindingIds = await _dbContext.MediaProviderOperations
@@ -293,6 +335,7 @@ public sealed class MediaProviderInitialSyncService(
             {
                 Id = Guid.NewGuid(),
                 MediaLibraryProviderBindingId = binding.Id,
+                BatchId = batchId,
                 OperationType = MediaProviderOperationTypes.SyncLibraryState,
                 PayloadJson = JsonSerializer.Serialize(match.Request, SerializerOptions),
                 Status = MediaProviderOperationStatuses.Pending,
@@ -545,7 +588,7 @@ public sealed class MediaProviderInitialSyncService(
         {
             ProviderId = providerId,
             Status = status,
-            PendingOperations = operationState.Active + operationState.Failed,
+            PendingOperations = operationState.Active,
             Message = message,
             GeneratedAt = DateTimeOffset.UtcNow
         };
@@ -561,8 +604,7 @@ public sealed class MediaProviderInitialSyncService(
             .Select(group => new { Status = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
         return new ProviderOperationState(
-            states.Where(state => ActiveOperationStatuses.Contains(state.Status)).Sum(state => state.Count),
-            states.Where(state => state.Status == MediaProviderOperationStatuses.Failed).Sum(state => state.Count));
+            states.Where(state => ActiveOperationStatuses.Contains(state.Status)).Sum(state => state.Count));
     }
 
     private static async Task<ConnectedServiceAccount> RequireAccountAsync(
@@ -605,6 +647,7 @@ public sealed class MediaProviderInitialSyncService(
     private sealed class InitialSyncPlan
     {
         public required string ProviderId { get; init; }
+        public required int CantaroEntryCount { get; init; }
         public required IReadOnlyList<InitialSyncMatch> Matches { get; init; }
         public required IReadOnlyList<MediaProviderLibraryItem> ProviderOnlyItems { get; init; }
         public required IReadOnlyList<MediaLibraryEntry> UnresolvedEntries { get; init; }
@@ -623,5 +666,5 @@ public sealed class MediaProviderInitialSyncService(
         public required bool RequiresWrite { get; init; }
     }
 
-    private sealed record ProviderOperationState(int Active, int Failed);
+    private sealed record ProviderOperationState(int Active);
 }

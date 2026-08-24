@@ -13,6 +13,7 @@ import type {
     MediaInitialSyncApplyRequestDto,
     MediaInitialSyncApplyResultDto,
     MediaInitialSyncPreviewDto,
+    MediaInitialSyncProgressDto,
     MediaLibraryPageDto,
     MediaLibraryQueryParams,
     MediaLinkRequestDto,
@@ -166,13 +167,21 @@ export class MediaApiClient {
         await this.ensureOk(response, 'Failed to disconnect media provider');
     }
 
-    async previewInitialSync(providerId: string): Promise<MediaInitialSyncPreviewDto> {
+    async previewInitialSync(providerId: string, signal?: AbortSignal): Promise<MediaInitialSyncPreviewDto> {
         const response = await this.request(
             `/api/media/providers/${encodeURIComponent(providerId)}/initial-sync/preview`,
-            { method: 'POST' },
+            { method: 'POST', signal },
         );
         await this.ensureOk(response, 'Failed to prepare provider sync');
         return response.json() as Promise<MediaInitialSyncPreviewDto>;
+    }
+
+    async getInitialSyncProgress(providerId: string, batchId: string): Promise<MediaInitialSyncProgressDto> {
+        const response = await this.request(
+            `/api/media/providers/${encodeURIComponent(providerId)}/initial-sync/batches/${encodeURIComponent(batchId)}`,
+        );
+        await this.ensureOk(response, 'Failed to check provider sync progress');
+        return response.json() as Promise<MediaInitialSyncProgressDto>;
     }
 
     async applyInitialSync(
