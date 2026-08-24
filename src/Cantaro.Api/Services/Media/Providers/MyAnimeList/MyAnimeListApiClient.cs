@@ -166,7 +166,9 @@ public sealed class MyAnimeListApiClient(
     private Uri ResolveApiUri(string pathOrUrl)
     {
         var apiBaseUri = new Uri(_options.ApiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
-        if (Uri.TryCreate(pathOrUrl, UriKind.Absolute, out var absolute))
+        if (Uri.TryCreate(pathOrUrl, UriKind.Absolute, out var absolute)
+            && (string.Equals(absolute.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(absolute.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
         {
             if (Uri.Compare(
                     apiBaseUri,
