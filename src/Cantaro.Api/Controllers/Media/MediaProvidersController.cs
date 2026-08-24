@@ -791,6 +791,7 @@ public class MediaProvidersController(
         if (existingLink?.MediaTitle is { } linkedTitle)
         {
             ApplyProviderDetails(linkedTitle, details, now);
+            await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
             existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
             existingLink.AvailabilityLastVerifiedAt = now;
             existingLink.LastVerifiedAt = now;
@@ -798,37 +799,81 @@ public class MediaProvidersController(
             return linkedTitle;
         }
 
-        var title = new MediaTitle
+        var crossReferenceAnchors = new List<MediaProviderLink>();
+        foreach (var reference in details.CrossReferences)
         {
-            Id = Guid.NewGuid(),
-            CanonicalTitle = details.Title,
-            SortTitle = details.Title,
-            OriginalTitle = details.NativeTitle,
-            Synonyms = [.. details.Synonyms],
-            MediaKind = details.MediaKind,
-            Synopsis = details.Synopsis,
-            Format = details.Format,
-            PosterUrl = details.PosterUrl,
-            BackgroundUrl = details.BackgroundUrl,
-            StartYear = details.StartYear,
-            EpisodeCount = details.EpisodeCount,
-            ChapterCount = details.ChapterCount,
-            VolumeCount = details.VolumeCount,
-            ReleasedCount = details.ReleasedCount,
-            TotalKnownCount = details.TotalKnownCount,
-            NextReleaseAt = details.NextReleaseAt,
-            NextReleaseLabel = details.NextReleaseLabel,
-            SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
-            SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter,
-            SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume,
-            IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly,
-            PrimaryProgressDimension = details.PrimaryProgressDimension,
-            ReleaseStatusDimension = details.ReleaseStatusDimension,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
+            var normalizedProvider = reference.ProviderId.Trim().ToLowerInvariant();
+            var normalizedMediaId = reference.ProviderMediaId.Trim();
+            var crossReference = await _dbContext.MediaProviderLinks
+                .Include(link => link.MediaTitle)
+                .FirstOrDefaultAsync(
+                    link => link.Provider == normalizedProvider && link.ExternalId == normalizedMediaId,
+                    cancellationToken);
+            if (crossReference is not null)
+            {
+                var conflictingPrimary = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
+                        link => link.MediaTitleId == crossReference.MediaTitleId && link.Provider == providerId)
+                    ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(
+                        link => link.MediaTitleId == crossReference.MediaTitleId && link.Provider == providerId,
+                        cancellationToken);
+                if (conflictingPrimary is not null && conflictingPrimary.ExternalId != providerMediaId)
+                {
+                    _logger.LogWarning(
+                        "Cross-reference anchor MediaTitle {MediaTitleId} already has provider link {Provider}/{ExistingProviderMediaId}; refusing requested {RequestedProviderMediaId}.",
+                        crossReference.MediaTitleId,
+                        providerId,
+                        conflictingPrimary.ExternalId,
+                        providerMediaId);
+                    continue;
+                }
+            }
+            if (crossReference is not null
+                && crossReferenceAnchors.All(anchor => anchor.MediaTitleId != crossReference.MediaTitleId))
+            {
+                crossReferenceAnchors.Add(crossReference);
+            }
+        }
 
-        _dbContext.MediaTitles.Add(title);
+        MediaTitle title;
+        if (crossReferenceAnchors.Count == 1 && crossReferenceAnchors[0].MediaTitle is { } anchoredTitle)
+        {
+            title = anchoredTitle;
+            ApplyProviderDetails(title, details, now);
+        }
+        else
+        {
+            title = new MediaTitle
+            {
+                Id = Guid.NewGuid(),
+                CanonicalTitle = details.Title,
+                SortTitle = details.Title,
+                OriginalTitle = details.NativeTitle,
+                Synonyms = [.. details.Synonyms],
+                MediaKind = details.MediaKind,
+                Synopsis = details.Synopsis,
+                Format = details.Format,
+                PosterUrl = details.PosterUrl,
+                BackgroundUrl = details.BackgroundUrl,
+                StartYear = details.StartYear,
+                EpisodeCount = details.EpisodeCount,
+                ChapterCount = details.ChapterCount,
+                VolumeCount = details.VolumeCount,
+                ReleasedCount = details.ReleasedCount,
+                TotalKnownCount = details.TotalKnownCount,
+                NextReleaseAt = details.NextReleaseAt,
+                NextReleaseLabel = details.NextReleaseLabel,
+                SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
+                SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter,
+                SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume,
+                IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly,
+                PrimaryProgressDimension = details.PrimaryProgressDimension,
+                ReleaseStatusDimension = details.ReleaseStatusDimension,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            _dbContext.MediaTitles.Add(title);
+        }
+
         _dbContext.MediaProviderLinks.Add(new MediaProviderLink
         {
             Id = Guid.NewGuid(),
@@ -842,8 +887,81 @@ public class MediaProvidersController(
             CreatedAt = now,
             UpdatedAt = now
         });
+        await PersistProviderCrossReferencesAsync(title, details.CrossReferences, now, cancellationToken);
 
         return title;
+    }
+
+    private async Task PersistProviderCrossReferencesAsync(
+        MediaTitle title,
+        IReadOnlyList<MediaProviderCrossReference> crossReferences,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        foreach (var reference in crossReferences)
+        {
+            var providerId = reference.ProviderId.Trim().ToLowerInvariant();
+            var providerMediaId = reference.ProviderMediaId.Trim();
+            if (providerId.Length == 0 || providerMediaId.Length == 0)
+            {
+                continue;
+            }
+
+            var link = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
+                    candidate => candidate.Provider == providerId && candidate.ExternalId == providerMediaId)
+                ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(
+                    candidate => candidate.Provider == providerId && candidate.ExternalId == providerMediaId,
+                    cancellationToken);
+            if (link is null)
+            {
+                var conflictingProviderLink = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
+                        candidate => candidate.MediaTitleId == title.Id && candidate.Provider == providerId)
+                    ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(
+                        candidate => candidate.MediaTitleId == title.Id && candidate.Provider == providerId,
+                        cancellationToken);
+                if (conflictingProviderLink is not null)
+                {
+                    _logger.LogWarning(
+                        "MediaTitle {MediaTitleId} already has provider link {Provider}/{ExistingProviderMediaId}; refusing cross-reference {RequestedProviderMediaId}.",
+                        title.Id,
+                        providerId,
+                        conflictingProviderLink.ExternalId,
+                        providerMediaId);
+                    continue;
+                }
+
+                _dbContext.MediaProviderLinks.Add(new MediaProviderLink
+                {
+                    Id = Guid.NewGuid(),
+                    MediaTitleId = title.Id,
+                    Provider = providerId,
+                    ExternalId = providerMediaId,
+                    ExternalUrl = reference.ExternalUrl,
+                    Confidence = 1m,
+                    LinkSource = MediaMappingSources.Imported,
+                    LastVerifiedAt = now,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    MediaTitle = title
+                });
+                continue;
+            }
+
+            if (link.MediaTitleId != title.Id)
+            {
+                _logger.LogWarning(
+                    "Provider cross-reference {Provider}/{ProviderMediaId} already belongs to MediaTitle {ExistingTitleId}; refusing to move it to {RequestedTitleId}.",
+                    providerId,
+                    providerMediaId,
+                    link.MediaTitleId,
+                    title.Id);
+                continue;
+            }
+
+            link.ExternalUrl = reference.ExternalUrl ?? link.ExternalUrl;
+            link.LastVerifiedAt = now;
+            link.UpdatedAt = now;
+        }
     }
 
     private static void ApplyProviderDetails(MediaTitle title, MediaProviderTitleDetails details, DateTimeOffset now)

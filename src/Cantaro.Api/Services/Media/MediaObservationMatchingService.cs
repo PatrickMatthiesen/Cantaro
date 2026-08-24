@@ -316,38 +316,75 @@ public class MediaObservationMatchingService(
             return [];
         }
 
-        var link = await _dbContext.MediaProviderLinks
+        var providerMediaIds = GetProviderMediaIdCandidates(provider, siteMediaId, observation.ObservedUrl);
+        var links = await _dbContext.MediaProviderLinks
             .Include(l => l.MediaTitle)
-            .FirstOrDefaultAsync(
-                l => l.Provider == provider && l.ExternalId == siteMediaId,
-                cancellationToken);
+            .Where(link => link.Provider == provider && providerMediaIds.Contains(link.ExternalId))
+            .ToListAsync(cancellationToken);
 
-        if (link?.MediaTitle is null)
+        return links
+            .Where(link => link.MediaTitle is not null)
+            .Select(link =>
+            {
+                _logger.LogDebug(
+                    "Exact provider link match for observation {ObservationId}: {Provider}/{ProviderMediaId} → MediaTitle {MediaTitleId}.",
+                    observation.Id,
+                    provider,
+                    link.ExternalId,
+                    link.MediaTitleId);
+                return new MediaObservationCandidate
+                {
+                    Id = Guid.NewGuid(),
+                    MediaObservationId = observation.Id,
+                    CandidateSource = MediaObservationCandidateSources.ProviderLinkExact,
+                    MediaTitleId = link.MediaTitleId,
+                    Provider = provider,
+                    ProviderMediaId = link.ExternalId,
+                    Title = link.MediaTitle!.CanonicalTitle,
+                    MediaKind = link.MediaTitle.MediaKind,
+                    Score = 0.97m,
+                    Explanation = $"Exact provider link match: {provider}/{link.ExternalId}",
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+            })
+            .ToList();
+    }
+
+    internal static IReadOnlyList<string> GetProviderMediaIdCandidates(
+        string provider,
+        string siteMediaId,
+        string observedUrl)
+    {
+        var normalizedId = siteMediaId.Trim();
+        if (provider != MediaObservationSiteIdentifiers.MyAnimeList)
         {
-            return [];
+            return [normalizedId];
         }
 
-        _logger.LogDebug(
-            "Exact provider link match for observation {ObservationId}: {Provider}/{SiteMediaId} → MediaTitle {MediaTitleId}.",
-            observation.Id, provider, siteMediaId, link.MediaTitleId);
+        if (normalizedId.StartsWith("anime:", StringComparison.OrdinalIgnoreCase))
+        {
+            return [$"anime:{normalizedId[6..]}" ];
+        }
 
-        return
-        [
-            new MediaObservationCandidate
+        if (normalizedId.StartsWith("manga:", StringComparison.OrdinalIgnoreCase))
+        {
+            return [$"manga:{normalizedId[6..]}" ];
+        }
+
+        if (Uri.TryCreate(observedUrl, UriKind.Absolute, out var uri))
+        {
+            var firstSegment = uri.AbsolutePath
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            if (firstSegment is "anime" or "manga")
             {
-                Id = Guid.NewGuid(),
-                MediaObservationId = observation.Id,
-                CandidateSource = MediaObservationCandidateSources.ProviderLinkExact,
-                MediaTitleId = link.MediaTitleId,
-                Provider = provider,
-                ProviderMediaId = link.ExternalId,
-                Title = link.MediaTitle.CanonicalTitle,
-                MediaKind = link.MediaTitle.MediaKind,
-                Score = 0.97m,
-                Explanation = $"Exact provider link match: {provider}/{siteMediaId}",
-                CreatedAt = DateTimeOffset.UtcNow
+                return [$"{firstSegment}:{normalizedId}"];
             }
-        ];
+        }
+
+        // A bare MAL number is ambiguous because anime and manga use separate ID
+        // namespaces. Query both; equal exact matches remain ambiguous for review.
+        return [$"anime:{normalizedId}", $"manga:{normalizedId}"];
     }
 
     private async Task<List<MediaObservationCandidate>> FindByUserLibraryTitleAsync(

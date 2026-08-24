@@ -499,6 +499,7 @@ public class AniListMediaProvider(
             PosterUrl = SelectPosterUrl(entry.Media.CoverImage),
             BackgroundUrl = entry.Media.BannerImage,
             ExternalUrl = entry.Media.SiteUrl,
+            CrossReferences = BuildCrossReferences(entry.Media, mediaKind),
             StartYear = entry.Media.StartDate?.Year,
             EpisodeCount = entry.Media.Episodes,
             ChapterCount = entry.Media.Chapters,
@@ -562,6 +563,7 @@ public class AniListMediaProvider(
             Format = media.Format,
             PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
+            CrossReferences = BuildCrossReferences(media, mediaKind),
             StartYear = media.StartDate?.Year,
             EpisodeCount = media.Episodes,
             ChapterCount = media.Chapters,
@@ -827,6 +829,27 @@ public class AniListMediaProvider(
         };
     }
 
+    private static IReadOnlyList<MediaProviderCrossReference> BuildCrossReferences(
+        AniListMedia media,
+        string mediaKind)
+    {
+        if (media.IdMal is not > 0)
+        {
+            return [];
+        }
+
+        var pathKind = mediaKind == MediaKinds.Manga ? "manga" : "anime";
+        return
+        [
+            new MediaProviderCrossReference
+            {
+                ProviderId = MediaObservationSiteIdentifiers.MyAnimeList,
+                ProviderMediaId = $"{pathKind}:{media.IdMal.Value}",
+                ExternalUrl = $"https://myanimelist.net/{pathKind}/{media.IdMal.Value}"
+            }
+        ];
+    }
+
     private static string? MapMediaFormat(string? format)
     {
         if (string.IsNullOrWhiteSpace(format))
@@ -960,6 +983,7 @@ public class AniListMediaProvider(
                 updatedAt
                 media {
                   id
+                  idMal
                   type
                   format
                   status
@@ -1035,6 +1059,7 @@ public class AniListMediaProvider(
         query ($id: Int) {
           Media(id: $id) {
             id
+            idMal
             type
             format
             status
@@ -1251,6 +1276,9 @@ public class AniListMedia
 {
     [JsonPropertyName("id")]
     public int Id { get; set; }
+
+    [JsonPropertyName("idMal")]
+    public int? IdMal { get; set; }
 
     [JsonPropertyName("type")]
     public string? Type { get; set; }
