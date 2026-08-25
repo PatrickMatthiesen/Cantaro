@@ -1,27 +1,22 @@
 namespace Cantaro.Api.Models;
 
+using System.ComponentModel.DataAnnotations.Schema;
+
 /// <summary>
-/// A provider's identity and safe destination path for a canonical episode.
+/// A provider's playable identity and safe destination path for logical episode content.
 /// </summary>
 public class MediaEpisodeProviderIdentity
 {
     public Guid Id { get; set; }
 
-    public Guid MediaEpisodeId { get; set; }
+    public Guid MediaEpisodeProviderContentId { get; set; }
 
     public required string Provider { get; set; }
 
-    public string? ProviderSeriesId { get; set; }
-
-    public string? ProviderSeasonId { get; set; }
-
     public required string ProviderEpisodeId { get; set; }
 
-    public int? ProviderSeasonNumber { get; set; }
-
-    public int? ProviderEpisodeNumber { get; set; }
-
-    public int? ProviderSequenceNumber { get; set; }
+    /// <summary>BCP-47 audio locale for this playable variant, when known.</summary>
+    public string? AudioLocale { get; set; }
 
     /// <summary>
     /// Provider-relative path. A destination URL is only reconstructed through
@@ -47,5 +42,53 @@ public class MediaEpisodeProviderIdentity
     /// </summary>
     public bool HasConflict { get; set; }
 
-    public MediaEpisode? MediaEpisode { get; set; }
+    public MediaEpisodeProviderContent? Content { get; set; }
+
+    // Compatibility accessors keep callers focused on the canonical episode
+    // while persistence remains normalized through Content.
+    [NotMapped]
+    public Guid MediaEpisodeId
+    {
+        get => Content?.MediaEpisodeId ?? Guid.Empty;
+        set => EnsureContent().MediaEpisodeId = value;
+    }
+
+    [NotMapped]
+    public MediaEpisode? MediaEpisode
+    {
+        get => Content?.MediaEpisode;
+        set
+        {
+            var content = EnsureContent();
+            content.MediaEpisode = value;
+            if (value is not null) content.MediaEpisodeId = value.Id;
+        }
+    }
+
+    [NotMapped]
+    public string? ProviderSeriesId { get => Content?.ProviderSeriesId; set => EnsureContent().ProviderSeriesId = value; }
+
+    [NotMapped]
+    public string? ProviderSeasonId { get => Content?.ProviderSeasonId; set => EnsureContent().ProviderSeasonId = value; }
+
+    [NotMapped]
+    public int? ProviderSeasonNumber { get => Content?.ProviderSeasonNumber; set => EnsureContent().ProviderSeasonNumber = value; }
+
+    [NotMapped]
+    public int? ProviderEpisodeNumber { get => Content?.ProviderEpisodeNumber; set => EnsureContent().ProviderEpisodeNumber = value; }
+
+    [NotMapped]
+    public int? ProviderSequenceNumber { get => Content?.ProviderSequenceNumber; set => EnsureContent().ProviderSequenceNumber = value; }
+
+    private MediaEpisodeProviderContent EnsureContent()
+    {
+        if (Content is not null) return Content;
+        Content = new MediaEpisodeProviderContent
+        {
+            Id = Guid.NewGuid(),
+            Provider = Provider
+        };
+        MediaEpisodeProviderContentId = Content.Id;
+        return Content;
+    }
 }

@@ -18,10 +18,7 @@ import {
   EntryLinkDialog,
   MediaHero,
 } from "./MediaEntryDetailHero";
-import {
-  EpisodesSection,
-  type EpisodeProviderAvailabilityState,
-} from "./EpisodesSection";
+import { EpisodesSection } from "./EpisodesSection";
 import {
   CharactersSection,
   CommunitySection,
@@ -43,22 +40,6 @@ import {
   type MediaEntryDetailPageViewProps,
   type ProgressSummary,
 } from "./mediaEntryDetailTypes";
-
-function getEpisodeProviderAvailabilityState(
-  availabilityByProviderLink: MediaEntryDetailContentProps["availabilityByProviderLink"],
-): EpisodeProviderAvailabilityState {
-  const states = Object.values(availabilityByProviderLink);
-  const hasLinks = states.some((state) => state.links.length > 0);
-  if (hasLinks) {
-    return states.some((state) =>
-      state.isStale || state.status === "error" || state.status === "unavailable")
-      ? "stale"
-      : "fresh";
-  }
-  if (states.some((state) => state.status === "loading")) return "loading";
-  if (states.some((state) => state.status === "error")) return "error";
-  return "unavailable";
-}
 
 function MediaDetailTabPanel({
   activeTab,
@@ -117,9 +98,6 @@ function MediaDetailTabPanel({
         entry={props.entry}
         state={props.episodeCatalog}
         streamingDestinations={streamingDestinations}
-        providerAvailabilityState={getEpisodeProviderAvailabilityState(
-          props.availabilityByProviderLink,
-        )}
         preferredServiceId={preferredServiceId}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={props.onReloadEpisodes}

@@ -1,4 +1,5 @@
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
+import { extensionLogMessage } from '../../../../platform/diagnostics/extensionIdentity';
 import { registerTabContext } from '../../../../platform/messaging/tabContext';
 import { watchExtensionSettings } from '../../../../platform/settings/settingsRepository';
 import type { MediaTabContext } from '../../contracts/mediaTabContext';
@@ -16,14 +17,14 @@ function startVerboseLogging(
 ): void {
   const stopWatching = dependencies.watchVerboseLogging((enabled) => {
     setEnabled(enabled);
-    console.info(`Cantaro: verbose logging ${enabled ? 'enabled' : 'disabled'}`);
+    console.info(extensionLogMessage(`verbose logging ${enabled ? 'enabled' : 'disabled'}`));
   });
   ctx.onInvalidated(stopWatching);
 
   void dependencies.readVerboseLogging()
     .then(setEnabled)
     .catch((error: unknown) => {
-      console.warn('Cantaro: could not read verbose logging setting', error);
+      console.warn(extensionLogMessage('could not read verbose logging setting'), error);
     })
     .finally(onReady);
 }

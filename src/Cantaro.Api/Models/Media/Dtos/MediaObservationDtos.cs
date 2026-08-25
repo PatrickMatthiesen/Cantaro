@@ -156,6 +156,8 @@ public class SubmitMediaObservationResponse
 
     public int? ResolvedProgress { get; set; }
 
+    public bool ProgressUpdated { get; set; }
+
     public MediaObservationDto? Observation { get; set; }
 
     public List<MediaObservationProviderChoiceDto> ProviderChoices { get; set; } = [];

@@ -14,6 +14,7 @@ import {
 } from '../../../platform/storage/deliveryQueue';
 import type { DrainDeliveryQueueResult } from '../../../platform/messaging/platformMessages';
 import type { MediaBackgroundRequest, MediaBackgroundResponse } from '../contracts/mediaMessages';
+import { browserMediaProgressNotifier, type MediaProgressNotifier } from './mediaProgressNotifier';
 
 type SubmissionRequest = Exclude<MediaBackgroundRequest, { type: 'media.watch.resolve' }>;
 type ResolutionRequest = Extract<MediaBackgroundRequest, { type: 'media.watch.resolve' }>;
@@ -47,15 +48,6 @@ function failureResult(
   );
 }
 
-async function submitObservation(
-  apiClient: CantaroApiClient,
-  request: SubmissionRequest,
-): Promise<MediaBackgroundResponse> {
-  return request.type === 'media.catalog.submit'
-    ? apiClient.submitCatalog(request.payload)
-    : apiClient.submitWatch(request.payload);
-}
-
 function queuedDelivery(request: SubmissionRequest): QueuedDelivery {
   return request.type === 'media.catalog.submit'
     ? { kind: 'media.catalog', payload: request.payload }
@@ -87,9 +79,19 @@ async function handleSubmission(
   apiClient: CantaroApiClient,
   queue: DeliveryQueue,
   logger: ExtensionLogger,
+  progressNotifier: MediaProgressNotifier,
 ): Promise<MessageResult<MediaBackgroundResponse>> {
   try {
-    const result = await submitObservation(apiClient, request);
+    if (request.type === 'media.catalog.submit') {
+      const result = await apiClient.submitCatalog(request.payload);
+      logSubmission(logger, request, result);
+      return messageSuccess(result, request.correlationId);
+    }
+
+    const result = await apiClient.submitWatch(request.payload);
+    await progressNotifier.notify(result).catch((error: unknown) => {
+      logger.warn('Could not notify open Cantaro tabs', { reason: failureMessage(error) });
+    });
     logSubmission(logger, request, result);
     return messageSuccess(result, request.correlationId);
   } catch (error) {
@@ -127,13 +129,17 @@ export function createMediaRequestHandler(
   apiClient: CantaroApiClient,
   queue: DeliveryQueue,
   logger: ExtensionLogger,
+  progressNotifier: MediaProgressNotifier = { notify: async () => {} },
 ): MediaRequestHandler {
   async function deliver(delivery: QueuedDelivery): Promise<void> {
     if (delivery.kind === 'media.catalog') {
       await apiClient.submitCatalog(delivery.payload);
       return;
     }
-    await apiClient.submitWatch(delivery.payload);
+    const result = await apiClient.submitWatch(delivery.payload);
+    await progressNotifier.notify(result).catch((error: unknown) => {
+      logger.warn('Could not notify open Cantaro tabs', { reason: failureMessage(error) });
+    });
   }
 
   return {
@@ -141,7 +147,7 @@ export function createMediaRequestHandler(
       const requestLogger = logger.child({ tabId, correlationId: request.correlationId });
       return request.type === 'media.watch.resolve'
         ? handleResolution(request, apiClient, requestLogger)
-        : handleSubmission(request, apiClient, queue, requestLogger);
+        : handleSubmission(request, apiClient, queue, requestLogger, progressNotifier);
     },
 
     async drainQueue() {
@@ -173,4 +179,5 @@ export const mediaRequestHandler = createMediaRequestHandler(
   backgroundCantaroApiClient,
   browserDeliveryQueue,
   createExtensionLogger({ scope: 'background', feature: 'media' }),
+  browserMediaProgressNotifier,
 );

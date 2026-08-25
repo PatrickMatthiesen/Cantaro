@@ -35,6 +35,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderSeasonMapping> MediaProviderSeasonMappings => Set<MediaProviderSeasonMapping>();
     public DbSet<MediaProviderLink> MediaProviderLinks => Set<MediaProviderLink>();
     public DbSet<MediaEpisode> MediaEpisodes => Set<MediaEpisode>();
+    public DbSet<MediaEpisodeProviderContent> MediaEpisodeProviderContents => Set<MediaEpisodeProviderContent>();
     public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
     public DbSet<MediaLibraryProviderBinding> MediaLibraryProviderBindings => Set<MediaLibraryProviderBinding>();
@@ -585,6 +586,25 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<MediaEpisodeProviderContent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new { e.MediaEpisodeId, e.Provider, e.ProviderContentKey })
+                .IsUnique();
+            entity.HasIndex(e => new { e.Provider, e.ProviderContentKey });
+
+            entity.Property(e => e.Provider).HasMaxLength(64);
+            entity.Property(e => e.ProviderContentKey).HasMaxLength(256);
+            entity.Property(e => e.ProviderSeriesId).HasMaxLength(256);
+            entity.Property(e => e.ProviderSeasonId).HasMaxLength(256);
+
+            entity.HasOne(e => e.MediaEpisode)
+                .WithMany(e => e.ProviderContents)
+                .HasForeignKey(e => e.MediaEpisodeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<MediaEpisodeProviderIdentity>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -592,12 +612,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => new { e.Provider, e.ProviderEpisodeId })
                 .IsUnique();
 
-            entity.HasIndex(e => new { e.MediaEpisodeId, e.Provider, e.HasConflict });
+            entity.HasIndex(e => new { e.MediaEpisodeProviderContentId, e.HasConflict });
 
             entity.Property(e => e.Provider).HasMaxLength(64);
-            entity.Property(e => e.ProviderSeriesId).HasMaxLength(256);
-            entity.Property(e => e.ProviderSeasonId).HasMaxLength(256);
             entity.Property(e => e.ProviderEpisodeId).HasMaxLength(256);
+            entity.Property(e => e.AudioLocale).HasMaxLength(35);
             entity.Property(e => e.ProviderUrlPath).HasMaxLength(1024);
             entity.Property(e => e.SeenCount).HasDefaultValue(1);
 
@@ -605,9 +624,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 "CK_MediaEpisodeProviderIdentities_SeenCount",
                 "\"SeenCount\" > 0"));
 
-            entity.HasOne(e => e.MediaEpisode)
-                .WithMany(e => e.ProviderIdentities)
-                .HasForeignKey(e => e.MediaEpisodeId)
+            entity.HasOne(e => e.Content)
+                .WithMany(e => e.Variants)
+                .HasForeignKey(e => e.MediaEpisodeProviderContentId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -785,6 +804,26 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     {
         UpdateUserTimestamps();
         UpdateTrackSearchProjections();
+        NormalizeMediaProviderContents();
+    }
+
+    private void NormalizeMediaProviderContents()
+    {
+        foreach (var entry in ChangeTracker.Entries<MediaEpisodeProviderIdentity>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified)
+                || entry.Entity.Content is null)
+            {
+                continue;
+            }
+
+            entry.Entity.Content.Provider = entry.Entity.Provider;
+            var parsed = Cantaro.Api.Services.MediaProviderVariantIdentities.Parse(
+                entry.Entity.Provider,
+                entry.Entity.ProviderEpisodeId);
+            entry.Entity.Content.ProviderContentKey ??= parsed.ContentKey;
+            entry.Entity.AudioLocale ??= parsed.AudioLocale;
+        }
     }
 
     private void UpdateTrackSearchProjections()

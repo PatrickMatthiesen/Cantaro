@@ -333,11 +333,12 @@ public class MediaEpisodeIdentityService(
         var episodes = await _dbContext.MediaEpisodes
             .AsNoTracking()
             .Where(episode => episode.MediaTitleId == title.Id)
-            .Include(episode => episode.ProviderIdentities)
+            .Include(episode => episode.ProviderContents)
+                .ThenInclude(content => content.Variants)
             .OrderBy(episode => episode.EpisodeNumber)
             .ToListAsync(cancellationToken);
         var seriesDestinations = SelectSeriesDestinations(
-            episodes.SelectMany(episode => episode.ProviderIdentities));
+            episodes.SelectMany(episode => episode.ProviderContents));
 
         return new MediaEpisodeCatalogDto
         {
@@ -380,14 +381,15 @@ public class MediaEpisodeIdentityService(
 
     private static MediaEpisodeDestinationDto MapEpisodeDestination(MediaEpisode episode)
     {
-        var identities = episode.ProviderIdentities
-            .OrderBy(identity => identity.HasConflict)
-            .ThenByDescending(identity => identity.SeenCount)
-            .ThenByDescending(identity => identity.LastSeenAt)
+        var identities = episode.ProviderContents
+            .SelectMany(content => content.Variants.Select(variant => (Content: content, Variant: variant)))
+            .OrderBy(item => item.Variant.HasConflict)
+            .ThenByDescending(item => item.Variant.SeenCount)
+            .ThenByDescending(item => item.Variant.LastSeenAt)
             .ToList();
         var destinations = identities
-            .Where(identity => !identity.HasConflict)
-            .Select(MapEpisodeProviderDestination)
+            .Where(item => !item.Variant.HasConflict)
+            .Select(item => MapEpisodeProviderDestination(item.Variant))
             .OfType<MediaStreamingDestinationDto>()
             .ToList();
 
@@ -398,8 +400,8 @@ public class MediaEpisodeIdentityService(
             AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes,
             AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes,
             Destinations = destinations,
-            SeenCount = identities.Select(identity => identity.SeenCount).DefaultIfEmpty(0).Max(),
-            HasConflict = identities.Any(identity => identity.HasConflict)
+            SeenCount = identities.Select(item => item.Variant.SeenCount).DefaultIfEmpty(0).Max(),
+            HasConflict = identities.Any(item => item.Variant.HasConflict)
         };
     }
 
@@ -413,6 +415,7 @@ public class MediaEpisodeIdentityService(
             {
                 ServiceId = identity.Provider,
                 Url = url,
+                AudioLocale = identity.AudioLocale,
                 SeenCount = identity.SeenCount,
                 FirstSeenAt = identity.FirstSeenAt,
                 LastSeenAt = identity.LastSeenAt
@@ -463,7 +466,8 @@ public class MediaEpisodeIdentityService(
             .Where(episode =>
                 episode.MediaTitleId == entry.MediaTitleId
                 && episode.EpisodeNumber == nextEpisodeNumber)
-            .SelectMany(episode => episode.ProviderIdentities)
+            .SelectMany(episode => episode.ProviderContents)
+            .SelectMany(content => content.Variants)
             .ToListAsync(cancellationToken);
 
         identities = identities
@@ -521,11 +525,12 @@ public class MediaEpisodeIdentityService(
         Guid mediaTitleId,
         CancellationToken cancellationToken)
     {
-        var identities = await _dbContext.MediaEpisodes
+        var identities = await _dbContext.MediaEpisodeProviderContents
             .AsNoTracking()
-            .Where(episode => episode.MediaTitleId == mediaTitleId)
-            .SelectMany(episode => episode.ProviderIdentities)
-            .Where(identity => !identity.HasConflict && identity.ProviderSeriesId != null)
+            .Where(content => content.MediaEpisode!.MediaTitleId == mediaTitleId)
+            .Where(content => content.Variants.Any(identity => !identity.HasConflict)
+                && content.ProviderSeriesId != null)
+            .Include(content => content.Variants)
             .ToListAsync(cancellationToken);
 
         var destination = SelectSeriesDestinations(identities).FirstOrDefault();
@@ -533,11 +538,11 @@ public class MediaEpisodeIdentityService(
     }
 
     private static IReadOnlyList<MediaStreamingDestinationDto> SelectSeriesDestinations(
-        IEnumerable<MediaEpisodeProviderIdentity> identities)
+        IEnumerable<MediaEpisodeProviderContent> contents)
     {
-        return identities
-            .Where(identity => !identity.HasConflict && !string.IsNullOrWhiteSpace(identity.ProviderSeriesId))
-            .GroupBy(identity => new { identity.Provider, identity.ProviderSeriesId })
+        return contents
+            .Where(content => !string.IsNullOrWhiteSpace(content.ProviderSeriesId))
+            .GroupBy(content => new { content.Provider, content.ProviderSeriesId })
             .Select(group =>
             {
                 var url = MediaDestinationUrlPolicy.BuildSeriesUrl(
@@ -549,9 +554,15 @@ public class MediaEpisodeIdentityService(
                     {
                         ServiceId = group.Key.Provider,
                         Url = url,
-                        SeenCount = group.Sum(identity => identity.SeenCount),
-                        FirstSeenAt = group.Min(identity => identity.FirstSeenAt),
-                        LastSeenAt = group.Max(identity => identity.LastSeenAt)
+                        SeenCount = group.SelectMany(content => content.Variants)
+                            .Where(variant => !variant.HasConflict)
+                            .Sum(variant => variant.SeenCount),
+                        FirstSeenAt = group.SelectMany(content => content.Variants)
+                            .Where(variant => !variant.HasConflict)
+                            .Min(variant => variant.FirstSeenAt),
+                        LastSeenAt = group.SelectMany(content => content.Variants)
+                            .Where(variant => !variant.HasConflict)
+                            .Max(variant => variant.LastSeenAt)
                     };
             })
             .OfType<MediaStreamingDestinationDto>()
@@ -645,7 +656,9 @@ public class MediaEpisodeIdentityService(
             StringComparison.Ordinal)
             ? providerEpisodeId.Trim().ToUpperInvariant()
             : providerEpisodeId.Trim();
+        var variantIdentity = MediaProviderVariantIdentities.Parse(normalizedProvider, normalizedEpisodeId);
         var identity = await _dbContext.MediaEpisodeProviderIdentities
+            .Include(item => item.Content)
             .FirstOrDefaultAsync(item =>
                 item.Provider == normalizedProvider
                 && item.ProviderEpisodeId == normalizedEpisodeId,
@@ -653,17 +666,23 @@ public class MediaEpisodeIdentityService(
 
         if (identity is null)
         {
+            var providerContent = await FindOrCreateProviderContentAsync(
+                episode,
+                normalizedProvider,
+                variantIdentity.ContentKey,
+                providerSeriesId,
+                providerSeasonId,
+                providerSeasonNumber,
+                providerEpisodeNumber,
+                providerSequenceNumber,
+                cancellationToken);
             _dbContext.MediaEpisodeProviderIdentities.Add(new MediaEpisodeProviderIdentity
             {
                 Id = Guid.NewGuid(),
-                MediaEpisodeId = episode.Id,
+                MediaEpisodeProviderContentId = providerContent.Id,
                 Provider = normalizedProvider,
-                ProviderSeriesId = TrimToNull(providerSeriesId),
-                ProviderSeasonId = TrimToNull(providerSeasonId),
                 ProviderEpisodeId = normalizedEpisodeId,
-                ProviderSeasonNumber = providerSeasonNumber,
-                ProviderEpisodeNumber = providerEpisodeNumber,
-                ProviderSequenceNumber = providerSequenceNumber,
+                AudioLocale = variantIdentity.AudioLocale,
                 ProviderUrlPath = providerUrlPath,
                 SeenCount = 1,
                 FirstSeenAt = now,
@@ -675,7 +694,9 @@ public class MediaEpisodeIdentityService(
 
         identity.SeenCount += 1;
         identity.LastSeenAt = now;
-        if (identity.MediaEpisodeId != episode.Id)
+        var content = identity.Content
+            ?? throw new InvalidOperationException("Provider variant content was not loaded.");
+        if (content.MediaEpisodeId != episode.Id)
         {
             if (!allowIdentityRemap || identity.IsTrusted && !isTrusted)
             {
@@ -684,7 +705,7 @@ public class MediaEpisodeIdentityService(
                     "Provider episode {Provider}/{ProviderEpisodeId} conflicted between canonical episodes {ExistingEpisodeId} and {ObservedEpisodeId}.",
                     normalizedProvider,
                     normalizedEpisodeId,
-                    identity.MediaEpisodeId,
+                    content.MediaEpisodeId,
                     episode.Id);
                 return;
             }
@@ -693,20 +714,58 @@ public class MediaEpisodeIdentityService(
                 "Remapped catalog episode {Provider}/{ProviderEpisodeId} from canonical episode {ExistingEpisodeId} to {ObservedEpisodeId}.",
                 normalizedProvider,
                 normalizedEpisodeId,
-                identity.MediaEpisodeId,
+                content.MediaEpisodeId,
                 episode.Id);
-            identity.MediaEpisodeId = episode.Id;
+            content.MediaEpisodeId = episode.Id;
             identity.HasConflict = false;
         }
 
         identity.IsTrusted |= isTrusted;
 
-        identity.ProviderSeriesId = FirstNonBlank(providerSeriesId, identity.ProviderSeriesId);
-        identity.ProviderSeasonId = FirstNonBlank(providerSeasonId, identity.ProviderSeasonId);
-        identity.ProviderSeasonNumber = providerSeasonNumber ?? identity.ProviderSeasonNumber;
-        identity.ProviderEpisodeNumber = providerEpisodeNumber ?? identity.ProviderEpisodeNumber;
-        identity.ProviderSequenceNumber = providerSequenceNumber ?? identity.ProviderSequenceNumber;
+        content.ProviderSeriesId = FirstNonBlank(providerSeriesId, content.ProviderSeriesId);
+        content.ProviderSeasonId = FirstNonBlank(providerSeasonId, content.ProviderSeasonId);
+        content.ProviderSeasonNumber = providerSeasonNumber ?? content.ProviderSeasonNumber;
+        content.ProviderEpisodeNumber = providerEpisodeNumber ?? content.ProviderEpisodeNumber;
+        content.ProviderSequenceNumber = providerSequenceNumber ?? content.ProviderSequenceNumber;
+        identity.AudioLocale ??= variantIdentity.AudioLocale;
         identity.ProviderUrlPath = providerUrlPath;
+    }
+
+    private async Task<MediaEpisodeProviderContent> FindOrCreateProviderContentAsync(
+        MediaEpisode episode,
+        string provider,
+        string? providerContentKey,
+        string? providerSeriesId,
+        string? providerSeasonId,
+        int? providerSeasonNumber,
+        int? providerEpisodeNumber,
+        int? providerSequenceNumber,
+        CancellationToken cancellationToken)
+    {
+        var content = await _dbContext.MediaEpisodeProviderContents.FirstOrDefaultAsync(item =>
+            item.MediaEpisodeId == episode.Id
+            && item.Provider == provider
+            && item.ProviderContentKey == providerContentKey,
+            cancellationToken);
+        if (content is not null)
+        {
+            return content;
+        }
+
+        content = new MediaEpisodeProviderContent
+        {
+            Id = Guid.NewGuid(),
+            MediaEpisodeId = episode.Id,
+            Provider = provider,
+            ProviderContentKey = providerContentKey,
+            ProviderSeriesId = TrimToNull(providerSeriesId),
+            ProviderSeasonId = TrimToNull(providerSeasonId),
+            ProviderSeasonNumber = providerSeasonNumber,
+            ProviderEpisodeNumber = providerEpisodeNumber,
+            ProviderSequenceNumber = providerSequenceNumber
+        };
+        _dbContext.MediaEpisodeProviderContents.Add(content);
+        return content;
     }
 
     private static SubmitMediaObservationRequest? DeserializePayload(string? rawPayload)

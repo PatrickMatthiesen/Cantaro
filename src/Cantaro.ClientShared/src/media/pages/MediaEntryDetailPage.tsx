@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { mediaApi } from '../services/mediaApi';
 import { mediaKindLabel } from '../services/mediaFormatting';
+import { subscribeToMediaProgressUpdates } from '../services/mediaProgressEvents';
 import { MediaEntryDetailPageView } from './media-entry-detail/MediaEntryDetailView';
 import {
   useContinueWatching,
@@ -82,6 +83,17 @@ export function MediaEntryDetailPage({
   const { unlinkingId, handleUnlink } = useProviderUnlinkAction(mediaTitleId, setEntry, showSnackbar);
   const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [isAddingToLibrary, setIsAddingToLibrary] = useState(false);
+
+  useEffect(() => subscribeToMediaProgressUpdates((notification) => {
+    if (notification.mediaTitleId !== mediaTitleId) {
+      return;
+    }
+    void Promise.all([
+      reloadEntry(),
+      Promise.resolve(reloadEpisodes()),
+      Promise.resolve(reloadProviderAvailability()),
+    ]);
+  }), [mediaTitleId, reloadEntry, reloadEpisodes, reloadProviderAvailability]);
 
   const handleAddToLibrary = async () => {
     if (!entry) return;

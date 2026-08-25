@@ -39,8 +39,9 @@ const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 // https://wxt.dev/api/config.html
 export default defineConfig({
   manifestVersion: 3,
-  manifest: ({ browser }) => ({
-    name: 'Cantaro',
+  manifest: ({ browser, mode }) => ({
+    name: mode === 'development' ? 'Cantaro (Dev)' : 'Cantaro',
+    short_name: mode === 'development' ? 'Cantaro Dev' : 'Cantaro',
     description: 'Sync music and collect rendered episode URLs from supported streaming pages',
     version: packageMetadata.version,
     icons: {
@@ -53,6 +54,7 @@ export default defineConfig({
     permissions: [
       'storage',
       'identity',
+      'scripting',
     ],
     host_permissions: [
       ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),
@@ -66,7 +68,7 @@ export default defineConfig({
     ...(browser === 'firefox' ? {
       browser_specific_settings: {
         gecko: {
-          id: 'cantaro@bmstack.net',
+          id: mode === 'development' ? 'cantaro-dev@bmstack.net' : 'cantaro@bmstack.net',
           strict_min_version: '140.0',
           data_collection_permissions: {
             required: [

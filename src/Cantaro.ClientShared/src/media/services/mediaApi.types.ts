@@ -215,6 +215,7 @@ export interface MediaEpisodeDestinationDto {
 export interface MediaStreamingDestinationDto {
     serviceId: string;
     url: string;
+    audioLocale?: string;
     seenCount: number;
     firstSeenAt: string;
     lastSeenAt: string;

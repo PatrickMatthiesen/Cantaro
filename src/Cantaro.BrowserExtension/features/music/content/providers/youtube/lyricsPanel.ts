@@ -1,4 +1,5 @@
 import type { LyricsResult } from './youtubeService';
+import { currentExtensionNamespace } from '../../../../../platform/diagnostics/extensionIdentity';
 
 export type LyricsPanelSite = 'youtube' | 'youtube_music';
 
@@ -79,7 +80,10 @@ export function shouldResetLyricsPanel(previousContextKey: string, nextContextKe
 
 export function createLyricsPanel(documentRoot: Document): LyricsPanelController {
   const host = documentRoot.createElement('aside');
-  host.setAttribute('data-cantaro-lyrics-panel', '');
+  const owner = currentExtensionNamespace();
+  host.id = `${owner}-lyrics-panel`;
+  host.setAttribute('data-cantaro-lyrics-panel', owner);
+  host.setAttribute('data-cantaro-owner', owner);
   host.setAttribute('aria-label', 'Cantaro lyrics');
   const shadow = host.attachShadow({ mode: 'closed' });
   const style = documentRoot.createElement('style');
