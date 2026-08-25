@@ -37,11 +37,16 @@ public class MediaObservationProgressService(
     public async Task<int> TryEnqueueAutoProgressAsync(
         MediaObservation observation,
         CancellationToken cancellationToken)
+        => (await TryEnqueueAutoProgressWithResultAsync(observation, cancellationToken)).EnqueuedCount;
+
+    public async Task<MediaObservationProgressResult> TryEnqueueAutoProgressWithResultAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
     {
         if (observation.MatchStatus != MediaObservationStatuses.Matched
             || observation.MediaTitleId is null)
         {
-            return 0;
+            return MediaObservationProgressResult.None;
         }
 
         if (!TryResolveObservationProgress(observation, out var parsedProgress))
@@ -51,7 +56,7 @@ public class MediaObservationProgressService(
                 "\"{ProgressHint}\" could not be parsed as a positive integer.",
                 observation.Id,
                 observation.ProgressHint);
-            return 0;
+            return MediaObservationProgressResult.None;
         }
 
         // Load the matched title so we know which progress dimension to update.
@@ -61,7 +66,7 @@ public class MediaObservationProgressService(
 
         if (mediaTitle is null)
         {
-            return 0;
+            return MediaObservationProgressResult.None;
         }
 
         // Resolve the accepted candidate to get the match score for provenance.
@@ -83,7 +88,7 @@ public class MediaObservationProgressService(
                 "Auto-progress skipped.",
                 observation.UserId,
                 observation.MediaTitleId);
-            return 0;
+            return MediaObservationProgressResult.None;
         }
 
         var enqueuedCount = 0;
@@ -172,7 +177,7 @@ public class MediaObservationProgressService(
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        return enqueuedCount;
+        return new MediaObservationProgressResult(enqueuedCount, localUpdatesCount);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -286,4 +291,11 @@ public class MediaObservationProgressService(
 
         return candidate?.Score;
     }
+}
+
+public readonly record struct MediaObservationProgressResult(int EnqueuedCount, int LocalUpdatesCount)
+{
+    public static MediaObservationProgressResult None => new(0, 0);
+
+    public bool ProgressUpdated => LocalUpdatesCount > 0;
 }

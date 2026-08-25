@@ -6,6 +6,7 @@ import type { DeliveryQueue, QueuedDelivery } from '../../../platform/storage/de
 import type { SeriesCatalogObservation } from '../contracts/catalogObservation';
 import type { WatchProgressObservation, WatchSubmissionResult } from '../contracts/watchObservation';
 import { createMediaRequestHandler } from './mediaRequestHandler';
+import type { MediaProgressNotifier } from './mediaProgressNotifier';
 
 function catalog(): SeriesCatalogObservation {
   return {
@@ -74,6 +75,33 @@ const logger: ExtensionLogger = {
 };
 
 describe('mediaRequestHandler', () => {
+  it('notifies open Cantaro pages after local progress changes', async () => {
+    const deliveryQueue = queue();
+    const client = apiClient(vi.fn());
+    client.submitWatch = vi.fn(async (): Promise<WatchSubmissionResult> => ({
+      status: 'accepted',
+      observationId: 'observation',
+      matchedMediaTitleId: 'media-title',
+      resolvedProgress: 16,
+      progressUpdated: true,
+    }));
+    const notifier: MediaProgressNotifier = { notify: vi.fn(async () => {}) };
+    const handler = createMediaRequestHandler(client, deliveryQueue.value, logger, notifier);
+
+    const result = await handler.handle({
+      type: 'media.watch.submit',
+      correlationId: 'correlation',
+      payload: watch(),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
+    expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({
+      matchedMediaTitleId: 'media-title',
+      resolvedProgress: 16,
+      progressUpdated: true,
+    }));
+  });
+
   it('treats pending catalog matching as successful API delivery', async () => {
     const deliveryQueue = queue();
     const handler = createMediaRequestHandler(apiClient(async () => ({

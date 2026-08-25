@@ -25,7 +25,8 @@ public class MediaEpisodeIdentityServiceTests
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
         var episodes = await fixture.Db.MediaEpisodes
-            .Include(item => item.ProviderIdentities)
+            .Include(item => item.ProviderContents)
+                .ThenInclude(content => content.Variants)
             .OrderBy(item => item.EpisodeNumber)
             .ToListAsync();
         Assert.Equal([7, 8], episodes.Select(item => item.EpisodeNumber));
@@ -75,6 +76,58 @@ public class MediaEpisodeIdentityServiceTests
         var identity = await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync();
         Assert.Equal(2, identity.SeenCount);
         Assert.False(identity.HasConflict);
+    }
+
+    [Fact]
+    public async Task RecordObservation_GroupsLocalizedCrunchyrollVariantsByContentKey()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync();
+
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeObservation(3, "GE00375194ENUS", "https://www.crunchyroll.com/watch/GE00375194ENUS/example"),
+            CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeObservation(3, "GE00375194JAJP", "https://www.crunchyroll.com/watch/GE00375194JAJP/example"),
+            CancellationToken.None);
+
+        var content = await fixture.Db.MediaEpisodeProviderContents
+            .Include(item => item.Variants)
+            .SingleAsync();
+        Assert.Equal("GE00375194", content.ProviderContentKey);
+        Assert.Equal(2, content.Variants.Count);
+        Assert.Equal(
+            ["en-US", "ja-JP"],
+            content.Variants.OrderBy(item => item.AudioLocale).Select(item => item.AudioLocale));
+
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(
+            fixture.TitleId,
+            CancellationToken.None);
+        Assert.NotNull(catalog);
+        Assert.Equal(
+            ["en-US", "ja-JP"],
+            Assert.Single(catalog.Episodes).Destinations
+                .OrderBy(item => item.AudioLocale)
+                .Select(item => item.AudioLocale));
+    }
+
+    [Fact]
+    public async Task RecordObservation_GroupsOpaqueCrunchyrollVariantsByCanonicalEpisode()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync();
+
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeObservation(3, "G31UXQKKG", "https://www.crunchyroll.com/watch/G31UXQKKG/example"),
+            CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeObservation(3, "GRQW9GW7R", "https://www.crunchyroll.com/watch/GRQW9GW7R/example"),
+            CancellationToken.None);
+
+        var content = await fixture.Db.MediaEpisodeProviderContents
+            .Include(item => item.Variants)
+            .SingleAsync();
+        Assert.Null(content.ProviderContentKey);
+        Assert.All(content.Variants, item => Assert.Null(item.AudioLocale));
+        Assert.Equal(2, content.Variants.Count);
     }
 
     [Fact]
@@ -248,7 +301,8 @@ public class MediaEpisodeIdentityServiceTests
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
         var episodes = await fixture.Db.MediaEpisodes
-            .Include(item => item.ProviderIdentities)
+            .Include(item => item.ProviderContents)
+                .ThenInclude(content => content.Variants)
             .OrderBy(item => item.EpisodeNumber)
             .ToListAsync();
         Assert.Equal([1, 2], episodes.Select(item => item.EpisodeNumber));

@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { currentExtensionNamespace } from '../../../../../../platform/diagnostics/extensionIdentity';
 import type {
   ResolveWatchObservationRequest,
   WatchResolution,
@@ -235,9 +236,11 @@ function parseOffset(value: string): number | null {
 }
 
 function ensureOverlayContainer(): HTMLDivElement {
-  document.getElementById('cantaro-resolution-overlay')?.remove();
+  const overlayId = `${currentExtensionNamespace()}-resolution-overlay`;
+  document.getElementById(overlayId)?.remove();
   const container = document.createElement('div');
-  container.id = 'cantaro-resolution-overlay';
+  container.id = overlayId;
+  container.dataset.cantaroOwner = currentExtensionNamespace();
   document.documentElement.appendChild(container);
   return container;
 }

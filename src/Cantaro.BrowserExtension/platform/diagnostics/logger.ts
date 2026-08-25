@@ -1,3 +1,5 @@
+import { extensionLogMessage } from './extensionIdentity';
+
 export interface DiagnosticContext {
   scope: 'background' | 'popup' | 'content';
   feature?: 'media' | 'music' | 'settings' | 'auth';
@@ -24,7 +26,7 @@ function write(
 ): void {
   if (level === 'debug' && !verbose()) return;
   const payload = details === undefined ? context : { ...context, details };
-  console[level](`Cantaro: ${message}`, payload);
+  console[level](extensionLogMessage(message), payload);
 }
 
 export function createExtensionLogger(

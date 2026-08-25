@@ -161,7 +161,8 @@ public class MediaObservationsApiTests
             .SingleAsync(entry => entry.MediaTitleId == seasonTwo.Id);
         Assert.Equal(10, seasonTwoEntry.ProgressEpisodes);
         var identity = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(item => item.MediaEpisode)
+            .Include(item => item.Content)
+                .ThenInclude(content => content!.MediaEpisode)
             .SingleAsync(item => item.ProviderEpisodeId == "GE00340376ENUS");
         Assert.Equal(10, identity.MediaEpisode!.EpisodeNumber);
         Assert.Equal(22, identity.ProviderEpisodeNumber);
@@ -223,7 +224,9 @@ public class MediaObservationsApiTests
         Assert.Equal(-12, observation.EpisodeOffset);
         Assert.Equal(12, await fixture.Db.MediaEpisodeProviderIdentities.CountAsync());
         Assert.Contains(
-            fixture.Db.MediaEpisodeProviderIdentities.Include(identity => identity.MediaEpisode),
+            fixture.Db.MediaEpisodeProviderIdentities
+                .Include(identity => identity.Content)
+                    .ThenInclude(content => content!.MediaEpisode),
             identity => identity.ProviderEpisodeNumber == 22
                 && identity.MediaEpisode!.EpisodeNumber == 10);
     }
@@ -373,14 +376,15 @@ public class MediaObservationsApiTests
         Assert.Equal(seasonTwo.Id.ToString(), response.MediaTitleId);
 
         var persistedIdentities = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(identity => identity.MediaEpisode)
+            .Include(identity => identity.Content)
+                .ThenInclude(content => content!.MediaEpisode)
             .ToListAsync();
         Assert.Equal(2, persistedIdentities.Count);
         Assert.All(persistedIdentities, identity =>
             Assert.Equal(seasonTwo.Id, identity.MediaEpisode!.MediaTitleId));
         Assert.All(persistedIdentities, identity => Assert.False(identity.IsTrusted));
         Assert.Empty(await fixture.Db.MediaEpisodeProviderIdentities
-            .Where(identity => identity.MediaEpisode!.MediaTitleId == seasonOne.Id)
+            .Where(identity => identity.Content!.MediaEpisode!.MediaTitleId == seasonOne.Id)
             .ToListAsync());
     }
 
@@ -655,7 +659,8 @@ public class MediaObservationsApiTests
         Assert.Equal(5, persistedObservation.ResolvedProgress);
 
         var recordedEpisodes = await fixture.Db.MediaEpisodes
-            .Include(item => item.ProviderIdentities)
+            .Include(item => item.ProviderContents)
+                .ThenInclude(content => content.Variants)
             .OrderBy(item => item.EpisodeNumber)
             .ToListAsync();
         Assert.Equal([5, 6], recordedEpisodes.Select(item => item.EpisodeNumber));
@@ -663,8 +668,11 @@ public class MediaObservationsApiTests
         Assert.Equal("NEXTGEN6", recordedEpisodes[1].ProviderIdentities.Single().ProviderEpisodeId);
     }
 
-    [Fact]
-    public async Task Submit_DeduplicatedCumulativeEpisode_UsesKnownProviderIdentityAndCorrectsSeasonProgress()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Submit_DeduplicatedCumulativeEpisode_UsesCompatibleProviderIdentityAndCorrectsSeasonProgress(
+        bool initiallyTrusted)
     {
         await using var fixture = await MediaObservationFixture.CreateAsync();
         var now = DateTimeOffset.UtcNow;
@@ -695,7 +703,7 @@ public class MediaObservationsApiTests
             SeenCount = 1,
             FirstSeenAt = now.AddMinutes(-10),
             LastSeenAt = now.AddMinutes(-10),
-            IsTrusted = true,
+            IsTrusted = initiallyTrusted,
             HasConflict = true
         };
         var existingObservation = new MediaObservation
@@ -757,6 +765,7 @@ public class MediaObservationsApiTests
         var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
         Assert.True(response.WasDeduplicated);
         Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.True(response.ProgressUpdated);
 
         var persistedObservation = await fixture.Db.MediaObservations
             .Include(item => item.Candidates)
@@ -776,6 +785,7 @@ public class MediaObservationsApiTests
 
         Assert.Equal(0, seasonOneEntry.ProgressEpisodes);
         Assert.Equal(12, seasonTwoEntry.ProgressEpisodes);
+        Assert.True(knownIdentity.IsTrusted);
         Assert.False(knownIdentity.HasConflict);
     }
 

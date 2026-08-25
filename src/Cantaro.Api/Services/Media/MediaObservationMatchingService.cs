@@ -127,16 +127,17 @@ public class MediaObservationMatchingService(
             ? observation.SiteMediaId.Trim().ToUpperInvariant()
             : observation.SiteMediaId.Trim();
         var identity = await _dbContext.MediaEpisodeProviderIdentities
-            .Include(item => item.MediaEpisode)
+            .Include(item => item.Content)
+                .ThenInclude(content => content!.MediaEpisode)
                 .ThenInclude(episode => episode!.MediaTitle)
             .FirstOrDefaultAsync(item =>
                 item.Provider == provider
                 && item.ProviderEpisodeId == providerEpisodeId,
                 cancellationToken);
-        var episode = identity?.MediaEpisode;
+        var episode = identity?.Content?.MediaEpisode;
         var title = episode?.MediaTitle;
-        if (identity is null || !identity.IsTrusted || episode is null || title is null
-            || !IsCompatibleEpisodeIdentity(identity, observation.RawPayload))
+        if (identity is null || episode is null || title is null
+            || !CanUseEpisodeIdentityForMatching(identity, observation.RawPayload))
         {
             return false;
         }
@@ -194,14 +195,44 @@ public class MediaObservationMatchingService(
             return false;
         }
 
-        var seriesMatches = !string.IsNullOrWhiteSpace(identity.ProviderSeriesId)
+        var content = identity.Content;
+        var seriesMatches = !string.IsNullOrWhiteSpace(content?.ProviderSeriesId)
             && string.Equals(
-                identity.ProviderSeriesId,
+                content.ProviderSeriesId,
                 payload.ProviderSeriesId,
                 StringComparison.OrdinalIgnoreCase);
-        var episodeMatches = identity.ProviderEpisodeNumber is > 0
-            && identity.ProviderEpisodeNumber == payload.EpisodeNumber;
+        var episodeMatches = content?.ProviderEpisodeNumber is > 0
+            && content.ProviderEpisodeNumber == payload.EpisodeNumber;
         return seriesMatches && episodeMatches;
+    }
+
+    private static bool CanUseEpisodeIdentityForMatching(
+        MediaEpisodeProviderIdentity identity,
+        string? rawPayload)
+    {
+        if (!IsCompatibleEpisodeIdentity(identity, rawPayload))
+        {
+            return false;
+        }
+
+        if (identity.IsTrusted)
+        {
+            return true;
+        }
+
+        // Catalog observations may discover a correct episode destination before
+        // a user has confirmed the surrounding season mapping. Reuse that identity
+        // only when the watch payload independently confirms both its provider
+        // series and provider episode number. Trust is still required to remap it.
+        var payload = DeserializeRawPayload(rawPayload);
+        return payload is not null
+            && !string.IsNullOrWhiteSpace(identity.Content?.ProviderSeriesId)
+            && string.Equals(
+                identity.Content.ProviderSeriesId,
+                payload.ProviderSeriesId,
+                StringComparison.OrdinalIgnoreCase)
+            && identity.Content.ProviderEpisodeNumber is > 0
+            && identity.Content.ProviderEpisodeNumber == payload.EpisodeNumber;
     }
 
     private static ObservationRawPayload? DeserializeRawPayload(string? rawPayload)

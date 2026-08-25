@@ -24,6 +24,7 @@ import {
 } from './navigationMetadata';
 import { decideThresholdSubmission } from './thresholdSubmission';
 import type { WatchResolutionOverlayHandle } from './watchResolutionOverlay';
+import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
 
 const RESTART_DELAY_MS = 500;
 
@@ -81,8 +82,8 @@ export function createCrunchyrollWatchController(
 
   const verboseLog = (message: string, details?: unknown) => {
     if (!verboseLogging) return;
-    if (details === undefined) console.debug(message);
-    else console.debug(message, details);
+    if (details === undefined) console.debug(extensionLogMessage(message));
+    else console.debug(extensionLogMessage(message), details);
   };
 
   const requestRestart = () => {
@@ -198,7 +199,7 @@ export function createCrunchyrollWatchController(
       status: 'error',
       message: error instanceof Error ? error.message : 'Unexpected watch tracking failure.',
     });
-    console.error('Cantaro: Crunchyroll watch tracker failed', {
+    console.error(extensionLogMessage('Crunchyroll watch tracker failed'), {
       pageUrl: location.href,
       error,
     });
@@ -268,7 +269,7 @@ export function createCrunchyrollWatchController(
       status: 'error',
       message: deliveryErrorMessage(error),
     });
-    console.warn('Cantaro: Crunchyroll watch-progress delivery failed', {
+    console.warn(extensionLogMessage('Crunchyroll watch-progress delivery failed'), {
       correlationId,
       error,
     });
@@ -345,7 +346,7 @@ export function logWatchProgressStatus(
 ): void {
   const details = { watchId, ...status };
   if (status.type === 'threshold-reached') {
-    console.info('Cantaro: Crunchyroll watch threshold reached', details);
+    console.info(extensionLogMessage('Crunchyroll watch threshold reached'), details);
     return;
   }
   if (status.type === 'progress') {

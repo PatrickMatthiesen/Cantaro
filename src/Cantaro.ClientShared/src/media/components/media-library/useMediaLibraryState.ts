@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { mediaApi } from '../../services/mediaApi';
 import { mainMediaProviderId } from '../../services/mediaProviders';
+import { subscribeToMediaProgressUpdates } from '../../services/mediaProgressEvents';
 import {
   formatTimestamp,
   isRemoteCheckStale,
@@ -273,6 +274,10 @@ export function useMediaLibraryState(filterDefaults?: MediaLibraryFilterDefaults
   useEffect(() => {
     void loadLibrary(filterState.filters);
   }, [filterState.filters, loadLibrary]);
+
+  useEffect(() => subscribeToMediaProgressUpdates(() => {
+    void loadLibrary(filtersRef.current);
+  }), [loadLibrary]);
 
   const providerState = useProviderRefresh(loadLibrary, filtersRef);
 

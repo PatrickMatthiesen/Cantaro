@@ -102,18 +102,25 @@ public class MediaObservationsController(
                 }
                 var deduplicatedProviderChoicesUnavailableReason = await EnsureProviderChoicesAsync(existing, cancellationToken);
 
+                var progressUpdated = false;
                 if (existing.MatchStatus == MediaObservationStatuses.Matched)
                 {
                     await ApplyStoredOffsetAsync(existing, cancellationToken);
                     await _episodeIdentityService.RecordObservationAsync(existing, cancellationToken);
-                    await _progressService.TryEnqueueAutoProgressAsync(existing, cancellationToken);
+                    progressUpdated = (await _progressService.TryEnqueueAutoProgressWithResultAsync(
+                        existing,
+                        cancellationToken)).ProgressUpdated;
                 }
 
                 _logger.LogInformation(
                     "Deduplicated MediaObservation for user {UserId}: {SiteIdentifier}/{SiteMediaId} → {ObservationId}.",
                     userId, normalizedSite, normalizedSiteMediaId, existing.Id);
 
-                return Ok(MapToSubmitResponse(existing, wasDeduplicated: true, deduplicatedProviderChoicesUnavailableReason));
+                return Ok(MapToSubmitResponse(
+                    existing,
+                    wasDeduplicated: true,
+                    deduplicatedProviderChoicesUnavailableReason,
+                    progressUpdated));
             }
         }
 
@@ -147,14 +154,21 @@ public class MediaObservationsController(
         var providerChoicesUnavailableReason = await EnsureProviderChoicesAsync(observation, cancellationToken);
 
         // Attempt episode progress tracking if the matching step produced a confident match.
+        var newProgressUpdated = false;
         if (observation.MatchStatus == MediaObservationStatuses.Matched)
         {
             await ApplyStoredOffsetAsync(observation, cancellationToken);
             await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
-            await _progressService.TryEnqueueAutoProgressAsync(observation, cancellationToken);
+            newProgressUpdated = (await _progressService.TryEnqueueAutoProgressWithResultAsync(
+                observation,
+                cancellationToken)).ProgressUpdated;
         }
 
-        return Ok(MapToSubmitResponse(observation, wasDeduplicated: false, providerChoicesUnavailableReason));
+        return Ok(MapToSubmitResponse(
+            observation,
+            wasDeduplicated: false,
+            providerChoicesUnavailableReason,
+            newProgressUpdated));
     }
 
     // -----------------------------------------------------------------------
@@ -487,7 +501,8 @@ public class MediaObservationsController(
     private static SubmitMediaObservationResponse MapToSubmitResponse(
         MediaObservation observation,
         bool wasDeduplicated,
-        string? providerChoicesUnavailableReason = null)
+        string? providerChoicesUnavailableReason = null,
+        bool progressUpdated = false)
     {
         var dto = MapToDto(observation);
         var requiresResolution = observation.MatchStatus is MediaObservationStatuses.Ambiguous or MediaObservationStatuses.NoMatch;
@@ -503,6 +518,7 @@ public class MediaObservationsController(
             ObservedProgress = dto.ObservedProgress,
             SuggestedEpisodeOffset = observation.EpisodeOffset ?? 0,
             ResolvedProgress = observation.ResolvedProgress,
+            ProgressUpdated = progressUpdated,
             Observation = requiresResolution || wasDeduplicated ? dto : null,
             ProviderChoices = dto.ProviderChoices,
             ProviderChoicesUnavailableReason = providerChoicesUnavailableReason

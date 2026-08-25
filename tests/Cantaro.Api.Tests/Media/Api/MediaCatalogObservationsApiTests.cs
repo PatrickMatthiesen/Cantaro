@@ -54,7 +54,7 @@ public class MediaCatalogObservationsApiTests
         Assert.Equal(0, await fixture.Db.MediaProviderOperations.CountAsync());
 
         var identities = await fixture.Db.MediaEpisodeProviderIdentities
-            .OrderBy(item => item.ProviderEpisodeNumber)
+            .OrderBy(item => item.Content!.ProviderEpisodeNumber)
             .ToListAsync();
         Assert.Equal(2, identities.Count);
         Assert.All(identities, item => Assert.Equal("GW4HM7WK9", item.ProviderSeriesId));
@@ -239,7 +239,8 @@ public class MediaCatalogObservationsApiTests
         var observation = await fixture.Db.MediaObservations.SingleAsync();
         Assert.Equal(-12, observation.EpisodeOffset);
         var episode22 = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(identity => identity.MediaEpisode)
+            .Include(identity => identity.Content)
+                .ThenInclude(content => content!.MediaEpisode)
             .SingleAsync(identity => identity.ProviderEpisodeId == "GE00340376ENUS");
         Assert.Equal(10, episode22.MediaEpisode!.EpisodeNumber);
         Assert.Equal(22, episode22.ProviderEpisodeNumber);
@@ -259,8 +260,9 @@ public class MediaCatalogObservationsApiTests
 
         await fixture.Controller.Submit(request, CancellationToken.None);
         var initiallyRecorded = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(identity => identity.MediaEpisode)
-            .Where(identity => identity.ProviderSeasonId == "BOOKWORM4")
+            .Include(identity => identity.Content)
+                .ThenInclude(content => content!.MediaEpisode)
+            .Where(identity => identity.Content!.ProviderSeasonId == "BOOKWORM4")
             .ToListAsync();
         Assert.All(initiallyRecorded, identity => Assert.Equal(baseTitle.Id, identity.MediaEpisode!.MediaTitleId));
         Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
@@ -318,12 +320,14 @@ public class MediaCatalogObservationsApiTests
         var response = GetResponse(duplicateResult);
         Assert.Equal(seasonFour.Id.ToString(), response.MatchedMediaTitleId);
         var corrected = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(identity => identity.MediaEpisode)
-            .Where(identity => identity.ProviderSeasonId == "BOOKWORM4")
+            .Include(identity => identity.Content)
+                .ThenInclude(content => content!.MediaEpisode)
+            .Where(identity => identity.Content!.ProviderSeasonId == "BOOKWORM4")
             .ToListAsync();
         Assert.All(corrected, identity => Assert.Equal(seasonFour.Id, identity.MediaEpisode!.MediaTitleId));
         var preserved = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(identity => identity.MediaEpisode)
+            .Include(identity => identity.Content)
+                .ThenInclude(content => content!.MediaEpisode)
             .SingleAsync(identity => identity.Id == unrelatedIdentity.Id);
         Assert.Equal(baseTitle.Id, preserved.MediaEpisode!.MediaTitleId);
     }

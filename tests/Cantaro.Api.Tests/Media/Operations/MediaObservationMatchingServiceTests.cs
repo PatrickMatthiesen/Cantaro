@@ -682,6 +682,68 @@ public class MediaObservationMatchingServiceTests
     }
 
     [Fact]
+    public async Task ProcessObservation_ReusesCompatibleUntrustedEpisodeIdentity()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+        var correctTitle = fixture.SeedTitle(
+            "Ascendance of a Bookworm: Adopted Daughter of an Archduke",
+            MediaKinds.Anime,
+            episodeCount: 24);
+        fixture.SeedLibraryEntry(correctTitle);
+        var now = DateTimeOffset.UtcNow;
+        var episode = new MediaEpisode
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = correctTitle.Id,
+            EpisodeNumber = 16,
+            Title = "New Dress and Printing Press",
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var identity = new MediaEpisodeProviderIdentity
+        {
+            Id = Guid.NewGuid(),
+            MediaEpisodeId = episode.Id,
+            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+            ProviderSeriesId = "G6793XKZY",
+            ProviderEpisodeId = "GE00375193ENUS",
+            ProviderEpisodeNumber = 16,
+            ProviderUrlPath = "/watch/GE00375193ENUS/new-dress-and-printing-press",
+            SeenCount = 1,
+            FirstSeenAt = now,
+            LastSeenAt = now,
+            IsTrusted = false
+        };
+        fixture.DbContext.AddRange(episode, identity);
+        await fixture.DbContext.SaveChangesAsync();
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            "GE00375193ENUS",
+            "E16 - New Dress and Printing Press",
+            """
+            {
+              "seriesTitle": "Ascendance of a Bookworm",
+              "providerSeriesId": "G6793XKZY",
+              "episodeNumber": 16
+            }
+            """);
+        observation.ProgressHint = "16";
+        await fixture.DbContext.SaveChangesAsync();
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+        Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.Equal(correctTitle.Id, persisted.MediaTitleId);
+        Assert.Equal(16, persisted.ResolvedProgress);
+        var accepted = Assert.Single(persisted.Candidates);
+        Assert.Equal(MediaObservationCandidateSources.ProviderEpisodeIdentityExact, accepted.CandidateSource);
+        Assert.True(accepted.IsAccepted);
+    }
+
+    [Fact]
     public async Task ProcessObservation_IncrementsAttemptCount()
     {
         await using var fixture = await ObservationTestFixture.CreateAsync();

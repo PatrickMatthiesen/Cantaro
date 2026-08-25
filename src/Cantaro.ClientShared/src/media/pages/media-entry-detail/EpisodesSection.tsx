@@ -21,13 +21,6 @@ import type { EpisodeCatalogState } from "./mediaEntryDetailTypes";
 
 const EPISODE_WINDOW_SIZE = 100;
 
-export type EpisodeProviderAvailabilityState =
-  | "loading"
-  | "fresh"
-  | "stale"
-  | "unavailable"
-  | "error";
-
 function getInitialEpisodeWindowStart(
   rows: ReturnType<typeof getEpisodeRows>,
   watchedThrough: number,
@@ -90,17 +83,52 @@ function getEpisodeServiceDestinations(
     );
 }
 
+function getLanguageCode(locale: string) {
+  try {
+    return new Intl.Locale(locale).language;
+  } catch {
+    return locale.split("-")[0]?.toLowerCase() ?? locale;
+  }
+}
+
+function formatAudioLanguage(language: string) {
+  try {
+    return new Intl.DisplayNames(undefined, { type: "language" }).of(language)
+      ?? language;
+  } catch {
+    return language;
+  }
+}
+
+function getAudioLanguages(destinations: MediaStreamingDestinations) {
+  return [...new Set(destinations.episodes
+    .flatMap((episode) => episode.destinations)
+    .map((destination) => destination.audioLocale)
+    .filter((locale): locale is string => Boolean(locale))
+    .map(getLanguageCode))]
+    .sort((left, right) => formatAudioLanguage(left).localeCompare(formatAudioLanguage(right)));
+}
+
+function filterDestinationsByAudioLanguage(
+  destinations: readonly StreamingDestination[],
+  audioLanguage: string | null,
+) {
+  return audioLanguage
+    ? destinations.filter((destination) =>
+        destination.audioLocale
+        && getLanguageCode(destination.audioLocale) === audioLanguage)
+    : destinations;
+}
+
 function EpisodeDestinationActions({
   episodeNumber,
   episodeDestinations,
   seriesDestinations,
-  providerAvailabilityState,
   onSelectStreamingService,
 }: {
   episodeNumber: number;
   episodeDestinations: readonly StreamingDestination[];
   seriesDestinations: readonly StreamingDestination[];
-  providerAvailabilityState: EpisodeProviderAvailabilityState;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const destinations = getEpisodeServiceDestinations(
@@ -108,15 +136,8 @@ function EpisodeDestinationActions({
     seriesDestinations,
   );
   if (destinations.length === 0) {
-    const label = providerAvailabilityState === "loading"
-      ? "Checking streaming links…"
-      : providerAvailabilityState === "error"
-        ? "Streaming links unavailable"
-        : providerAvailabilityState === "stale"
-          ? "No fresh streaming link"
-          : "No streaming link";
     return (
-      <span className="text-sm text-content-subtle">{label}</span>
+      <span className="text-sm text-content-subtle">No streaming link</span>
     );
   }
 
@@ -162,14 +183,14 @@ function EpisodeRow({
   destination,
   watchedThrough,
   seriesDestinations,
-  providerAvailabilityState,
+  audioLanguage,
   onSelectStreamingService,
 }: {
   episodeNumber: number;
   destination?: MediaStreamingDestinations["episodes"][number];
   watchedThrough: number;
   seriesDestinations: readonly StreamingDestination[];
-  providerAvailabilityState: EpisodeProviderAvailabilityState;
+  audioLanguage: string | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const isNext = episodeNumber === watchedThrough + 1;
@@ -198,9 +219,11 @@ function EpisodeRow({
       </div>
       <EpisodeDestinationActions
         episodeNumber={episodeNumber}
-        episodeDestinations={destination?.destinations ?? []}
+        episodeDestinations={filterDestinationsByAudioLanguage(
+          destination?.destinations ?? [],
+          audioLanguage,
+        )}
         seriesDestinations={seriesDestinations}
-        providerAvailabilityState={providerAvailabilityState}
         onSelectStreamingService={onSelectStreamingService}
       />
     </li>
@@ -214,7 +237,7 @@ function EpisodeSectionContent({
   totalRowCount,
   windowStart,
   seriesDestinations,
-  providerAvailabilityState,
+  audioLanguage,
   onSelectStreamingService,
   onRefresh,
   onShowEarlier,
@@ -226,7 +249,7 @@ function EpisodeSectionContent({
   totalRowCount: number;
   windowStart: number;
   seriesDestinations: readonly StreamingDestination[];
-  providerAvailabilityState: EpisodeProviderAvailabilityState;
+  audioLanguage: string | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
   onShowEarlier: () => void;
@@ -248,7 +271,7 @@ function EpisodeSectionContent({
       totalRowCount={totalRowCount}
       windowStart={windowStart}
       seriesDestinations={seriesDestinations}
-      providerAvailabilityState={providerAvailabilityState}
+      audioLanguage={audioLanguage}
       onSelectStreamingService={onSelectStreamingService}
       onShowEarlier={onShowEarlier}
       onShowLater={onShowLater}
@@ -284,33 +307,13 @@ function EpisodeEmpty() {
   );
 }
 
-function EpisodeAvailabilityNotice() {
-  return (
-    <p className="mt-5 border border-border-subtle bg-surface-subtle px-4 py-3 text-sm text-content-muted">
-      Some availability information is cached and may be out of date.
-    </p>
-  );
-}
-
-function EpisodeAvailabilityNoticeIfNeeded({
-  providerAvailabilityState,
-  destinationCount,
-}: {
-  providerAvailabilityState: EpisodeProviderAvailabilityState;
-  destinationCount: number;
-}) {
-  return providerAvailabilityState === "stale" && destinationCount > 0
-    ? <EpisodeAvailabilityNotice />
-    : null;
-}
-
 function EpisodeWindow({
   entry,
   rows,
   totalRowCount,
   windowStart,
   seriesDestinations,
-  providerAvailabilityState,
+  audioLanguage,
   onSelectStreamingService,
   onShowEarlier,
   onShowLater,
@@ -320,7 +323,7 @@ function EpisodeWindow({
   totalRowCount: number;
   windowStart: number;
   seriesDestinations: readonly StreamingDestination[];
-  providerAvailabilityState: EpisodeProviderAvailabilityState;
+  audioLanguage: string | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onShowEarlier: () => void;
   onShowLater: () => void;
@@ -346,7 +349,7 @@ function EpisodeWindow({
             destination={row.destination}
             watchedThrough={entry.progressEpisodes ?? 0}
             seriesDestinations={seriesDestinations}
-            providerAvailabilityState={providerAvailabilityState}
+            audioLanguage={audioLanguage}
             onSelectStreamingService={onSelectStreamingService}
           />
         ))}
@@ -401,7 +404,6 @@ export function EpisodesSection({
   entry,
   state,
   streamingDestinations,
-  providerAvailabilityState,
   preferredServiceId,
   onSelectStreamingService,
   onRefresh,
@@ -409,7 +411,6 @@ export function EpisodesSection({
   entry: MediaEntryDetailModel;
   state: EpisodeCatalogState;
   streamingDestinations: MediaStreamingDestinations;
-  providerAvailabilityState: EpisodeProviderAvailabilityState;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
@@ -424,10 +425,21 @@ export function EpisodesSection({
     [entry.progressEpisodes, rows],
   );
   const [windowStart, setWindowStart] = useState(initialWindowStart);
+  const audioLanguages = useMemo(
+    () => getAudioLanguages(streamingDestinations),
+    [streamingDestinations],
+  );
+  const [audioLanguage, setAudioLanguage] = useState<string | null>(null);
 
   useEffect(() => {
     setWindowStart(initialWindowStart);
   }, [entry.title.id, initialWindowStart]);
+
+  useEffect(() => {
+    if (audioLanguage && !audioLanguages.includes(audioLanguage)) {
+      setAudioLanguage(null);
+    }
+  }, [audioLanguage, audioLanguages]);
 
   const visibleRows = rows.slice(
     windowStart,
@@ -449,19 +461,34 @@ export function EpisodesSection({
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <DetailSectionHeading title="Episodes" detail={summary} />
-        <ActionButton tone="ghost" onClick={onRefresh} disabled={isLoading}>
-          <RefreshCcw
-            size={17}
-            className={isLoading ? "animate-spin" : ""}
-            aria-hidden
-          />
-          Refresh links
-        </ActionButton>
+        <div className="flex flex-wrap items-end justify-end gap-3">
+          {audioLanguages.length > 0 ? (
+            <label className="grid gap-1 text-xs font-semibold text-content-muted">
+              Audio
+              <select
+                value={audioLanguage ?? ""}
+                onChange={(event) => setAudioLanguage(event.target.value || null)}
+                className="min-h-10 border border-border-strong bg-surface px-3 text-sm font-medium text-content focus-visible:outline-2 focus-visible:outline-focus"
+              >
+                <option value="">Default</option>
+                {audioLanguages.map((language) => (
+                  <option key={language} value={language}>
+                    {formatAudioLanguage(language)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <ActionButton tone="ghost" onClick={onRefresh} disabled={isLoading}>
+            <RefreshCcw
+              size={17}
+              className={isLoading ? "animate-spin" : ""}
+              aria-hidden
+            />
+            Check for updates
+          </ActionButton>
+        </div>
       </div>
-      <EpisodeAvailabilityNoticeIfNeeded
-        providerAvailabilityState={providerAvailabilityState}
-        destinationCount={orderedSeriesDestinations.length}
-      />
       <EpisodeSectionContent
         entry={entry}
         state={state}
@@ -469,7 +496,7 @@ export function EpisodesSection({
         totalRowCount={rows.length}
         windowStart={windowStart}
         seriesDestinations={orderedSeriesDestinations}
-        providerAvailabilityState={providerAvailabilityState}
+        audioLanguage={audioLanguage}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={onRefresh}
         onShowEarlier={() =>

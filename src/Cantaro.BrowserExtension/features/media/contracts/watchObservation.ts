@@ -59,6 +59,8 @@ export interface WatchSubmissionResult {
   observationId?: string;
   matchedMediaTitleId?: string;
   matchedTitle?: string;
+  resolvedProgress?: number;
+  progressUpdated?: boolean;
   resolution?: WatchResolution;
 }
 

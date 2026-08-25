@@ -26,6 +26,8 @@ interface WatchApiResponse {
   wasDeduplicated: boolean;
   matchedMediaTitleId?: string;
   matchedTitle?: string;
+  resolvedProgress?: number;
+  progressUpdated: boolean;
   requiresResolution: boolean;
   suggestedEpisodeOffset: number;
   observation?: {
@@ -96,6 +98,8 @@ function toWatchResult(response: WatchApiResponse): WatchSubmissionResult {
     observationId: response.observationId,
     matchedMediaTitleId: response.matchedMediaTitleId,
     matchedTitle: response.matchedTitle,
+    resolvedProgress: response.resolvedProgress,
+    progressUpdated: response.progressUpdated,
     resolution,
   };
 }

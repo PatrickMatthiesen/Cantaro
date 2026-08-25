@@ -17,6 +17,7 @@ import {
 } from './seriesParser';
 import { buildSeriesDiscoveryLog } from './seriesLogging';
 import { extractSeriesId } from '../shared/crunchyrollUrls';
+import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
 
 const SCAN_DELAY_MS = 750;
 const FAILURE_WARNING_DELAY_MS = 5_000;
@@ -64,8 +65,8 @@ export function createCrunchyrollSeriesController(
 
   const logVerbose = (message: string, details?: unknown) => {
     if (!verboseLogging) return;
-    if (details === undefined) console.debug(message);
-    else console.debug(message, details);
+    if (details === undefined) console.debug(extensionLogMessage(message));
+    else console.debug(extensionLogMessage(message), details);
   };
 
   const requestScan = () => {
@@ -124,7 +125,7 @@ export function createCrunchyrollSeriesController(
     const fingerprint = catalogObservationFingerprint(observation);
     if (verboseLogging && fingerprint !== lastLoggedFingerprint) {
       console.debug(
-        'Cantaro: found Crunchyroll episodes',
+        extensionLogMessage('found Crunchyroll episodes'),
         buildSeriesDiscoveryLog(observation),
       );
       lastLoggedFingerprint = fingerprint;
@@ -159,7 +160,7 @@ export function createCrunchyrollSeriesController(
       status: 'error',
       message: error instanceof Error ? error.message : 'Unexpected series collection failure.',
     });
-    console.error('Cantaro: Crunchyroll series collection failed', {
+    console.error(extensionLogMessage('Crunchyroll series collection failed'), {
       pageUrl: location.href,
       error,
     });
@@ -188,7 +189,7 @@ export function createCrunchyrollSeriesController(
 
     failure.warned = true;
     updateSnapshot({ status: 'error' });
-    console.warn(`Cantaro: ${extractionIssueMessage(diagnostics.issue)}`, diagnostics);
+    console.warn(extensionLogMessage(extractionIssueMessage(diagnostics.issue)), diagnostics);
   };
 
   const scheduleFailureRescan = (failureAge: number) => {
@@ -206,7 +207,7 @@ export function createCrunchyrollSeriesController(
     logVerbose('Cantaro: Crunchyroll catalog delivery result', { correlationId, result });
     if (!result.ok) {
       updateSnapshot({ status: 'error', message: result.error.message });
-      console.warn('Cantaro: Crunchyroll catalog delivery failed', {
+      console.warn(extensionLogMessage('Crunchyroll catalog delivery failed'), {
         correlationId,
         error: result.error,
       });
@@ -219,7 +220,7 @@ export function createCrunchyrollSeriesController(
       submissionStatus: status,
       message: catalogStatusMessage(result.value),
     });
-    console.info('Cantaro: Crunchyroll catalog snapshot handled', {
+    console.info(extensionLogMessage('Crunchyroll catalog snapshot handled'), {
       correlationId,
       status,
       providerSeriesId: snapshot.providerSeriesId,
