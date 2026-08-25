@@ -24,7 +24,9 @@ export function usePlaylistController(song: MusicLibrarySong, playlists: MusicLi
   const youtubeIds = useMemo(() => song.sourceIdentities
     .filter((identity) => identity.source === 'youtube')
     .map((identity) => identity.externalId), [song.sourceIdentities]);
-  const [selectedYouTubeId, setSelectedYouTubeId] = useState(youtubeIds.length === 1 ? youtubeIds[0] : '');
+  const [selectedYouTubeId, setSelectedYouTubeId] = useState(
+    youtubeIds.length === 1 ? youtubeIds[0]! : '',
+  );
   const trackId = song.id.startsWith('track:') ? song.id.slice(6) : null;
   const availablePlaylists = playlists.filter((playlist) =>
     !memberships.some((membership) => membership.playlistId === playlist.id));

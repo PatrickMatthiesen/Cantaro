@@ -215,7 +215,7 @@ function ContinuityLane({
               <span>
                 {continuityRelationLabel(
                   graph,
-                  nodes[index - 1].mediaTitleId,
+                  nodes[index - 1]!.mediaTitleId,
                   node.mediaTitleId,
                 )}
               </span>

@@ -19,14 +19,14 @@ function normalizedMusicLabel(value?: string) {
 export function resolveMusicTab(context: MusicTabContext, songs: MusicLibrarySong[]): MusicContextResolution {
   const idMatches = songs.filter((song) => song.sourceIdentities.some((identity) =>
     identity.source.toLowerCase().includes('youtube') && identity.externalId === context.externalId));
-  if (idMatches.length === 1) return { status: 'matched', song: idMatches[0] };
+  if (idMatches.length === 1) return { status: 'matched', song: idMatches[0]! };
   if (idMatches.length > 1) return { status: 'ambiguous', songs: idMatches };
 
   const title = normalizedMusicLabel(context.title);
   if (!title) return { status: 'unmatched' };
   const metadataMatches = songs.filter((song) => normalizedMusicLabel(song.title) === title
     && (!context.artist || normalizedMusicLabel(song.artist) === normalizedMusicLabel(context.artist)));
-  if (metadataMatches.length === 1) return { status: 'matched', song: metadataMatches[0] };
+  if (metadataMatches.length === 1) return { status: 'matched', song: metadataMatches[0]! };
   if (metadataMatches.length > 1) return { status: 'ambiguous', songs: metadataMatches };
   return { status: 'unmatched' };
 }

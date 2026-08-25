@@ -186,9 +186,10 @@
       }
     ],
     "expected": {
-      "outcome": "manual_review",
+      "outcome": "exact_recording",
       "normalizedTitle": "Phoenix",
-      "artistCredits": ["cailin russo", "chrissy costanza", "league of legends"]
+      "artistCredits": ["cailin russo", "chrissy costanza", "league of legends"],
+      "acceptedExternalId": "6zAiRKvAMlXHxEtyO4yxIO"
     }
   },
   {

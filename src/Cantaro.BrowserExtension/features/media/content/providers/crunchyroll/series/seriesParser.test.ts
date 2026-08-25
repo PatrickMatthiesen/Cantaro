@@ -194,7 +194,7 @@ describe('Crunchyroll series catalog extraction', () => {
 
     expect(observation).toMatchObject({ seriesTitle, seasonTitle, seasonNumber, providerSeasonId });
     if (audioLanguage) {
-      expect(observation?.episodes[0].availableAudioLanguageCodes).toEqual([audioLanguage]);
+      expect(observation?.episodes[0]?.availableAudioLanguageCodes).toEqual([audioLanguage]);
     }
   });
 
@@ -489,11 +489,11 @@ describe('Crunchyroll series catalog extraction', () => {
       .toBe('SERIES1||Season 2|EP22|22|https://www.crunchyroll.com/watch/EP22/old-slug');
     expect(catalogObservationFingerprint({
       ...observation,
-      episodes: [{ ...observation.episodes[0], episodeNumber: 10 }],
+      episodes: [{ ...observation.episodes[0]!, episodeNumber: 10 }],
     })).not.toBe(fingerprint);
     expect(catalogObservationFingerprint({
       ...observation,
-      episodes: [{ ...observation.episodes[0], providerUrl: 'https://www.crunchyroll.com/watch/EP22/corrected-slug' }],
+      episodes: [{ ...observation.episodes[0]!, providerUrl: 'https://www.crunchyroll.com/watch/EP22/corrected-slug' }],
     })).not.toBe(fingerprint);
   });
 });

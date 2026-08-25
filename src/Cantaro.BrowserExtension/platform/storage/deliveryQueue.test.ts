@@ -42,9 +42,10 @@ describe('deliveryQueue', () => {
 
     const items = await queue.readBatch(10);
     expect(items).toHaveLength(1);
-    expect(items[0].delivery.kind).toBe('media.catalog');
-    if (items[0].delivery.kind === 'media.catalog') {
-      expect(items[0].delivery.payload.episodes).toHaveLength(3);
+    const item = items[0]!;
+    expect(item.delivery.kind).toBe('media.catalog');
+    if (item.delivery.kind === 'media.catalog') {
+      expect(item.delivery.payload.episodes).toHaveLength(3);
     }
     expect(storage.values[DELIVERY_QUEUE_STORAGE_KEY]).toHaveLength(1);
   });
@@ -62,8 +63,9 @@ describe('deliveryQueue', () => {
 
     const items = await queue.readBatch(10);
     expect(items).toHaveLength(1);
-    expect(items[0].id).toBe(second.id);
-    expect(items[0].attempts).toBe(1);
+    const item = items[0]!;
+    expect(item.id).toBe(second.id);
+    expect(item.attempts).toBe(1);
   });
 
 });
