@@ -122,7 +122,10 @@ jobs:
           FIREFOX_MANIFEST="$RUNNER_TEMP/firefox-manifest.json"
           unzip -p "$CHROME_ZIP" manifest.json > "$CHROME_MANIFEST"
           unzip -p "$FIREFOX_ZIP" manifest.json > "$FIREFOX_MANIFEST"
-          unzip -Z1 "$FIREFOX_SOURCES_ZIP" > "$RUNNER_TEMP/firefox-source-files.txt"
+          if ! unzip -Z1 "$FIREFOX_SOURCES_ZIP" > "$RUNNER_TEMP/firefox-source-files.txt"; then
+            echo "::error::Firefox source archive is empty or invalid: $FIREFOX_SOURCES_ZIP"
+            exit 1
+          fi
 
           for required_source in \
             package.json \
