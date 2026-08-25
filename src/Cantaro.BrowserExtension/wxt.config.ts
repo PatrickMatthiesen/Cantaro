@@ -87,7 +87,6 @@ export default defineConfig({
   },
   zip: {
     sourcesRoot: repositoryRoot,
-    excludeSources: ['**/*'],
     includeSources: [
       'package.json',
       'bun.lock',
