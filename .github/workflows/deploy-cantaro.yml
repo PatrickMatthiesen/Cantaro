@@ -108,6 +108,8 @@ jobs:
           Parameters__FrontendHttpsBaseUrl: ${{ vars.CANTARO_HTTPS_BASE_URL }}
           Parameters__AniListClientId: ${{ secrets.CANTARO_ANILIST_CLIENT_ID }}
           Parameters__AniListClientSecret: ${{ secrets.CANTARO_ANILIST_CLIENT_SECRET }}
+          Parameters__MyAnimeListClientId: ${{ secrets.CANTARO_MYANIMELIST_CLIENT_ID }}
+          Parameters__MyAnimeListClientSecret: ${{ secrets.CANTARO_MYANIMELIST_CLIENT_SECRET }}
           Parameters__AnimeScheduleId: ${{ secrets.CANTARO_ANIMESCHEDULE_ID }}
           Parameters__AnimeScheduleToken: ${{ secrets.CANTARO_ANIMESCHEDULE_TOKEN }}
           Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}
