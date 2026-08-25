@@ -44,7 +44,7 @@ describe('cantaroApiClient', () => {
 
     expect(result.value).toBe(1);
     expect(getAccessToken).toHaveBeenNthCalledWith(2, 'https://cantaro.example.test', true);
-    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer fresh');
+    expect(fetchMock.mock.calls[1]![1].headers.Authorization).toBe('Bearer fresh');
   });
 
   it('marks a network failure as retryable', async () => {

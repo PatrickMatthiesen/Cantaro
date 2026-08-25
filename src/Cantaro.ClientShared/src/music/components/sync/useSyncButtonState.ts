@@ -75,8 +75,10 @@ function useSyncSimulation(platformName: string) {
       setSyncProgress((previous) => {
         const next = Math.min(previous + 4, 90);
 
-        while (milestoneRef.current < milestones.length && next >= milestones[milestoneRef.current].progress) {
-          appendStatus(milestones[milestoneRef.current].message);
+        while (milestoneRef.current < milestones.length) {
+          const milestone = milestones[milestoneRef.current];
+          if (!milestone || next < milestone.progress) break;
+          appendStatus(milestone.message);
           milestoneRef.current += 1;
         }
 

@@ -159,9 +159,12 @@ const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
 function readSeasonLanguageAvailability(seasonTitle?: string) {
   const match = seasonTitle?.match(/\(([^)]+?)\s+(dub|sub)\)/i);
   if (!match) return {};
-  const languageCode = LANGUAGE_NAME_TO_CODE[match[1].trim().toLowerCase()];
+  const languageName = match[1];
+  const availabilityKind = match[2];
+  if (!languageName || !availabilityKind) return {};
+  const languageCode = LANGUAGE_NAME_TO_CODE[languageName.trim().toLowerCase()];
   if (!languageCode) return {};
-  return match[2].toLowerCase() === 'dub'
+  return availabilityKind.toLowerCase() === 'dub'
     ? { availableAudioLanguageCodes: [languageCode] }
     : { availableSubtitleLanguageCodes: [languageCode] };
 }

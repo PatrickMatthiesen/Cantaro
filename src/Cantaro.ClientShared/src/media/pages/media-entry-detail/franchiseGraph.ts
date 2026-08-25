@@ -119,7 +119,7 @@ function collectRelationBranches(
   const branchesBySource = new Map<string, FranchiseBranch[]>();
   const laneEdges = new Set(
     continuityNodes.slice(0, -1).map((node, index) =>
-      [node.mediaTitleId, continuityNodes[index + 1].mediaTitleId].sort().join(':')),
+      [node.mediaTitleId, continuityNodes[index + 1]!.mediaTitleId].sort().join(':')),
   );
   const continuityIds = new Set(continuityNodes.map((node) => node.mediaTitleId));
 
