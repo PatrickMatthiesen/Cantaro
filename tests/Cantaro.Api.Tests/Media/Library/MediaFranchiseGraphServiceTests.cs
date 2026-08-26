@@ -183,6 +183,107 @@ public sealed class MediaFranchiseGraphServiceTests
         Assert.True(graph.Continuity.OrderedMediaTitleIds.Count < titles.Count);
     }
 
+    [Fact]
+    public async Task GetAsync_DoesNotMergeFranchisesThroughASharedBranchNode()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var slime = CreateTitle("Slime", "TV", 24, 2018, now);
+        var slimeSeasonTwo = CreateTitle("Slime season two", "TV", 24, 2021, now);
+        var attackOnTitan = CreateTitle("Attack on Titan", "TV", 25, 2013, now);
+        var sharedCharacterStory = CreateTitle("Shared character short", "ONA", 1, 2020, now);
+        db.MediaTitles.AddRange(slime, slimeSeasonTwo, attackOnTitan, sharedCharacterStory);
+        db.MediaProviderLinks.AddRange(
+            CreateLink(slime, "shared-1", now),
+            CreateLink(slimeSeasonTwo, "shared-2", now),
+            CreateLink(attackOnTitan, "shared-3", now),
+            CreateLink(sharedCharacterStory, "shared-4", now));
+        db.MediaTitleRelations.AddRange(
+            CreateRelation(slime, slimeSeasonTwo, MediaRelationTypes.Sequel, now),
+            CreateRelation(slime, sharedCharacterStory, MediaRelationTypes.Character, now),
+            CreateRelation(attackOnTitan, sharedCharacterStory, MediaRelationTypes.Character, now));
+        await db.SaveChangesAsync();
+
+        var graph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, slime.Id, CancellationToken.None);
+
+        Assert.NotNull(graph);
+        Assert.Contains(graph.Nodes, node => node.MediaTitleId == sharedCharacterStory.Id);
+        Assert.DoesNotContain(graph.Nodes, node => node.MediaTitleId == attackOnTitan.Id);
+        Assert.DoesNotContain(graph.Relations, relation =>
+            relation.SourceMediaTitleId == attackOnTitan.Id
+            || relation.TargetMediaTitleId == attackOnTitan.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_TraversesAnimeContinuityThroughAnOvaBridge()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var seasonOne = CreateTitle("Season one", "TV", 24, 2018, now);
+        var bridgeOva = CreateTitle("Bridge OVA", "OVA", 3, 2023, now);
+        var seasonTwo = CreateTitle("Season two", "TV", 24, 2021, now);
+        db.MediaTitles.AddRange(seasonOne, bridgeOva, seasonTwo);
+        db.MediaProviderLinks.AddRange(
+            CreateLink(seasonOne, "bridge-1", now),
+            CreateLink(bridgeOva, "bridge-ova", now),
+            CreateLink(seasonTwo, "bridge-2", now));
+        db.MediaTitleRelations.AddRange(
+            CreateRelation(seasonOne, bridgeOva, MediaRelationTypes.Sequel, now),
+            CreateRelation(bridgeOva, seasonTwo, MediaRelationTypes.Sequel, now));
+        await db.SaveChangesAsync();
+
+        var graph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, seasonTwo.Id, CancellationToken.None);
+
+        Assert.NotNull(graph);
+        Assert.Equal(
+            [seasonOne.Id, bridgeOva.Id, seasonTwo.Id],
+            graph.Continuity.OrderedMediaTitleIds);
+        Assert.All(graph.Relations, relation => Assert.True(relation.IsEpisodeContinuity));
+    }
+
+    [Fact]
+    public async Task GetAsync_ReturnsTheSameStructuralFranchiseFromAnimeMangaAndMovieRoots()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var manga = CreateTitle("Source manga", "MANGA", 0, 2014, now);
+        manga.MediaKind = MediaKinds.Manga;
+        var season = CreateTitle("Season", "TV", 24, 2018, now);
+        var movie = CreateTitle("Movie", "MOVIE", 1, 2020, now);
+        db.MediaTitles.AddRange(manga, season, movie);
+        db.MediaProviderLinks.AddRange(
+            CreateLink(manga, "stable-manga", now),
+            CreateLink(season, "stable-season", now),
+            CreateLink(movie, "stable-movie", now));
+        db.MediaTitleRelations.AddRange(
+            CreateRelation(season, manga, MediaRelationTypes.Source, now),
+            CreateRelation(season, movie, MediaRelationTypes.Sequel, now));
+        await db.SaveChangesAsync();
+
+        var service = new MediaFranchiseGraphService(db);
+        var fromAnime = await service.GetAsync(null, season.Id, CancellationToken.None);
+        var fromManga = await service.GetAsync(null, manga.Id, CancellationToken.None);
+        var fromMovie = await service.GetAsync(null, movie.Id, CancellationToken.None);
+
+        Assert.NotNull(fromAnime);
+        Assert.NotNull(fromManga);
+        Assert.NotNull(fromMovie);
+        var expectedIds = fromAnime.Nodes.Select(node => node.MediaTitleId).Order().ToArray();
+        Assert.Equal(expectedIds, fromManga.Nodes.Select(node => node.MediaTitleId).Order().ToArray());
+        Assert.Equal(expectedIds, fromMovie.Nodes.Select(node => node.MediaTitleId).Order().ToArray());
+        Assert.Equal(
+            fromAnime.Continuity.OrderedMediaTitleIds,
+            fromManga.Continuity.OrderedMediaTitleIds);
+    }
+
     private static async Task<(ApplicationDbContext Db, SqliteConnection Connection)> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

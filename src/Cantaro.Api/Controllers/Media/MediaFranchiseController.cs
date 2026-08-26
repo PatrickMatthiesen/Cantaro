@@ -96,14 +96,19 @@ public sealed class MediaFranchiseController(
 
         var freshnessCutoff = DateTimeOffset.UtcNow.AddHours(-6);
         var hasFreshGraph = root.RelationsLastVerifiedAt >= freshnessCutoff;
-        if (user is not null && root.RelationsLastVerifiedAt is not null && !hasFreshGraph)
+        var graph = await _graphService.GetAsync(user?.Id, mediaTitleId, cancellationToken);
+        if (graph is null)
+        {
+            return NotFound(new { error = "Media title not found." });
+        }
+
+        if (user is not null
+            && root.RelationsLastVerifiedAt is not null
+            && (!hasFreshGraph || !graph.Continuity.IsComplete))
         {
             _relationGraphRefreshQueue.Enqueue(user.Id, AniListProvider, root.ExternalId);
         }
 
-        var graph = await _graphService.GetAsync(user?.Id, mediaTitleId, cancellationToken);
-        return graph is null
-            ? NotFound(new { error = "Media title not found." })
-            : Ok(graph);
+        return Ok(graph);
     }
 }
