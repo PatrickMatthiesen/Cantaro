@@ -3,6 +3,8 @@ import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   MediaCatalogDetailPage,
   MediaEntryDetailPage,
+  FranchiseDesignLabPage,
+  type FranchiseDesignVariant,
   MediaLibraryPage,
   MediaObservationReviewPage,
 } from '@cantaro/client-shared/media';
@@ -155,6 +157,38 @@ export function MediaTitleRoutePage({ mediaTitleId }: { mediaTitleId: string }) 
       onNavigateTitle={(relatedMediaTitleId) => void navigate({
         to: '/media/$mediaTitleId',
         params: { mediaTitleId: relatedMediaTitleId },
+      })}
+    />
+  );
+}
+
+export function MediaFranchiseDesignRoutePage({
+  mediaTitleId,
+  variant,
+}: {
+  mediaTitleId: string;
+  variant: FranchiseDesignVariant;
+}) {
+  const navigate = useNavigate();
+  const heading = useMemo(() => ({
+    eyebrow: 'Cantaro · Media',
+    title: 'Franchise layout study',
+    hidden: true,
+  }), []);
+  useStaticMediaHeading(heading);
+
+  return (
+    <FranchiseDesignLabPage
+      mediaTitleId={mediaTitleId}
+      variant={variant}
+      onBack={() => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId } })}
+      onNavigateTitle={(relatedMediaTitleId) => void navigate({
+        to: '/media/$mediaTitleId/franchise/$layoutId',
+        params: { mediaTitleId: relatedMediaTitleId, layoutId: String(variant) },
+      })}
+      onNavigateVariant={(nextVariant) => void navigate({
+        to: '/media/$mediaTitleId/franchise/$layoutId',
+        params: { mediaTitleId, layoutId: String(nextVariant) },
       })}
     />
   );

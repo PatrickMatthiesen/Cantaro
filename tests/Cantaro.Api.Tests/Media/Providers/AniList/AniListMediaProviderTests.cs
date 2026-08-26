@@ -43,7 +43,7 @@ public class AniListMediaProviderTests
     }
 
     [Fact]
-    public async Task GetRelationGraphAsync_FollowsOnlyTvContinuityAndIncludesOtherRelationsOneHop()
+    public async Task GetRelationGraphAsync_FollowsStructuralFranchiseRelationsAcrossFormats()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -91,6 +91,12 @@ public class AniListMediaProviderTests
               "relations":{"edges":[
                 {"id":3,"relationType":"SEQUEL","node":{"id":200,"type":"ANIME","format":"TV","episodes":12,"title":{"english":"Example Season 2"}}}
               ]}
+            },{
+              "id":300,"type":"ANIME","format":"OVA","episodes":1,
+              "siteUrl":"https://anilist.co/anime/300","title":{"english":"Example OVA"},
+              "relations":{"edges":[
+                {"id":4,"relationType":"PARENT","node":{"id":200,"type":"ANIME","format":"TV","episodes":12,"title":{"english":"Example Season 2"}}}
+              ]}
             }]}}}
             """);
         var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
@@ -98,7 +104,7 @@ public class AniListMediaProviderTests
         var graph = await provider.GetRelationGraphAsync(user.Id, "200", CancellationToken.None);
 
         Assert.True(graph.IsComplete);
-        Assert.Equal(["100", "200"], graph.RefreshedProviderMediaIds);
+        Assert.Equal(["100", "200", "300"], graph.RefreshedProviderMediaIds);
         Assert.Equal(3, graph.Nodes.Count);
         Assert.Contains(graph.Nodes, node => node.ProviderMediaId == "100" && node.Format == MediaFormats.Tv);
         Assert.Contains(graph.Nodes, node => node.ProviderMediaId == "300" && node.Format == MediaFormats.Ova);

@@ -9,6 +9,20 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
     private const string AniListProvider = "anilist";
     private const int MaxNodes = 50;
     private const int MaxTraversalDepth = 8;
+    private static readonly string[] FranchiseTraversalRelationTypes =
+    [
+        MediaRelationTypes.Adaptation,
+        MediaRelationTypes.Alternative,
+        MediaRelationTypes.Compilation,
+        MediaRelationTypes.Contains,
+        MediaRelationTypes.Parent,
+        MediaRelationTypes.Prequel,
+        MediaRelationTypes.Sequel,
+        MediaRelationTypes.SideStory,
+        MediaRelationTypes.Source,
+        MediaRelationTypes.SpinOff,
+        MediaRelationTypes.Summary
+    ];
     private readonly ApplicationDbContext _dbContext = dbContext;
 
     public async Task<MediaFranchiseGraphDto?> GetAsync(
@@ -33,7 +47,10 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             var frontierIds = frontier.ToArray();
             var relations = await _dbContext.MediaTitleRelations
                 .AsNoTracking()
+                .Include(relation => relation.MediaTitle)
+                .Include(relation => relation.RelatedMediaTitle)
                 .Where(relation => relation.SourceProvider == AniListProvider
+                    && FranchiseTraversalRelationTypes.Contains(relation.RelationType)
                     && (frontierIds.Contains(relation.MediaTitleId)
                         || frontierIds.Contains(relation.RelatedMediaTitleId)))
                 .ToListAsync(cancellationToken);
@@ -51,6 +68,41 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         }
 
         var traversalIsComplete = frontier.Count == 0;
+
+        // Traverse only structural franchise relations. Generic CHARACTER and
+        // OTHER nodes can be shared by unrelated series, so they are included
+        // one hop from the structural component but are never traversal bridges.
+        var continuityIdSet = titleIds.ToHashSet();
+        var continuityIds = continuityIdSet.ToArray();
+        var directRelations = await _dbContext.MediaTitleRelations
+            .AsNoTracking()
+            .Include(relation => relation.MediaTitle)
+            .Include(relation => relation.RelatedMediaTitle)
+            .Where(relation => relation.SourceProvider == AniListProvider
+                && (continuityIds.Contains(relation.MediaTitleId)
+                    || continuityIds.Contains(relation.RelatedMediaTitleId)))
+            .OrderBy(relation => relation.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var relation in directRelations)
+        {
+            if (FranchiseTraversalRelationTypes.Contains(relation.RelationType)
+                && (!continuityIdSet.Contains(relation.MediaTitleId)
+                    || !continuityIdSet.Contains(relation.RelatedMediaTitleId)))
+            {
+                continue;
+            }
+
+            var missingEndpointCount = (titleIds.Contains(relation.MediaTitleId) ? 0 : 1)
+                + (titleIds.Contains(relation.RelatedMediaTitleId) ? 0 : 1);
+            if (titleIds.Count + missingEndpointCount > MaxNodes)
+            {
+                continue;
+            }
+
+            titleIds.Add(relation.MediaTitleId);
+            titleIds.Add(relation.RelatedMediaTitleId);
+            relationsById[relation.Id] = relation;
+        }
 
         var selectedIds = titleIds.ToArray();
         var titles = await _dbContext.MediaTitles
@@ -165,20 +217,8 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             .Distinct()
             .ToList();
 
-        var connectedIds = new HashSet<Guid> { currentTitleId };
-        var changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var edge in directedEdges)
-            {
-                if (connectedIds.Contains(edge.Earlier) && connectedIds.Add(edge.Later)
-                    || connectedIds.Contains(edge.Later) && connectedIds.Add(edge.Earlier))
-                {
-                    changed = true;
-                }
-            }
-        }
+        var connectedIds = SelectContinuityComponent(currentTitleId, directedEdges, titles);
+        var continuityAnchorId = SelectContinuityStart(connectedIds, directedEdges, titles);
 
         directedEdges = directedEdges
             .Where(edge => connectedIds.Contains(edge.Earlier) && connectedIds.Contains(edge.Later))
@@ -195,8 +235,8 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             && nextByNode.Values.All(values => values.Count <= 1);
 
         var before = new List<Guid>();
-        var seen = new HashSet<Guid> { currentTitleId };
-        var cursor = currentTitleId;
+        var seen = new HashSet<Guid> { continuityAnchorId };
+        var cursor = continuityAnchorId;
         while (previousByNode.TryGetValue(cursor, out var previous) && previous.Count == 1)
         {
             cursor = previous[0];
@@ -210,8 +250,8 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         }
         before.Reverse();
 
-        var ordered = new List<Guid>(before) { currentTitleId };
-        cursor = currentTitleId;
+        var ordered = new List<Guid>(before) { continuityAnchorId };
+        cursor = continuityAnchorId;
         while (nextByNode.TryGetValue(cursor, out var next) && next.Count == 1)
         {
             cursor = next[0];
@@ -273,9 +313,66 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         return titles.TryGetValue(relation.MediaTitleId, out var source)
             && titles.TryGetValue(relation.RelatedMediaTitleId, out var target)
             && string.Equals(source.MediaKind, MediaKinds.Anime, StringComparison.Ordinal)
-            && string.Equals(target.MediaKind, MediaKinds.Anime, StringComparison.Ordinal)
-            && string.Equals(source.Format, "TV", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(target.Format, "TV", StringComparison.OrdinalIgnoreCase);
+            && string.Equals(target.MediaKind, MediaKinds.Anime, StringComparison.Ordinal);
+    }
+
+    private static HashSet<Guid> SelectContinuityComponent(
+        Guid currentTitleId,
+        IReadOnlyCollection<(Guid Earlier, Guid Later)> edges,
+        IReadOnlyDictionary<Guid, MediaTitle> titles)
+    {
+        var remaining = edges
+            .SelectMany(edge => new[] { edge.Earlier, edge.Later })
+            .ToHashSet();
+        if (remaining.Count == 0)
+        {
+            return [currentTitleId];
+        }
+
+        var components = new List<HashSet<Guid>>();
+        while (remaining.Count > 0)
+        {
+            var component = new HashSet<Guid> { remaining.First() };
+            var changed = true;
+            while (changed)
+            {
+                changed = false;
+                foreach (var edge in edges)
+                {
+                    if (component.Contains(edge.Earlier) && component.Add(edge.Later)
+                        || component.Contains(edge.Later) && component.Add(edge.Earlier))
+                    {
+                        changed = true;
+                    }
+                }
+            }
+
+            remaining.ExceptWith(component);
+            components.Add(component);
+        }
+
+        return components
+            .OrderByDescending(component => component.Count)
+            .ThenBy(component => component.Min(id => titles.GetValueOrDefault(id)?.StartYear ?? int.MaxValue))
+            .ThenBy(component => component.Min())
+            .First();
+    }
+
+    private static Guid SelectContinuityStart(
+        IReadOnlySet<Guid> component,
+        IReadOnlyCollection<(Guid Earlier, Guid Later)> edges,
+        IReadOnlyDictionary<Guid, MediaTitle> titles)
+    {
+        var laterIds = edges
+            .Where(edge => component.Contains(edge.Earlier) && component.Contains(edge.Later))
+            .Select(edge => edge.Later)
+            .ToHashSet();
+        return component
+            .OrderBy(id => laterIds.Contains(id))
+            .ThenBy(id => titles.GetValueOrDefault(id)?.StartYear ?? int.MaxValue)
+            .ThenBy(id => titles.GetValueOrDefault(id)?.CanonicalTitle, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(id => id)
+            .First();
     }
 
 }

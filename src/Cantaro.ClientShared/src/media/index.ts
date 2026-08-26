@@ -1,4 +1,5 @@
 export { MediaEntryDetailPage } from './pages/MediaEntryDetailPage';
+export { FranchiseDesignLabPage, type FranchiseDesignVariant } from './pages/FranchiseDesignLabPage';
 export { MediaCatalogDetailPage } from './pages/MediaCatalogDetailPage';
 export { MediaLibraryPage, type MediaPageHeading } from './pages/MediaLibraryPage';
 export { MediaObservationReviewPage } from './pages/MediaObservationReviewPage';

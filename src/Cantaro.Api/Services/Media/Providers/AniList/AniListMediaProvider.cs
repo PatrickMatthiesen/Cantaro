@@ -281,9 +281,7 @@ public class AniListMediaProvider(
                             : null
                     };
 
-                    if (relationType is MediaRelationTypes.Prequel or MediaRelationTypes.Sequel
-                        && MapMediaKind(related.Type) == MediaKinds.Anime
-                        && MapMediaFormat(related.Format) == MediaFormats.Tv
+                    if (IsFranchiseTraversalRelation(relationType)
                         && enqueued.Add(related.Id))
                     {
                         pending.Enqueue(related.Id);
@@ -629,6 +627,20 @@ public class AniListMediaProvider(
             VolumeCount = media.Volumes
         };
     }
+
+    private static bool IsFranchiseTraversalRelation(string relationType)
+        => relationType is
+            MediaRelationTypes.Adaptation or
+            MediaRelationTypes.Alternative or
+            MediaRelationTypes.Compilation or
+            MediaRelationTypes.Contains or
+            MediaRelationTypes.Parent or
+            MediaRelationTypes.Prequel or
+            MediaRelationTypes.Sequel or
+            MediaRelationTypes.SideStory or
+            MediaRelationTypes.Source or
+            MediaRelationTypes.SpinOff or
+            MediaRelationTypes.Summary;
 
     private static IReadOnlyList<MediaProviderCharacterCredit> MapCharacters(AniListCharacterConnection? connection)
     {
