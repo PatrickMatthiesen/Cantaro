@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Snackbar } from "../../../ui";
 import {
   ActionRail,
@@ -28,6 +28,7 @@ import {
   StreamingDestinationsSection,
 } from "./MediaDetailSections";
 import { FranchiseSection } from "./FranchiseSection";
+import { FranchiseExplorer } from "../FranchiseExplorer";
 import {
   getEntryStatusChanged,
   getPrimaryProgressSummary,
@@ -75,7 +76,6 @@ function MediaDetailTabPanel({
         />
         <FranchiseSection
           state={props.franchiseGraph}
-          variant="preview"
           onRetry={props.onReloadFranchise}
           onViewAll={onViewFullFranchise}
           onNavigateTitle={props.onNavigateTitle}
@@ -128,9 +128,8 @@ function MediaDetailTabPanel({
         id="media-detail-panel-franchise"
         aria-labelledby="media-detail-tab-franchise"
       >
-        <FranchiseSection
+        <FranchiseExplorer
           state={props.franchiseGraph}
-          variant="full"
           onRetry={props.onReloadFranchise}
           onNavigateTitle={props.onNavigateTitle}
         />
@@ -163,7 +162,7 @@ function MediaDetailTabPanel({
 }
 
 function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
-  const [activeTab, setActiveTab] = useState<DetailTabId>("overview");
+  const activeTab = props.activeTab;
   const mediaKind = props.entry.title.mediaKind;
   const progressSummary = getPrimaryProgressSummary(
     props.entry.title,
@@ -237,7 +236,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
               tabs={DETAIL_TABS}
               activeTab={activeTab}
               idPrefix="media-detail"
-              onChange={setActiveTab}
+              onChange={props.onTabChange}
             />
             <div className="px-4 sm:px-7 xl:px-9">
               <MediaDetailTabPanel
@@ -247,7 +246,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 streamingDestinations={streamingDestinations}
                 preferredServiceId={preferredServiceId}
                 onSelectStreamingService={setPreferredServiceId}
-                onViewFullFranchise={() => setActiveTab("franchise")}
+                onViewFullFranchise={() => props.onTabChange("franchise")}
               />
             </div>
           </section>

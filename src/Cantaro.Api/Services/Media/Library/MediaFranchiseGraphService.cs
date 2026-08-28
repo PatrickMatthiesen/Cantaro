@@ -38,9 +38,45 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             return null;
         }
 
+        var rootSnapshotId = await _dbContext.MediaProviderLinks
+            .AsNoTracking()
+            .Where(link => link.MediaTitleId == mediaTitleId && link.Provider == AniListProvider)
+            .Select(link => link.RelationsSnapshotId)
+            .SingleOrDefaultAsync(cancellationToken);
         var titleIds = new HashSet<Guid> { mediaTitleId };
         var frontier = new HashSet<Guid> { mediaTitleId };
         var relationsById = new Dictionary<Guid, MediaTitleRelation>();
+
+        var hasStructuralRootRelation = await _dbContext.MediaTitleRelations
+            .AsNoTracking()
+            .AnyAsync(relation => relation.SourceProvider == AniListProvider
+                && FranchiseTraversalRelationTypes.Contains(relation.RelationType)
+                && (relation.MediaTitleId == mediaTitleId
+                    || relation.RelatedMediaTitleId == mediaTitleId), cancellationToken);
+        if (!hasStructuralRootRelation && rootSnapshotId is not null)
+        {
+            var directNeighborIds = await _dbContext.MediaTitleRelations
+                .AsNoTracking()
+                .Where(relation => relation.SourceProvider == AniListProvider
+                    && (relation.MediaTitleId == mediaTitleId
+                        || relation.RelatedMediaTitleId == mediaTitleId))
+                .Select(relation => relation.MediaTitleId == mediaTitleId
+                    ? relation.RelatedMediaTitleId
+                    : relation.MediaTitleId)
+                .Distinct()
+                .ToArrayAsync(cancellationToken);
+            var snapshotAnchorIds = await _dbContext.MediaProviderLinks
+                .AsNoTracking()
+                .Where(link => directNeighborIds.Contains(link.MediaTitleId)
+                    && link.Provider == AniListProvider
+                    && link.RelationsSnapshotId == rootSnapshotId)
+                .Select(link => link.MediaTitleId)
+                .ToArrayAsync(cancellationToken);
+            foreach (var anchorId in snapshotAnchorIds)
+            {
+                AddIfWithinBound(anchorId, titleIds, frontier);
+            }
+        }
 
         for (var depth = 0; depth < MaxTraversalDepth && frontier.Count > 0 && titleIds.Count < MaxNodes; depth++)
         {
@@ -72,7 +108,9 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         // Traverse only structural franchise relations. Generic CHARACTER and
         // OTHER nodes can be shared by unrelated series, so they are included
         // one hop from the structural component but are never traversal bridges.
-        var continuityIdSet = titleIds.ToHashSet();
+        var continuityIdSet = !hasStructuralRootRelation && titleIds.Count > 1
+            ? titleIds.Where(id => id != mediaTitleId).ToHashSet()
+            : titleIds.ToHashSet();
         var continuityIds = continuityIdSet.ToArray();
         var directRelations = await _dbContext.MediaTitleRelations
             .AsNoTracking()
@@ -162,6 +200,7 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
                     CanonicalTitle = title.CanonicalTitle,
                     OriginalTitle = title.OriginalTitle,
                     PosterUrl = title.PosterUrl,
+                    BackgroundUrl = title.BackgroundUrl,
                     MediaKind = title.MediaKind,
                     MediaFormat = title.Format,
                     StartYear = title.StartYear,
@@ -209,15 +248,23 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         IReadOnlySet<Guid> verifiedRelationSourceIds,
         bool traversalIsComplete)
     {
-        var directedEdges = relations
-            .Where(relation => IsContinuityRelation(relation, titles))
+        var chronologyEdges = relations
+            .Where(relation => IsAnimeChronologyRelation(relation, titles))
             .Select(relation => string.Equals(relation.RelationType, MediaRelationTypes.Prequel, StringComparison.Ordinal)
                 ? (Earlier: relation.RelatedMediaTitleId, Later: relation.MediaTitleId)
                 : (Earlier: relation.MediaTitleId, Later: relation.RelatedMediaTitleId))
             .Distinct()
             .ToList();
-
-        var connectedIds = SelectContinuityComponent(currentTitleId, directedEdges, titles);
+        var directedEdges = BuildEpisodeSeriesEdges(chronologyEdges, titles);
+        var episodeSeriesIds = chronologyEdges
+            .SelectMany(edge => new[] { edge.Earlier, edge.Later })
+            .Where(id => titles.TryGetValue(id, out var title) && IsEpisodeSeriesTitle(title))
+            .ToHashSet();
+        var connectedIds = directedEdges.Count > 0
+            ? SelectContinuityComponent(currentTitleId, directedEdges, titles)
+            : episodeSeriesIds.Count > 0
+                ? episodeSeriesIds
+                : new HashSet<Guid> { currentTitleId };
         var continuityAnchorId = SelectContinuityStart(connectedIds, directedEdges, titles);
 
         directedEdges = directedEdges
@@ -300,7 +347,7 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
         };
     }
 
-    private static bool IsContinuityRelation(
+    private static bool IsAnimeChronologyRelation(
         MediaTitleRelation relation,
         IReadOnlyDictionary<Guid, MediaTitle> titles)
     {
@@ -314,6 +361,64 @@ public sealed class MediaFranchiseGraphService(ApplicationDbContext dbContext)
             && titles.TryGetValue(relation.RelatedMediaTitleId, out var target)
             && string.Equals(source.MediaKind, MediaKinds.Anime, StringComparison.Ordinal)
             && string.Equals(target.MediaKind, MediaKinds.Anime, StringComparison.Ordinal);
+    }
+
+    private static bool IsContinuityRelation(
+        MediaTitleRelation relation,
+        IReadOnlyDictionary<Guid, MediaTitle> titles)
+    {
+        return IsAnimeChronologyRelation(relation, titles)
+            && titles.TryGetValue(relation.MediaTitleId, out var source)
+            && titles.TryGetValue(relation.RelatedMediaTitleId, out var target)
+            && IsEpisodeSeriesTitle(source)
+            && IsEpisodeSeriesTitle(target);
+    }
+
+    private static List<(Guid Earlier, Guid Later)> BuildEpisodeSeriesEdges(
+        IReadOnlyCollection<(Guid Earlier, Guid Later)> chronologyEdges,
+        IReadOnlyDictionary<Guid, MediaTitle> titles)
+    {
+        var outgoing = chronologyEdges
+            .GroupBy(edge => edge.Earlier)
+            .ToDictionary(group => group.Key, group => group.Select(edge => edge.Later).Distinct().ToList());
+        var seriesIds = chronologyEdges
+            .SelectMany(edge => new[] { edge.Earlier, edge.Later })
+            .Where(id => titles.TryGetValue(id, out var title) && IsEpisodeSeriesTitle(title))
+            .Distinct()
+            .ToList();
+        var result = new HashSet<(Guid Earlier, Guid Later)>();
+
+        foreach (var seriesId in seriesIds)
+        {
+            var pending = new Queue<Guid>(outgoing.GetValueOrDefault(seriesId) ?? []);
+            var visited = new HashSet<Guid> { seriesId };
+            while (pending.TryDequeue(out var candidate))
+            {
+                if (!visited.Add(candidate))
+                {
+                    continue;
+                }
+
+                if (titles.TryGetValue(candidate, out var title) && IsEpisodeSeriesTitle(title))
+                {
+                    result.Add((seriesId, candidate));
+                    continue;
+                }
+
+                foreach (var next in outgoing.GetValueOrDefault(candidate) ?? [])
+                {
+                    pending.Enqueue(next);
+                }
+            }
+        }
+
+        return result.ToList();
+    }
+
+    private static bool IsEpisodeSeriesTitle(MediaTitle title)
+    {
+        return string.Equals(title.Format, MediaFormats.Tv, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(title.Format, MediaFormats.TvShort, StringComparison.OrdinalIgnoreCase);
     }
 
     private static HashSet<Guid> SelectContinuityComponent(

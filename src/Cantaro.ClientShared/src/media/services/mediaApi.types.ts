@@ -15,6 +15,7 @@ export interface MediaLibraryListItemDto {
     canonicalTitle: string;
     originalTitle?: string;
     posterUrl?: string;
+    backgroundUrl?: string;
     mediaKind: string;
     status: string;
     score: number | null;
@@ -130,6 +131,7 @@ export interface MediaFranchiseNodeDto {
     canonicalTitle: string;
     originalTitle?: string;
     posterUrl?: string;
+    backgroundUrl?: string;
     mediaKind: string;
     mediaFormat?: string;
     startYear?: number;

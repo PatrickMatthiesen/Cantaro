@@ -17,6 +17,7 @@ public class MediaLibraryListItemDto
     public required string CanonicalTitle { get; set; }
     public string? OriginalTitle { get; set; }
     public string? PosterUrl { get; set; }
+    public string? BackgroundUrl { get; set; }
     public required string MediaKind { get; set; }
     public required string Status { get; set; }
     public decimal? Score { get; set; }
@@ -115,6 +116,7 @@ public class MediaFranchiseNodeDto
     public required string CanonicalTitle { get; set; }
     public string? OriginalTitle { get; set; }
     public string? PosterUrl { get; set; }
+    public string? BackgroundUrl { get; set; }
     public required string MediaKind { get; set; }
     public string? MediaFormat { get; set; }
     public int? StartYear { get; set; }

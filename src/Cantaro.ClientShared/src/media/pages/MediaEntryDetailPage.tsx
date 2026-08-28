@@ -16,11 +16,15 @@ import {
   useStatusSaveAction,
   useTimedSnackbar,
 } from './media-entry-detail/useMediaEntryDetailState';
+import type { DetailTabId } from './media-entry-detail/mediaEntryDetailTypes';
 
 interface MediaEntryDetailPageProps {
   mediaTitleId: string;
+  franchiseMediaTitleId?: string;
   onNavigateBack: () => void;
   onNavigateTitle?: (mediaTitleId: string) => void;
+  activeTab?: DetailTabId;
+  onTabChange?: (tab: DetailTabId) => void;
   embedded?: boolean;
   onHeadingChange?: (heading: { eyebrow: string; title: string; details?: string[]; hidden?: boolean }) => void;
 }
@@ -29,11 +33,17 @@ interface MediaEntryDetailPageProps {
 // fallow-ignore-next-line complexity
 export function MediaEntryDetailPage({
   mediaTitleId,
+  franchiseMediaTitleId,
   onNavigateBack,
   onNavigateTitle,
+  activeTab,
+  onTabChange,
   embedded = false,
   onHeadingChange,
 }: MediaEntryDetailPageProps) {
+  const [localActiveTab, setLocalActiveTab] = useState<DetailTabId>('overview');
+  const resolvedActiveTab = activeTab ?? localActiveTab;
+  const handleTabChange = onTabChange ?? setLocalActiveTab;
   const {
     entry,
     setEntry,
@@ -55,7 +65,23 @@ export function MediaEntryDetailPage({
     reload: reloadProviderAvailability,
   } = useProviderAvailability(entry);
   const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
-  const { state: franchiseGraph, reload: reloadFranchise } = useFranchiseGraph(entry);
+  const { state: loadedFranchiseGraph, reload: reloadFranchise } = useFranchiseGraph(
+    entry,
+    franchiseMediaTitleId,
+  );
+  const franchiseGraph = loadedFranchiseGraph.status === 'loaded'
+    ? {
+      ...loadedFranchiseGraph,
+      value: {
+        ...loadedFranchiseGraph.value,
+        currentMediaTitleId: mediaTitleId,
+        nodes: loadedFranchiseGraph.value.nodes.map((node) => ({
+          ...node,
+          isCurrent: node.mediaTitleId === mediaTitleId,
+        })),
+      },
+    }
+    : loadedFranchiseGraph;
   const continueWatching = useContinueWatching(entry, episodeCatalog);
   const { snackbar, showSnackbar } = useTimedSnackbar();
   useRemoteEntryRefresh(entry, reloadEntry, showSnackbar);
@@ -150,6 +176,8 @@ export function MediaEntryDetailPage({
       continueWatching={continueWatching}
       episodeCatalog={episodeCatalog}
       franchiseGraph={franchiseGraph}
+      activeTab={resolvedActiveTab}
+      onTabChange={handleTabChange}
       onSetShowLinkDialog={setShowLinkDialog}
       onSetProgressEpisodes={setProgressEpisodes}
       onSetProgressChapters={setProgressChapters}

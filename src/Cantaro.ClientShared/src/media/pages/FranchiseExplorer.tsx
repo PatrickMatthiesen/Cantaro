@@ -1,41 +1,25 @@
-import { ArrowDown, ArrowLeft, ArrowUp, Check, GitBranch, RotateCcw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, RotateCcw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent } from "react";
 import { DetailArtwork } from "../components/media-entry-detail/EntryDisplayPrimitives";
-import { mediaApi, type MediaFranchiseGraphDto, type MediaFranchiseNodeDto } from "../services/mediaApi";
+import type { MediaFranchiseGraphDto, MediaFranchiseNodeDto } from "../services/mediaApi";
 import { mediaFormatLabel, mediaKindLabel } from "../services/mediaFormatting";
 import {
   buildFranchisePresentation,
   relationLabel,
   type FranchisePresentation,
 } from "./media-entry-detail/franchiseGraph";
+import { SquareOverlayNode } from "./franchise/SquareOverlayNode";
+import type { FranchiseGraphState } from "./media-entry-detail/mediaEntryDetailTypes";
 
-export type FranchiseDesignVariant = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+type FranchiseLayoutId = "release-horizontal" | "release-vertical" | "episode" | "format" | "table";
+type FranchiseCardType = "compact" | "portrait" | "square" | "wide";
 
-interface FranchiseDesignLabPageProps {
-  mediaTitleId: string;
-  variant: FranchiseDesignVariant;
-  onBack: () => void;
-  onNavigateTitle: (mediaTitleId: string) => void;
-  onNavigateVariant: (variant: FranchiseDesignVariant) => void;
-}
-
-const variantNames: Record<FranchiseDesignVariant, string> = {
-  1: "Directed levels",
-  2: "Current-title focus",
-  3: "Release timeline",
-  4: "Episode journey",
-  5: "Release timeline · vertical",
-  6: "Franchise map",
-  7: "By format",
-  8: "Franchise table",
-};
-
-const visibleVariants: Array<{ id: FranchiseDesignVariant; label: string }> = [
-  { id: 3, label: "By release →" },
-  { id: 4, label: "By episode" },
-  { id: 5, label: "By release ↓" },
-  { id: 7, label: "By format" },
-  { id: 8, label: "Table" },
+const layoutOptions: Array<{ id: FranchiseLayoutId; label: string }> = [
+  { id: "release-horizontal", label: "By release →" },
+  { id: "release-vertical", label: "By release ↓" },
+  { id: "episode", label: "By episode" },
+  { id: "format", label: "By format" },
+  { id: "table", label: "Table" },
 ];
 
 function nodeMeta(node: MediaFranchiseNodeDto) {
@@ -46,49 +30,133 @@ function nodeMeta(node: MediaFranchiseNodeDto) {
   ].filter(Boolean).join(" · ");
 }
 
-function NodeContext({ context }: { context?: string }) {
-  return context
-    ? <span className="mb-2 block text-xs font-semibold text-content-muted">{context}</span>
-    : null;
-}
-
-function CurrentMarker({ isCurrent }: { isCurrent: boolean }) {
-  return isCurrent
-    ? <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-focus"><Check size={12} /> Current title</span>
-    : null;
-}
-
 function CompactNode({
   node,
   onNavigate,
   emphasis = false,
-  context,
 }: {
   node: MediaFranchiseNodeDto;
   onNavigate: (id: string) => void;
   emphasis?: boolean;
-  context?: string;
 }) {
   return (
     <button
       type="button"
       onClick={() => onNavigate(node.mediaTitleId)}
       className="group min-w-0 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-      aria-current={node.isCurrent ? "page" : undefined}
     >
-      <NodeContext context={context} />
-      <span className={`flex min-w-0 gap-3 border bg-surface p-3 transition-colors group-hover:border-content-subtle ${emphasis || node.isCurrent ? "border-focus" : "border-border-subtle"}`}>
+      <span className={`flex min-w-0 gap-3 border bg-surface p-3 transition-colors group-hover:border-content-subtle ${emphasis ? "border-focus" : "border-border-subtle"}`}>
         <span className="relative block h-24 w-16 shrink-0 overflow-hidden bg-surface-subtle">
           <DetailArtwork posterUrl={node.posterUrl} title={node.canonicalTitle} className="object-cover" />
         </span>
         <span className="min-w-0 self-center">
           <strong className="block text-pretty text-sm leading-5 text-content">{node.canonicalTitle}</strong>
           <span className="mt-1 block text-xs text-content-muted">{nodeMeta(node)}</span>
-          <CurrentMarker isCurrent={node.isCurrent} />
         </span>
       </span>
     </button>
   );
+}
+
+type OverlayNodeProps = {
+  node: MediaFranchiseNodeDto;
+  onNavigate: (id: string) => void;
+  shape?: OverlayShape;
+};
+
+function TextOverlayNode({ node, onNavigate, shape }: OverlayNodeProps & { shape: "portrait" | "wide" }) {
+  const artworkUrl = shape === "wide" ? node.backgroundUrl ?? node.posterUrl : node.posterUrl;
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(node.mediaTitleId)}
+      className="group block w-full text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      <span className={`relative block overflow-hidden bg-surface-subtle ${overlayShapeClasses[shape]}`}>
+        <DetailArtwork posterUrl={artworkUrl} title={node.canonicalTitle} className="transition-transform duration-200 ease-out group-hover:scale-[1.025]" />
+        <span className="absolute inset-0 bg-linear-to-t from-black/95 via-black/35 via-55% to-transparent" aria-hidden />
+        <span className="absolute inset-x-0 bottom-0 block p-3 text-white sm:p-4">
+          <strong className="block text-pretty text-sm leading-5 sm:text-base">{node.canonicalTitle}</strong>
+          {shape === "portrait" ? <span className="mt-1 block text-xs text-white/80">{nodeMeta(node)}</span> : null}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function OverlayNode({ node, onNavigate, shape = "portrait" }: OverlayNodeProps) {
+  if (shape === "square") return <SquareOverlayNode node={node} meta={nodeMeta(node)} onNavigate={onNavigate} />;
+  if (shape === "wide") return <TextOverlayNode node={node} onNavigate={onNavigate} shape="wide" />;
+  return <TextOverlayNode node={node} onNavigate={onNavigate} shape="portrait" />;
+}
+
+type OverlayShape = Exclude<FranchiseCardType, "compact">;
+
+const overlayShapeClasses: Record<OverlayShape, string> = {
+  portrait: "aspect-3/4",
+  square: "aspect-square",
+  wide: "aspect-4/3",
+};
+
+const overlayGridClasses: Record<OverlayShape, string> = {
+  portrait: "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6",
+  square: "grid-cols-4 sm:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8",
+  wide: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+};
+
+const cardGridClasses: Record<FranchiseCardType, string> = {
+  compact: "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+  ...overlayGridClasses,
+};
+
+const timelineColumnClasses: Record<FranchiseCardType, string> = {
+  compact: "w-64",
+  portrait: "w-48",
+  square: "w-32",
+  wide: "w-80",
+};
+
+const episodeColumnClasses: Record<FranchiseCardType, string> = {
+  compact: "lg:grid-cols-[7rem_19rem_1fr]",
+  portrait: "lg:grid-cols-[7rem_12rem_1fr]",
+  square: "lg:grid-cols-[7rem_8rem_1fr]",
+  wide: "lg:grid-cols-[7rem_22rem_1fr]",
+};
+
+const posterShapeStorageKey = "cantaro.franchise.poster-shape";
+const layoutStorageKey = "cantaro.franchise.layout";
+
+function readCardType(): FranchiseCardType {
+  if (typeof window === "undefined") return "compact";
+  const value = window.localStorage.getItem(posterShapeStorageKey);
+  return value === "portrait" || value === "square" || value === "wide" ? value : "compact";
+}
+
+function readLayoutVariant(): FranchiseLayoutId {
+  if (typeof window === "undefined") return "release-horizontal";
+  const value = window.localStorage.getItem(layoutStorageKey);
+  const legacyLayouts: Record<string, FranchiseLayoutId> = {
+    "3": "release-horizontal",
+    "4": "episode",
+    "5": "release-vertical",
+    "7": "format",
+    "8": "table",
+  };
+  if (value && legacyLayouts[value]) return legacyLayouts[value];
+  return layoutOptions.some((variant) => variant.id === value)
+    ? value as FranchiseLayoutId
+    : "release-horizontal";
+}
+
+function FranchiseCard({ node, onNavigate, cardType, emphasis = false }: {
+  node: MediaFranchiseNodeDto;
+  onNavigate: (id: string) => void;
+  cardType: FranchiseCardType;
+  emphasis?: boolean;
+}) {
+  return cardType === "compact"
+    ? <CompactNode node={node} onNavigate={onNavigate} emphasis={emphasis} />
+    : <OverlayNode node={node} onNavigate={onNavigate} shape={cardType} />;
 }
 
 function branchEntries(presentation: FranchisePresentation) {
@@ -104,86 +172,7 @@ function branchEntries(presentation: FranchisePresentation) {
 
 type BranchEntry = ReturnType<typeof branchEntries>[number];
 
-function BranchNodeList({
-  entries,
-  onNavigate,
-}: {
-  entries: BranchEntry[];
-  onNavigate: (id: string) => void;
-}) {
-  return entries.map(({ source, branch }) => (
-    <CompactNode
-      key={branch.node.mediaTitleId}
-      node={branch.node}
-      onNavigate={onNavigate}
-      context={`${relationLabel(branch.displayRelationType)} from ${source.canonicalTitle}`}
-    />
-  ));
-}
-
-function DirectedLevels({ presentation, onNavigate }: LayoutProps) {
-  const branches = branchEntries(presentation);
-  return (
-    <div className="overflow-x-auto pb-4">
-      <div className="min-w-240">
-        <div className="grid grid-cols-[14rem_1fr_16rem] gap-8 text-sm font-bold text-content-muted">
-          <span>Origins</span><span>Main continuity · earlier to later</span><span>Related branches</span>
-        </div>
-        <div className="mt-4 grid grid-cols-[14rem_1fr_16rem] items-start gap-8">
-          <div className="space-y-4">
-            <BranchNodeList entries={branches.filter(({ branch }) => ["source", "adaptation"].includes(branch.displayRelationType)).slice(0, 3)} onNavigate={onNavigate} />
-          </div>
-          <ol className="space-y-3 border-l border-border-subtle pl-6">
-            {presentation.continuityNodes.map((node, index) => (
-              <li key={node.mediaTitleId} className="relative grid grid-cols-[2rem_1fr] items-center gap-3">
-                <span className="absolute -left-[1.68rem] h-px w-6 bg-border-subtle" aria-hidden />
-                <span className="text-sm font-black text-content-subtle">{index + 1}</span>
-                <CompactNode node={node} onNavigate={onNavigate} emphasis />
-              </li>
-            ))}
-          </ol>
-          <div className="space-y-4">
-            <BranchNodeList entries={branches.filter(({ branch }) => !["source", "adaptation"].includes(branch.displayRelationType)).slice(0, 5)} onNavigate={onNavigate} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CurrentFocus({ presentation, onNavigate }: LayoutProps) {
-  const currentIndex = Math.max(0, presentation.continuityNodes.findIndex((node) => node.isCurrent));
-  const before = presentation.continuityNodes.slice(0, currentIndex);
-  const current = presentation.continuityNodes[currentIndex];
-  const after = presentation.continuityNodes.slice(currentIndex + 1);
-  const branches = branchEntries(presentation);
-  return (
-    <div>
-      <div className="grid items-center gap-5 lg:grid-cols-[1fr_auto_1fr]">
-        <div className="space-y-3">
-          <p className="text-sm font-bold text-content-muted">Leads here from</p>
-          {before.slice(-2).map((node) => <CompactNode key={node.mediaTitleId} node={node} onNavigate={onNavigate} />)}
-        </div>
-        <div className="mx-auto w-full max-w-80">
-          <p className="mb-3 text-center text-sm font-bold text-focus">You are here</p>
-          {current ? <CompactNode node={current} onNavigate={onNavigate} emphasis /> : null}
-        </div>
-        <div className="space-y-3">
-          <p className="text-sm font-bold text-content-muted">Continues as</p>
-          {after.slice(0, 2).map((node) => <CompactNode key={node.mediaTitleId} node={node} onNavigate={onNavigate} />)}
-        </div>
-      </div>
-      <div className="mt-10 border-t border-border-subtle pt-6">
-        <h2 className="text-lg font-bold text-content">Directly connected to this path</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <BranchNodeList entries={branches.slice(0, 9)} onNavigate={onNavigate} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReleaseTimeline({ graph, onNavigate }: LayoutProps) {
+function ReleaseTimeline({ graph, onNavigate, cardType }: LayoutProps) {
   const years = [...new Set(graph.nodes.map((node) => node.startYear ?? 0))].sort((a, b) => a - b);
   const scrollRef = useRef<HTMLDivElement>(null);
   const drag = useRef({ pointerId: -1, startX: 0, scrollLeft: 0, moved: false });
@@ -193,18 +182,23 @@ function ReleaseTimeline({ graph, onNavigate }: LayoutProps) {
     const element = scrollRef.current;
     if (!element) return;
     drag.current = { pointerId: event.pointerId, startX: event.clientX, scrollLeft: element.scrollLeft, moved: false };
-    element.setPointerCapture(event.pointerId);
   };
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const element = scrollRef.current;
     if (!element || drag.current.pointerId !== event.pointerId) return;
     const distance = event.clientX - drag.current.startX;
-    if (Math.abs(distance) > 6) drag.current.moved = true;
+    if (Math.abs(distance) > 6 && !drag.current.moved) {
+      drag.current.moved = true;
+      element.setPointerCapture(event.pointerId);
+    }
     if (drag.current.moved) element.scrollLeft = drag.current.scrollLeft - distance;
   };
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current.pointerId !== event.pointerId) return;
-    scrollRef.current?.releasePointerCapture(event.pointerId);
+    const element = scrollRef.current;
+    if (element?.hasPointerCapture(event.pointerId)) {
+      element.releasePointerCapture(event.pointerId);
+    }
     drag.current.pointerId = -1;
   };
   return (
@@ -216,16 +210,16 @@ function ReleaseTimeline({ graph, onNavigate }: LayoutProps) {
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onClickCapture={(event) => { if (drag.current.moved) { event.preventDefault(); event.stopPropagation(); drag.current.moved = false; } }}
-      aria-label="Release timeline. Drag horizontally or use the scrollbar to explore."
+      aria-label="By release, left to right. Drag horizontally or use the scrollbar to explore."
     >
       <ol className="flex min-w-max items-start gap-0 pt-5">
         {years.map((year) => (
-          <li key={year} className="relative w-64 border-t-2 border-border-subtle px-3 pt-6 first:pl-0 last:pr-0">
+          <li key={year} className={`relative shrink-0 border-t-2 border-border-subtle px-3 pt-6 first:pl-0 last:pr-0 ${timelineColumnClasses[cardType]}`}>
             <span className="absolute -top-2 left-3 h-3.5 w-3.5 rounded-full border-2 border-surface bg-focus" aria-hidden />
             <h2 className="text-xl font-black text-content">{year || "Unknown"}</h2>
             <div className="mt-4 space-y-3">
               {graph.nodes.filter((node) => (node.startYear ?? 0) === year).map((node) => (
-                <CompactNode key={node.mediaTitleId} node={node} onNavigate={onNavigate} />
+                <FranchiseCard key={node.mediaTitleId} node={node} onNavigate={onNavigate} cardType={cardType} />
               ))}
             </div>
           </li>
@@ -235,9 +229,10 @@ function ReleaseTimeline({ graph, onNavigate }: LayoutProps) {
   );
 }
 
-function GroupedBranches({ entries, onNavigate }: {
+function GroupedBranches({ entries, onNavigate, cardType = "compact" }: {
   entries: BranchEntry[];
   onNavigate: (id: string) => void;
+  cardType?: FranchiseCardType;
 }) {
   const groups = new Map<string, BranchEntry[]>();
   for (const entry of entries) {
@@ -249,8 +244,8 @@ function GroupedBranches({ entries, onNavigate }: {
       {[...groups.entries()].map(([label, items]) => (
         <section key={label}>
           <h3 className="mb-2 text-xs font-bold text-content-muted">{label}</h3>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {items.map(({ branch }) => <CompactNode key={branch.node.mediaTitleId} node={branch.node} onNavigate={onNavigate} />)}
+          <div className={`grid gap-3 ${cardType === "compact" ? "sm:grid-cols-2" : cardGridClasses[cardType]}`}>
+            {items.map(({ branch }) => <FranchiseCard key={branch.node.mediaTitleId} node={branch.node} onNavigate={onNavigate} cardType={cardType} />)}
           </div>
         </section>
       ))}
@@ -258,7 +253,7 @@ function GroupedBranches({ entries, onNavigate }: {
   );
 }
 
-function EpisodeJourney({ graph, presentation, onNavigate }: LayoutProps) {
+function EpisodeJourney({ graph, presentation, onNavigate, cardType }: LayoutProps) {
   const offsets = graph.continuity.episodeOffsetByMediaTitleId;
   const branches = branchEntries(presentation);
   const continuityIds = new Set(presentation.continuityNodes.map((node) => node.mediaTitleId));
@@ -273,13 +268,13 @@ function EpisodeJourney({ graph, presentation, onNavigate }: LayoutProps) {
           const end = node.episodeCount ? start + node.episodeCount - 1 : null;
           const attached = attachedBranches.filter(({ source }) => source.mediaTitleId === node.mediaTitleId);
           return (
-            <li key={node.mediaTitleId} className="grid items-start gap-4 border-l-2 border-focus pb-8 pl-6 lg:grid-cols-[7rem_19rem_1fr]">
+            <li key={node.mediaTitleId} className={`grid items-start gap-4 border-l-2 border-focus pb-8 pl-6 ${episodeColumnClasses[cardType]}`}>
               <div className="relative self-start">
                 <span className="absolute -left-[1.96rem] top-1 h-3.5 w-3.5 rounded-full bg-focus ring-4 ring-surface" aria-hidden />
                 <span className="text-sm font-black text-content">{end ? `Ep. ${start}–${end}` : `Step ${index + 1}`}</span>
               </div>
-              <CompactNode node={node} onNavigate={onNavigate} emphasis />
-              <GroupedBranches entries={attached} onNavigate={onNavigate} />
+              <FranchiseCard node={node} onNavigate={onNavigate} cardType={cardType} emphasis />
+              <GroupedBranches entries={attached} onNavigate={onNavigate} cardType={cardType} />
             </li>
           );
         })}
@@ -287,15 +282,14 @@ function EpisodeJourney({ graph, presentation, onNavigate }: LayoutProps) {
       {remaining.length > 0 ? (
         <section className="border-t border-border-subtle pt-6">
           <h2 className="text-lg font-bold text-content">Related outside the episode lane</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><BranchNodeList entries={remaining} onNavigate={onNavigate} /></div>
+          <div className="mt-4"><GroupedBranches entries={remaining} onNavigate={onNavigate} cardType={cardType} /></div>
         </section>
       ) : null}
     </div>
   );
 }
 
-function EraLanes({ graph, presentation, onNavigate }: LayoutProps) {
-  const branches = branchEntries(presentation);
+function EraLanes({ graph, onNavigate, cardType }: LayoutProps) {
   const eras = [...new Set(graph.nodes.map((node) => node.startYear ?? 0))].sort((a, b) => a - b);
   return (
     <div>
@@ -304,51 +298,12 @@ function EraLanes({ graph, presentation, onNavigate }: LayoutProps) {
         return (
           <section key={year} className="grid items-start gap-5 border-l-2 border-focus pb-8 pl-6 lg:grid-cols-[7rem_1fr]">
             <h2 className="relative text-xl font-black text-content"><span className="absolute -left-[1.96rem] top-1 h-3.5 w-3.5 rounded-full bg-focus ring-4 ring-surface" aria-hidden />{year || "Unscheduled"}</h2>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {nodes.map((node) => {
-                const relation = branches.find(({ branch }) => branch.node.mediaTitleId === node.mediaTitleId);
-                const isContinuity = presentation.continuityNodes.some((item) => item.mediaTitleId === node.mediaTitleId);
-                return <CompactNode key={node.mediaTitleId} node={node} onNavigate={onNavigate} emphasis={isContinuity} context={isContinuity ? "Main continuity" : relation ? `${relationLabel(relation.branch.displayRelationType)} from ${relation.source.canonicalTitle}` : "Related title"} />;
-              })}
+            <div className={`grid gap-4 ${cardGridClasses[cardType]}`}>
+              {nodes.map((node) => <FranchiseCard key={node.mediaTitleId} node={node} onNavigate={onNavigate} cardType={cardType} />)}
             </div>
           </section>
         );
       })}
-    </div>
-  );
-}
-
-function FranchiseMap({ graph, presentation, onNavigate }: LayoutProps) {
-  const continuityIds = new Set(presentation.continuityNodes.map((node) => node.mediaTitleId));
-  const entries = branchEntries(presentation).filter(({ branch }) => !continuityIds.has(branch.node.mediaTitleId));
-  const attachedEntries = entries.filter(({ source }) => continuityIds.has(source.mediaTitleId));
-  const represented = new Set([...continuityIds, ...attachedEntries.map(({ branch }) => branch.node.mediaTitleId)]);
-  const fallbackSource = presentation.continuityNodes[0] ?? graph.nodes[0];
-  const remaining = graph.nodes.filter((node) => !represented.has(node.mediaTitleId));
-  return (
-    <div className="mx-auto max-w-5xl">
-      <ol className="space-y-0">
-        {presentation.continuityNodes.map((node, index) => {
-          const attached = attachedEntries.filter(({ source }) => source.mediaTitleId === node.mediaTitleId);
-          return (
-            <li key={node.mediaTitleId} className="relative border-l-2 border-focus pb-9 pl-7">
-              <span className="absolute -left-3 top-0 grid h-6 w-6 place-items-center rounded-full bg-focus text-xs font-black text-white">{index + 1}</span>
-              <div className="grid gap-5 lg:grid-cols-[20rem_1fr]">
-                <CompactNode node={node} onNavigate={onNavigate} emphasis />
-                <GroupedBranches entries={attached} onNavigate={onNavigate} />
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-      {remaining.length > 0 && fallbackSource ? (
-        <section className="border-t border-border-subtle pt-6">
-          <h2 className="text-lg font-bold text-content">Other related titles</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {remaining.map((node) => <CompactNode key={node.mediaTitleId} node={node} onNavigate={onNavigate} context={`Related to ${fallbackSource.canonicalTitle}`} />)}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
@@ -370,30 +325,38 @@ function shelfCategory(node: MediaFranchiseNodeDto) {
   return categoryByFormat[format ?? ""] ?? "Other releases";
 }
 
-function FranchiseShelf({ graph, presentation, onNavigate }: LayoutProps) {
-  const categories = ["TV seasons", "Movies", "OVA, ONA and specials", "Source material", "Other releases"];
+function sortNodesByRelease(nodes: MediaFranchiseNodeDto[]) {
+  return nodes.sort((left, right) =>
+    (left.startYear ?? 9999) - (right.startYear ?? 9999)
+    || left.canonicalTitle.localeCompare(right.canonicalTitle));
+}
+
+const franchiseCategories = ["TV seasons", "Movies", "OVA, ONA and specials", "Source material", "Other releases"];
+
+function nodesInCategory(graph: MediaFranchiseGraphDto, category: string) {
+  return sortNodesByRelease(graph.nodes.filter((node) => shelfCategory(node) === category));
+}
+
+function ShelfCategory({ category, graph, onNavigate, cardType }: Pick<LayoutProps, "graph" | "onNavigate" | "cardType"> & { category: string }) {
+  const nodes = nodesInCategory(graph, category);
+  if (nodes.length === 0) return null;
+  return (
+    <section>
+      <h2 className="text-xl font-black text-content">{category}</h2>
+      <div className={`mt-4 grid gap-4 ${cardGridClasses[cardType]}`}>
+        {nodes.map((node) => <FranchiseCard key={node.mediaTitleId} node={node} onNavigate={onNavigate} cardType={cardType} />)}
+      </div>
+    </section>
+  );
+}
+
+function FranchiseShelf({ graph, onNavigate, cardType }: LayoutProps) {
   return (
     <div className="space-y-9">
       <div className="flex flex-wrap gap-x-6 gap-y-2 border-y border-border-subtle py-3 text-sm text-content-muted">
-        {categories.map((category) => <span key={category}><strong className="text-content">{graph.nodes.filter((node) => shelfCategory(node) === category).length}</strong> {category.toLowerCase()}</span>)}
+        {franchiseCategories.map((category) => <span key={category}><strong className="text-content">{graph.nodes.filter((node) => shelfCategory(node) === category).length}</strong> {category.toLowerCase()}</span>)}
       </div>
-      {categories.map((category) => {
-        const nodes = graph.nodes.filter((node) => shelfCategory(node) === category).sort((left, right) =>
-          (left.startYear ?? 9999) - (right.startYear ?? 9999)
-          || left.canonicalTitle.localeCompare(right.canonicalTitle));
-        if (nodes.length === 0) return null;
-        return (
-          <section key={category}>
-            <h2 className="text-xl font-black text-content">{category}</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {nodes.map((node) => {
-                const continuityIndex = presentation.continuityNodes.findIndex((item) => item.mediaTitleId === node.mediaTitleId);
-                return <CompactNode key={node.mediaTitleId} node={node} onNavigate={onNavigate} emphasis={continuityIndex >= 0} />;
-              })}
-            </div>
-          </section>
-        );
-      })}
+      {franchiseCategories.map((category) => <ShelfCategory key={category} category={category} graph={graph} onNavigate={onNavigate} cardType={cardType} />)}
     </div>
   );
 }
@@ -443,7 +406,7 @@ function FranchiseTable({ graph, presentation, onNavigate }: LayoutProps) {
   const [descending, setDescending] = useState(false);
   const relationFor = (node: MediaFranchiseNodeDto) => {
     const entry = branches.find(({ branch }) => branch.node.mediaTitleId === node.mediaTitleId);
-    return entry ? relationLabel(entry.branch.displayRelationType) : presentation.continuityNodes.some((item) => item.mediaTitleId === node.mediaTitleId) ? "Main continuity" : "Related title";
+    return entry ? relationLabel(entry.branch.displayRelationType) : presentation.continuityNodes.some((item) => item.mediaTitleId === node.mediaTitleId) ? "Main series" : "Related title";
   };
   const relations = [...new Set(graph.nodes.map(relationFor))].sort();
   const rows = graph.nodes.filter((node) => {
@@ -498,11 +461,11 @@ function FranchiseTableRow({ node, branches, presentation, onNavigate }: {
   const entry = branches.find(({ branch }) => branch.node.mediaTitleId === node.mediaTitleId);
   const continuityIndex = presentation.continuityNodes.findIndex((item) => item.mediaTitleId === node.mediaTitleId);
   const relationship = continuityIndex >= 0
-    ? `Continuity ${continuityIndex + 1}`
+    ? "Main series"
     : entry ? `${relationLabel(entry.branch.displayRelationType)} from ${entry.source.canonicalTitle}` : "Related title";
   return (
     <tr className="hover:bg-surface-subtle">
-      <td className="p-3"><button type="button" onClick={() => onNavigate(node.mediaTitleId)} className="flex max-w-xl items-center gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span className="h-14 w-10 shrink-0 overflow-hidden bg-surface-subtle"><DetailArtwork posterUrl={node.posterUrl} title={node.canonicalTitle} className="object-cover" /></span><span><strong className="block text-pretty text-content">{node.canonicalTitle}</strong><CurrentMarker isCurrent={node.isCurrent} /></span></button></td>
+      <td className="p-3"><button type="button" onClick={() => onNavigate(node.mediaTitleId)} className="flex max-w-xl items-center gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span className="h-14 w-10 shrink-0 overflow-hidden bg-surface-subtle"><DetailArtwork posterUrl={node.posterUrl} title={node.canonicalTitle} className="object-cover" /></span><span><strong className="block text-pretty text-content">{node.canonicalTitle}</strong></span></button></td>
       <td className="p-3 text-content-muted">{node.startYear ?? "—"}</td>
       <td className="p-3 text-content-muted">{node.mediaFormat ? mediaFormatLabel(node.mediaFormat) : mediaKindLabel(node.mediaKind)}</td>
       <td className="p-3 text-content-muted">{node.episodeCount ?? "—"}</td>
@@ -515,81 +478,68 @@ interface LayoutProps {
   graph: MediaFranchiseGraphDto;
   presentation: FranchisePresentation;
   onNavigate: (id: string) => void;
+  cardType: FranchiseCardType;
 }
 
-const designLayouts: Record<FranchiseDesignVariant, ComponentType<LayoutProps>> = {
-  1: DirectedLevels,
-  2: CurrentFocus,
-  3: ReleaseTimeline,
-  4: EpisodeJourney,
-  5: EraLanes,
-  6: FranchiseMap,
-  7: FranchiseShelf,
-  8: FranchiseTable,
+const franchiseLayouts: Record<FranchiseLayoutId, ComponentType<LayoutProps>> = {
+  "release-horizontal": ReleaseTimeline,
+  "release-vertical": EraLanes,
+  episode: EpisodeJourney,
+  format: FranchiseShelf,
+  table: FranchiseTable,
 };
 
-function DesignLayout({ variant, ...props }: LayoutProps & { variant: FranchiseDesignVariant }) {
-  const Layout = designLayouts[variant];
+function FranchiseLayout({ variant, ...props }: LayoutProps & { variant: FranchiseLayoutId }) {
+  const Layout = franchiseLayouts[variant];
   return <Layout {...props} />;
 }
 
-function useFranchiseDesignGraph(mediaTitleId: string) {
-  const [graph, setGraph] = useState<MediaFranchiseGraphDto | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setGraph(null);
-    setError(null);
-    mediaApi.getFranchiseGraph(mediaTitleId).then((value) => {
-      if (!cancelled) setGraph(value);
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Couldn’t load franchise connections.");
-    });
-    return () => { cancelled = true; };
-  }, [mediaTitleId, reloadKey]);
-
-  const presentation = useMemo(() => graph ? buildFranchisePresentation(graph) : null, [graph]);
-  return { graph, error, presentation, reload: () => setReloadKey((value) => value + 1) };
-}
-
-function LabHeader({
-  graph,
+function FranchiseControls({
   variant,
-  onNavigateVariant,
+  cardType,
+  onVariantChange,
+  onCardTypeChange,
 }: {
-  graph: MediaFranchiseGraphDto | null;
-  variant: FranchiseDesignVariant;
-  onNavigateVariant: (variant: FranchiseDesignVariant) => void;
+  variant: FranchiseLayoutId;
+  cardType: FranchiseCardType;
+  onVariantChange: (variant: FranchiseLayoutId) => void;
+  onCardTypeChange: (cardType: FranchiseCardType) => void;
 }) {
-  const current = graph?.nodes.find((node) => node.isCurrent);
   return (
-    <header className="mt-5 flex flex-wrap items-end justify-between gap-5 border-b border-border-subtle pb-6">
-      <div className="max-w-3xl">
-        <div className="flex items-center gap-2 text-sm font-semibold text-content-muted"><GitBranch size={16} /> Franchise layout study</div>
-        <h1 className="mt-2 text-3xl font-black text-content">{variantNames[variant]}</h1>
-        <p className="mt-2 text-pretty text-content-muted">{current?.canonicalTitle ?? "Franchise"} · Explore how chronology, direction, and related works could fit together.</p>
-      </div>
-      <nav aria-label="Franchise layout variants" className="flex flex-wrap gap-2">
-        {visibleVariants.map((item) => <button key={item.id} type="button" onClick={() => onNavigateVariant(item.id)} aria-current={item.id === variant ? "page" : undefined} className={`border px-3 py-2 text-sm font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${item.id === variant ? "border-focus bg-focus text-white" : "border-border-subtle text-content-muted hover:border-content-subtle hover:text-content"}`}>{item.label}</button>)}
-      </nav>
-    </header>
+    <div className="flex flex-wrap justify-end gap-3 border-b border-border-subtle py-5">
+      <label className="grid gap-1 text-xs font-semibold text-content-muted">
+        Layout
+        <select value={variant} onChange={(event) => onVariantChange(event.target.value as FranchiseLayoutId)} className="min-w-44 border border-border-subtle bg-surface px-3 py-2 text-sm font-semibold text-content focus:border-focus focus:outline-none">
+          {layoutOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
+      </label>
+      <label className="grid gap-1 text-xs font-semibold text-content-muted">
+        Card type
+        <select value={cardType} disabled={variant === "table"} onChange={(event) => onCardTypeChange(event.target.value as FranchiseCardType)} className="min-w-36 border border-border-subtle bg-surface px-3 py-2 text-sm font-semibold text-content focus:border-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-50">
+          <option value="compact">Compact</option>
+          <option value="portrait">Portrait</option>
+          <option value="square">Square</option>
+          <option value="wide">Wide</option>
+        </select>
+      </label>
+    </div>
   );
 }
 
-function LabContent({
+function ExplorerContent({
   graph,
   error,
   presentation,
   variant,
+  cardType,
   onNavigateTitle,
   onRetry,
 }: {
   graph: MediaFranchiseGraphDto | null;
   error: string | null;
   presentation: FranchisePresentation | null;
-  variant: FranchiseDesignVariant;
+  variant: FranchiseLayoutId;
+  cardType: FranchiseCardType;
   onNavigateTitle: (id: string) => void;
   onRetry: () => void;
 }) {
@@ -599,23 +549,52 @@ function LabContent({
   if (!graph || !presentation) {
     return <div className="h-72 animate-pulse bg-surface-subtle" aria-label="Loading franchise layout" />;
   }
-  return <DesignLayout variant={variant} graph={graph} presentation={presentation} onNavigate={onNavigateTitle} />;
+  return <FranchiseLayout variant={variant} graph={graph} presentation={presentation} onNavigate={onNavigateTitle} cardType={cardType} />;
 }
 
-function LabFooter({ graph }: { graph: MediaFranchiseGraphDto | null }) {
+function ExplorerFooter({ graph }: { graph: MediaFranchiseGraphDto | null }) {
   if (!graph) return null;
-  return <footer className="border-t border-border-subtle pt-5 text-sm text-content-muted"><p><strong className="text-content">Reading key:</strong> every title appears once in the selected view; current context is marked without changing franchise membership.</p><p className="mt-1">Relations from {graph.sourceProvider === "anilist" ? "AniList" : graph.sourceProvider}{graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}</p></footer>;
+  return <footer className="border-t border-border-subtle pt-5 text-sm text-content-muted"><p><strong className="text-content">Reading key:</strong> every title appears once in the selected view.</p><p className="mt-1">Relations from {graph.sourceProvider === "anilist" ? "AniList" : graph.sourceProvider}{graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}</p></footer>;
 }
 
-export function FranchiseDesignLabPage({ mediaTitleId, variant, onBack, onNavigateTitle, onNavigateVariant }: FranchiseDesignLabPageProps) {
-  const { graph, error, presentation, reload } = useFranchiseDesignGraph(mediaTitleId);
+export function FranchiseExplorer({
+  state,
+  onRetry,
+  onNavigateTitle,
+}: {
+  state: FranchiseGraphState;
+  onRetry: () => void;
+  onNavigateTitle?: (mediaTitleId: string) => void;
+}) {
+  const [variant, setVariant] = useState<FranchiseLayoutId>(readLayoutVariant);
+  const [cardType, setCardType] = useState<FranchiseCardType>(readCardType);
+  const graph = state.status === "loaded" ? state.value : null;
+  const error = state.status === "error" ? state.error : null;
+  const presentation = useMemo(() => graph ? buildFranchisePresentation(graph) : null, [graph]);
+
+  useEffect(() => window.localStorage.setItem(layoutStorageKey, String(variant)), [variant]);
+  useEffect(() => window.localStorage.setItem(posterShapeStorageKey, cardType), [cardType]);
 
   return (
-    <div className="mx-auto w-full max-w-360 px-4 py-6 sm:px-7 xl:px-9">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-content-muted hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><ArrowLeft size={17} /> Back to title</button>
-      <LabHeader graph={graph} variant={variant} onNavigateVariant={onNavigateVariant} />
-      <div className="py-8"><LabContent graph={graph} error={error} presentation={presentation} variant={variant} onNavigateTitle={onNavigateTitle} onRetry={reload} /></div>
-      <LabFooter graph={graph} />
-    </div>
+    <section aria-label="Franchise">
+      <FranchiseControls
+        variant={variant}
+        cardType={cardType}
+        onVariantChange={setVariant}
+        onCardTypeChange={setCardType}
+      />
+      <div className="py-8">
+        <ExplorerContent
+          graph={graph}
+          error={error}
+          presentation={presentation}
+          variant={variant}
+          cardType={cardType}
+          onNavigateTitle={onNavigateTitle ?? (() => undefined)}
+          onRetry={onRetry}
+        />
+      </div>
+      <ExplorerFooter graph={graph} />
+    </section>
   );
 }

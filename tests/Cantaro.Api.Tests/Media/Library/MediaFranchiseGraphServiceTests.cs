@@ -19,6 +19,7 @@ public sealed class MediaFranchiseGraphServiceTests
         var user = TestUserFactory.Create(941, "franchise@example.com");
         var seasonOne = CreateTitle("Season one", "TV", 12, 2024, now);
         var seasonTwo = CreateTitle("Season two", "TV", 12, 2025, now);
+        seasonTwo.BackgroundUrl = "https://example.test/season-two-banner.jpg";
         var ova = CreateTitle("Side story", "OVA", 1, 2025, now);
         db.Users.Add(user);
         db.MediaTitles.AddRange(seasonOne, seasonTwo, ova);
@@ -46,6 +47,9 @@ public sealed class MediaFranchiseGraphServiceTests
         Assert.Contains(graph.Relations, relation => relation.RelationType == MediaRelationTypes.SideStory
             && !relation.IsEpisodeContinuity);
         Assert.True(graph.Nodes.Single(node => node.MediaTitleId == seasonTwo.Id).IsInLibrary);
+        Assert.Equal(
+            seasonTwo.BackgroundUrl,
+            graph.Nodes.Single(node => node.MediaTitleId == seasonTwo.Id).BackgroundUrl);
     }
 
     [Fact]
@@ -218,7 +222,48 @@ public sealed class MediaFranchiseGraphServiceTests
     }
 
     [Fact]
-    public async Task GetAsync_TraversesAnimeContinuityThroughAnOvaBridge()
+    public async Task GetAsync_UsesSnapshotMatchedParentForABranchOnlyRoot()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var seasonOne = CreateTitle("Season one", "TV", 24, 2018, now);
+        var seasonTwo = CreateTitle("Season two", "TV", 12, 2021, now);
+        var characterShort = CreateTitle("Character short", "ONA", 1, 2020, now);
+        var unrelated = CreateTitle("Unrelated series", "TV", 12, 2020, now);
+        var seasonOneLink = CreateLink(seasonOne, "branch-parent", now);
+        var seasonTwoLink = CreateLink(seasonTwo, "branch-sequel", now);
+        var characterShortLink = CreateLink(characterShort, "branch-short", now);
+        var unrelatedLink = CreateLink(unrelated, "branch-unrelated", now);
+        unrelatedLink.RelationsSnapshotId = Guid.NewGuid();
+        db.AddRange(
+            seasonOne,
+            seasonTwo,
+            characterShort,
+            unrelated,
+            seasonOneLink,
+            seasonTwoLink,
+            characterShortLink,
+            unrelatedLink);
+        db.MediaTitleRelations.AddRange(
+            CreateRelation(seasonOne, seasonTwo, MediaRelationTypes.Sequel, now),
+            CreateRelation(seasonOne, characterShort, MediaRelationTypes.Character, now),
+            CreateRelation(unrelated, characterShort, MediaRelationTypes.Character, now));
+        await db.SaveChangesAsync();
+
+        var graph = await new MediaFranchiseGraphService(db)
+            .GetAsync(null, characterShort.Id, CancellationToken.None);
+
+        Assert.NotNull(graph);
+        Assert.Contains(graph.Nodes, node => node.MediaTitleId == seasonOne.Id);
+        Assert.Contains(graph.Nodes, node => node.MediaTitleId == seasonTwo.Id);
+        Assert.Contains(graph.Nodes, node => node.MediaTitleId == characterShort.Id);
+        Assert.DoesNotContain(graph.Nodes, node => node.MediaTitleId == unrelated.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_ConnectsTvSeasonsAcrossAnOvaWithoutPuttingTheOvaInTheEpisodeLane()
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -242,9 +287,12 @@ public sealed class MediaFranchiseGraphServiceTests
 
         Assert.NotNull(graph);
         Assert.Equal(
-            [seasonOne.Id, bridgeOva.Id, seasonTwo.Id],
+            [seasonOne.Id, seasonTwo.Id],
             graph.Continuity.OrderedMediaTitleIds);
-        Assert.All(graph.Relations, relation => Assert.True(relation.IsEpisodeContinuity));
+        Assert.Equal(0, graph.Continuity.EpisodeOffsetByMediaTitleId[seasonOne.Id]);
+        Assert.Equal(24, graph.Continuity.EpisodeOffsetByMediaTitleId[seasonTwo.Id]);
+        Assert.DoesNotContain(bridgeOva.Id, graph.Continuity.EpisodeOffsetByMediaTitleId.Keys);
+        Assert.All(graph.Relations, relation => Assert.False(relation.IsEpisodeContinuity));
     }
 
     [Fact]
