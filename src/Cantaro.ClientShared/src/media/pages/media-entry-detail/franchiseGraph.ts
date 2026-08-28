@@ -83,10 +83,6 @@ function buildContinuity(
   const orderedIds = unique(graph.continuity.orderedMediaTitleIds)
     .filter((mediaTitleId) => nodesById.has(mediaTitleId));
 
-  if (currentNode && !orderedIds.includes(currentNode.mediaTitleId)) {
-    orderedIds.push(currentNode.mediaTitleId);
-  }
-
   const continuityNodes = orderedIds.map((mediaTitleId) => nodesById.get(mediaTitleId)!);
   return { currentNode, orderedIds, continuityNodes };
 }

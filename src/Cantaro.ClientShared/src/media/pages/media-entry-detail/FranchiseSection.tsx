@@ -14,16 +14,10 @@ import type { FranchiseGraphState } from "./mediaEntryDetailTypes";
 import {
   buildFranchisePresentation,
   continuityRelationLabel,
-  relationLabel,
-  type FranchiseBranch,
-  type FranchisePresentation,
 } from "./franchiseGraph";
-
-type FranchiseVariant = "preview" | "full";
 
 interface FranchiseSectionProps {
   state: FranchiseGraphState;
-  variant: FranchiseVariant;
   onRetry: () => void;
   onViewAll?: () => void;
   onNavigateTitle?: (mediaTitleId: string) => void;
@@ -228,43 +222,6 @@ function ContinuityLane({
   );
 }
 
-function FranchiseBranches({
-  presentation,
-  navigation,
-}: {
-  presentation: FranchisePresentation;
-  navigation: FranchiseNavigation;
-}) {
-  if (presentation.branchGroups.length === 0) return null;
-  return (
-    <div className="mt-9">
-      <h3 className="text-lg font-bold text-content">
-        Related stories and adaptations
-      </h3>
-      {presentation.branchGroups.map((group) => (
-        <section key={group.source.mediaTitleId} className="mt-5">
-          <p className="text-sm text-content-muted">
-            From <strong>{group.source.canonicalTitle}</strong>
-          </p>
-          <ul className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-            {group.branches.map((branch: FranchiseBranch) => (
-              <li
-                key={`${branch.displayRelationType}:${branch.node.mediaTitleId}`}
-                className="min-w-0"
-              >
-                <span className="mb-2 block text-xs font-semibold text-content-subtle">
-                  {relationLabel(branch.displayRelationType)}
-                </span>
-                <NodeCard node={branch.node} fill {...navigation} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
 function FranchiseHeading({ onViewAll }: { onViewAll?: () => void }) {
   return (
     <DetailSectionHeading
@@ -331,13 +288,11 @@ function FranchiseRelations({
 }
 
 function FranchisePreviewSummary({
-  variant,
   relatedTitleCount,
 }: {
-  variant: FranchiseVariant;
   relatedTitleCount: number;
 }) {
-  if (variant !== "preview" || relatedTitleCount === 0) return null;
+  if (relatedTitleCount === 0) return null;
   return (
     <p className="mt-3 text-sm text-content-muted">
       {relatedTitleCount} related {relatedTitleCount === 1 ? "title" : "titles"}{" "}
@@ -346,37 +301,17 @@ function FranchisePreviewSummary({
   );
 }
 
-function FullFranchiseBranches({
-  variant,
-  presentation,
-  navigation,
-}: {
-  variant: FranchiseVariant;
-  presentation: ReturnType<typeof buildFranchisePresentation>;
-  navigation: FranchiseNavigation;
-}) {
-  if (variant !== "full") return null;
-  return (
-    <FranchiseBranches presentation={presentation} navigation={navigation} />
-  );
-}
-
 function LoadedSection({
   graph,
-  variant,
   onViewAll,
   navigation,
 }: {
   graph: MediaFranchiseGraphDto;
-  variant: FranchiseVariant;
   onViewAll?: () => void;
   navigation: FranchiseNavigation;
 }) {
   const presentation = buildFranchisePresentation(graph);
-  const viewAllAction =
-    variant === "preview" && presentation.relatedTitleCount > 0
-      ? onViewAll
-      : undefined;
+  const viewAllAction = presentation.relatedTitleCount > 0 ? onViewAll : undefined;
   const providerName =
     graph.sourceProvider === "anilist" ? "AniList" : graph.sourceProvider;
 
@@ -389,13 +324,7 @@ function LoadedSection({
         navigation={navigation}
       />
       <FranchisePreviewSummary
-        variant={variant}
         relatedTitleCount={presentation.relatedTitleCount}
-      />
-      <FullFranchiseBranches
-        variant={variant}
-        presentation={presentation}
-        navigation={navigation}
       />
       <p className="mt-5 text-xs text-content-subtle">
         Relations from {providerName}
@@ -412,7 +341,6 @@ export function FranchiseSection(props: FranchiseSectionProps) {
   return (
     <LoadedSection
       graph={props.state.value}
-      variant={props.variant}
       onViewAll={props.onViewAll}
       navigation={{ onNavigateTitle: props.onNavigateTitle }}
     />

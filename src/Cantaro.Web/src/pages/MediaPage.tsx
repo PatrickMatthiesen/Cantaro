@@ -3,10 +3,9 @@ import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   MediaCatalogDetailPage,
   MediaEntryDetailPage,
-  FranchiseDesignLabPage,
-  type FranchiseDesignVariant,
   MediaLibraryPage,
   MediaObservationReviewPage,
+  type DetailTabId,
 } from '@cantaro/client-shared/media';
 import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
 import { MediaPageShell } from '../media/MediaPageShell';
@@ -138,7 +137,15 @@ export function MediaReviewRoutePage() {
   );
 }
 
-export function MediaTitleRoutePage({ mediaTitleId }: { mediaTitleId: string }) {
+export function MediaTitleRoutePage({
+  mediaTitleId,
+  tab = 'overview',
+  franchiseMediaTitleId,
+}: {
+  mediaTitleId: string;
+  tab?: DetailTabId;
+  franchiseMediaTitleId?: string;
+}) {
   const navigate = useNavigate();
   const { setHeading } = useMediaShell();
   const heading = useMemo(() => ({
@@ -152,43 +159,25 @@ export function MediaTitleRoutePage({ mediaTitleId }: { mediaTitleId: string }) 
     <MediaEntryDetailPage
       embedded
       mediaTitleId={mediaTitleId}
+      franchiseMediaTitleId={franchiseMediaTitleId}
+      activeTab={tab}
+      onTabChange={(nextTab) => void navigate({
+        to: '/media/$mediaTitleId',
+        params: { mediaTitleId },
+        resetScroll: false,
+        search: {
+          ...(nextTab === 'overview' ? {} : { tab: nextTab }),
+          ...(franchiseMediaTitleId ? { franchise: franchiseMediaTitleId } : {}),
+        },
+      })}
       onHeadingChange={setHeading}
       onNavigateBack={() => void navigate({ to: '/media/library' })}
       onNavigateTitle={(relatedMediaTitleId) => void navigate({
         to: '/media/$mediaTitleId',
         params: { mediaTitleId: relatedMediaTitleId },
-      })}
-    />
-  );
-}
-
-export function MediaFranchiseDesignRoutePage({
-  mediaTitleId,
-  variant,
-}: {
-  mediaTitleId: string;
-  variant: FranchiseDesignVariant;
-}) {
-  const navigate = useNavigate();
-  const heading = useMemo(() => ({
-    eyebrow: 'Cantaro · Media',
-    title: 'Franchise layout study',
-    hidden: true,
-  }), []);
-  useStaticMediaHeading(heading);
-
-  return (
-    <FranchiseDesignLabPage
-      mediaTitleId={mediaTitleId}
-      variant={variant}
-      onBack={() => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId } })}
-      onNavigateTitle={(relatedMediaTitleId) => void navigate({
-        to: '/media/$mediaTitleId/franchise/$layoutId',
-        params: { mediaTitleId: relatedMediaTitleId, layoutId: String(variant) },
-      })}
-      onNavigateVariant={(nextVariant) => void navigate({
-        to: '/media/$mediaTitleId/franchise/$layoutId',
-        params: { mediaTitleId, layoutId: String(nextVariant) },
+        search: tab === 'franchise'
+          ? { franchise: franchiseMediaTitleId ?? mediaTitleId }
+          : {},
       })}
     />
   );

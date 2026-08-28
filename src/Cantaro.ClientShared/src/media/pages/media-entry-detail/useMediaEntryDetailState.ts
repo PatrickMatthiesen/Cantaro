@@ -403,9 +403,12 @@ export function useEpisodeCatalog(entry: MediaEntryDetailModel | null) {
   );
 }
 
-export function useFranchiseGraph(entry: MediaEntryDetailModel | null) {
+export function useFranchiseGraph(
+  entry: MediaEntryDetailModel | null,
+  franchiseMediaTitleId?: string,
+) {
   return useReloadableMediaResource(
-    entry?.mediaTitleId,
+    entry ? franchiseMediaTitleId ?? entry.mediaTitleId : undefined,
     loadFranchiseGraph,
     createFranchiseGraphError,
   );

@@ -65,6 +65,8 @@ export interface MediaEntryDetailContentProps {
   continueWatching: ContinueWatchingState;
   episodeCatalog: EpisodeCatalogState;
   franchiseGraph: FranchiseGraphState;
+  activeTab: DetailTabId;
+  onTabChange: (tab: DetailTabId) => void;
   onNavigateBack: () => void;
   onNavigateTitle?: (mediaTitleId: string) => void;
   onLoadEntry: () => Promise<void>;
