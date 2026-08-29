@@ -20,6 +20,11 @@ public sealed record YouTubePlaylistRemovalResult(IReadOnlyList<long?> Positions
 public sealed class YouTubePlaylistReconciliationException(string message, Exception innerException)
     : Exception(message, innerException);
 
+internal sealed record YouTubePlaylistItemMappingResult(
+    YouTubePlaylistItemDto? Item,
+    string? SkipReason,
+    long? ProviderPosition);
+
 /// <summary>
 /// DTO for YouTube playlist information
 /// </summary>
@@ -512,7 +517,7 @@ public class YouTubeService
                 break;
             }
 
-            var request = youtubeService.PlaylistItems.List("snippet,contentDetails");
+            var request = youtubeService.PlaylistItems.List("snippet,contentDetails,status");
             request.PlaylistId = playlistId;
             request.MaxResults = 50;
             request.PageToken = nextPageToken;
@@ -528,53 +533,87 @@ public class YouTubeService
                     .Distinct(StringComparer.Ordinal)
                     .ToList();
 
-                var durationsByVideoId = await GetDurationsByVideoIdAsync(youtubeService, videoIds);
+                var availableVideos = await GetAvailableVideosAsync(youtubeService, videoIds);
 
                 foreach (var item in response.Items)
                 {
-                    if (item == null)
+                    var mapping = MapAvailablePlaylistItem(item, availableVideos);
+                    if (mapping.Item == null)
                     {
-                        _logger.LogWarning("Encountered null playlist item for user {UserId}", userId);
+                        _logger.LogInformation(
+                            "Skipping YouTube playlist item at position {Position} in playlist {PlaylistId}: {Reason}",
+                            mapping.ProviderPosition,
+                            playlistId,
+                            mapping.SkipReason);
                         continue;
                     }
 
-                    if (item.Snippet == null)
-                    {
-                        _logger.LogWarning("Encountered playlist with null snippet for user {UserId}, playlist ID {PlaylistId}", userId, item.Id);
-                        continue;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(item.ContentDetails?.VideoId))
-                    {
-                        _logger.LogWarning("Encountered playlist item without a video ID for user {UserId}, playlist ID {PlaylistId}", userId, playlistId);
-                        continue;
-                    }
-
-                    items.Add(new YouTubePlaylistItemDto
-                    {
-                        VideoId = item.ContentDetails.VideoId,
-                        Title = item.Snippet.Title,
-                        Description = item.Snippet.Description,
-                        ThumbnailUrl = item.Snippet.Thumbnails?.Medium?.Url
-                            ?? item.Snippet.Thumbnails?.Default__?.Url,
-                        ChannelTitle = item.Snippet.VideoOwnerChannelTitle,
-                        Position = (int)(item.Snippet.Position ?? 0),
-                        PublishedAt = ParsePublishedAtRaw(item.Snippet?.PublishedAtRaw),
-                        DurationSeconds = item.ContentDetails?.VideoId != null &&
-                            durationsByVideoId.TryGetValue(item.ContentDetails.VideoId, out var durationSeconds)
-                            ? durationSeconds
-                            : null
-                    });
+                    items.Add(mapping.Item);
                 }
             }
 
             nextPageToken = response.NextPageToken;
         } while (!string.IsNullOrEmpty(nextPageToken));
 
-        return items;
+        return CompactPlaylistPositions(items);
     }
 
-    private async Task<Dictionary<string, int>> GetDurationsByVideoIdAsync(
+    internal static List<YouTubePlaylistItemDto> CompactPlaylistPositions(
+        IEnumerable<YouTubePlaylistItemDto> items)
+    {
+        var orderedItems = items.OrderBy(item => item.Position).ToList();
+        for (var index = 0; index < orderedItems.Count; index++)
+        {
+            orderedItems[index].Position = index;
+        }
+
+        return orderedItems;
+    }
+
+    internal static YouTubePlaylistItemMappingResult MapAvailablePlaylistItem(
+        PlaylistItem? item,
+        IReadOnlyDictionary<string, int?> availableVideos)
+    {
+        if (item?.Snippet == null)
+        {
+            return new(null, item == null ? "missing_item" : "missing_snippet", null);
+        }
+
+        var position = item.Snippet.Position;
+        if (string.IsNullOrWhiteSpace(item.ContentDetails?.VideoId))
+        {
+            return new(null, "missing_video_id", position);
+        }
+
+        if (string.Equals(item.Status?.PrivacyStatus, "private", StringComparison.OrdinalIgnoreCase))
+        {
+            return new(null, "private", position);
+        }
+
+        var videoId = item.ContentDetails.VideoId;
+        if (!availableVideos.TryGetValue(videoId, out var durationSeconds))
+        {
+            return new(null, "provider_unavailable", position);
+        }
+
+        return new(
+            new YouTubePlaylistItemDto
+            {
+                VideoId = videoId,
+                Title = item.Snippet.Title,
+                Description = item.Snippet.Description,
+                ThumbnailUrl = item.Snippet.Thumbnails?.Medium?.Url
+                    ?? item.Snippet.Thumbnails?.Default__?.Url,
+                ChannelTitle = item.Snippet.VideoOwnerChannelTitle,
+                Position = (int)(position ?? 0),
+                PublishedAt = ParsePublishedAtRaw(item.Snippet.PublishedAtRaw),
+                DurationSeconds = durationSeconds
+            },
+            null,
+            position);
+    }
+
+    private async Task<Dictionary<string, int?>> GetAvailableVideosAsync(
         Google.Apis.YouTube.v3.YouTubeService youtubeService,
         IReadOnlyCollection<string> videoIds)
     {
@@ -583,37 +622,44 @@ public class YouTubeService
             return [];
         }
 
-        var request = youtubeService.Videos.List("contentDetails");
+        var request = youtubeService.Videos.List("contentDetails,status");
         request.Id = string.Join(",", videoIds);
         request.MaxResults = videoIds.Count;
 
         var response = await request.ExecuteAsync();
-        var durations = new Dictionary<string, int>(StringComparer.Ordinal);
+        var availableVideos = new Dictionary<string, int?>(StringComparer.Ordinal);
 
         if (response.Items == null)
         {
-            return durations;
+            return availableVideos;
         }
 
         foreach (var video in response.Items)
         {
-            if (string.IsNullOrWhiteSpace(video.Id) || string.IsNullOrWhiteSpace(video.ContentDetails?.Duration))
+            if (string.IsNullOrWhiteSpace(video.Id)
+                || string.Equals(video.Status?.PrivacyStatus, "private", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            try
+            int? durationSeconds = null;
+            if (!string.IsNullOrWhiteSpace(video.ContentDetails?.Duration))
             {
-                var duration = XmlConvert.ToTimeSpan(video.ContentDetails.Duration);
-                durations[video.Id] = (int)Math.Round(duration.TotalSeconds, MidpointRounding.AwayFromZero);
+                try
+                {
+                    var duration = XmlConvert.ToTimeSpan(video.ContentDetails.Duration);
+                    durationSeconds = (int)Math.Round(duration.TotalSeconds, MidpointRounding.AwayFromZero);
+                }
+                catch (FormatException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse YouTube duration '{Duration}' for video {VideoId}", video.ContentDetails.Duration, video.Id);
+                }
             }
-            catch (FormatException ex)
-            {
-                _logger.LogWarning(ex, "Failed to parse YouTube duration '{Duration}' for video {VideoId}", video.ContentDetails.Duration, video.Id);
-            }
+
+            availableVideos[video.Id] = durationSeconds;
         }
 
-        return durations;
+        return availableVideos;
     }
 
     private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(ConnectedServiceAccount account)
