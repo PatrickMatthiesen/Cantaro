@@ -11,6 +11,7 @@ import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
 import { MediaPageShell } from '../media/MediaPageShell';
 import { MediaProvidersPage } from './MediaProvidersPage';
 import { getMediaFilterDefaults } from '../media/mediaLibraryRouteFilters';
+import { useAuth } from '../contexts/AuthContext';
 
 const defaultMediaHeading: GlobalHeadingState = {
   eyebrow: 'Cantaro · Media',
@@ -147,6 +148,7 @@ export function MediaTitleRoutePage({
   franchiseMediaTitleId?: string;
 }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { setHeading } = useMediaShell();
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
@@ -159,6 +161,7 @@ export function MediaTitleRoutePage({
     <MediaEntryDetailPage
       embedded
       mediaTitleId={mediaTitleId}
+      preferredMediaReleaseTrack={user?.preferences.preferredMediaReleaseTrack}
       franchiseMediaTitleId={franchiseMediaTitleId}
       activeTab={tab}
       onTabChange={(nextTab) => void navigate({

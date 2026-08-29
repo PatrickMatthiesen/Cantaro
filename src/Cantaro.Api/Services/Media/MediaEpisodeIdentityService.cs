@@ -184,7 +184,8 @@ public class MediaEpisodeIdentityService(
             payload?.ProviderSequenceNumber,
             now,
             cancellationToken,
-            isTrusted: trustIdentities);
+            isTrusted: trustIdentities,
+            releaseTrack: payload?.ReleaseTrack);
 
         if (payload?.NextEpisodeProviderId is { Length: > 0 } nextEpisodeId
             && !string.Equals(nextEpisodeId, providerEpisodeId, StringComparison.OrdinalIgnoreCase)
@@ -212,7 +213,8 @@ public class MediaEpisodeIdentityService(
                 null,
                 now,
                 cancellationToken,
-                isTrusted: trustIdentities);
+                isTrusted: trustIdentities,
+                releaseTrack: payload.NextEpisodeReleaseTrack);
         }
 
         return true;
@@ -231,6 +233,7 @@ public class MediaEpisodeIdentityService(
             ProviderUrl = item.ProviderUrl,
             EpisodeNumber = item.EpisodeNumber,
             EpisodeTitle = item.EpisodeTitle,
+            ReleaseTrack = item.ReleaseTrack,
             AvailableSubtitleLanguageCodes = item.AvailableSubtitleLanguageCodes,
             AvailableAudioLanguageCodes = item.AvailableAudioLanguageCodes
         }).ToList();
@@ -309,7 +312,8 @@ public class MediaEpisodeIdentityService(
                 allowIdentityRemap,
                 trustIdentities,
                 renderedEpisode.AvailableSubtitleLanguageCodes,
-                renderedEpisode.AvailableAudioLanguageCodes);
+                renderedEpisode.AvailableAudioLanguageCodes,
+                renderedEpisode.ReleaseTrack);
             recordedDestinationCount++;
         }
 
@@ -416,6 +420,7 @@ public class MediaEpisodeIdentityService(
                 ServiceId = identity.Provider,
                 Url = url,
                 AudioLocale = identity.AudioLocale,
+                ReleaseTrack = identity.ReleaseTrack,
                 SeenCount = identity.SeenCount,
                 FirstSeenAt = identity.FirstSeenAt,
                 LastSeenAt = identity.LastSeenAt
@@ -436,7 +441,10 @@ public class MediaEpisodeIdentityService(
                 item.ProgressEpisodes,
                 item.Status,
                 item.MediaTitle!.EpisodeCount,
-                item.MediaTitle.SupportsEpisodeProgress
+                item.MediaTitle.SupportsEpisodeProgress,
+                PreferredReleaseTrack = item.User!.Settings != null
+                    ? item.User.Settings.PreferredMediaReleaseTrack
+                    : null
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -469,14 +477,14 @@ public class MediaEpisodeIdentityService(
             .SelectMany(episode => episode.ProviderContents)
             .SelectMany(content => content.Variants)
             .ToListAsync(cancellationToken);
+        var preferredTrack = MediaReleaseTrackPreferences.TryNormalize(
+            entry.PreferredReleaseTrack,
+            out var normalizedTrack)
+            ? normalizedTrack
+            : MediaReleaseTrackPreferences.Default;
 
-        identities = identities
-            .OrderBy(identity => identity.HasConflict)
-            .ThenByDescending(identity => identity.SeenCount)
-            .ThenByDescending(identity => identity.LastSeenAt)
-            .ToList();
-
-        foreach (var identity in identities.Where(identity => !identity.HasConflict))
+        foreach (var identity in OrderIdentitiesForPreferredTrack(identities, preferredTrack)
+                     .Where(identity => !identity.HasConflict))
         {
             var url = MediaDestinationUrlPolicy.BuildUrl(identity.Provider, identity.ProviderUrlPath);
             if (url is not null)
@@ -535,6 +543,37 @@ public class MediaEpisodeIdentityService(
 
         var destination = SelectSeriesDestinations(identities).FirstOrDefault();
         return destination is null ? null : (destination.ServiceId, destination.Url);
+    }
+
+    private static IEnumerable<MediaEpisodeProviderIdentity> OrderIdentitiesForPreferredTrack(
+        IEnumerable<MediaEpisodeProviderIdentity> identities,
+        string preferredTrack)
+    {
+        MediaReleaseTrackPreferences.TryNormalize(preferredTrack, out var normalizedTrack);
+        var parts = normalizedTrack.Split(':', 2);
+        var presentation = parts[0];
+        var language = parts[1].Split('-', 2)[0];
+        return identities
+            .OrderBy(identity => identity.HasConflict)
+            .ThenBy(identity => string.Equals(identity.ReleaseTrack, normalizedTrack, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(identity => PreferredTrackRank(identity.AudioLocale, presentation, language))
+            .ThenByDescending(identity => identity.SeenCount)
+            .ThenByDescending(identity => identity.LastSeenAt);
+    }
+
+    private static int PreferredTrackRank(string? audioLocale, string presentation, string language)
+    {
+        var audioLanguage = audioLocale?.Split('-', 2)[0];
+        if (presentation == "dub")
+        {
+            return string.Equals(audioLanguage, language, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        }
+
+        if (string.Equals(audioLanguage, "ja", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+        return audioLanguage is null ? 1 : 2;
     }
 
     private static IReadOnlyList<MediaStreamingDestinationDto> SelectSeriesDestinations(
@@ -606,7 +645,8 @@ public class MediaEpisodeIdentityService(
         bool allowIdentityRemap = false,
         bool isTrusted = false,
         IReadOnlyCollection<string>? subtitleLanguageCodes = null,
-        IReadOnlyCollection<string>? audioLanguageCodes = null)
+        IReadOnlyCollection<string>? audioLanguageCodes = null,
+        string? releaseTrack = null)
     {
         var episode = await _dbContext.MediaEpisodes
             .FirstOrDefaultAsync(item =>
@@ -657,6 +697,9 @@ public class MediaEpisodeIdentityService(
             ? providerEpisodeId.Trim().ToUpperInvariant()
             : providerEpisodeId.Trim();
         var variantIdentity = MediaProviderVariantIdentities.Parse(normalizedProvider, normalizedEpisodeId);
+        var normalizedReleaseTrack = MediaReleaseTrackPreferences.TryNormalize(releaseTrack, out var parsedReleaseTrack)
+            ? parsedReleaseTrack
+            : null;
         var identity = await _dbContext.MediaEpisodeProviderIdentities
             .Include(item => item.Content)
             .FirstOrDefaultAsync(item =>
@@ -683,6 +726,7 @@ public class MediaEpisodeIdentityService(
                 Provider = normalizedProvider,
                 ProviderEpisodeId = normalizedEpisodeId,
                 AudioLocale = variantIdentity.AudioLocale,
+                ReleaseTrack = normalizedReleaseTrack,
                 ProviderUrlPath = providerUrlPath,
                 SeenCount = 1,
                 FirstSeenAt = now,
@@ -728,6 +772,7 @@ public class MediaEpisodeIdentityService(
         content.ProviderEpisodeNumber = providerEpisodeNumber ?? content.ProviderEpisodeNumber;
         content.ProviderSequenceNumber = providerSequenceNumber ?? content.ProviderSequenceNumber;
         identity.AudioLocale ??= variantIdentity.AudioLocale;
+        identity.ReleaseTrack ??= normalizedReleaseTrack;
         identity.ProviderUrlPath = providerUrlPath;
     }
 

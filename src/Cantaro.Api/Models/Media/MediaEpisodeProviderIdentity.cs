@@ -18,6 +18,9 @@ public class MediaEpisodeProviderIdentity
     /// <summary>BCP-47 audio locale for this playable variant, when known.</summary>
     public string? AudioLocale { get; set; }
 
+    /// <summary>Observed provider presentation and subtitle language, for example dub:en or sub:en.</summary>
+    public string? ReleaseTrack { get; set; }
+
     /// <summary>
     /// Provider-relative path. A destination URL is only reconstructed through
     /// the provider allowlist; arbitrary observed URLs are never served back.

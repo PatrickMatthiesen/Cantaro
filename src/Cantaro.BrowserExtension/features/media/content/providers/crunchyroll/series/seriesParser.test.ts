@@ -380,6 +380,7 @@ describe('Crunchyroll series catalog extraction', () => {
       episodes: [{
         providerEpisodeId: 'GVWU0M4XG',
         episodeNumber: 1,
+        releaseTrack: 'dub:en',
         availableAudioLanguageCodes: ['en'],
       }],
     });
@@ -436,7 +437,7 @@ describe('Crunchyroll series catalog extraction', () => {
     ).observation;
 
     expect(observation && catalogObservationFingerprint(observation))
-      .toBe('SERIES1||Season 1|EP1|1|https://www.crunchyroll.com/watch/EP1/one');
+      .toBe('SERIES1||Season 1|EP1|1||https://www.crunchyroll.com/watch/EP1/one');
   });
 
   it('fingerprints Crunchyroll parts separately even when their season number is shared', () => {
@@ -459,7 +460,7 @@ describe('Crunchyroll series catalog extraction', () => {
     };
 
     expect(catalogObservationFingerprint(observation))
-      .toBe('SERIES1|PART2|Season 1 Part 2|EP13|13|https://www.crunchyroll.com/watch/EP13/thirteen');
+      .toBe('SERIES1|PART2|Season 1 Part 2|EP13|13||https://www.crunchyroll.com/watch/EP13/thirteen');
     expect(catalogObservationFingerprint({
       ...observation,
       providerSeasonId: 'PART3',
@@ -486,7 +487,7 @@ describe('Crunchyroll series catalog extraction', () => {
     const fingerprint = catalogObservationFingerprint(observation);
 
     expect(fingerprint)
-      .toBe('SERIES1||Season 2|EP22|22|https://www.crunchyroll.com/watch/EP22/old-slug');
+      .toBe('SERIES1||Season 2|EP22|22||https://www.crunchyroll.com/watch/EP22/old-slug');
     expect(catalogObservationFingerprint({
       ...observation,
       episodes: [{ ...observation.episodes[0]!, episodeNumber: 10 }],
@@ -495,5 +496,35 @@ describe('Crunchyroll series catalog extraction', () => {
       ...observation,
       episodes: [{ ...observation.episodes[0]!, providerUrl: 'https://www.crunchyroll.com/watch/EP22/corrected-slug' }],
     })).not.toBe(fingerprint);
+  });
+
+  it('changes the fingerprint when Crunchyroll switches the rendered audio language', () => {
+    const japanese = {
+      schemaVersion: 1 as const,
+      provider: 'crunchyroll' as const,
+      seriesUrl: 'https://www.crunchyroll.com/series/GEXAMPLE/my-show',
+      providerSeriesId: 'GEXAMPLE',
+      seriesTitle: 'My Show',
+      seasonTitle: 'Season 1',
+      episodes: [{
+        providerEpisodeId: 'GE00374382JAJP',
+        providerUrl: 'https://www.crunchyroll.com/watch/GE00374382JAJP/episode-one',
+        episodeNumber: 1,
+      }],
+      observedAt: '2026-08-29T00:00:00.000Z',
+      extensionVersion: '0.1.0',
+    };
+    const english = {
+      ...japanese,
+      episodes: [{
+        ...japanese.episodes[0]!,
+        providerEpisodeId: 'GE00374382ENUS',
+        providerUrl: 'https://www.crunchyroll.com/watch/GE00374382ENUS/episode-one',
+      }],
+    };
+
+    expect(catalogObservationFingerprint(japanese)).not.toBe(
+      catalogObservationFingerprint(english),
+    );
   });
 });

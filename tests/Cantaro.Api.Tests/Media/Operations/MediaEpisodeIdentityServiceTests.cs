@@ -111,6 +111,62 @@ public class MediaEpisodeIdentityServiceTests
     }
 
     [Fact]
+    public async Task ResolveContinueWatching_PrefersObservedEnglishDubOverMoreSeenJapaneseVariant()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(progressEpisodes: 2);
+        await fixture.SetPreferredReleaseTrackAsync("dub:en");
+        var japanese = fixture.MakeObservation(
+            3,
+            "GE00374382JAJP",
+            "https://www.crunchyroll.com/watch/GE00374382JAJP/example");
+        await fixture.Service.RecordObservationAsync(japanese, CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(japanese, CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeObservation(
+                3,
+                "GE00374382ENUS",
+                "https://www.crunchyroll.com/watch/GE00374382ENUS/example"),
+            CancellationToken.None);
+
+        var destination = await fixture.Service.ResolveContinueWatchingAsync(
+            fixture.UserId,
+            fixture.TitleId,
+            CancellationToken.None);
+
+        Assert.NotNull(destination);
+        Assert.Equal("direct", destination.Outcome);
+        Assert.Equal("https://www.crunchyroll.com/watch/GE00374382ENUS", destination.Url);
+    }
+
+    [Fact]
+    public async Task ResolveContinueWatching_PrefersObservedJapaneseVariantForEnglishSubtitles()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(progressEpisodes: 2);
+        await fixture.SetPreferredReleaseTrackAsync("sub:en");
+        var english = fixture.MakeObservation(
+            3,
+            "GE00374382ENUS",
+            "https://www.crunchyroll.com/watch/GE00374382ENUS/example");
+        await fixture.Service.RecordObservationAsync(english, CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(english, CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeObservation(
+                3,
+                "GE00374382JAJP",
+                "https://www.crunchyroll.com/watch/GE00374382JAJP/example"),
+            CancellationToken.None);
+
+        var destination = await fixture.Service.ResolveContinueWatchingAsync(
+            fixture.UserId,
+            fixture.TitleId,
+            CancellationToken.None);
+
+        Assert.NotNull(destination);
+        Assert.Equal("direct", destination.Outcome);
+        Assert.Equal("https://www.crunchyroll.com/watch/GE00374382JAJP", destination.Url);
+    }
+
+    [Fact]
     public async Task RecordObservation_GroupsOpaqueCrunchyrollVariantsByCanonicalEpisode()
     {
         await using var fixture = await EpisodeIdentityFixture.CreateAsync();
@@ -128,6 +184,45 @@ public class MediaEpisodeIdentityServiceTests
         Assert.Null(content.ProviderContentKey);
         Assert.All(content.Variants, item => Assert.Null(item.AudioLocale));
         Assert.Equal(2, content.Variants.Count);
+    }
+
+    [Fact]
+    public async Task ResolveContinueWatching_UsesObservedReleaseTrackForOpaqueCrunchyrollIds()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(progressEpisodes: 2);
+        await fixture.SetPreferredReleaseTrackAsync("dub:en");
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeSeriesObservation(
+                new ObservedProviderEpisodeDto
+                {
+                    ProviderEpisodeId = "G31UXQKKG",
+                    ProviderUrl = "https://www.crunchyroll.com/watch/G31UXQKKG/subbed",
+                    EpisodeNumber = 3,
+                    ReleaseTrack = "sub:en"
+                }),
+            CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeSeriesObservation(
+                new ObservedProviderEpisodeDto
+                {
+                    ProviderEpisodeId = "GRQW9GW7R",
+                    ProviderUrl = "https://www.crunchyroll.com/watch/GRQW9GW7R/dubbed",
+                    EpisodeNumber = 3,
+                    ReleaseTrack = "dub:en"
+                }),
+            CancellationToken.None);
+
+        var destination = await fixture.Service.ResolveContinueWatchingAsync(
+            fixture.UserId,
+            fixture.TitleId,
+            CancellationToken.None);
+
+        Assert.NotNull(destination);
+        Assert.Equal("https://www.crunchyroll.com/watch/GRQW9GW7R", destination.Url);
+        Assert.Equal(
+            ["dub:en", "sub:en"],
+            (await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None))!
+                .Episodes.Single().Destinations.OrderBy(item => item.ReleaseTrack).Select(item => item.ReleaseTrack));
     }
 
     [Fact]
@@ -579,6 +674,18 @@ public class MediaEpisodeIdentityServiceTests
                 CreatedAt = now,
                 UpdatedAt = now
             };
+        }
+
+        public async Task SetPreferredReleaseTrackAsync(string preferredTrack)
+        {
+            Db.UserSettings.Add(new UserSettings
+            {
+                UserId = UserId,
+                PreferredMediaReleaseTrack = preferredTrack,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await Db.SaveChangesAsync();
         }
 
         public async ValueTask DisposeAsync()

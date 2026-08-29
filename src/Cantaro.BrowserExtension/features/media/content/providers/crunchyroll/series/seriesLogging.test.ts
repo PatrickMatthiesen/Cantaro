@@ -21,6 +21,7 @@ describe('Crunchyroll series discovery logging', () => {
           episodeTitle: 'The Beginning',
           providerEpisodeId: 'EPISODE1',
           providerUrl: 'https://www.crunchyroll.com/watch/EPISODE1/the-beginning',
+          releaseTrack: 'dub:en',
         },
         {
           episodeNumber: 2,
@@ -41,6 +42,7 @@ describe('Crunchyroll series discovery logging', () => {
           title: 'The Beginning',
           providerEpisodeId: 'EPISODE1',
           url: 'https://www.crunchyroll.com/watch/EPISODE1/the-beginning',
+          releaseTrack: 'dub:en',
         },
         {
           episodeNumber: 2,

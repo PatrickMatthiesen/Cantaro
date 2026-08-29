@@ -218,6 +218,7 @@ export interface MediaStreamingDestinationDto {
     serviceId: string;
     url: string;
     audioLocale?: string;
+    releaseTrack?: string;
     seenCount: number;
     firstSeenAt: string;
     lastSeenAt: string;

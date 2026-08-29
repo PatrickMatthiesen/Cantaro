@@ -19,6 +19,7 @@ export interface StreamingDestination {
   kind: StreamingDestinationKind;
   displayName: string;
   audioLocale?: string;
+  releaseTrack?: string;
   seenCount?: number;
   firstSeenAt?: string;
   lastSeenAt?: string;
@@ -97,7 +98,7 @@ export function normalizeAndOrder(
     // more than one valid URL for the same title, but rendering each URL would
     // present indistinguishable duplicate actions. Ordering above keeps the
     // strongest observation, then this collapses the rest per service.
-    const key = `${item.serviceId}:${item.audioLocale ?? "default"}`;
+    const key = `${item.serviceId}:${item.releaseTrack ?? item.audioLocale ?? "default"}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -146,6 +147,7 @@ function destination(
     kind,
     displayName: definition.displayName,
     audioLocale: source.audioLocale,
+    releaseTrack: source.releaseTrack,
     seenCount: source.seenCount,
     firstSeenAt: source.firstSeenAt,
     lastSeenAt: source.lastSeenAt,

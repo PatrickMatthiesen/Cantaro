@@ -11,6 +11,7 @@ import {
   extractSeriesId,
   parseCrunchyrollUrl,
 } from '../shared/crunchyrollUrls';
+import { releaseTrackFromSeasonLabel } from '../shared/releaseTrack';
 
 const EPISODE_CARD_SELECTOR = '[data-t^="episode-card"]';
 const WATCH_LINK_SELECTOR = 'a[href*="/watch/"]';
@@ -103,6 +104,7 @@ export function catalogObservationFingerprint(observation: SeriesCatalogObservat
     ...observation.episodes.flatMap(episode => [
       episode.providerEpisodeId,
       episode.episodeNumber,
+      episode.releaseTrack ?? '',
       normalizeProviderUrlForFingerprint(episode.providerUrl),
     ]),
   ].join('|');
@@ -144,29 +146,13 @@ function readSeriesPageState(
   };
 }
 
-const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
-  english: 'en',
-  german: 'de',
-  spanish: 'es',
-  french: 'fr',
-  portuguese: 'pt',
-  italian: 'it',
-  hindi: 'hi',
-  arabic: 'ar',
-  russian: 'ru',
-};
-
 function readSeasonLanguageAvailability(seasonTitle?: string) {
-  const match = seasonTitle?.match(/\(([^)]+?)\s+(dub|sub)\)/i);
-  if (!match) return {};
-  const languageName = match[1];
-  const availabilityKind = match[2];
-  if (!languageName || !availabilityKind) return {};
-  const languageCode = LANGUAGE_NAME_TO_CODE[languageName.trim().toLowerCase()];
-  if (!languageCode) return {};
-  return availabilityKind.toLowerCase() === 'dub'
-    ? { availableAudioLanguageCodes: [languageCode] }
-    : { availableSubtitleLanguageCodes: [languageCode] };
+  const releaseTrack = releaseTrackFromSeasonLabel(seasonTitle);
+  if (!releaseTrack) return {};
+  const [presentation, languageCode] = releaseTrack.split(':');
+  return presentation === 'dub'
+    ? { releaseTrack, availableAudioLanguageCodes: [languageCode!] }
+    : { releaseTrack, availableSubtitleLanguageCodes: [languageCode!] };
 }
 
 function readSeriesIdentity(

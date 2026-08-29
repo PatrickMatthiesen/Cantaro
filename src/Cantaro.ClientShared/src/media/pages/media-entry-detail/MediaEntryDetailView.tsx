@@ -99,6 +99,7 @@ function MediaDetailTabPanel({
         state={props.episodeCatalog}
         streamingDestinations={streamingDestinations}
         preferredServiceId={preferredServiceId}
+        preferredMediaReleaseTrack={props.preferredMediaReleaseTrack}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={props.onReloadEpisodes}
       />

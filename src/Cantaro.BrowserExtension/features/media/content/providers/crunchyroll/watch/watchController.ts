@@ -13,6 +13,7 @@ import {
 import {
   extractCrunchyrollWatchMetadata,
   extractEpisodeId,
+  readSelectedPlayerTracks,
   trackVideoProgress,
   type CrunchyrollWatchMetadata,
   type VideoProgressTracker,
@@ -66,11 +67,13 @@ export function createCrunchyrollWatchController(
   let overlay: WatchResolutionOverlayHandle | null = null;
   let currentWatchId: string | undefined;
   let currentMetadataFingerprint: string | undefined;
+  let currentMetadata: CrunchyrollWatchMetadata | undefined;
   let previousNavigationFingerprint: string | undefined;
   let restartTimer: number | null = null;
   let restartRunning = false;
   let restartRequested = false;
   let verboseLogging = false;
+  let lastPlayerSelectionLogKey: string | undefined;
   const submittedWatchIds = new Set<string>();
   let snapshot = createInitialSnapshot();
   let notifyContextChanged: () => void = () => undefined;
@@ -142,6 +145,7 @@ export function createCrunchyrollWatchController(
     overlay?.close();
     overlay = null;
     currentWatchId = attempt.watchId;
+    currentMetadata = attempt.metadata;
     currentMetadataFingerprint = watchMetadataFingerprint(attempt.metadata);
     previousNavigationFingerprint = undefined;
     updateSnapshot({
@@ -283,10 +287,52 @@ export function createCrunchyrollWatchController(
     updateSnapshot({ status: 'submitted', message: undefined });
   };
 
+  const observePlayerSelection = (selection: ReturnType<typeof readSelectedPlayerTracks>) => {
+    if (!selection.audioLabel) return;
+    const logKey = `${selection.audioLabel}|${selection.subtitleLabel ?? ''}|${selection.releaseTrack ?? ''}`;
+    if (logKey === lastPlayerSelectionLogKey) return;
+    lastPlayerSelectionLogKey = logKey;
+    const metadata = currentMetadata;
+    if (!selection.releaseTrack) {
+      verboseLog('Cantaro: Crunchyroll release track selection not recognized', {
+        watchId: currentWatchId,
+        audioLabel: selection.audioLabel,
+        subtitleLabel: selection.subtitleLabel,
+      });
+      return;
+    }
+    const changed = metadata?.releaseTrack !== selection.releaseTrack;
+    if (metadata) {
+      metadata.releaseTrack = selection.releaseTrack;
+      metadata.nextEpisodeReleaseTrack = selection.releaseTrack;
+    }
+    verboseLog('Cantaro: selected Crunchyroll release track observed', {
+      watchId: currentWatchId,
+      releaseTrack: selection.releaseTrack,
+      audioLabel: selection.audioLabel,
+      subtitleLabel: selection.subtitleLabel,
+      changed,
+    });
+  };
+
   const observer = new MutationObserver((mutations) => {
+    observePlayerSelection(readSelectedPlayerTracks(document));
     if (mutations.some(hasRelevantPageChange)) requestRestart();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
+  const handlePlayerTrackSelection = (event: Event) => {
+    const target = event.target instanceof Element
+      ? event.target.closest('[role="menuitemradio"]')
+      : null;
+    if (!target) return;
+    const menuLabel = target.closest('[role="menu"]')?.getAttribute('aria-label');
+    if (menuLabel !== 'Audio Track Selection'
+      && menuLabel !== 'Subtitle and closed caption selection') return;
+    const selection = readSelectedPlayerTracks(document, target);
+    lastPlayerSelectionLogKey = undefined;
+    observePlayerSelection(selection);
+  };
+  ctx.addEventListener(document, 'click', handlePlayerTrackSelection, true);
   notifyContextChanged = startMediaControllerRuntime(ctx, dependencies, () => snapshot, (enabled) => {
     verboseLogging = enabled;
   }, () => {
@@ -310,6 +356,8 @@ export function createCrunchyrollWatchController(
     overlay = null;
     previousNavigationFingerprint = currentMetadataFingerprint;
     currentMetadataFingerprint = undefined;
+    currentMetadata = undefined;
+    lastPlayerSelectionLogKey = undefined;
     currentWatchId = undefined;
     updateSnapshot({
       status: 'starting',

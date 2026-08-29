@@ -9,6 +9,7 @@ export interface WatchProgressObservation {
   seriesTitle: string;
   episodeTitle: string;
   episodeNumber?: number;
+  releaseTrack?: string;
   seasonTitle?: string;
   seasonNumber?: number;
   watchProgressPercent: number;
@@ -18,6 +19,7 @@ export interface WatchProgressObservation {
   nextEpisodeUrl?: string;
   nextEpisodeTitle?: string;
   nextEpisodeNumber?: number;
+  nextEpisodeReleaseTrack?: string;
   observedAt: string;
   extensionVersion: string;
 }

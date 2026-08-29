@@ -51,6 +51,7 @@ export interface MediaEntryDetailContentProps {
   mediaTitleId: string;
   entry: MediaEntryDetailModel;
   embedded: boolean;
+  preferredMediaReleaseTrack?: string;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingProgress: boolean;
   isSavingStatus: boolean;

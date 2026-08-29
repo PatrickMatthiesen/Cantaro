@@ -636,6 +636,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.Provider).HasMaxLength(64);
             entity.Property(e => e.ProviderEpisodeId).HasMaxLength(256);
             entity.Property(e => e.AudioLocale).HasMaxLength(35);
+            entity.Property(e => e.ReleaseTrack).HasMaxLength(64);
             entity.Property(e => e.ProviderUrlPath).HasMaxLength(1024);
             entity.Property(e => e.SeenCount).HasDefaultValue(1);
 
