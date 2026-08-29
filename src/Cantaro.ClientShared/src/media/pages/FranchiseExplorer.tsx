@@ -178,7 +178,7 @@ function ReleaseTimeline({ graph, onNavigate, cardType }: LayoutProps) {
   const drag = useRef({ pointerId: -1, startX: 0, scrollLeft: 0, moved: false });
 
   const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
     const element = scrollRef.current;
     if (!element) return;
     drag.current = { pointerId: event.pointerId, startX: event.clientX, scrollLeft: element.scrollLeft, moved: false };
@@ -204,7 +204,7 @@ function ReleaseTimeline({ graph, onNavigate, cardType }: LayoutProps) {
   return (
     <div
       ref={scrollRef}
-      className="cursor-grab touch-pan-y select-none overflow-x-auto pb-4 active:cursor-grabbing"
+      className="cursor-grab touch-auto select-none overflow-x-auto overscroll-x-contain pb-4 active:cursor-grabbing"
       onPointerDown={beginDrag}
       onPointerMove={moveDrag}
       onPointerUp={endDrag}
