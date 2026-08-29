@@ -7,6 +7,12 @@ import {
   extractSeriesId,
   parseCrunchyrollUrl,
 } from '../shared/crunchyrollUrls';
+import {
+  releaseTrackFromPresentationLabel,
+  releaseTrackFromProviderEpisodeId,
+  releaseTrackFromSelectedPlayerTracks,
+  releaseTrackFromSeasonLabel,
+} from '../shared/releaseTrack';
 
 export { extractEpisodeId } from '../shared/crunchyrollUrls';
 
@@ -46,10 +52,12 @@ export interface CrunchyrollWatchMetadata {
   episodeNumber?: number;
   seasonTitle?: string;
   seasonNumber?: number;
+  releaseTrack?: string;
   nextEpisodeProviderId?: string;
   nextEpisodeUrl?: string;
   nextEpisodeTitle?: string;
   nextEpisodeNumber?: number;
+  nextEpisodeReleaseTrack?: string;
 }
 
 export interface VideoProgressTracker {
@@ -74,7 +82,12 @@ export function extractCrunchyrollWatchMetadata(
   if (!titles) return null;
   const seasonTitle = readText(doc, SEASON_SELECTORS)
     ?? seasonTitleFromPageTitle(parsePageTitle(doc.title));
-  const nextEpisode = readNextEpisode(doc, identity.pageUrl.href);
+  const releaseTrack = readResolvedWatchReleaseTrack(
+    doc,
+    identity.providerEpisodeId,
+    seasonTitle,
+  );
+  const nextEpisode = readNextEpisode(doc, identity.pageUrl.href, releaseTrack);
 
   return {
     provider: 'crunchyroll',
@@ -86,11 +99,32 @@ export function extractCrunchyrollWatchMetadata(
     episodeNumber: extractEpisodeNumber(`${titles.episodeTitle} ${identity.pageUrl.pathname}`) ?? undefined,
     seasonTitle,
     seasonNumber: extractSeasonNumber(seasonTitle ?? ''),
+    releaseTrack,
     nextEpisodeProviderId: nextEpisode?.providerId,
     nextEpisodeUrl: nextEpisode?.url,
     nextEpisodeTitle: nextEpisode?.title,
     nextEpisodeNumber: nextEpisode?.episodeNumber,
+    nextEpisodeReleaseTrack: nextEpisode?.releaseTrack,
   };
+}
+
+function readResolvedWatchReleaseTrack(
+  doc: Document,
+  providerEpisodeId: string,
+  seasonTitle?: string,
+) {
+  return readSelectedPlayerReleaseTrack(doc)
+    ?? readWatchReleaseTrack(providerEpisodeId, seasonTitle, doc.title);
+}
+
+function readWatchReleaseTrack(
+  providerEpisodeId: string,
+  seasonTitle?: string,
+  pageTitle?: string,
+) {
+  return releaseTrackFromProviderEpisodeId(providerEpisodeId)
+    ?? releaseTrackFromSeasonLabel(seasonTitle)
+    ?? releaseTrackFromSeasonLabel(pageTitle);
 }
 
 export function trackVideoProgress(
@@ -188,10 +222,46 @@ function buildProgressObservation(
   return {
     schemaVersion: 1,
     ...refreshed,
+    releaseTrack: refreshed.releaseTrack ?? metadata.releaseTrack,
+    nextEpisodeReleaseTrack: refreshed.nextEpisodeReleaseTrack
+      ?? metadata.nextEpisodeReleaseTrack,
     ...snapshot,
     observedAt: new Date().toISOString(),
     extensionVersion: getExtensionVersion(),
   };
+}
+
+export interface SelectedPlayerReleaseTrack {
+  audioLabel?: string;
+  subtitleLabel?: string;
+  releaseTrack?: string;
+}
+
+export function readSelectedPlayerTracks(
+  doc: Document,
+  selectionTarget?: Element,
+): SelectedPlayerReleaseTrack {
+  const selectedLabel = (menuLabel: string) => {
+    const menu = Array.from(doc.querySelectorAll<HTMLElement>('[role="menu"]'))
+      .find(element => element.getAttribute('aria-label') === menuLabel);
+    const targetItem = selectionTarget?.closest<HTMLElement>('[role="menuitemradio"]');
+    if (targetItem && targetItem.closest('[role="menu"]') === menu) {
+      return targetItem.getAttribute('aria-label') ?? targetItem.textContent?.trim();
+    }
+    const selected = menu?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]');
+    return selected?.getAttribute('aria-label') ?? selected?.textContent?.trim();
+  };
+  const audioLabel = selectedLabel('Audio Track Selection');
+  const subtitleLabel = selectedLabel('Subtitle and closed caption selection');
+  return {
+    audioLabel,
+    subtitleLabel,
+    releaseTrack: releaseTrackFromSelectedPlayerTracks(audioLabel, subtitleLabel),
+  };
+}
+
+export function readSelectedPlayerReleaseTrack(doc: Document): string | undefined {
+  return readSelectedPlayerTracks(doc).releaseTrack;
 }
 
 function readText(doc: Document, selectors: string[]): string | null {
@@ -249,21 +319,81 @@ function readProviderSeriesId(doc: Document, baseUrl: string): string | undefine
 function readNextEpisode(
   doc: Document,
   baseUrl: string,
-): { providerId: string; url: string; title?: string; episodeNumber?: number } | null {
+  currentReleaseTrack?: string,
+): { providerId: string; url: string; title?: string; episodeNumber?: number; releaseTrack?: string } | null {
   const link = NEXT_EPISODE_SELECTORS
     .map(selector => doc.querySelector<HTMLAnchorElement>(selector))
-    .find((element): element is HTMLAnchorElement => Boolean(element));
-  const href = link?.getAttribute('href');
+    .find((element): element is HTMLAnchorElement => Boolean(element))
+    ?? findLabelledNextEpisodeLink(doc);
+  if (!link) return null;
+  const href = link.getAttribute('href');
   const url = href ? parseCrunchyrollUrl(href, baseUrl) : null;
   const providerId = url ? extractEpisodeId(url.pathname) : undefined;
   if (!url || !providerId) return null;
-  const title = link?.textContent?.trim() || undefined;
+  const localizedLink = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href*="/watch/"]'))
+    .find(candidate => {
+      const candidateUrl = parseCrunchyrollUrl(candidate.getAttribute('href') ?? '', baseUrl);
+      return candidateUrl
+        && extractEpisodeId(candidateUrl.pathname) === providerId
+        && directNextEpisodeText(candidate) !== undefined;
+    });
+  const cardText = nextEpisodeCardText(localizedLink ?? link);
+  const title = extractNextEpisodeTitle(cardText);
   return {
     providerId,
     url: url.href,
     title,
-    episodeNumber: extractEpisodeNumber(`${title ?? ''} ${url.pathname}`) ?? undefined,
+    episodeNumber: extractEpisodeNumber(`${cardText ?? ''} ${url.pathname}`) ?? undefined,
+    releaseTrack: releaseTrackFromProviderEpisodeId(providerId)
+      ?? releaseTrackFromPresentationLabel(cardText)
+      ?? currentReleaseTrack,
   };
+}
+
+function findLabelledNextEpisodeLink(doc: Document): HTMLAnchorElement | null {
+  const label = Array.from(doc.querySelectorAll<HTMLElement>('body *'))
+    .find(element => /^next episode\s*:?$/i.test(element.textContent?.trim() ?? '') && isVisible(element));
+  if (!label) return null;
+
+  let container: HTMLElement | null = label.parentElement;
+  for (let depth = 0; container && container !== doc.body && depth < 4; depth += 1) {
+    const link = container.querySelector<HTMLAnchorElement>('a[href*="/watch/"]');
+    if (link) return link;
+    container = container.parentElement;
+  }
+  return null;
+}
+
+function nextEpisodeCardText(link: HTMLAnchorElement): string | undefined {
+  const directText = directNextEpisodeText(link);
+  if (directText) return directText;
+
+  let container: HTMLElement | null = link.parentElement;
+  for (let depth = 0; container && container !== link.ownerDocument.body && depth < 3; depth += 1) {
+    const text = container.textContent?.trim();
+    if (text && extractEpisodeNumber(text) !== null) return text;
+    container = container.parentElement;
+  }
+  return link.textContent?.trim() || undefined;
+}
+
+function directNextEpisodeText(link: HTMLAnchorElement): string | undefined {
+  return [
+    link.getAttribute('aria-label'),
+    link.getAttribute('title'),
+    link.textContent,
+  ].map(value => value?.trim()).find(value => value && extractEpisodeNumber(value) !== null);
+}
+
+function extractNextEpisodeTitle(cardText: string | undefined): string | undefined {
+  if (!cardText) return undefined;
+  const normalized = cardText
+    .replace(/^next episode\s*:?\s*/i, '')
+    .replace(/^(?:play|watch again)\s+/i, '')
+    .replace(/\s+(?:subtitled|dubbed|dub\s*\|\s*sub|sub\s*\|\s*dub)\s*$/i, '')
+    .trim();
+  const match = /^(?:episode|ep|e)\s*\d+(?:\.\d+)?\s*[-–—:]\s*(.+)$/i.exec(normalized);
+  return match?.[1]?.trim() || normalized || undefined;
 }
 
 function findActiveVideo(doc: Document): HTMLVideoElement | null {

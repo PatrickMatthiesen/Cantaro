@@ -20,6 +20,7 @@ import type { DetailTabId } from './media-entry-detail/mediaEntryDetailTypes';
 
 interface MediaEntryDetailPageProps {
   mediaTitleId: string;
+  preferredMediaReleaseTrack?: string;
   franchiseMediaTitleId?: string;
   onNavigateBack: () => void;
   onNavigateTitle?: (mediaTitleId: string) => void;
@@ -33,6 +34,7 @@ interface MediaEntryDetailPageProps {
 // fallow-ignore-next-line complexity
 export function MediaEntryDetailPage({
   mediaTitleId,
+  preferredMediaReleaseTrack,
   franchiseMediaTitleId,
   onNavigateBack,
   onNavigateTitle,
@@ -154,6 +156,7 @@ export function MediaEntryDetailPage({
   return (
     <MediaEntryDetailPageView
       mediaTitleId={mediaTitleId}
+      preferredMediaReleaseTrack={preferredMediaReleaseTrack}
       onNavigateBack={onNavigateBack}
       onNavigateTitle={onNavigateTitle}
       embedded={embedded}

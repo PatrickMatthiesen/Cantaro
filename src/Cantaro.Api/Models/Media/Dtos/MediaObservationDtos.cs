@@ -61,6 +61,9 @@ public class SubmitMediaObservationRequest
 
     public int? ProviderSequenceNumber { get; set; }
 
+    [MaxLength(64)]
+    public string? ReleaseTrack { get; set; }
+
     [MaxLength(256)]
     public string? NextEpisodeProviderId { get; set; }
 
@@ -71,6 +74,9 @@ public class SubmitMediaObservationRequest
     public string? NextEpisodeTitle { get; set; }
 
     public int? NextEpisodeNumber { get; set; }
+
+    [MaxLength(64)]
+    public string? NextEpisodeReleaseTrack { get; set; }
 
     /// <summary>
     /// Episode destinations already rendered on a provider series page. The
@@ -118,6 +124,9 @@ public class ObservedProviderEpisodeDto
 
     [MaxLength(512)]
     public string? EpisodeTitle { get; set; }
+
+    [MaxLength(64)]
+    public string? ReleaseTrack { get; set; }
 
     public List<string> AvailableSubtitleLanguageCodes { get; set; } = [];
 

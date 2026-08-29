@@ -5,6 +5,7 @@ export interface CrunchyrollEpisodeLogEntry {
   title?: string;
   providerEpisodeId: string;
   url: string;
+  releaseTrack?: string;
 }
 
 export interface CrunchyrollSeriesDiscoveryLog {
@@ -29,6 +30,7 @@ export function buildSeriesDiscoveryLog(
       title: episode.episodeTitle,
       providerEpisodeId: episode.providerEpisodeId,
       url: episode.providerUrl,
+      releaseTrack: episode.releaseTrack,
     })),
   };
 }

@@ -225,6 +225,7 @@ public class MediaStreamingDestinationDto
     public required string ServiceId { get; set; }
     public required string Url { get; set; }
     public string? AudioLocale { get; set; }
+    public string? ReleaseTrack { get; set; }
     public int SeenCount { get; set; }
     public DateTimeOffset FirstSeenAt { get; set; }
     public DateTimeOffset LastSeenAt { get; set; }

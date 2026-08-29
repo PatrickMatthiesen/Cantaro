@@ -2,8 +2,12 @@ import { parseHTML } from 'linkedom';
 import { describe, expect, it } from 'vitest';
 import type { WatchProgressObservation } from '../../../../contracts/watchObservation';
 import wistoriaSeasonTwoEpisodeTwentyFourHtml from './fixtures/wistoria-season-2-episode-24.html?raw';
+import nextEpisodeJapaneseCardHtml from './fixtures/next-episode-japanese-card.html?raw';
+import opaqueEnglishDubWatchHtml from './fixtures/opaque-english-dub-watch.html?raw';
 import {
   extractCrunchyrollWatchMetadata,
+  readSelectedPlayerReleaseTrack,
+  readSelectedPlayerTracks,
   trackVideoProgress,
   type CrunchyrollWatchMetadata,
 } from './watchAdapter';
@@ -85,6 +89,41 @@ class FakeVideo {
 }
 
 describe('Crunchyroll watch metadata extraction', () => {
+  it('reads the selected player audio and subtitle tracks from their checked menu items', () => {
+    const { document: doc } = parseHTML(`
+      <div role="menu" aria-label="Audio Track Selection">
+        <div role="menuitemradio" aria-label="Japanese" aria-checked="true">Japanese</div>
+      </div>
+      <div role="menu" aria-label="Subtitle and closed caption selection">
+        <div role="menuitemradio" aria-label="English" aria-checked="true">English</div>
+      </div>
+    `);
+
+    expect(readSelectedPlayerReleaseTrack(doc)).toBe('sub:en');
+  });
+
+  it('reads the clicked audio choice before Crunchyroll updates and closes a multi-option menu', () => {
+    const { document: doc } = parseHTML(`
+      <div role="menu" aria-label="Audio Track Selection">
+        <div role="menuitemradio" aria-label="Japanese">Japanese</div>
+        <div role="menuitemradio" aria-label="English">English</div>
+        <div role="menuitemradio" aria-label="Deutsch" aria-checked="true">Deutsch</div>
+      </div>
+      <div role="menu" aria-label="Subtitle and closed caption selection">
+        <div role="menuitemradio" aria-label="Deutsch">Deutsch</div>
+        <div role="menuitemradio" aria-label="None" aria-checked="true">None</div>
+      </div>
+    `);
+    const englishChoice = doc.querySelector('[aria-label="English"]');
+
+    expect(readSelectedPlayerTracks(doc, englishChoice ?? undefined)).toEqual({
+      audioLabel: 'English',
+      subtitleLabel: 'None',
+      releaseTrack: 'dub:en',
+    });
+    expect(readSelectedPlayerReleaseTrack(doc)).toBe('dub:de');
+  });
+
   it('extracts the cumulative Wistoria episode from the sanitized Crunchyroll DOM contract', () => {
     const metadata = extractCrunchyrollWatchMetadata(
       fixtureDoc(wistoriaSeasonTwoEpisodeTwentyFourHtml),
@@ -92,6 +131,7 @@ describe('Crunchyroll watch metadata extraction', () => {
     );
 
     expect(metadata).toMatchObject({
+      releaseTrack: 'dub:en',
       providerEpisodeId: 'GE00340382ENUS',
       providerSeriesId: 'GW4HM7WK9',
       seriesTitle: 'Wistoria: Wand and Sword',
@@ -223,6 +263,37 @@ describe('Crunchyroll watch metadata extraction', () => {
       nextEpisodeProviderId: 'G31UXQ9K2',
       nextEpisodeUrl: 'https://www.crunchyroll.com/watch/G31UXQ9K2/episode-8',
       nextEpisodeNumber: 8,
+    });
+  });
+
+  it('captures the visible labelled next-episode card with its real title', () => {
+    const metadata = extractCrunchyrollWatchMetadata(
+      fixtureDoc(nextEpisodeJapaneseCardHtml),
+      'https://www.crunchyroll.com/watch/GE00374382JAJP/the-day-of-departure',
+    );
+
+    expect(metadata).toMatchObject({
+      nextEpisodeProviderId: 'GE00374383JAJP',
+      nextEpisodeUrl: 'https://www.crunchyroll.com/watch/GE00374383JAJP/death-and-loss',
+      nextEpisodeNumber: 19,
+      nextEpisodeTitle: 'Death and Loss',
+      nextEpisodeReleaseTrack: 'sub:en',
+    });
+  });
+
+  it('reads the selected dub and sibling next-card metadata for opaque episode IDs', () => {
+    const metadata = extractCrunchyrollWatchMetadata(
+      fixtureDoc(opaqueEnglishDubWatchHtml),
+      'https://www.crunchyroll.com/watch/GVWU8X9GQ/a-ghost-may-show-up-during-training-but-nobody-told-me-about-it',
+    );
+
+    expect(metadata).toMatchObject({
+      providerEpisodeId: 'GVWU8X9GQ',
+      releaseTrack: 'dub:en',
+      nextEpisodeProviderId: 'GEVUW3NPM',
+      nextEpisodeNumber: 11,
+      nextEpisodeTitle: 'It May Be a Trap, but I Have to Keep Moving Forward',
+      nextEpisodeReleaseTrack: 'dub:en',
     });
   });
 

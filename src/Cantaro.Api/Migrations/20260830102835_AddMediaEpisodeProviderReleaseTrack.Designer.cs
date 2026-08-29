@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cantaro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cantaro.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260830102835_AddMediaEpisodeProviderReleaseTrack")]
+    partial class AddMediaEpisodeProviderReleaseTrack
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1049,9 +1052,6 @@ namespace Cantaro.Api.Migrations
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int?>("ConnectedServiceAccountId")
-                        .HasColumnType("integer");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -1118,13 +1118,9 @@ namespace Cantaro.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectedServiceAccountId");
-
                     b.HasIndex("UserId", "Service")
                         .IsUnique()
                         .HasFilter("\"Status\" IN ('queued', 'running')");
-
-                    b.HasIndex("UserId", "CreatedAt", "Id");
 
                     b.HasIndex("UserId", "Status", "CreatedAt");
 
@@ -1217,7 +1213,7 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int>("ConnectedServiceAccountId")
+                    b.Property<int?>("ConnectedServiceAccountId")
                         .HasColumnType("integer");
 
                     b.Property<string>("LastSyncStatus")
@@ -1243,10 +1239,9 @@ namespace Cantaro.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectedServiceAccountId", "ServicePlaylistId")
-                        .IsUnique();
+                    b.HasIndex("ConnectedServiceAccountId");
 
-                    b.HasIndex("PlaylistId", "ConnectedServiceAccountId", "Service")
+                    b.HasIndex("PlaylistId", "Service")
                         .IsUnique();
 
                     b.ToTable("ServicePlaylistMappings");
@@ -1470,30 +1465,6 @@ namespace Cantaro.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("TrackArtistCredits");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.TrackMatchQueueItem", b =>
-                {
-                    b.Property<Guid>("TrackObservationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("LeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("LeaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("NextAttemptAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("RetryCount")
-                        .HasColumnType("integer");
-
-                    b.HasKey("TrackObservationId");
-
-                    b.HasIndex("NextAttemptAt");
-
-                    b.ToTable("TrackMatchQueueItems");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
@@ -2242,18 +2213,11 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.MusicSyncJob", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
-                        .WithMany()
-                        .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Cantaro.Api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ConnectedServiceAccount");
 
                     b.Navigation("User");
                 });
@@ -2299,8 +2263,7 @@ namespace Cantaro.Api.Migrations
                     b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
                         .WithMany("ServicePlaylistMappings")
                         .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("Cantaro.Api.Models.Playlist", "Playlist")
                         .WithMany("ServiceMappings")
@@ -2410,17 +2373,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("Artist");
 
                     b.Navigation("Track");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.TrackMatchQueueItem", b =>
-                {
-                    b.HasOne("Cantaro.Api.Models.TrackObservation", "TrackObservation")
-                        .WithOne("MatchQueueItem")
-                        .HasForeignKey("Cantaro.Api.Models.TrackMatchQueueItem", "TrackObservationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("TrackObservation");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
@@ -2629,8 +2581,6 @@ namespace Cantaro.Api.Migrations
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
                 {
                     b.Navigation("Candidates");
-
-                    b.Navigation("MatchQueueItem");
 
                     b.Navigation("PlaylistEntries");
                 });

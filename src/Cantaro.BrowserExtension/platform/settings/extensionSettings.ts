@@ -18,10 +18,16 @@ function readBuildBaseUrl(): string {
 export const DEFAULT_BASE_URL = normalizeBaseUrl(readBuildBaseUrl())
   || 'https://localhost:5173';
 
+export function defaultVerboseLoggingForMode(mode: string): boolean {
+  return mode === 'development';
+}
+
+const DEFAULT_VERBOSE_LOGGING = defaultVerboseLoggingForMode(import.meta.env.MODE);
+
 export const defaultExtensionSettings: ExtensionSettings = {
   baseUrl: DEFAULT_BASE_URL,
   injectLyricsOnYouTube: false,
-  verboseLogging: false,
+  verboseLogging: DEFAULT_VERBOSE_LOGGING,
 };
 
 export function normalizeExtensionSettings(
@@ -30,6 +36,8 @@ export function normalizeExtensionSettings(
   return {
     baseUrl: normalizeBaseUrl(settings.baseUrl) || DEFAULT_BASE_URL,
     injectLyricsOnYouTube: settings.injectLyricsOnYouTube === true,
-    verboseLogging: settings.verboseLogging === true,
+    verboseLogging: typeof settings.verboseLogging === 'boolean'
+      ? settings.verboseLogging
+      : DEFAULT_VERBOSE_LOGGING,
   };
 }
