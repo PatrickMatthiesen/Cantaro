@@ -18,6 +18,15 @@ public sealed class TrackMatchingOptions
     [Range(0, 10)]
     public int MusicBrainzCollaboratorVariantLimit { get; set; } = 2;
 
+    [Range(1, 20)]
+    public int MaximumAutomaticAttempts { get; set; } = 5;
+
+    [Range(1, 3600)]
+    public int RetryBaseDelaySeconds { get; set; } = 30;
+
+    [Range(1, 1440)]
+    public int RetryMaximumDelayMinutes { get; set; } = 60;
+
     [Range(typeof(decimal), "0", "1", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
     public decimal AutoMatchThreshold { get; set; } = 0.85m;
 

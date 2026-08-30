@@ -14,6 +14,7 @@ public class TrackMatchingService
     private readonly ILogger<TrackMatchingService> _logger;
     private readonly TrackMatchingOptions _options;
     private readonly TrackIdentityResolver _identityResolver;
+    private readonly PlaylistCanonicalReconciliationService _playlistReconciler;
 
     public TrackMatchingService(
         ApplicationDbContext dbContext,
@@ -42,13 +43,15 @@ public class TrackMatchingService
         IEnumerable<ITrackMetadataSearchProvider> metadataProviders,
         ILogger<TrackMatchingService> logger,
         IOptions<TrackMatchingOptions> options,
-        TrackIdentityResolver identityResolver)
+        TrackIdentityResolver identityResolver,
+        PlaylistCanonicalReconciliationService? playlistReconciler = null)
     {
         _dbContext = dbContext;
         _metadataProviders = metadataProviders;
         _logger = logger;
         _options = options.Value;
         _identityResolver = identityResolver;
+        _playlistReconciler = playlistReconciler ?? new PlaylistCanonicalReconciliationService(dbContext);
     }
 
     public async Task<TrackObservation> ProcessObservationAsync(Guid observationId, CancellationToken cancellationToken)
@@ -185,7 +188,7 @@ public class TrackMatchingService
             $"Created a {DescribeVersion(versionFlags)} version Track under the selected candidate's Song.";
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await UpdatePlaylistEntriesForObservationAsync(
+        await _playlistReconciler.ReconcileObservationAsync(
             observation.Id,
             versionTrack.Id,
             cancellationToken);
@@ -251,7 +254,7 @@ public class TrackMatchingService
         observation.AcceptedCandidateId = null;
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
+        await _playlistReconciler.ReconcileObservationAsync(observation.Id, null, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return observation;
     }
@@ -292,7 +295,7 @@ public class TrackMatchingService
         observation.AcceptedCandidateId = null;
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await UpdatePlaylistEntriesForObservationAsync(observation.Id, track.Id, cancellationToken);
+        await _playlistReconciler.ReconcileObservationAsync(observation.Id, track.Id, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return observation;
     }
@@ -356,7 +359,7 @@ public class TrackMatchingService
                     topScore: localIdentityMatch.Kind == TrackIdentityMatchKind.ExactSource ? null : 1m,
                     secondDistinctScore: null,
                     distinctClusterCount: localIdentityMatch.Kind == TrackIdentityMatchKind.ExactSource ? 0 : 1));
-            await UpdatePlaylistEntriesForObservationAsync(
+            await _playlistReconciler.ReconcileObservationAsync(
                 observation.Id,
                 localIdentityMatch.Track.Id,
                 cancellationToken);
@@ -366,17 +369,17 @@ public class TrackMatchingService
 
         try
         {
-            if (observation.Candidates.Count > 0)
-            {
-                _dbContext.TrackResolutionCandidates.RemoveRange(observation.Candidates);
-                observation.Candidates.Clear();
-            }
-
             var scoredCandidates = new List<TrackMatchScoredCandidate>();
             foreach (var provider in _metadataProviders)
             {
                 var providerCandidates = await provider.SearchAsync(observation, cancellationToken);
                 scoredCandidates.AddRange(providerCandidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, _options)));
+            }
+
+            if (observation.Candidates.Count > 0)
+            {
+                _dbContext.TrackResolutionCandidates.RemoveRange(observation.Candidates);
+                observation.Candidates.Clear();
             }
 
             var rankedCandidates = scoredCandidates
@@ -431,7 +434,7 @@ public class TrackMatchingService
                     decision.TopScore,
                     decision.SecondDistinctScore,
                     clusters.Count));
-                await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
+                await _playlistReconciler.ReconcileObservationAsync(observation.Id, null, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 return observation;
             }
@@ -470,9 +473,13 @@ public class TrackMatchingService
                     decision.SecondDistinctScore,
                     clusters.Count));
 
-            await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
+            await _playlistReconciler.ReconcileObservationAsync(observation.Id, null, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -489,7 +496,7 @@ public class TrackMatchingService
                     topScore: null,
                     secondDistinctScore: null,
                     distinctClusterCount: 0));
-            await UpdatePlaylistEntriesForObservationAsync(observation.Id, null, cancellationToken);
+            await _playlistReconciler.ReconcileObservationAsync(observation.Id, null, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
         }
@@ -583,7 +590,7 @@ public class TrackMatchingService
         observation.ResolutionNotes = resolutionNotes;
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await UpdatePlaylistEntriesForObservationAsync(observation.Id, track.Id, cancellationToken);
+        await _playlistReconciler.ReconcileObservationAsync(observation.Id, track.Id, cancellationToken);
     }
 
     private async Task<Track> ResolveCandidateAnchorTrackAsync(
@@ -1014,54 +1021,6 @@ public class TrackMatchingService
             ExternalId = externalId,
             LastVerifiedAt = DateTimeOffset.UtcNow
         });
-    }
-
-    private async Task UpdatePlaylistEntriesForObservationAsync(Guid observationId, Guid? trackId, CancellationToken cancellationToken)
-    {
-        var entries = await _dbContext.PlaylistEntries
-            .Where(entry => entry.TrackObservationId == observationId)
-            .ToListAsync(cancellationToken);
-
-        if (trackId == null)
-        {
-            foreach (var entry in entries)
-            {
-                entry.TrackId = null;
-            }
-
-            return;
-        }
-
-        var entryIds = entries.Select(entry => entry.Id).ToArray();
-        var playlistIds = entries.Select(entry => entry.PlaylistId).Distinct().ToArray();
-        var playlistsAlreadyContainingTrack = playlistIds.Length == 0
-            ? []
-            : await _dbContext.PlaylistEntries
-                .Where(entry =>
-                    playlistIds.Contains(entry.PlaylistId)
-                    && entry.TrackId == trackId
-                    && !entryIds.Contains(entry.Id))
-                .Select(entry => entry.PlaylistId)
-                .Distinct()
-                .ToListAsync(cancellationToken);
-        var existingPlaylistIds = playlistsAlreadyContainingTrack.ToHashSet();
-
-        foreach (var playlistEntries in entries.GroupBy(entry => entry.PlaylistId))
-        {
-            if (existingPlaylistIds.Contains(playlistEntries.Key))
-            {
-                _dbContext.PlaylistEntries.RemoveRange(playlistEntries);
-                continue;
-            }
-
-            var retainedEntry = playlistEntries
-                .OrderBy(entry => entry.Position)
-                .ThenBy(entry => entry.Id)
-                .First();
-            retainedEntry.TrackId = trackId;
-            _dbContext.PlaylistEntries.RemoveRange(
-                playlistEntries.Where(entry => entry.Id != retainedEntry.Id));
-        }
     }
 
     private static string BuildCandidateExplanation(TrackMatchScoredCandidate result)

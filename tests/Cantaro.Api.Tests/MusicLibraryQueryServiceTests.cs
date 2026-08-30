@@ -33,6 +33,15 @@ public class MusicLibraryQueryServiceTests
         var userA = TestUserFactory.Create(701, "music-a@example.com");
         var userB = TestUserFactory.Create(702, "music-b@example.com");
         db.Users.AddRange(userA, userB);
+        var account = new ConnectedServiceAccount
+        {
+            UserId = userA.Id,
+            Service = "youtube",
+            ExternalAccountId = "youtube-music-a",
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        };
+        db.ConnectedServiceAccounts.Add(account);
         var track = new Track
         {
             Id = Guid.NewGuid(),
@@ -87,8 +96,8 @@ public class MusicLibraryQueryServiceTests
         var secondPlaylist = MakePlaylist(userA.Id, "Favorites", now);
         var otherUserPlaylist = MakePlaylist(userB.Id, "Other library", now);
 
-        firstPlaylist.ServiceMappings.Add(MakeMapping(firstPlaylist.Id, "youtube", "yt-road", now));
-        secondPlaylist.ServiceMappings.Add(MakeMapping(secondPlaylist.Id, "youtube", "yt-faves", now));
+        firstPlaylist.ServiceMappings.Add(MakeMapping(firstPlaylist.Id, account, "youtube", "yt-road", now));
+        secondPlaylist.ServiceMappings.Add(MakeMapping(secondPlaylist.Id, account, "youtube", "yt-faves", now));
         db.Tracks.Add(track);
         db.Playlists.AddRange(firstPlaylist, secondPlaylist, otherUserPlaylist);
         await db.SaveChangesAsync();
@@ -282,12 +291,18 @@ public class MusicLibraryQueryServiceTests
         };
     }
 
-    private static ServicePlaylistMapping MakeMapping(Guid playlistId, string service, string servicePlaylistId, DateTimeOffset now)
+    private static ServicePlaylistMapping MakeMapping(
+        Guid playlistId,
+        ConnectedServiceAccount account,
+        string service,
+        string servicePlaylistId,
+        DateTimeOffset now)
     {
         return new ServicePlaylistMapping
         {
             Id = Guid.NewGuid(),
             PlaylistId = playlistId,
+            ConnectedServiceAccount = account,
             Service = service,
             ServicePlaylistId = servicePlaylistId,
             SyncMode = "import_only",

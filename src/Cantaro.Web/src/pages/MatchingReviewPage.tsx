@@ -4,6 +4,7 @@ import { matchingApi } from '@cantaro/client-shared/music';
 import type { KeyboardEvent, ReactNode } from 'react';
 import type {
   MatchingQueueCandidateResponse,
+  MatchingQueueFilters,
   MatchingQueueItemResponse,
   MatchingQueuePageResponse,
   MatchingQueuePlaylistResponse,
@@ -15,16 +16,19 @@ import type { SongGroupingReviewState } from './matching/useSongGroupingReview';
 import { CandidateList } from './matching/MatchingCandidateList';
 import { formatDuration, formatPercent, formatSource, formatStatus, statusClasses } from './matching/matchingReviewPresentation';
 import { MarkerList } from './matching/MarkerList';
+import { MatchingQueueFiltersPanel } from './matching/MatchingQueueFiltersPanel';
+import { TrackMatchingQueuePanel } from './matching/TrackMatchingQueue';
 
 interface MatchingReviewPageProps {
   embedded?: boolean;
 }
 
 type MatchingActionHandler = (observationId: string, action: () => Promise<void>) => Promise<void>;
-type MatchingReviewTab = 'musicbrainz' | 'track-groupings';
+type MatchingReviewTab = 'musicbrainz' | 'work-queue' | 'track-groupings';
 
 const matchingReviewTabs: ReadonlyArray<{ id: MatchingReviewTab; label: string }> = [
   { id: 'musicbrainz', label: 'MusicBrainz matches' },
+  { id: 'work-queue', label: 'Matching queue' },
   { id: 'track-groupings', label: 'Track groupings' },
 ];
 
@@ -46,12 +50,17 @@ function nextMatchingReviewTabIndex(key: string, currentIndex: number, tabCount:
 interface MatchingReviewState {
   activeObservationId: string | null;
   error: string | null;
+  filters: MatchingQueueFilters;
+  isRetryingFiltered: boolean;
   isLoading: boolean;
   loadQueue: () => Promise<MatchingQueuePageResponse | null>;
   page: number;
   pageData: MatchingQueuePageResponse | null;
   queue: MatchingQueueItemResponse[];
   runObservationAction: MatchingActionHandler;
+  retryFiltered: () => Promise<void>;
+  retryMessage: string | null;
+  setFilters: (filters: MatchingQueueFilters) => void;
   summary: MatchingSummaryResponse | null;
   setPage: (page: number) => void;
 }
@@ -99,20 +108,46 @@ function restoreMatchingActionPosition(
   });
 }
 
-function useMatchingReviewQueue(): MatchingReviewState {
+function useFilteredRetry(
+  filters: MatchingQueueFilters,
+  totalCount: number,
+  loadQueue: () => Promise<MatchingQueuePageResponse | null>,
+  setError: (error: string | null) => void,
+) {
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const clearMessage = useCallback(() => setMessage(null), []);
+  const retry = useCallback(async () => {
+    if (totalCount === 0 || !window.confirm(`Queue a new bounded retry cycle for ${totalCount} filtered item(s)?`)) return;
+    setIsRetrying(true);
+    setError(null);
+    try {
+      const result = await matchingApi.retryFiltered(filters);
+      setMessage(`${result.queuedCount} item(s) queued for retry.`);
+      await loadQueue();
+    } catch (retryError) {
+      setError(getErrorMessage(retryError, 'Failed to retry filtered matches'));
+    } finally {
+      setIsRetrying(false);
+    }
+  }, [filters, loadQueue, setError, totalCount]);
+  return { clearMessage, isRetrying, message, retry };
+}
+
+function useMatchingQueueData(
+  page: number,
+  filters: MatchingQueueFilters,
+  setPage: (page: number) => void,
+  setError: (error: string | null) => void,
+) {
   const [summary, setSummary] = useState<MatchingSummaryResponse | null>(null);
   const [queue, setQueue] = useState<MatchingQueueItemResponse[]>([]);
-  const [page, setPage] = useState(1);
   const [pageData, setPageData] = useState<MatchingQueuePageResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeObservationId, setActiveObservationId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const loadQueue = useCallback(async () => {
     try {
       const [summaryResponse, queueResponse] = await Promise.all([
-        matchingApi.getSummary(),
-        matchingApi.getQueue(page),
+        matchingApi.getSummary(), matchingApi.getQueue(page, 5, filters),
       ]);
       setSummary(summaryResponse);
       setQueue(queueResponse.items);
@@ -126,22 +161,34 @@ function useMatchingReviewQueue(): MatchingReviewState {
     } finally {
       setIsLoading(false);
     }
-  }, [page]);
+  }, [filters, page, setError, setPage]);
+  useEffect(() => { void loadQueue(); }, [loadQueue]);
+  return { isLoading, loadQueue, pageData, queue, summary };
+}
 
-  useEffect(() => {
-    void loadQueue();
-  }, [loadQueue]);
+function useMatchingReviewQueue(): MatchingReviewState {
+  const [page, setPage] = useState(1);
+  const [activeObservationId, setActiveObservationId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFiltersState] = useState<MatchingQueueFilters>({});
+
+  const setFilters = useCallback((nextFilters: MatchingQueueFilters) => {
+    setFiltersState(nextFilters);
+    setPage(1);
+  }, []);
+
+  const data = useMatchingQueueData(page, filters, setPage, setError);
 
   const runObservationAction = useCallback(
     async (observationId: string, action: () => Promise<void>) => {
       const position = captureMatchingActionPosition();
-      const observationIndex = queue.findIndex((item) => item.observationId === observationId);
+      const observationIndex = data.queue.findIndex((item) => item.observationId === observationId);
       let fallbackObservationId: string | null = null;
 
       setActiveObservationId(observationId);
       try {
         await action();
-        const queueResponse = await loadQueue();
+        const queueResponse = await data.loadQueue();
         if (queueResponse && queueResponse.items.length > 0 && observationIndex >= 0) {
           fallbackObservationId = queueResponse.items[
             Math.min(observationIndex, queueResponse.items.length - 1)
@@ -154,10 +201,16 @@ function useMatchingReviewQueue(): MatchingReviewState {
         restoreMatchingActionPosition(position, fallbackObservationId);
       }
     },
-    [loadQueue, queue],
+    [data],
   );
 
-  return { activeObservationId, error, isLoading, loadQueue, page, pageData, queue, runObservationAction, setPage, summary };
+  const filteredRetry = useFilteredRetry(filters, data.pageData?.totalCount ?? 0, data.loadQueue, setError);
+  const updateFilters = useCallback((nextFilters: MatchingQueueFilters) => {
+    filteredRetry.clearMessage();
+    setFilters(nextFilters);
+  }, [filteredRetry, setFilters]);
+
+  return { activeObservationId, error, filters, isLoading: data.isLoading, isRetryingFiltered: filteredRetry.isRetrying, loadQueue: data.loadQueue, page, pageData: data.pageData, queue: data.queue, retryFiltered: filteredRetry.retry, retryMessage: filteredRetry.message, runObservationAction, setFilters: updateFilters, setPage, summary: data.summary };
 }
 
 function MatchingReviewLoading({ embedded }: { embedded: boolean }) {
@@ -370,6 +423,7 @@ function MatchingReviewContent({
       {activeTab === 'musicbrainz' ? (
         <section id="musicbrainz-panel" role="tabpanel" aria-labelledby="musicbrainz-tab" className="space-y-5">
           <MatchingSummaryStats summary={review.summary} />
+          <MatchingQueueFiltersPanel filters={review.filters} filteredCount={review.pageData?.totalCount ?? 0} isRetrying={review.isRetryingFiltered} retryMessage={review.retryMessage} onChange={review.setFilters} onRetry={() => void review.retryFiltered()} />
           <MatchingReviewError error={review.error} />
           <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} label="MusicBrainz matches" />
           <MatchingQueueList
@@ -378,6 +432,10 @@ function MatchingReviewContent({
             queue={review.queue}
           />
           <MatchingQueuePagination pageData={review.pageData} onPageChange={review.setPage} label="MusicBrainz matches" />
+        </section>
+      ) : activeTab === 'work-queue' ? (
+        <section id="work-queue-panel" role="tabpanel" aria-labelledby="work-queue-tab">
+          <TrackMatchingQueuePanel />
         </section>
       ) : (
         <section id="track-groupings-panel" role="tabpanel" aria-labelledby="track-groupings-tab">

@@ -1,9 +1,7 @@
 import type { MusicSyncJobResponse, PlatformId } from '@cantaro/client-shared/music';
 
-const playlistSyncProgressKey = 'cantaro.playlistSyncProgress.v1';
-const maxProgressAgeMs = 10 * 60 * 1000;
+const playlistSyncFocusKey = 'cantaro.playlistSyncFocusJob.v1';
 
-export const playlistSyncProgressEventName = 'cantaro-playlist-sync-progress';
 export const playlistSyncDataRefreshEventName = 'cantaro-playlist-sync-data-refresh';
 
 export type PlaylistSyncProgressPhase = 'syncing' | 'completed' | 'failed';
@@ -25,7 +23,6 @@ export interface PlaylistSyncProgress {
   processedSongCount?: number;
   currentPlaylistName?: string;
   currentSongName?: string;
-  focusActivity?: boolean;
 }
 
 function progressPhase(status: MusicSyncJobResponse['status']): PlaylistSyncProgressPhase {
@@ -34,7 +31,16 @@ function progressPhase(status: MusicSyncJobResponse['status']): PlaylistSyncProg
   return 'syncing';
 }
 
-export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = false): PlaylistSyncProgress {
+function optionalText(value: string | null | undefined): string | undefined {
+  return value ?? undefined;
+}
+
+function syncErrorMessage(job: MusicSyncJobResponse): string | undefined {
+  const failedResult = job.results.find((result) => !result.success);
+  return optionalText(failedResult?.errorMessage ?? job.errorMessage);
+}
+
+export function progressFromSyncJob(job: MusicSyncJobResponse): PlaylistSyncProgress {
   return {
     jobId: job.id,
     phase: progressPhase(job.status),
@@ -43,62 +49,33 @@ export function progressFromSyncJob(job: MusicSyncJobResponse, focusActivity = f
     songCount: job.songCount,
     targetCount: 0,
     playlistNames: job.playlistNames,
-    startedAt: job.startedAt ?? job.createdAt,
+    startedAt: optionalText(job.startedAt) ?? job.createdAt,
     updatedAt: job.updatedAt,
     successCount: job.successCount,
     failureCount: job.failureCount,
-    errorMessage: job.errorMessage ?? undefined,
+    errorMessage: syncErrorMessage(job),
     processedPlaylistCount: job.processedPlaylistCount,
     processedSongCount: job.processedSongCount,
-    currentPlaylistName: job.currentPlaylistName ?? undefined,
-    currentSongName: job.currentSongName ?? undefined,
-    focusActivity,
+    currentPlaylistName: optionalText(job.currentPlaylistName),
+    currentSongName: optionalText(job.currentSongName),
   };
 }
 
-function isProgressFresh(progress: PlaylistSyncProgress): boolean {
-  return progress.phase === 'syncing'
-    || Date.now() - new Date(progress.updatedAt).getTime() < maxProgressAgeMs;
+export function writePlaylistSyncActivityFocus(jobId: string): void {
+  window.sessionStorage.setItem(playlistSyncFocusKey, jobId);
 }
 
-export function readPlaylistSyncProgress(): PlaylistSyncProgress | null {
+export function consumePlaylistSyncActivityFocus(jobIds: ReadonlySet<string>): boolean {
   try {
-    const rawProgress = window.sessionStorage.getItem(playlistSyncProgressKey);
-    if (!rawProgress) return null;
-
-    const progress = JSON.parse(rawProgress) as PlaylistSyncProgress;
-    if (!progress.jobId) {
-      window.sessionStorage.removeItem(playlistSyncProgressKey);
-      return null;
-    }
-    if (!isProgressFresh(progress)) {
-      window.sessionStorage.removeItem(playlistSyncProgressKey);
-      return null;
-    }
-
-    return progress;
+    const jobId = window.sessionStorage.getItem(playlistSyncFocusKey);
+    if (!jobId || !jobIds.has(jobId)) return false;
+    window.sessionStorage.removeItem(playlistSyncFocusKey);
+    return true;
   } catch {
-    window.sessionStorage.removeItem(playlistSyncProgressKey);
-    return null;
+    return false;
   }
-}
-
-export function writePlaylistSyncProgress(progress: PlaylistSyncProgress): void {
-  window.sessionStorage.setItem(playlistSyncProgressKey, JSON.stringify(progress));
-  window.dispatchEvent(new CustomEvent(playlistSyncProgressEventName));
 }
 
 export function requestPlaylistSyncDataRefresh(): void {
   window.dispatchEvent(new CustomEvent(playlistSyncDataRefreshEventName));
-}
-
-export function consumePlaylistSyncActivityFocus(): boolean {
-  const progress = readPlaylistSyncProgress();
-  if (!progress?.focusActivity) return false;
-
-  writePlaylistSyncProgress({
-    ...progress,
-    focusActivity: false,
-  });
-  return true;
 }

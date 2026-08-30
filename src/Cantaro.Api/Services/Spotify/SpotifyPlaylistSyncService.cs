@@ -9,29 +9,27 @@ public sealed class SpotifyPlaylistSyncService(
     ApplicationDbContext dbContext,
     SpotifyService spotifyService,
     SpotifyTrackResolver trackResolver,
+    PlaylistCanonicalReconciliationService playlistReconciler,
     TimeProvider timeProvider,
     ILogger<SpotifyPlaylistSyncService> logger)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly SpotifyService _spotifyService = spotifyService;
     private readonly SpotifyTrackResolver _trackResolver = trackResolver;
+    private readonly PlaylistCanonicalReconciliationService _playlistReconciler = playlistReconciler;
     private readonly TimeProvider _timeProvider = timeProvider;
     private readonly ILogger<SpotifyPlaylistSyncService> _logger = logger;
 
     public async Task<Guid> SyncPlaylistAsync(
-        int userId,
+        PlatformAccountContext account,
         string spotifyPlaylistId,
         CancellationToken cancellationToken)
     {
         // Spotify network calls complete before any database transaction starts.
         var snapshot = await _spotifyService.GetPlaylistImportSnapshotAsync(
-            userId,
+            account,
             spotifyPlaylistId,
             cancellationToken);
-        var accountId = await _dbContext.ConnectedServiceAccounts
-            .Where(account => account.UserId == userId && account.Service == SpotifyService.ServiceName)
-            .Select(account => account.Id)
-            .SingleAsync(cancellationToken);
         var strategy = _dbContext.Database.CreateExecutionStrategy();
 
         var importResult = await strategy.ExecuteAsync(async () =>
@@ -44,8 +42,8 @@ public sealed class SpotifyPlaylistSyncService(
                     .Include(candidate => candidate.Playlist)
                     .SingleOrDefaultAsync(
                         candidate => candidate.Service == SpotifyService.ServiceName
-                            && candidate.ServicePlaylistId == spotifyPlaylistId
-                            && candidate.Playlist!.UserId == userId,
+                            && candidate.ConnectedServiceAccountId == account.ConnectedServiceAccountId
+                            && candidate.ServicePlaylistId == spotifyPlaylistId,
                         cancellationToken);
 
                 Playlist playlist;
@@ -54,7 +52,7 @@ public sealed class SpotifyPlaylistSyncService(
                     playlist = new Playlist
                     {
                         Id = Guid.NewGuid(),
-                        UserId = userId,
+                        UserId = account.UserId,
                         Name = snapshot.Playlist.Name,
                         Description = snapshot.Playlist.Description,
                         ImportedFromService = SpotifyService.ServiceName,
@@ -65,7 +63,7 @@ public sealed class SpotifyPlaylistSyncService(
                     {
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
-                        ConnectedServiceAccountId = accountId,
+                        ConnectedServiceAccountId = account.ConnectedServiceAccountId,
                         Service = SpotifyService.ServiceName,
                         ServicePlaylistId = spotifyPlaylistId,
                         SyncMode = "import_only",
@@ -83,7 +81,7 @@ public sealed class SpotifyPlaylistSyncService(
                     playlist.Description = snapshot.Playlist.Description;
                     playlist.ImportedFromService = SpotifyService.ServiceName;
                     playlist.UpdatedAt = now;
-                    mapping.ConnectedServiceAccountId = accountId;
+                    mapping.ConnectedServiceAccountId = account.ConnectedServiceAccountId;
                     mapping.LastSyncedAt = now;
                     mapping.LastSyncStatus = "success";
 
@@ -105,8 +103,6 @@ public sealed class SpotifyPlaylistSyncService(
                     .Select(group => group.First())
                     .ToList();
                 var entries = new List<PlaylistEntry>(uniqueTracks.Count);
-                var resolvedTrackIds = new HashSet<Guid>();
-
                 foreach (var track in uniqueTracks)
                 {
                     var observation = await UpsertObservationAsync(track, now, cancellationToken);
@@ -118,27 +114,23 @@ public sealed class SpotifyPlaylistSyncService(
                     observation.ResolutionNotes = "Resolved directly from authoritative Spotify catalog metadata.";
                     observation.UpdatedAt = now;
 
-                    if (!resolvedTrackIds.Add(canonicalTrack.Id))
-                    {
-                        continue;
-                    }
-
                     entries.Add(new PlaylistEntry
                     {
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
                         TrackObservationId = observation.Id,
                         TrackId = canonicalTrack.Id,
-                        Position = entries.Count,
+                        Position = track.Position,
                         AddedAt = track.AddedAt ?? now,
                         SourceService = SpotifyService.ServiceName
                     });
                 }
 
-                _dbContext.PlaylistEntries.AddRange(entries);
+                var reconciledEntries = _playlistReconciler.ReconcileImportedEntries(entries);
+                _dbContext.PlaylistEntries.AddRange(reconciledEntries);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
-                return (PlaylistId: playlist.Id, TrackCount: entries.Count);
+                return (PlaylistId: playlist.Id, TrackCount: reconciledEntries.Count);
             }
             catch
             {

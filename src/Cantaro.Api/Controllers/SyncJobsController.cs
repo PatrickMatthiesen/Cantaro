@@ -1,6 +1,7 @@
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -31,6 +32,24 @@ public sealed class MusicSyncJobResponse
     public DateTimeOffset UpdatedAt { get; init; }
     public DateTimeOffset? StartedAt { get; init; }
     public DateTimeOffset? CompletedAt { get; init; }
+    public required IReadOnlyList<MusicSyncJobPlaylistResultResponse> Results { get; init; }
+}
+
+public sealed class MusicSyncJobPlaylistResultResponse
+{
+    public required string ServicePlaylistId { get; init; }
+    public required string PlaylistName { get; init; }
+    public bool Success { get; init; }
+    public string? CantaroPlaylistId { get; init; }
+    public string? ErrorCode { get; init; }
+    public string? ErrorMessage { get; init; }
+    public bool Retryable { get; init; }
+}
+
+public sealed class MusicSyncJobPageResponse
+{
+    public required IReadOnlyList<MusicSyncJobResponse> Items { get; init; }
+    public string? NextCursor { get; init; }
 }
 
 [ApiController]
@@ -43,6 +62,8 @@ public sealed class SyncJobsController(
     MusicSyncThrottleService throttleService,
     IServiceScopeFactory serviceScopeFactory) : ControllerBase
 {
+    private sealed record JobCursor(DateTimeOffset CreatedAt, Guid Id);
+
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly IPlatformRegistry _platformRegistry = platformRegistry;
@@ -79,10 +100,22 @@ public sealed class SyncJobsController(
         }
 
         var platform = _platformRegistry.GetRequired(service);
+        var connectedAccount = await platform.GetConnectedAccountAsync(userId, cancellationToken);
+        if (connectedAccount is null)
+        {
+            return BadRequest(new { error = $"Connect {service} before starting a sync." });
+        }
+
+        if (!string.Equals(connectedAccount.ConnectionState, "connected", StringComparison.Ordinal))
+        {
+            return BadRequest(new { error = $"Reconnect {service} before starting a sync." });
+        }
+
+        var accountContext = new PlatformAccountContext(userId, connectedAccount.Id);
         IReadOnlyList<PlatformPlaylistDto> available;
         try
         {
-            available = await platform.GetPlaylistsAsync(userId, cancellationToken);
+            available = await platform.GetPlaylistsAsync(accountContext, cancellationToken);
         }
         catch (PlatformApiException ex)
         {
@@ -112,6 +145,7 @@ public sealed class SyncJobsController(
 
         var existingMappings = await _dbContext.ServicePlaylistMappings
             .Where(mapping => mapping.Service == service
+                && mapping.ConnectedServiceAccountId == connectedAccount.Id
                 && mapping.Playlist!.UserId == userId
                 && requestedIdSet.Contains(mapping.ServicePlaylistId))
             .Select(mapping => new { mapping.ServicePlaylistId, mapping.PlaylistId })
@@ -148,6 +182,7 @@ public sealed class SyncJobsController(
         {
             Id = Guid.NewGuid(),
             UserId = userId,
+            ConnectedServiceAccountId = connectedAccount.Id,
             Service = service,
             PlaylistsJson = JsonSerializer.Serialize(playlists),
             Status = MusicSyncJobStatuses.Queued,
@@ -184,6 +219,57 @@ public sealed class SyncJobsController(
         }
 
         return AcceptedAtAction(nameof(Get), new { id = job.Id }, ToResponse(job));
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<MusicSyncJobPageResponse>> List(
+        [FromQuery] string? status,
+        [FromQuery] string? service,
+        [FromQuery] string? cursor,
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        limit = Math.Clamp(limit, 1, 50);
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToLowerInvariant();
+        if (normalizedStatus is not null
+            && normalizedStatus is not (MusicSyncJobStatuses.Queued
+                or MusicSyncJobStatuses.Running
+                or MusicSyncJobStatuses.Completed
+                or MusicSyncJobStatuses.Failed))
+        {
+            return BadRequest(new { error = "Unknown sync job status." });
+        }
+
+        var normalizedService = string.IsNullOrWhiteSpace(service) ? null : service.Trim().ToLowerInvariant();
+        JobCursor? decodedCursor = null;
+        if (!string.IsNullOrWhiteSpace(cursor) && !TryDecodeCursor(cursor, out decodedCursor))
+        {
+            return BadRequest(new { error = "Invalid sync job cursor." });
+        }
+
+        var query = _dbContext.MusicSyncJobs.AsNoTracking().Where(job => job.UserId == userId);
+        if (normalizedStatus is not null) query = query.Where(job => job.Status == normalizedStatus);
+        if (normalizedService is not null) query = query.Where(job => job.Service == normalizedService);
+        if (decodedCursor is not null)
+        {
+            query = query.Where(job => job.CreatedAt < decodedCursor.CreatedAt
+                || (job.CreatedAt == decodedCursor.CreatedAt && job.Id.CompareTo(decodedCursor.Id) < 0));
+        }
+
+        var jobs = await query
+            .OrderByDescending(job => job.CreatedAt)
+            .ThenByDescending(job => job.Id)
+            .Take(limit + 1)
+            .ToListAsync(cancellationToken);
+        var hasMore = jobs.Count > limit;
+        if (hasMore) jobs.RemoveAt(jobs.Count - 1);
+
+        return Ok(new MusicSyncJobPageResponse
+        {
+            Items = jobs.Select(ToResponse).ToList(),
+            NextCursor = hasMore && jobs.Count > 0 ? EncodeCursor(jobs[^1]) : null
+        });
     }
 
     [HttpGet("{id:guid}")]
@@ -243,6 +329,9 @@ public sealed class SyncJobsController(
     internal static MusicSyncJobResponse ToResponse(MusicSyncJob job)
     {
         var playlists = JsonSerializer.Deserialize<List<MusicSyncJobPlaylist>>(job.PlaylistsJson) ?? [];
+        var results = string.IsNullOrWhiteSpace(job.ResultsJson)
+            ? []
+            : JsonSerializer.Deserialize<List<BatchSyncResult>>(job.ResultsJson) ?? [];
         return new MusicSyncJobResponse
         {
             Id = job.Id,
@@ -261,7 +350,40 @@ public sealed class SyncJobsController(
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
             StartedAt = job.StartedAt,
-            CompletedAt = job.CompletedAt
+            CompletedAt = job.CompletedAt,
+            Results = results.Select(MapResult).ToList()
         };
+    }
+
+    private static MusicSyncJobPlaylistResultResponse MapResult(BatchSyncResult storedResult)
+    {
+        var result = MusicSyncFailureClassifier.SanitizeLegacy(storedResult);
+        return new MusicSyncJobPlaylistResultResponse
+        {
+            ServicePlaylistId = result.ServicePlaylistId,
+            PlaylistName = result.PlaylistName,
+            Success = result.Success,
+            CantaroPlaylistId = result.CantaroPlaylistId,
+            ErrorCode = result.ErrorCode,
+            ErrorMessage = result.Error,
+            Retryable = result.Retryable
+        };
+    }
+
+    private static string EncodeCursor(MusicSyncJob job)
+        => Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new JobCursor(job.CreatedAt, job.Id))));
+
+    private static bool TryDecodeCursor(string value, out JobCursor? cursor)
+    {
+        try
+        {
+            cursor = JsonSerializer.Deserialize<JobCursor>(Encoding.UTF8.GetString(Convert.FromBase64String(value)));
+            return cursor is not null;
+        }
+        catch (Exception exception) when (exception is FormatException or JsonException)
+        {
+            cursor = null;
+            return false;
+        }
     }
 }

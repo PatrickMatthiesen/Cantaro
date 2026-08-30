@@ -27,6 +27,7 @@ public sealed class MusicSyncJobProcessorTests
         {
             Id = Guid.NewGuid(),
             UserId = 42,
+            ConnectedServiceAccountId = 99,
             Service = "test",
             PlaylistsJson = JsonSerializer.Serialize(playlists),
             Status = MusicSyncJobStatuses.Queued,
@@ -61,6 +62,47 @@ public sealed class MusicSyncJobProcessorTests
     }
 
     [Fact]
+    public async Task ProcessNextAsync_CompletesWhileImportedTrackStillAwaitsMatching()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        dbContext.MusicSyncJobs.Add(new MusicSyncJob
+        {
+            Id = Guid.NewGuid(),
+            UserId = 42,
+            ConnectedServiceAccountId = 99,
+            Service = "test",
+            PlaylistsJson = JsonSerializer.Serialize(
+                new[] { new MusicSyncJobPlaylist("one", "First", 1) }),
+            Status = MusicSyncJobStatuses.Queued,
+            PlaylistCount = 1,
+            SongCount = 1,
+            EstimatedNewSongCount = 1,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+
+        var platform = new PendingMatchPlatformService(dbContext);
+        var processor = new MusicSyncJobProcessor(
+            dbContext,
+            new PlatformRegistry([platform]),
+            new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance);
+
+        Assert.True(await processor.ProcessNextAsync(CancellationToken.None));
+
+        var completedJob = await dbContext.MusicSyncJobs.AsNoTracking().SingleAsync();
+        var observation = await dbContext.TrackObservations.AsNoTracking().SingleAsync();
+        var queueItem = await dbContext.TrackMatchQueueItems.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Completed, completedJob.Status);
+        Assert.Equal(TrackMatchingStatuses.Pending, observation.MatchStatus);
+        Assert.Equal(observation.Id, queueItem.TrackObservationId);
+    }
+
+    [Fact]
     public async Task ProcessNextAsync_PersistsSongProgressWhilePlaylistIsStillRunning()
     {
         var databaseName = Guid.NewGuid().ToString();
@@ -72,6 +114,7 @@ public sealed class MusicSyncJobProcessorTests
         {
             Id = Guid.NewGuid(),
             UserId = 42,
+            ConnectedServiceAccountId = 99,
             Service = "test",
             PlaylistsJson = JsonSerializer.Serialize(
                 new[] { new MusicSyncJobPlaylist("one", "First", 3) }),
@@ -142,6 +185,7 @@ public sealed class MusicSyncJobProcessorTests
         {
             Id = Guid.NewGuid(),
             UserId = 42,
+            ConnectedServiceAccountId = 99,
             Service = "test",
             PlaylistsJson = JsonSerializer.Serialize(playlists),
             Status = MusicSyncJobStatuses.Queued,
@@ -204,7 +248,7 @@ public sealed class MusicSyncJobProcessorTests
         public string PlatformId => "test";
         public List<string> SyncedPlaylistIds { get; } = [];
 
-        public Task<Guid> SyncPlaylistAsync(int userId, string playlistId, CancellationToken cancellationToken)
+        public Task<Guid> SyncPlaylistAsync(PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
         {
             SyncedPlaylistIds.Add(playlistId);
             return Task.FromResult(Guid.NewGuid());
@@ -227,14 +271,14 @@ public sealed class MusicSyncJobProcessorTests
     {
         public string PlatformId => "test";
 
-        public Task<Guid> SyncPlaylistAsync(int userId, string playlistId, CancellationToken cancellationToken)
+        public Task<Guid> SyncPlaylistAsync(PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
         {
             if (playlistId == "fails")
             {
                 dbContext.Playlists.Add(new Playlist
                 {
                     Id = Guid.NewGuid(),
-                    UserId = userId,
+                    UserId = account.UserId,
                     Name = "Must not be persisted",
                     CreatedAt = DateTimeOffset.UtcNow,
                     UpdatedAt = DateTimeOffset.UtcNow
@@ -243,6 +287,49 @@ public sealed class MusicSyncJobProcessorTests
             }
 
             return Task.FromResult(Guid.NewGuid());
+        }
+
+        public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId) => throw new NotSupportedException();
+        public string GetAuthorizationUrl(string redirectUri, string state) => throw new NotSupportedException();
+        public Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(int userId, string authorizationCode, string redirectUri) => throw new NotSupportedException();
+        public Task DisconnectAsync(int userId) => throw new NotSupportedException();
+        public Task<IReadOnlyList<PlatformPlaylistDto>> GetPlaylistsAsync(int userId) => throw new NotSupportedException();
+        public Task<IReadOnlyList<PlatformSongDto>> GetPlaylistSongsAsync(int userId, string playlistId) => throw new NotSupportedException();
+        public bool TryValidatePlaylistId(string playlistId, out string? error)
+        {
+            error = null;
+            return true;
+        }
+    }
+
+    private sealed class PendingMatchPlatformService(ApplicationDbContext dbContext) : IPlatformService
+    {
+        public string PlatformId => "test";
+
+        public async Task<Guid> SyncPlaylistAsync(
+            PlatformAccountContext account,
+            string playlistId,
+            CancellationToken cancellationToken)
+        {
+            var observationId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            dbContext.TrackObservations.Add(new TrackObservation
+            {
+                Id = observationId,
+                SourceType = "youtube",
+                ExternalId = "pending-video",
+                Title = "Pending song",
+                MatchStatus = TrackMatchingStatuses.Pending,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            dbContext.TrackMatchQueueItems.Add(new TrackMatchQueueItem
+            {
+                TrackObservationId = observationId,
+                NextAttemptAt = now.UtcDateTime
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Guid.NewGuid();
         }
 
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId) => throw new NotSupportedException();
@@ -267,12 +354,12 @@ public sealed class MusicSyncJobProcessorTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<Guid> SyncPlaylistAsync(
-            int userId,
+            PlatformAccountContext account,
             string playlistId,
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public async Task<Guid> SyncPlaylistAsync(
-            int userId,
+            PlatformAccountContext account,
             string playlistId,
             Func<PlatformSyncProgress, CancellationToken, Task> reportProgressAsync,
             CancellationToken cancellationToken)

@@ -81,6 +81,45 @@ export interface MatchingQueuePageResponse {
   totalPages: number;
 }
 
+export interface MatchingQueueFilters {
+  status?: string;
+  sourceType?: string;
+  errorsOnly?: boolean;
+  query?: string;
+}
+
+export interface MatchingBulkRetryResponse {
+  queuedCount: number;
+}
+
+export interface TrackMatchWorkItemResponse {
+  observationId: string;
+  sourceType: string;
+  externalId: string;
+  title: string;
+  artist?: string;
+  queueStatus: 'ready' | 'processing' | 'scheduled';
+  retryCount: number;
+  lifetimeAttemptCount: number;
+  nextAttemptAt: string;
+  leaseExpiresAt?: string;
+  lastAttemptedAt?: string;
+  lastError?: string;
+}
+
+export interface TrackMatchWorkPageResponse {
+  items: TrackMatchWorkItemResponse[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  readyCount: number;
+  scheduledCount: number;
+  processingCount: number;
+  providerNotBefore?: string;
+  asOf: string;
+}
+
 export interface SongGroupingTrackResponse {
   trackId: string;
   title?: string;
@@ -152,13 +191,22 @@ class MatchingApiClient {
     return response.json();
   }
 
-  async getQueue(page = 1, pageSize = 5): Promise<MatchingQueuePageResponse> {
-    return this.getPage(
-      '/api/matching/queue',
-      page,
-      pageSize,
-      'Failed to load matching queue',
-    );
+  async getQueue(page = 1, pageSize = 5, filters: MatchingQueueFilters = {}): Promise<MatchingQueuePageResponse> {
+    const params = new URLSearchParams({ page: page.toString(), pageSize: pageSize.toString() });
+    if (filters.status) params.set('status', filters.status);
+    if (filters.sourceType) params.set('sourceType', filters.sourceType);
+    if (filters.errorsOnly) params.set('errorsOnly', 'true');
+    if (filters.query) params.set('query', filters.query);
+    const response = await fetch(`/api/matching/queue?${params}`, {
+      credentials: 'include',
+      headers: this.getHeaders(),
+    });
+    await this.ensureOk(response, 'Failed to load matching queue');
+    return response.json();
+  }
+
+  async getWorkQueue(page = 1, pageSize = 20): Promise<TrackMatchWorkPageResponse> {
+    return this.getPage('/api/matching/work-queue', page, pageSize, 'Failed to load matching work queue');
   }
 
   async retry(observationId: string): Promise<void> {
@@ -169,6 +217,17 @@ class MatchingApiClient {
     });
 
     await this.ensureOk(response, 'Failed to retry matching');
+  }
+
+  async retryFiltered(filters: MatchingQueueFilters): Promise<MatchingBulkRetryResponse> {
+    const response = await fetch('/api/matching/queue/retry-filtered', {
+      method: 'POST',
+      credentials: 'include',
+      headers: this.getHeaders(),
+      body: JSON.stringify(filters),
+    });
+    await this.ensureOk(response, 'Failed to retry filtered matches');
+    return response.json();
   }
 
   async selectCandidate(observationId: string, candidateId: string): Promise<void> {

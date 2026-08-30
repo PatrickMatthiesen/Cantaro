@@ -15,7 +15,7 @@ public class ServicePlaylistMapping
     /// <summary>
     /// Connected account that supplied this provider-derived mapping.
     /// </summary>
-    public int? ConnectedServiceAccountId { get; set; }
+    public int ConnectedServiceAccountId { get; set; }
     
     /// <summary>
     /// Service name (e.g., "youtube", "spotify")

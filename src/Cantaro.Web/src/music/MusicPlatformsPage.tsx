@@ -6,6 +6,7 @@ import {
   platformManager,
   syncApi,
   type MusicLibraryResponse,
+  type MusicSyncJobResponse,
   type PlatformId,
   type SyncStatusResponse,
 } from '@cantaro/client-shared/music';
@@ -17,12 +18,9 @@ import { formatRelativeTime, isPlatformId, latestTimestamp, platformName } from 
 import {
   consumePlaylistSyncActivityFocus,
   playlistSyncDataRefreshEventName,
-  playlistSyncProgressEventName,
   progressFromSyncJob,
-  readPlaylistSyncProgress,
   requestPlaylistSyncDataRefresh,
   type PlaylistSyncProgress,
-  writePlaylistSyncProgress,
 } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
 
@@ -152,53 +150,46 @@ function useOverviewSyncStatus() {
   return syncStatus;
 }
 
-function usePlaylistSyncProgress() {
-  const [progress, setProgress] = useState<PlaylistSyncProgress | null>(() => readPlaylistSyncProgress());
+function usePlaylistSyncJobs() {
+  const [jobs, setJobs] = useState<MusicSyncJobResponse[]>([]);
+  const activeJobIdsRef = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    const refreshProgress = () => setProgress(readPlaylistSyncProgress());
-    const intervalId = window.setInterval(refreshProgress, 1500);
-
-    window.addEventListener(playlistSyncProgressEventName, refreshProgress);
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener(playlistSyncProgressEventName, refreshProgress);
-    };
+  const loadJobs = useCallback(() => {
+    void syncApi.listSyncJobs({ limit: 10 }).then(({ items }) => {
+      const nextActiveJobIds = new Set(
+        items.filter((job) => job.status === 'queued' || job.status === 'running').map((job) => job.id),
+      );
+      const completedSinceLastLoad = Array.from(activeJobIdsRef.current)
+        .some((jobId) => !nextActiveJobIds.has(jobId));
+      activeJobIdsRef.current = nextActiveJobIds;
+      setJobs(items);
+      if (completedSinceLastLoad) requestPlaylistSyncDataRefresh();
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    if (!progress?.jobId || progress.phase !== 'syncing') return;
-
-    let disposed = false;
-    const applyJob = (job: Awaited<ReturnType<typeof syncApi.getSyncJob>>) => {
-      if (disposed) return;
-      const next = progressFromSyncJob(job);
-      writePlaylistSyncProgress(next);
-      if (next.phase !== 'syncing') {
-        requestPlaylistSyncDataRefresh();
-      }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') loadJobs();
     };
-
-    void syncApi.getSyncJob(progress.jobId).then(applyJob).catch(() => undefined);
-    const eventSource = new EventSource(`/api/sync/jobs/${encodeURIComponent(progress.jobId)}/events`);
-    eventSource.onmessage = (event) => {
-      try {
-        applyJob(JSON.parse(event.data) as Awaited<ReturnType<typeof syncApi.getSyncJob>>);
-      } catch {
-        // Ignore malformed events and recover from the next persisted snapshot.
-      }
-    };
-    eventSource.onerror = () => {
-      void syncApi.getSyncJob(progress.jobId).then(applyJob).catch(() => undefined);
-    };
-
+    loadJobs();
+    window.addEventListener('focus', loadJobs);
+    window.addEventListener(playlistSyncDataRefreshEventName, loadJobs);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      disposed = true;
-      eventSource.close();
+      window.removeEventListener('focus', loadJobs);
+      window.removeEventListener(playlistSyncDataRefreshEventName, loadJobs);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [progress?.jobId, progress?.phase]);
+  }, [loadJobs]);
 
-  return progress;
+  const hasActiveJob = jobs.some((job) => job.status === 'queued' || job.status === 'running');
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const intervalId = window.setInterval(loadJobs, 2000);
+    return () => window.clearInterval(intervalId);
+  }, [hasActiveJob, loadJobs]);
+
+  return jobs;
 }
 
 function MetricCard({
@@ -466,7 +457,7 @@ function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
   );
 }
 
-function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLibraryResponse; syncStatus: SyncStatusResponse | null; syncProgress: PlaylistSyncProgress | null }) {
+function ActivityPanel({ library, syncStatus, syncJobs }: { library: MusicLibraryResponse; syncStatus: SyncStatusResponse | null; syncJobs: MusicSyncJobResponse[] }) {
   const activities = useMemo(() => {
     const fromLibrary = library.playlists.flatMap((playlist) =>
       playlist.services.map((service) => ({
@@ -503,7 +494,7 @@ function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLi
       </div>
 
       <div className="mt-4 space-y-2">
-        {syncProgress ? <ProgressActivityRow progress={syncProgress} /> : null}
+        {syncJobs.slice(0, 5).map((job) => <ProgressActivityRow key={job.id} progress={progressFromSyncJob(job)} />)}
         {activities.length > 0 ? activities.map((activity) => {
           const platformId = asPlatformId(activity.service);
           return (
@@ -520,7 +511,7 @@ function ActivityPanel({ library, syncStatus, syncProgress }: { library: MusicLi
               <span className="text-right text-xs font-black text-content-muted">{formatRelativeTime(activity.lastSyncedAt)}</span>
             </div>
           );
-        }) : !syncProgress ? (
+        }) : syncJobs.length === 0 ? (
           <div className="border-y border-border-subtle py-4 text-sm font-semibold text-content-muted">No sync activity yet.</div>
         ) : null}
       </div>
@@ -637,7 +628,7 @@ function MusicPlatformsOverview({ library }: { library: MusicLibraryResponse }) 
   const [view, setView] = useState<SyncOverviewView>('platform');
   const activitySectionRef = useRef<HTMLElement | null>(null);
   const syncStatus = useOverviewSyncStatus();
-  const syncProgress = usePlaylistSyncProgress();
+  const syncJobs = usePlaylistSyncJobs();
   const {
     addPlatformMenuRef,
     showAddPlatformMenu,
@@ -655,12 +646,12 @@ function MusicPlatformsOverview({ library }: { library: MusicLibraryResponse }) 
   const healthTone = hasSyncProblem ? 'amber' : 'emerald';
 
   useEffect(() => {
-    if (!syncProgress || !consumePlaylistSyncActivityFocus()) return;
+    if (syncJobs.length === 0 || !consumePlaylistSyncActivityFocus(new Set(syncJobs.map((job) => job.id)))) return;
 
     window.setTimeout(() => {
       activitySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 120);
-  }, [syncProgress]);
+  }, [syncJobs]);
 
   return (
     <MusicPageShell library={library}>
@@ -704,7 +695,7 @@ function MusicPlatformsOverview({ library }: { library: MusicLibraryResponse }) 
         )}
 
         <section ref={activitySectionRef} className="grid scroll-mt-28 gap-5 xl:grid-cols-[minmax(0,1fr)_460px]">
-          <ActivityPanel library={library} syncStatus={syncStatus} syncProgress={syncProgress} />
+          <ActivityPanel library={library} syncStatus={syncStatus} syncJobs={syncJobs} />
           <HealthPanel library={library} syncStatus={syncStatus} />
         </section>
       </div>

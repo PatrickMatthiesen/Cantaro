@@ -399,6 +399,18 @@ public class YouTubeService
             .FirstOrDefaultAsync(a => a.UserId == userId && a.Service == ServiceName);
     }
 
+    private async Task<ConnectedServiceAccount> RequireAccountAsync(
+        PlatformAccountContext accountContext,
+        CancellationToken cancellationToken)
+    {
+        return await _dbContext.ConnectedServiceAccounts.SingleOrDefaultAsync(
+                account => account.Id == accountContext.ConnectedServiceAccountId
+                    && account.UserId == accountContext.UserId
+                    && account.Service == ServiceName,
+                cancellationToken)
+            ?? throw new InvalidOperationException("The selected YouTube account is no longer connected.");
+    }
+
     /// <summary>
     /// Disconnects a YouTube account for a user
     /// </summary>
@@ -438,6 +450,17 @@ public class YouTubeService
     {
         var account = await GetConnectedAccountAsync(userId)
             ?? throw new InvalidOperationException("YouTube account not connected");
+        return await GetPlaylistsAsync(
+            new PlatformAccountContext(userId, account.Id),
+            CancellationToken.None);
+    }
+
+    public async Task<List<YouTubePlaylistDto>> GetPlaylistsAsync(
+        PlatformAccountContext accountContext,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        var userId = accountContext.UserId;
 
         using var youtubeService = await CreateYouTubeServiceAsync(account);
         var playlists = new List<YouTubePlaylistDto>();
@@ -458,7 +481,7 @@ public class YouTubeService
             request.MaxResults = 50;
             request.PageToken = nextPageToken;
 
-            var response = await request.ExecuteAsync();
+            var response = await request.ExecuteAsync(cancellationToken);
 
             if (response.Items != null)
             {
@@ -502,6 +525,19 @@ public class YouTubeService
     {
         var account = await GetConnectedAccountAsync(userId)
             ?? throw new InvalidOperationException("YouTube account not connected");
+        return await GetPlaylistItemsAsync(
+            new PlatformAccountContext(userId, account.Id),
+            playlistId,
+            CancellationToken.None);
+    }
+
+    public async Task<List<YouTubePlaylistItemDto>> GetPlaylistItemsAsync(
+        PlatformAccountContext accountContext,
+        string playlistId,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        var userId = accountContext.UserId;
 
         using var youtubeService = await CreateYouTubeServiceAsync(account);
         var items = new List<YouTubePlaylistItemDto>();
@@ -522,7 +558,7 @@ public class YouTubeService
             request.MaxResults = 50;
             request.PageToken = nextPageToken;
 
-            var response = await request.ExecuteAsync();
+            var response = await request.ExecuteAsync(cancellationToken);
 
             if (response.Items != null)
             {

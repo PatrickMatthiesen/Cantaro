@@ -65,6 +65,23 @@ public sealed class SpotifyPlatformService(
         }).ToList();
     }
 
+    public async Task<IReadOnlyList<PlatformPlaylistDto>> GetPlaylistsAsync(
+        PlatformAccountContext account,
+        CancellationToken cancellationToken)
+    {
+        var playlists = await spotifyService.GetPlaylistsAsync(account, cancellationToken);
+        return playlists.Select(playlist => new PlatformPlaylistDto
+        {
+            Id = playlist.Id,
+            Title = playlist.Name,
+            Description = playlist.Description,
+            ThumbnailUrl = playlist.ImageUrl,
+            ItemCount = playlist.ItemCount,
+            ExternalUrl = playlist.ExternalUrl,
+            OwnerName = string.IsNullOrWhiteSpace(playlist.OwnerName) ? "Spotify" : playlist.OwnerName
+        }).ToList();
+    }
+
     public Task<IReadOnlyList<PlatformSongDto>> GetPlaylistSongsAsync(int userId, string playlistId)
         => GetPlaylistSongsAsync(userId, playlistId, CancellationToken.None);
 
@@ -89,8 +106,11 @@ public sealed class SpotifyPlatformService(
         }).ToList();
     }
 
-    public Task<Guid> SyncPlaylistAsync(int userId, string playlistId, CancellationToken cancellationToken)
-        => playlistSyncService.SyncPlaylistAsync(userId, playlistId, cancellationToken);
+    public Task<Guid> SyncPlaylistAsync(
+        PlatformAccountContext account,
+        string playlistId,
+        CancellationToken cancellationToken)
+        => playlistSyncService.SyncPlaylistAsync(account, playlistId, cancellationToken);
 
     public bool TryValidatePlaylistId(string playlistId, out string? error)
     {

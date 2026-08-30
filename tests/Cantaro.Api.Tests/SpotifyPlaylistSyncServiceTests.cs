@@ -40,7 +40,7 @@ public sealed class SpotifyPlaylistSyncServiceTests
             UpdatedAt = Now.UtcDateTime
         });
         var encryption = new TokenEncryptionService(new EphemeralDataProtectionProvider());
-        dbContext.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
+        var connectedAccount = new ConnectedServiceAccount
         {
             UserId = userId,
             Service = SpotifyService.ServiceName,
@@ -52,7 +52,8 @@ public sealed class SpotifyPlaylistSyncServiceTests
             ConnectionState = "connected",
             CreatedAt = Now.UtcDateTime,
             UpdatedAt = Now.UtcDateTime
-        });
+        };
+        dbContext.ConnectedServiceAccounts.Add(connectedAccount);
         await dbContext.SaveChangesAsync();
 
         var handler = new TransactionCheckingHandler(
@@ -89,17 +90,19 @@ public sealed class SpotifyPlaylistSyncServiceTests
             dbContext,
             spotifyService,
             trackResolver,
+            new PlaylistCanonicalReconciliationService(dbContext),
             timeProvider,
             NullLogger<SpotifyPlaylistSyncService>.Instance);
 
-        var playlistId = await syncService.SyncPlaylistAsync(userId, "playlist1", CancellationToken.None);
+        var accountContext = new PlatformAccountContext(userId, connectedAccount.Id);
+        var playlistId = await syncService.SyncPlaylistAsync(accountContext, "playlist1", CancellationToken.None);
         var firstResolution = await dbContext.PlaylistEntries
             .Where(entry => entry.PlaylistId == playlistId)
             .Select(entry => new { entry.TrackObservationId, entry.TrackId })
             .SingleAsync();
 
         var refreshedPlaylistId = await syncService.SyncPlaylistAsync(
-            userId,
+            accountContext,
             "playlist1",
             CancellationToken.None);
 

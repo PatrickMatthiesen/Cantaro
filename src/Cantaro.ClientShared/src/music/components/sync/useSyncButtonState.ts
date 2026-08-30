@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { syncApi } from '../../services';
-import type { BatchSyncResponse, SyncStatusResponse } from '../../services/syncApi';
+import type { MusicSyncJobResponse, SyncStatusResponse } from '../../services/syncApi';
 import { platformManager } from '../../platforms';
 import type { PlatformId, PlatformPlaylist } from '../../platforms';
 
@@ -67,8 +67,8 @@ function useSyncSimulation(platformName: string) {
     const milestones = [
       { progress: 15, message: 'Checking sync permissions and current rate limit window.' },
       { progress: 35, message: `Fetching latest playlist metadata from ${platformName}.` },
-      { progress: 55, message: 'Matching tracks to canonical TrackIDs.' },
-      { progress: 75, message: 'Writing playlist updates and finalizing results.' },
+      { progress: 55, message: 'Queueing the playlist import.' },
+      { progress: 75, message: 'Saving the sync job to Recent sync activity.' },
     ];
 
     progressIntervalRef.current = setInterval(() => {
@@ -181,18 +181,18 @@ function syncWasBlocked(
 }
 
 async function handleSyncSuccess(
-  result: BatchSyncResponse,
+  result: MusicSyncJobResponse,
   stopProgressSimulation: () => void,
   setSyncProgress: (progress: number) => void,
   appendStatus: (message: string) => void,
-  setSyncResult: (result: BatchSyncResponse | null) => void,
+  setSyncResult: (result: MusicSyncJobResponse | null) => void,
   loadSyncStatus: () => Promise<SyncStatusResponse | null>,
   setShowPlaylistSelector: (visible: boolean) => void,
 ) {
   stopProgressSimulation();
   setSyncProgress(100);
-  appendStatus(`Sync completed. ${result.successCount} playlist(s) succeeded, ${result.failureCount} failed.`);
-  appendStatus(`Processed ${result.songsSynced}/${result.songsRequested} requested songs in this run.`);
+  appendStatus(`Sync queued for ${result.playlistCount} playlist(s).`);
+  appendStatus('Progress and results are available in Recent sync activity.');
   setSyncResult(result);
   await loadSyncStatus();
   setShowPlaylistSelector(false);
@@ -230,7 +230,7 @@ function useSyncActions(
 ) {
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
   const [selectedPlaylists, setSelectedPlaylists] = useState<Set<string>>(new Set());
-  const [syncResult, setSyncResult] = useState<BatchSyncResponse | null>(null);
+  const [syncResult, setSyncResult] = useState<MusicSyncJobResponse | null>(null);
 
   const handleSync = useCallback(async (playlistIds: string[] | null) => {
     const latestStatus = await loadSyncStatus();
@@ -244,7 +244,7 @@ function useSyncActions(
     startProgressSimulation(playlistIds?.length ?? 0);
 
     try {
-      const result = await syncApi.batchSync({
+      const result = await syncApi.createSyncJob({
         service: platformId,
         servicePlaylistIds: playlistIds,
       });
