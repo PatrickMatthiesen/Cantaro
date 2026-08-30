@@ -219,7 +219,15 @@ public class PlatformsController : ControllerBase
         {
             var platform = _platformRegistry.GetRequired(platformId);
             var userId = await GetCurrentUserIdAsync();
-            var playlists = await platform.GetPlaylistsAsync(userId, cancellationToken);
+            var account = await platform.GetConnectedAccountAsync(userId, cancellationToken);
+            if (account is null)
+            {
+                return BadRequest(new { error = $"Connect {platformId} before loading playlists." });
+            }
+
+            var playlists = await platform.GetPlaylistsAsync(
+                new PlatformAccountContext(userId, account.Id),
+                cancellationToken);
             return Ok(playlists);
         }
         catch (PlatformApiException ex)

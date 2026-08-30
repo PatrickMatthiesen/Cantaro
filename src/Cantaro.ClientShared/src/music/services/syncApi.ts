@@ -28,23 +28,17 @@ interface BatchSyncRequest {
   servicePlaylistIds?: string[] | null; // null or empty = sync all
 }
 
-export interface BatchSyncResult {
+export type MusicSyncJobStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export interface MusicSyncJobPlaylistResult {
   servicePlaylistId: string;
   playlistName: string;
   success: boolean;
-  error?: string;
-  cantaroPlaylistId?: string;
+  cantaroPlaylistId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  retryable: boolean;
 }
-
-export interface BatchSyncResponse {
-  results: BatchSyncResult[];
-  successCount: number;
-  failureCount: number;
-  songsRequested: number;
-  songsSynced: number;
-}
-
-export type MusicSyncJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface MusicSyncJobResponse {
   id: string;
@@ -57,6 +51,7 @@ export interface MusicSyncJobResponse {
   successCount: number;
   failureCount: number;
   playlistNames: string[];
+  results: MusicSyncJobPlaylistResult[];
   currentPlaylistName?: string | null;
   currentSongName?: string | null;
   errorMessage?: string | null;
@@ -64,6 +59,18 @@ export interface MusicSyncJobResponse {
   updatedAt: string;
   startedAt?: string | null;
   completedAt?: string | null;
+}
+
+export interface MusicSyncJobListResponse {
+  items: MusicSyncJobResponse[];
+  nextCursor: string | null;
+}
+
+export interface MusicSyncJobListOptions {
+  service?: string;
+  status?: MusicSyncJobStatus;
+  cursor?: string;
+  limit?: number;
 }
 
 export const syncApi = {
@@ -78,24 +85,6 @@ export const syncApi = {
         throw new Error('Not authenticated');
       }
       throw new Error(`Failed to fetch sync status: ${response.statusText}`);
-    }
-
-    return response.json();
-  },
-
-  async batchSync(request: BatchSyncRequest): Promise<BatchSyncResponse> {
-    const response = await fetch('/api/sync/batch', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to sync playlists' }));
-      throw new Error(error.error || 'Failed to sync playlists');
     }
 
     return response.json();
@@ -125,6 +114,20 @@ export const syncApi = {
     });
     if (!response.ok) {
       throw new Error(response.status === 404 ? 'Sync job not found' : 'Failed to fetch sync job');
+    }
+    return response.json();
+  },
+
+  async listSyncJobs(options: MusicSyncJobListOptions = {}): Promise<MusicSyncJobListResponse> {
+    const query = new URLSearchParams();
+    if (options.service) query.set('service', options.service);
+    if (options.status) query.set('status', options.status);
+    if (options.cursor) query.set('cursor', options.cursor);
+    if (options.limit !== undefined) query.set('limit', options.limit.toString());
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const response = await fetch(`/api/sync/jobs${suffix}`, { credentials: 'include' });
+    if (!response.ok) {
+      throw new Error(response.status === 401 ? 'Not authenticated' : 'Failed to fetch sync history');
     }
     return response.json();
   },

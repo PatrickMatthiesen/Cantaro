@@ -52,6 +52,22 @@ public sealed class YouTubePlatformService : IPlatformService
         }).ToList();
     }
 
+    public async Task<IReadOnlyList<PlatformPlaylistDto>> GetPlaylistsAsync(
+        PlatformAccountContext account,
+        CancellationToken cancellationToken)
+    {
+        var playlists = await _youtubeService.GetPlaylistsAsync(account, cancellationToken);
+        return playlists.Select(playlist => new PlatformPlaylistDto
+        {
+            Id = playlist.Id,
+            Title = playlist.Title,
+            Description = playlist.Description,
+            ThumbnailUrl = playlist.ThumbnailUrl,
+            ItemCount = playlist.ItemCount,
+            PublishedAt = playlist.PublishedAt
+        }).ToList();
+    }
+
     public async Task<IReadOnlyList<PlatformSongDto>> GetPlaylistSongsAsync(int userId, string playlistId)
     {
         var items = await _youtubeService.GetPlaylistItemsAsync(userId, playlistId);
@@ -68,19 +84,22 @@ public sealed class YouTubePlatformService : IPlatformService
         }).ToList();
     }
 
-    public Task<Guid> SyncPlaylistAsync(int userId, string playlistId, CancellationToken cancellationToken)
+    public Task<Guid> SyncPlaylistAsync(
+        PlatformAccountContext account,
+        string playlistId,
+        CancellationToken cancellationToken)
     {
-        return _playlistSyncService.SyncYouTubePlaylistAsync(userId, playlistId, cancellationToken);
+        return _playlistSyncService.SyncYouTubePlaylistAsync(account, playlistId, cancellationToken);
     }
 
     public Task<Guid> SyncPlaylistAsync(
-        int userId,
+        PlatformAccountContext account,
         string playlistId,
         Func<PlatformSyncProgress, CancellationToken, Task> reportProgressAsync,
         CancellationToken cancellationToken)
     {
         return _playlistSyncService.SyncYouTubePlaylistAsync(
-            userId,
+            account,
             playlistId,
             reportProgressAsync,
             cancellationToken);

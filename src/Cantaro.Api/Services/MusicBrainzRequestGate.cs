@@ -27,6 +27,14 @@ public sealed class MusicBrainzRequestGate(TimeProvider timeProvider)
         }
     }
 
+    public DateTimeOffset NotBefore
+    {
+        get
+        {
+            lock (_lock) return _notBefore;
+        }
+    }
+
     public async Task WaitAsync(CancellationToken cancellationToken)
     {
         while (true)

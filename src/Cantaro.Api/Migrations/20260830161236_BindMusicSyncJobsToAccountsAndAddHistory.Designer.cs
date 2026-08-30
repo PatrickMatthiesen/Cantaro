@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cantaro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cantaro.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260830161236_BindMusicSyncJobsToAccountsAndAddHistory")]
+    partial class BindMusicSyncJobsToAccountsAndAddHistory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1468,30 +1471,6 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("TrackArtistCredits");
                 });
 
-            modelBuilder.Entity("Cantaro.Api.Models.TrackMatchQueueItem", b =>
-                {
-                    b.Property<Guid>("TrackObservationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("LeaseExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("LeaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("NextAttemptAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("RetryCount")
-                        .HasColumnType("integer");
-
-                    b.HasKey("TrackObservationId");
-
-                    b.HasIndex("NextAttemptAt");
-
-                    b.ToTable("TrackMatchQueueItems");
-                });
-
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2408,17 +2387,6 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("Track");
                 });
 
-            modelBuilder.Entity("Cantaro.Api.Models.TrackMatchQueueItem", b =>
-                {
-                    b.HasOne("Cantaro.Api.Models.TrackObservation", "TrackObservation")
-                        .WithOne("MatchQueueItem")
-                        .HasForeignKey("Cantaro.Api.Models.TrackMatchQueueItem", "TrackObservationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("TrackObservation");
-                });
-
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
                 {
                     b.HasOne("Cantaro.Api.Models.Track", "Track")
@@ -2625,8 +2593,6 @@ namespace Cantaro.Api.Migrations
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
                 {
                     b.Navigation("Candidates");
-
-                    b.Navigation("MatchQueueItem");
 
                     b.Navigation("PlaylistEntries");
                 });

@@ -14,6 +14,7 @@ public sealed class MusicSyncJob
 {
     public Guid Id { get; set; }
     public int UserId { get; set; }
+    public int? ConnectedServiceAccountId { get; set; }
     public required string Service { get; set; }
     public required string PlaylistsJson { get; set; }
     public required string Status { get; set; }
@@ -33,7 +34,7 @@ public sealed class MusicSyncJob
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public User? User { get; set; }
+    public ConnectedServiceAccount? ConnectedServiceAccount { get; set; }
 }
 
 public sealed record MusicSyncJobPlaylist(string Id, string Name, int SongCount);
-

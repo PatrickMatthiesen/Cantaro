@@ -13,7 +13,8 @@ public class YouTubePlaylistSyncService
 {
     private readonly ApplicationDbContext _dbContext;
     private readonly YouTubeService _youtubeService;
-    private readonly TrackMatchingService _trackMatchingService;
+    private readonly TrackMatchQueue _trackMatchQueue;
+    private readonly PlaylistCanonicalReconciliationService _playlistReconciler;
     private readonly ILogger<YouTubePlaylistSyncService> _logger;
 
     private const string ServiceName = "youtube";
@@ -21,12 +22,14 @@ public class YouTubePlaylistSyncService
     public YouTubePlaylistSyncService(
         ApplicationDbContext dbContext,
         YouTubeService youtubeService,
-        TrackMatchingService trackMatchingService,
+        TrackMatchQueue trackMatchQueue,
+        PlaylistCanonicalReconciliationService playlistReconciler,
         ILogger<YouTubePlaylistSyncService> logger)
     {
         _dbContext = dbContext;
         _youtubeService = youtubeService;
-        _trackMatchingService = trackMatchingService;
+        _trackMatchQueue = trackMatchQueue;
+        _playlistReconciler = playlistReconciler;
         _logger = logger;
     }
 
@@ -38,24 +41,24 @@ public class YouTubePlaylistSyncService
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The Cantaro Playlist ID (Guid)</returns>
     public async Task<Guid> SyncYouTubePlaylistAsync(
-        int userId,
+        PlatformAccountContext account,
         string youtubePlaylistId,
         CancellationToken cancellationToken)
     {
         return await SyncYouTubePlaylistAsync(
-            userId,
+            account,
             youtubePlaylistId,
             reportProgressAsync: null,
             cancellationToken);
     }
 
     public async Task<Guid> SyncYouTubePlaylistAsync(
-        int userId,
+        PlatformAccountContext account,
         string youtubePlaylistId,
         Func<PlatformSyncProgress, CancellationToken, Task>? reportProgressAsync,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId}", youtubePlaylistId, userId);
+        _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId} account {AccountId}", youtubePlaylistId, account.UserId, account.ConnectedServiceAccountId);
 
         // Use execution strategy to handle retries with transactions
         var strategy = _dbContext.Database.CreateExecutionStrategy();
@@ -67,19 +70,21 @@ public class YouTubePlaylistSyncService
             try
             {
                 // Step 1: Fetch YouTube playlist metadata
-                var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(userId);
+                var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(account, cancellationToken);
                 var youtubePlaylist = youtubePlaylists.FirstOrDefault(p => p.Id == youtubePlaylistId)
                     ?? throw new InvalidOperationException($"YouTube playlist {youtubePlaylistId} not found or not accessible");
 
                 // Step 2: Fetch all playlist items (videos)
-                var playlistItems = await _youtubeService.GetPlaylistItemsAsync(userId, youtubePlaylistId);
+                var playlistItems = await _youtubeService.GetPlaylistItemsAsync(account, youtubePlaylistId, cancellationToken);
                 _logger.LogInformation("Fetched {ItemCount} items from YouTube playlist {PlaylistId}", playlistItems.Count, youtubePlaylistId);
 
                 // Step 3: Check if this playlist is already mapped to a Cantaro playlist
                 var existingMapping = await _dbContext.ServicePlaylistMappings
                     .Include(m => m.Playlist)
                     .FirstOrDefaultAsync(
-                        m => m.Service == ServiceName && m.ServicePlaylistId == youtubePlaylistId,
+                        m => m.ConnectedServiceAccountId == account.ConnectedServiceAccountId
+                            && m.Service == ServiceName
+                            && m.ServicePlaylistId == youtubePlaylistId,
                         cancellationToken);
 
                 Playlist playlist;
@@ -108,7 +113,7 @@ public class YouTubePlaylistSyncService
                     playlist = new Playlist
                     {
                         Id = Guid.NewGuid(),
-                        UserId = userId,
+                        UserId = account.UserId,
                         Name = youtubePlaylist.Title,
                         Description = youtubePlaylist.Description,
                         CreatedAt = DateTimeOffset.UtcNow,
@@ -136,7 +141,12 @@ public class YouTubePlaylistSyncService
                             observation.Id,
                             out var existingWorkItem)
                             ? existingWorkItem with { OccurrenceCount = existingWorkItem.OccurrenceCount + 1 }
-                            : new YouTubeObservationWorkItem(observation.Id, observation.Title, 1);
+                            : new YouTubeObservationWorkItem(
+                                observation.Id,
+                                observation.Title,
+                                1,
+                                observation.TrackId == null
+                                    && observation.MatchStatus == TrackMatchingStatuses.Pending);
 
                         var entry = new PlaylistEntry
                         {
@@ -158,11 +168,17 @@ public class YouTubePlaylistSyncService
                     }
                 }
 
-                _dbContext.PlaylistEntries.AddRange(playlistEntries);
+                var reconciledEntries = _playlistReconciler.ReconcileImportedEntries(playlistEntries);
+                _dbContext.PlaylistEntries.AddRange(reconciledEntries);
                 _logger.LogInformation("Created {EntryCount} playlist entries for playlist {PlaylistId}",
-                    playlistEntries.Count, playlist.Id);
+                    reconciledEntries.Count, playlist.Id);
 
                 await _dbContext.SaveChangesAsync(cancellationToken);
+
+                foreach (var observation in observationsToProcess.Values.Where(item => item.RequiresMatching))
+                {
+                    await _trackMatchQueue.EnqueueAsync(observation.ObservationId, cancellationToken);
+                }
 
                 // Step 5: Create or update ServicePlaylistMapping
                 if (existingMapping != null)
@@ -176,6 +192,7 @@ public class YouTubePlaylistSyncService
                     {
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
+                        ConnectedServiceAccountId = account.ConnectedServiceAccountId,
                         Service = ServiceName,
                         ServicePlaylistId = youtubePlaylistId,
                         SyncMode = "import_only",
@@ -199,7 +216,7 @@ public class YouTubePlaylistSyncService
             {
                 await transaction.RollbackAsync(cancellationToken);
                 _logger.LogError(ex, "Failed to sync YouTube playlist {PlaylistId} for user {UserId}",
-                    youtubePlaylistId, userId);
+                    youtubePlaylistId, account.UserId);
                 throw;
             }
         });
@@ -214,7 +231,6 @@ public class YouTubePlaylistSyncService
                     cancellationToken);
             }
 
-            await _trackMatchingService.ProcessObservationAsync(observation.ObservationId, cancellationToken);
             processedSongCount += observation.OccurrenceCount;
         }
 
@@ -349,5 +365,6 @@ public class YouTubePlaylistSyncService
     private sealed record YouTubeObservationWorkItem(
         Guid ObservationId,
         string Title,
-        int OccurrenceCount);
+        int OccurrenceCount,
+        bool RequiresMatching);
 }

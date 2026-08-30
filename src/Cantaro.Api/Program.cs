@@ -67,6 +67,7 @@ builder.Services
 builder.Services.AddScoped<TokenEncryptionService>();
 builder.Services.AddScoped<YouTubeService>();
 builder.Services.AddScoped<YouTubePlaylistSyncService>();
+builder.Services.AddScoped<PlaylistCanonicalReconciliationService>();
 builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
 builder.Services.AddHttpClient<SpotifyApiClient>(client =>
 {
@@ -120,7 +121,7 @@ builder.Services.AddScoped<MediaEpisodeIdentityService>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
 builder.Services.AddScoped<SongGroupingSuggestionService>();
-builder.Services.AddSingleton<TrackMatchingQueue>();
+builder.Services.AddScoped<TrackMatchQueue>();
 builder.Services.AddSingleton<MusicSyncThrottleService>();
 builder.Services.AddScoped<MusicSyncJobProcessor>();
 builder.Services.AddHostedService<MusicSyncJobWorker>();

@@ -100,6 +100,42 @@ public class SelectMatchingCandidateAsVersionRequest
     public TrackVersionFlags VersionFlags { get; set; }
 }
 
+public sealed class MatchingQueueFilterRequest
+{
+    public string? Status { get; set; }
+    public string? SourceType { get; set; }
+    public bool ErrorsOnly { get; set; }
+    public string? Query { get; set; }
+}
+
+public sealed record MatchingBulkRetryResponse(int QueuedCount);
+
+public sealed record TrackMatchWorkItemResponse(
+    Guid ObservationId,
+    string SourceType,
+    string ExternalId,
+    string Title,
+    string? Artist,
+    string QueueStatus,
+    int RetryCount,
+    int LifetimeAttemptCount,
+    DateTimeOffset NextAttemptAt,
+    DateTimeOffset? LeaseExpiresAt,
+    DateTimeOffset? LastAttemptedAt,
+    string? LastError);
+
+public sealed record TrackMatchWorkPageResponse(
+    IReadOnlyList<TrackMatchWorkItemResponse> Items,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    int ReadyCount,
+    int ScheduledCount,
+    int ProcessingCount,
+    DateTimeOffset? ProviderNotBefore,
+    DateTimeOffset AsOf);
+
 public sealed record SongGroupingTrackResponse(
     Guid TrackId,
     string? Title,
@@ -132,24 +168,25 @@ public class MatchingController(
     ApplicationDbContext dbContext,
     UserManager<User> userManager,
     TrackMatchingService trackMatchingService,
-    SongGroupingSuggestionService songGroupingSuggestionService,
-    ILogger<MatchingController> logger) : ControllerBase
+    TrackMatchQueue trackMatchQueue,
+    MusicBrainzRequestGate musicBrainzRequestGate,
+    SongGroupingSuggestionService songGroupingSuggestionService) : ControllerBase
 {
+    // TODO: Matching decisions mutate Cantaro's global canonical music identity.
+    // Require a reviewer/admin-level role before this is exposed beyond the current trusted-user setup.
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly TrackMatchingService _trackMatchingService = trackMatchingService;
+    private readonly TrackMatchQueue _trackMatchQueue = trackMatchQueue;
+    private readonly MusicBrainzRequestGate _musicBrainzRequestGate = musicBrainzRequestGate;
     private readonly SongGroupingSuggestionService _songGroupingSuggestionService =
         songGroupingSuggestionService;
-    private readonly ILogger<MatchingController> _logger = logger;
 
     [HttpGet("summary")]
     public async Task<ActionResult<MatchingSummaryResponse>> GetSummary(CancellationToken cancellationToken)
     {
-        var userId = await GetCurrentUserIdAsync();
-
         var grouped = await _dbContext.TrackObservations
-            .Where(o => o.MatchStatus != TrackMatchingStatuses.Matched
-                && o.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
+            .Where(o => o.MatchStatus != TrackMatchingStatuses.Matched)
             .GroupBy(o => o.MatchStatus)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
@@ -167,14 +204,21 @@ public class MatchingController(
     public async Task<ActionResult<MatchingQueuePageResponse>> GetQueue(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 5,
+        [FromQuery] string? status = null,
+        [FromQuery] string? sourceType = null,
+        [FromQuery] bool errorsOnly = false,
+        [FromQuery] string? query = null,
         CancellationToken cancellationToken = default)
     {
         var userId = await GetCurrentUserIdAsync();
         pageSize = Math.Clamp(pageSize, 1, 20);
 
-        var unresolved = _dbContext.TrackObservations
-            .Where(observation => observation.MatchStatus != TrackMatchingStatuses.Matched
-                && observation.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId));
+        var unresolved = ApplyQueueFilters(
+            _dbContext.TrackObservations.Where(observation => observation.MatchStatus != TrackMatchingStatuses.Matched),
+            status,
+            sourceType,
+            errorsOnly,
+            query);
         var totalCount = await unresolved.CountAsync(cancellationToken);
         var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
         page = Math.Clamp(page, 1, totalPages);
@@ -201,20 +245,87 @@ public class MatchingController(
         });
     }
 
+    [HttpGet("work-queue")]
+    public async Task<ActionResult<TrackMatchWorkPageResponse>> GetWorkQueue(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        pageSize = Math.Clamp(pageSize, 1, 50);
+        var totalCount = await _dbContext.TrackMatchQueueItems.CountAsync(cancellationToken);
+        var processingCount = await _dbContext.TrackMatchQueueItems.CountAsync(
+            item => item.LeaseExpiresAt != null && item.LeaseExpiresAt > now.UtcDateTime,
+            cancellationToken);
+        var scheduledCount = await _dbContext.TrackMatchQueueItems.CountAsync(
+            item => (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now.UtcDateTime)
+                && item.NextAttemptAt > now.UtcDateTime,
+            cancellationToken);
+        var readyCount = totalCount - processingCount - scheduledCount;
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+        page = Math.Clamp(page, 1, totalPages);
+        var queuedItems = await _dbContext.TrackMatchQueueItems
+            .AsNoTracking()
+            .Include(item => item.TrackObservation)
+            .OrderByDescending(item => item.LeaseExpiresAt != null && item.LeaseExpiresAt > now.UtcDateTime)
+            .ThenBy(item => item.NextAttemptAt)
+            .ThenBy(item => item.TrackObservationId)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(item => new
+            {
+                item.TrackObservationId,
+                item.NextAttemptAt,
+                item.LeaseExpiresAt,
+                item.RetryCount,
+                item.TrackObservation!.SourceType,
+                item.TrackObservation.ExternalId,
+                item.TrackObservation.Title,
+                item.TrackObservation.Artist,
+                item.TrackObservation.MatchAttemptCount,
+                item.TrackObservation.LastMatchAttemptedAt,
+                item.TrackObservation.LastMatchError
+            })
+            .ToListAsync(cancellationToken);
+        var items = queuedItems.Select(item => new TrackMatchWorkItemResponse(
+            item.TrackObservationId,
+            item.SourceType,
+            item.ExternalId,
+            item.Title,
+            item.Artist,
+            item.LeaseExpiresAt != null && item.LeaseExpiresAt > now.UtcDateTime
+                ? "processing"
+                : item.NextAttemptAt > now.UtcDateTime ? "scheduled" : "ready",
+            item.RetryCount,
+            item.MatchAttemptCount,
+            new DateTimeOffset(item.NextAttemptAt, TimeSpan.Zero),
+            item.LeaseExpiresAt == null ? null : new DateTimeOffset(item.LeaseExpiresAt.Value, TimeSpan.Zero),
+            item.LastMatchAttemptedAt,
+            item.LastMatchError)).ToList();
+
+        return Ok(new TrackMatchWorkPageResponse(
+            items,
+            page,
+            pageSize,
+            totalCount,
+            totalPages,
+            readyCount,
+            scheduledCount,
+            processingCount,
+            _musicBrainzRequestGate.NotBefore > now ? _musicBrainzRequestGate.NotBefore : null,
+            now));
+    }
+
     [HttpGet("song-grouping")]
     public async Task<ActionResult<SongGroupingSuggestionPageResponse>> GetSongGroupingSuggestions(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 5,
         CancellationToken cancellationToken = default)
     {
-        var userId = await GetCurrentUserIdAsync();
         pageSize = Math.Clamp(pageSize, 1, 20);
         var pending = _dbContext.SongGroupingSuggestions
             .Where(suggestion =>
-                suggestion.Status == SongGroupingSuggestionStatuses.Pending
-                && suggestion.CandidateTrack != null
-                && suggestion.CandidateTrack.PlaylistEntries.Any(entry =>
-                    entry.Playlist != null && entry.Playlist.UserId == userId));
+                suggestion.Status == SongGroupingSuggestionStatuses.Pending);
         var totalCount = await pending.CountAsync(cancellationToken);
         var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
         page = Math.Clamp(page, 1, totalPages);
@@ -257,16 +368,34 @@ public class MatchingController(
         ReviewSongGroupingSuggestion(suggestionId, accept: false, cancellationToken);
 
     [HttpPost("queue/{observationId:guid}/retry")]
-    public async Task<ActionResult<MatchingQueueItemResponse>> Retry(Guid observationId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Retry(Guid observationId, CancellationToken cancellationToken)
     {
-        var userId = await GetCurrentUserIdAsync();
-        if (!await ObservationAccessibleAsync(observationId, userId, cancellationToken))
+        if (!await ObservationExistsAsync(observationId, cancellationToken))
         {
             return NotFound(new { error = "Track observation not found." });
         }
 
-        var observation = await _trackMatchingService.ProcessObservationAsync(observationId, cancellationToken);
-        return Ok(await LoadQueueItemAsync(observation.Id, userId, cancellationToken));
+        await QueueManualRetriesAsync([observationId], cancellationToken);
+        return Accepted();
+    }
+
+    [HttpPost("queue/retry-filtered")]
+    public async Task<ActionResult<MatchingBulkRetryResponse>> RetryFiltered(
+        [FromBody] MatchingQueueFilterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var ids = await ApplyQueueFilters(
+                _dbContext.TrackObservations.Where(observation =>
+                    observation.TrackId == null
+                    && observation.MatchStatus != TrackMatchingStatuses.Matched),
+                request.Status,
+                request.SourceType,
+                request.ErrorsOnly,
+                request.Query)
+            .Select(observation => observation.Id)
+            .ToListAsync(cancellationToken);
+        await QueueManualRetriesAsync(ids, cancellationToken);
+        return Accepted(new MatchingBulkRetryResponse(ids.Count));
     }
 
     [HttpPost("queue/{observationId:guid}/select-candidate")]
@@ -275,14 +404,13 @@ public class MatchingController(
         [FromBody] SelectMatchingCandidateRequest request,
         CancellationToken cancellationToken)
     {
-        var userId = await GetCurrentUserIdAsync();
-        if (!await ObservationAccessibleAsync(observationId, userId, cancellationToken))
+        if (!await ObservationExistsAsync(observationId, cancellationToken))
         {
             return NotFound(new { error = "Track observation not found." });
         }
 
         var observation = await _trackMatchingService.AcceptCandidateAsync(observationId, request.CandidateId, cancellationToken);
-        return Ok(await LoadQueueItemAsync(observation.Id, userId, cancellationToken));
+        return Ok(await LoadQueueItemAsync(observation.Id, cancellationToken));
     }
 
     [HttpPost("queue/{observationId:guid}/select-candidate-as-version")]
@@ -291,11 +419,7 @@ public class MatchingController(
         [FromBody] SelectMatchingCandidateAsVersionRequest request,
         CancellationToken cancellationToken)
     {
-        var userId = await GetCurrentUserIdAsync();
-        if (!await ObservationAccessibleAsync(
-                observationId,
-                userId,
-                cancellationToken))
+        if (!await ObservationExistsAsync(observationId, cancellationToken))
         {
             return NotFound(new { error = "Track observation not found." });
         }
@@ -316,10 +440,7 @@ public class MatchingController(
                     request.CandidateId,
                     request.VersionFlags,
                     cancellationToken);
-            return Ok(await LoadQueueItemAsync(
-                observation.Id,
-                userId,
-                cancellationToken));
+            return Ok(await LoadQueueItemAsync(observation.Id, cancellationToken));
         }
         catch (ArgumentOutOfRangeException exception)
         {
@@ -334,30 +455,28 @@ public class MatchingController(
     [HttpPost("queue/{observationId:guid}/mark-no-match")]
     public async Task<ActionResult<MatchingQueueItemResponse>> MarkNoMatch(Guid observationId, CancellationToken cancellationToken)
     {
-        var userId = await GetCurrentUserIdAsync();
-        if (!await ObservationAccessibleAsync(observationId, userId, cancellationToken))
+        if (!await ObservationExistsAsync(observationId, cancellationToken))
         {
             return NotFound(new { error = "Track observation not found." });
         }
 
         var observation = await _trackMatchingService.MarkNoMatchAsync(observationId, cancellationToken);
-        return Ok(await LoadQueueItemAsync(observation.Id, userId, cancellationToken));
+        return Ok(await LoadQueueItemAsync(observation.Id, cancellationToken));
     }
 
     [HttpPost("queue/{observationId:guid}/create-track")]
     public async Task<ActionResult<MatchingQueueItemResponse>> CreateTrack(Guid observationId, CancellationToken cancellationToken)
     {
-        var userId = await GetCurrentUserIdAsync();
-        if (!await ObservationAccessibleAsync(observationId, userId, cancellationToken))
+        if (!await ObservationExistsAsync(observationId, cancellationToken))
         {
             return NotFound(new { error = "Track observation not found." });
         }
 
         var observation = await _trackMatchingService.CreateTrackFromObservationAsync(observationId, cancellationToken);
-        return Ok(await LoadQueueItemAsync(observation.Id, userId, cancellationToken));
+        return Ok(await LoadQueueItemAsync(observation.Id, cancellationToken));
     }
 
-    private async Task<MatchingQueueItemResponse> LoadQueueItemAsync(Guid observationId, int userId, CancellationToken cancellationToken)
+    private async Task<MatchingQueueItemResponse> LoadQueueItemAsync(Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
             .Include(o => o.Candidates)
@@ -367,7 +486,7 @@ public class MatchingController(
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
-        return MapQueueItem(observation, userId);
+        return MapQueueItem(observation, await GetCurrentUserIdAsync());
     }
 
     private async Task<ActionResult<SongGroupingSuggestionResponse>>
@@ -378,10 +497,7 @@ public class MatchingController(
     {
         var userId = await GetCurrentUserIdAsync();
         var accessible = await _dbContext.SongGroupingSuggestions.AnyAsync(
-            suggestion => suggestion.Id == suggestionId
-                && suggestion.CandidateTrack != null
-                && suggestion.CandidateTrack.PlaylistEntries.Any(entry =>
-                    entry.Playlist != null && entry.Playlist.UserId == userId),
+            suggestion => suggestion.Id == suggestionId,
             cancellationToken);
         if (!accessible)
         {
@@ -709,19 +825,70 @@ public class MatchingController(
         }
     }
 
-    private async Task<bool> ObservationAccessibleAsync(Guid observationId, int userId, CancellationToken cancellationToken)
-    {
-        var accessible = await _dbContext.PlaylistEntries
-            .AnyAsync(
-                entry => entry.TrackObservationId == observationId && entry.Playlist != null && entry.Playlist.UserId == userId,
-                cancellationToken);
+    private Task<bool> ObservationExistsAsync(Guid observationId, CancellationToken cancellationToken) =>
+        _dbContext.TrackObservations.AnyAsync(observation => observation.Id == observationId, cancellationToken);
 
-        if (!accessible)
+    private static IQueryable<TrackObservation> ApplyQueueFilters(
+        IQueryable<TrackObservation> observations,
+        string? status,
+        string? sourceType,
+        bool errorsOnly,
+        string? query)
+    {
+        if (!string.IsNullOrWhiteSpace(status))
         {
-            _logger.LogWarning("User {UserId} attempted to access observation {ObservationId} outside their queue.", userId, observationId);
+            var normalizedStatus = status.Trim().ToLowerInvariant().Replace('-', '_');
+            observations = observations.Where(observation => observation.MatchStatus == normalizedStatus);
         }
 
-        return accessible;
+        if (!string.IsNullOrWhiteSpace(sourceType))
+        {
+            var normalizedSource = sourceType.Trim().ToLowerInvariant();
+            observations = observations.Where(observation => observation.SourceType == normalizedSource);
+        }
+
+        if (errorsOnly)
+        {
+            observations = observations.Where(observation => observation.LastMatchError != null && observation.LastMatchError != "");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var term = query.Trim().ToLowerInvariant();
+            observations = observations.Where(observation =>
+                observation.Title.ToLower().Contains(term)
+                || (observation.Artist != null && observation.Artist.ToLower().Contains(term))
+                || observation.ExternalId.ToLower().Contains(term)
+                || (observation.LastMatchError != null && observation.LastMatchError.ToLower().Contains(term)));
+        }
+
+        return observations;
+    }
+
+    private async Task QueueManualRetriesAsync(
+        IReadOnlyCollection<Guid> observationIds,
+        CancellationToken cancellationToken)
+    {
+        if (observationIds.Count == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+        await _dbContext.TrackObservations
+            .Where(observation => observationIds.Contains(observation.Id)
+                && observation.TrackId == null
+                && observation.MatchStatus != TrackMatchingStatuses.Matched)
+            .ExecuteUpdateAsync(
+                updates => updates
+                    .SetProperty(observation => observation.MatchStatus, TrackMatchingStatuses.Pending)
+                    .SetProperty(observation => observation.ResolutionNotes, "Queued for manual retry.")
+                    .SetProperty(observation => observation.UpdatedAt, now),
+                cancellationToken);
+
+        foreach (var observationId in observationIds)
+        {
+            await _trackMatchQueue.EnqueueManualRetryAsync(observationId, cancellationToken);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<int> GetCurrentUserIdAsync()

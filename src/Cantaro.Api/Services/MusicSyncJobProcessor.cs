@@ -45,6 +45,11 @@ public sealed class MusicSyncJobProcessor(
         try
         {
             var platform = _platformRegistry.GetRequired(job.Service);
+            if (job.ConnectedServiceAccountId is not { } connectedServiceAccountId)
+            {
+                throw new InvalidOperationException("Music sync job has no connected account target.");
+            }
+            var account = new PlatformAccountContext(job.UserId, connectedServiceAccountId);
             foreach (var playlist in playlists.Skip(job.ProcessedPlaylistCount))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -61,7 +66,7 @@ public sealed class MusicSyncJobProcessor(
                 try
                 {
                     var cantaroPlaylistId = await platform.SyncPlaylistAsync(
-                        job.UserId,
+                        account,
                         playlist.Id,
                         async (progress, progressCancellationToken) =>
                         {
@@ -109,12 +114,15 @@ public sealed class MusicSyncJobProcessor(
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Music sync job {JobId} failed playlist {PlaylistId}", jobId, playlist.Id);
+                    var failure = MusicSyncFailureClassifier.Classify(ex);
                     result = new BatchSyncResult
                     {
                         ServicePlaylistId = playlist.Id,
                         PlaylistName = playlist.Name,
                         Success = false,
-                        Error = ex.Message
+                        Error = failure.Message,
+                        ErrorCode = failure.Code,
+                        Retryable = failure.Retryable
                     };
                 }
 
@@ -170,7 +178,7 @@ public sealed class MusicSyncJobProcessor(
         {
             job = await ReloadJobAsync(jobId, CancellationToken.None);
             job.Status = MusicSyncJobStatuses.Failed;
-            job.ErrorMessage = ex.Message;
+            job.ErrorMessage = MusicSyncFailureClassifier.Classify(ex).Message;
             job.CurrentPlaylistName = null;
             job.CurrentSongName = null;
             job.CompletedAt = DateTimeOffset.UtcNow;

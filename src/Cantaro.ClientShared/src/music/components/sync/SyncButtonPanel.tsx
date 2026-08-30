@@ -1,4 +1,4 @@
-import type { BatchSyncResponse, SyncStatusResponse } from '../../services/syncApi';
+import type { MusicSyncJobResponse, SyncStatusResponse } from '../../services/syncApi';
 import type { PlatformPlaylist } from '../../platforms';
 
 interface SyncUsageSummaryProps {
@@ -30,7 +30,7 @@ interface SyncStatusDrawerProps {
 }
 
 interface SyncResultPanelProps {
-    syncResult: BatchSyncResponse;
+    syncResult: MusicSyncJobResponse;
 }
 
 interface PlaylistSelectorProps {
@@ -52,7 +52,7 @@ export interface SyncButtonPanelProps {
     showStatusDrawer: boolean;
     showPlaylistSelector: boolean;
     selectedPlaylists: Set<string>;
-    syncResult: BatchSyncResponse | null;
+    syncResult: MusicSyncJobResponse | null;
     error: string | null;
     songsSyncedInWindow: number;
     songSyncLimit: number;
@@ -177,20 +177,9 @@ function SyncStatusDrawer({ statusUpdates }: SyncStatusDrawerProps) {
 }
 
 function SyncResultPanel({ syncResult }: SyncResultPanelProps) {
-    const failedResults = syncResult.results.filter((result) => !result.success);
-
     return (
         <div className="mt-4 rounded-xl border border-success-border bg-success-surface px-4 py-3 text-sm text-success-content">
-            Processed {syncResult.songsSynced}/{syncResult.songsRequested} requested songs.
-            {failedResults.length > 0 ? (
-                <ul className="mt-2 list-disc space-y-1 pl-4">
-                    {failedResults.map((result) => (
-                        <li key={result.servicePlaylistId}>
-                            {result.playlistName}: {result.error}
-                        </li>
-                    ))}
-                </ul>
-            ) : null}
+            Sync queued for {syncResult.playlistCount} playlist(s). Follow progress in Recent sync activity.
         </div>
     );
 }

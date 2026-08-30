@@ -5,7 +5,7 @@ import {
   platformCatalog,
   platformManager,
   syncApi,
-  type BatchSyncResponse,
+  type MusicSyncJobResponse,
   type MusicLibraryResponse,
   type PlatformId,
   type PlatformPlaylist,
@@ -15,7 +15,7 @@ import { GlassCard, StatusBadge } from '@cantaro/client-shared/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MusicLibraryPanel } from './MusicLibraryPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { progressFromSyncJob, writePlaylistSyncProgress } from './playlistSyncProgress';
+import { writePlaylistSyncActivityFocus } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -433,7 +433,7 @@ function SyncPreview({
   selectedPlaylists: PlatformPlaylist[];
   targetPlatformIds: PlatformId[];
   syncStatus: SyncStatusResponse | null;
-  syncResult: BatchSyncResponse | null;
+  syncResult: MusicSyncJobResponse | null;
 }) {
   const totalSongs = selectedPlaylists.reduce((sum, playlist) => sum + playlist.itemCount, 0);
 
@@ -472,7 +472,7 @@ function SyncPreview({
 
       {syncResult ? (
         <div className="mt-4 border-y border-success-border bg-success-surface px-4 py-3 text-sm font-semibold text-success-content">
-          Sync completed: {syncResult.successCount} succeeded, {syncResult.failureCount} failed, {syncResult.songsSynced.toLocaleString()} songs processed.
+          Sync queued for {syncResult.playlistCount} playlist(s). Follow progress in Recent sync activity.
         </div>
       ) : null}
     </GlassCard>
@@ -529,7 +529,7 @@ function useSyncSetupData(sourcePlatformId: PlatformId) {
   const [playlists, setPlaylists] = useState<PlatformPlaylist[]>([]);
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<Set<string>>(new Set());
   const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
-  const [syncResult, setSyncResult] = useState<BatchSyncResponse | null>(null);
+  const [syncResult, setSyncResult] = useState<MusicSyncJobResponse | null>(null);
   const [isLoadingPlaylists, setIsLoadingPlaylists] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -584,7 +584,7 @@ function useSyncJob({
   sourcePlatformId: PlatformId;
   setError: (message: string | null) => void;
   setIsSyncing: (isSyncing: boolean) => void;
-  setSyncResult: (result: BatchSyncResponse | null) => void;
+  setSyncResult: (result: MusicSyncJobResponse | null) => void;
   setSyncStatus: (status: SyncStatusResponse | null) => void;
 }) {
   const navigate = useNavigate();
@@ -610,7 +610,7 @@ function useSyncJob({
         service: sourcePlatformId,
         servicePlaylistIds: Array.from(selectedPlaylistIds),
       });
-      writePlaylistSyncProgress(progressFromSyncJob(job, true));
+      writePlaylistSyncActivityFocus(job.id);
       void navigate({ to: '/music/platforms' });
     } catch (syncError) {
       const errorMessage = getSyncErrorMessage(syncError, 'Failed to sync playlists');

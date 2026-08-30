@@ -93,4 +93,5 @@ public class TrackObservation
     public Track? Track { get; set; }
     public ICollection<TrackResolutionCandidate> Candidates { get; set; } = [];
     public ICollection<PlaylistEntry> PlaylistEntries { get; set; } = [];
+    public TrackMatchQueueItem? MatchQueueItem { get; set; }
 }

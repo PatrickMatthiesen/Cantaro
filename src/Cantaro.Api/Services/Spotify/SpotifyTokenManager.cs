@@ -47,6 +47,18 @@ public sealed class SpotifyTokenManager
         CancellationToken cancellationToken)
     {
         var account = await RequireAccountAsync(userId, cancellationToken);
+        return await GetAccessTokenSnapshotAsync(
+            new PlatformAccountContext(userId, account.Id),
+            forceRefresh,
+            cancellationToken);
+    }
+
+    public async Task<SpotifyAccessToken> GetAccessTokenSnapshotAsync(
+        PlatformAccountContext accountContext,
+        bool forceRefresh,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
         if (IsReconnectRequired(account))
         {
             throw ReconnectRequired();
@@ -255,6 +267,35 @@ public sealed class SpotifyTokenManager
         return updated == 1;
     }
 
+    public async Task<bool> MarkReconnectRequiredAsync(
+        PlatformAccountContext accountContext,
+        long expectedTokenVersion,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var updated = await ExecuteWithFreshContextAsync(dbContext =>
+            dbContext.ConnectedServiceAccounts
+                .Where(candidate => candidate.Id == account.Id
+                    && candidate.TokenVersion == expectedTokenVersion)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(candidate => candidate.EncryptedAccessToken, (string?)null)
+                        .SetProperty(candidate => candidate.EncryptedRefreshToken, (string?)null)
+                        .SetProperty(candidate => candidate.TokenExpiresAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.RefreshTokenExpiresAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.ConnectionState, "reconnect_required")
+                        .SetProperty(candidate => candidate.ReconnectRequiredAt, now)
+                        .SetProperty(candidate => candidate.ReconnectReason, reason)
+                        .SetProperty(candidate => candidate.TokenVersion, expectedTokenVersion + 1)
+                        .SetProperty(candidate => candidate.TokenRefreshLeaseId, (Guid?)null)
+                        .SetProperty(candidate => candidate.TokenRefreshLeaseExpiresAt, (DateTime?)null)
+                        .SetProperty(candidate => candidate.UpdatedAt, now),
+                    cancellationToken));
+        return updated == 1;
+    }
+
     private async Task<ConnectedServiceAccount> RequireAccountAsync(
         int userId,
         CancellationToken cancellationToken)
@@ -265,6 +306,21 @@ public sealed class SpotifyTokenManager
             ?? throw new PlatformApiException(
                 "spotify_not_connected",
                 "Connect Spotify before requesting playlists.",
+                StatusCodes.Status403Forbidden);
+    }
+
+    private async Task<ConnectedServiceAccount> RequireAccountAsync(
+        PlatformAccountContext accountContext,
+        CancellationToken cancellationToken)
+    {
+        return await _dbContext.ConnectedServiceAccounts.SingleOrDefaultAsync(
+                candidate => candidate.Id == accountContext.ConnectedServiceAccountId
+                    && candidate.UserId == accountContext.UserId
+                    && candidate.Service == ServiceName,
+                cancellationToken)
+            ?? throw new PlatformApiException(
+                "spotify_not_connected",
+                "The selected Spotify account is no longer connected.",
                 StatusCodes.Status403Forbidden);
     }
 

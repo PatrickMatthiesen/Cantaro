@@ -25,6 +25,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
     public DbSet<TrackSourceId> TrackSourceIds => Set<TrackSourceId>();
     public DbSet<TrackObservation> TrackObservations => Set<TrackObservation>();
+    public DbSet<TrackMatchQueueItem> TrackMatchQueueItems => Set<TrackMatchQueueItem>();
     public DbSet<TrackResolutionCandidate> TrackResolutionCandidates => Set<TrackResolutionCandidate>();
     public DbSet<Playlist> Playlists => Set<Playlist>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
@@ -376,6 +377,16 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<TrackMatchQueueItem>(entity =>
+        {
+            entity.HasKey(item => item.TrackObservationId);
+            entity.HasIndex(item => item.NextAttemptAt);
+            entity.HasOne(item => item.TrackObservation)
+                .WithOne(observation => observation.MatchQueueItem)
+                .HasForeignKey<TrackMatchQueueItem>(item => item.TrackObservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<TrackResolutionCandidate>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -430,8 +441,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
-            // Unique index on (PlaylistId, Service)
-            entity.HasIndex(e => new { e.PlaylistId, e.Service })
+            entity.HasIndex(e => new { e.ConnectedServiceAccountId, e.ServicePlaylistId })
+                .IsUnique();
+            entity.HasIndex(e => new { e.PlaylistId, e.ConnectedServiceAccountId, e.Service })
                 .IsUnique();
 
             entity.HasOne(e => e.Playlist)
@@ -449,6 +461,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.UserId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.UserId, e.CreatedAt, e.Id });
+            entity.HasIndex(e => e.ConnectedServiceAccountId);
             entity.HasIndex(e => new { e.UserId, e.Service })
                 .IsUnique()
                 .HasFilter("\"Status\" IN ('queued', 'running')");
@@ -462,6 +476,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ConnectedServiceAccount)
+                .WithMany()
+                .HasForeignKey(e => e.ConnectedServiceAccountId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<MediaTitle>(entity =>

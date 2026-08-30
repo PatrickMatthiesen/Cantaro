@@ -19,7 +19,7 @@ public sealed record RecognizeYouTubeResponse(string Classification, string Stat
 public sealed class MusicRecognitionController(
     ApplicationDbContext dbContext,
     YouTubeService youtubeService,
-    TrackMatchingQueue trackMatchingQueue,
+    TrackMatchQueue trackMatchQueue,
     MusicLibraryQueryService musicLibraryQueryService,
     UserManager<User> userManager) : ControllerBase
 {
@@ -90,7 +90,8 @@ public sealed class MusicRecognitionController(
             }
         }
 
-        trackMatchingQueue.Enqueue(observation.Id);
+        await trackMatchQueue.EnqueueAsync(observation.Id, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(new RecognizeYouTubeResponse("music", TrackMatchingStatuses.Pending, null, observation.Title, observation.Artist, false, null));
     }
 

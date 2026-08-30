@@ -4,6 +4,8 @@ namespace Cantaro.Api.Services;
 
 public sealed record PlatformSyncProgress(int ProcessedSongCount, string? CurrentSongName);
 
+public sealed record PlatformAccountContext(int UserId, int ConnectedServiceAccountId);
+
 public interface IPlatformService
 {
     string PlatformId { get; }
@@ -39,6 +41,11 @@ public interface IPlatformService
     Task<IReadOnlyList<PlatformPlaylistDto>> GetPlaylistsAsync(int userId, CancellationToken cancellationToken)
         => GetPlaylistsAsync(userId);
 
+    Task<IReadOnlyList<PlatformPlaylistDto>> GetPlaylistsAsync(
+        PlatformAccountContext account,
+        CancellationToken cancellationToken)
+        => GetPlaylistsAsync(account.UserId, cancellationToken);
+
     Task<IReadOnlyList<PlatformSongDto>> GetPlaylistSongsAsync(int userId, string playlistId);
 
     Task<IReadOnlyList<PlatformSongDto>> GetPlaylistSongsAsync(
@@ -47,14 +54,17 @@ public interface IPlatformService
         CancellationToken cancellationToken)
         => GetPlaylistSongsAsync(userId, playlistId);
 
-    Task<Guid> SyncPlaylistAsync(int userId, string playlistId, CancellationToken cancellationToken);
+    Task<Guid> SyncPlaylistAsync(
+        PlatformAccountContext account,
+        string playlistId,
+        CancellationToken cancellationToken);
 
     Task<Guid> SyncPlaylistAsync(
-        int userId,
+        PlatformAccountContext account,
         string playlistId,
         Func<PlatformSyncProgress, CancellationToken, Task> reportProgressAsync,
         CancellationToken cancellationToken)
-        => SyncPlaylistAsync(userId, playlistId, cancellationToken);
+        => SyncPlaylistAsync(account, playlistId, cancellationToken);
 
     bool TryValidatePlaylistId(string playlistId, out string? error);
 }
