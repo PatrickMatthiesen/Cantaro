@@ -338,7 +338,8 @@ public class YouTubePlaylistSyncService
         observation.DurationSeconds = video.DurationSeconds;
         observation.UpdatedAt = now;
 
-        if (observation.MatchStatus != TrackMatchingStatuses.Matched)
+        if (observation.MatchStatus != TrackMatchingStatuses.Matched
+            && observation.MatchStatus != TrackMatchingStatuses.NotMusic)
         {
             observation.MatchStatus = TrackMatchingStatuses.Pending;
             observation.ResolutionNotes = null;

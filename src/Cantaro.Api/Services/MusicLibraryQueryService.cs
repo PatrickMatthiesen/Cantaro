@@ -29,7 +29,9 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
 
         var playlistDtos = playlists.Select(MapPlaylist).ToList();
         var songDtos = playlists
-            .SelectMany(playlist => playlist.Entries.Select(entry => new MusicLibraryEntryContext(playlist, entry)))
+            .SelectMany(playlist => playlist.Entries
+                .Where(IsMusicEntry)
+                .Select(entry => new MusicLibraryEntryContext(playlist, entry)))
             .GroupBy(item => GetSongStableId(item.Entry))
             .Select(MapSong)
             .OrderBy(song => song.Title)
@@ -55,7 +57,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             Id = playlist.Id.ToString(),
             Name = playlist.Name,
             Description = playlist.Description,
-            EntryCount = playlist.Entries.Count,
+            EntryCount = playlist.Entries.Count(IsMusicEntry),
             Services = playlist.ServiceMappings
                 .OrderBy(mapping => mapping.Service)
                 .Select(mapping => new MusicLibraryPlaylistServiceDto
@@ -68,6 +70,9 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 .ToList()
         };
     }
+
+    private static bool IsMusicEntry(PlaylistEntry entry) =>
+        entry.TrackObservation?.MatchStatus != TrackMatchingStatuses.NotMusic;
 
     private static MusicLibrarySongDto MapSong(IGrouping<string, MusicLibraryEntryContext> group)
     {

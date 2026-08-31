@@ -8,7 +8,7 @@ export function formatDuration(durationSeconds?: number): string | null {
 }
 
 export function formatStatus(status: string): string {
-  const labels: Readonly<Record<string, string>> = { ambiguous: 'Ambiguous', no_match: 'No match', pending: 'Pending', matched: 'Matched' };
+  const labels: Readonly<Record<string, string>> = { ambiguous: 'Review candidates', no_match: 'No suitable candidates', pending: 'Awaiting matching', matched: 'Matched', not_music: 'Not music' };
   return labels[status] ?? status;
 }
 
@@ -23,7 +23,7 @@ export function formatClusterReason(clusterReason?: string): string | null {
 }
 
 export function statusClasses(status: string): string {
-  const classes: Readonly<Record<string, string>> = { ambiguous: 'bg-amber-100 text-amber-800', no_match: 'bg-rose-100 text-rose-800', pending: 'bg-indigo-100 text-indigo-800' };
+  const classes: Readonly<Record<string, string>> = { ambiguous: 'bg-amber-100 text-amber-800', no_match: 'bg-rose-100 text-rose-800', pending: 'bg-indigo-100 text-indigo-800', not_music: 'bg-surface-subtle text-content-muted' };
   return classes[status] ?? 'bg-emerald-100 text-emerald-800';
 }
 

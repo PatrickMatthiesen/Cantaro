@@ -18,6 +18,66 @@ namespace Cantaro.Api.Tests;
 public sealed class MatchingControllerTests
 {
     [Fact]
+    public async Task ReviewQueue_ShowsCompletedDecisionsByDefaultAndNotMusicOnRequest()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var user = TestUserFactory.Create(899, "matching-states@example.com");
+        db.Users.Add(user);
+        AddObservation(db, "youtube", TrackMatchingStatuses.Pending, null, "Still queued");
+        AddObservation(db, "youtube", TrackMatchingStatuses.Ambiguous, null, "Review candidates");
+        AddObservation(db, "youtube", TrackMatchingStatuses.NoMatch, null, "No suitable candidates");
+        AddObservation(db, "youtube", TrackMatchingStatuses.NotMusic, null, "Coding talk");
+        AddObservation(db, "youtube", TrackMatchingStatuses.Matched, null, "Resolved song");
+        await db.SaveChangesAsync();
+
+        using var userManager = CreateUserManager(db);
+        var controller = CreateController(db, userManager, user.Id);
+        var defaultResult = await controller.GetQueue(cancellationToken: CancellationToken.None);
+        var defaultPage = Assert.IsType<MatchingQueuePageResponse>(Assert.IsType<OkObjectResult>(defaultResult.Result).Value);
+        Assert.Equal(2, defaultPage.TotalCount);
+        Assert.Contains(defaultPage.Items, item => item.MatchStatus == TrackMatchingStatuses.Ambiguous);
+        Assert.Contains(defaultPage.Items, item => item.MatchStatus == TrackMatchingStatuses.NoMatch);
+
+        var notMusicResult = await controller.GetQueue(status: TrackMatchingStatuses.NotMusic, cancellationToken: CancellationToken.None);
+        var notMusicPage = Assert.IsType<MatchingQueuePageResponse>(Assert.IsType<OkObjectResult>(notMusicResult.Result).Value);
+        Assert.Equal("Coding talk", Assert.Single(notMusicPage.Items).Title);
+    }
+
+    [Fact]
+    public async Task MarkNotMusic_RemovesObservationFromWorkQueueAndCanBeReturnedToMatching()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var user = TestUserFactory.Create(898, "not-music@example.com");
+        db.Users.Add(user);
+        var observation = AddObservation(db, "youtube", TrackMatchingStatuses.NoMatch, null, "Coding talk");
+        db.TrackMatchQueueItems.Add(new TrackMatchQueueItem
+        {
+            TrackObservationId = observation.Id,
+            NextAttemptAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        using var userManager = CreateUserManager(db);
+        var controller = CreateController(db, userManager, user.Id);
+        Assert.IsType<OkObjectResult>((await controller.MarkNotMusic(observation.Id, CancellationToken.None)).Result);
+
+        Assert.Equal(TrackMatchingStatuses.NotMusic, (await db.TrackObservations.AsNoTracking().SingleAsync()).MatchStatus);
+        Assert.Empty(await db.TrackMatchQueueItems.AsNoTracking().ToListAsync());
+
+        Assert.IsType<AcceptedResult>(await controller.Retry(observation.Id, CancellationToken.None));
+        Assert.Equal(TrackMatchingStatuses.Pending, (await db.TrackObservations.AsNoTracking().SingleAsync()).MatchStatus);
+        Assert.Single(await db.TrackMatchQueueItems.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task GetWorkQueue_ReportsOnlyDurableQueueRowsAndTheirOperationalState()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

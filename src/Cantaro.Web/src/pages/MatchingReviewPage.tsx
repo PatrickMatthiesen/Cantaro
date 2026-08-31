@@ -118,12 +118,18 @@ function useFilteredRetry(
   const [message, setMessage] = useState<string | null>(null);
   const clearMessage = useCallback(() => setMessage(null), []);
   const retry = useCallback(async () => {
-    if (totalCount === 0 || !window.confirm(`Queue a new bounded retry cycle for ${totalCount} filtered item(s)?`)) return;
+    const returningNotMusic = filters.status === 'not_music';
+    const confirmation = returningNotMusic
+      ? `Return ${totalCount} filtered item(s) to matching?`
+      : `Queue a new bounded retry cycle for ${totalCount} filtered item(s)?`;
+    if (totalCount === 0 || !window.confirm(confirmation)) return;
     setIsRetrying(true);
     setError(null);
     try {
       const result = await matchingApi.retryFiltered(filters);
-      setMessage(`${result.queuedCount} item(s) queued for retry.`);
+      setMessage(returningNotMusic
+        ? `${result.queuedCount} item(s) returned to matching.`
+        : `${result.queuedCount} item(s) queued for retry.`);
       await loadQueue();
     } catch (retryError) {
       setError(getErrorMessage(retryError, 'Failed to retry filtered matches'));
@@ -237,7 +243,7 @@ function MatchingReviewHeader({ onRefresh }: { onRefresh: () => void }) {
       <div>
         <h1 className="text-3xl font-black tracking-[-0.03em] text-content">Resolve track identity</h1>
         <p className="mt-2 text-sm text-content-muted">
-          Review ambiguous and unmatched imports before they become canonical Cantaro tracks.
+          Review completed searches that need a decision before they become canonical Cantaro tracks.
         </p>
       </div>
       <GradientButton tone="soft" onClick={onRefresh}>
@@ -249,10 +255,10 @@ function MatchingReviewHeader({ onRefresh }: { onRefresh: () => void }) {
 
 function getMatchingSummaryStats(summary: MatchingSummaryResponse) {
   return [
-    { label: 'Unresolved', value: summary.totalUnresolved, tone: 'text-personal-accent-strong' },
-    { label: 'Pending', value: summary.pending, tone: 'text-info-content' },
-    { label: 'Ambiguous', value: summary.ambiguous, tone: 'text-warning-content' },
-    { label: 'No match', value: summary.noMatch, tone: 'text-danger-content' },
+    { label: 'Awaiting matching', value: summary.awaitingMatching, tone: 'text-info-content' },
+    { label: 'Needs review', value: summary.needsReview, tone: 'text-warning-content' },
+    { label: 'Matched', value: summary.matched, tone: 'text-success-content' },
+    { label: 'Not music', value: summary.notMusic, tone: 'text-content-muted' },
   ];
 }
 
@@ -292,7 +298,7 @@ function MatchingQueueEmptyState() {
     <div className="border-y border-border-subtle py-8">
       <h2 className="text-2xl font-semibold">Queue is clear</h2>
       <p className="mt-2 text-sm text-content-muted">
-        Imported songs are either matched already or there are no playlists waiting for review.
+        Completed searches are either resolved already or none currently need review.
       </p>
     </div>
   );
@@ -554,6 +560,20 @@ function ObservationActions({
   item: MatchingQueueItemResponse;
   onAction: MatchingActionHandler;
 }) {
+  if (item.matchStatus === 'not_music') {
+    return (
+      <div className="flex flex-wrap gap-2 lg:w-64 lg:flex-col">
+        <GradientButton
+          className="flex-1 lg:flex-none"
+          onClick={() => void onAction(item.observationId, () => matchingApi.retry(item.observationId))}
+          disabled={isBusy}
+        >
+          {isBusy ? 'Returning…' : 'Return to matching'}
+        </GradientButton>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap gap-2 lg:w-64 lg:flex-col">
       <GradientButton
@@ -574,10 +594,10 @@ function ObservationActions({
       <button
         type="button"
         className="min-h-11 flex-1 px-5 text-sm font-semibold text-content transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60 lg:flex-none"
-        onClick={() => void onAction(item.observationId, () => matchingApi.markNoMatch(item.observationId))}
+        onClick={() => void onAction(item.observationId, () => matchingApi.markNotMusic(item.observationId))}
         disabled={isBusy}
       >
-        Mark no match
+        Mark as not music
       </button>
     </div>
   );

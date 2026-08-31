@@ -1,8 +1,8 @@
 export interface MatchingSummaryResponse {
-  totalUnresolved: number;
-  pending: number;
-  ambiguous: number;
-  noMatch: number;
+  awaitingMatching: number;
+  needsReview: number;
+  matched: number;
+  notMusic: number;
 }
 
 export interface MatchingQueuePlaylistResponse {
@@ -259,14 +259,14 @@ class MatchingApiClient {
     await this.ensureOk(response, 'Failed to add matching candidate as a version');
   }
 
-  async markNoMatch(observationId: string): Promise<void> {
-    const response = await fetch(`/api/matching/queue/${encodeURIComponent(observationId)}/mark-no-match`, {
+  async markNotMusic(observationId: string): Promise<void> {
+    const response = await fetch(`/api/matching/queue/${encodeURIComponent(observationId)}/mark-not-music`, {
       method: 'POST',
       credentials: 'include',
       headers: this.getHeaders(),
     });
 
-    await this.ensureOk(response, 'Failed to mark observation as no match');
+    await this.ensureOk(response, 'Failed to mark observation as not music');
   }
 
   async createTrack(observationId: string): Promise<void> {

@@ -198,6 +198,36 @@ public class MusicLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetLibraryAsync_ExcludesEntriesMarkedAsNotMusic()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(707, "not-music-library@example.com");
+        var playlist = MakePlaylist(user.Id, "Coding", now);
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "coding-talk",
+            Title = "Deep dive on LINQ",
+            MatchStatus = TrackMatchingStatuses.NotMusic,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.AddRange(user, playlist, observation);
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.Add(MakeEntry(playlist.Id, null, observation.Id, 0, "youtube", now));
+        await db.SaveChangesAsync();
+
+        var result = await new MusicLibraryQueryService(db).GetLibraryAsync(user.Id, CancellationToken.None);
+
+        Assert.Empty(result.Songs);
+        Assert.Equal(0, Assert.Single(result.Playlists).EntryCount);
+    }
+
+    [Fact]
     public async Task AddCanonicalSongToPlaylistAsync_IsUserScopedAndIdempotent()
     {
         var (db, connection) = await CreateDbAsync();
