@@ -11,10 +11,10 @@ namespace Cantaro.Api.Controllers;
 
 public class MatchingSummaryResponse
 {
-    public int TotalUnresolved { get; set; }
-    public int Pending { get; set; }
-    public int Ambiguous { get; set; }
-    public int NoMatch { get; set; }
+    public int AwaitingMatching { get; set; }
+    public int NeedsReview { get; set; }
+    public int Matched { get; set; }
+    public int NotMusic { get; set; }
 }
 
 public class MatchingQueuePlaylistResponse
@@ -186,17 +186,17 @@ public class MatchingController(
     public async Task<ActionResult<MatchingSummaryResponse>> GetSummary(CancellationToken cancellationToken)
     {
         var grouped = await _dbContext.TrackObservations
-            .Where(o => o.MatchStatus != TrackMatchingStatuses.Matched)
             .GroupBy(o => o.MatchStatus)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
 
+        int Count(string status) => grouped.FirstOrDefault(item => item.Key == status)?.Count ?? 0;
         return Ok(new MatchingSummaryResponse
         {
-            TotalUnresolved = grouped.Sum(item => item.Count),
-            Pending = grouped.FirstOrDefault(item => item.Key == TrackMatchingStatuses.Pending)?.Count ?? 0,
-            Ambiguous = grouped.FirstOrDefault(item => item.Key == TrackMatchingStatuses.Ambiguous)?.Count ?? 0,
-            NoMatch = grouped.FirstOrDefault(item => item.Key == TrackMatchingStatuses.NoMatch)?.Count ?? 0
+            AwaitingMatching = Count(TrackMatchingStatuses.Pending),
+            NeedsReview = Count(TrackMatchingStatuses.Ambiguous) + Count(TrackMatchingStatuses.NoMatch),
+            Matched = Count(TrackMatchingStatuses.Matched),
+            NotMusic = Count(TrackMatchingStatuses.NotMusic)
         });
     }
 
@@ -214,7 +214,7 @@ public class MatchingController(
         pageSize = Math.Clamp(pageSize, 1, 20);
 
         var unresolved = ApplyQueueFilters(
-            _dbContext.TrackObservations.Where(observation => observation.MatchStatus != TrackMatchingStatuses.Matched),
+            ReviewQueue(status),
             status,
             sourceType,
             errorsOnly,
@@ -229,7 +229,7 @@ public class MatchingController(
                 .ThenInclude(entry => entry.Playlist)
             .AsSplitQuery()
             .OrderByDescending(o => o.MatchStatus == TrackMatchingStatuses.Ambiguous)
-            .ThenByDescending(o => o.LastMatchAttemptedAt)
+            .ThenByDescending(o => o.MatchAttemptCount)
             .ThenBy(o => o.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -385,9 +385,7 @@ public class MatchingController(
         CancellationToken cancellationToken)
     {
         var ids = await ApplyQueueFilters(
-                _dbContext.TrackObservations.Where(observation =>
-                    observation.TrackId == null
-                    && observation.MatchStatus != TrackMatchingStatuses.Matched),
+                ReviewQueue(request.Status),
                 request.Status,
                 request.SourceType,
                 request.ErrorsOnly,
@@ -452,16 +450,23 @@ public class MatchingController(
         }
     }
 
-    [HttpPost("queue/{observationId:guid}/mark-no-match")]
-    public async Task<ActionResult<MatchingQueueItemResponse>> MarkNoMatch(Guid observationId, CancellationToken cancellationToken)
+    [HttpPost("queue/{observationId:guid}/mark-not-music")]
+    public async Task<ActionResult<MatchingQueueItemResponse>> MarkNotMusic(Guid observationId, CancellationToken cancellationToken)
     {
         if (!await ObservationExistsAsync(observationId, cancellationToken))
         {
             return NotFound(new { error = "Track observation not found." });
         }
 
-        var observation = await _trackMatchingService.MarkNoMatchAsync(observationId, cancellationToken);
-        return Ok(await LoadQueueItemAsync(observation.Id, cancellationToken));
+        try
+        {
+            var observation = await _trackMatchingService.MarkNotMusicAsync(observationId, cancellationToken);
+            return Ok(await LoadQueueItemAsync(observation.Id, cancellationToken));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { error = exception.Message });
+        }
     }
 
     [HttpPost("queue/{observationId:guid}/create-track")]
@@ -863,6 +868,19 @@ public class MatchingController(
         }
 
         return observations;
+    }
+
+    private IQueryable<TrackObservation> ReviewQueue(string? status)
+    {
+        var observations = _dbContext.TrackObservations.Where(observation => observation.TrackId == null);
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return observations.Where(observation =>
+                observation.MatchStatus == TrackMatchingStatuses.Ambiguous
+                || observation.MatchStatus == TrackMatchingStatuses.NoMatch);
+        }
+
+        return observations.Where(observation => observation.MatchStatus != TrackMatchingStatuses.Matched);
     }
 
     private async Task QueueManualRetriesAsync(

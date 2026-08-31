@@ -242,17 +242,33 @@ public class TrackMatchingService
         }
     }
 
-    public async Task<TrackObservation> MarkNoMatchAsync(Guid observationId, CancellationToken cancellationToken)
+    public async Task<TrackObservation> MarkNotMusicAsync(Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
+        if (observation.TrackId != null || observation.MatchStatus == TrackMatchingStatuses.Matched)
+        {
+            throw new InvalidOperationException("A matched observation cannot be marked as not music.");
+        }
+
         observation.TrackId = null;
-        observation.MatchStatus = TrackMatchingStatuses.NoMatch;
-        observation.ResolutionNotes = "Marked as no match during review.";
+        observation.MatchStatus = TrackMatchingStatuses.NotMusic;
+        observation.LastMatchError = null;
+        observation.ResolutionNotes = "Marked as not music during review.";
         observation.AcceptedCandidateId = null;
         observation.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _dbContext.TrackMatchQueueItems
+            .Where(item => item.TrackObservationId == observationId)
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var trackedQueueItem in _dbContext.TrackMatchQueueItems.Local
+                     .Where(item => item.TrackObservationId == observationId)
+                     .ToList())
+        {
+            _dbContext.Entry(trackedQueueItem).State = EntityState.Detached;
+        }
 
         await _playlistReconciler.ReconcileObservationAsync(observation.Id, null, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
