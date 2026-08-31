@@ -42,11 +42,34 @@ function QueueStats({ data }: { data: TrackMatchWorkPageResponse }) {
   ].map(([label, value]) => <div key={label} className="py-4 md:border-r md:border-border-subtle md:px-5 md:last:border-r-0"><dt className="text-sm text-content-muted">{label}</dt><dd className="mt-1 text-2xl font-bold text-content">{value}</dd></div>)}</dl>;
 }
 
-function QueueItem({ item, isNext, data }: { item: TrackMatchWorkItemResponse; isNext: boolean; data: TrackMatchWorkPageResponse }) {
+function QueueItem({
+  item,
+  isNext,
+  data,
+  isMarkingNotMusic,
+  onMarkNotMusic,
+}: {
+  item: TrackMatchWorkItemResponse;
+  isNext: boolean;
+  data: TrackMatchWorkPageResponse;
+  isMarkingNotMusic: boolean;
+  onMarkNotMusic: (item: TrackMatchWorkItemResponse) => void;
+}) {
   return <article className="border-y border-border-subtle bg-surface-translucent px-4 py-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0"><h3 className="truncate text-base font-bold text-content">{item.title}</h3><p className="mt-1 text-sm text-content-muted">{item.artist ?? 'Unknown artist'} · {item.sourceType}</p><p className="mt-1 text-xs text-content-subtle">{item.externalId}</p></div>
-      <span className={`px-3 py-1 text-xs font-bold ${queueStatusClasses(item.queueStatus)}`}>{queueStatusLabel(item, isNext, data)}</span>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <span className={`px-3 py-1 text-xs font-bold ${queueStatusClasses(item.queueStatus)}`}>{queueStatusLabel(item, isNext, data)}</span>
+        <button
+          type="button"
+          onClick={() => onMarkNotMusic(item)}
+          disabled={isMarkingNotMusic}
+          aria-label={`Mark ${item.title} as not music`}
+          className="min-h-8 border border-danger-border px-3 text-xs font-semibold text-danger-content transition-colors hover:bg-danger-surface focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isMarkingNotMusic ? 'Marking…' : 'Mark as not music'}
+        </button>
+      </div>
     </div>
     <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-content-muted">Retry cycle</dt><dd className="font-semibold text-content">{item.retryCount} retries</dd></div><div><dt className="text-content-muted">Lifetime attempts</dt><dd className="font-semibold text-content">{item.lifetimeAttemptCount}</dd></div></dl>
     {item.lastError ? <p className="mt-3 text-sm text-danger-content">Last error: {item.lastError}</p> : null}
@@ -79,24 +102,49 @@ function useTrackMatchingQueueData() {
     return () => window.clearInterval(interval);
   }, [load]);
 
-  return { data, error, load, setPage };
+  const [markingObservationId, setMarkingObservationId] = useState<string | null>(null);
+  const markNotMusic = useCallback(async (item: TrackMatchWorkItemResponse) => {
+    const confirmation = `Mark “${item.title}” as not music?\n\nIt will be removed from the matching queue and will not be queued again.`;
+    if (!window.confirm(confirmation)) return;
+
+    setMarkingObservationId(item.observationId);
+    setError(null);
+    try {
+      await matchingApi.markNotMusic(item.observationId);
+      await load();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Failed to mark item as not music');
+    } finally {
+      setMarkingObservationId(null);
+    }
+  }, [load]);
+
+  return { data, error, load, markNotMusic, markingObservationId, setPage };
 }
 
-function QueueRows({ data }: { data: TrackMatchWorkPageResponse }) {
+function QueueRows({
+  data,
+  markingObservationId,
+  onMarkNotMusic,
+}: {
+  data: TrackMatchWorkPageResponse;
+  markingObservationId: string | null;
+  onMarkNotMusic: (item: TrackMatchWorkItemResponse) => void;
+}) {
   if (data.items.length === 0) return <div className="border-y border-border-subtle py-8"><h3 className="text-xl font-semibold text-content">No matching work is scheduled</h3><p className="mt-2 text-sm text-content-muted">New unresolved imports and manual retries will appear here.</p></div>;
   const nextObservationId = data.page === 1
     ? data.items.find((item) => item.queueStatus !== 'processing')?.observationId
     : undefined;
-  return <section className="space-y-3">{data.items.map((item) => <QueueItem key={item.observationId} item={item} isNext={item.observationId === nextObservationId} data={data} />)}</section>;
+  return <section className="space-y-3">{data.items.map((item) => <QueueItem key={item.observationId} item={item} isNext={item.observationId === nextObservationId} data={data} isMarkingNotMusic={markingObservationId === item.observationId} onMarkNotMusic={onMarkNotMusic} />)}</section>;
 }
 
-function TrackMatchingQueueContent({ data, error, onRefresh, onPageChange }: { data: TrackMatchWorkPageResponse; error: string | null; onRefresh: () => void; onPageChange: (page: number) => void }) {
-  return <div className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-bold text-content">Matching work queue</h2><p className="mt-1 text-sm text-content-muted">Durable work waiting for the canonical track matcher. Updates every two seconds.</p></div><button type="button" onClick={onRefresh} className="min-h-10 border border-border-strong px-3 text-sm font-semibold text-content">Refresh now</button></div><QueueStats data={data} />{data.providerNotBefore ? <p className="border-y border-warning-border bg-warning-surface p-3 text-sm font-semibold text-warning-content">MusicBrainz cooldown active until {formatTime(data.providerNotBefore)}. Ready items will resume automatically.</p> : null}{error ? <p className="text-sm text-danger-content">{error}</p> : null}<QueuePagination data={data} onPageChange={onPageChange} /><QueueRows data={data} /><QueuePagination data={data} onPageChange={onPageChange} /></div>;
+function TrackMatchingQueueContent({ data, error, markingObservationId, onMarkNotMusic, onRefresh, onPageChange }: { data: TrackMatchWorkPageResponse; error: string | null; markingObservationId: string | null; onMarkNotMusic: (item: TrackMatchWorkItemResponse) => void; onRefresh: () => void; onPageChange: (page: number) => void }) {
+  return <div className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-bold text-content">Matching work queue</h2><p className="mt-1 text-sm text-content-muted">Durable work waiting for the canonical track matcher. Updates every two seconds.</p></div><button type="button" onClick={onRefresh} className="min-h-10 border border-border-strong px-3 text-sm font-semibold text-content">Refresh now</button></div><QueueStats data={data} />{data.providerNotBefore ? <p className="border-y border-warning-border bg-warning-surface p-3 text-sm font-semibold text-warning-content">MusicBrainz cooldown active until {formatTime(data.providerNotBefore)}. Ready items will resume automatically.</p> : null}{error ? <p className="text-sm text-danger-content">{error}</p> : null}<QueuePagination data={data} onPageChange={onPageChange} /><QueueRows data={data} markingObservationId={markingObservationId} onMarkNotMusic={onMarkNotMusic} /><QueuePagination data={data} onPageChange={onPageChange} /></div>;
 }
 
 export function TrackMatchingQueuePanel() {
   const queue = useTrackMatchingQueueData();
   if (!queue.data && !queue.error) return <p className="py-8 text-sm text-content-muted">Loading matching queue…</p>;
   if (!queue.data) return <p className="border-y border-danger-border bg-danger-surface p-4 text-danger-content">{queue.error}</p>;
-  return <TrackMatchingQueueContent data={queue.data} error={queue.error} onRefresh={() => void queue.load()} onPageChange={queue.setPage} />;
+  return <TrackMatchingQueueContent data={queue.data} error={queue.error} markingObservationId={queue.markingObservationId} onMarkNotMusic={(item) => void queue.markNotMusic(item)} onRefresh={() => void queue.load()} onPageChange={queue.setPage} />;
 }
