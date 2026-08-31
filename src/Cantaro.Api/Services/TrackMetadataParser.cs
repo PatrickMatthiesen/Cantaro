@@ -34,9 +34,11 @@ public static partial class TrackMetadataParser
         cleanedTitle = StripTrailingDashVersionContext(cleanedTitle, rawArtist);
         var isTopicChannel = IsTopicChannel(rawArtist);
         var cleanedArtist = CleanupArtist(rawArtist);
+        var decoratedAttribution = ExtractDecoratedArtistTitle(cleanedTitle, cleanedArtist);
+        cleanedTitle = decoratedAttribution.Title;
 
         var displayTitle = cleanedTitle;
-        string? parsedArtist = null;
+        string? parsedArtist = decoratedAttribution.Artist;
         var featuredArtists = ExtractFeaturedArtistNames(rawTitle);
 
         foreach (var separator in ArtistTitleSeparators)
@@ -105,6 +107,11 @@ public static partial class TrackMetadataParser
 
         var normalizedValue = NormalizeDashes(value);
         var versionMarkers = ExtractMarkers(normalizedValue, VersionMarkerRegex()).ToList();
+        if (LiveVersionContextRegex().IsMatch(normalizedValue))
+        {
+            versionMarkers.Add("live");
+        }
+
         if (SourceVersionContextRegex().IsMatch(normalizedValue))
         {
             versionMarkers.Add("source-context");
@@ -257,6 +264,51 @@ public static partial class TrackMetadataParser
         return TopicSuffixRegex().IsMatch(NormalizeDashes(value));
     }
 
+    private static (string Title, string? Artist) ExtractDecoratedArtistTitle(
+        string title,
+        string? suppliedArtist)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(suppliedArtist))
+        {
+            return (title, null);
+        }
+
+        if (title.StartsWith('【'))
+        {
+            var closingBracket = title.IndexOf('】');
+            if (closingBracket > 1)
+            {
+                var taggedArtist = CleanupArtist(title[1..closingBracket]);
+                if (IsSuppliedArtist(taggedArtist, suppliedArtist))
+                {
+                    return (title[(closingBracket + 1)..].Trim(), taggedArtist);
+                }
+            }
+        }
+
+        var openingQuote = title.IndexOf('「');
+        var closingQuote = openingQuote < 0 ? -1 : title.IndexOf('」', openingQuote + 1);
+        if (openingQuote > 0 && closingQuote > openingQuote + 1)
+        {
+            var taggedArtist = CleanupArtist(title[..openingQuote]);
+            if (IsSuppliedArtist(taggedArtist, suppliedArtist))
+            {
+                return (title[(openingQuote + 1)..closingQuote].Trim(), taggedArtist);
+            }
+        }
+
+        return (title, null);
+    }
+
+    private static bool IsSuppliedArtist(string? taggedArtist, string suppliedArtist)
+    {
+        var normalizedTag = TrackTextNormalizer.Normalize(taggedArtist);
+        var normalizedSuppliedArtist = TrackTextNormalizer.Normalize(suppliedArtist);
+        return !string.IsNullOrWhiteSpace(normalizedTag)
+            && (string.Equals(normalizedTag, normalizedSuppliedArtist, StringComparison.Ordinal)
+                || normalizedSuppliedArtist.StartsWith($"{normalizedTag} ", StringComparison.Ordinal));
+    }
+
     private static string NormalizeDashes(string value) => value
         .Replace("\u2013", "-", StringComparison.Ordinal)
         .Replace("\u2014", "-", StringComparison.Ordinal);
@@ -343,7 +395,8 @@ public static partial class TrackMetadataParser
 
         var suffix = value[(separatorIndex + 3)..].Trim();
         var marker = VersionMarkerRegex().Match(suffix);
-        return marker.Success && marker.Index == 0 && marker.Length == suffix.Length
+        return (marker.Success && marker.Index == 0 && marker.Length == suffix.Length)
+            || LiveVersionSuffixRegex().IsMatch(suffix)
             ? value[..separatorIndex].Trim()
             : value;
     }
@@ -434,8 +487,14 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"\b(speed\s*up|sped\s*up|nightcore|slowed(?:\s*\+\s*reverb)?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PlaybackModifierRegex();
 
-    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|live|remix(?:ed)?|remaster(?:ed)?|instrumental|karaoke|demo|dirty|clean|intro|outro|radio(?:\s+(?:edit|version))?|vip\s+mix|extended(?:\s+mix)?|club\s+mix|original\s+mix|acapella|stripped|cover|edit)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|remix(?:ed)?|remaster(?:ed)?|instrumental|karaoke|demo|dirty|clean|intro|outro|radio(?:\s+(?:edit|version))?|vip\s+mix|extended(?:\s+mix)?|club\s+mix|original\s+mix|acapella|stripped|cover|edit)\b", RegexOptions.IgnoreCase)]
     private static partial Regex VersionMarkerRegex();
+
+    [GeneratedRegex(@"(?:[\[(]\s*live(?:\s+(?:version|recording|at|from|in)\b[^\])]*)?\s*[\])]|(?:^|\s[-|]\s)live(?:\s+(?:version|recording))?\s*$|\blive\s+(?:version|recording)\b)", RegexOptions.IgnoreCase)]
+    private static partial Regex LiveVersionContextRegex();
+
+    [GeneratedRegex(@"^live(?:\s+(?:version|recording))?$", RegexOptions.IgnoreCase)]
+    private static partial Regex LiveVersionSuffixRegex();
 
     [GeneratedRegex(@"[\[(]\s*from\s+[^\])]+[\])]", RegexOptions.IgnoreCase)]
     private static partial Regex SourceVersionContextRegex();

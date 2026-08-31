@@ -14,6 +14,7 @@ public class TrackMatchIdentityFamilyResolverTests
     [InlineData("Darkside", "Alan Walker, Au/Ra, Tomine Harket", 240, 212, 203)]
     [InlineData("Beautiful Now", "Zedd, Jon Bellion", 253, 225, 211)]
     [InlineData("Desire", "Calvin Harris, Sam Smith", 178, 179, 151)]
+    [InlineData("残響散歌", "Aimer", 190, 181, 175)]
     public void BuildFamilies_SelectsClosestDurationWithinEquivalentIdentity(
         string title,
         string artist,
@@ -83,6 +84,26 @@ public class TrackMatchIdentityFamilyResolverTests
 
         var family = Assert.Single(families);
         Assert.Equal(2, family.ProviderConsensusCount);
+    }
+
+    [Fact]
+    public void BuildFamilies_DoesNotConflateDistinctJapaneseTitlesForSameArtist()
+    {
+        var observation = CreateObservation("残響散歌", "Aimer", 181);
+        var options = new TrackMatchingOptions();
+        var candidates = new[]
+        {
+            CreateCandidate("zankyo", "残響散歌", "Aimer", 181),
+            CreateCandidate("kataomoi", "カタオモイ", "Aimer", 182)
+        }.Select(candidate => TrackMatchScorer.Score(observation, candidate, options)).ToArray();
+
+        var families = TrackMatchIdentityFamilyResolver.BuildFamilies(candidates);
+
+        Assert.Equal(2, families.Count);
+        Assert.Contains(families, family => family.Representative.Candidate.ExternalId == "zankyo");
+        Assert.Contains(families, family => family.Representative.Candidate.ExternalId == "kataomoi");
+        Assert.Equal(1m, candidates[0].TitleSimilarity);
+        Assert.NotEqual(1m, candidates[1].TitleSimilarity);
     }
 
     [Fact]

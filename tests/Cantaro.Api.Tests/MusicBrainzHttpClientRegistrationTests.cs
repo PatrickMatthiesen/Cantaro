@@ -43,6 +43,7 @@ public sealed class MusicBrainzHttpClientRegistrationTests
 
         Assert.Equal(TimeSpan.FromMinutes(2), delay);
         Assert.True(gate.IsCoolingDown);
+        Assert.Equal("retry-after", gate.CooldownSource);
     }
 
     [Fact]
@@ -52,6 +53,7 @@ public sealed class MusicBrainzHttpClientRegistrationTests
         var gate = new MusicBrainzRequestGate(new FixedTimeProvider(now));
 
         Assert.Equal(TimeSpan.FromSeconds(30), gate.Defer(retryAfter: null));
+        Assert.Equal("fallback", gate.CooldownSource);
         Assert.Equal(TimeSpan.FromMinutes(1), gate.Defer(retryAfter: null));
     }
 

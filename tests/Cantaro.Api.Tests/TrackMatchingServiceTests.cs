@@ -303,7 +303,7 @@ public class TrackMatchingServiceTests
         var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
         Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
-        Assert.Equal(2, await dbContext.TrackResolutionCandidates.CountAsync());
+        Assert.Single(await dbContext.TrackResolutionCandidates.ToListAsync());
     }
 
     [Fact]
@@ -507,7 +507,7 @@ public class TrackMatchingServiceTests
         Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
         Assert.NotNull(result.AcceptedCandidateId);
         Assert.NotNull(result.TrackId);
-        Assert.Equal(3, await dbContext.TrackResolutionCandidates.CountAsync());
+        Assert.Equal(2, await dbContext.TrackResolutionCandidates.CountAsync());
     }
 
     [Fact]
@@ -1462,6 +1462,45 @@ public class TrackMatchingServiceTests
         Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
         Assert.Null(result.AcceptedCandidateId);
         Assert.Contains("exact artist credits", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_AutoMatchesUnopposedStrongCreditExpansionAndStoresOneClusterRepresentative()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "so-far-away",
+            Title = "So Far Away", Artist = "Seven Lions", DurationSeconds = 249,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+        var candidates = Enumerable.Range(1, 3).Select(index => new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify",
+            ExternalId = $"spotify-{index}",
+            Title = "So Far Away",
+            Artist = "Seven Lions, Lilly Ahlberg",
+            ArtistCredits = ["Seven Lions", "Lilly Ahlberg"],
+            Isrc = "CA5KR2593426",
+            DurationSeconds = 248
+        }).ToArray();
+
+        var result = await new TrackMatchingService(
+                dbContext,
+                [new FakeTrackMetadataSearchProvider(candidates)],
+                NullLogger<TrackMatchingService>.Instance)
+            .ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
+        Assert.Single(await dbContext.TrackResolutionCandidates.ToListAsync());
     }
 
     [Fact]

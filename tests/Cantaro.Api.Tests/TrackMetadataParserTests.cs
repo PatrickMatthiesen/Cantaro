@@ -61,6 +61,30 @@ public class TrackMetadataParserTests
         Assert.Contains("live", parsed.VersionMarkers);
     }
 
+    [Theory]
+    [InlineData("Meant To Live (Jon Bellion Version)")]
+    [InlineData("How Do I Live")]
+    [InlineData("Live Forever")]
+    public void Parse_DoesNotTreatLiveInBaseTitleAsVersionMarker(string title)
+    {
+        var parsed = TrackMetadataParser.Parse(title, "The Artist");
+
+        Assert.DoesNotContain("live", parsed.VersionMarkers);
+    }
+
+    [Theory]
+    [InlineData("Signal (Live)", "Signal (Live)")]
+    [InlineData("Signal (Live at Wembley)", "Signal (Live at Wembley)")]
+    [InlineData("Signal - Live", "Signal")]
+    [InlineData("Signal - Live Version", "Signal")]
+    public void Parse_RecognizesLiveOnlyInVersionContext(string title, string expectedSearchTitle)
+    {
+        var parsed = TrackMetadataParser.Parse(title, "The Artist");
+
+        Assert.Equal(expectedSearchTitle, parsed.SearchTitle);
+        Assert.Contains("live", parsed.VersionMarkers);
+    }
+
     [Fact]
     public void Parse_ExtractsPlaybackModifiersEvenWhenTheyAreRemovedFromSearchTitle()
     {

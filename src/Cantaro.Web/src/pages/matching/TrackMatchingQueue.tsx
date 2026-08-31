@@ -36,6 +36,13 @@ function formatTime(value?: string) {
   return value ? new Date(value).toLocaleString() : '—';
 }
 
+function cooldownMessage(data: TrackMatchWorkPageResponse) {
+  const until = formatTime(data.providerNotBefore);
+  return data.providerCooldownSource === 'retry-after'
+    ? `MusicBrainz requested a cooldown until ${until}. Ready items will resume automatically.`
+    : `MusicBrainz is unavailable; Cantaro is backing off until ${until}. Ready items will resume automatically.`;
+}
+
 function QueueStats({ data }: { data: TrackMatchWorkPageResponse }) {
   return <dl className="grid grid-cols-2 border-y border-border-subtle md:grid-cols-4">{[
     ['Total queued', data.totalCount], ['Ready', data.readyCount], ['Scheduled', data.scheduledCount], ['Processing', data.processingCount],
@@ -139,7 +146,7 @@ function QueueRows({
 }
 
 function TrackMatchingQueueContent({ data, error, markingObservationId, onMarkNotMusic, onRefresh, onPageChange }: { data: TrackMatchWorkPageResponse; error: string | null; markingObservationId: string | null; onMarkNotMusic: (item: TrackMatchWorkItemResponse) => void; onRefresh: () => void; onPageChange: (page: number) => void }) {
-  return <div className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-bold text-content">Matching work queue</h2><p className="mt-1 text-sm text-content-muted">Durable work waiting for the canonical track matcher. Updates every two seconds.</p></div><button type="button" onClick={onRefresh} className="min-h-10 border border-border-strong px-3 text-sm font-semibold text-content">Refresh now</button></div><QueueStats data={data} />{data.providerNotBefore ? <p className="border-y border-warning-border bg-warning-surface p-3 text-sm font-semibold text-warning-content">MusicBrainz cooldown active until {formatTime(data.providerNotBefore)}. Ready items will resume automatically.</p> : null}{error ? <p className="text-sm text-danger-content">{error}</p> : null}<QueuePagination data={data} onPageChange={onPageChange} /><QueueRows data={data} markingObservationId={markingObservationId} onMarkNotMusic={onMarkNotMusic} /><QueuePagination data={data} onPageChange={onPageChange} /></div>;
+  return <div className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-bold text-content">Matching work queue</h2><p className="mt-1 text-sm text-content-muted">Durable work waiting for the canonical track matcher. Updates every two seconds.</p></div><button type="button" onClick={onRefresh} className="min-h-10 border border-border-strong px-3 text-sm font-semibold text-content">Refresh now</button></div><QueueStats data={data} />{data.providerNotBefore ? <p className="border-y border-warning-border bg-warning-surface p-3 text-sm font-semibold text-warning-content">{cooldownMessage(data)}</p> : null}{error ? <p className="text-sm text-danger-content">{error}</p> : null}<QueuePagination data={data} onPageChange={onPageChange} /><QueueRows data={data} markingObservationId={markingObservationId} onMarkNotMusic={onMarkNotMusic} /><QueuePagination data={data} onPageChange={onPageChange} /></div>;
 }
 
 export function TrackMatchingQueuePanel() {

@@ -451,12 +451,17 @@ public class TrackMatchingService
                 _options.AmbiguousThreshold,
                 _options.AutoMatchMargin);
 
-            var displayedCandidates = SelectDisplayedCandidates(rankedCandidates, clusters, maximumCount: 5);
+            var displayedCandidates = SelectDisplayedCandidates(
+                clusters,
+                decision.AcceptedCandidate,
+                maximumCount: 5);
 
             var persistedCandidates = new List<TrackResolutionCandidate>(displayedCandidates.Count);
             foreach (var result in displayedCandidates)
             {
-                var cluster = clusters.FirstOrDefault(existingCluster => existingCluster.Members.Any(member => member.Candidate.ExternalId == result.Candidate.ExternalId));
+                var cluster = clusters.FirstOrDefault(existingCluster => existingCluster.Members.Any(member =>
+                    member.Candidate.ExternalId == result.Candidate.ExternalId
+                    && member.Candidate.CandidateSource == result.Candidate.CandidateSource));
                 var persistedCandidate = new TrackResolutionCandidate
                 {
                     Id = Guid.NewGuid(),
@@ -620,27 +625,19 @@ public class TrackMatchingService
     }
 
     private static IReadOnlyList<TrackMatchScoredCandidate> SelectDisplayedCandidates(
-        IReadOnlyList<TrackMatchScoredCandidate> rankedCandidates,
         IReadOnlyList<TrackMatchCluster> clusters,
+        TrackMatchScoredCandidate? acceptedCandidate,
         int maximumCount)
     {
         var selected = new List<TrackMatchScoredCandidate>(maximumCount);
         foreach (var cluster in clusters.Take(maximumCount))
         {
-            selected.Add(cluster.Representative);
-        }
-
-        foreach (var candidate in rankedCandidates)
-        {
-            if (selected.Count >= maximumCount)
-            {
-                break;
-            }
-
-            if (!selected.Any(existing => existing.Candidate.ExternalId == candidate.Candidate.ExternalId))
-            {
-                selected.Add(candidate);
-            }
+            var representative = acceptedCandidate != null && cluster.Members.Any(member =>
+                member.Candidate.ExternalId == acceptedCandidate.Candidate.ExternalId
+                && member.Candidate.CandidateSource == acceptedCandidate.Candidate.CandidateSource)
+                    ? acceptedCandidate
+                    : cluster.Representative;
+            selected.Add(representative);
         }
 
         return selected

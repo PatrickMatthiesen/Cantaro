@@ -47,14 +47,29 @@ public class TrackMatchClustererTests
         Assert.Equal(2, clusters.Count);
     }
 
+    [Fact]
+    public void BuildClusters_MergesMatchingJapaneseTitlesButKeepsDistinctTitlesSeparate()
+    {
+        var first = Candidate("first", "残響散歌", 181, 0.95m, "Aimer");
+        var same = Candidate("same", "残響散歌", 183, 0.90m, "Aimer");
+        var distinct = Candidate("distinct", "カタオモイ", 182, 0.85m, "Aimer");
+
+        var clusters = TrackMatchClusterer.BuildClusters([first, same, distinct], 8);
+
+        Assert.Equal(2, clusters.Count);
+        Assert.Equal(2, clusters[0].Members.Count);
+        Assert.Single(clusters[1].Members);
+    }
+
     private static TrackMatchScoredCandidate Candidate(
         string externalId,
         string title,
         int? durationSeconds,
-        decimal score)
+        decimal score,
+        string artist = "OneRepublic")
     {
-        var observationMetadata = TrackMetadataParser.Parse("Rescue Me", "OneRepublic");
-        var candidateMetadata = TrackMetadataParser.Parse(title, "OneRepublic");
+        var observationMetadata = TrackMetadataParser.Parse(title, artist);
+        var candidateMetadata = TrackMetadataParser.Parse(title, artist);
         return new TrackMatchScoredCandidate
         {
             Candidate = new TrackMatchSearchCandidate
@@ -62,12 +77,12 @@ public class TrackMatchClustererTests
                 CandidateSource = "musicbrainz",
                 ExternalId = externalId,
                 Title = title,
-                Artist = "OneRepublic",
-                ArtistCredits = ["OneRepublic"],
+                Artist = artist,
+                ArtistCredits = [artist],
                 DurationSeconds = durationSeconds
             },
             ObservationTitle = "Rescue Me",
-            ObservationArtist = "OneRepublic",
+            ObservationArtist = artist,
             ObservationMetadata = observationMetadata,
             CandidateMetadata = candidateMetadata,
             TitleSimilarity = 1m,
