@@ -72,6 +72,12 @@ internal sealed class SpotifyPage<T>
     public int Total { get; init; }
 }
 
+internal sealed class SpotifySearchResponse
+{
+    [JsonPropertyName("tracks")]
+    public SpotifyPage<SpotifyItemResponse>? Tracks { get; init; }
+}
+
 internal sealed class SpotifyPlaylistResponse
 {
     [JsonPropertyName("id")]

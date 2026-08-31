@@ -24,8 +24,17 @@ internal static class TrackMatchDecisionEngine
             };
         }
 
-        var topCandidate = rankedCandidates[0];
-        var secondDistinctScore = clusters.Count > 1 ? clusters[1].Representative.Score : 0m;
+        var identityFamilies = TrackMatchIdentityFamilyResolver.BuildFamilies(rankedCandidates);
+        var topCandidate = identityFamilies.Count > 0
+            ? identityFamilies[0].Representative
+            : rankedCandidates[0];
+        var hasStrongProviderConsensus = identityFamilies.Count > 0
+            && identityFamilies[0].ProviderConsensusCount >= 2
+            && (identityFamilies.Count == 1
+                || identityFamilies[0].ProviderConsensusCount > identityFamilies[1].ProviderConsensusCount);
+        var secondDistinctScore = identityFamilies.Count > 1 && !hasStrongProviderConsensus
+            ? identityFamilies[1].Representative.Score
+            : 0m;
         var margin = topCandidate.Score - secondDistinctScore;
 
         var meetsAutoMatchThreshold = topCandidate.Score >= autoMatchThreshold;
@@ -55,7 +64,7 @@ internal static class TrackMatchDecisionEngine
                 AcceptedCandidate = null,
                 TopScore = topCandidate.Score,
                 SecondDistinctScore = secondDistinctScore,
-                DecisionReason = $"Distinct clusters: {clusters.Count}. {evidenceReason}"
+                DecisionReason = $"Distinct clusters: {clusters.Count}; credible identity families: {identityFamilies.Count}. {evidenceReason}"
             };
         }
 
@@ -87,7 +96,7 @@ internal static class TrackMatchDecisionEngine
             AcceptedCandidate = null,
             TopScore = topCandidate.Score,
             SecondDistinctScore = secondDistinctScore,
-            DecisionReason = $"Distinct clusters: {clusters.Count}. {failureReason} {scoreSummary}"
+            DecisionReason = $"Distinct clusters: {clusters.Count}; credible identity families: {identityFamilies.Count}. {failureReason} {scoreSummary}"
         };
     }
 

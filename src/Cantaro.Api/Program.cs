@@ -77,6 +77,8 @@ builder.Services.AddHttpClient<SpotifyApiClient>(client =>
 builder.Services.AddSingleton<ISpotifyRetryDelay, SpotifyRetryDelay>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SpotifyTokenManager>();
+builder.Services.AddSingleton<SpotifyCatalogTokenCache>();
+builder.Services.AddScoped<SpotifyCatalogTokenProvider>();
 builder.Services.AddScoped<SpotifyService>();
 builder.Services.AddScoped<SpotifyPlaylistSyncService>();
 builder.Services.AddScoped<TrackIdentityResolver>();
@@ -118,6 +120,7 @@ builder.Services.AddScoped<MediaObservationMatchingService>();
 builder.Services.AddScoped<MediaProviderSeasonMappingService>();
 builder.Services.AddScoped<MediaObservationProgressService>();
 builder.Services.AddScoped<MediaEpisodeIdentityService>();
+builder.Services.AddScoped<ITrackMetadataSearchProvider, SpotifySearchProvider>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
 builder.Services.AddScoped<TrackMatchingService>();
 builder.Services.AddScoped<SongGroupingSuggestionService>();

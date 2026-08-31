@@ -64,6 +64,24 @@ public class TrackMatchingService
         return await ProcessObservationAsync(observation, cancellationToken);
     }
 
+    public async Task<TrackObservation?> ReevaluateStoredCandidatesAsync(
+        Guid observationId,
+        CancellationToken cancellationToken)
+    {
+        var observation = await _dbContext.TrackObservations
+            .Include(item => item.Candidates)
+            .FirstOrDefaultAsync(item => item.Id == observationId, cancellationToken);
+        if (observation is null || observation.TrackId != null)
+        {
+            return null;
+        }
+
+        return await TryResolveFromStoredCandidatesAsync(
+            observation,
+            TrackObservationParser.Parse(observation),
+            cancellationToken);
+    }
+
     public async Task<TrackObservation> AcceptCandidateAsync(Guid observationId, Guid candidateId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
@@ -386,10 +404,32 @@ public class TrackMatchingService
         try
         {
             var scoredCandidates = new List<TrackMatchScoredCandidate>();
+            var providerErrors = new List<Exception>();
             foreach (var provider in _metadataProviders)
             {
-                var providerCandidates = await provider.SearchAsync(observation, cancellationToken);
-                scoredCandidates.AddRange(providerCandidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, _options)));
+                try
+                {
+                    var providerCandidates = await provider.SearchAsync(observation, cancellationToken);
+                    scoredCandidates.AddRange(providerCandidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, _options)));
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    providerErrors.Add(exception);
+                    _logger.LogWarning(
+                        exception,
+                        "Track metadata provider {ProviderType} failed for observation {ObservationId}; continuing with other evidence providers",
+                        provider.GetType().Name,
+                        observation.Id);
+                }
+            }
+
+            if (scoredCandidates.Count == 0 && providerErrors.Count > 0)
+            {
+                throw providerErrors[0];
             }
 
             if (observation.Candidates.Count > 0)
@@ -460,7 +500,9 @@ public class TrackMatchingService
                 var persistedCandidate = persistedCandidates
                     .OrderByDescending(candidate => candidate.Score)
                     .ThenBy(candidate => candidate.Title, StringComparer.Ordinal)
-                    .First(candidate => candidate.ExternalId == decision.AcceptedCandidate.Candidate.ExternalId);
+                    .First(candidate =>
+                        candidate.ExternalId == decision.AcceptedCandidate.Candidate.ExternalId
+                        && candidate.CandidateSource == decision.AcceptedCandidate.Candidate.CandidateSource);
 
                 PersistObservationDiagnostics(
                     observation,
@@ -516,6 +558,65 @@ public class TrackMatchingService
             await _dbContext.SaveChangesAsync(cancellationToken);
             return observation;
         }
+    }
+
+    private async Task<TrackObservation?> TryResolveFromStoredCandidatesAsync(
+        TrackObservation observation,
+        ParsedTrackMetadata parsedObservation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.Candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var rankedCandidates = observation.Candidates
+            .Select(candidate => new TrackMatchSearchCandidate
+            {
+                CandidateSource = candidate.CandidateSource,
+                ExternalId = candidate.ExternalId,
+                Title = candidate.Title,
+                Artist = candidate.Artist,
+                MbidRecording = candidate.MbidRecording,
+                Isrc = candidate.Isrc,
+                DurationSeconds = candidate.DurationSeconds,
+                Explanation = candidate.Explanation,
+                RawMetadata = candidate.RawMetadata
+            })
+            .Select(candidate => TrackMatchScorer.Score(observation, candidate, _options))
+            .Where(result => result.Score >= _options.MinimumCandidateScore)
+            .OrderByDescending(result => result.Score)
+            .ToList();
+        var clusters = TrackMatchClusterer.BuildClusters(rankedCandidates, _options.ClusterDurationToleranceSeconds);
+        var decision = TrackMatchDecisionEngine.Decide(
+            rankedCandidates,
+            clusters,
+            _options.AutoMatchThreshold,
+            _options.AmbiguousThreshold,
+            _options.AutoMatchMargin);
+        if (decision.AcceptedCandidate == null)
+        {
+            return null;
+        }
+
+        var acceptedCandidate = observation.Candidates.First(candidate =>
+            candidate.CandidateSource == decision.AcceptedCandidate.Candidate.CandidateSource
+            && candidate.ExternalId == decision.AcceptedCandidate.Candidate.ExternalId);
+        PersistObservationDiagnostics(
+            observation,
+            CreateObservationDiagnostics(
+                parsedObservation,
+                $"Re-evaluated stored evidence. {decision.DecisionReason}",
+                decision.TopScore,
+                decision.SecondDistinctScore,
+                clusters.Count));
+        await ResolveObservationToTrackAsync(
+            observation,
+            acceptedCandidate,
+            $"Automatically resolved from stored provider evidence. {decision.ResolutionNotes}",
+            cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return observation;
     }
 
     private static IReadOnlyList<TrackMatchScoredCandidate> SelectDisplayedCandidates(
@@ -594,7 +695,15 @@ public class TrackMatchingService
 
         await EnsureSourceMappingAsync(track.Id, observation.SourceType, observation.ExternalId, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(candidate.MbidRecording))
+        if (!string.IsNullOrWhiteSpace(candidate.CandidateSource)
+            && !string.IsNullOrWhiteSpace(candidate.ExternalId))
+        {
+            await EnsureSourceMappingAsync(track.Id, candidate.CandidateSource, candidate.ExternalId, cancellationToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.MbidRecording)
+            && (!string.Equals(candidate.CandidateSource, "musicbrainz", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(candidate.ExternalId, candidate.MbidRecording, StringComparison.OrdinalIgnoreCase)))
         {
             await EnsureSourceMappingAsync(track.Id, "musicbrainz", candidate.MbidRecording, cancellationToken);
         }
