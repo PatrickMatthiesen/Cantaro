@@ -12,6 +12,53 @@ namespace Cantaro.Api.Tests;
 public sealed class SpotifyApiClientTests
 {
     [Fact]
+    public async Task GetClientCredentialsTokenAsync_UsesApplicationCredentialsGrant()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.OK, """{ "access_token": "catalog-token", "expires_in": 3600, "token_type": "Bearer" }""")
+        ]);
+        using var client = CreateClient(handler);
+
+        var token = await client.Api.GetClientCredentialsTokenAsync(CancellationToken.None);
+
+        Assert.Equal("catalog-token", token.AccessToken);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("/api/token", request.PathAndQuery);
+        Assert.Equal("grant_type=client_credentials", request.Body);
+        Assert.Equal("Basic", request.Authorization?.Scheme);
+    }
+
+    [Fact]
+    public async Task SearchTracksAsync_MapsCatalogIdentityEvidence()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.OK, """
+                { "tracks": { "items": [{
+                  "type": "track", "id": "spotify-track", "name": "Desire", "duration_ms": 179500,
+                  "artists": [{ "name": "Calvin Harris" }, { "name": "Sam Smith" }],
+                  "external_urls": { "spotify": "https://open.spotify.com/track/spotify-track" },
+                  "external_ids": { "isrc": "GBARL2300987" }
+                }] } }
+                """)
+        ]);
+        using var client = CreateClient(handler);
+
+        var tracks = await client.Api.SearchTracksAsync(
+            "catalog-token", "track:\"Desire\" artist:\"Calvin Harris, Sam Smith\"", 10, CancellationToken.None);
+
+        var track = Assert.Single(tracks);
+        Assert.Equal("spotify-track", track.Id);
+        Assert.Equal(["Calvin Harris", "Sam Smith"], track.ArtistNames);
+        Assert.Equal("GBARL2300987", track.Isrc);
+        Assert.Equal(179, track.DurationSeconds);
+        var request = Assert.Single(handler.Requests);
+        Assert.StartsWith("/v1/search?type=track&limit=10&q=", request.PathAndQuery, StringComparison.Ordinal);
+        Assert.Equal("Bearer catalog-token", request.Authorization?.ToString());
+    }
+
+    [Fact]
     public async Task GetPlaylistsAsync_UsesCurrentItemsSummaryAndOwnerSchema()
     {
         var handler = new StubHandler(

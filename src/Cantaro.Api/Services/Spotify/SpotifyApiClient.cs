@@ -65,8 +65,34 @@ public sealed class SpotifyApiClient
             cancellationToken);
     }
 
+    public Task<SpotifyTokenResponse> GetClientCredentialsTokenAsync(CancellationToken cancellationToken)
+    {
+        return SendTokenRequestAsync(
+            new Dictionary<string, string> { ["grant_type"] = "client_credentials" },
+            cancellationToken);
+    }
+
     public Task<SpotifyProfileResponse> GetProfileAsync(string accessToken, CancellationToken cancellationToken)
         => GetAsync<SpotifyProfileResponse>("/v1/me", accessToken, cancellationToken);
+
+    public async Task<IReadOnlyList<SpotifyTrackSnapshot>> SearchTracksAsync(
+        string accessToken,
+        string query,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var boundedLimit = Math.Clamp(limit, 1, 50);
+        var response = await GetAsync<SpotifySearchResponse>(
+            $"/v1/search?type=track&limit={boundedLimit}&q={Uri.EscapeDataString(query)}",
+            accessToken,
+            cancellationToken);
+
+        return response.Tracks?.Items
+            .Select((item, index) => ToTrackSnapshot(item, addedAt: null, index))
+            .Where(item => item != null)
+            .Select(item => item!)
+            .ToArray() ?? [];
+    }
 
     public async Task<IReadOnlyList<SpotifyPlaylistSnapshot>> GetPlaylistsAsync(
         string accessToken,
@@ -136,26 +162,7 @@ public sealed class SpotifyApiClient
                     continue;
                 }
 
-                var artistNames = item.Artists
-                    .Select(candidate => candidate.Name?.Trim())
-                    .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
-                    .Select(candidate => candidate!)
-                    .ToArray();
-                var artist = string.Join(", ", artistNames);
-
-                tracks.Add(new SpotifyTrackSnapshot(
-                    id,
-                    name,
-                    string.IsNullOrWhiteSpace(artist) ? "Unknown artist" : artist,
-                    artistNames,
-                    item.Album?.Name,
-                    item.Album?.Images.FirstOrDefault()?.Url,
-                    item.ExternalUrls?.Spotify ?? $"https://open.spotify.com/track/{id}",
-                    item.Album?.ExternalUrls?.Spotify,
-                    item.ExternalIds?.Isrc,
-                    Math.Max(0, item.DurationMs / 1000),
-                    envelope.AddedAt,
-                    tracks.Count));
+                tracks.Add(ToTrackSnapshot(item, envelope.AddedAt, tracks.Count)!);
             }
 
             if (string.IsNullOrWhiteSpace(page.Next))
@@ -165,6 +172,29 @@ public sealed class SpotifyApiClient
 
             offset += PageSize;
         }
+    }
+
+    private static SpotifyTrackSnapshot? ToTrackSnapshot(SpotifyItemResponse? item, DateTimeOffset? addedAt, int position)
+    {
+        if (item?.Type is not "track"
+            || item.Id is not { Length: > 0 } id
+            || item.Name is not { Length: > 0 } name)
+        {
+            return null;
+        }
+
+        var artistNames = item.Artists
+            .Select(candidate => candidate.Name?.Trim())
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Select(candidate => candidate!)
+            .ToArray();
+        var artist = string.Join(", ", artistNames);
+        return new SpotifyTrackSnapshot(
+            id, name, string.IsNullOrWhiteSpace(artist) ? "Unknown artist" : artist, artistNames,
+            item.Album?.Name, item.Album?.Images.FirstOrDefault()?.Url,
+            item.ExternalUrls?.Spotify ?? $"https://open.spotify.com/track/{id}",
+            item.Album?.ExternalUrls?.Spotify, item.ExternalIds?.Isrc,
+            Math.Max(0, item.DurationMs / 1000), addedAt, position);
     }
 
     private async Task<T> GetAsync<T>(string requestUri, string accessToken, CancellationToken cancellationToken)

@@ -23,6 +23,8 @@ internal static class TrackMatchScorer
         }
 
         var semanticAdjustment = ComputeTitleSemanticAdjustment(parsedObservation, parsedCandidate, options);
+        var compatibleSemantics = !HaveDifferentMarkers(parsedObservation.VersionMarkers, parsedCandidate.VersionMarkers)
+            && !HaveDifferentMarkers(parsedObservation.PlaybackModifiers, parsedCandidate.PlaybackModifiers);
         var semanticExplanation = BuildSemanticExplanation(parsedObservation, parsedCandidate);
         var durationDifference = observation.DurationSeconds.HasValue && candidate.DurationSeconds.HasValue
             ? observation.DurationSeconds.Value - candidate.DurationSeconds.Value
@@ -65,6 +67,7 @@ internal static class TrackMatchScorer
         var compatibleDuration = durationDifference.HasValue
             && Math.Abs(durationDifference.Value) <= options.AutoMatchDurationToleranceSeconds;
         var isAutoMatchEligible = exactCredits
+            && compatibleSemantics
             && (compatibleDuration || unmarkedYouTubePadding || officialVideoPadding);
 
         return new TrackMatchScoredCandidate
@@ -80,6 +83,10 @@ internal static class TrackMatchScorer
             SemanticAdjustment = semanticAdjustment,
             SemanticExplanation = semanticExplanation,
             Score = Math.Round(Math.Clamp(score, 0m, 1m), 3, MidpointRounding.AwayFromZero),
+            ObservationDurationSeconds = observation.DurationSeconds,
+            DurationDifferenceSeconds = durationDifference.HasValue ? Math.Abs(durationDifference.Value) : null,
+            HasEquivalentArtistCredits = exactCredits,
+            HasCompatibleSemantics = compatibleSemantics,
             IsAutoMatchEligible = isAutoMatchEligible,
             AutoMatchEligibilityReason = isAutoMatchEligible
                 ? officialVideoPadding
@@ -89,6 +96,8 @@ internal static class TrackMatchScorer
                         : "Exact artist credits and compatible duration."
                 : !exactCredits
                     ? "Automated matching requires exact artist credits."
+                    : !compatibleSemantics
+                        ? "Automated matching requires compatible version and playback markers."
                     : "Automated matching requires compatible duration evidence."
         };
     }

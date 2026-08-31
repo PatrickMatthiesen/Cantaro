@@ -79,9 +79,8 @@ internal static class TrackMatchClusterer
         var candidateCredits = GetCandidateCredits(candidate);
         var representativeCredits = GetCandidateCredits(representative);
 
-        var bothHaveStructuredCredits = candidate.Candidate.ArtistCredits.Count > 0
-            && representative.Candidate.ArtistCredits.Count > 0;
-        var artistsMatch = bothHaveStructuredCredits
+        var bothHaveCredits = candidateCredits.Count > 0 && representativeCredits.Count > 0;
+        var artistsMatch = bothHaveCredits
             ? candidateCredits.SequenceEqual(representativeCredits, StringComparer.Ordinal)
             : normalizedArtist == representativeArtist;
 
@@ -106,7 +105,7 @@ internal static class TrackMatchClusterer
         return false;
     }
 
-    private static IReadOnlyList<string> GetCandidateCredits(TrackMatchScoredCandidate candidate)
+    internal static IReadOnlyList<string> GetCandidateCredits(TrackMatchScoredCandidate candidate)
     {
         return candidate.Candidate.ArtistCredits.Count > 0
             ? TrackMetadataParser.NormalizeArtistCredits(candidate.Candidate.ArtistCredits)

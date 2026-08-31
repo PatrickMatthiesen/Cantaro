@@ -1000,7 +1000,7 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
-    public async Task ProcessObservationAsync_DistinctCompetingCandidatesRemainAmbiguous()
+    public async Task ProcessObservationAsync_ExtraArtistCandidateDoesNotBlockExactCredits()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -1059,8 +1059,8 @@ public class TrackMatchingServiceTests
 
         var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
-        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
-        Assert.Null(result.AcceptedCandidateId);
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
     }
 
     [Fact]
@@ -1465,7 +1465,7 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
-    public async Task ProcessObservationAsync_DecisionIncludesDistinctRunnerUpBeyondFiveDuplicates()
+    public async Task ProcessObservationAsync_IneligibleRunnerUpBeyondFiveDuplicatesDoesNotBlock()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -1509,9 +1509,51 @@ public class TrackMatchingServiceTests
         var result = await new TrackMatchingService(dbContext, [new FakeTrackMetadataSearchProvider(candidates)], NullLogger<TrackMatchingService>.Instance)
             .ProcessObservationAsync(observation.Id, CancellationToken.None);
 
-        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
-        Assert.Null(result.AcceptedCandidateId);
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
         Assert.Contains(await dbContext.TrackResolutionCandidates.ToListAsync(), candidate => candidate.ExternalId == "distinct-runner-up");
+    }
+
+    [Fact]
+    public async Task ProcessObservationAsync_UsesSuccessfulProviderWhenAnotherProviderFails()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "provider-fallback",
+            Title = "Youngblood",
+            Artist = "5 Seconds of Summer",
+            DurationSeconds = 230,
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+        var successfulProvider = new FakeTrackMetadataSearchProvider(new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify",
+            ExternalId = "spotify-youngblood",
+            Title = "Youngblood",
+            Artist = "5 Seconds of Summer",
+            ArtistCredits = ["5 Seconds of Summer"],
+            Isrc = "GBCAD1801407",
+            DurationSeconds = 230
+        });
+        var service = new TrackMatchingService(
+            dbContext,
+            [new ThrowingTrackMetadataSearchProvider(), successfulProvider],
+            NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Contains(await dbContext.TrackSourceIds.ToListAsync(), source =>
+            source.SourceType == "spotify" && source.ExternalId == "spotify-youngblood");
     }
 
     private sealed class FakeTrackMetadataSearchProvider : ITrackMetadataSearchProvider
@@ -1530,5 +1572,12 @@ public class TrackMatchingServiceTests
             SearchCount++;
             return Task.FromResult(_candidates);
         }
+    }
+
+    private sealed class ThrowingTrackMetadataSearchProvider : ITrackMetadataSearchProvider
+    {
+        public Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(
+            TrackObservation observation,
+            CancellationToken cancellationToken) => throw new HttpRequestException("Provider unavailable.");
     }
 }

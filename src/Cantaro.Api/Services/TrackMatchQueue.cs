@@ -135,6 +135,19 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
                     .SetProperty(item => item.LeaseExpiresAt, (DateTime?)null),
                 cancellationToken);
 
+    public Task DeferAsync(
+        ClaimedTrackMatch claim,
+        DateTimeOffset nextAttemptAt,
+        CancellationToken cancellationToken) =>
+        dbContext.TrackMatchQueueItems
+            .Where(item => item.TrackObservationId == claim.ObservationId && item.LeaseId == claim.LeaseId)
+            .ExecuteUpdateAsync(
+                updates => updates
+                    .SetProperty(item => item.NextAttemptAt, nextAttemptAt.UtcDateTime)
+                    .SetProperty(item => item.LeaseId, (Guid?)null)
+                    .SetProperty(item => item.LeaseExpiresAt, (DateTime?)null),
+                cancellationToken);
+
     public async Task RecoverPendingAsync(int maximumAttempts, CancellationToken cancellationToken)
     {
         var queuedIds = dbContext.TrackMatchQueueItems.Select(item => item.TrackObservationId);
@@ -170,13 +183,6 @@ public sealed class TrackMatchingWorker(
         await RecoverPendingAsync(stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
-            var cooldownDelay = musicBrainzRequestGate.NotBefore - timeProvider.GetUtcNow();
-            if (cooldownDelay > TimeSpan.Zero)
-            {
-                await Task.Delay(cooldownDelay, timeProvider, stoppingToken);
-                continue;
-            }
-
             var processed = await ProcessNextAsync(stoppingToken);
             if (!processed) await Task.Delay(EmptyQueueDelay, timeProvider, stoppingToken);
         }
@@ -211,8 +217,24 @@ public sealed class TrackMatchingWorker(
                 return true;
             }
 
-            var observation = await scope.ServiceProvider.GetRequiredService<TrackMatchingService>()
-                .ProcessObservationAsync(claim.ObservationId, cancellationToken);
+            var matchingService = scope.ServiceProvider.GetRequiredService<TrackMatchingService>();
+            var providerNotBefore = musicBrainzRequestGate.NotBefore;
+            if (providerNotBefore > timeProvider.GetUtcNow())
+            {
+                var locallyResolved = await matchingService.ReevaluateStoredCandidatesAsync(
+                    claim.ObservationId,
+                    cancellationToken);
+                if (locallyResolved?.MatchStatus == TrackMatchingStatuses.Matched)
+                {
+                    await queue.CompleteAsync(claim, cancellationToken);
+                    return true;
+                }
+
+                await queue.DeferAsync(claim, providerNotBefore, cancellationToken);
+                return true;
+            }
+
+            var observation = await matchingService.ProcessObservationAsync(claim.ObservationId, cancellationToken);
             if (observation.MatchStatus != TrackMatchingStatuses.Pending
                 || string.IsNullOrWhiteSpace(observation.LastMatchError)
                 || claim.RetryCount + 1 >= _options.MaximumAutomaticAttempts)
@@ -222,7 +244,7 @@ public sealed class TrackMatchingWorker(
             }
 
             var nextAttemptAt = timeProvider.GetUtcNow() + GetRetryDelay(observation.MatchAttemptCount);
-            var providerNotBefore = musicBrainzRequestGate.NotBefore;
+            providerNotBefore = musicBrainzRequestGate.NotBefore;
             if (providerNotBefore > nextAttemptAt) nextAttemptAt = providerNotBefore;
             await queue.RescheduleAsync(claim, nextAttemptAt, cancellationToken);
         }

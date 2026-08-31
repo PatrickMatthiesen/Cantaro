@@ -63,6 +63,24 @@ public sealed class TrackMatchQueueTests
         Assert.Equal(eligible.Id, item.TrackObservationId);
     }
 
+    [Fact]
+    public async Task DeferAsync_DoesNotConsumeRetryAttempt()
+    {
+        await using var fixture = await QueueFixture.CreateAsync();
+        var observation = fixture.AddPendingObservation();
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Queue.EnqueueAsync(observation.Id, CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+        var claim = Assert.IsType<ClaimedTrackMatch>(await fixture.Queue.TryClaimNextAsync(CancellationToken.None));
+
+        await fixture.Queue.DeferAsync(claim, fixture.Now.AddMinutes(5), CancellationToken.None);
+
+        var item = Assert.Single(await fixture.Db.TrackMatchQueueItems.AsNoTracking().ToListAsync());
+        Assert.Equal(0, item.RetryCount);
+        Assert.Null(item.LeaseId);
+        Assert.Equal(fixture.Now.AddMinutes(5).UtcDateTime, item.NextAttemptAt);
+    }
+
     private sealed class QueueFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
