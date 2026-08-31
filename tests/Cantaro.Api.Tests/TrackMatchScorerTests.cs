@@ -8,6 +8,37 @@ namespace Cantaro.Api.Tests;
 public class TrackMatchScorerTests
 {
     [Fact]
+    public void Score_DoesNotInventLiveSemanticMismatchFromBaseTitle()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "meant-to-live-video",
+            Title = "Meant To Live (Jon Bellion Version)",
+            Artist = "Jon Bellion",
+            DurationSeconds = 205,
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "musicbrainz",
+            ExternalId = "meant-to-live-recording",
+            Title = "Meant To Live (Jon Bellion Version)",
+            Artist = "Jon Bellion",
+            ArtistCredits = ["Jon Bellion"],
+            DurationSeconds = 205
+        };
+
+        var result = TrackMatchScorer.Score(observation, candidate, new TrackMatchingOptions());
+
+        Assert.DoesNotContain("live", result.ObservationMetadata.VersionMarkers);
+        Assert.DoesNotContain("live", result.CandidateMetadata.VersionMarkers);
+        Assert.True(result.HasCompatibleSemantics);
+        Assert.Equal(0m, result.SemanticAdjustment);
+    }
+
+    [Fact]
     public void Score_UsesBoundedYouTubePaddingForExactIdentity()
     {
         var result = Score(209, 178, "Rescue Me");
@@ -54,6 +85,55 @@ public class TrackMatchScorerTests
         Assert.InRange(result.DurationScore, 0.01m, 0.03m);
         Assert.Equal(-0.15m, result.SemanticAdjustment);
         Assert.False(result.IsAutoMatchEligible);
+    }
+
+    [Fact]
+    public void Score_AllowsExactTitlePrimaryArtistToExpandToStronglyIdentifiedFullCredit()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "so-far-away-video",
+            Title = "So Far Away",
+            Artist = "Seven Lions",
+            DurationSeconds = 249,
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify",
+            ExternalId = "spotify-track",
+            Title = "So Far Away",
+            Artist = "Seven Lions, Lilly Ahlberg",
+            ArtistCredits = ["Seven Lions", "Lilly Ahlberg"],
+            Isrc = "CA5KR2593426",
+            DurationSeconds = 248
+        };
+
+        var result = TrackMatchScorer.Score(observation, candidate, new TrackMatchingOptions());
+
+        Assert.True(result.IsAutoMatchEligible);
+        Assert.Equal(0.97m, result.Score);
+    }
+
+    [Fact]
+    public void Score_DoesNotExpandCreditsWithoutAStableRecordingIdentifier()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video",
+            Title = "Shared Song", Artist = "Artist", DurationSeconds = 200,
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "musicbrainz", ExternalId = "candidate",
+            Title = "Shared Song", Artist = "Artist, Guest",
+            ArtistCredits = ["Artist", "Guest"], DurationSeconds = 200
+        };
+
+        Assert.False(TrackMatchScorer.Score(observation, candidate, new TrackMatchingOptions()).IsAutoMatchEligible);
     }
 
     private static TrackMatchScoredCandidate Score(

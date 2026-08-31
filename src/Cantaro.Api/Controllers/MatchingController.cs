@@ -134,6 +134,7 @@ public sealed record TrackMatchWorkPageResponse(
     int ScheduledCount,
     int ProcessingCount,
     DateTimeOffset? ProviderNotBefore,
+    string? ProviderCooldownSource,
     DateTimeOffset AsOf);
 
 public sealed record SongGroupingTrackResponse(
@@ -313,6 +314,7 @@ public class MatchingController(
             scheduledCount,
             processingCount,
             _musicBrainzRequestGate.NotBefore > now ? _musicBrainzRequestGate.NotBefore : null,
+            _musicBrainzRequestGate.CooldownSource,
             now));
     }
 

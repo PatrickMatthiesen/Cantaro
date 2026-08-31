@@ -66,7 +66,13 @@ internal static class TrackMatchScorer
         var score = (titleSimilarity * 0.55m) + (artistSimilarity * 0.30m) + (durationScore * 0.15m) + semanticAdjustment;
         var compatibleDuration = durationDifference.HasValue
             && Math.Abs(durationDifference.Value) <= options.AutoMatchDurationToleranceSeconds;
-        var isAutoMatchEligible = exactCredits
+        var credibleCreditExpansion = HasCredibleCreditExpansion(
+            parsedObservation,
+            parsedCandidate,
+            candidate,
+            titleSimilarity,
+            compatibleDuration);
+        var isAutoMatchEligible = (exactCredits || credibleCreditExpansion)
             && compatibleSemantics
             && (compatibleDuration || unmarkedYouTubePadding || officialVideoPadding);
 
@@ -94,12 +100,37 @@ internal static class TrackMatchScorer
                     : unmarkedYouTubePadding
                         ? "Exact credited YouTube match with bounded source padding."
                         : "Exact artist credits and compatible duration."
-                : !exactCredits
-                    ? "Automated matching requires exact artist credits."
+                : !exactCredits && !credibleCreditExpansion
+                    ? "Automated matching requires exact artist credits, except for a strongly identified exact-title expansion from one observed primary artist."
                     : !compatibleSemantics
                         ? "Automated matching requires compatible version and playback markers."
                     : "Automated matching requires compatible duration evidence."
         };
+    }
+
+    private static bool HasCredibleCreditExpansion(
+        ParsedTrackMetadata observation,
+        ParsedTrackMetadata parsedCandidate,
+        TrackMatchSearchCandidate candidate,
+        decimal titleSimilarity,
+        bool compatibleDuration)
+    {
+        if (titleSimilarity != 1m
+            || !compatibleDuration
+            || string.IsNullOrWhiteSpace(candidate.Isrc)
+            || observation.ArtistCredits.Count != 1)
+        {
+            return false;
+        }
+
+        var candidateCredits = TrackMetadataParser.NormalizeArtistCredits(candidate.ArtistCredits);
+        if (candidateCredits.Count == 0)
+        {
+            candidateCredits = parsedCandidate.ArtistCredits;
+        }
+
+        return candidateCredits.Count > observation.ArtistCredits.Count
+            && observation.ArtistCredits.All(credit => candidateCredits.Contains(credit, StringComparer.Ordinal));
     }
 
     internal static decimal BestSimilarity(string? candidateValue, params string?[] values)

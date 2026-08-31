@@ -117,6 +117,7 @@ export interface TrackMatchWorkPageResponse {
   scheduledCount: number;
   processingCount: number;
   providerNotBefore?: string;
+  providerCooldownSource?: 'retry-after' | 'fallback';
   asOf: string;
 }
 

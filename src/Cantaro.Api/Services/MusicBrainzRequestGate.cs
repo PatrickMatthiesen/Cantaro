@@ -8,6 +8,7 @@ public sealed class MusicBrainzRequestGate(TimeProvider timeProvider)
     private static readonly TimeSpan MaximumFallbackDelay = TimeSpan.FromMinutes(5);
     private readonly Lock _lock = new();
     private DateTimeOffset _notBefore = DateTimeOffset.MinValue;
+    private string? _cooldownSource;
     private int _consecutiveUnavailableResponses;
     private long _cooldownRevision;
 
@@ -35,6 +36,14 @@ public sealed class MusicBrainzRequestGate(TimeProvider timeProvider)
         }
     }
 
+    public string? CooldownSource
+    {
+        get
+        {
+            lock (_lock) return _notBefore > timeProvider.GetUtcNow() ? _cooldownSource : null;
+        }
+    }
+
     public async Task WaitAsync(CancellationToken cancellationToken)
     {
         while (true)
@@ -57,7 +66,11 @@ public sealed class MusicBrainzRequestGate(TimeProvider timeProvider)
             if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
 
             var requestedNotBefore = now + delay;
-            if (requestedNotBefore > _notBefore) _notBefore = requestedNotBefore;
+            if (requestedNotBefore > _notBefore)
+            {
+                _notBefore = requestedNotBefore;
+                _cooldownSource = retryAfter == null ? "fallback" : "retry-after";
+            }
             return _notBefore - now;
         }
     }
@@ -68,6 +81,7 @@ public sealed class MusicBrainzRequestGate(TimeProvider timeProvider)
         {
             _consecutiveUnavailableResponses = 0;
             _notBefore = DateTimeOffset.MinValue;
+            _cooldownSource = null;
         }
     }
 

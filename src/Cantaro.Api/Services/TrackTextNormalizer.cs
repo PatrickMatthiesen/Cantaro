@@ -26,7 +26,7 @@ public static partial class TrackTextNormalizer
         var normalized = lettersAndSpacingMarks.ToString().Normalize(NormalizationForm.FormC);
         normalized = BracketedNoiseRegex().Replace(normalized, " ");
         normalized = NoiseTokenRegex().Replace(normalized, " ");
-        normalized = NonAlphaNumericRegex().Replace(normalized, " ");
+        normalized = NonLetterOrDigitRegex().Replace(normalized, " ");
         normalized = WhitespaceRegex().Replace(normalized, " ").Trim();
 
         return normalized;
@@ -108,8 +108,8 @@ public static partial class TrackTextNormalizer
     [GeneratedRegex(@"\b(official|video|audio|lyrics|lyric|hd|hq|remaster|remastered)\b", RegexOptions.Compiled)]
     private static partial Regex NoiseTokenRegex();
 
-    [GeneratedRegex(@"[^a-z0-9\s]", RegexOptions.Compiled)]
-    private static partial Regex NonAlphaNumericRegex();
+    [GeneratedRegex(@"[^\p{L}\p{Nd}\s]", RegexOptions.Compiled)]
+    private static partial Regex NonLetterOrDigitRegex();
 
     [GeneratedRegex(@"\s+", RegexOptions.Compiled)]
     private static partial Regex WhitespaceRegex();
