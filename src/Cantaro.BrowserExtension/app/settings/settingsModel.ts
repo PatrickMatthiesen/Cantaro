@@ -14,7 +14,6 @@ export function createSettingsUpdate(savedSettings: ExtensionSettings, draft: Se
   const baseUrl = normalizeBaseUrl(draft.baseUrl) || DEFAULT_BASE_URL;
   const settings = {
     baseUrl: normalizeBaseUrl(draft.baseUrl) || DEFAULT_BASE_URL,
-    injectLyricsOnYouTube: draft.injectLyricsOnYouTube,
     verboseLogging: draft.verboseLogging,
   } satisfies ExtensionSettings;
   return { settings, baseUrlChanged: baseUrl !== savedSettings.baseUrl };
@@ -23,6 +22,5 @@ export function createSettingsUpdate(savedSettings: ExtensionSettings, draft: Se
 export function hasSettingsChanges(savedSettings: ExtensionSettings, draft: SettingsDraft) {
   const normalized = createSettingsUpdate(savedSettings, draft).settings;
   return normalized.baseUrl !== savedSettings.baseUrl
-    || normalized.injectLyricsOnYouTube !== savedSettings.injectLyricsOnYouTube
     || normalized.verboseLogging !== savedSettings.verboseLogging;
 }

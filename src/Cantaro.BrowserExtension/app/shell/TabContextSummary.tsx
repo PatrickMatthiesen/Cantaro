@@ -2,7 +2,6 @@ import type { PopupTabContextSnapshot } from './extensionAppTypes';
 import type { ActiveTabContextState } from './extensionAppTypes';
 
 function contextDetail(snapshot: Exclude<PopupTabContextSnapshot, { feature: 'unsupported' }>) {
-  if (snapshot.feature === 'music') return firstDetail(snapshot.title, snapshot.status);
   if (snapshot.pageKind === 'series') return firstDetail(snapshot.seriesTitle, snapshot.status);
   return firstDetail(snapshot.episodeTitle, snapshot.seriesTitle, snapshot.status);
 }

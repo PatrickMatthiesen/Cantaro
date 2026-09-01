@@ -2,7 +2,6 @@ declare const __CANTARO_BASE_URL__: string;
 
 export interface ExtensionSettings {
   baseUrl: string;
-  injectLyricsOnYouTube: boolean;
   verboseLogging: boolean;
 }
 
@@ -26,7 +25,6 @@ const DEFAULT_VERBOSE_LOGGING = defaultVerboseLoggingForMode(import.meta.env.MOD
 
 export const defaultExtensionSettings: ExtensionSettings = {
   baseUrl: DEFAULT_BASE_URL,
-  injectLyricsOnYouTube: false,
   verboseLogging: DEFAULT_VERBOSE_LOGGING,
 };
 
@@ -35,7 +33,6 @@ export function normalizeExtensionSettings(
 ): ExtensionSettings {
   return {
     baseUrl: normalizeBaseUrl(settings.baseUrl) || DEFAULT_BASE_URL,
-    injectLyricsOnYouTube: settings.injectLyricsOnYouTube === true,
     verboseLogging: typeof settings.verboseLogging === 'boolean'
       ? settings.verboseLogging
       : DEFAULT_VERBOSE_LOGGING,

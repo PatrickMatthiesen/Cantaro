@@ -36,7 +36,6 @@ describe('settingsRepository', () => {
       [SETTINGS_STORAGE_KEY]: {
         baseUrl: 'https://new.example.test',
         webBaseUrl: 'https://web.example.test',
-        injectLyricsOnYouTube: true,
         verboseLogging: false,
       },
     });

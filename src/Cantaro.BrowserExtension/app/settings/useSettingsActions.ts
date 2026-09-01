@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { browserAuthService } from '../../platform/auth/authService';
 import type { ExtensionSession } from '../../platform/auth/extensionSession';
 import { signOutRuntimeSession } from '../../platform/auth/runtimeAuthClient';
-import { createCorrelationId } from '../../platform/messaging/messageResult';
 import {
   ensureApiPermission,
   removeReplacedApiPermission,
@@ -90,10 +89,6 @@ export function useSettingsActions(context: SettingsActionContext) {
       context.setSession(session);
       context.setSessionEmail(session.email || null);
       context.notify('Signed in to Cantaro', 'success');
-      await browser.runtime.sendMessage({
-        type: 'delivery.queue.drain',
-        correlationId: createCorrelationId(),
-      }).catch(() => null);
       return true;
     } catch (error) {
       console.error('Extension sign-in failed:', error);

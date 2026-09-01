@@ -28,11 +28,12 @@ describe('registerTabContext', () => {
       },
     } as unknown as ContentScriptContext;
     const snapshot = {
-      feature: 'music' as const,
-      provider: 'spotify' as const,
-      pageKind: 'placeholder' as const,
-      pageUrl: 'https://open.spotify.com/',
-      status: 'unsupported' as const,
+      feature: 'media' as const,
+      provider: 'crunchyroll' as const,
+      pageKind: 'series' as const,
+      pageUrl: 'https://www.crunchyroll.com/series/example',
+      status: 'starting' as const,
+      observedEpisodeCount: 0,
     };
 
     const notifyChanged = registerTabContext(ctx, () => snapshot);

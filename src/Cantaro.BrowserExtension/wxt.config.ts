@@ -42,7 +42,7 @@ export default defineConfig({
   manifest: ({ browser, mode }) => ({
     name: mode === 'development' ? 'Cantaro (Dev)' : 'Cantaro',
     short_name: mode === 'development' ? 'Cantaro Dev' : 'Cantaro',
-    description: 'Sync music and collect rendered episode URLs from supported streaming pages',
+    description: 'Manage Cantaro music and track watched media on supported streaming pages',
     version: packageMetadata.version,
     icons: {
       16: '/icon/16.png',
@@ -58,10 +58,6 @@ export default defineConfig({
     ],
     host_permissions: [
       ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),
-      'https://open.spotify.com/*',
-      'https://music.youtube.com/*',
-      'https://www.youtube.com/*',
-      'https://youtube.com/*',
       'https://www.crunchyroll.com/*',
     ],
     optional_host_permissions: ['https://*/*'],

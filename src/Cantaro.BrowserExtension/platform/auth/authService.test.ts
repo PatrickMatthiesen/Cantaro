@@ -67,6 +67,70 @@ describe('authService', () => {
     expect(repository.clear).not.toHaveBeenCalled();
   });
 
+  it('rotates refresh and access tokens after a browser restart', async () => {
+    let stored = expiredSession('', 'persistent-refresh');
+    const repository: SessionRepository = {
+      read: vi.fn(async () => stored),
+      save: vi.fn(async value => {
+        stored = value;
+        return value;
+      }),
+      clear: vi.fn(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      access_token: 'rotated-access',
+      refresh_token: 'rotated-refresh',
+      expires_in: 3600,
+      user: { email: 'user@example.test' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const service = createAuthService(repository, authBrowser());
+
+    await expect(service.getAccessToken('https://api.example.test')).resolves.toBe('rotated-access');
+    expect(repository.save).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: 'rotated-access',
+      refreshToken: 'rotated-refresh',
+    }));
+  });
+
+  it('clears a refresh session rejected by the token service', async () => {
+    const session = expiredSession('', 'revoked-refresh');
+    const repository: SessionRepository = {
+      read: vi.fn(async () => session),
+      save: vi.fn(async value => value),
+      clear: vi.fn(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: 'invalid_grant' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const service = createAuthService(repository, authBrowser());
+
+    await expect(service.getAccessToken('https://api.example.test')).resolves.toBeNull();
+    expect(repository.clear).toHaveBeenCalledOnce();
+  });
+
+  it('revokes and clears the persistent session on sign-out', async () => {
+    const session = expiredSession('access', 'refresh-to-revoke');
+    const repository: SessionRepository = {
+      read: vi.fn(async () => session),
+      save: vi.fn(async value => value),
+      clear: vi.fn(),
+    };
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const service = createAuthService(repository, authBrowser());
+
+    await service.signOut('https://api.example.test');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/auth/extension/revoke',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(repository.clear).toHaveBeenCalledOnce();
+  });
+
   it('does not recreate a session cleared while refresh was in flight', async () => {
     let stored: ExtensionSession | null = expiredSession('expired-access', 'refresh-before-signout');
     let resolveGrant: ((response: Response) => void) | undefined;

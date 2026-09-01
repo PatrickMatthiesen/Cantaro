@@ -45,8 +45,8 @@ If a queued watch observation later needs manual matching, the API remains the d
 | Rendered DOM, extracted provider IDs, tracker status | Content controller in that tab |
 | Current popup page and transient notices | Popup React tree |
 | API/web origins and feature preferences | `cantaro.settings.v1` |
-| OAuth tokens and signed-in email | `cantaro.session.v1` |
-| Offline media delivery | `cantaro.deliveryQueue.v1` |
+| Refresh token and signed-in email | `cantaro.refresh-session.v2` in trusted local storage |
+| Short-lived access token | `cantaro.access-session.v2` in browser session storage |
 | Observations, matching, destinations, seen counts | Cantaro API/database |
 
 The background service worker can stop at any time under Manifest V3. Durable state therefore lives in extension storage or the backend, while transient controller state remains reconstructible from its page.

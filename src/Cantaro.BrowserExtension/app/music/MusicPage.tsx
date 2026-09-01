@@ -1,6 +1,5 @@
 import { GradientButton } from '@cantaro/client-shared/ui';
 import type { ActiveTabContextState } from '../shell/extensionAppTypes';
-import { CurrentMusicTab } from './CurrentMusicTab';
 import { MusicResults } from './MusicResults';
 import { MusicState } from './MusicState';
 import { SongDetail } from './SongDetail';
@@ -23,11 +22,11 @@ export function MusicPage(props: MusicPageProps) {
       </MusicState>
     );
   }
-  return <ConfiguredMusicPage {...props} />;
+  return <ConfiguredMusicPage />;
 }
 
-function ConfiguredMusicPage(props: Pick<MusicPageProps, 'activeTabContext'>) {
-  const page = useMusicPage(props.activeTabContext);
+function ConfiguredMusicPage() {
+  const page = useMusicPage();
   if (page.error) return <MusicState title="Music is unavailable" detail={page.error} />;
   if (!page.library) return <MusicState title="Loading your library…" detail="Fetching canonical songs and playlists." />;
   if (page.route.kind === 'song') {
@@ -42,17 +41,6 @@ function ConfiguredMusicPage(props: Pick<MusicPageProps, 'activeTabContext'>) {
 
   return (
     <section className="space-y-3 p-1" aria-label="Music">
-      {page.context ? (
-        <CurrentMusicTab
-          context={page.context}
-          resolution={page.resolution}
-          recognition={page.recognition}
-          loading={page.recognitionLoading}
-          error={page.recognitionError}
-          onSelectSong={(song) => page.setRoute({ kind: 'song', song })}
-          onRetry={page.retryRecognition}
-        />
-      ) : null}
       <label className="block">
         <span className="sr-only">Search music</span>
         <input

@@ -7,7 +7,6 @@ import { createCantaroApiClient } from './cantaroApiClient';
 const settingsRepository: SettingsRepository = {
   read: vi.fn(async () => ({
     baseUrl: 'https://cantaro.example.test',
-    injectLyricsOnYouTube: false,
     verboseLogging: false,
   })),
   save: vi.fn(),

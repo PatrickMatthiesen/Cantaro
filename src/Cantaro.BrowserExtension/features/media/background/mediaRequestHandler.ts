@@ -7,12 +7,6 @@ import {
   messageSuccess,
   type MessageResult,
 } from '../../../platform/messaging/messageResult';
-import {
-  browserDeliveryQueue,
-  type DeliveryQueue,
-  type QueuedDelivery,
-} from '../../../platform/storage/deliveryQueue';
-import type { DrainDeliveryQueueResult } from '../../../platform/messaging/platformMessages';
 import type { MediaBackgroundRequest, MediaBackgroundResponse } from '../contracts/mediaMessages';
 import { browserMediaProgressNotifier, type MediaProgressNotifier } from './mediaProgressNotifier';
 
@@ -21,11 +15,6 @@ type ResolutionRequest = Extract<MediaBackgroundRequest, { type: 'media.watch.re
 
 export interface MediaRequestHandler {
   handle(request: MediaBackgroundRequest, tabId?: number): Promise<MessageResult<MediaBackgroundResponse>>;
-  drainQueue(): Promise<DrainDeliveryQueueResult>;
-}
-
-function queueableError(error: unknown): boolean {
-  return error instanceof ApiError && (error.retryable || error.status === 401);
 }
 
 function failureMessage(error: unknown): string {
@@ -48,18 +37,6 @@ function failureResult(
   );
 }
 
-function queuedDelivery(request: SubmissionRequest): QueuedDelivery {
-  return request.type === 'media.catalog.submit'
-    ? { kind: 'media.catalog', payload: request.payload }
-    : { kind: 'media.watch', payload: request.payload };
-}
-
-function queuedResult(request: SubmissionRequest, error: unknown): MediaBackgroundResponse {
-  return request.type === 'media.catalog.submit'
-    ? { status: 'queued', acceptedEpisodeCount: 0, reason: failureMessage(error) }
-    : { status: 'queued' };
-}
-
 function logSubmission(
   logger: ExtensionLogger,
   request: SubmissionRequest,
@@ -77,7 +54,6 @@ function logSubmission(
 async function handleSubmission(
   request: SubmissionRequest,
   apiClient: CantaroApiClient,
-  queue: DeliveryQueue,
   logger: ExtensionLogger,
   progressNotifier: MediaProgressNotifier,
 ): Promise<MessageResult<MediaBackgroundResponse>> {
@@ -95,16 +71,8 @@ async function handleSubmission(
     logSubmission(logger, request, result);
     return messageSuccess(result, request.correlationId);
   } catch (error) {
-    if (!queueableError(error)) {
-      logger.error('Media request failed', error);
-      return failureResult(request, error);
-    }
-    await queue.enqueue(queuedDelivery(request));
-    logger.warn('Observation queued for later delivery', {
-      type: request.type,
-      reason: failureMessage(error),
-    });
-    return messageSuccess(queuedResult(request, error), request.correlationId);
+    logger.error('Media request failed', error);
+    return failureResult(request, error);
   }
 }
 
@@ -127,57 +95,21 @@ async function handleResolution(
 
 export function createMediaRequestHandler(
   apiClient: CantaroApiClient,
-  queue: DeliveryQueue,
   logger: ExtensionLogger,
   progressNotifier: MediaProgressNotifier = { notify: async () => {} },
 ): MediaRequestHandler {
-  async function deliver(delivery: QueuedDelivery): Promise<void> {
-    if (delivery.kind === 'media.catalog') {
-      await apiClient.submitCatalog(delivery.payload);
-      return;
-    }
-    const result = await apiClient.submitWatch(delivery.payload);
-    await progressNotifier.notify(result).catch((error: unknown) => {
-      logger.warn('Could not notify open Cantaro tabs', { reason: failureMessage(error) });
-    });
-  }
-
   return {
     async handle(request, tabId) {
       const requestLogger = logger.child({ tabId, correlationId: request.correlationId });
       return request.type === 'media.watch.resolve'
         ? handleResolution(request, apiClient, requestLogger)
-        : handleSubmission(request, apiClient, queue, requestLogger, progressNotifier);
-    },
-
-    async drainQueue() {
-      const batch = await queue.readBatch(10);
-      const succeeded: string[] = [];
-      const failed: string[] = [];
-      for (const item of batch) {
-        try {
-          await deliver(item.delivery);
-          succeeded.push(item.id);
-        } catch {
-          failed.push(item.id);
-        }
-      }
-      await queue.markSucceeded(succeeded);
-      await queue.markFailed(failed);
-      const remaining = (await queue.readBatch(50)).length;
-      if (batch.length > 0) logger.info('Delivery queue processed', {
-        attempted: batch.length,
-        delivered: succeeded.length,
-        remaining,
-      });
-      return { delivered: succeeded.length, remaining };
+        : handleSubmission(request, apiClient, requestLogger, progressNotifier);
     },
   };
 }
 
 export const mediaRequestHandler = createMediaRequestHandler(
   backgroundCantaroApiClient,
-  browserDeliveryQueue,
   createExtensionLogger({ scope: 'background', feature: 'media' }),
   browserMediaProgressNotifier,
 );

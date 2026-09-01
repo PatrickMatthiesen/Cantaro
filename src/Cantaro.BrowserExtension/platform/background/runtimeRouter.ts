@@ -4,7 +4,6 @@ import { browserAuthService } from '../auth/authService';
 import { createExtensionLogger } from '../diagnostics/logger';
 import { isAuthBackgroundRequest, type AuthBackgroundRequest } from '../messaging/authMessages';
 import { messageFailure, messageSuccess } from '../messaging/messageResult';
-import { isDrainDeliveryQueueRequest } from '../messaging/platformMessages';
 import { normalizeBaseUrl } from '../settings/extensionSettings';
 import { browserSettingsRepository } from '../settings/settingsRepository';
 
@@ -49,20 +48,6 @@ export function createRuntimeRouter(mediaHandler: MediaRequestHandler) {
     const tabId = sender.tab?.id;
     if (isAuthBackgroundRequest(message)) return handleAuthRequest(message);
     if (isMediaBackgroundRequest(message)) return mediaHandler.handle(message, tabId);
-    if (isDrainDeliveryQueueRequest(message)) {
-      try {
-        return messageSuccess(await mediaHandler.drainQueue(), message.correlationId);
-      } catch (error) {
-        logger.error('Delivery queue drain failed', error);
-        return messageFailure(
-          message.correlationId,
-          'delivery_failed',
-          error instanceof Error ? error.message : 'Delivery queue drain failed.',
-          true,
-        );
-      }
-    }
-
     return undefined;
   };
 }

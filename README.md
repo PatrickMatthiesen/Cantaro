@@ -234,6 +234,8 @@ The browser automatically includes the authentication cookie in all API requests
 
 The optional browser extension accelerates playlist sync and observes supported media pages in real time:
 
+The extension's data handling is described in the [browser extension privacy policy](./PRIVACY.md).
+
 ```bash
 cd src/Cantaro.BrowserExtension
 bun install
