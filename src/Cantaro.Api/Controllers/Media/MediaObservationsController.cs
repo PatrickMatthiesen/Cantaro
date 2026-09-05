@@ -67,8 +67,8 @@ public class MediaObservationsController(
         var progressHint = string.IsNullOrWhiteSpace(request.ProgressHint)
             ? request.EpisodeNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture)
             : request.ProgressHint.Trim();
-        var rawPayload = JsonSerializer.Serialize(request, RawPayloadJsonOptions);
         var now = DateTimeOffset.UtcNow;
+        var normalizedObservedUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(request.ObservedUrl);
 
         // Deduplicate by (UserId, SiteIdentifier, SiteMediaId) when SiteMediaId
         // is available. This prevents duplicate rows when the extension re-fires
@@ -77,6 +77,7 @@ public class MediaObservationsController(
         {
             var existing = await _dbContext.MediaObservations
                 .Include(o => o.Candidates)
+                .Include(o => o.Episodes)
                 .FirstOrDefaultAsync(
                     o => o.UserId == userId
                          && o.SiteIdentifier == normalizedSite
@@ -85,12 +86,12 @@ public class MediaObservationsController(
 
             if (existing is not null)
             {
-                existing.ObservedUrl = request.ObservedUrl;
+                existing.ObservedUrl = normalizedObservedUrl;
                 existing.ObservedTitle = request.ObservedTitle.Trim();
                 existing.ProgressHint = progressHint;
                 existing.ObservedAt = request.ObservedAt ?? now;
                 existing.ExtensionVersion = request.ExtensionVersion?.Trim();
-                existing.RawPayload = rawPayload;
+                ApplyStructuredPayload(existing, request, isCatalogObservation: false);
                 existing.UpdatedAt = now;
 
                 var exactIdentityApplied = await _matchingService.TryApplyProviderEpisodeIdentityAsync(
@@ -129,17 +130,18 @@ public class MediaObservationsController(
             Id = Guid.NewGuid(),
             UserId = userId,
             SiteIdentifier = normalizedSite,
-            ObservedUrl = request.ObservedUrl,
+            ObservedUrl = normalizedObservedUrl,
             SiteMediaId = normalizedSiteMediaId,
             ObservedTitle = request.ObservedTitle.Trim(),
             ProgressHint = progressHint,
             ObservedAt = request.ObservedAt ?? now,
             ExtensionVersion = request.ExtensionVersion?.Trim(),
-            RawPayload = rawPayload,
+            IsCatalogObservation = false,
             MatchStatus = MediaObservationStatuses.Pending,
             CreatedAt = now,
             UpdatedAt = now
         };
+        ApplyStructuredPayload(observation, request, isCatalogObservation: false);
 
         _dbContext.MediaObservations.Add(observation);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -451,33 +453,11 @@ public class MediaObservationsController(
         int episodeOffset,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(observation.RawPayload))
-        {
-            return;
-        }
-
-        SubmitMediaObservationRequest? payload;
-        try
-        {
-            payload = JsonSerializer.Deserialize<SubmitMediaObservationRequest>(
-                observation.RawPayload,
-                RawPayloadJsonOptions);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
-
-        if (payload is null)
-        {
-            return;
-        }
-
         await _seasonMappingService.EstablishAsync(
             observation.SiteIdentifier,
-            payload.ProviderSeriesId,
-            payload.ProviderSeasonId,
-            payload.SeasonNumber,
+            observation.ProviderSeriesId,
+            observation.ProviderSeasonId,
+            observation.SeasonNumber,
             mediaTitleId,
             episodeOffset,
             MediaProviderSeasonMappingSources.Manual,
@@ -492,6 +472,7 @@ public class MediaObservationsController(
     {
         return await _dbContext.MediaObservations
             .Include(o => o.Candidates)
+            .Include(o => o.Episodes)
             .Include(o => o.MediaTitle)
             .FirstOrDefaultAsync(
                 o => o.Id == observationId && o.UserId == userId,
@@ -1136,12 +1117,11 @@ public class MediaObservationsController(
             return;
         }
 
-        var payload = TryDeserializeRawPayload(observation.RawPayload);
         var seasonMapping = await _seasonMappingService.FindAsync(
             observation.SiteIdentifier,
-            payload?.ProviderSeriesId,
-            payload?.ProviderSeasonId,
-            payload?.SeasonNumber,
+            observation.ProviderSeriesId,
+            observation.ProviderSeasonId,
+            observation.SeasonNumber,
             cancellationToken);
         if (seasonMapping is not null && seasonMapping.MediaTitleId == observation.MediaTitleId)
         {
@@ -1173,6 +1153,56 @@ public class MediaObservationsController(
         observation.UpdatedAt = DateTimeOffset.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    private static void ApplyStructuredPayload(
+        MediaObservation observation,
+        SubmitMediaObservationRequest request,
+        bool isCatalogObservation)
+    {
+        observation.SeriesTitle = FirstNonBlank(request.SeriesTitle);
+        observation.EpisodeTitle = FirstNonBlank(request.EpisodeTitle);
+        observation.EpisodeNumber = request.EpisodeNumber;
+        observation.SeasonTitle = FirstNonBlank(request.SeasonTitle);
+        observation.SeasonNumber = request.SeasonNumber;
+        observation.ProviderSeriesId = FirstNonBlank(request.ProviderSeriesId);
+        observation.ProviderSeasonId = FirstNonBlank(request.ProviderSeasonId);
+        observation.ProviderSequenceNumber = request.ProviderSequenceNumber;
+        observation.ReleaseTrack = FirstNonBlank(request.ReleaseTrack);
+        observation.NextEpisodeProviderId = FirstNonBlank(request.NextEpisodeProviderId);
+        observation.NextEpisodeUrl = string.IsNullOrWhiteSpace(request.NextEpisodeUrl)
+            ? null
+            : MediaDestinationUrlPolicy.NormalizeObservedUrl(request.NextEpisodeUrl);
+        observation.NextEpisodeTitle = FirstNonBlank(request.NextEpisodeTitle);
+        observation.NextEpisodeNumber = request.NextEpisodeNumber;
+        observation.NextEpisodeReleaseTrack = FirstNonBlank(request.NextEpisodeReleaseTrack);
+        observation.IsCatalogObservation = isCatalogObservation;
+
+        observation.Episodes.Clear();
+        foreach (var episode in request.ObservedEpisodes
+                     .Where(item => item is not null)
+                     .Take(MediaCatalogObservationLimits.MaximumEpisodesPerObservation))
+        {
+            observation.Episodes.Add(new MediaObservationEpisode
+            {
+                Id = Guid.NewGuid(),
+                ProviderEpisodeId = episode.ProviderEpisodeId.Trim(),
+                ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl),
+                EpisodeNumber = episode.EpisodeNumber,
+                EpisodeTitle = FirstNonBlank(episode.EpisodeTitle),
+                ReleaseTrack = FirstNonBlank(episode.ReleaseTrack),
+                AvailableSubtitleLanguageCodes = NormalizeLanguageCodes(episode.AvailableSubtitleLanguageCodes),
+                AvailableAudioLanguageCodes = NormalizeLanguageCodes(episode.AvailableAudioLanguageCodes)
+            });
+        }
+    }
+
+    private static List<string> NormalizeLanguageCodes(IEnumerable<string>? values) =>
+        values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
 
     private async Task UpsertEpisodeOffsetAsync(
         int userId,
@@ -1209,8 +1239,7 @@ public class MediaObservationsController(
 
     private static string? GetProviderSearchQuery(MediaObservation observation)
     {
-        var raw = TryDeserializeRawPayload(observation.RawPayload);
-        return FirstNonBlank(raw?.SeriesTitle, observation.ObservedTitle);
+        return FirstNonBlank(observation.SeriesTitle, observation.ObservedTitle);
     }
 
     private static bool TryParseObservationProgress(MediaObservation observation, out int progress)
@@ -1242,23 +1271,6 @@ public class MediaObservationsController(
             : JsonSerializer.Deserialize<List<ObservationResolutionLogEntry>>(payload, RawPayloadJsonOptions) ?? [];
         entries.Add(entry);
         return JsonSerializer.Serialize(entries, RawPayloadJsonOptions);
-    }
-
-    private static ObservationRawPayload? TryDeserializeRawPayload(string? rawPayload)
-    {
-        if (string.IsNullOrWhiteSpace(rawPayload))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<ObservationRawPayload>(rawPayload, RawPayloadJsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private static string? FirstNonBlank(params string?[] values)
@@ -1293,17 +1305,6 @@ public class MediaObservationsController(
     private sealed record AddProviderTitleResult(Guid LibraryEntryId, Guid MediaTitleId, string Title, ActionResult? Error)
     {
         public static AddProviderTitleResult FromError(ActionResult error) => new(Guid.Empty, Guid.Empty, string.Empty, error);
-    }
-
-    private sealed class ObservationRawPayload
-    {
-        public string? SeriesTitle { get; set; }
-
-        public string? ProviderSeriesId { get; set; }
-
-        public string? ProviderSeasonId { get; set; }
-
-        public int? SeasonNumber { get; set; }
     }
 
     private sealed class ObservationResolutionLogEntry

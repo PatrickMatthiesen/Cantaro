@@ -1,4 +1,5 @@
 import type { SeriesCatalogObservation } from '../../../../contracts/catalogObservation';
+import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 
 export interface CrunchyrollEpisodeLogEntry {
   episodeNumber: number;
@@ -29,7 +30,7 @@ export function buildSeriesDiscoveryLog(
       episodeNumber: episode.episodeNumber,
       title: episode.episodeTitle,
       providerEpisodeId: episode.providerEpisodeId,
-      url: episode.providerUrl,
+      url: stripUrlQueryAndFragment(episode.providerUrl),
       releaseTrack: episode.releaseTrack,
     })),
   };

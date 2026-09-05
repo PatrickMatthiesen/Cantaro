@@ -26,6 +26,7 @@ import {
 import { decideThresholdSubmission } from './thresholdSubmission';
 import type { WatchResolutionOverlayHandle } from './watchResolutionOverlay';
 import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
+import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 
 const RESTART_DELAY_MS = 500;
 
@@ -79,7 +80,7 @@ export function createCrunchyrollWatchController(
   let notifyContextChanged: () => void = () => undefined;
 
   const updateSnapshot = (changes: Partial<MediaWatchTabContext>) => {
-    snapshot = { ...snapshot, ...changes, pageUrl: location.href };
+    snapshot = { ...snapshot, ...changes, pageUrl: stripUrlQueryAndFragment(location.href) };
     notifyContextChanged();
   };
 
@@ -204,7 +205,7 @@ export function createCrunchyrollWatchController(
       message: error instanceof Error ? error.message : 'Unexpected watch tracking failure.',
     });
     console.error(extensionLogMessage('Crunchyroll watch tracker failed'), {
-      pageUrl: location.href,
+      pageUrl: stripUrlQueryAndFragment(location.href),
       error,
     });
   };
@@ -228,7 +229,17 @@ export function createCrunchyrollWatchController(
     observation: WatchProgressObservation,
   ) => {
     const correlationId = createCorrelationId();
-    verboseLog('Cantaro: submitting Crunchyroll watch progress', { correlationId, observation });
+    verboseLog('Cantaro: submitting Crunchyroll watch progress', {
+      correlationId,
+      providerEpisodeId: observation.providerEpisodeId,
+      providerSeriesId: observation.providerSeriesId,
+      providerSeasonId: observation.providerSeasonId,
+      episodeNumber: observation.episodeNumber,
+      releaseTrack: observation.releaseTrack,
+      watchProgressPercent: observation.watchProgressPercent,
+      durationSeconds: observation.durationSeconds,
+      positionSeconds: observation.positionSeconds,
+    });
     try {
       const result = await dependencies.submitWatch(observation, correlationId);
       if (!isCurrentDelivery(ctx, watchId, currentWatchId)) return;
@@ -336,7 +347,9 @@ export function createCrunchyrollWatchController(
   notifyContextChanged = startMediaControllerRuntime(ctx, dependencies, () => snapshot, (enabled) => {
     verboseLogging = enabled;
   }, () => {
-    verboseLog('Cantaro: Crunchyroll watch controller started', { pageUrl: location.href });
+    verboseLog('Cantaro: Crunchyroll watch controller started', {
+      pageUrl: stripUrlQueryAndFragment(location.href),
+    });
     requestRestart();
   }, () => extractEpisodeId(location.pathname) !== undefined);
 
@@ -346,7 +359,7 @@ export function createCrunchyrollWatchController(
   });
 
   const handleLocationChange = () => {
-    const nextWatchId = extractEpisodeId(location.pathname) ?? location.href;
+    const nextWatchId = extractEpisodeId(location.pathname) ?? stripUrlQueryAndFragment(location.href);
     if (nextWatchId === currentWatchId) {
       requestRestart();
       return;
@@ -409,7 +422,7 @@ function createInitialSnapshot(): MediaWatchTabContext {
     feature: 'media',
     provider: 'crunchyroll',
     pageKind: 'watch',
-    pageUrl: location.href,
+    pageUrl: stripUrlQueryAndFragment(location.href),
     status: 'starting',
   };
 }
@@ -429,7 +442,7 @@ function prepareTrackingAttempt(
 }
 
 function currentPageWatchId(locationLike: Location): string {
-  return extractEpisodeId(locationLike.pathname) ?? locationLike.href;
+  return extractEpisodeId(locationLike.pathname) ?? stripUrlQueryAndFragment(locationLike.href);
 }
 
 function canPrepareTracking(

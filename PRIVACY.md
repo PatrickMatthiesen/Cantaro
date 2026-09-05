@@ -1,6 +1,6 @@
 # Cantaro Browser Extension Privacy Policy
 
-Effective September 1, 2026
+Effective September 5, 2026
 
 Cantaro observes supported streaming pages only to provide its media-library and watch-tracking features. Cantaro does not sell user data or use it for advertising.
 
@@ -39,7 +39,7 @@ The extension stores settings, the refresh credential used to preserve sign-in, 
 
 ### On the configured Cantaro server
 
-The extension sends account requests and delivered Crunchyroll media observations over HTTPS to the Cantaro server configured by the user. The server stores and processes them to provide Cantaro's library features.
+The extension sends account requests and delivered Crunchyroll media observations over HTTPS to the Cantaro server configured by the user. Observation URLs have query strings and fragments removed before delivery and again at server ingestion. The server retains structured title, episode, provider, language, progress and resolution information needed for matching and library features. It does not retain full serialized observation requests or playback position, duration and percentage in observation records. Duplicate title values are not stored in a second request body.
 
 When a user connects an external music or media provider, the configured server may exchange the identifiers, library state, playlists, or progress needed to perform the action requested by the user. Those services process data under their own privacy terms. The extension does not send supported-page observations to advertising networks or data brokers.
 
@@ -65,8 +65,9 @@ Cantaro's use of information received from Google APIs adheres to the [Chrome We
 ## Retention and user controls
 
 - Signing out removes the extension authentication session from local storage.
-- The configured server retains user-scoped account, library, and media-observation data while the account is active. Cantaro's web settings let users export their data, disconnect providers, and permanently delete their account and user-scoped live records.
-- Provider metadata used for shared recognition and canonical matching may remain after account deletion when it is no longer associated with the deleted account.
+- The configured server retains account and library data while the account is active. Media observations, their episode evidence, matching candidates and resolution history expire after 30 days without a server-side update; cleanup runs at startup and hourly while the server is running. Observation expiry does not erase library watch progress.
+- Cantaro's web settings let users export their retained user-scoped data, disconnect providers, and permanently delete their account and user-scoped live records, including observations and dependent episode evidence.
+- Shared canonical titles, episodes, provider mappings, playable episode identities and language availability remain until explicitly maintained or removed, including after observation expiry or account deletion. These records contain catalog information without a user owner; they are not retained as the deleted user's viewing history.
 - Server backups and operational or security logs follow the configured server operator's retention rules. Cantaro does not impose one retention period on every self-hosted deployment.
 
 ## Security

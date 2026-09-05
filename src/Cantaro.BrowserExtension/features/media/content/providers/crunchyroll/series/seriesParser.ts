@@ -12,6 +12,7 @@ import {
   parseCrunchyrollUrl,
 } from '../shared/crunchyrollUrls';
 import { releaseTrackFromSeasonLabel } from '../shared/releaseTrack';
+import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 
 const EPISODE_CARD_SELECTOR = '[data-t^="episode-card"]';
 const WATCH_LINK_SELECTOR = 'a[href*="/watch/"]';
@@ -130,7 +131,7 @@ function readSeriesPageState(
       : undefined);
   const languageAvailability = readSeasonLanguageAvailability(season.rawTitle);
   return {
-    pageUrl: identity?.pageUrl.href ?? rawUrl,
+    pageUrl: identity?.pageUrl.href ?? stripUrlQueryAndFragment(rawUrl),
     pageUrlValue: identity?.pageUrl ?? null,
     providerSeriesId: identity?.providerSeriesId,
     seriesTitle,

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Claims;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
@@ -205,6 +206,192 @@ public sealed class ProfileControllerTests
         Assert.NotEqual(previousObjectKey, replacementObjectKey);
         Assert.False(fixture.Store.Objects.ContainsKey(previousObjectKey));
     }
+
+    [Fact]
+    public async Task ExportContainsRetainedStructuredObservationsWithoutRawPayloads()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.MediaObservations.Add(new MediaObservation
+        {
+            UserId = fixture.User.Id,
+            SiteIdentifier = "crunchyroll",
+            ObservedUrl = "https://www.crunchyroll.com/watch/episode",
+            SiteMediaId = "series-1",
+            ObservedTitle = "Episode",
+            ProgressHint = "Episode 1",
+            ObservedAt = now,
+            SeriesTitle = "Series",
+            EpisodeTitle = "Episode",
+            EpisodeNumber = 1,
+            ProviderSeriesId = "series-1",
+            ReleaseTrack = "sub:en",
+            MatchStatus = MediaObservationStatuses.Matched,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        fixture.Db.MediaObservations.Add(new MediaObservation
+        {
+            UserId = fixture.User.Id,
+            SiteIdentifier = "crunchyroll",
+            ObservedUrl = "https://www.crunchyroll.com/watch/expired",
+            SiteMediaId = "expired-series",
+            ObservedTitle = "expired observation",
+            ObservedAt = now.AddDays(-31),
+            MatchStatus = MediaObservationStatuses.Matched,
+            CreatedAt = now.AddDays(-31),
+            UpdatedAt = now.AddDays(-31)
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Export(CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        await using var archiveStream = new MemoryStream(file.FileContents);
+        using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read);
+        var dataEntry = Assert.Single(archive.Entries, entry => entry.FullName == "cantaro-export.json");
+        using var reader = new StreamReader(dataEntry.Open());
+        var json = await reader.ReadToEndAsync();
+
+        Assert.Contains("series-1", json);
+        Assert.Contains("Episode", json);
+        Assert.DoesNotContain("expired observation", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("RawPayload", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProviderChoicesPayload", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResolutionHistoryPayload", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeleteAccountRemovesPersonalDataAndLeavesCanonicalMediaData()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var title = new MediaTitle
+        {
+            CanonicalTitle = "Canonical series",
+            MediaKind = "anime",
+            PrimaryProgressDimension = "episodes",
+            ReleaseStatusDimension = "episodes"
+        };
+        var providerLink = new MediaProviderLink
+        {
+            MediaTitle = title,
+            Provider = "anilist",
+            ExternalId = "123",
+            LinkSource = "provider"
+        };
+        fixture.Db.MediaTitles.Add(title);
+        fixture.Db.MediaProviderLinks.Add(providerLink);
+        fixture.Db.ExtensionAuthorizationCodes.Add(new ExtensionAuthorizationCode
+        {
+            UserId = fixture.User.Id,
+            ClientId = "cantaro-extension",
+            RedirectUri = "https://extension.invalid/callback",
+            CodeChallenge = "challenge",
+            CodeHash = "code-hash",
+            CreatedAt = now.UtcDateTime,
+            ExpiresAt = now.AddMinutes(5).UtcDateTime
+        });
+        fixture.Db.ExtensionRefreshTokens.Add(new ExtensionRefreshToken
+        {
+            UserId = fixture.User.Id,
+            ClientId = "cantaro-extension",
+            TokenHash = "refresh-hash",
+            CreatedAt = now.UtcDateTime,
+            ExpiresAt = now.AddDays(30).UtcDateTime
+        });
+        fixture.Db.MediaLibraryEntries.Add(new MediaLibraryEntry
+        {
+            UserId = fixture.User.Id,
+            MediaTitle = title,
+            Status = "watching",
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        var observation = new MediaObservation
+        {
+            UserId = fixture.User.Id,
+            SiteIdentifier = "crunchyroll",
+            ObservedUrl = "https://www.crunchyroll.com/watch/episode",
+            SiteMediaId = "series-1",
+            ObservedTitle = "Episode",
+            ObservedAt = now,
+            MediaTitle = title,
+            MatchStatus = MediaObservationStatuses.Matched,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        observation.Candidates.Add(new MediaObservationCandidate
+        {
+            CandidateSource = "provider_search",
+            MediaTitle = title,
+            Title = title.CanonicalTitle,
+            MediaKind = title.MediaKind,
+            Score = 0.95m
+        });
+        observation.Episodes.Add(new MediaObservationEpisode
+        {
+            ProviderEpisodeId = "episode-1",
+            ProviderUrl = "https://www.crunchyroll.com/watch/episode",
+            EpisodeNumber = 1,
+            EpisodeTitle = "Episode",
+            ReleaseTrack = "sub:en",
+            AvailableSubtitleLanguageCodes = ["en"],
+            AvailableAudioLanguageCodes = []
+        });
+        fixture.Db.MediaObservations.Add(observation);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.DeleteAccount(
+            new DeleteAccountRequest { CurrentPassword = "secret1" },
+            CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Empty(fixture.Db.Users);
+        Assert.Empty(fixture.Db.UserSettings);
+        Assert.Empty(fixture.Db.MediaLibraryEntries);
+        Assert.Empty(fixture.Db.MediaObservations);
+        Assert.Empty(fixture.Db.MediaObservationCandidates);
+        Assert.Empty(fixture.Db.Set<MediaObservationEpisode>());
+        Assert.Empty(fixture.Db.ExtensionAuthorizationCodes);
+        Assert.Empty(fixture.Db.ExtensionRefreshTokens);
+        Assert.Single(fixture.Db.MediaTitles);
+        Assert.Single(fixture.Db.MediaProviderLinks);
+    }
+
+    [Fact]
+    public async Task RetentionDeletesExpiredObservationsUsingLastServerUpdate()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var now = new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero);
+        var expired = CreateObservation(fixture.User.Id, "expired", now.AddDays(-31), now.AddDays(-31));
+        var retained = CreateObservation(fixture.User.Id, "retained", now.AddDays(-31), now.AddDays(-1));
+        var boundary = CreateObservation(fixture.User.Id, "boundary", now.AddDays(-30), now.AddDays(-30));
+        fixture.Db.MediaObservations.AddRange(expired, retained, boundary);
+        await fixture.Db.SaveChangesAsync();
+
+        var deleted = await new MediaObservationRetentionService(fixture.Db)
+            .CleanupExpiredAsync(now, CancellationToken.None);
+
+        Assert.Equal(2, deleted);
+        Assert.Equal(["retained"], await fixture.Db.MediaObservations
+            .OrderBy(observation => observation.SiteMediaId)
+            .Select(observation => observation.SiteMediaId!)
+            .ToListAsync());
+    }
+
+    private static MediaObservation CreateObservation(int userId, string siteMediaId, DateTimeOffset createdAt, DateTimeOffset updatedAt) => new()
+    {
+        UserId = userId,
+        SiteIdentifier = "crunchyroll",
+        ObservedUrl = $"https://www.crunchyroll.com/watch/{siteMediaId}",
+        SiteMediaId = siteMediaId,
+        ObservedTitle = siteMediaId,
+        ObservedAt = createdAt,
+        MatchStatus = MediaObservationStatuses.Pending,
+        CreatedAt = createdAt,
+        UpdatedAt = updatedAt
+    };
 
     private sealed class ProfileFixture : IAsyncDisposable
     {

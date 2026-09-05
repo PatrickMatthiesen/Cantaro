@@ -17,6 +17,7 @@ import {
 } from './seriesParser';
 import { buildSeriesDiscoveryLog } from './seriesLogging';
 import { extractSeriesId } from '../shared/crunchyrollUrls';
+import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
 
 const SCAN_DELAY_MS = 750;
@@ -59,7 +60,7 @@ export function createCrunchyrollSeriesController(
   let notifyContextChanged: () => void = () => undefined;
 
   const updateSnapshot = (changes: Partial<MediaSeriesTabContext>) => {
-    snapshot = { ...snapshot, ...changes, pageUrl: location.href };
+    snapshot = { ...snapshot, ...changes, pageUrl: stripUrlQueryAndFragment(location.href) };
     notifyContextChanged();
   };
 
@@ -147,7 +148,12 @@ export function createCrunchyrollSeriesController(
       correlationId,
       providerSeriesId: observation.providerSeriesId,
       seasonTitle: observation.seasonTitle,
-      episodes: observation.episodes,
+      episodeCount: observation.episodes.length,
+      episodes: observation.episodes.map(episode => ({
+        providerEpisodeId: episode.providerEpisodeId,
+        episodeNumber: episode.episodeNumber,
+        releaseTrack: episode.releaseTrack,
+      })),
     });
     const result = await dependencies.submitCatalog(observation, correlationId);
     if (ctx.isInvalid) return;
@@ -161,7 +167,7 @@ export function createCrunchyrollSeriesController(
       message: error instanceof Error ? error.message : 'Unexpected series collection failure.',
     });
     console.error(extensionLogMessage('Crunchyroll series collection failed'), {
-      pageUrl: location.href,
+      pageUrl: stripUrlQueryAndFragment(location.href),
       error,
     });
   };
@@ -234,7 +240,9 @@ export function createCrunchyrollSeriesController(
   notifyContextChanged = startMediaControllerRuntime(ctx, dependencies, () => snapshot, (enabled) => {
     verboseLogging = enabled;
   }, () => {
-    logVerbose('Cantaro: Crunchyroll series controller started', { pageUrl: location.href });
+    logVerbose('Cantaro: Crunchyroll series controller started', {
+      pageUrl: stripUrlQueryAndFragment(location.href),
+    });
     requestScan();
   }, isCurrentSeriesPage);
 
@@ -260,7 +268,7 @@ function createInitialSnapshot(): MediaSeriesTabContext {
     feature: 'media',
     provider: 'crunchyroll',
     pageKind: 'series',
-    pageUrl: location.href,
+    pageUrl: stripUrlQueryAndFragment(location.href),
     status: 'starting',
     observedEpisodeCount: 0,
   };

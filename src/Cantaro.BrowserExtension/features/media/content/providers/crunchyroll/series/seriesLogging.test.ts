@@ -20,7 +20,7 @@ describe('Crunchyroll series discovery logging', () => {
           episodeNumber: 1,
           episodeTitle: 'The Beginning',
           providerEpisodeId: 'EPISODE1',
-          providerUrl: 'https://www.crunchyroll.com/watch/EPISODE1/the-beginning',
+          providerUrl: 'https://www.crunchyroll.com/watch/EPISODE1/the-beginning?token=secret#player',
           releaseTrack: 'dub:en',
         },
         {

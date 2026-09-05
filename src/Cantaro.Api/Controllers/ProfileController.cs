@@ -224,13 +224,29 @@ public sealed class ProfileController(
                     binding.LastRemoteUpdateAt
                 })
             }).ToListAsync(cancellationToken);
+        var observationCutoff = MediaObservationRetentionService.GetCutoff(DateTimeOffset.UtcNow);
         var observations = await dbContext.MediaObservations.AsNoTracking()
-            .Where(observation => observation.UserId == user.Id)
+            .Where(observation => observation.UserId == user.Id && observation.UpdatedAt > observationCutoff)
             .Select(observation => new
             {
                 observation.Id, observation.SiteIdentifier, observation.SiteMediaId, observation.ObservedTitle,
-                observation.ProgressHint, observation.ObservedAt, observation.MatchStatus,
-                observation.MediaTitleId, observation.CreatedAt, observation.UpdatedAt
+                observation.ObservedUrl, observation.ProgressHint, observation.ObservedAt, observation.ExtensionVersion,
+                observation.SeriesTitle, observation.EpisodeTitle, observation.EpisodeNumber,
+                observation.ProviderSeriesId, observation.ProviderSeasonId, observation.SeasonNumber,
+                observation.ProviderSequenceNumber, observation.ReleaseTrack,
+                observation.NextEpisodeProviderId, observation.NextEpisodeUrl, observation.NextEpisodeTitle,
+                observation.NextEpisodeNumber, observation.NextEpisodeReleaseTrack, observation.IsCatalogObservation,
+                observation.MatchStatus, observation.MediaTitleId, observation.AcceptedCandidateId,
+                observation.ResolutionNotes, observation.EpisodeOffset, observation.ResolvedProgress,
+                observation.ResolvedLibraryEntryId, observation.MatchAttemptCount,
+                observation.LastMatchAttemptedAt, observation.LastMatchError,
+                observation.CreatedAt, observation.UpdatedAt,
+                Episodes = observation.Episodes.Select(episode => new
+                {
+                    episode.Id, episode.ProviderEpisodeId, episode.ProviderUrl, episode.EpisodeNumber,
+                    episode.EpisodeTitle, episode.ReleaseTrack,
+                    episode.AvailableSubtitleLanguageCodes, episode.AvailableAudioLanguageCodes
+                })
             }).ToListAsync(cancellationToken);
 
         var export = new

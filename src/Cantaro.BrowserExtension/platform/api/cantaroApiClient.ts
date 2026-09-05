@@ -11,6 +11,7 @@ import type {
 import { runtimeAccessTokenProvider } from '../auth/runtimeAuthClient';
 import { browserSettingsRepository, type SettingsRepository } from '../settings/settingsRepository';
 import { ApiError, apiErrorMessage } from './apiError';
+import { stripUrlQueryAndFragment } from '../../features/media/contracts/observationUrl';
 
 interface CatalogApiResponse {
   status: Exclude<CatalogSubmissionResult['status'], 'queued'>;
@@ -57,7 +58,7 @@ async function responsePayload(response: Response): Promise<unknown> {
 function watchRequest(observation: WatchProgressObservation): Record<string, unknown> {
   return {
     siteIdentifier: observation.provider,
-    observedUrl: observation.observedUrl,
+    observedUrl: stripUrlQueryAndFragment(observation.observedUrl),
     siteMediaId: observation.providerEpisodeId,
     observedTitle: observation.episodeTitle,
     seriesTitle: observation.seriesTitle,
@@ -70,7 +71,9 @@ function watchRequest(observation: WatchProgressObservation): Record<string, unk
     providerSequenceNumber: observation.providerSequenceNumber,
     releaseTrack: observation.releaseTrack,
     nextEpisodeProviderId: observation.nextEpisodeProviderId,
-    nextEpisodeUrl: observation.nextEpisodeUrl,
+    nextEpisodeUrl: observation.nextEpisodeUrl
+      ? stripUrlQueryAndFragment(observation.nextEpisodeUrl)
+      : undefined,
     nextEpisodeTitle: observation.nextEpisodeTitle,
     nextEpisodeNumber: observation.nextEpisodeNumber,
     nextEpisodeReleaseTrack: observation.nextEpisodeReleaseTrack,
@@ -80,6 +83,17 @@ function watchRequest(observation: WatchProgressObservation): Record<string, unk
     positionSeconds: observation.positionSeconds,
     observedAt: observation.observedAt,
     extensionVersion: observation.extensionVersion,
+  };
+}
+
+function catalogRequest(observation: SeriesCatalogObservation): SeriesCatalogObservation {
+  return {
+    ...observation,
+    seriesUrl: stripUrlQueryAndFragment(observation.seriesUrl),
+    episodes: observation.episodes.map(episode => ({
+      ...episode,
+      providerUrl: stripUrlQueryAndFragment(episode.providerUrl),
+    })),
   };
 }
 
@@ -157,7 +171,7 @@ export function createCantaroApiClient(
       const response = await request<CatalogApiResponse>('/api/media/catalog-observations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(observation),
+        body: JSON.stringify(catalogRequest(observation)),
       });
       return {
         status: response.status,

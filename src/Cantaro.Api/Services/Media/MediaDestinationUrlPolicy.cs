@@ -5,6 +5,23 @@ namespace Cantaro.Api.Services;
 
 public static partial class MediaDestinationUrlPolicy
 {
+    /// <summary>
+    /// Removes query parameters and fragments from an observed URL before it is
+    /// persisted. Invalid URLs are trimmed and returned unchanged so the
+    /// existing validation path can report the provider-specific error.
+    /// </summary>
+    public static string NormalizeObservedUrl(string? value)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            var queryIndex = trimmed.IndexOfAny(['?', '#']);
+            return (queryIndex >= 0 ? trimmed[..queryIndex] : trimmed).Trim();
+        }
+
+        return uri.GetLeftPart(UriPartial.Path);
+    }
+
     [GeneratedRegex(@"^/(?:[a-z]{2}(?:-[a-z]{2})?/)?watch/([A-Z0-9]+)(?:/.*)?$", RegexOptions.IgnoreCase)]
     private static partial Regex CrunchyrollWatchPathRegex();
 

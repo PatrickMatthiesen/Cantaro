@@ -6,6 +6,7 @@ import {
   extractSeriesId,
   parseCrunchyrollUrl,
 } from './crunchyrollUrls';
+import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 
 describe('Crunchyroll URL parsing', () => {
   it('extracts stable provider identifiers and numbering', () => {
@@ -21,5 +22,13 @@ describe('Crunchyroll URL parsing', () => {
       .toBe('https://www.crunchyroll.com/watch/G123ABC');
     expect(parseCrunchyrollUrl('https://crunchyroll.example/watch/G123ABC')).toBeNull();
     expect(parseCrunchyrollUrl('http://www.crunchyroll.com/watch/G123ABC')).toBeNull();
+  });
+
+  it('removes query strings and fragments from provider URLs', () => {
+    expect(parseCrunchyrollUrl(
+      'https://www.crunchyroll.com/watch/G123ABC/episode?utm_source=private#player',
+    )?.href).toBe('https://www.crunchyroll.com/watch/G123ABC/episode');
+    expect(stripUrlQueryAndFragment('https://www.crunchyroll.com/watch/G123ABC/episode?token=secret#player'))
+      .toBe('https://www.crunchyroll.com/watch/G123ABC/episode');
   });
 });

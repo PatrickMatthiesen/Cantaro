@@ -30,7 +30,10 @@ export function parseCrunchyrollUrl(value: string, baseUrl?: string): URL | null
   try {
     const url = baseUrl ? new URL(value, baseUrl) : new URL(value);
     if (url.protocol !== 'https:') return null;
-    return isCrunchyrollHost(url.hostname) ? url : null;
+    if (!isCrunchyrollHost(url.hostname)) return null;
+    url.search = '';
+    url.hash = '';
+    return url;
   } catch {
     return null;
   }
