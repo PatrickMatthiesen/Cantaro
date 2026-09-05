@@ -225,8 +225,8 @@ public sealed class ProfileController(
                 })
             }).ToListAsync(cancellationToken);
         var observationCutoff = MediaObservationRetentionService.GetCutoff(DateTimeOffset.UtcNow);
-        var observations = await dbContext.MediaObservations.AsNoTracking()
-            .Where(observation => observation.UserId == user.Id && observation.UpdatedAt > observationCutoff)
+        var observations = (await dbContext.MediaObservations.AsNoTracking()
+            .Where(observation => observation.UserId == user.Id)
             .Select(observation => new
             {
                 observation.Id, observation.SiteIdentifier, observation.SiteMediaId, observation.ObservedTitle,
@@ -247,7 +247,7 @@ public sealed class ProfileController(
                     episode.EpisodeTitle, episode.ReleaseTrack,
                     episode.AvailableSubtitleLanguageCodes, episode.AvailableAudioLanguageCodes
                 })
-            }).ToListAsync(cancellationToken);
+            }).ToListAsync(cancellationToken)).Where(observation => observation.UpdatedAt > observationCutoff).ToList();
 
         var export = new
         {
@@ -302,7 +302,7 @@ public sealed class ProfileController(
         {
             return BadRequest(new { error = string.Join(" ", result.Errors.Select(error => error.Description)) });
         }
-        await signInManager.SignOutAsync();
+        if (signInManager is not null) await signInManager.SignOutAsync();
         if (avatarObjectKey is not null) await TryDeleteAvatarAsync(avatarObjectKey, cancellationToken);
         return NoContent();
     }

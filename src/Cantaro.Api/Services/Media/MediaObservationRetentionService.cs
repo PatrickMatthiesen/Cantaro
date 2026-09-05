@@ -23,9 +23,13 @@ public sealed class MediaObservationRetentionService(ApplicationDbContext dbCont
         CancellationToken cancellationToken = default)
     {
         var cutoff = GetCutoff(now);
-        return await dbContext.MediaObservations
+        var expired = await dbContext.MediaObservations
             .Where(observation => observation.UpdatedAt <= cutoff)
-            .ExecuteDeleteAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        if (expired.Count == 0) return 0;
+        dbContext.MediaObservations.RemoveRange(expired);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return expired.Count;
     }
 }
 
