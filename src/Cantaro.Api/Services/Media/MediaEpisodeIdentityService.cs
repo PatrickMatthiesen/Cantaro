@@ -737,6 +737,9 @@ public class MediaEpisodeIdentityService(
             ?? throw new InvalidOperationException("Provider variant content was not loaded.");
         if (content.MediaEpisodeId != episode.Id)
         {
+            // Inferred identities may be repaired when stronger catalog evidence
+            // arrives. User-confirmed or authoritative identities are immutable;
+            // preserve them and surface the disagreement as a conflict.
             if (!allowIdentityRemap || identity.IsTrusted && !isTrusted)
             {
                 identity.HasConflict = true;
