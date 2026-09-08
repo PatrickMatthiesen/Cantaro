@@ -1,12 +1,14 @@
 # Cantaro Browser Extension Privacy Policy
 
-Effective September 8, 2026
+Effective September 9, 2026
 
 Cantaro observes supported streaming pages only to provide its media-library and watch-tracking features. Cantaro does not sell user data or use it for advertising.
 
 ## Scope
 
-This policy describes how the Cantaro browser extension handles data.
+This policy describes how the Cantaro browser extension handles data. The
+extension asks for affirmative, informed consent before it reads a supported
+streaming page for media collection. Collection is off by default.
 
 Cantaro can connect to a hosted Cantaro service or to a self-hosted instance chosen by the user. The operator of the configured server controls the data stored there. When a user self-hosts Cantaro, that user or their chosen administrator controls the server and its retention, logging, and security practices.
 
@@ -15,8 +17,9 @@ Cantaro can connect to a hosted Cantaro service or to a self-hosted instance cho
 Depending on the features used, the extension handles the following data:
 
 - **Account and authentication data:** The user's Cantaro account email, configured server address, and access and refresh tokens used to keep the extension signed in. Cantaro does not receive the user's password through the extension.
-- **Settings and temporary state:** Page feature preferences, diagnostic logging preference, tracking pauses, and popup state.
-- **Crunchyroll activity and content:** Page URLs, provider identifiers, rendered series, season, and episode titles, episode numbers, available audio or subtitle languages, playback position, duration, watch progress, observation time, and extension version. Catalog observations are collected from rendered series pages. Watch-progress observations are submitted when playback reaches Cantaro's completion threshold.
+- **Settings and temporary state:** Page feature preferences, versioned consent choices, diagnostic logging preference, tracking pauses, and popup state.
+- **Crunchyroll activity and content:** Only after the user has opted in to the relevant media feature and is signed in, the extension can read the rendered page URL, provider identifiers, series, season, and episode titles, episode numbers, available audio or subtitle languages, playback position, duration, watch progress, observation time, and extension version. Catalog observations are collected from rendered series pages when catalog collection is enabled. Watch-progress observations are submitted when playback reaches Cantaro's completion threshold and watch tracking is enabled.
+- **Music features:** The extension's music features use authenticated Cantaro account and popup requests to manage the library, playlists, and lyrics. They do not scrape Spotify, YouTube, or other music websites and do not collect music-page browsing activity.
 - **Standard server request data:** The configured server and its hosting provider may process IP addresses, request timestamps, browser or user-agent details, and requested endpoints in operational or security logs. The extension does not separately collect precise location.
 
 The extension does not collect health, financial, payment, or personal communication data. It does not include third-party advertising or analytics SDKs.
@@ -27,7 +30,7 @@ Cantaro uses this data only to:
 
 - authenticate the user with the selected Cantaro server;
 - show the user's Cantaro music library, playlists, and lyrics information;
-- record supported media catalog information and watch progress in the user's library;
+- record supported media catalog information and watch progress in the user's library when the user has enabled those separate collection purposes;
 - apply the user's settings and provide diagnostics the user explicitly enables; and
 - maintain, secure, and troubleshoot those user-facing features.
 
@@ -35,13 +38,32 @@ Cantaro uses this data only to:
 
 ### In the browser
 
-The extension stores settings, the refresh credential used to preserve sign-in, the signed-in email address, tracking preferences, and popup state in Chrome local extension storage. Local storage is restricted to trusted extension contexts so content scripts cannot read it. Short-lived access credentials are stored in Chrome session storage and are refreshed after a browser restart without requiring the user to sign in again while the refresh session remains valid. Failed Crunchyroll catalog or watch observations are not retained for later delivery. Diagnostic messages, which may include supported-page URLs, titles, provider identifiers, and progress details, are written to the browser console. Cantaro does not send them to a separate analytics service.
+The extension stores settings, the versioned consent choices, the refresh credential used to preserve sign-in, the signed-in email address, tracking preferences, and popup state in Chrome local extension storage. Local storage is restricted to trusted extension contexts so content scripts cannot read it. Short-lived access credentials are stored in Chrome session storage and are refreshed after a browser restart without requiring the user to sign in again while the refresh session remains valid. Before consent, when a feature is disabled, or while signed out, supported-page content is not collected, queued, or transmitted. Failed Crunchyroll catalog or watch observations are not retained for later delivery. Diagnostic messages, which may include supported-page URLs, titles, provider identifiers, and progress details, are written to the browser console. Cantaro does not send them to a separate analytics service.
 
 ### On the configured Cantaro server
 
 The extension sends account requests and delivered Crunchyroll media observations over HTTPS to the Cantaro server configured by the user. Observation URLs have query strings and fragments removed before delivery and again at server ingestion. The server retains structured title, episode, provider, language, progress and resolution information needed for matching and library features. It does not retain full serialized observation requests or playback position, duration and percentage in observation records. Duplicate title values are not stored in a second request body.
 
 When a user connects an external music or media provider, the configured server may exchange the identifiers, library state, playlists, or progress needed to perform the action requested by the user. Those services process data under their own privacy terms. The extension does not send supported-page observations to advertising networks or data brokers.
+
+## Consent and user controls
+
+On first use, the extension shows a consent screen before a supported page is
+read for media collection. It explains the information read, the purpose of
+each collection feature, the configured server that receives it, and links to
+this policy. Collection is disabled until the user affirmatively saves a
+choice. Media watch tracking and catalog collection have separate controls.
+The extension has no music website collection purpose: music actions are
+authenticated popup and account operations.
+
+Consent is stored locally with a policy version and the user's choices. A
+material change to what a feature reads or sends raises the required version
+and pauses that feature until the user reviews and accepts the new disclosure.
+The user can revoke or reset a choice from the extension settings. Revocation
+immediately stops new collection for that purpose and clears pending local
+delivery state. Signing out also stops all media collection; signing in again
+does not re-enable it until the user is authenticated and has an accepted
+consent choice.
 
 ## Browser permissions
 
@@ -64,7 +86,7 @@ Cantaro's use of information received from Google APIs adheres to the [Chrome We
 
 ## Retention and user controls
 
-- Signing out removes the extension authentication session from local storage.
+- Signing out removes the extension authentication session from local storage and stops media collection. A later sign-in does not re-enable media collection without an accepted consent choice.
 - The configured server retains account and library data while the account is active. Media observations, their episode evidence, matching candidates and resolution history expire after 30 days without a server-side update; cleanup runs at startup and hourly while the server is running. Observation expiry does not erase library watch progress.
 - Cantaro's web settings let users export their retained user-scoped data, disconnect providers, and permanently delete their account and user-scoped live records, including observations and dependent episode evidence.
 - Shared canonical titles, episodes, provider mappings, playable episode identities and language availability remain until explicitly maintained or removed, including after observation expiry or account deletion. These records contain catalog information without a user owner; they are not retained as the deleted user's viewing history.

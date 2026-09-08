@@ -2,6 +2,8 @@ import { ApiError } from '../../../platform/api/apiError';
 import { backgroundCantaroApiClient } from '../../../platform/api/backgroundCantaroApiClient';
 import type { CantaroApiClient } from '../../../platform/api/cantaroApiClient';
 import { createExtensionLogger, type ExtensionLogger } from '../../../platform/diagnostics/logger';
+import { browserConsentService, type ConsentStatus } from '../../../platform/consent/consentService';
+import { browserSettingsRepository, type SettingsRepository } from '../../../platform/settings/settingsRepository';
 import {
   messageFailure,
   messageSuccess,
@@ -15,6 +17,26 @@ type ResolutionRequest = Extract<MediaBackgroundRequest, { type: 'media.watch.re
 
 export interface MediaRequestHandler {
   handle(request: MediaBackgroundRequest, tabId?: number): Promise<MessageResult<MediaBackgroundResponse>>;
+}
+
+export interface MediaConsentGate {
+  getStatus(baseUrl: string): Promise<ConsentStatus>;
+}
+
+function removeCatalogEvidence(
+  request: Extract<MediaBackgroundRequest, { type: 'media.watch.submit' }>,
+): Extract<MediaBackgroundRequest, { type: 'media.watch.submit' }> {
+  return {
+    ...request,
+    payload: {
+      ...request.payload,
+      nextEpisodeProviderId: undefined,
+      nextEpisodeUrl: undefined,
+      nextEpisodeTitle: undefined,
+      nextEpisodeNumber: undefined,
+      nextEpisodeReleaseTrack: undefined,
+    },
+  };
 }
 
 function failureMessage(error: unknown): string {
@@ -97,13 +119,38 @@ export function createMediaRequestHandler(
   apiClient: CantaroApiClient,
   logger: ExtensionLogger,
   progressNotifier: MediaProgressNotifier = { notify: async () => {} },
+  consentGate: MediaConsentGate = browserConsentService,
+  settingsRepository: SettingsRepository = browserSettingsRepository,
 ): MediaRequestHandler {
   return {
     async handle(request, tabId) {
       const requestLogger = logger.child({ tabId, correlationId: request.correlationId });
-      return request.type === 'media.watch.resolve'
-        ? handleResolution(request, apiClient, requestLogger)
-        : handleSubmission(request, apiClient, requestLogger, progressNotifier);
+      try {
+        const settings = await settingsRepository.read();
+        const consent = await consentGate.getStatus(settings.baseUrl);
+        const permitted = consent.authenticated && (request.type === 'media.catalog.submit'
+          ? consent.catalogCollectionAllowed
+          : consent.watchTrackingAllowed);
+        if (!permitted) {
+          return messageFailure(
+            request.correlationId,
+            consent.authenticated ? 'consent_required' : 'not_authenticated',
+            consent.authenticated
+              ? 'Enable the corresponding Cantaro collection option before submitting website observations.'
+              : 'Sign in and enable Cantaro collection before submitting website observations.',
+          );
+        }
+        const effectiveRequest = request.type === 'media.watch.submit'
+          && !consent.catalogCollectionAllowed
+          ? removeCatalogEvidence(request)
+          : request;
+        return effectiveRequest.type === 'media.watch.resolve'
+          ? handleResolution(effectiveRequest, apiClient, requestLogger)
+          : handleSubmission(effectiveRequest, apiClient, requestLogger, progressNotifier);
+      } catch (error) {
+        requestLogger.error('Media consent check failed', error);
+        return failureResult(request, error);
+      }
     },
   };
 }

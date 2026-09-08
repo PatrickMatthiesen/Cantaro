@@ -62,6 +62,20 @@ describe('cantaroApiClient', () => {
     } satisfies Partial<ApiError>));
   });
 
+  it('checks consent after token refresh and before sending the request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const guard = vi.fn(async () => { throw new ApiError('Consent revoked', 403, false); });
+    const client = createCantaroApiClient(
+      settingsRepository,
+      authService(vi.fn(async () => 'token')),
+      guard,
+    );
+    await expect(client.request('/api/media/observations')).rejects.toMatchObject({ status: 403 });
+    expect(guard).toHaveBeenCalledWith('/api/media/observations', 'https://cantaro.example.test', {});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('strips query strings and fragments before transmitting watch URLs', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       observationId: 'observation',

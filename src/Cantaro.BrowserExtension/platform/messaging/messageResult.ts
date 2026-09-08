@@ -2,6 +2,7 @@ export type ExtensionMessageErrorCode =
   | 'unsupported_tab'
   | 'invalid_request'
   | 'not_authenticated'
+  | 'consent_required'
   | 'delivery_failed'
   | 'api_rejected'
   | 'not_found'

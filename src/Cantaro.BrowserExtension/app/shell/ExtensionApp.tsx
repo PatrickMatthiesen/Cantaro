@@ -2,6 +2,8 @@ import { MediaPage } from '../media/MediaPage';
 import { MusicPage } from '../music/MusicPage';
 import { SettingsPage } from '../settings/SettingsPage';
 import { useSettings } from '../settings/useSettings';
+import { CollectionConsent, type CollectionConsentProps } from '../settings/CollectionConsent';
+import { useCollectionConsent } from '../settings/useCollectionConsent';
 import { browserPopupServices } from './browserPopupServices';
 import type { ExtensionAppServices } from './extensionAppTypes';
 import { PopupHeader } from './PopupHeader';
@@ -19,7 +21,11 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
   const { notice, showNotice } = usePopupNotice();
   const navigation = usePopupNavigation();
   const settings = useSettings(showNotice);
-  const activeTabContext = useActiveTabContext(services);
+  const consent = useCollectionConsent(settings.savedSettings.baseUrl, settings.configured);
+  const consentProps = createConsentProps(settings, consent);
+  const anyCollection = consentProps.choices.watchTracking || consentProps.choices.catalogCollection;
+  const activeTabContext = useActiveTabContext(services, anyCollection);
+  const consentKey = JSON.stringify([consentProps.baseUrl, consentProps.authenticated, consentProps.choices]);
 
   return (
     <div className="h-screen overflow-hidden bg-canvas text-content">
@@ -31,34 +37,58 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
           onSelectSection={navigation.selectPrimarySection}
           onOpenSettings={navigation.openSettings}
         />
-        {navigation.section === 'media' ? <TabContextSummary context={activeTabContext.state} /> : null}
+        {navigation.section === 'media' && anyCollection ? <TabContextSummary context={activeTabContext.state} /> : null}
         <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-canvas" aria-label={`${navigation.section} content`}>
-          {settings.loading ? (
-            <PopupLoadingState />
-          ) : navigation.section === 'settings' ? (
-            <SettingsPage controller={settings} onClose={navigation.closeSettings} />
-          ) : navigation.section === 'music' ? (
-            <MusicPage
-              configured={settings.configured}
-              isSigningIn={settings.isSigningIn}
-              activeTabContext={activeTabContext.state}
-              onSignIn={settings.signIn}
-            />
-          ) : (
-            <MediaPage
-              configured={settings.configured}
-              isSigningIn={settings.isSigningIn}
-              activeTabContext={activeTabContext.state}
-              onSignIn={settings.signIn}
-              onOpenSettings={navigation.openSettings}
-              onNotice={showNotice}
-            />
-          )}
+          <PopupContent settings={settings} consentLoading={consent.loading}
+            navigation={navigation} consentProps={consentProps} consentKey={consentKey}
+            activeTabContext={activeTabContext} showNotice={showNotice} />
         </main>
       </div>
       <StatusToast notice={notice} />
     </div>
   );
+}
+
+function createConsentProps(settings: ReturnType<typeof useSettings>, consent: ReturnType<typeof useCollectionConsent>): CollectionConsentProps {
+  return {
+    choices: {
+      watchTracking: consent.status?.watchTrackingAllowed === true,
+      catalogCollection: consent.status?.catalogCollectionAllowed === true,
+    },
+    needsReview: consent.status?.needsReview !== false,
+    authenticated: consent.status?.authenticated === true,
+    baseUrl: settings.savedSettings.baseUrl,
+    busy: consent.busy || settings.isSigningIn,
+    error: consent.error,
+    onSave: consent.save,
+    onRevoke: consent.revoke,
+    onReset: consent.reset,
+    onSignIn: settings.signIn,
+  };
+}
+
+function PopupContent({ settings, consentLoading, navigation, consentProps, consentKey, activeTabContext, showNotice }: {
+  settings: ReturnType<typeof useSettings>;
+  consentLoading: boolean;
+  navigation: ReturnType<typeof usePopupNavigation>;
+  consentProps: CollectionConsentProps;
+  consentKey: string;
+  activeTabContext: ReturnType<typeof useActiveTabContext>;
+  showNotice: ReturnType<typeof usePopupNotice>['showNotice'];
+}) {
+  if (settings.loading || consentLoading) return <PopupLoadingState />;
+  const collectionConsent = <CollectionConsent key={consentKey} {...consentProps} />;
+  if (navigation.section === 'settings') {
+    return <SettingsPage controller={settings} onClose={navigation.closeSettings} collectionConsent={collectionConsent} />;
+  }
+  if (navigation.section === 'music') {
+    return <MusicPage configured={settings.configured} isSigningIn={settings.isSigningIn}
+      activeTabContext={activeTabContext.state} onSignIn={settings.signIn} />;
+  }
+  if (consentProps.needsReview) return <div className="mx-auto max-w-2xl px-5">{collectionConsent}</div>;
+  return <MediaPage configured={settings.configured} watchCollectionAllowed={consentProps.choices.watchTracking}
+    isSigningIn={settings.isSigningIn} activeTabContext={activeTabContext.state} onSignIn={settings.signIn}
+    onOpenSettings={navigation.openSettings} onNotice={showNotice} />;
 }
 
 function PopupLoadingState() {

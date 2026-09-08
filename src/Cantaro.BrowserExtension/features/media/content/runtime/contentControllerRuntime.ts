@@ -2,7 +2,6 @@ import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { extensionLogMessage } from '../../../../platform/diagnostics/extensionIdentity';
 import { sanitizeDiagnosticDetails } from '../../../../platform/diagnostics/logger';
 import { registerTabContext } from '../../../../platform/messaging/tabContext';
-import { watchExtensionSettings } from '../../../../platform/settings/settingsRepository';
 import type { MediaTabContext } from '../../contracts/mediaTabContext';
 
 export interface VerboseLoggingDependencies {
@@ -10,15 +9,24 @@ export interface VerboseLoggingDependencies {
   watchVerboseLogging(listener: (enabled: boolean) => void): () => void;
 }
 
+export function logContentVerbose(enabled: boolean, message: string, details?: unknown): void {
+  if (!enabled) return;
+  if (details === undefined) console.debug(extensionLogMessage(message));
+  else console.debug(extensionLogMessage(message), details);
+}
+
 function startVerboseLogging(
   ctx: ContentScriptContext,
   dependencies: VerboseLoggingDependencies,
   setEnabled: (enabled: boolean) => void,
   onReady: () => void,
+  canLog: () => boolean,
 ): void {
   const stopWatching = dependencies.watchVerboseLogging((enabled) => {
     setEnabled(enabled);
-    console.info(extensionLogMessage(`verbose logging ${enabled ? 'enabled' : 'disabled'}`));
+    if (canLog()) {
+      console.info(extensionLogMessage(`verbose logging ${enabled ? 'enabled' : 'disabled'}`));
+    }
   });
   ctx.onInvalidated(stopWatching);
 
@@ -37,14 +45,11 @@ export function startMediaControllerRuntime(
   setVerboseLogging: (enabled: boolean) => void,
   onReady: () => void,
   isActive: () => boolean = () => true,
+  canLog: () => boolean = () => true,
 ): () => void {
   const notifyChanged = registerTabContext(ctx, getSnapshot, isActive);
-  startVerboseLogging(ctx, dependencies, setVerboseLogging, onReady);
-  return notifyChanged;
-}
-
-export function watchVerboseLoggingSetting(
-  listener: (enabled: boolean) => void,
-): () => void {
-  return watchExtensionSettings(settings => listener(settings.verboseLogging));
+  startVerboseLogging(ctx, dependencies, setVerboseLogging, onReady, canLog);
+  return () => {
+    if (canLog()) notifyChanged();
+  };
 }

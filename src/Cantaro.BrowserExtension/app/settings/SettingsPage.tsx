@@ -1,15 +1,16 @@
 import { BlurredEmail } from '@cantaro/client-shared/auth';
 import { GradientButton } from '@cantaro/client-shared/ui';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { DEFAULT_BASE_URL } from '../../platform/settings/extensionSettings';
 import type { SettingsController } from './useSettings';
 
 interface SettingsPageProps {
   controller: SettingsController;
   onClose: () => void;
+  collectionConsent: ReactNode;
 }
 
-export function SettingsPage({ controller, onClose }: SettingsPageProps) {
+export function SettingsPage({ controller, onClose, collectionConsent }: SettingsPageProps) {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (await controller.save()) onClose();
@@ -33,6 +34,7 @@ export function SettingsPage({ controller, onClose }: SettingsPageProps) {
 
       <form className="divide-y divide-border-subtle" onSubmit={(event) => void handleSubmit(event)}>
         <ConnectionSettings controller={controller} />
+        {collectionConsent}
         <DiagnosticsSettings controller={controller} />
         <SettingsActions controller={controller} onClose={onClose} />
       </form>

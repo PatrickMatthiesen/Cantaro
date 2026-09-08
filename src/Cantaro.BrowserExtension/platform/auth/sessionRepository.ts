@@ -164,3 +164,33 @@ export const browserSessionRepository = createSessionRepository(
     remove: (key) => browser.storage.session.remove(key),
   },
 );
+
+/**
+ * Watches only persistent session identity changes. Access-token rotation is
+ * intentionally excluded so token refreshes cannot create notification loops.
+ */
+export function watchSessionIdentityChanges(listener: () => void): () => void {
+  const readIdentity = (value: unknown): string => {
+    const stored = record(value);
+    if (!stored) return '';
+    const baseUrl = normalizeBaseUrl(readString(stored, 'baseUrl'));
+    const email = readString(stored, 'email').toLowerCase();
+    return baseUrl && email ? `${baseUrl}\u0000${email}` : '';
+  };
+
+  const onChanged = (
+    changes: Record<string, Browser.storage.StorageChange>,
+    areaName: string,
+  ) => {
+    if (areaName !== 'local') return;
+    // Legacy records are migrated by read() and removed immediately after the
+    // v2 record is written. Watching that removal would create a duplicate
+    // revocation and could race a newly saved consent record.
+    const change = changes[PERSISTENT_SESSION_STORAGE_KEY];
+    if (!change) return;
+    if (readIdentity(change.oldValue) === readIdentity(change.newValue)) return;
+    listener();
+  };
+  browser.storage.onChanged.addListener(onChanged);
+  return () => browser.storage.onChanged.removeListener(onChanged);
+}

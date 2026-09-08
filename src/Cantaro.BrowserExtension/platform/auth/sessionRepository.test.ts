@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACCESS_SESSION_STORAGE_KEY,
   createSessionRepository,
   LEGACY_SESSION_STORAGE_KEY,
   PERSISTENT_SESSION_STORAGE_KEY,
+  watchSessionIdentityChanges,
 } from './sessionRepository';
 
 function memoryStorage(initial: Record<string, unknown> = {}) {
@@ -25,6 +26,8 @@ const fullSession = {
 };
 
 describe('sessionRepository', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('splits persistent refresh state from the session access token', async () => {
     const persistent = memoryStorage();
     const access = memoryStorage();
@@ -110,5 +113,28 @@ describe('sessionRepository', () => {
 
     expect(persistent.values).toEqual({ unrelated: true });
     expect(access.values).toEqual({ unrelated: true });
+  });
+
+  it('notifies only when the persistent session identity changes', () => {
+    let storageListener: ((changes: Record<string, unknown>, areaName: string) => void) | undefined;
+    const removeListener = vi.fn();
+    vi.stubGlobal('browser', {
+      storage: { onChanged: {
+        addListener: (listener: typeof storageListener) => { storageListener = listener; },
+        removeListener,
+      } },
+    });
+    const changed = vi.fn();
+    const stop = watchSessionIdentityChanges(changed);
+    storageListener?.({ [ACCESS_SESSION_STORAGE_KEY]: { newValue: { accessToken: 'rotated' } } }, 'session');
+    expect(changed).not.toHaveBeenCalled();
+    const identity = { baseUrl: 'https://api.example.test', email: 'user@example.test', refreshToken: 'one' };
+    storageListener?.({ [PERSISTENT_SESSION_STORAGE_KEY]: { newValue: identity } }, 'local');
+    storageListener?.({ [PERSISTENT_SESSION_STORAGE_KEY]: { oldValue: identity, newValue: { ...identity, refreshToken: 'two' } } }, 'local');
+    expect(changed).toHaveBeenCalledOnce();
+    storageListener?.({ [PERSISTENT_SESSION_STORAGE_KEY]: { oldValue: identity, newValue: undefined } }, 'local');
+    expect(changed).toHaveBeenCalledTimes(2);
+    stop();
+    expect(removeListener).toHaveBeenCalledOnce();
   });
 });

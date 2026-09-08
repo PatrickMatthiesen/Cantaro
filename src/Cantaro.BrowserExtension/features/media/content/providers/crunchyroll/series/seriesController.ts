@@ -8,7 +8,15 @@ import type { MessageResult } from '../../../../../../platform/messaging/message
 import { createCorrelationId } from '../../../../../../platform/messaging/messageResult';
 import {
   startMediaControllerRuntime,
+  logContentVerbose,
 } from '../../../runtime/contentControllerRuntime';
+import {
+  createContentCollectionGate,
+  createContentCollectionStateHandler,
+  updateContentSnapshot,
+  type ContentCollectionConsentDependencies,
+  type ContentCollectionGate,
+} from '../../../runtime/contentCollectionGate';
 import {
   inspectSeriesPage,
   catalogObservationFingerprint,
@@ -24,7 +32,7 @@ import { sanitizeDiagnosticDetails } from '../../../../../../platform/diagnostic
 const SCAN_DELAY_MS = 750;
 const FAILURE_WARNING_DELAY_MS = 5_000;
 
-export interface SeriesControllerDependencies {
+export interface SeriesControllerDependencies extends ContentCollectionConsentDependencies {
   submitCatalog(
     observation: SeriesCatalogObservation,
     correlationId: string,
@@ -57,22 +65,23 @@ export function createCrunchyrollSeriesController(
   let lastSubmittedFingerprint = '';
   let lastLoggedFingerprint = '';
   let failure: FailureState | null = null;
-  let snapshot = createInitialSnapshot();
   let notifyContextChanged: () => void = () => undefined;
+  let collectionAllowed = false;
+  let collectionGate: ContentCollectionGate;
+  let snapshot = createInitialSnapshot(collectionAllowed);
 
   const updateSnapshot = (changes: Partial<MediaSeriesTabContext>) => {
-    snapshot = { ...snapshot, ...changes, pageUrl: stripUrlQueryAndFragment(location.href) };
+    snapshot = updateContentSnapshot(snapshot, changes, collectionAllowed);
     notifyContextChanged();
   };
 
   const logVerbose = (message: string, details?: unknown) => {
-    if (!verboseLogging) return;
-    if (details === undefined) console.debug(extensionLogMessage(message));
-    else console.debug(extensionLogMessage(message), details);
+    logContentVerbose(verboseLogging, message, details);
   };
 
   const requestScan = () => {
     if (ctx.isInvalid) return;
+    if (!collectionAllowed) return;
     if (scanRunning) {
       scanRequested = true;
       return;
@@ -104,16 +113,20 @@ export function createCrunchyrollSeriesController(
   };
 
   const scanPage = async () => {
+    if (!collectionAllowed) return;
+    const generation = collectionGate.getState().generation;
     const extraction = inspectSeriesPage(document, location);
     logVerbose('Cantaro: Crunchyroll series scan', extraction.diagnostics);
     if (!extraction.observation) {
       handleExtractionFailure(extraction.diagnostics);
       return;
     }
-    await processObservation(extraction.observation);
+    if (!collectionAllowed || generation !== collectionGate.getState().generation) return;
+    await processObservation(extraction.observation, generation);
   };
 
-  const processObservation = async (observation: SeriesCatalogObservation) => {
+  const processObservation = async (observation: SeriesCatalogObservation, generation: number) => {
+    if (!collectionAllowed || generation !== collectionGate.getState().generation) return;
     failure = null;
     updateSnapshot({
       status: 'ready',
@@ -136,13 +149,15 @@ export function createCrunchyrollSeriesController(
       logVerbose('Cantaro: unchanged Crunchyroll catalog snapshot skipped', { fingerprint });
       return;
     }
-    await submitObservation(observation, fingerprint);
+    await submitObservation(observation, fingerprint, generation);
   };
 
   const submitObservation = async (
     observation: SeriesCatalogObservation,
     fingerprint: string,
+    generation: number,
   ) => {
+    if (!collectionAllowed || generation !== collectionGate.getState().generation) return;
     const correlationId = createCorrelationId();
     updateSnapshot({ status: 'submitting', submissionStatus: undefined });
     logVerbose('Cantaro: submitting Crunchyroll catalog snapshot', {
@@ -157,12 +172,13 @@ export function createCrunchyrollSeriesController(
       })),
     });
     const result = await dependencies.submitCatalog(observation, correlationId);
-    if (ctx.isInvalid) return;
+    if (ctx.isInvalid || !collectionAllowed || generation !== collectionGate.getState().generation) return;
     applyDeliveryResult(result, correlationId);
     if (isDeliveredCatalog(result)) lastSubmittedFingerprint = fingerprint;
   };
 
   const handleUnexpectedFailure = (error: unknown) => {
+    if (!collectionAllowed) return;
     updateSnapshot({
       status: 'error',
       message: error instanceof Error ? error.message : 'Unexpected series collection failure.',
@@ -237,20 +253,58 @@ export function createCrunchyrollSeriesController(
   };
 
   const observer = new MutationObserver(requestScan);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  const attachObserver = () => {
+    if (!collectionAllowed || ctx.isInvalid) return;
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  };
   notifyContextChanged = startMediaControllerRuntime(ctx, dependencies, () => snapshot, (enabled) => {
     verboseLogging = enabled;
   }, () => {
+    if (!collectionAllowed) return;
     logVerbose('Cantaro: Crunchyroll series controller started', {
       pageUrl: stripUrlQueryAndFragment(location.href),
     });
     requestScan();
-  }, isCurrentSeriesPage);
+  }, () => collectionAllowed && isCurrentSeriesPage(), () => collectionAllowed);
+
+  const clearCollectionState = () => {
+    if (scanTimer !== null) {
+      clearTimeout(scanTimer);
+      scanTimer = null;
+    }
+    scanRequested = false;
+    failure = null;
+    lastSubmittedFingerprint = '';
+    lastLoggedFingerprint = '';
+    updateSnapshot({
+      status: 'starting',
+      providerSeriesId: undefined,
+      seriesTitle: undefined,
+      seasonTitle: undefined,
+      observedEpisodeCount: 0,
+      submissionStatus: undefined,
+      message: undefined,
+    });
+  };
+
+  const handleCollectionState = createContentCollectionStateHandler(
+    () => collectionAllowed,
+    allowed => { collectionAllowed = allowed; },
+    () => {
+      observer.disconnect();
+      clearCollectionState();
+    },
+    attachObserver,
+    requestScan,
+  );
+  collectionGate = createContentCollectionGate(dependencies, handleCollectionState);
+  ctx.onInvalidated(() => collectionGate.dispose());
 
   ctx.addEventListener(window, 'wxt:locationchange', requestScan);
   ctx.onInvalidated(() => {
     observer.disconnect();
     if (scanTimer !== null) clearTimeout(scanTimer);
+    clearCollectionState();
   });
 
   return {
@@ -264,12 +318,12 @@ function isCurrentSeriesPage(): boolean {
   return extractSeriesId(location.pathname) !== undefined;
 }
 
-function createInitialSnapshot(): MediaSeriesTabContext {
+function createInitialSnapshot(collectionAllowed: boolean): MediaSeriesTabContext {
   return {
     feature: 'media',
     provider: 'crunchyroll',
     pageKind: 'series',
-    pageUrl: stripUrlQueryAndFragment(location.href),
+    pageUrl: collectionAllowed ? stripUrlQueryAndFragment(location.href) : '',
     status: 'starting',
     observedEpisodeCount: 0,
   };

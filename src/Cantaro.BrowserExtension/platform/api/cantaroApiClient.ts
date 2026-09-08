@@ -50,6 +50,8 @@ export interface AccessTokenProvider {
   getAccessToken(baseUrl: string, forceRefresh?: boolean): Promise<string | null>;
 }
 
+export type ApiRequestGuard = (path: string, baseUrl: string, init: RequestInit) => Promise<void>;
+
 async function responsePayload(response: Response): Promise<unknown> {
   if (response.status === 204) return null;
   return response.json().catch(() => null);
@@ -123,6 +125,7 @@ function toWatchResult(response: WatchApiResponse): WatchSubmissionResult {
 export function createCantaroApiClient(
   settingsRepository: SettingsRepository,
   authService: AccessTokenProvider,
+  requestGuard?: ApiRequestGuard,
 ): CantaroApiClient {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const settings = await settingsRepository.read();
@@ -138,6 +141,7 @@ export function createCantaroApiClient(
       },
     });
     let response: Response;
+    await requestGuard?.(path, settings.baseUrl, init);
     try {
       response = await send(token);
     } catch {
@@ -146,6 +150,7 @@ export function createCantaroApiClient(
     if (response.status === 401) {
       token = await authService.getAccessToken(settings.baseUrl, true);
       if (token) {
+        await requestGuard?.(path, settings.baseUrl, init);
         try {
           response = await send(token);
         } catch {
