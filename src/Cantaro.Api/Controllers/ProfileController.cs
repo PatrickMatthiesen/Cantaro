@@ -225,13 +225,17 @@ public sealed class ProfileController(
                 })
             }).ToListAsync(cancellationToken);
         var observationCutoff = MediaObservationRetentionService.GetCutoff(DateTimeOffset.UtcNow);
-        var observations = (await dbContext.MediaObservations.AsNoTracking()
-            .Where(observation => observation.UserId == user.Id)
+        var observations = await dbContext.MediaObservations.AsNoTracking()
+            .Where(observation =>
+                (observation.UserId == user.Id && observation.UpdatedAt > observationCutoff)
+                || (observation.UserId == user.Id
+                    && observation.UpdatedAt == default
+                    && observation.CreatedAt > observationCutoff))
             .Select(observation => new
             {
                 observation.Id, observation.SiteIdentifier, observation.SiteMediaId, observation.ObservedTitle,
                 observation.ObservedUrl, observation.ProgressHint, observation.ObservedAt, observation.ExtensionVersion,
-                observation.SeriesTitle, observation.EpisodeTitle, observation.EpisodeNumber,
+                observation.SeriesTitle, observation.SeasonTitle, observation.EpisodeTitle, observation.EpisodeNumber,
                 observation.ProviderSeriesId, observation.ProviderSeasonId, observation.SeasonNumber,
                 observation.ProviderSequenceNumber, observation.ReleaseTrack,
                 observation.NextEpisodeProviderId, observation.NextEpisodeUrl, observation.NextEpisodeTitle,
@@ -247,7 +251,7 @@ public sealed class ProfileController(
                     episode.EpisodeTitle, episode.ReleaseTrack,
                     episode.AvailableSubtitleLanguageCodes, episode.AvailableAudioLanguageCodes
                 })
-            }).ToListAsync(cancellationToken)).Where(observation => observation.UpdatedAt > observationCutoff).ToList();
+            }).ToListAsync(cancellationToken);
 
         var export = new
         {
@@ -302,7 +306,7 @@ public sealed class ProfileController(
         {
             return BadRequest(new { error = string.Join(" ", result.Errors.Select(error => error.Description)) });
         }
-        if (signInManager is not null) await signInManager.SignOutAsync();
+        await signInManager.SignOutAsync();
         if (avatarObjectKey is not null) await TryDeleteAvatarAsync(avatarObjectKey, cancellationToken);
         return NoContent();
     }

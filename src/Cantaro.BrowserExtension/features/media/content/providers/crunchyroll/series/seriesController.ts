@@ -19,6 +19,7 @@ import { buildSeriesDiscoveryLog } from './seriesLogging';
 import { extractSeriesId } from '../shared/crunchyrollUrls';
 import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
+import { sanitizeDiagnosticDetails } from '../../../../../../platform/diagnostics/logger';
 
 const SCAN_DELAY_MS = 750;
 const FAILURE_WARNING_DELAY_MS = 5_000;
@@ -168,7 +169,7 @@ export function createCrunchyrollSeriesController(
     });
     console.error(extensionLogMessage('Crunchyroll series collection failed'), {
       pageUrl: stripUrlQueryAndFragment(location.href),
-      error,
+      error: sanitizeDiagnosticDetails(error),
     });
   };
 
@@ -215,7 +216,7 @@ export function createCrunchyrollSeriesController(
       updateSnapshot({ status: 'error', message: result.error.message });
       console.warn(extensionLogMessage('Crunchyroll catalog delivery failed'), {
         correlationId,
-        error: result.error,
+        error: sanitizeDiagnosticDetails(result.error),
       });
       return;
     }

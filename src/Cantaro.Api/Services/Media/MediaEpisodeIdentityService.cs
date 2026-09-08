@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +15,8 @@ public class MediaEpisodeIdentityService(
     public async Task RecordObservationAsync(
         MediaObservation observation,
         CancellationToken cancellationToken,
-        bool isUserConfirmed = false)
+        bool isUserConfirmed = false,
+        bool allowTrustedIdentityRemap = false)
     {
         if (observation.MatchStatus != MediaObservationStatuses.Matched
             || observation.MediaTitleId is null
@@ -29,6 +29,7 @@ public class MediaEpisodeIdentityService(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var hasIdentityConflict = false;
         var canTrustIdentities = isUserConfirmed
             || await WasMatchedByTrustedCandidateAsync(observation, cancellationToken);
         var recordedDestinationCount = observation.IsCatalogObservation
@@ -36,7 +37,9 @@ public class MediaEpisodeIdentityService(
                 observation,
                 now,
                 cancellationToken,
-                canTrustIdentities)
+                canTrustIdentities,
+                allowTrustedIdentityRemap,
+                onConflict: () => hasIdentityConflict = true)
             : observation.Episodes.Count > 0
                 ? await RecordRenderedEpisodesAsync(
                     observation,
@@ -46,7 +49,10 @@ public class MediaEpisodeIdentityService(
                     observation.Episodes.Select(ToObservedProviderEpisode).ToList(),
                     now,
                     cancellationToken,
-                    trustIdentities: canTrustIdentities)
+                    allowIdentityRemap: true,
+                    trustIdentities: canTrustIdentities,
+                    allowTrustedIdentityRemap: allowTrustedIdentityRemap,
+                    onConflict: () => hasIdentityConflict = true)
                 : 0;
 
         if (observation.ResolvedProgress is > 0)
@@ -55,11 +61,18 @@ public class MediaEpisodeIdentityService(
                 observation,
                 now,
                 cancellationToken,
-                canTrustIdentities);
+                canTrustIdentities,
+                allowTrustedIdentityRemap,
+                onConflict: () => hasIdentityConflict = true);
             recordedDestinationCount += recordedWatchDestination ? 1 : 0;
         }
 
-        if (recordedDestinationCount > 0)
+        if (hasIdentityConflict)
+        {
+            MarkObservationIdentityConflict(observation);
+        }
+
+        if (recordedDestinationCount > 0 || hasIdentityConflict)
         {
             if (await WasMatchedByExactProviderEpisodeIdentityAsync(observation, cancellationToken))
             {
@@ -89,34 +102,23 @@ public class MediaEpisodeIdentityService(
             return 0;
         }
 
+        var hasIdentityConflict = false;
         var recordedCount = await RecordCatalogEpisodesAsync(
             observation,
             DateTimeOffset.UtcNow,
             cancellationToken,
-            await WasMatchedByTrustedCandidateAsync(observation, cancellationToken));
-        if (recordedCount > 0)
+            await WasMatchedByTrustedCandidateAsync(observation, cancellationToken),
+            allowTrustedIdentityRemap: false,
+            onConflict: () =>
+            {
+                hasIdentityConflict = true;
+                MarkObservationIdentityConflict(observation);
+            });
+        if (recordedCount > 0 || hasIdentityConflict)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
         return recordedCount;
-    }
-
-    [Obsolete("Catalog observations are stored as structured evidence.")]
-    public async Task<int> RecordCatalogObservationAsync(
-        MediaObservation observation,
-        SubmitMediaCatalogObservationRequest request,
-        CancellationToken cancellationToken)
-    {
-        observation.IsCatalogObservation = true;
-        observation.SeriesTitle ??= request.SeriesTitle;
-        observation.ProviderSeriesId ??= request.ProviderSeriesId;
-        observation.Episodes = request.Episodes.Select(item => new MediaObservationEpisode
-        {
-            Id = Guid.NewGuid(), ProviderEpisodeId = item.ProviderEpisodeId, ProviderUrl = item.ProviderUrl,
-            EpisodeNumber = item.EpisodeNumber, EpisodeTitle = item.EpisodeTitle, ReleaseTrack = item.ReleaseTrack,
-            AvailableSubtitleLanguageCodes = item.AvailableSubtitleLanguageCodes, AvailableAudioLanguageCodes = item.AvailableAudioLanguageCodes
-        }).ToList();
-        return await RecordCatalogObservationAsync(observation, cancellationToken);
     }
 
     private async Task<bool> WasMatchedByExactProviderEpisodeIdentityAsync(
@@ -158,8 +160,11 @@ public class MediaEpisodeIdentityService(
         MediaObservation observation,
         DateTimeOffset now,
         CancellationToken cancellationToken,
-        bool trustIdentities)
+        bool trustIdentities,
+        bool allowTrustedIdentityRemap,
+        Action? onConflict = null)
     {
+        var hasConflict = false;
         var providerEpisodeId = FirstNonBlank(observation.SiteMediaId);
         if (providerEpisodeId is null
             || !MediaDestinationUrlPolicy.TryNormalizePath(
@@ -189,7 +194,14 @@ public class MediaEpisodeIdentityService(
             observation.ProviderSequenceNumber,
             now,
             cancellationToken,
+            allowIdentityRemap: true,
             isTrusted: trustIdentities,
+            allowTrustedIdentityRemap: allowTrustedIdentityRemap,
+            onConflict: () =>
+            {
+                hasConflict = true;
+                onConflict?.Invoke();
+            },
             releaseTrack: observation.ReleaseTrack);
 
         if (observation.NextEpisodeProviderId is { Length: > 0 } nextEpisodeId
@@ -218,18 +230,27 @@ public class MediaEpisodeIdentityService(
                 null,
                 now,
                 cancellationToken,
+                allowIdentityRemap: true,
                 isTrusted: trustIdentities,
+                allowTrustedIdentityRemap: allowTrustedIdentityRemap,
+                onConflict: () =>
+                {
+                    hasConflict = true;
+                    onConflict?.Invoke();
+                },
                 releaseTrack: observation.NextEpisodeReleaseTrack);
         }
 
-        return true;
+        return !hasConflict;
     }
 
     private Task<int> RecordCatalogEpisodesAsync(
         MediaObservation observation,
         DateTimeOffset now,
         CancellationToken cancellationToken,
-        bool trustIdentities)
+        bool trustIdentities,
+        bool allowTrustedIdentityRemap,
+        Action? onConflict = null)
     {
         var episodes = observation.Episodes.Select(ToObservedProviderEpisode).ToList();
 
@@ -242,7 +263,9 @@ public class MediaEpisodeIdentityService(
             now,
             cancellationToken,
             allowIdentityRemap: true,
-            trustIdentities: trustIdentities);
+            trustIdentities: trustIdentities,
+            allowTrustedIdentityRemap: allowTrustedIdentityRemap,
+            onConflict: onConflict);
     }
 
     private async Task<int> RecordRenderedEpisodesAsync(
@@ -254,7 +277,9 @@ public class MediaEpisodeIdentityService(
         DateTimeOffset now,
         CancellationToken cancellationToken,
         bool allowIdentityRemap = false,
-        bool trustIdentities = false)
+        bool trustIdentities = false,
+        bool allowTrustedIdentityRemap = false,
+        Action? onConflict = null)
     {
         if (observation.MediaTitleId is not { } mediaTitleId
             || observedEpisodes.Count == 0)
@@ -290,6 +315,7 @@ public class MediaEpisodeIdentityService(
                 continue;
             }
 
+            var hasConflict = false;
             await UpsertIdentityAsync(
                 mediaTitleId,
                 canonicalEpisodeNumber,
@@ -306,10 +332,19 @@ public class MediaEpisodeIdentityService(
                 cancellationToken,
                 allowIdentityRemap,
                 trustIdentities,
+                allowTrustedIdentityRemap,
                 renderedEpisode.AvailableSubtitleLanguageCodes,
                 renderedEpisode.AvailableAudioLanguageCodes,
-                renderedEpisode.ReleaseTrack);
-            recordedDestinationCount++;
+                renderedEpisode.ReleaseTrack,
+                onConflict: () =>
+                {
+                    hasConflict = true;
+                    onConflict?.Invoke();
+                });
+            if (!hasConflict)
+            {
+                recordedDestinationCount++;
+            }
         }
 
         return recordedDestinationCount;
@@ -639,9 +674,11 @@ public class MediaEpisodeIdentityService(
         CancellationToken cancellationToken,
         bool allowIdentityRemap = false,
         bool isTrusted = false,
+        bool allowTrustedIdentityRemap = false,
         IReadOnlyCollection<string>? subtitleLanguageCodes = null,
         IReadOnlyCollection<string>? audioLanguageCodes = null,
-        string? releaseTrack = null)
+        string? releaseTrack = null,
+        Action? onConflict = null)
     {
         var episode = await _dbContext.MediaEpisodes
             .FirstOrDefaultAsync(item =>
@@ -735,14 +772,24 @@ public class MediaEpisodeIdentityService(
         identity.LastSeenAt = now;
         var content = identity.Content
             ?? throw new InvalidOperationException("Provider variant content was not loaded.");
+        if (identity.HasConflict
+            && identity.IsTrusted
+            && content.MediaEpisodeId == episode.Id
+            && !allowTrustedIdentityRemap)
+        {
+            onConflict?.Invoke();
+            return;
+        }
+
         if (content.MediaEpisodeId != episode.Id)
         {
-            // Inferred identities may be repaired when stronger catalog evidence
-            // arrives. User-confirmed or authoritative identities are immutable;
-            // preserve them and surface the disagreement as a conflict.
-            if (!allowIdentityRemap || identity.IsTrusted && !isTrusted)
+            // Inferred identities may be repaired when newer observation evidence
+            // arrives. User-confirmed or authoritative identities remain fixed
+            // during automatic ingestion; surface disagreement as a conflict.
+            if (!allowIdentityRemap || identity.IsTrusted && !allowTrustedIdentityRemap)
             {
                 identity.HasConflict = true;
+                onConflict?.Invoke();
                 _logger.LogWarning(
                     "Provider episode {Provider}/{ProviderEpisodeId} conflicted between canonical episodes {ExistingEpisodeId} and {ObservedEpisodeId}.",
                     normalizedProvider,
@@ -762,6 +809,14 @@ public class MediaEpisodeIdentityService(
             identity.HasConflict = false;
         }
 
+        // New evidence can clear a conflict on an inferred identity. A trusted
+        // identity requires an explicit confirmation before its conflict clears.
+        if (content.MediaEpisodeId == episode.Id
+            && (allowTrustedIdentityRemap || !identity.IsTrusted))
+        {
+            identity.HasConflict = false;
+        }
+
         identity.IsTrusted |= isTrusted;
 
         content.ProviderSeriesId = FirstNonBlank(providerSeriesId, content.ProviderSeriesId);
@@ -772,6 +827,21 @@ public class MediaEpisodeIdentityService(
         identity.AudioLocale ??= variantIdentity.AudioLocale;
         identity.ReleaseTrack ??= normalizedReleaseTrack;
         identity.ProviderUrlPath = providerUrlPath;
+    }
+
+    private static void MarkObservationIdentityConflict(MediaObservation observation)
+    {
+        foreach (var candidate in observation.Candidates)
+        {
+            candidate.IsAccepted = false;
+        }
+
+        observation.AcceptedCandidateId = null;
+        observation.MatchStatus = MediaObservationStatuses.Ambiguous;
+        observation.EpisodeOffset = null;
+        observation.ResolvedProgress = null;
+        observation.ResolutionNotes =
+            "A trusted provider episode identity conflicts with this match. Review the observation before accepting it.";
     }
 
     private async Task<MediaEpisodeProviderContent> FindOrCreateProviderContentAsync(

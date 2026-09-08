@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -346,7 +345,7 @@ public class MediaEpisodeIdentityServiceTests
         var first = fixture.MakeObservation(3, "SAMEID", "https://www.crunchyroll.com/watch/SAMEID");
         var second = fixture.MakeObservation(4, "SAMEID", "https://www.crunchyroll.com/watch/SAMEID");
 
-        await fixture.Service.RecordObservationAsync(first, CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(first, CancellationToken.None, isUserConfirmed: true);
         var originalEpisodeId = (await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync()).MediaEpisodeId;
         await fixture.Service.RecordObservationAsync(second, CancellationToken.None);
 
@@ -442,6 +441,18 @@ public class MediaEpisodeIdentityServiceTests
             UserId = fixture.UserId,
             SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
             SiteMediaId = "catalog:trusted-bound",
+            IsCatalogObservation = true,
+            SeriesTitle = payload.SeriesTitle,
+            ProviderSeriesId = payload.ProviderSeriesId,
+            ProviderSeasonId = payload.ProviderSeasonId,
+            SeasonNumber = payload.SeasonNumber,
+            Episodes = payload.Episodes.Select(episode => new MediaObservationEpisode
+            {
+                Id = Guid.NewGuid(),
+                ProviderEpisodeId = episode.ProviderEpisodeId,
+                ProviderUrl = episode.ProviderUrl,
+                EpisodeNumber = episode.EpisodeNumber
+            }).ToList(),
             ObservedUrl = payload.SeriesUrl,
             ObservedTitle = payload.SeriesTitle,
             ObservedAt = now,
@@ -453,7 +464,6 @@ public class MediaEpisodeIdentityServiceTests
 
         var recorded = await fixture.Service.RecordCatalogObservationAsync(
             observation,
-            payload,
             CancellationToken.None);
 
         Assert.Equal(12, recorded);
@@ -635,7 +645,14 @@ public class MediaEpisodeIdentityServiceTests
                 ObservedTitle = payload.ObservedTitle,
                 ProgressHint = resolvedProgress.ToString(),
                 ObservedAt = now,
-                RawPayload = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                SeriesTitle = "Destination Test",
+                EpisodeTitle = payload.EpisodeTitle,
+                EpisodeNumber = payload.EpisodeNumber,
+                SeasonNumber = payload.SeasonNumber,
+                ProviderSeriesId = payload.ProviderSeriesId,
+                NextEpisodeProviderId = payload.NextEpisodeProviderId,
+                NextEpisodeUrl = payload.NextEpisodeUrl,
+                NextEpisodeNumber = payload.NextEpisodeNumber,
                 MatchStatus = MediaObservationStatuses.Matched,
                 MediaTitleId = TitleId,
                 ResolvedProgress = resolvedProgress,
@@ -668,7 +685,22 @@ public class MediaEpisodeIdentityServiceTests
                 ObservedUrl = payload.ObservedUrl,
                 ObservedTitle = payload.ObservedTitle,
                 ObservedAt = now,
-                RawPayload = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                SeriesTitle = payload.SeriesTitle,
+                SeasonTitle = payload.SeasonTitle,
+                SeasonNumber = payload.SeasonNumber,
+                ProviderSeriesId = payload.ProviderSeriesId,
+                IsCatalogObservation = false,
+                Episodes = payload.ObservedEpisodes.Select(episode => new MediaObservationEpisode
+                {
+                    Id = Guid.NewGuid(),
+                    ProviderEpisodeId = episode.ProviderEpisodeId,
+                    ProviderUrl = episode.ProviderUrl,
+                    EpisodeNumber = episode.EpisodeNumber,
+                    EpisodeTitle = episode.EpisodeTitle,
+                    ReleaseTrack = episode.ReleaseTrack,
+                    AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(),
+                    AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
+                }).ToList(),
                 MatchStatus = MediaObservationStatuses.Matched,
                 MediaTitleId = TitleId,
                 CreatedAt = now,

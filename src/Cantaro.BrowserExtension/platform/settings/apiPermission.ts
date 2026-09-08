@@ -1,4 +1,5 @@
 import { DEFAULT_BASE_URL, normalizeBaseUrl } from './extensionSettings';
+import { sanitizeDiagnosticDetails } from '../diagnostics/logger';
 
 export function apiOriginMatchPattern(value: string | null | undefined): string | null {
   const normalized = normalizeBaseUrl(value);
@@ -50,6 +51,6 @@ export async function removeReplacedApiPermission(
   try {
     await permissions.remove({ origins: [previousOrigin] });
   } catch (error) {
-    console.warn(`Could not remove access to ${previousOrigin}`, error);
+    console.warn(`Could not remove access to ${previousOrigin}`, sanitizeDiagnosticDetails(error));
   }
 }

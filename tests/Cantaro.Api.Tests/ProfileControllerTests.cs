@@ -4,12 +4,14 @@ using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -380,6 +382,37 @@ public sealed class ProfileControllerTests
             .ToListAsync());
     }
 
+    [Fact]
+    public async Task RetentionUsesCreationTimeForLegacyRowsWithoutServerUpdate()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var now = new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero);
+        var legacyRetained = CreateObservation(
+            fixture.User.Id,
+            "legacy-retained",
+            now.AddDays(-1),
+            default);
+        var legacyExpired = CreateObservation(
+            fixture.User.Id,
+            "legacy-expired",
+            now.AddDays(-31),
+            default);
+        fixture.Db.MediaObservations.AddRange(legacyRetained, legacyExpired);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Db.MediaObservations
+            .Where(observation => observation.SiteMediaId!.StartsWith("legacy-"))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(observation => observation.UpdatedAt, default(DateTimeOffset)));
+
+        var deleted = await new MediaObservationRetentionService(fixture.Db)
+            .CleanupExpiredAsync(now, CancellationToken.None);
+
+        Assert.Equal(1, deleted);
+        Assert.Equal("legacy-retained", await fixture.Db.MediaObservations
+            .Select(observation => observation.SiteMediaId)
+            .SingleAsync());
+    }
+
     private static MediaObservation CreateObservation(int userId, string siteMediaId, DateTimeOffset createdAt, DateTimeOffset updatedAt) => new()
     {
         UserId = userId,
@@ -417,7 +450,7 @@ public sealed class ProfileControllerTests
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
-            var db = new ApplicationDbContext(options);
+            var db = new ProfileDbContext(options);
             await db.Database.EnsureCreatedAsync();
             var userManager = CreateUserManager(db);
             var user = new User { UserName = "listener@example.com", Email = "listener@example.com", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
@@ -427,7 +460,16 @@ public sealed class ProfileControllerTests
             {
                 User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "test"))
             };
-            var controller = new ProfileController(db, userManager, null!, store, NullLogger<ProfileController>.Instance)
+            var identityOptions = Options.Create(new IdentityOptions());
+            var signInManager = new TestSignInManager(
+                userManager,
+                new HttpContextAccessor { HttpContext = httpContext },
+                new UserClaimsPrincipalFactory<User>(userManager, identityOptions),
+                identityOptions,
+                NullLogger<SignInManager<User>>.Instance,
+                new AuthenticationSchemeProvider(Options.Create(new AuthenticationOptions())),
+                new DefaultUserConfirmation<User>());
+            var controller = new ProfileController(db, userManager, signInManager, store, NullLogger<ProfileController>.Instance)
             {
                 ControllerContext = new ControllerContext { HttpContext = httpContext }
             };
@@ -470,5 +512,50 @@ public sealed class ProfileControllerTests
             Objects.Remove(objectKey);
             return Task.CompletedTask;
         }
+    }
+
+    /// SQLite does not support ordering DateTimeOffset values directly. Keep
+    /// this fixture's timestamps as UTC DateTime values so the retention and
+    /// export predicates exercise their real SQL paths.
+    private sealed class ProfileDbContext(DbContextOptions<ApplicationDbContext> options)
+        : ApplicationDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            {
+                foreach (var property in entityType.GetProperties())
+                {
+                    if (property.ClrType == typeof(DateTimeOffset))
+                    {
+                        property.SetValueConverter(new ValueConverter<DateTimeOffset, DateTime>(
+                            value => value.UtcDateTime,
+                            value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc))));
+                    }
+                    else if (property.ClrType == typeof(DateTimeOffset?))
+                    {
+                        property.SetValueConverter(new ValueConverter<DateTimeOffset?, DateTime?>(
+                            value => value.HasValue ? value.Value.UtcDateTime : null,
+                            value => value.HasValue
+                                ? new DateTimeOffset(DateTime.SpecifyKind(value.Value, DateTimeKind.Utc))
+                                : null));
+                    }
+                }
+            }
+        }
+    }
+
+    private sealed class TestSignInManager(
+        UserManager<User> userManager,
+        IHttpContextAccessor contextAccessor,
+        IUserClaimsPrincipalFactory<User> claimsFactory,
+        IOptions<IdentityOptions> options,
+        Microsoft.Extensions.Logging.ILogger<SignInManager<User>> logger,
+        IAuthenticationSchemeProvider schemes,
+        IUserConfirmation<User> confirmation)
+        : SignInManager<User>(userManager, contextAccessor, claimsFactory, options, logger, schemes, confirmation)
+    {
+        public override Task SignOutAsync() => Task.CompletedTask;
     }
 }

@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -26,7 +25,6 @@ public class MediaCatalogObservationsController(
     MediaEpisodeIdentityService episodeIdentityService,
     ILogger<MediaCatalogObservationsController> logger) : ControllerBase
 {
-    private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly MediaObservationMatchingService _matchingService = matchingService;
@@ -197,7 +195,7 @@ public class MediaCatalogObservationsController(
         return await _episodeIdentityService.RecordCatalogObservationAsync(observation, cancellationToken);
     }
 
-    private static void ApplyLatestEvidence(
+    private void ApplyLatestEvidence(
         MediaObservation observation,
         SubmitMediaCatalogObservationRequest request,
         string normalizedSeriesUrl,
@@ -213,22 +211,47 @@ public class MediaCatalogObservationsController(
         observation.ProviderSeasonId = TrimToNull(request.ProviderSeasonId);
         observation.SeasonNumber = request.SeasonNumber;
         observation.IsCatalogObservation = true;
-        observation.Episodes.Clear();
         ApplyEpisodeEvidence(observation, request);
         observation.UpdatedAt = now;
     }
 
     private static void ApplyEpisodeEvidence(MediaObservation observation, SubmitMediaCatalogObservationRequest request)
     {
+        var incomingIds = request.Episodes
+            .Select(episode => episode.ProviderEpisodeId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var existing in observation.Episodes
+                     .Where(existing => !incomingIds.Contains(existing.ProviderEpisodeId))
+                     .ToList())
+        {
+            // Remove orphaned children explicitly. Clearing a required
+            // relationship and immediately adding replacements can make EF
+            // issue a stale DELETE when the same tracked observation is
+            // refreshed during duplicate handling.
+            observation.Episodes.Remove(existing);
+        }
+
         foreach (var episode in request.Episodes)
         {
-            if (observation.Episodes.Any(existing => string.Equals(existing.ProviderEpisodeId, episode.ProviderEpisodeId, StringComparison.OrdinalIgnoreCase))) continue;
-            observation.Episodes.Add(new MediaObservationEpisode
+            var existing = observation.Episodes.FirstOrDefault(item =>
+                string.Equals(item.ProviderEpisodeId, episode.ProviderEpisodeId, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
             {
-                Id = Guid.NewGuid(), ProviderEpisodeId = episode.ProviderEpisodeId.Trim(), ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl),
-                EpisodeNumber = episode.EpisodeNumber, EpisodeTitle = TrimToNull(episode.EpisodeTitle), ReleaseTrack = TrimToNull(episode.ReleaseTrack),
-                AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(), AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
-            });
+                observation.Episodes.Add(new MediaObservationEpisode
+                {
+                    Id = Guid.NewGuid(), ProviderEpisodeId = episode.ProviderEpisodeId.Trim(), ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl),
+                    EpisodeNumber = episode.EpisodeNumber, EpisodeTitle = TrimToNull(episode.EpisodeTitle), ReleaseTrack = TrimToNull(episode.ReleaseTrack),
+                    AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(), AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
+                });
+                continue;
+            }
+
+            existing.ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl);
+            existing.EpisodeNumber = episode.EpisodeNumber;
+            existing.EpisodeTitle = TrimToNull(episode.EpisodeTitle);
+            existing.ReleaseTrack = TrimToNull(episode.ReleaseTrack);
+            existing.AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList();
+            existing.AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList();
         }
     }
 

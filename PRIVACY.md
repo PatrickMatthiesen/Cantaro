@@ -1,6 +1,6 @@
 # Cantaro Browser Extension Privacy Policy
 
-Effective September 5, 2026
+Effective September 8, 2026
 
 Cantaro observes supported streaming pages only to provide its media-library and watch-tracking features. Cantaro does not sell user data or use it for advertising.
 

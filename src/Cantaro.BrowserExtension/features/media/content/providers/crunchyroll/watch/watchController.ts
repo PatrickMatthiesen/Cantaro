@@ -26,6 +26,7 @@ import {
 import { decideThresholdSubmission } from './thresholdSubmission';
 import type { WatchResolutionOverlayHandle } from './watchResolutionOverlay';
 import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
+import { sanitizeDiagnosticDetails } from '../../../../../../platform/diagnostics/logger';
 import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 
 const RESTART_DELAY_MS = 500;
@@ -206,7 +207,7 @@ export function createCrunchyrollWatchController(
     });
     console.error(extensionLogMessage('Crunchyroll watch tracker failed'), {
       pageUrl: stripUrlQueryAndFragment(location.href),
-      error,
+      error: sanitizeDiagnosticDetails(error),
     });
   };
 
@@ -286,7 +287,7 @@ export function createCrunchyrollWatchController(
     });
     console.warn(extensionLogMessage('Crunchyroll watch-progress delivery failed'), {
       correlationId,
-      error,
+      error: sanitizeDiagnosticDetails(error),
     });
     requestRestart();
   };

@@ -640,6 +640,8 @@ namespace Cantaro.Api.Migrations
                         .IsUnique()
                         .HasFilter("\"SiteMediaId\" IS NOT NULL");
 
+                    b.HasIndex("UpdatedAt");
+
                     b.ToTable("MediaObservations");
                 });
 

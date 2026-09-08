@@ -6,20 +6,26 @@ namespace Cantaro.Api.Services;
 public static partial class MediaDestinationUrlPolicy
 {
     /// <summary>
-    /// Removes query parameters and fragments from an observed URL before it is
-    /// persisted. Invalid URLs are trimmed and returned unchanged so the
-    /// existing validation path can report the provider-specific error.
+    /// Removes credentials, query parameters and fragments before persistence.
+    /// Malformed values still lose query/fragment data before provider validation.
     /// </summary>
     public static string NormalizeObservedUrl(string? value)
     {
         var trimmed = value?.Trim() ?? string.Empty;
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https"))
         {
             var queryIndex = trimmed.IndexOfAny(['?', '#']);
             return (queryIndex >= 0 ? trimmed[..queryIndex] : trimmed).Trim();
         }
 
-        return uri.GetLeftPart(UriPartial.Path);
+        return new UriBuilder(uri)
+        {
+            UserName = string.Empty,
+            Password = string.Empty,
+            Query = string.Empty,
+            Fragment = string.Empty
+        }.Uri.AbsoluteUri;
     }
 
     [GeneratedRegex(@"^/(?:[a-z]{2}(?:-[a-z]{2})?/)?watch/([A-Z0-9]+)(?:/.*)?$", RegexOptions.IgnoreCase)]

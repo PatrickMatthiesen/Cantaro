@@ -12,10 +12,11 @@ namespace Cantaro.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.RenameColumn(
-                name: "RawPayload",
+            migrationBuilder.AddColumn<string>(
+                name: "SeriesTitle",
                 table: "MediaObservations",
-                newName: "SeriesTitle");
+                type: "text",
+                nullable: true);
 
             migrationBuilder.AddColumn<int>(
                 name: "EpisodeNumber",
@@ -131,11 +132,18 @@ namespace Cantaro.Api.Migrations
                 name: "IX_MediaObservationEpisode_MediaObservationId",
                 table: "MediaObservationEpisode",
                 column: "MediaObservationId");
+
+            BackfillEvidence(migrationBuilder);
+            migrationBuilder.DropColumn(name: "RawPayload", table: "MediaObservations");
+            migrationBuilder.CreateIndex(name: "IX_MediaObservations_UpdatedAt", table: "MediaObservations", column: "UpdatedAt");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // Retired request bodies cannot be reconstructed on rollback.
+            migrationBuilder.AddColumn<string>(name: "RawPayload", table: "MediaObservations", type: "text", nullable: true);
+            migrationBuilder.DropIndex(name: "IX_MediaObservations_UpdatedAt", table: "MediaObservations");
             migrationBuilder.DropTable(
                 name: "MediaObservationEpisode");
 
@@ -195,10 +203,9 @@ namespace Cantaro.Api.Migrations
                 name: "SeasonTitle",
                 table: "MediaObservations");
 
-            migrationBuilder.RenameColumn(
+            migrationBuilder.DropColumn(
                 name: "SeriesTitle",
-                table: "MediaObservations",
-                newName: "RawPayload");
+                table: "MediaObservations");
         }
     }
 }

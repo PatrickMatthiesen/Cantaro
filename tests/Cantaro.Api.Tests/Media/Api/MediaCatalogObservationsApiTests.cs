@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.Json;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -451,7 +450,23 @@ public class MediaCatalogObservationsApiTests
             ObservedUrl = request.SeriesUrl,
             ObservedTitle = request.SeriesTitle,
             ObservedAt = now,
-            RawPayload = JsonSerializer.Serialize(request, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            SeriesTitle = request.SeriesTitle,
+            SeasonTitle = request.SeasonTitle,
+            ProviderSeriesId = request.ProviderSeriesId,
+            ProviderSeasonId = request.ProviderSeasonId,
+            SeasonNumber = request.SeasonNumber,
+            IsCatalogObservation = true,
+            Episodes = request.Episodes.Select(episode => new MediaObservationEpisode
+            {
+                Id = Guid.NewGuid(),
+                ProviderEpisodeId = episode.ProviderEpisodeId,
+                ProviderUrl = episode.ProviderUrl,
+                EpisodeNumber = episode.EpisodeNumber,
+                EpisodeTitle = episode.EpisodeTitle,
+                ReleaseTrack = episode.ReleaseTrack,
+                AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(),
+                AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
+            }).ToList(),
             MatchStatus = MediaObservationStatuses.Matched,
             MediaTitleId = title.Id,
             CreatedAt = now,

@@ -1,10 +1,12 @@
 using System.Data.Common;
+using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -58,7 +60,14 @@ public class MediaObservationMatchingServiceTests
             SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
             ObservedUrl = "https://www.crunchyroll.com/series/EXAMPLE/example",
             ObservedTitle = "Example",
-            RawPayload = "{\"seriesTitle\":\"Example\",\"observedEpisodes\":[{\"episodeNumber\":1}]}",
+            SeriesTitle = "Example",
+            Episodes = [new MediaObservationEpisode
+            {
+                Id = Guid.NewGuid(),
+                ProviderEpisodeId = "test-1",
+                ProviderUrl = "https://www.crunchyroll.com/watch/test-1",
+                EpisodeNumber = 1
+            }],
             MatchStatus = MediaObservationStatuses.Pending,
             CreatedAt = now,
             UpdatedAt = now
@@ -631,6 +640,49 @@ public class MediaObservationMatchingServiceTests
         Assert.NotNull(secondAttempt.LastMatchAttemptedAt);
     }
 
+    [Fact]
+    public async Task ProcessObservation_DoesNotPersistOrLogProviderExceptionMessage()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var logger = new RecordingLogger<MediaObservationMatchingService>();
+        var interceptor = new ThrowingReaderInterceptor(
+            "provider URL https://www.crunchyroll.com/watch/SECRET?token=SECRET");
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        db.Users.Add(TestUserFactory.Create(813, "safe-error@example.com"));
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = 813,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/SAFE",
+            ObservedTitle = "Safe title",
+            MatchStatus = MediaObservationStatuses.Pending,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.MediaObservations.Add(observation);
+        await db.SaveChangesAsync();
+
+        var service = new MediaObservationMatchingService(
+            db,
+            new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance),
+            new MediaRelationGraphRefreshQueue(),
+            logger);
+
+        await service.ProcessObservationAsync(observation, CancellationToken.None);
+
+        Assert.Equal("Candidate generation failed.", observation.LastMatchError);
+        Assert.DoesNotContain("SECRET", observation.LastMatchError, StringComparison.Ordinal);
+        Assert.DoesNotContain(logger.Messages, message => message.Text.Contains("SECRET", StringComparison.Ordinal));
+    }
+
     // -----------------------------------------------------------------------
     // Attempt counter increments
     // -----------------------------------------------------------------------
@@ -741,6 +793,59 @@ public class MediaObservationMatchingServiceTests
         var accepted = Assert.Single(persisted.Candidates);
         Assert.Equal(MediaObservationCandidateSources.ProviderEpisodeIdentityExact, accepted.CandidateSource);
         Assert.True(accepted.IsAccepted);
+    }
+
+    [Fact]
+    public async Task ProcessObservation_DoesNotAutoAcceptConflictedProviderIdentity()
+    {
+        await using var fixture = await ObservationTestFixture.CreateAsync();
+        var title = fixture.SeedTitle("Previously assigned title", MediaKinds.Anime, episodeCount: 12);
+        var now = DateTimeOffset.UtcNow;
+        var episode = new MediaEpisode
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            EpisodeNumber = 1,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var identity = new MediaEpisodeProviderIdentity
+        {
+            Id = Guid.NewGuid(),
+            MediaEpisodeId = episode.Id,
+            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
+            ProviderSeriesId = "SERIES1",
+            ProviderEpisodeId = "CONFLICTED1",
+            ProviderEpisodeNumber = 1,
+            ProviderUrlPath = "/watch/CONFLICTED1",
+            SeenCount = 4,
+            FirstSeenAt = now.AddDays(-2),
+            LastSeenAt = now.AddDays(-1),
+            IsTrusted = true,
+            HasConflict = true
+        };
+        fixture.DbContext.AddRange(episode, identity);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var observation = fixture.SeedObservation(
+            MediaObservationSiteIdentifiers.Crunchyroll,
+            "CONFLICTED1",
+            "An unrelated title",
+            """{"seriesTitle":"An unrelated title","providerSeriesId":"SERIES1","episodeNumber":1}""");
+
+        await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
+
+        var persisted = await fixture.DbContext.MediaObservations
+            .Include(item => item.Candidates)
+            .SingleAsync(item => item.Id == observation.Id);
+        var persistedIdentity = await fixture.DbContext.MediaEpisodeProviderIdentities
+            .SingleAsync(item => item.ProviderEpisodeId == "CONFLICTED1");
+        Assert.NotEqual(MediaObservationStatuses.Matched, persisted.MatchStatus);
+        Assert.DoesNotContain(
+            persisted.Candidates,
+            candidate => candidate.CandidateSource == MediaObservationCandidateSources.ProviderEpisodeIdentityExact);
+        Assert.True(persistedIdentity.HasConflict);
+        Assert.Equal(4, persistedIdentity.SeenCount);
     }
 
     [Fact]
@@ -936,16 +1041,72 @@ public class MediaObservationMatchingServiceTests
                 ObservedUrl = $"https://{siteIdentifier}.co/anime/test",
                 SiteMediaId = siteMediaId,
                 ObservedTitle = observedTitle,
-                RawPayload = rawPayload,
                 ObservedAt = DateTimeOffset.UtcNow,
                 MatchStatus = MediaObservationStatuses.Pending,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
 
+            ApplyStructuredPayload(observation, rawPayload);
+
             DbContext.MediaObservations.Add(observation);
             DbContext.SaveChanges();
             return observation;
+        }
+
+        private static void ApplyStructuredPayload(MediaObservation observation, string? payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload)) return;
+
+            using var json = JsonDocument.Parse(payload);
+            var root = json.RootElement;
+            string? String(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+            int? Int(string name) => root.TryGetProperty(name, out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt32(out var result)
+                    ? result
+                    : null;
+
+            observation.SeriesTitle = String("seriesTitle");
+            observation.EpisodeTitle = String("episodeTitle");
+            observation.EpisodeNumber = Int("episodeNumber");
+            observation.SeasonTitle = String("seasonTitle");
+            observation.SeasonNumber = Int("seasonNumber");
+            observation.ProviderSeriesId = String("providerSeriesId");
+            observation.ProviderSeasonId = String("providerSeasonId");
+            observation.ProviderSequenceNumber = Int("providerSequenceNumber");
+            observation.ReleaseTrack = String("releaseTrack");
+
+            var episodes = root.TryGetProperty("observedEpisodes", out var observed)
+                ? observed
+                : root.TryGetProperty("episodes", out var catalog) ? catalog : default;
+            if (episodes.ValueKind != JsonValueKind.Array) return;
+
+            foreach (var item in episodes.EnumerateArray())
+            {
+                var number = item.TryGetProperty("episodeNumber", out var numberValue)
+                    && numberValue.TryGetInt32(out var parsedNumber)
+                        ? parsedNumber
+                        : 0;
+                if (number <= 0) continue;
+                var providerId = item.TryGetProperty("providerEpisodeId", out var idValue)
+                    ? idValue.GetString()
+                    : $"test-{number}";
+                providerId ??= $"test-{number}";
+                observation.Episodes.Add(new MediaObservationEpisode
+                {
+                    Id = Guid.NewGuid(),
+                    ProviderEpisodeId = providerId,
+                    ProviderUrl = item.TryGetProperty("providerUrl", out var urlValue)
+                        ? urlValue.GetString() ?? $"https://www.crunchyroll.com/watch/{providerId}"
+                        : $"https://www.crunchyroll.com/watch/{providerId}",
+                    EpisodeNumber = number,
+                    EpisodeTitle = item.TryGetProperty("episodeTitle", out var titleValue) ? titleValue.GetString() : null,
+                    ReleaseTrack = item.TryGetProperty("releaseTrack", out var trackValue) ? trackValue.GetString() : null
+                });
+            }
         }
 
         public async ValueTask DisposeAsync()
@@ -984,6 +1145,51 @@ public class MediaObservationMatchingServiceTests
             {
                 RelationQueryCount++;
             }
+        }
+    }
+
+    private sealed class ThrowingReaderInterceptor(string message) : DbCommandInterceptor
+    {
+        private readonly string _message = message;
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+            => ShouldThrow(command)
+                ? throw new InvalidOperationException(_message)
+                : result;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+            => ShouldThrow(command)
+                ? ValueTask.FromException<InterceptionResult<DbDataReader>>(
+                    new InvalidOperationException(_message))
+                : ValueTask.FromResult(result);
+
+        private static bool ShouldThrow(DbCommand command) =>
+            command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Text)> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add((logLevel, formatter(state, exception)));
         }
     }
 }

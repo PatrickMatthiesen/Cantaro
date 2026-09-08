@@ -751,6 +751,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.HasIndex(e => new { e.UserId, e.MatchStatus });
             entity.HasIndex(e => new { e.UserId, e.CreatedAt });
+            entity.HasIndex(e => e.UpdatedAt);
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -768,6 +769,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasMany(e => e.Candidates)
                 .WithOne(c => c.MediaObservation)
                 .HasForeignKey(c => c.MediaObservationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.Episodes)
+                .WithOne(e => e.MediaObservation)
+                .HasForeignKey(e => e.MediaObservationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

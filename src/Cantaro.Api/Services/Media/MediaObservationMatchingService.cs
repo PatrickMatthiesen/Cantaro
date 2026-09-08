@@ -80,8 +80,14 @@ public class MediaObservationMatchingService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Candidate generation failed for MediaObservation {ObservationId}.", observation.Id);
-            observation.LastMatchError = ex.Message;
+            // Exception messages can contain provider URLs or other payload
+            // data. Keep both the persisted diagnostic and log metadata
+            // bounded to a safe exception type.
+            _logger.LogError(
+                "Candidate generation failed for MediaObservation {ObservationId}; failure type {FailureType}.",
+                observation.Id,
+                ex.GetType().Name);
+            observation.LastMatchError = "Candidate generation failed.";
             observation.MatchStatus = MediaObservationStatuses.Pending;
         }
 
@@ -167,8 +173,6 @@ public class MediaObservationMatchingService(
             observation.EpisodeOffset = episode.EpisodeNumber - observedProgress;
             observation.ResolvedProgress = episode.EpisodeNumber;
         }
-        identity.HasConflict = false;
-
         _logger.LogInformation(
             "Matched MediaObservation {ObservationId} through provider episode identity {Provider}/{ProviderEpisodeId}: title {MediaTitleId}, episode {EpisodeNumber}.",
             observation.Id,
@@ -179,33 +183,27 @@ public class MediaObservationMatchingService(
         return true;
     }
 
-    private static bool IsCompatibleEpisodeIdentity(
-        MediaEpisodeProviderIdentity identity,
-        MediaObservation observation)
-    {
-        if (!identity.HasConflict)
-        {
-            return true;
-        }
-
-        var content = identity.Content;
-        var seriesMatches = !string.IsNullOrWhiteSpace(content?.ProviderSeriesId)
-            && string.Equals(
-                content.ProviderSeriesId,
-                observation.ProviderSeriesId,
-                StringComparison.OrdinalIgnoreCase);
-        var episodeMatches = content?.ProviderEpisodeNumber is > 0
-            && content.ProviderEpisodeNumber == observation.EpisodeNumber;
-        return seriesMatches && episodeMatches;
-    }
-
     private static bool CanUseEpisodeIdentityForMatching(
         MediaEpisodeProviderIdentity identity,
         MediaObservation observation)
     {
-        if (!IsCompatibleEpisodeIdentity(identity, observation))
+        // A trusted conflict remains in the resolution workflow. An untrusted
+        // conflict may still be corrected by a compatible, newer observation.
+        if (identity.HasConflict && identity.IsTrusted)
         {
             return false;
+        }
+
+        if (identity.HasConflict)
+        {
+            var content = identity.Content;
+            return !string.IsNullOrWhiteSpace(content?.ProviderSeriesId)
+                && string.Equals(
+                    content.ProviderSeriesId,
+                    observation.ProviderSeriesId,
+                    StringComparison.OrdinalIgnoreCase)
+                && content.ProviderEpisodeNumber is > 0
+                && content.ProviderEpisodeNumber == observation.EpisodeNumber;
         }
 
         if (identity.IsTrusted)
@@ -214,9 +212,9 @@ public class MediaObservationMatchingService(
         }
 
         // Catalog observations may discover a correct episode destination before
-        // a user has confirmed the surrounding season mapping. Reuse that identity
-        // only when the watch payload independently confirms both its provider
-        // series and provider episode number. Trust is still required to remap it.
+        // a user has confirmed the surrounding season mapping. Reuse an
+        // untrusted identity only when the watch payload independently confirms
+        // both its provider series and provider episode number.
         return !string.IsNullOrWhiteSpace(identity.Content?.ProviderSeriesId)
             && string.Equals(
                 identity.Content.ProviderSeriesId,

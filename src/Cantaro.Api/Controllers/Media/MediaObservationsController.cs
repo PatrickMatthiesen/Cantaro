@@ -34,7 +34,7 @@ public class MediaObservationsController(
     private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly ILogger<MediaObservationsController> _logger = logger;
-    private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions PayloadJsonOptions = new(JsonSerializerDefaults.Web);
 
     // -----------------------------------------------------------------------
     // Ingestion
@@ -97,8 +97,18 @@ public class MediaObservationsController(
                 var exactIdentityApplied = await _matchingService.TryApplyProviderEpisodeIdentityAsync(
                     existing,
                     cancellationToken);
-                if (!exactIdentityApplied && existing.MatchStatus != MediaObservationStatuses.Matched)
+                var shouldReprocess = !exactIdentityApplied
+                    && (existing.MatchStatus != MediaObservationStatuses.Matched
+                        || await HasConflictedProviderIdentityAsync(
+                            existing.SiteIdentifier,
+                            existing.SiteMediaId,
+                            cancellationToken));
+                if (shouldReprocess)
                 {
+                    // A previously matched observation may now disagree with
+                    // a conflicted provider identity. Re-run matching so the
+                    // trusted mismatch can enter the review workflow instead
+                    // of silently replaying the stale canonical assignment.
                     existing = await _matchingService.ProcessObservationAsync(existing, cancellationToken);
                 }
                 var deduplicatedProviderChoicesUnavailableReason = await EnsureProviderChoicesAsync(existing, cancellationToken);
@@ -171,6 +181,28 @@ public class MediaObservationsController(
             wasDeduplicated: false,
             providerChoicesUnavailableReason,
             newProgressUpdated));
+    }
+
+    private Task<bool> HasConflictedProviderIdentityAsync(
+        string provider,
+        string? providerEpisodeId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(providerEpisodeId)
+            || providerEpisodeId.StartsWith("catalog:", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(false);
+        }
+
+        var normalizedProvider = provider.Trim().ToLowerInvariant();
+        var normalizedEpisodeId = normalizedProvider == MediaObservationSiteIdentifiers.Crunchyroll
+            ? providerEpisodeId.Trim().ToUpperInvariant()
+            : providerEpisodeId.Trim();
+        return _dbContext.MediaEpisodeProviderIdentities.AnyAsync(
+            identity => identity.Provider == normalizedProvider
+                && identity.ProviderEpisodeId == normalizedEpisodeId
+                && identity.HasConflict,
+            cancellationToken);
     }
 
     // -----------------------------------------------------------------------
@@ -357,7 +389,8 @@ public class MediaObservationsController(
         await _episodeIdentityService.RecordObservationAsync(
             observation,
             cancellationToken,
-            isUserConfirmed: true);
+            isUserConfirmed: true,
+            allowTrustedIdentityRemap: true);
 
         _logger.LogInformation(
             "User {UserId} resolved MediaObservation {ObservationId} to MediaTitle {MediaTitleId}.",
@@ -613,7 +646,7 @@ public class MediaObservationsController(
         }
 
         var choices = await MapProviderChoicesAsync(observation.UserId, provider.ProviderId, results, cancellationToken);
-        observation.ProviderChoicesPayload = JsonSerializer.Serialize(choices, RawPayloadJsonOptions);
+        observation.ProviderChoicesPayload = JsonSerializer.Serialize(choices, PayloadJsonOptions);
         observation.UpdatedAt = DateTimeOffset.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
         return null;
@@ -1256,7 +1289,7 @@ public class MediaObservationsController(
 
         try
         {
-            return JsonSerializer.Deserialize<List<MediaObservationProviderChoiceDto>>(payload, RawPayloadJsonOptions) ?? [];
+            return JsonSerializer.Deserialize<List<MediaObservationProviderChoiceDto>>(payload, PayloadJsonOptions) ?? [];
         }
         catch (JsonException)
         {
@@ -1268,9 +1301,9 @@ public class MediaObservationsController(
     {
         var entries = string.IsNullOrWhiteSpace(payload)
             ? []
-            : JsonSerializer.Deserialize<List<ObservationResolutionLogEntry>>(payload, RawPayloadJsonOptions) ?? [];
+            : JsonSerializer.Deserialize<List<ObservationResolutionLogEntry>>(payload, PayloadJsonOptions) ?? [];
         entries.Add(entry);
-        return JsonSerializer.Serialize(entries, RawPayloadJsonOptions);
+        return JsonSerializer.Serialize(entries, PayloadJsonOptions);
     }
 
     private static string? FirstNonBlank(params string?[] values)

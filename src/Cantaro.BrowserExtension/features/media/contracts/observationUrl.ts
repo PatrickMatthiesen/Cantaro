@@ -4,6 +4,8 @@ export function stripUrlQueryAndFragment(value: string): string {
     const url = new URL(value);
     url.search = '';
     url.hash = '';
+    url.username = '';
+    url.password = '';
     return url.href;
   } catch {
     // Keep malformed values usable for diagnostics while still removing anything

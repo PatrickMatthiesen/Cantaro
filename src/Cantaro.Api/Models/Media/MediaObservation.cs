@@ -1,6 +1,3 @@
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Text.Json;
-
 namespace Cantaro.Api.Models;
 
 /// <summary>
@@ -9,37 +6,6 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class MediaObservation
 {
-    [NotMapped]
-    public string? RawPayload
-    {
-        get => SeriesTitle is null && EpisodeNumber is null ? null : JsonSerializer.Serialize(new { seriesTitle = SeriesTitle, episodeTitle = EpisodeTitle, episodeNumber = EpisodeNumber, seasonTitle = SeasonTitle, seasonNumber = SeasonNumber, providerSeriesId = ProviderSeriesId, nextEpisodeProviderId = NextEpisodeProviderId, nextEpisodeNumber = NextEpisodeNumber });
-        set
-        {
-            if (string.IsNullOrWhiteSpace(value)) return;
-            try
-            {
-                using var json = JsonDocument.Parse(value);
-                var root = json.RootElement;
-                string? String(string name) => root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
-                int? Int(string name) => root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var n) ? n : null;
-                SeriesTitle ??= String("seriesTitle"); SeasonTitle ??= String("seasonTitle");
-                ProviderSeriesId ??= String("providerSeriesId"); ProviderSeasonId ??= String("providerSeasonId");
-                EpisodeTitle ??= String("episodeTitle"); EpisodeNumber ??= Int("episodeNumber"); SeasonNumber ??= Int("seasonNumber");
-                ProviderSequenceNumber ??= Int("providerSequenceNumber"); ReleaseTrack ??= String("releaseTrack");
-                NextEpisodeProviderId ??= String("nextEpisodeProviderId"); NextEpisodeUrl ??= String("nextEpisodeUrl");
-                NextEpisodeTitle ??= String("nextEpisodeTitle"); NextEpisodeNumber ??= Int("nextEpisodeNumber"); NextEpisodeReleaseTrack ??= String("nextEpisodeReleaseTrack");
-                var episodes = root.TryGetProperty("observedEpisodes", out var observed) ? observed : root.TryGetProperty("episodes", out var catalog) ? catalog : default;
-                if (episodes.ValueKind == JsonValueKind.Array)
-                    foreach (var item in episodes.EnumerateArray())
-                    {
-                        var id = item.TryGetProperty("providerEpisodeId", out var idp) ? idp.GetString() : null;
-                        if (string.IsNullOrWhiteSpace(id) || Episodes.Any(e => e.ProviderEpisodeId == id)) continue;
-                        Episodes.Add(new MediaObservationEpisode { Id = Guid.NewGuid(), ProviderEpisodeId = id, ProviderUrl = item.TryGetProperty("providerUrl", out var url) ? url.GetString() ?? string.Empty : string.Empty, EpisodeNumber = item.TryGetProperty("episodeNumber", out var ep) && ep.TryGetInt32(out var n) ? n : 0, EpisodeTitle = item.TryGetProperty("episodeTitle", out var title) ? title.GetString() : null, ReleaseTrack = item.TryGetProperty("releaseTrack", out var track) ? track.GetString() : null });
-                    }
-            }
-            catch (JsonException) { }
-        }
-    }
     public Guid Id { get; set; }
 
     /// <summary>

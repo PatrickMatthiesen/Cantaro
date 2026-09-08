@@ -1,5 +1,6 @@
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import { extensionLogMessage } from '../../../../platform/diagnostics/extensionIdentity';
+import { sanitizeDiagnosticDetails } from '../../../../platform/diagnostics/logger';
 import { registerTabContext } from '../../../../platform/messaging/tabContext';
 import { watchExtensionSettings } from '../../../../platform/settings/settingsRepository';
 import type { MediaTabContext } from '../../contracts/mediaTabContext';
@@ -24,7 +25,7 @@ function startVerboseLogging(
   void dependencies.readVerboseLogging()
     .then(setEnabled)
     .catch((error: unknown) => {
-      console.warn(extensionLogMessage('could not read verbose logging setting'), error);
+      console.warn(extensionLogMessage('could not read verbose logging setting'), sanitizeDiagnosticDetails(error));
     })
     .finally(onReady);
 }

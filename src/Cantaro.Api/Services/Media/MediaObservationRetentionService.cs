@@ -23,13 +23,16 @@ public sealed class MediaObservationRetentionService(ApplicationDbContext dbCont
         CancellationToken cancellationToken = default)
     {
         var cutoff = GetCutoff(now);
-        var expired = await dbContext.MediaObservations
-            .Where(observation => observation.UpdatedAt <= cutoff)
-            .ToListAsync(cancellationToken);
-        if (expired.Count == 0) return 0;
-        dbContext.MediaObservations.RemoveRange(expired);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return expired.Count;
+        var defaultUpdatedAt = default(DateTimeOffset);
+
+        // UpdatedAt is server maintained for current rows. A small number of
+        // legacy rows may still contain its CLR default, so use CreatedAt for
+        // those rows without loading the entire observation table.
+        return await dbContext.MediaObservations
+            .Where(observation =>
+                observation.UpdatedAt <= cutoff
+                && (observation.UpdatedAt != defaultUpdatedAt || observation.CreatedAt <= cutoff))
+            .ExecuteDeleteAsync(cancellationToken);
     }
 }
 

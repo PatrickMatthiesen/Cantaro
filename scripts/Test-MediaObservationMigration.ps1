@@ -15,7 +15,7 @@ function Assert-CommandSucceeded {
 function Invoke-SqlFile([string] $path, [string] $name) {
     docker cp $path "${containerName}:/tmp/$name"
     Assert-CommandSucceeded
-    docker exec $containerName psql -U postgres -d cantaro -v ON_ERROR_STOP=1 -f "/tmp/$name"
+    docker exec $containerName psql -q -U postgres -d cantaro -v ON_ERROR_STOP=1 -f "/tmp/$name"
     Assert-CommandSucceeded
 }
 
@@ -32,8 +32,13 @@ try {
     Assert-CommandSucceeded
     $ready = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        docker exec $containerName pg_isready -U postgres -d cantaro *> $null
-        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+        # The image briefly starts a bootstrap server before restarting. Wait
+        # for initialization to finish before probing the final server.
+        $startupLog = docker logs $containerName 2>&1 | Out-String
+        if ($startupLog.Contains('PostgreSQL init process complete; ready for start up.')) {
+            docker exec $containerName pg_isready -U postgres -d cantaro *> $null
+            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+        }
         Start-Sleep -Seconds 1
     }
     if (-not $ready) { throw 'Disposable PostgreSQL did not become ready.' }
