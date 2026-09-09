@@ -26,7 +26,7 @@ Chrome's [User Data FAQ](https://developer.chrome.com/docs/webstore/program-poli
 | Chrome Web Store category | Data handled by Cantaro | Purpose and destination |
 | --- | --- | --- |
 | Authentication information | Cantaro account email and extension access/refresh credentials | Keep the user signed in to the configured Cantaro server. The extension does not receive the account password. |
-| Web history / browsing activity | Supported Crunchyroll page URL, provider identifiers, rendered series/season/episode information, playback progress, and observation time | With separate consent for watch tracking or catalog collection, send structured media evidence over HTTPS to the configured Cantaro server. URLs are stripped of query strings and fragments. |
+| Web history / browsing activity | Supported Crunchyroll page URL, provider identifiers, rendered series/season/episode information, playback progress, and observation time | With separate consent for watch tracking or catalog collection, send structured media evidence over HTTPS to the configured Cantaro server. URLs are stripped of query strings and fragments; temporary matching evidence is removed after successful processing. |
 | Website content | Rendered Crunchyroll titles, episode numbers, language labels, and episode links | Match the user's media to library and episode records on the configured Cantaro server after the corresponding catalog or watch consent is accepted. |
 | Personally identifiable information | Account email, only as part of the Cantaro account session | Display account state and associate the user's private library data with the account. |
 | User activity | Watch progress and, when the user requests music actions, library or playlist identifiers | Update the user's Cantaro library and perform the requested sync action on the configured server. |
@@ -42,7 +42,7 @@ websites.
 - **Use data for advertising:** No.
 - **Use data for creditworthiness, lending, or unrelated profiling:** No.
 - **Transfer data for a purpose unrelated to the extension's disclosed feature:** No.
-- **Data is handled only transiently:** No for authenticated media observations; structured evidence may be retained by the configured server under the retention policy.
+- **Data is handled only transiently:** Media reports are processed transiently when they match successfully. Evidence for an unresolved match is retained in the user's private matching task until it is resolved or dismissed; account, library, and shared catalog data have their own lifecycles.
 - **Privacy policy:** Yes. Link to the deployed public HTTPS policy URL.
 
 The extension displays a first-use consent screen before reading a supported
@@ -50,7 +50,10 @@ page for media collection. Collection is off by default. Watch tracking and
 catalog collection are separate choices. A signed-out user produces no media
 capture, queue entry, or transmission. Revocation stops new collection for the
 purpose immediately, and a material change to collection requires renewed,
-versioned consent.
+versioned consent. Successful page reports do not remain as browsing history:
+the server removes their temporary matching evidence after processing. An
+unresolved match remains available only as a private task for the user to
+resolve or dismiss.
 
 ## Permission rationale
 

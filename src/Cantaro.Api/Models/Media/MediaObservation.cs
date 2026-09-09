@@ -1,8 +1,8 @@
 namespace Cantaro.Api.Models;
 
 /// <summary>
-/// Represents a media title observation submitted by the browser extension.
-/// User-scoped: each user's observations are independent and never shared.
+/// Temporary private matching work submitted by the browser extension.
+/// Evidence is removed once its catalog and library effects are safely recorded.
 /// </summary>
 public class MediaObservation
 {
@@ -20,7 +20,7 @@ public class MediaObservation
     public required string SiteIdentifier { get; set; }
 
     /// <summary>
-    /// Full URL that was observed.
+    /// Observed URL with credentials, query and fragment removed.
     /// </summary>
     public required string ObservedUrl { get; set; }
 
@@ -46,11 +46,6 @@ public class MediaObservation
     /// server receipt time).
     /// </summary>
     public DateTimeOffset ObservedAt { get; set; }
-
-    /// <summary>
-    /// Version string of the extension that submitted the observation.
-    /// </summary>
-    public string? ExtensionVersion { get; set; }
 
     /// <summary>
     /// Series title extracted from the page, when the provider exposes one.
@@ -99,11 +94,6 @@ public class MediaObservation
     /// not safely resolve the observation.
     /// </summary>
     public string? ProviderChoicesPayload { get; set; }
-
-    /// <summary>
-    /// JSON audit trail of user resolution decisions and overrides.
-    /// </summary>
-    public string? ResolutionHistoryPayload { get; set; }
 
     /// <summary>
     /// Matching/resolution lifecycle: pending, matched, ambiguous, no_match, rejected.

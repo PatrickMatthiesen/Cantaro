@@ -23,12 +23,15 @@ public class MediaCatalogObservationsController(
     UserManager<User> userManager,
     MediaObservationMatchingService matchingService,
     MediaEpisodeIdentityService episodeIdentityService,
-    ILogger<MediaCatalogObservationsController> logger) : ControllerBase
+    ILogger<MediaCatalogObservationsController> logger,
+    MediaObservationLifecycleService? lifecycleService = null) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
+    private readonly MediaObservationLifecycleService _lifecycleService = lifecycleService
+        ?? new MediaObservationLifecycleService(dbContext);
     private readonly ILogger<MediaCatalogObservationsController> _logger = logger;
 
     [HttpPost]
@@ -78,7 +81,6 @@ public class MediaCatalogObservationsController(
             ObservedUrl = validation.SeriesUrl,
             ObservedTitle = BuildObservedTitle(request),
             ObservedAt = request.ObservedAt ?? now,
-            ExtensionVersion = TrimToNull(request.ExtensionVersion),
             SeriesTitle = request.SeriesTitle.Trim(),
             SeasonTitle = TrimToNull(request.SeasonTitle),
             ProviderSeriesId = validation.ProviderSeriesId,
@@ -135,14 +137,16 @@ public class MediaCatalogObservationsController(
             validation.ProviderSeriesId,
             status);
 
-        return Ok(CreateResponse(
+        var response = CreateResponse(
             observation,
             status,
             validation.ObservedEpisodeCount,
             acceptedCount,
             observation.MatchStatus == MediaObservationStatuses.Matched
                 ? validation.ObservedEpisodeCount - acceptedCount
-                : validation.RejectedEpisodeCount));
+                : validation.RejectedEpisodeCount);
+        await DeleteCompletedCatalogObservationIfSafeAsync(observation, acceptedCount, cancellationToken);
+        return Ok(response);
     }
 
     private async Task<SubmitMediaCatalogObservationResponse> ProcessDuplicateAsync(
@@ -164,7 +168,7 @@ public class MediaCatalogObservationsController(
             validation.Provider,
             validation.ProviderSeriesId);
 
-        return CreateResponse(
+        var response = CreateResponse(
             observation,
             MediaCatalogObservationStatuses.Deduplicated,
             validation.ObservedEpisodeCount,
@@ -172,6 +176,8 @@ public class MediaCatalogObservationsController(
             observation.MatchStatus == MediaObservationStatuses.Matched
                 ? validation.ObservedEpisodeCount - recordedCount
                 : validation.RejectedEpisodeCount);
+        await DeleteCompletedCatalogObservationIfSafeAsync(observation, recordedCount, cancellationToken);
+        return response;
     }
 
     private async Task<MediaObservation> RefreshMatchAsync(
@@ -195,6 +201,17 @@ public class MediaCatalogObservationsController(
         return await _episodeIdentityService.RecordCatalogObservationAsync(observation, cancellationToken);
     }
 
+    private Task DeleteCompletedCatalogObservationIfSafeAsync(
+        MediaObservation observation,
+        int recordedCount,
+        CancellationToken cancellationToken)
+        => _lifecycleService.DeleteAfterDurableOutcomeAsync(
+            observation,
+            observation.MatchStatus == MediaObservationStatuses.Matched
+                && recordedCount > 0
+                && recordedCount == observation.Episodes.Count,
+            cancellationToken);
+
     private void ApplyLatestEvidence(
         MediaObservation observation,
         SubmitMediaCatalogObservationRequest request,
@@ -204,7 +221,6 @@ public class MediaCatalogObservationsController(
         observation.ObservedUrl = normalizedSeriesUrl;
         observation.ObservedTitle = BuildObservedTitle(request);
         observation.ObservedAt = request.ObservedAt ?? now;
-        observation.ExtensionVersion = TrimToNull(request.ExtensionVersion);
         observation.SeriesTitle = request.SeriesTitle.Trim();
         observation.SeasonTitle = TrimToNull(request.SeasonTitle);
         observation.ProviderSeriesId = observation.ProviderSeriesId ?? request.ProviderSeriesId.Trim();

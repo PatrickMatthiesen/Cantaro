@@ -42,7 +42,7 @@ The extension stores settings, the versioned consent choices, the refresh creden
 
 ### On the configured Cantaro server
 
-The extension sends account requests and delivered Crunchyroll media observations over HTTPS to the Cantaro server configured by the user. Observation URLs have query strings and fragments removed before delivery and again at server ingestion. The server retains structured title, episode, provider, language, progress and resolution information needed for matching and library features. It does not retain full serialized observation requests or playback position, duration and percentage in observation records. Duplicate title values are not stored in a second request body.
+The extension sends account requests and delivered Crunchyroll media observations over HTTPS to the Cantaro server configured by the user. Observation URLs have query strings and fragments removed before delivery and again at server ingestion. The server turns each report into the structured facts needed for matching and library features. It does not retain full serialized observation requests or playback position, duration and percentage in observation records. Duplicate title values are not stored in a second request body. Once a report has been processed successfully, its temporary matching evidence is removed. If Cantaro cannot identify the episode automatically, the evidence is kept as a private matching task until it is resolved or dismissed.
 
 When a user connects an external music or media provider, the configured server may exchange the identifiers, library state, playlists, or progress needed to perform the action requested by the user. Those services process data under their own privacy terms. The extension does not send supported-page observations to advertising networks or data brokers.
 
@@ -87,9 +87,9 @@ Cantaro's use of information received from Google APIs adheres to the [Chrome We
 ## Retention and user controls
 
 - Signing out removes the extension authentication session from local storage and stops media collection. A later sign-in does not re-enable media collection without an accepted consent choice.
-- The configured server retains account and library data while the account is active. Media observations, their episode evidence, matching candidates and resolution history expire after 30 days without a server-side update; cleanup runs at startup and hourly while the server is running. Observation expiry does not erase library watch progress.
-- Cantaro's web settings let users export their retained user-scoped data, disconnect providers, and permanently delete their account and user-scoped live records, including observations and dependent episode evidence.
-- Shared canonical titles, episodes, provider mappings, playable episode identities and language availability remain until explicitly maintained or removed, including after observation expiry or account deletion. These records contain catalog information without a user owner; they are not retained as the deleted user's viewing history.
+- The configured server retains account and library data while the account is active. Temporary media evidence is removed after successful processing. Evidence for an unresolved match is kept only in that user's private matching task until the task is resolved or dismissed. Processing temporary evidence does not erase library watch progress.
+- Cantaro's web settings let users export their retained user-scoped data, disconnect providers, and permanently delete their account and user-scoped live records, including unresolved matching tasks and dependent episode evidence.
+- Shared canonical titles, episodes, provider mappings, playable episode identities and language availability remain until explicitly maintained or removed, including after the source report is processed or an account is deleted. These are specific catalog facts without a user owner; they do not retain the contributing user's page visits, watch time, or browsing history.
 - Server backups and operational or security logs follow the configured server operator's retention rules. Cantaro does not impose one retention period on every self-hosted deployment.
 
 ## Security

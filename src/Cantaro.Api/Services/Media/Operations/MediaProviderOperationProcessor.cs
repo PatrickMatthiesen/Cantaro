@@ -337,12 +337,10 @@ public class MediaProviderOperationProcessor(
             {
                 _logger.LogInformation(
                     "Auto-progress skipped for operation {OperationId}: " +
-                    "provider has newer remote state ({RemoteAt} > {KnownAt}). " +
-                    "Observation: {ObservationId}.",
+                    "provider has newer remote state ({RemoteAt} > {KnownAt}).",
                     operation.Id,
                     currentRemoteUpdateAt.Value,
-                    payload.LastKnownRemoteUpdateAt.Value,
-                    payload.TriggeredByObservationId);
+                    payload.LastKnownRemoteUpdateAt.Value);
 
                 // Return a synthetic "already up-to-date" result so the operation
                 // is treated as successful and removed from the queue.
@@ -429,17 +427,12 @@ public class MediaProviderOperationProcessor(
 
                 _logger.LogInformation(
                     "Auto-progress applied for user {UserId}, entry {EntryId}: " +
-                    "ep={Ep}/ch={Ch}/vol={Vol}. " +
-                    "Provenance: observation={ObsId}, site={Site}, hint=\"{Hint}\", score={Score}.",
+                    "ep={Ep}/ch={Ch}/vol={Vol}.",
                     entry.UserId,
                     entry.Id,
                     payload.ProgressEpisodes,
                     payload.ProgressChapters,
-                    payload.ProgressVolumes,
-                    payload.TriggeredByObservationId,
-                    payload.ObservedSiteIdentifier,
-                    payload.ObservedProgressHint,
-                    payload.ObservationMatchScore);
+                    payload.ProgressVolumes);
                 break;
             }
             case MediaProviderOperationTypes.SyncLibraryState:

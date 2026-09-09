@@ -32,7 +32,7 @@ Each supported page has its own content controller and snapshot. Nothing copies 
 3. Catalog evidence uses `media.catalog.submit`; watch progress uses `media.watch.submit`; manual watch matching uses `media.watch.resolve`.
 4. The background worker owns refresh-token exchange and forwards media messages. Popup and content clients request an access token from it, so separate extension contexts cannot rotate the same refresh token concurrently. It does not own a current tab, current media item, or resolution overlay.
 5. The background worker forwards only authenticated, consented media messages. A signed-out or disabled feature never creates a delivery. Failed media deliveries are discarded rather than retained for offline replay; signing in again does not retroactively collect pages that were visited while signed out.
-6. The configured Cantaro API owns observations, matching, episode identities, destination trust, and deduplication.
+6. The configured Cantaro API owns temporary observations and unresolved matching tasks, matching, episode identities, destination trust, and deduplication. Successfully processed observation evidence is discarded; only the resulting user progress and specific shared catalog facts remain.
 
 Consent is a local extension concern. The first-use flow explains the data read,
 each media purpose, the configured server destination, and the Privacy Policy
@@ -44,7 +44,7 @@ delivery state and takes effect for newly observed pages immediately.
 Catalog collection and watch progress intentionally have separate backend endpoints. A catalog batch that is still waiting for a media-title match is a successful `pending_match` delivery; it must not open the watch-resolution UI or advance progress.
 
 If an accepted watch observation needs manual matching, the API remains the
-durable owner of that unresolved observation. The extension does not replay
+durable owner of that user's unresolved matching task. The extension does not replay
 page observations from local storage or store a global "latest resolution",
 because that would let one provider tab overwrite or display another tab's
 state. Pending-review recovery belongs in a backend-backed review surface

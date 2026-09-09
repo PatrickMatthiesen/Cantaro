@@ -28,38 +28,44 @@ export function CollectionConsent(props: CollectionConsentProps) {
     <section className="space-y-4 py-5" aria-labelledby="collection-consent-title">
       <div>
         <h2 id="collection-consent-title" className="text-lg font-bold text-content">
-          {props.needsReview ? 'Choose what Cantaro can collect' : 'Website collection'}
+          {props.needsReview ? 'Keep track of what you watch' : 'Website collection'}
         </h2>
         <p className="mt-2 text-sm leading-6 text-content-muted">
-          Cantaro can read supported Crunchyroll pages to update your library. Collection is optional
-          and stays off until you sign in and allow it.
+          Cantaro can automatically mark episodes as watched and keep your library up to date. To do
+          this, the extension reads episode information and playback progress from Crunchyroll while
+          you browse and watch. Choose which features you would like to use below. Nothing is collected
+          until you sign in and give permission.
         </p>
       </div>
       <p className="text-sm leading-6 text-content-muted">
-        Send selected data to your Cantaro server: <strong className="break-all font-semibold text-content">{props.baseUrl}</strong>.
-        {' '}Watch progress may sync to providers you connect there. Catalog information can become part
-        of the shared catalog and remain after account deletion. Observation details expire after 30 days
-        without a server update.
+        This information goes to your Cantaro server: <strong className="break-all font-semibold text-content">{props.baseUrl}</strong>.
+        {' '}Watch progress can sync with services you connect there. You can turn either feature off at any time.
+      </p>
+      <p className="text-sm leading-6 text-content-muted">
+        <strong className="font-semibold text-content">What happens to this information?</strong>{' '}
+        Your watch progress is saved in your library. Once Cantaro has processed a page report, it removes
+        the temporary information used to match it. If a match needs your help, that matching task stays
+        until you resolve or dismiss it. Episode and watch-link facts may be added to Cantaro’s shared
+        catalog and can remain after account deletion; they are not kept as your browsing history.
       </p>
       <div className="divide-y divide-border-subtle border-y border-border-subtle">
         <ConsentChoice
-          label="Track what I watch"
-          detail="Read the current episode’s URL, titles, identifiers, languages and playback progress to mark completed episodes in my library."
+          label="Automatically track what I watch"
+          detail="Use episode information and playback progress to mark completed episodes in my Cantaro library and sync with services I have connected."
           checked={draft.watchTracking}
           disabled={props.busy}
           onChange={watchTracking => setDraft(current => ({ ...current, watchTracking }))}
         />
         <ConsentChoice
-          label="Contribute catalog information"
-          detail="Read rendered episode lists, titles, identifiers, links and languages to improve episode matching and playable links, including when I am not watching."
+          label="Help Cantaro find episodes and watch links"
+          detail="Read episode lists and links as you browse Crunchyroll, so Cantaro can identify episodes and help you find where to watch them."
           checked={draft.catalogCollection}
           disabled={props.busy}
           onChange={catalogCollection => setDraft(current => ({ ...current, catalogCollection }))}
         />
       </div>
       <p className="text-xs leading-5 text-content-muted">
-        Music library features do not read music websites. You can change these choices here at any time.
-        Turning collection off stops new collection; it does not delete data already sent.
+        Music library features do not read music websites. Turning collection off stops new collection.
         {' '}<a href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md" target="_blank" rel="noreferrer"
           className="font-semibold text-personal-accent-strong underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Read the privacy policy</a>.
       </p>

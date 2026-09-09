@@ -44,6 +44,13 @@ describe('collection consent disclosure', () => {
   it('starts unchecked and allows declining without signing in', async () => {
     const props = await render();
     expect(Array.from(container.querySelectorAll('input')).every(input => !input.checked)).toBe(true);
+    expect(container.textContent).toContain('Keep track of what you watch');
+    expect(container.textContent).toContain('automatically mark episodes as watched and keep your library up to date');
+    expect(container.textContent).toContain('Automatically track what I watch');
+    expect(container.textContent).toContain('Help Cantaro find episodes and watch links');
+    expect(container.textContent).toContain('What happens to this information?');
+    expect(container.textContent).toContain('temporary information used to match it');
+    expect(container.textContent).not.toContain('Cantaro can read supported Crunchyroll pages to update your library');
     expect(container.textContent).toContain('https://cantaro.example');
     expect(container.querySelector('a')?.getAttribute('href')).toContain('/PRIVACY.md');
     await clickButton('Continue without collection');

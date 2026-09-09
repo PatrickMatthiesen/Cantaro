@@ -118,6 +118,7 @@ builder.Services.AddSingleton<MediaProviderSearchCache>();
 builder.Services.AddScoped<MediaProviderOperationProcessor>();
 builder.Services.AddScoped<MediaObservationMatchingService>();
 builder.Services.AddScoped<MediaObservationRetentionService>();
+builder.Services.AddScoped<MediaObservationLifecycleService>();
 builder.Services.AddScoped<MediaProviderSeasonMappingService>();
 builder.Services.AddScoped<MediaObservationProgressService>();
 builder.Services.AddScoped<MediaEpisodeIdentityService>();

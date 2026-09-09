@@ -19,6 +19,47 @@ namespace Cantaro.Api.Tests;
 public class MediaObservationsApiTests
 {
     [Fact]
+    public async Task Submit_MatchedWithoutLibraryProgress_RetainsActionableObservation()
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Tracked Later",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            SupportsEpisodeProgress = true,
+            EpisodeCount = 12,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        fixture.Db.MediaTitles.Add(title);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/LATER/episode-3",
+            SiteMediaId = "LATER",
+            ObservedTitle = "Tracked Later - Episode 3",
+            SeriesTitle = title.CanonicalTitle,
+            EpisodeNumber = 3,
+            ProgressHint = "3"
+        }, CancellationToken.None);
+
+        var response = Assert.IsType<SubmitMediaObservationResponse>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Single(fixture.Db.MediaObservations);
+
+        var summary = Assert.IsType<MediaObservationSummaryDto>(
+            Assert.IsType<OkObjectResult>(
+                (await fixture.Controller.GetSummary(CancellationToken.None)).Result).Value);
+        Assert.Equal(1, summary.TotalUnresolved);
+    }
+
+    [Fact]
     public async Task Submit_RejectsUnboundedSeriesPageBatches()
     {
         await using var fixture = await MediaObservationFixture.CreateAsync();
@@ -161,10 +202,7 @@ public class MediaObservationsApiTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
         Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
-        var observation = await fixture.Db.MediaObservations.SingleAsync();
-        Assert.Equal(seasonTwo.Id, observation.MediaTitleId);
-        Assert.Equal(-12, observation.EpisodeOffset);
-        Assert.Equal(10, observation.ResolvedProgress);
+        Assert.Empty(fixture.Db.MediaObservations);
         var seasonTwoEntry = await fixture.Db.MediaLibraryEntries
             .SingleAsync(entry => entry.MediaTitleId == seasonTwo.Id);
         Assert.Equal(10, seasonTwoEntry.ProgressEpisodes);
@@ -228,8 +266,7 @@ public class MediaObservationsApiTests
             Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
         Assert.Equal(seasonTwo.Id.ToString(), response.MatchedMediaTitleId);
-        var observation = await fixture.Db.MediaObservations.SingleAsync();
-        Assert.Equal(-12, observation.EpisodeOffset);
+        Assert.Empty(fixture.Db.MediaObservations);
         Assert.Equal(12, await fixture.Db.MediaEpisodeProviderIdentities.CountAsync());
         Assert.Contains(
             fixture.Db.MediaEpisodeProviderIdentities
@@ -678,9 +715,7 @@ public class MediaObservationsApiTests
         Assert.NotNull(persistedEntry.LastLocalEditAt);
         Assert.Equal(1, await fixture.Db.MediaProviderOperations.CountAsync());
 
-        var persistedObservation = await fixture.Db.MediaObservations.SingleAsync(item => item.Id == existingObservation.Id);
-        Assert.Equal("5", persistedObservation.ProgressHint);
-        Assert.Equal(5, persistedObservation.ResolvedProgress);
+        Assert.Null(await fixture.Db.MediaObservations.FindAsync(existingObservation.Id));
 
         var recordedEpisodes = await fixture.Db.MediaEpisodes
             .Include(item => item.ProviderContents)
@@ -847,16 +882,7 @@ public class MediaObservationsApiTests
         Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
         Assert.True(response.ProgressUpdated);
 
-        var persistedObservation = await fixture.Db.MediaObservations
-            .Include(item => item.Candidates)
-            .SingleAsync(item => item.Id == existingObservation.Id);
-        Assert.Equal(seasonTwo.Id, persistedObservation.MediaTitleId);
-        Assert.Equal(-12, persistedObservation.EpisodeOffset);
-        Assert.Equal(12, persistedObservation.ResolvedProgress);
-        var acceptedCandidate = Assert.Single(persistedObservation.Candidates);
-        Assert.Equal(MediaObservationCandidateSources.ProviderEpisodeIdentityExact, acceptedCandidate.CandidateSource);
-        Assert.Equal(seasonTwo.Id, acceptedCandidate.MediaTitleId);
-        Assert.True(acceptedCandidate.IsAccepted);
+        Assert.Null(await fixture.Db.MediaObservations.FindAsync(existingObservation.Id));
 
         var establishedMapping = await fixture.Db.MediaProviderSeasonMappings.SingleAsync();
         Assert.Equal(seasonTwo.Id, establishedMapping.MediaTitleId);
@@ -910,6 +936,16 @@ public class MediaObservationsApiTests
             CreatedAt = now
         };
         fixture.Db.MediaTitles.Add(title);
+        fixture.Db.MediaLibraryEntries.Add(new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.UserId,
+            MediaTitleId = title.Id,
+            Status = MediaLibraryStatuses.Current,
+            ProgressEpisodes = 0,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
         fixture.Db.MediaObservations.Add(observation);
         fixture.Db.MediaObservationCandidates.Add(candidate);
         await fixture.Db.SaveChangesAsync();
@@ -920,11 +956,11 @@ public class MediaObservationsApiTests
             EpisodeOffset = -12
         }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result.Result);
-        var persisted = await fixture.Db.MediaObservations.SingleAsync(item => item.Id == observation.Id);
-        Assert.Equal(-12, persisted.EpisodeOffset);
-        Assert.Equal(4, persisted.ResolvedProgress);
-        Assert.NotNull(persisted.ResolutionHistoryPayload);
+        var resolvedResponse = Assert.IsType<MediaObservationDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(-12, resolvedResponse.EpisodeOffset);
+        Assert.Equal(4, resolvedResponse.ResolvedProgress);
+        Assert.Null(await fixture.Db.MediaObservations.FindAsync(observation.Id));
         Assert.Single(await fixture.Db.MediaObservationEpisodeOffsets.ToListAsync());
     }
 

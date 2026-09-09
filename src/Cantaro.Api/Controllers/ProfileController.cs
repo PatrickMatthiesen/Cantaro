@@ -224,17 +224,12 @@ public sealed class ProfileController(
                     binding.LastRemoteUpdateAt
                 })
             }).ToListAsync(cancellationToken);
-        var observationCutoff = MediaObservationRetentionService.GetCutoff(DateTimeOffset.UtcNow);
         var observations = await dbContext.MediaObservations.AsNoTracking()
-            .Where(observation =>
-                (observation.UserId == user.Id && observation.UpdatedAt > observationCutoff)
-                || (observation.UserId == user.Id
-                    && observation.UpdatedAt == default
-                    && observation.CreatedAt > observationCutoff))
+            .Where(observation => observation.UserId == user.Id)
             .Select(observation => new
             {
                 observation.Id, observation.SiteIdentifier, observation.SiteMediaId, observation.ObservedTitle,
-                observation.ObservedUrl, observation.ProgressHint, observation.ObservedAt, observation.ExtensionVersion,
+                observation.ObservedUrl, observation.ProgressHint, observation.ObservedAt,
                 observation.SeriesTitle, observation.SeasonTitle, observation.EpisodeTitle, observation.EpisodeNumber,
                 observation.ProviderSeriesId, observation.ProviderSeasonId, observation.SeasonNumber,
                 observation.ProviderSequenceNumber, observation.ReleaseTrack,

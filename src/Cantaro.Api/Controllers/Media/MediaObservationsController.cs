@@ -24,12 +24,15 @@ public class MediaObservationsController(
     MediaEpisodeIdentityService episodeIdentityService,
     MediaProviderSeasonMappingService seasonMappingService,
     IMediaProviderRegistry mediaProviderRegistry,
-    ILogger<MediaObservationsController> logger) : ControllerBase
+    ILogger<MediaObservationsController> logger,
+    MediaObservationLifecycleService? lifecycleService = null) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaObservationProgressService _progressService = progressService;
+    private readonly MediaObservationLifecycleService _lifecycleService = lifecycleService
+        ?? new MediaObservationLifecycleService(dbContext);
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
     private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
@@ -90,7 +93,6 @@ public class MediaObservationsController(
                 existing.ObservedTitle = request.ObservedTitle.Trim();
                 existing.ProgressHint = progressHint;
                 existing.ObservedAt = request.ObservedAt ?? now;
-                existing.ExtensionVersion = request.ExtensionVersion?.Trim();
                 ApplyStructuredPayload(existing, request, isCatalogObservation: false);
                 existing.UpdatedAt = now;
 
@@ -123,15 +125,18 @@ public class MediaObservationsController(
                         cancellationToken)).ProgressUpdated;
                 }
 
+                var response = MapToSubmitResponse(
+                    existing,
+                    wasDeduplicated: true,
+                    deduplicatedProviderChoicesUnavailableReason,
+                    progressUpdated);
+                await DeleteCompletedObservationIfSafeAsync(existing, progressUpdated, cancellationToken);
+
                 _logger.LogInformation(
                     "Deduplicated MediaObservation for user {UserId}: {SiteIdentifier}/{SiteMediaId} → {ObservationId}.",
                     userId, normalizedSite, normalizedSiteMediaId, existing.Id);
 
-                return Ok(MapToSubmitResponse(
-                    existing,
-                    wasDeduplicated: true,
-                    deduplicatedProviderChoicesUnavailableReason,
-                    progressUpdated));
+                return Ok(response);
             }
         }
 
@@ -145,7 +150,6 @@ public class MediaObservationsController(
             ObservedTitle = request.ObservedTitle.Trim(),
             ProgressHint = progressHint,
             ObservedAt = request.ObservedAt ?? now,
-            ExtensionVersion = request.ExtensionVersion?.Trim(),
             IsCatalogObservation = false,
             MatchStatus = MediaObservationStatuses.Pending,
             CreatedAt = now,
@@ -176,11 +180,13 @@ public class MediaObservationsController(
                 cancellationToken)).ProgressUpdated;
         }
 
-        return Ok(MapToSubmitResponse(
+        var submitResponse = MapToSubmitResponse(
             observation,
             wasDeduplicated: false,
             providerChoicesUnavailableReason,
-            newProgressUpdated));
+            newProgressUpdated);
+        await DeleteCompletedObservationIfSafeAsync(observation, newProgressUpdated, cancellationToken);
+        return Ok(submitResponse);
     }
 
     private Task<bool> HasConflictedProviderIdentityAsync(
@@ -205,6 +211,65 @@ public class MediaObservationsController(
             cancellationToken);
     }
 
+    private async Task<bool> DeleteCompletedObservationIfSafeAsync(
+        MediaObservation observation,
+        bool progressUpdated,
+        CancellationToken cancellationToken)
+    {
+        if (observation.MatchStatus != MediaObservationStatuses.Matched)
+        {
+            return false;
+        }
+
+        // A match is not by itself proof that the user's personal outcome was
+        // persisted. Keep the task when no library progress was requested or
+        // when the matched title is not currently in the user's library.
+        var hasProgressRequest = observation.ResolvedProgress is > 0
+            || MediaObservationProgressService.TryParseProgressHint(observation.ProgressHint, out _);
+        var durableOutcome = progressUpdated
+            || await HasAppliedProgressAsync(observation, cancellationToken)
+            || (!hasProgressRequest && observation.Episodes.Count > 0);
+        return await _lifecycleService.DeleteAfterDurableOutcomeAsync(
+            observation,
+            durableOutcome,
+            cancellationToken);
+    }
+
+    private async Task<bool> HasAppliedProgressAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
+        if (observation.MediaTitleId is not { } mediaTitleId
+            || !MediaObservationProgressService.TryParseProgressHint(
+                observation.ResolvedProgress is > 0
+                    ? observation.ResolvedProgress.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : observation.ProgressHint,
+                out var expectedProgress))
+        {
+            return false;
+        }
+
+        var title = await _dbContext.MediaTitles
+            .AsNoTracking()
+            .Where(item => item.Id == mediaTitleId)
+            .Select(item => item.PrimaryProgressDimension)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (title is null)
+        {
+            return false;
+        }
+
+        return await _dbContext.MediaLibraryEntries.AnyAsync(entry =>
+                entry.UserId == observation.UserId
+                && entry.MediaTitleId == mediaTitleId
+                && (title == MediaProgressDimensions.Chapter
+                    ? entry.ProgressChapters >= expectedProgress
+                    : title == MediaProgressDimensions.Volume
+                        ? entry.ProgressVolumes >= expectedProgress
+                        : entry.ProgressEpisodes >= expectedProgress),
+                cancellationToken);
+    }
+
     // -----------------------------------------------------------------------
     // Review queue
     // -----------------------------------------------------------------------
@@ -220,7 +285,6 @@ public class MediaObservationsController(
 
         var grouped = await _dbContext.MediaObservations
             .Where(o => o.UserId == userId &&
-                        o.MatchStatus != MediaObservationStatuses.Matched &&
                         o.MatchStatus != MediaObservationStatuses.Rejected)
             .GroupBy(o => o.MatchStatus)
             .Select(g => new { g.Key, Count = g.Count() })
@@ -253,9 +317,7 @@ public class MediaObservationsController(
 
         if (!includeResolved)
         {
-            query = query.Where(o =>
-                o.MatchStatus != MediaObservationStatuses.Matched &&
-                o.MatchStatus != MediaObservationStatuses.Rejected);
+            query = query.Where(o => o.MatchStatus != MediaObservationStatuses.Rejected);
         }
 
         var observations = await query
@@ -330,16 +392,6 @@ public class MediaObservationsController(
             resolution.AcceptedCandidate.IsAccepted = true;
         }
 
-        var previous = new ObservationResolutionSnapshot
-        {
-            MediaTitleId = observation.MediaTitleId?.ToString(),
-            AcceptedCandidateId = observation.AcceptedCandidateId?.ToString(),
-            ResolvedLibraryEntryId = observation.ResolvedLibraryEntryId?.ToString(),
-            EpisodeOffset = observation.EpisodeOffset,
-            ResolvedProgress = observation.ResolvedProgress,
-            Notes = observation.ResolutionNotes
-        };
-
         var observedProgress = TryParseObservationProgress(observation, out var parsedProgress)
             ? parsedProgress
             : (int?)null;
@@ -356,26 +408,6 @@ public class MediaObservationsController(
         observation.EpisodeOffset = request.EpisodeOffset;
         observation.ResolvedProgress = resolvedProgress;
         observation.ResolvedLibraryEntryId = resolution.LibraryEntryId;
-        observation.ResolutionHistoryPayload = AppendResolutionHistory(
-            observation.ResolutionHistoryPayload,
-            new ObservationResolutionLogEntry
-            {
-                ResolvedAt = DateTimeOffset.UtcNow,
-                Previous = previous,
-                Selected = new ObservationResolutionSnapshot
-                {
-                    MediaTitleId = resolution.MediaTitleId?.ToString(),
-                    AcceptedCandidateId = resolution.AcceptedCandidate?.Id.ToString(),
-                    ProviderId = resolution.ProviderId,
-                    ProviderMediaId = resolution.ProviderMediaId,
-                    Title = resolution.Title,
-                    ResolvedLibraryEntryId = resolution.LibraryEntryId?.ToString(),
-                    EpisodeOffset = request.EpisodeOffset,
-                    ObservedProgress = observedProgress,
-                    ResolvedProgress = resolvedProgress,
-                    Notes = resolution.Notes
-                }
-            });
         observation.UpdatedAt = DateTimeOffset.UtcNow;
 
         await UpsertEpisodeOffsetAsync(userId, observation.SiteIdentifier, resolvedMediaTitleId, request.EpisodeOffset, cancellationToken);
@@ -396,10 +428,26 @@ public class MediaObservationsController(
             "User {UserId} resolved MediaObservation {ObservationId} to MediaTitle {MediaTitleId}.",
             userId, observationId, resolution.MediaTitleId);
 
-        // Trigger progress for the confirmed match.
-        await _progressService.TryEnqueueAutoProgressAsync(observation, cancellationToken);
+        // Trigger progress for the confirmed match. A task carrying a
+        // progress request remains until that personal update is verifiably
+        // durable; choosing a canonical title alone is not enough.
+        var progressResult = await _progressService.TryEnqueueAutoProgressWithResultAsync(
+            observation,
+            cancellationToken);
 
-        return Ok(MapToDto(observation));
+        var response = MapToDto(observation);
+        var progressHandled = observedProgress is null
+            || progressResult.ProgressUpdated
+            || await HasAppliedProgressAsync(observation, cancellationToken);
+        if (observation.MatchStatus == MediaObservationStatuses.Matched && progressHandled)
+        {
+            await _lifecycleService.DeleteAfterDurableOutcomeAsync(
+                observation,
+                outcomeVerified: true,
+                cancellationToken);
+        }
+
+        return Ok(response);
     }
 
     /// <summary>
@@ -431,11 +479,17 @@ public class MediaObservationsController(
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        var response = MapToDto(observation);
+        await _lifecycleService.DeleteAfterDurableOutcomeAsync(
+            observation,
+            outcomeVerified: true,
+            cancellationToken);
+
         _logger.LogInformation(
             "User {UserId} rejected MediaObservation {ObservationId}.",
             userId, observationId);
 
-        return Ok(MapToDto(observation));
+        return Ok(response);
     }
 
     /// <summary>
@@ -465,15 +519,20 @@ public class MediaObservationsController(
         observation.ResolvedProgress = null;
 
         observation = await _matchingService.ProcessObservationAsync(observation, cancellationToken);
+        var progressUpdated = false;
         if (observation.MatchStatus == MediaObservationStatuses.Matched)
         {
             // Re-run catalog recording after a rematch so untrusted provider
             // episode identities follow the newly selected canonical season.
             await _episodeIdentityService.RecordObservationAsync(observation, cancellationToken);
-            await _progressService.TryEnqueueAutoProgressAsync(observation, cancellationToken);
+            progressUpdated = (await _progressService.TryEnqueueAutoProgressWithResultAsync(
+                observation,
+                cancellationToken)).ProgressUpdated;
         }
         await EnsureProviderChoicesAsync(observation, cancellationToken);
-        return Ok(MapToDto(observation));
+        var response = MapToDto(observation);
+        await DeleteCompletedObservationIfSafeAsync(observation, progressUpdated, cancellationToken);
+        return Ok(response);
     }
 
     // -----------------------------------------------------------------------
@@ -550,7 +609,7 @@ public class MediaObservationsController(
             ObservedTitle = observation.ObservedTitle,
             ProgressHint = observation.ProgressHint,
             ObservedAt = observation.ObservedAt,
-            ExtensionVersion = observation.ExtensionVersion,
+            ExtensionVersion = null,
             MatchStatus = observation.MatchStatus,
             MediaTitleId = observation.MediaTitleId?.ToString(),
             ResolutionNotes = observation.ResolutionNotes,
@@ -1297,15 +1356,6 @@ public class MediaObservationsController(
         }
     }
 
-    private static string AppendResolutionHistory(string? payload, ObservationResolutionLogEntry entry)
-    {
-        var entries = string.IsNullOrWhiteSpace(payload)
-            ? []
-            : JsonSerializer.Deserialize<List<ObservationResolutionLogEntry>>(payload, PayloadJsonOptions) ?? [];
-        entries.Add(entry);
-        return JsonSerializer.Serialize(entries, PayloadJsonOptions);
-    }
-
     private static string? FirstNonBlank(params string?[] values)
     {
         return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
@@ -1340,24 +1390,4 @@ public class MediaObservationsController(
         public static AddProviderTitleResult FromError(ActionResult error) => new(Guid.Empty, Guid.Empty, string.Empty, error);
     }
 
-    private sealed class ObservationResolutionLogEntry
-    {
-        public DateTimeOffset ResolvedAt { get; set; }
-        public ObservationResolutionSnapshot? Previous { get; set; }
-        public ObservationResolutionSnapshot? Selected { get; set; }
-    }
-
-    private sealed class ObservationResolutionSnapshot
-    {
-        public string? MediaTitleId { get; set; }
-        public string? AcceptedCandidateId { get; set; }
-        public string? ProviderId { get; set; }
-        public string? ProviderMediaId { get; set; }
-        public string? Title { get; set; }
-        public string? ResolvedLibraryEntryId { get; set; }
-        public int? ObservedProgress { get; set; }
-        public int? EpisodeOffset { get; set; }
-        public int? ResolvedProgress { get; set; }
-        public string? Notes { get; set; }
-    }
 }

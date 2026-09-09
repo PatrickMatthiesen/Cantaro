@@ -46,6 +46,11 @@ try {
     Invoke-SqlFile (Join-Path $repoRoot 'tests/Cantaro.Api.Tests/Fixtures/media-observation-migration-before.sql') 'seed.sql'
     Invoke-SqlFile (Join-Path $scratch 'upgrade.sql') 'upgrade.sql'
     Invoke-SqlFile (Join-Path $repoRoot 'tests/Cantaro.Api.Tests/Fixtures/media-observation-migration-after.sql') 'assert.sql'
+    dotnet ef migrations script MinimizeMediaObservationStorage RemoveCompletedObservationMetadata --project src/Cantaro.Api --no-build --output (Join-Path $scratch 'lifecycle.sql')
+    Assert-CommandSucceeded
+    Invoke-SqlFile (Join-Path $repoRoot 'tests/Cantaro.Api.Tests/Fixtures/media-observation-lifecycle-before.sql') 'lifecycle-seed.sql'
+    Invoke-SqlFile (Join-Path $scratch 'lifecycle.sql') 'lifecycle.sql'
+    Invoke-SqlFile (Join-Path $repoRoot 'tests/Cantaro.Api.Tests/Fixtures/media-observation-lifecycle-after.sql') 'lifecycle-assert.sql'
     Write-Output 'Media observation PostgreSQL migration assertions passed.'
 }
 finally {

@@ -46,10 +46,7 @@ public class MediaCatalogObservationsApiTests
         Assert.Equal(2, response.RecordedEpisodeCount);
         Assert.Equal(0, response.RejectedEpisodeCount);
 
-        var observation = await fixture.Db.MediaObservations.SingleAsync();
-        Assert.Equal(fixture.UserId, observation.UserId);
-        Assert.Null(observation.ProgressHint);
-        Assert.Null(observation.ResolvedProgress);
+        Assert.Empty(fixture.Db.MediaObservations);
         Assert.Equal(0, await fixture.Db.MediaProviderOperations.CountAsync());
 
         var identities = await fixture.Db.MediaEpisodeProviderIdentities
@@ -235,8 +232,7 @@ public class MediaCatalogObservationsApiTests
         Assert.Equal(MediaCatalogObservationStatuses.Accepted, response.Status);
         Assert.Equal(seasonTwo.Id.ToString(), response.MatchedMediaTitleId);
         Assert.Equal(12, response.RecordedEpisodeCount);
-        var observation = await fixture.Db.MediaObservations.SingleAsync();
-        Assert.Equal(-12, observation.EpisodeOffset);
+        Assert.Empty(fixture.Db.MediaObservations);
         var episode22 = await fixture.Db.MediaEpisodeProviderIdentities
             .Include(identity => identity.Content)
                 .ThenInclude(content => content!.MediaEpisode)
@@ -361,9 +357,9 @@ public class MediaCatalogObservationsApiTests
         var duplicateResult = await fixture.Controller.Submit(request, CancellationToken.None);
 
         var response = GetResponse(duplicateResult);
-        Assert.Equal(MediaCatalogObservationStatuses.Deduplicated, response.Status);
+        Assert.Equal(MediaCatalogObservationStatuses.Accepted, response.Status);
         Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
-        Assert.Single(fixture.Db.MediaObservations);
+        Assert.Empty(fixture.Db.MediaObservations);
         var identities = await fixture.Db.MediaEpisodeProviderIdentities.ToListAsync();
         Assert.Equal(2, identities.Count);
         Assert.All(identities, item => Assert.Equal(2, item.SeenCount));
