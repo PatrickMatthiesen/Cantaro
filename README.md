@@ -178,7 +178,7 @@ Copy the complete output into `CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY` without c
 Cantaro/
 ├── docs/                           # Documentation
 │   ├── infrastructure.md          # Architecture overview
-│   └── agent-extra.md             # Additional specifications
+│   └── music-song-version-model.md # Music identity model
 ├── src/
 │   ├── Cantaro.Api/               # ASP.NET Core Web API
 │   ├── Cantaro.AppHost/           # Aspire orchestration
@@ -233,6 +233,8 @@ The browser automatically includes the authentication cookie in all API requests
 ### Browser Extension Development
 
 The optional browser extension accelerates playlist sync and observes supported media pages in real time:
+
+The extension's data handling is described in the [browser extension privacy policy](./PRIVACY.md).
 
 ```bash
 cd src/Cantaro.BrowserExtension

@@ -11,6 +11,7 @@ import type {
 import { runtimeAccessTokenProvider } from '../auth/runtimeAuthClient';
 import { browserSettingsRepository, type SettingsRepository } from '../settings/settingsRepository';
 import { ApiError, apiErrorMessage } from './apiError';
+import { stripUrlQueryAndFragment } from '../../features/media/contracts/observationUrl';
 
 interface CatalogApiResponse {
   status: Exclude<CatalogSubmissionResult['status'], 'queued'>;
@@ -49,6 +50,8 @@ export interface AccessTokenProvider {
   getAccessToken(baseUrl: string, forceRefresh?: boolean): Promise<string | null>;
 }
 
+export type ApiRequestGuard = (path: string, baseUrl: string, init: RequestInit) => Promise<void>;
+
 async function responsePayload(response: Response): Promise<unknown> {
   if (response.status === 204) return null;
   return response.json().catch(() => null);
@@ -57,7 +60,7 @@ async function responsePayload(response: Response): Promise<unknown> {
 function watchRequest(observation: WatchProgressObservation): Record<string, unknown> {
   return {
     siteIdentifier: observation.provider,
-    observedUrl: observation.observedUrl,
+    observedUrl: stripUrlQueryAndFragment(observation.observedUrl),
     siteMediaId: observation.providerEpisodeId,
     observedTitle: observation.episodeTitle,
     seriesTitle: observation.seriesTitle,
@@ -70,7 +73,9 @@ function watchRequest(observation: WatchProgressObservation): Record<string, unk
     providerSequenceNumber: observation.providerSequenceNumber,
     releaseTrack: observation.releaseTrack,
     nextEpisodeProviderId: observation.nextEpisodeProviderId,
-    nextEpisodeUrl: observation.nextEpisodeUrl,
+    nextEpisodeUrl: observation.nextEpisodeUrl
+      ? stripUrlQueryAndFragment(observation.nextEpisodeUrl)
+      : undefined,
     nextEpisodeTitle: observation.nextEpisodeTitle,
     nextEpisodeNumber: observation.nextEpisodeNumber,
     nextEpisodeReleaseTrack: observation.nextEpisodeReleaseTrack,
@@ -80,6 +85,17 @@ function watchRequest(observation: WatchProgressObservation): Record<string, unk
     positionSeconds: observation.positionSeconds,
     observedAt: observation.observedAt,
     extensionVersion: observation.extensionVersion,
+  };
+}
+
+function catalogRequest(observation: SeriesCatalogObservation): SeriesCatalogObservation {
+  return {
+    ...observation,
+    seriesUrl: stripUrlQueryAndFragment(observation.seriesUrl),
+    episodes: observation.episodes.map(episode => ({
+      ...episode,
+      providerUrl: stripUrlQueryAndFragment(episode.providerUrl),
+    })),
   };
 }
 
@@ -109,6 +125,7 @@ function toWatchResult(response: WatchApiResponse): WatchSubmissionResult {
 export function createCantaroApiClient(
   settingsRepository: SettingsRepository,
   authService: AccessTokenProvider,
+  requestGuard?: ApiRequestGuard,
 ): CantaroApiClient {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const settings = await settingsRepository.read();
@@ -124,6 +141,7 @@ export function createCantaroApiClient(
       },
     });
     let response: Response;
+    await requestGuard?.(path, settings.baseUrl, init);
     try {
       response = await send(token);
     } catch {
@@ -132,6 +150,7 @@ export function createCantaroApiClient(
     if (response.status === 401) {
       token = await authService.getAccessToken(settings.baseUrl, true);
       if (token) {
+        await requestGuard?.(path, settings.baseUrl, init);
         try {
           response = await send(token);
         } catch {
@@ -157,7 +176,7 @@ export function createCantaroApiClient(
       const response = await request<CatalogApiResponse>('/api/media/catalog-observations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(observation),
+        body: JSON.stringify(catalogRequest(observation)),
       });
       return {
         status: response.status,

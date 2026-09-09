@@ -20,23 +20,35 @@ platform/
   diagnostics/               structured logging
   messaging/                 shared envelopes and active-tab protocol
   settings/                  versioned settings storage and host permissions
-  storage/                   bounded durable delivery queue
+  storage/                   restricted extension storage access
 ```
 
 ## Runtime flow
 
 Each supported page has its own content controller and snapshot. Nothing copies the "latest tab" into global storage.
 
-1. A content controller reads only its current document and keeps its extraction/tracking status in that tab.
+1. A content controller first checks the local, versioned consent gate and the authenticated session. Until the relevant media purpose is enabled and the user is signed in, it does not read, capture, queue, or transmit supported-page data. Once enabled, it reads only its current document and keeps its extraction/tracking status in that tab.
 2. When the popup opens, it asks the active tab for `tab.context.get`. That tab's content controller replies directly.
 3. Catalog evidence uses `media.catalog.submit`; watch progress uses `media.watch.submit`; manual watch matching uses `media.watch.resolve`.
 4. The background worker owns refresh-token exchange and forwards media messages. Popup and content clients request an access token from it, so separate extension contexts cannot rotate the same refresh token concurrently. It does not own a current tab, current media item, or resolution overlay.
-5. Network and signed-out deliveries are stored in a bounded queue. A successful sign-in asks the background worker to drain it.
-6. The configured Cantaro API owns observations, matching, episode identities, destination trust, and deduplication.
+5. The background worker forwards only authenticated, consented media messages. A signed-out or disabled feature never creates a delivery. Failed media deliveries are discarded rather than retained for offline replay; signing in again does not retroactively collect pages that were visited while signed out.
+6. The configured Cantaro API owns temporary observations and unresolved matching tasks, matching, episode identities, destination trust, and deduplication. Successfully processed observation evidence is discarded; only the resulting user progress and specific shared catalog facts remain.
+
+Consent is a local extension concern. The first-use flow explains the data read,
+each media purpose, the configured server destination, and the Privacy Policy
+before enabling collection. Watch progress and catalog collection have separate
+choices. A material collection change increments the consent version and pauses
+the affected purpose until it is accepted again. Revocation clears pending
+delivery state and takes effect for newly observed pages immediately.
 
 Catalog collection and watch progress intentionally have separate backend endpoints. A catalog batch that is still waiting for a media-title match is a successful `pending_match` delivery; it must not open the watch-resolution UI or advance progress.
 
-If a queued watch observation later needs manual matching, the API remains the durable owner of that unresolved observation. Queue replay does not store a global "latest resolution" in the extension, because that would let one provider tab overwrite or display another tab's state. Pending-review recovery belongs in a backend-backed review surface rather than tab-agnostic extension storage.
+If an accepted watch observation needs manual matching, the API remains the
+durable owner of that user's unresolved matching task. The extension does not replay
+page observations from local storage or store a global "latest resolution",
+because that would let one provider tab overwrite or display another tab's
+state. Pending-review recovery belongs in a backend-backed review surface
+rather than tab-agnostic extension storage.
 
 ## State ownership
 
@@ -45,11 +57,16 @@ If a queued watch observation later needs manual matching, the API remains the d
 | Rendered DOM, extracted provider IDs, tracker status | Content controller in that tab |
 | Current popup page and transient notices | Popup React tree |
 | API/web origins and feature preferences | `cantaro.settings.v1` |
-| OAuth tokens and signed-in email | `cantaro.session.v1` |
-| Offline media delivery | `cantaro.deliveryQueue.v1` |
+| Consent version and media collection choices | Versioned local settings |
+| Refresh token and signed-in email | `cantaro.refresh-session.v2` in trusted local storage |
+| Short-lived access token | `cantaro.access-session.v2` in browser session storage |
 | Observations, matching, destinations, seen counts | Cantaro API/database |
 
-The background service worker can stop at any time under Manifest V3. Durable state therefore lives in extension storage or the backend, while transient controller state remains reconstructible from its page.
+The background service worker can stop at any time under Manifest V3. Durable
+state therefore lives in extension storage or the backend, while transient
+controller state remains reconstructible from its page. Media observations are
+not an offline queue: if collection is disabled, the user is signed out, or a
+delivery fails, the page data is not retained for later replay.
 
 ## Adding a provider feature
 

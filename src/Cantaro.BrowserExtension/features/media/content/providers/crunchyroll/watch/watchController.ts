@@ -9,7 +9,15 @@ import type { MessageResult } from '../../../../../../platform/messaging/message
 import { createCorrelationId } from '../../../../../../platform/messaging/messageResult';
 import {
   startMediaControllerRuntime,
+  logContentVerbose,
 } from '../../../runtime/contentControllerRuntime';
+import {
+  createContentCollectionGate,
+  createContentCollectionStateHandler,
+  updateContentSnapshot,
+  type ContentCollectionConsentDependencies,
+  type ContentCollectionGate,
+} from '../../../runtime/contentCollectionGate';
 import {
   extractCrunchyrollWatchMetadata,
   extractEpisodeId,
@@ -26,10 +34,14 @@ import {
 import { decideThresholdSubmission } from './thresholdSubmission';
 import type { WatchResolutionOverlayHandle } from './watchResolutionOverlay';
 import { extensionLogMessage } from '../../../../../../platform/diagnostics/extensionIdentity';
+import { sanitizeDiagnosticDetails } from '../../../../../../platform/diagnostics/logger';
+import { stripUrlQueryAndFragment } from '../../../../contracts/observationUrl';
 
 const RESTART_DELAY_MS = 500;
 
-export interface WatchControllerDependencies {
+export interface WatchControllerDependencies extends ContentCollectionConsentDependencies {
+  readCatalogCollectionConsent(): Promise<boolean>;
+  watchCatalogCollectionConsent(listener: (allowed: boolean) => void): () => void;
   isTrackingPaused(): Promise<boolean>;
   watchTrackingPause(listener: () => void): () => void;
   submitWatch(
@@ -75,22 +87,25 @@ export function createCrunchyrollWatchController(
   let verboseLogging = false;
   let lastPlayerSelectionLogKey: string | undefined;
   const submittedWatchIds = new Set<string>();
-  let snapshot = createInitialSnapshot();
   let notifyContextChanged: () => void = () => undefined;
+  let collectionAllowed = false;
+  let collectionGate: ContentCollectionGate;
+  let catalogAllowed = false;
+  let catalogGate: ContentCollectionGate;
+  let snapshot = createInitialSnapshot(collectionAllowed);
 
   const updateSnapshot = (changes: Partial<MediaWatchTabContext>) => {
-    snapshot = { ...snapshot, ...changes, pageUrl: location.href };
+    snapshot = updateContentSnapshot(snapshot, changes, collectionAllowed);
     notifyContextChanged();
   };
 
   const verboseLog = (message: string, details?: unknown) => {
-    if (!verboseLogging) return;
-    if (details === undefined) console.debug(extensionLogMessage(message));
-    else console.debug(extensionLogMessage(message), details);
+    logContentVerbose(verboseLogging, message, details);
   };
 
   const requestRestart = () => {
     if (ctx.isInvalid) return;
+    if (!collectionAllowed) return;
     if (restartRunning) {
       restartRequested = true;
       return;
@@ -122,6 +137,8 @@ export function createCrunchyrollWatchController(
   };
 
   const updateTracker = async () => {
+    if (!collectionAllowed) return;
+    const generation = collectionGate.getState().generation;
     if (await dependencies.isTrackingPaused()) {
       tracker = disposeTracker(tracker);
       updateSnapshot({
@@ -130,12 +147,14 @@ export function createCrunchyrollWatchController(
       });
       return;
     }
+    if (!collectionAllowed || generation !== collectionGate.getState().generation) return;
 
     const attempt = prepareTrackingAttempt(
       currentWatchId,
       tracker,
       submittedWatchIds,
       previousNavigationFingerprint,
+      catalogAllowed,
     );
     if (attempt) armTracker(attempt);
   };
@@ -166,7 +185,7 @@ export function createCrunchyrollWatchController(
       document,
       attempt.metadata,
       observation => handleThresholdReached(attempt.watchId, observation),
-      { onStatus: updateProgress },
+      { onStatus: updateProgress, includeCatalogEvidence: catalogAllowed },
     );
   };
 
@@ -174,6 +193,7 @@ export function createCrunchyrollWatchController(
     watchId: string,
     observation: WatchProgressObservation,
   ) => {
+    if (!collectionAllowed) return;
     void submitThresholdObservation(watchId, observation);
   };
 
@@ -181,10 +201,14 @@ export function createCrunchyrollWatchController(
     watchId: string,
     observation: WatchProgressObservation,
   ) => {
+    if (!collectionAllowed) return;
+    const generation = collectionGate.getState().generation;
+    const catalogGeneration = catalogGate.getState().generation;
     const decision = await decideThresholdSubmission(
       dependencies.isTrackingPaused,
       () => isCurrentWatchPage(ctx, watchId, currentWatchId, location.pathname),
     );
+    if (!collectionAllowed) return;
     if (decision === 'paused') {
       tracker = disposeTracker(tracker);
       updateSnapshot({
@@ -194,18 +218,28 @@ export function createCrunchyrollWatchController(
       return;
     }
     if (decision === 'stale') return;
+    if (!collectionAllowed || generation !== collectionGate.getState().generation
+      || catalogGeneration !== catalogGate.getState().generation) return;
     submittedWatchIds.add(watchId);
-    await submitWatchProgress(watchId, observation);
+    if (!catalogAllowed) {
+      observation.nextEpisodeProviderId = undefined;
+      observation.nextEpisodeUrl = undefined;
+      observation.nextEpisodeTitle = undefined;
+      observation.nextEpisodeNumber = undefined;
+      observation.nextEpisodeReleaseTrack = undefined;
+    }
+    await submitWatchProgress(watchId, observation, generation, catalogGeneration);
   };
 
   const handleTrackingFailure = (error: unknown) => {
+    if (!collectionAllowed) return;
     updateSnapshot({
       status: 'error',
       message: error instanceof Error ? error.message : 'Unexpected watch tracking failure.',
     });
     console.error(extensionLogMessage('Crunchyroll watch tracker failed'), {
-      pageUrl: location.href,
-      error,
+      pageUrl: stripUrlQueryAndFragment(location.href),
+      error: sanitizeDiagnosticDetails(error),
     });
   };
 
@@ -226,12 +260,28 @@ export function createCrunchyrollWatchController(
   const submitWatchProgress = async (
     watchId: string,
     observation: WatchProgressObservation,
+    generation: number,
+    catalogGeneration: number,
   ) => {
+    if (!collectionAllowed || generation !== collectionGate.getState().generation
+      || catalogGeneration !== catalogGate.getState().generation) return;
     const correlationId = createCorrelationId();
-    verboseLog('Cantaro: submitting Crunchyroll watch progress', { correlationId, observation });
+    verboseLog('Cantaro: submitting Crunchyroll watch progress', {
+      correlationId,
+      providerEpisodeId: observation.providerEpisodeId,
+      providerSeriesId: observation.providerSeriesId,
+      providerSeasonId: observation.providerSeasonId,
+      episodeNumber: observation.episodeNumber,
+      releaseTrack: observation.releaseTrack,
+      watchProgressPercent: observation.watchProgressPercent,
+      durationSeconds: observation.durationSeconds,
+      positionSeconds: observation.positionSeconds,
+    });
     try {
       const result = await dependencies.submitWatch(observation, correlationId);
-      if (!isCurrentDelivery(ctx, watchId, currentWatchId)) return;
+      if (!collectionAllowed || generation !== collectionGate.getState().generation
+        || catalogGeneration !== catalogGate.getState().generation
+        || !isCurrentDelivery(ctx, watchId, currentWatchId)) return;
       if (!result.ok) {
         handleDeliveryFailure(watchId, correlationId, result.error);
         return;
@@ -268,6 +318,7 @@ export function createCrunchyrollWatchController(
     correlationId: string,
     error: unknown,
   ) => {
+    if (!collectionAllowed) return;
     submittedWatchIds.delete(watchId);
     updateSnapshot({
       status: 'error',
@@ -275,19 +326,22 @@ export function createCrunchyrollWatchController(
     });
     console.warn(extensionLogMessage('Crunchyroll watch-progress delivery failed'), {
       correlationId,
-      error,
+      error: sanitizeDiagnosticDetails(error),
     });
     requestRestart();
   };
 
   const resolveWatchProgress = async (request: ResolveWatchObservationRequest) => {
+    if (!collectionAllowed) return;
     const correlationId = createCorrelationId();
     const result = await dependencies.resolveWatch(request, correlationId);
+    if (!collectionAllowed) return;
     if (!result.ok) throw new Error(result.error.message);
     updateSnapshot({ status: 'submitted', message: undefined });
   };
 
   const observePlayerSelection = (selection: ReturnType<typeof readSelectedPlayerTracks>) => {
+    if (!collectionAllowed) return;
     if (!selection.audioLabel) return;
     const logKey = `${selection.audioLabel}|${selection.subtitleLabel ?? ''}|${selection.releaseTrack ?? ''}`;
     if (logKey === lastPlayerSelectionLogKey) return;
@@ -316,11 +370,16 @@ export function createCrunchyrollWatchController(
   };
 
   const observer = new MutationObserver((mutations) => {
+    if (!collectionAllowed) return;
     observePlayerSelection(readSelectedPlayerTracks(document));
     if (mutations.some(hasRelevantPageChange)) requestRestart();
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  const attachObserver = () => {
+    if (!collectionAllowed || ctx.isInvalid) return;
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  };
   const handlePlayerTrackSelection = (event: Event) => {
+    if (!collectionAllowed) return;
     const target = event.target instanceof Element
       ? event.target.closest('[role="menuitemradio"]')
       : null;
@@ -336,17 +395,79 @@ export function createCrunchyrollWatchController(
   notifyContextChanged = startMediaControllerRuntime(ctx, dependencies, () => snapshot, (enabled) => {
     verboseLogging = enabled;
   }, () => {
-    verboseLog('Cantaro: Crunchyroll watch controller started', { pageUrl: location.href });
+    if (!collectionAllowed) return;
+    verboseLog('Cantaro: Crunchyroll watch controller started', {
+      pageUrl: stripUrlQueryAndFragment(location.href),
+    });
     requestRestart();
-  }, () => extractEpisodeId(location.pathname) !== undefined);
+  }, () => collectionAllowed && extractEpisodeId(location.pathname) !== undefined, () => collectionAllowed);
 
   const stopWatchingPause = dependencies.watchTrackingPause(() => {
     tracker = disposeTracker(tracker);
     requestRestart();
   });
 
+  const clearCollectionState = () => {
+    if (restartTimer !== null) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+    restartRequested = false;
+    tracker = disposeTracker(tracker);
+    overlay?.close();
+    overlay = null;
+    currentWatchId = undefined;
+    currentMetadata = undefined;
+    currentMetadataFingerprint = undefined;
+    previousNavigationFingerprint = undefined;
+    lastPlayerSelectionLogKey = undefined;
+    submittedWatchIds.clear();
+    updateSnapshot({
+      status: 'starting',
+      providerEpisodeId: undefined,
+      seriesTitle: undefined,
+      episodeTitle: undefined,
+      episodeNumber: undefined,
+      watchProgressPercent: undefined,
+      message: undefined,
+    });
+  };
+
+  const handleCollectionState = createContentCollectionStateHandler(
+    () => collectionAllowed,
+    allowed => { collectionAllowed = allowed; },
+    () => {
+      observer.disconnect();
+      clearCollectionState();
+    },
+    attachObserver,
+    requestRestart,
+  );
+  collectionGate = createContentCollectionGate(dependencies, handleCollectionState);
+  catalogGate = createContentCollectionGate({
+    readCollectionConsent: dependencies.readCatalogCollectionConsent,
+    watchCollectionConsent: dependencies.watchCatalogCollectionConsent,
+  }, state => {
+    const changed = catalogAllowed !== state.allowed;
+    catalogAllowed = state.allowed;
+    if (!catalogAllowed && currentMetadata) {
+      currentMetadata.nextEpisodeProviderId = undefined;
+      currentMetadata.nextEpisodeUrl = undefined;
+      currentMetadata.nextEpisodeTitle = undefined;
+      currentMetadata.nextEpisodeNumber = undefined;
+      currentMetadata.nextEpisodeReleaseTrack = undefined;
+    }
+    if (state.ready && changed && collectionAllowed) {
+      tracker = disposeTracker(tracker);
+      requestRestart();
+    }
+  });
+  ctx.onInvalidated(() => collectionGate.dispose());
+  ctx.onInvalidated(() => catalogGate.dispose());
+
   const handleLocationChange = () => {
-    const nextWatchId = extractEpisodeId(location.pathname) ?? location.href;
+    if (!collectionAllowed) return;
+    const nextWatchId = extractEpisodeId(location.pathname) ?? stripUrlQueryAndFragment(location.href);
     if (nextWatchId === currentWatchId) {
       requestRestart();
       return;
@@ -378,6 +499,7 @@ export function createCrunchyrollWatchController(
     tracker = disposeTracker(tracker);
     overlay?.close();
     if (restartTimer !== null) clearTimeout(restartTimer);
+    clearCollectionState();
   });
 
   return {
@@ -404,12 +526,12 @@ export function logWatchProgressStatus(
   verboseLog('Cantaro: Crunchyroll video progress unavailable', details);
 }
 
-function createInitialSnapshot(): MediaWatchTabContext {
+function createInitialSnapshot(collectionAllowed: boolean): MediaWatchTabContext {
   return {
     feature: 'media',
     provider: 'crunchyroll',
     pageKind: 'watch',
-    pageUrl: location.href,
+    pageUrl: collectionAllowed ? stripUrlQueryAndFragment(location.href) : '',
     status: 'starting',
   };
 }
@@ -419,17 +541,18 @@ function prepareTrackingAttempt(
   tracker: VideoProgressTracker | null,
   submittedWatchIds: Set<string>,
   previousNavigationFingerprint: string | undefined,
+  includeCatalogEvidence: boolean,
 ): TrackingAttempt | null {
   const watchId = currentPageWatchId(location);
   if (!canPrepareTracking(watchId, currentWatchId, tracker, submittedWatchIds)) return null;
-  const metadata = extractCrunchyrollWatchMetadata(document, location);
+  const metadata = extractCrunchyrollWatchMetadata(document, location, { includeCatalogEvidence });
   return metadata && isFreshNavigationMetadata(previousNavigationFingerprint, metadata)
     ? { metadata, watchId }
     : null;
 }
 
 function currentPageWatchId(locationLike: Location): string {
-  return extractEpisodeId(locationLike.pathname) ?? locationLike.href;
+  return extractEpisodeId(locationLike.pathname) ?? stripUrlQueryAndFragment(locationLike.href);
 }
 
 function canPrepareTracking(

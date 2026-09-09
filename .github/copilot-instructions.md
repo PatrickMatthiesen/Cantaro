@@ -76,4 +76,3 @@ PR guidance
 References
 
 - docs/infrastructure.md — canonical architecture, domain entities, and sync model.
-- docs/agent-extra.md — supplemental context only; may be removed in favor of this file.

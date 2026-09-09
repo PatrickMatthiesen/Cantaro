@@ -182,10 +182,12 @@ public class MediaObservationProgressServiceTests
 
         Assert.Equal(8, payload.ProgressEpisodes);
         Assert.Null(payload.ProgressChapters);
-        Assert.Equal(observation.Id.ToString(), payload.TriggeredByObservationId);
-        Assert.Equal(observation.SiteIdentifier, payload.ObservedSiteIdentifier);
-        Assert.Equal("8", payload.ObservedProgressHint);
         Assert.Equal(binding.LastRemoteUpdateAt, payload.LastKnownRemoteUpdateAt);
+        Assert.DoesNotContain("TriggeredByObservationId", op.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("ObservedSiteIdentifier", op.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("ObservedProgressHint", op.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("ObservationMatchScore", op.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("TriggeredAt", op.PayloadJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -212,7 +214,6 @@ public class MediaObservationProgressServiceTests
             op.PayloadJson,
             new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
         Assert.Equal(4, payload.ProgressEpisodes);
-        Assert.Equal("16", payload.ObservedProgressHint);
     }
 
     [Fact]

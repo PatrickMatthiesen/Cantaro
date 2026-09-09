@@ -7,6 +7,7 @@ import {
 } from '../../platform/settings/extensionSettings';
 import { browserSettingsRepository } from '../../platform/settings/settingsRepository';
 import { draftFromSettings, type SettingsDraft } from './settingsModel';
+import { sanitizeDiagnosticDetails } from '../../platform/diagnostics/logger';
 
 type SettingsNotice = (message: string, tone: 'success' | 'error') => void;
 
@@ -36,7 +37,7 @@ export function useSettingsState(notify: SettingsNotice) {
         setSessionEmail(storedSession?.email || null);
       })
       .catch((error) => {
-        console.error('Error loading settings:', error);
+        console.error('Error loading settings:', sanitizeDiagnosticDetails(error));
         notify('Failed to load extension settings', 'error');
       })
       .finally(() => {

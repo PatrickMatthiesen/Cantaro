@@ -74,6 +74,7 @@ type ProgressSnapshot = Omit<Extract<VideoProgressTrackerStatus, { type: 'progre
 export function extractCrunchyrollWatchMetadata(
   doc: Document,
   locationLike: Location | URL | string,
+  options: { includeCatalogEvidence?: boolean } = {},
 ): CrunchyrollWatchMetadata | null {
   const rawUrl = typeof locationLike === 'string' ? locationLike : locationLike.href;
   const identity = readWatchIdentity(rawUrl);
@@ -87,7 +88,12 @@ export function extractCrunchyrollWatchMetadata(
     identity.providerEpisodeId,
     seasonTitle,
   );
-  const nextEpisode = readNextEpisode(doc, identity.pageUrl.href, releaseTrack);
+  const nextEpisode = readCatalogNextEpisode(
+    doc,
+    identity.pageUrl.href,
+    releaseTrack,
+    options.includeCatalogEvidence,
+  );
 
   return {
     provider: 'crunchyroll',
@@ -106,6 +112,16 @@ export function extractCrunchyrollWatchMetadata(
     nextEpisodeNumber: nextEpisode?.episodeNumber,
     nextEpisodeReleaseTrack: nextEpisode?.releaseTrack,
   };
+}
+
+function readCatalogNextEpisode(
+  doc: Document,
+  pageUrl: string,
+  releaseTrack: string | undefined,
+  includeCatalogEvidence: boolean | undefined,
+) {
+  if (includeCatalogEvidence === false) return undefined;
+  return readNextEpisode(doc, pageUrl, releaseTrack);
 }
 
 function readResolvedWatchReleaseTrack(
@@ -131,7 +147,11 @@ export function trackVideoProgress(
   doc: Document,
   metadata: CrunchyrollWatchMetadata,
   onThresholdReached: (observation: WatchProgressObservation) => void,
-  options: { threshold?: number; onStatus?: (status: VideoProgressTrackerStatus) => void } = {},
+  options: {
+    threshold?: number;
+    onStatus?: (status: VideoProgressTrackerStatus) => void;
+    includeCatalogEvidence?: boolean;
+  } = {},
 ): VideoProgressTracker | null {
   const video = findActiveVideo(doc);
   if (!video) return null;
@@ -149,7 +169,7 @@ export function trackVideoProgress(
     if (snapshot.watchProgressPercent / 100 < threshold) return;
     fired = true;
     reportThresholdReached(options.onStatus, snapshot);
-    onThresholdReached(buildProgressObservation(doc, metadata, snapshot));
+    onThresholdReached(buildProgressObservation(doc, metadata, snapshot, options.includeCatalogEvidence));
   };
 
   video.addEventListener('timeupdate', evaluate);
@@ -217,8 +237,9 @@ function buildProgressObservation(
   doc: Document,
   metadata: CrunchyrollWatchMetadata,
   snapshot: ProgressSnapshot,
+  includeCatalogEvidence = true,
 ): WatchProgressObservation {
-  const refreshed = extractCrunchyrollWatchMetadata(doc, metadata.observedUrl) ?? metadata;
+  const refreshed = extractCrunchyrollWatchMetadata(doc, metadata.observedUrl, { includeCatalogEvidence }) ?? metadata;
   return {
     schemaVersion: 1,
     ...refreshed,

@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { browserAuthService } from '../../platform/auth/authService';
 import type { ExtensionSession } from '../../platform/auth/extensionSession';
 import { signOutRuntimeSession } from '../../platform/auth/runtimeAuthClient';
-import { createCorrelationId } from '../../platform/messaging/messageResult';
 import {
   ensureApiPermission,
   removeReplacedApiPermission,
@@ -14,6 +13,7 @@ import {
 } from '../../platform/settings/extensionSettings';
 import { browserSettingsRepository } from '../../platform/settings/settingsRepository';
 import { createSettingsUpdate, type SettingsDraft } from './settingsModel';
+import { sanitizeDiagnosticDetails } from '../../platform/diagnostics/logger';
 
 type SettingsNotice = (message: string, tone: 'success' | 'error') => void;
 
@@ -63,7 +63,7 @@ export function useSettingsActions(context: SettingsActionContext) {
       );
       return true;
     } catch (error) {
-      console.error('Error saving settings:', error);
+      console.error('Error saving settings:', sanitizeDiagnosticDetails(error));
       context.notify('Failed to save extension settings', 'error');
       return false;
     }
@@ -90,13 +90,9 @@ export function useSettingsActions(context: SettingsActionContext) {
       context.setSession(session);
       context.setSessionEmail(session.email || null);
       context.notify('Signed in to Cantaro', 'success');
-      await browser.runtime.sendMessage({
-        type: 'delivery.queue.drain',
-        correlationId: createCorrelationId(),
-      }).catch(() => null);
       return true;
     } catch (error) {
-      console.error('Extension sign-in failed:', error);
+      console.error('Extension sign-in failed:', sanitizeDiagnosticDetails(error));
       context.notify(error instanceof Error ? error.message : 'Sign-in failed.', 'error');
       return false;
     } finally {
@@ -114,7 +110,7 @@ export function useSettingsActions(context: SettingsActionContext) {
       context.notify('Cantaro session cleared', 'success');
       return true;
     } catch (error) {
-      console.error('Extension sign-out failed:', error);
+      console.error('Extension sign-out failed:', sanitizeDiagnosticDetails(error));
       context.notify('Failed to clear the stored Cantaro session.', 'error');
       return false;
     } finally {

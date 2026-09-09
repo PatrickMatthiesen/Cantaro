@@ -79,6 +79,7 @@ Thumbs.db
 
 # Aspire
 .aspire/
+aspire-output/
 
 # Test Coverage
 coverage/

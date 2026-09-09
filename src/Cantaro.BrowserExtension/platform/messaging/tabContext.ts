@@ -1,9 +1,8 @@
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { MediaTabContext } from '../../features/media/contracts/mediaTabContext';
-import type { MusicTabContext } from '../../features/music/contracts/musicTabContext';
 import { messageSuccess } from './messageResult';
 
-export type TabContextSnapshot = MediaTabContext | MusicTabContext;
+export type TabContextSnapshot = MediaTabContext;
 
 interface GetTabContextRequest {
   type: 'tab.context.get';

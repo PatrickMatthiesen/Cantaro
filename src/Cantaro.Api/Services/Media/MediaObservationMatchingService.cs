@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +17,6 @@ public class MediaObservationMatchingService(
     private const decimal HighConfidenceThreshold = 0.85m;
     private const decimal LowConfidenceThreshold = 0.40m;
 
-    private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly MediaRelationGraphRefreshQueue _relationGraphRefreshQueue = relationGraphRefreshQueue;
@@ -34,6 +32,7 @@ public class MediaObservationMatchingService(
     {
         var observation = await _dbContext.MediaObservations
             .Include(o => o.Candidates)
+            .Include(o => o.Episodes)
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"MediaObservation {observationId} was not found.");
 
@@ -81,8 +80,14 @@ public class MediaObservationMatchingService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Candidate generation failed for MediaObservation {ObservationId}.", observation.Id);
-            observation.LastMatchError = ex.Message;
+            // Exception messages can contain provider URLs or other payload
+            // data. Keep both the persisted diagnostic and log metadata
+            // bounded to a safe exception type.
+            _logger.LogError(
+                "Candidate generation failed for MediaObservation {ObservationId}; failure type {FailureType}.",
+                observation.Id,
+                ex.GetType().Name);
+            observation.LastMatchError = "Candidate generation failed.";
             observation.MatchStatus = MediaObservationStatuses.Pending;
         }
 
@@ -137,7 +142,7 @@ public class MediaObservationMatchingService(
         var episode = identity?.Content?.MediaEpisode;
         var title = episode?.MediaTitle;
         if (identity is null || episode is null || title is null
-            || !CanUseEpisodeIdentityForMatching(identity, observation.RawPayload))
+            || !CanUseEpisodeIdentityForMatching(identity, observation))
         {
             return false;
         }
@@ -168,8 +173,6 @@ public class MediaObservationMatchingService(
             observation.EpisodeOffset = episode.EpisodeNumber - observedProgress;
             observation.ResolvedProgress = episode.EpisodeNumber;
         }
-        identity.HasConflict = false;
-
         _logger.LogInformation(
             "Matched MediaObservation {ObservationId} through provider episode identity {Provider}/{ProviderEpisodeId}: title {MediaTitleId}, episode {EpisodeNumber}.",
             observation.Id,
@@ -180,39 +183,27 @@ public class MediaObservationMatchingService(
         return true;
     }
 
-    private static bool IsCompatibleEpisodeIdentity(
-        MediaEpisodeProviderIdentity identity,
-        string? rawPayload)
-    {
-        if (!identity.HasConflict)
-        {
-            return true;
-        }
-
-        var payload = DeserializeRawPayload(rawPayload);
-        if (payload is null)
-        {
-            return false;
-        }
-
-        var content = identity.Content;
-        var seriesMatches = !string.IsNullOrWhiteSpace(content?.ProviderSeriesId)
-            && string.Equals(
-                content.ProviderSeriesId,
-                payload.ProviderSeriesId,
-                StringComparison.OrdinalIgnoreCase);
-        var episodeMatches = content?.ProviderEpisodeNumber is > 0
-            && content.ProviderEpisodeNumber == payload.EpisodeNumber;
-        return seriesMatches && episodeMatches;
-    }
-
     private static bool CanUseEpisodeIdentityForMatching(
         MediaEpisodeProviderIdentity identity,
-        string? rawPayload)
+        MediaObservation observation)
     {
-        if (!IsCompatibleEpisodeIdentity(identity, rawPayload))
+        // A trusted conflict remains in the resolution workflow. An untrusted
+        // conflict may still be corrected by a compatible, newer observation.
+        if (identity.HasConflict && identity.IsTrusted)
         {
             return false;
+        }
+
+        if (identity.HasConflict)
+        {
+            var content = identity.Content;
+            return !string.IsNullOrWhiteSpace(content?.ProviderSeriesId)
+                && string.Equals(
+                    content.ProviderSeriesId,
+                    observation.ProviderSeriesId,
+                    StringComparison.OrdinalIgnoreCase)
+                && content.ProviderEpisodeNumber is > 0
+                && content.ProviderEpisodeNumber == observation.EpisodeNumber;
         }
 
         if (identity.IsTrusted)
@@ -221,35 +212,16 @@ public class MediaObservationMatchingService(
         }
 
         // Catalog observations may discover a correct episode destination before
-        // a user has confirmed the surrounding season mapping. Reuse that identity
-        // only when the watch payload independently confirms both its provider
-        // series and provider episode number. Trust is still required to remap it.
-        var payload = DeserializeRawPayload(rawPayload);
-        return payload is not null
-            && !string.IsNullOrWhiteSpace(identity.Content?.ProviderSeriesId)
+        // a user has confirmed the surrounding season mapping. Reuse an
+        // untrusted identity only when the watch payload independently confirms
+        // both its provider series and provider episode number.
+        return !string.IsNullOrWhiteSpace(identity.Content?.ProviderSeriesId)
             && string.Equals(
                 identity.Content.ProviderSeriesId,
-                payload.ProviderSeriesId,
+                observation.ProviderSeriesId,
                 StringComparison.OrdinalIgnoreCase)
             && identity.Content.ProviderEpisodeNumber is > 0
-            && identity.Content.ProviderEpisodeNumber == payload.EpisodeNumber;
-    }
-
-    private static ObservationRawPayload? DeserializeRawPayload(string? rawPayload)
-    {
-        if (string.IsNullOrWhiteSpace(rawPayload))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<ObservationRawPayload>(rawPayload, RawPayloadJsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+            && identity.Content.ProviderEpisodeNumber == observation.EpisodeNumber;
     }
 
     private async Task<List<MediaObservationCandidate>> GenerateCandidatesAsync(
@@ -300,17 +272,11 @@ public class MediaObservationMatchingService(
         MediaObservation observation,
         CancellationToken cancellationToken)
     {
-        var payload = DeserializeRawPayload(observation.RawPayload);
-        if (payload is null)
-        {
-            return [];
-        }
-
         var mapping = await _seasonMappingService.FindAsync(
             observation.SiteIdentifier,
-            payload.ProviderSeriesId,
-            payload.ProviderSeasonId,
-            payload.SeasonNumber,
+            observation.ProviderSeriesId,
+            observation.ProviderSeasonId,
+            observation.SeasonNumber,
             cancellationToken);
         if (mapping?.MediaTitle is null)
         {
@@ -538,11 +504,10 @@ public class MediaObservationMatchingService(
             .Where(query => !string.IsNullOrWhiteSpace(query))
             .ToList();
         var catalogEvidence = ReadEpisodeEvidence(observation);
-        var rawPayload = DeserializeRawPayload(observation.RawPayload);
-        var hasProviderSeasonContext = !string.IsNullOrWhiteSpace(rawPayload?.ProviderSeasonId)
-            || rawPayload?.SeasonNumber is > 0;
+        var hasProviderSeasonContext = !string.IsNullOrWhiteSpace(observation.ProviderSeasonId)
+            || observation.SeasonNumber is > 0;
         var normalizedObservedTitle = NormalizeTitle(observation.ObservedTitle);
-        var normalizedSeriesTitle = NormalizeTitle(rawPayload?.SeriesTitle ?? string.Empty);
+        var normalizedSeriesTitle = NormalizeTitle(observation.SeriesTitle ?? string.Empty);
         var hasSeasonSpecificObservedTitle = hasProviderSeasonContext
             && !string.IsNullOrWhiteSpace(normalizedObservedTitle)
             && (string.IsNullOrWhiteSpace(normalizedSeriesTitle)
@@ -553,7 +518,7 @@ public class MediaObservationMatchingService(
             .Where(title => HasStrongSeasonTitleEvidence(
                 hasProviderSeasonContext,
                 hasSeasonSpecificObservedTitle,
-                rawPayload,
+                observation,
                 normalizedObservedTitle,
                 normalizedSeriesTitle,
                 title,
@@ -661,33 +626,14 @@ public class MediaObservationMatchingService(
     private static List<string> GetCandidateQueryTitles(MediaObservation observation)
     {
         var titles = new List<string>();
-        AddTitle(titles, TryReadRawSeriesTitle(observation.RawPayload));
+        AddTitle(titles, observation.SeriesTitle);
         AddTitle(titles, observation.ObservedTitle);
         return titles;
     }
 
-    private static string? TryReadRawSeriesTitle(string? rawPayload)
-    {
-        if (string.IsNullOrWhiteSpace(rawPayload))
-        {
-            return null;
-        }
-
-        try
-        {
-            var payload = JsonSerializer.Deserialize<ObservationRawPayload>(rawPayload, RawPayloadJsonOptions);
-            return payload?.SeriesTitle;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
     private static CatalogEvidence? ReadEpisodeEvidence(MediaObservation observation)
     {
-        if (string.IsNullOrWhiteSpace(observation.RawPayload)
-            || !string.Equals(
+        if (!string.Equals(
                 observation.SiteIdentifier,
                 MediaObservationSiteIdentifiers.Crunchyroll,
                 StringComparison.OrdinalIgnoreCase))
@@ -695,30 +641,20 @@ public class MediaObservationMatchingService(
             return null;
         }
 
-        try
+        var episodeNumbers = observation.Episodes
+            .Where(episode => episode.EpisodeNumber > 0)
+            .Select(episode => episode.EpisodeNumber)
+            .ToList();
+        if (observation.EpisodeNumber is > 0)
         {
-            var payload = JsonSerializer.Deserialize<ObservationRawPayload>(
-                observation.RawPayload,
-                RawPayloadJsonOptions);
-            var episodeNumbers = (payload?.ObservedEpisodes ?? payload?.Episodes)?
-                .Where(episode => episode.EpisodeNumber > 0)
-                .Select(episode => episode.EpisodeNumber)
-                .ToList() ?? [];
-            if (payload?.EpisodeNumber is > 0)
-            {
-                episodeNumbers.Add(payload.EpisodeNumber.Value);
-            }
+            episodeNumbers.Add(observation.EpisodeNumber.Value);
+        }
 
-            var lowestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Min() : (int?)null;
-            var highestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Max() : (int?)null;
-            return highestEpisodeNumber > 0 || payload?.SeasonNumber is > 0
-                ? new CatalogEvidence(payload?.SeasonNumber, lowestEpisodeNumber, highestEpisodeNumber)
-                : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        var lowestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Min() : (int?)null;
+        var highestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Max() : (int?)null;
+        return highestEpisodeNumber > 0 || observation.SeasonNumber is > 0
+            ? new CatalogEvidence(observation.SeasonNumber, lowestEpisodeNumber, highestEpisodeNumber)
+            : null;
     }
 
     private async Task<int?> InferCumulativeEpisodeOffsetAsync(
@@ -1067,7 +1003,7 @@ public class MediaObservationMatchingService(
     private static bool HasStrongSeasonTitleEvidence(
         bool hasProviderSeasonContext,
         bool hasSeasonSpecificObservedTitle,
-        ObservationRawPayload? rawPayload,
+        MediaObservation observation,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title,
@@ -1075,29 +1011,29 @@ public class MediaObservationMatchingService(
         => hasProviderSeasonContext
             && ((hasSeasonSpecificObservedTitle && IsExactTitleMatch(normalizedObservedTitle, title))
                 || IsFirstSeasonBaseTitleMatch(
-                    rawPayload,
+                    observation,
                     normalizedObservedTitle,
                     normalizedSeriesTitle,
                     title)
                 || IsExplicitNumberedSeasonAliasMatch(
-                    rawPayload,
+                    observation,
                     normalizedObservedTitle,
                     normalizedSeriesTitle,
                     title)
                 || IsEpisodeRangeSegmentMatch(
-                    rawPayload,
+                    observation,
                     normalizedObservedTitle,
                     normalizedSeriesTitle,
                     title,
                     catalogEvidence));
 
     private static bool IsFirstSeasonBaseTitleMatch(
-        ObservationRawPayload? rawPayload,
+        MediaObservation observation,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title)
     {
-        if (rawPayload?.SeasonNumber != 1
+        if (observation.SeasonNumber != 1
             || !IsTvAnime(title)
             || string.IsNullOrWhiteSpace(normalizedSeriesTitle)
             || !IsExactTitleMatch(normalizedSeriesTitle, title))
@@ -1114,19 +1050,19 @@ public class MediaObservationMatchingService(
             .Contains("season", StringComparer.Ordinal);
 
     private static bool IsExplicitNumberedSeasonAliasMatch(
-        ObservationRawPayload? rawPayload,
+        MediaObservation observation,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title)
     {
-        if (rawPayload?.SeasonNumber is not > 1
+        if (observation.SeasonNumber is not > 1
             || !IsTvAnime(title)
             || string.IsNullOrWhiteSpace(normalizedSeriesTitle))
         {
             return false;
         }
 
-        var seasonNumber = rawPayload.SeasonNumber.Value;
+        var seasonNumber = observation.SeasonNumber.Value;
         var providerSeasonTitle = $"{normalizedSeriesTitle} season {seasonNumber}";
         if (!string.Equals(normalizedObservedTitle, providerSeasonTitle, StringComparison.Ordinal))
         {
@@ -1138,14 +1074,14 @@ public class MediaObservationMatchingService(
     }
 
     private static bool IsEpisodeRangeSegmentMatch(
-        ObservationRawPayload? rawPayload,
+        MediaObservation observation,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title,
         CatalogEvidence? catalogEvidence)
     {
-        if (string.IsNullOrWhiteSpace(rawPayload?.ProviderSeasonId)
-            || string.IsNullOrWhiteSpace(rawPayload.SeasonTitle)
+        if (string.IsNullOrWhiteSpace(observation.ProviderSeasonId)
+            || string.IsNullOrWhiteSpace(observation.SeasonTitle)
             || catalogEvidence?.LowestEpisodeNumber is not > 0
             || catalogEvidence.HighestEpisodeNumber is not > 0
             || !IsTvAnime(title)
@@ -1156,9 +1092,9 @@ public class MediaObservationMatchingService(
         }
 
         var reconstructedObservedTitle = NormalizeTitle(
-            $"{rawPayload.SeriesTitle} {rawPayload.SeasonTitle}");
+            $"{observation.SeriesTitle} {observation.SeasonTitle}");
         if (!string.Equals(normalizedObservedTitle, reconstructedObservedTitle, StringComparison.Ordinal)
-            || !TryReadEpisodeRange(rawPayload.SeasonTitle, out var rangeStart, out var rangeEnd))
+            || !TryReadEpisodeRange(observation.SeasonTitle, out var rangeStart, out var rangeEnd))
         {
             return false;
         }
@@ -1352,30 +1288,6 @@ public class MediaObservationMatchingService(
             MediaObservationSiteIdentifiers.MyAnimeList => "myanimelist",
             _ => null
         };
-    }
-
-    private sealed class ObservationRawPayload
-    {
-        public string? SeriesTitle { get; set; }
-
-        public string? ProviderSeriesId { get; set; }
-
-        public string? ProviderSeasonId { get; set; }
-
-        public int? SeasonNumber { get; set; }
-
-        public string? SeasonTitle { get; set; }
-
-        public int? EpisodeNumber { get; set; }
-
-        public List<ObservationRawEpisode>? Episodes { get; set; }
-
-        public List<ObservationRawEpisode>? ObservedEpisodes { get; set; }
-    }
-
-    private sealed class ObservationRawEpisode
-    {
-        public int EpisodeNumber { get; set; }
     }
 
     private sealed record CatalogEvidence(

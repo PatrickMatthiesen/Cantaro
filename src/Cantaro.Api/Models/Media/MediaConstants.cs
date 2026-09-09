@@ -95,7 +95,8 @@ public static class MediaProviderOperationTypes
     /// <summary>
     /// Progress update triggered automatically by a matched observation.
     /// Carries an <see cref="AutoProgressUpdatePayload"/> in <c>PayloadJson</c>
-    /// so provenance is recorded alongside the update numbers.
+    /// with only the provider target, progress values, and sync concurrency
+    /// snapshot required to apply the update.
     /// </summary>
     public const string AutoProgressUpdate = "auto_progress_update";
 }

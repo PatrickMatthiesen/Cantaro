@@ -1,4 +1,5 @@
 import { extensionLogMessage } from './extensionIdentity';
+import { stripUrlQueryAndFragment } from '../../features/media/contracts/observationUrl';
 
 export interface DiagnosticContext {
   scope: 'background' | 'popup' | 'content';
@@ -17,6 +18,59 @@ export interface ExtensionLogger {
   child(context: Partial<DiagnosticContext>): ExtensionLogger;
 }
 
+/** Keeps exception objects and URL credentials/query strings out of diagnostics. */
+export function sanitizeDiagnosticDetails(value: unknown): unknown {
+  return sanitizeDiagnosticValue(value, new WeakSet<object>(), 0);
+}
+
+function sanitizeDiagnosticValue(
+  value: unknown,
+  seen: WeakSet<object>,
+  depth: number,
+): unknown {
+  if (depth > 6) return '[truncated]';
+  if (value instanceof Error) {
+    return { name: value.name || 'Error' };
+  }
+  if (typeof value === 'string') {
+    return sanitizeDiagnosticText(value);
+  }
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
+    return value.map(entry => sanitizeDiagnosticValue(entry, seen, depth + 1));
+  }
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        sanitizeDiagnosticValue(entry, seen, depth + 1),
+      ]),
+    );
+  }
+  return value;
+}
+
+function sanitizeDiagnosticText(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return stripUrlQueryAndFragment(value);
+    }
+  } catch {
+    // The value is ordinary diagnostic text rather than a URL.
+  }
+  return value.replace(/https?:\/\/[^\s"'<>]+/gi, (candidate) => {
+    try {
+      return stripUrlQueryAndFragment(candidate);
+    } catch {
+      return '[url]';
+    }
+  });
+}
+
 function write(
   level: 'debug' | 'info' | 'warn' | 'error',
   context: DiagnosticContext,
@@ -25,8 +79,10 @@ function write(
   details?: unknown,
 ): void {
   if (level === 'debug' && !verbose()) return;
-  const payload = details === undefined ? context : { ...context, details };
-  console[level](extensionLogMessage(message), payload);
+  const payload = details === undefined
+    ? context
+    : { ...context, details: sanitizeDiagnosticDetails(details) };
+  console[level](extensionLogMessage(sanitizeDiagnosticText(message)), payload);
 }
 
 export function createExtensionLogger(

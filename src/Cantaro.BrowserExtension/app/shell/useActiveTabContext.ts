@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ActiveTabContextState,
   ExtensionAppServices,
@@ -48,23 +48,31 @@ export function createActiveTabContextRefresher(
   };
 }
 
-export function useActiveTabContext(services: ExtensionAppServices) {
+export function useActiveTabContext(services: ExtensionAppServices, enabled = true) {
   const [state, setState] = useState<ActiveTabContextState>({ status: 'loading' });
+  const currentRefresh = useRef<object>(null);
   const refresh = useMemo(
-    () => createActiveTabContextRefresher(services, setState),
-    [services],
+    () => {
+      const identity = {};
+      currentRefresh.current = identity;
+      return createActiveTabContextRefresher(services, next => {
+        if (enabled && currentRefresh.current === identity) setState(next);
+      });
+    },
+    [services, enabled],
   );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (enabled) void refresh();
+  }, [refresh, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     return subscribeToActiveTabContextChanges(
       () => { void refresh(); },
       () => { void refresh(false); },
     );
-  }, [refresh]);
+  }, [refresh, enabled]);
 
-  return { state, refresh };
+  return { state: enabled ? state : { status: 'available', snapshot: { feature: 'unsupported', pageKind: 'unsupported', pageUrl: '' } } as ActiveTabContextState, refresh };
 }

@@ -266,6 +266,26 @@ describe('Crunchyroll watch metadata extraction', () => {
     });
   });
 
+  it('does not collect next-episode catalog evidence when catalog consent is disabled', () => {
+    const metadata = extractCrunchyrollWatchMetadata(
+      makeDoc('Episode 7 - Frieren - Crunchyroll', {
+        'a[href*="/series/"]': [linkElement('Frieren', () => '/series/GYEXQKJG6/frieren')],
+        '[data-t="next-episode"] a[href*="/watch/"]': [
+          linkElement('Episode 8 - The Hero of the Village', () => '/watch/G31UXQ9K2/episode-8'),
+        ],
+      }),
+      'https://www.crunchyroll.com/watch/CURRENT7/episode-7',
+      { includeCatalogEvidence: false },
+    );
+
+    expect(metadata).toMatchObject({
+      providerEpisodeId: 'CURRENT7',
+      providerSeriesId: 'GYEXQKJG6',
+    });
+    expect(metadata?.nextEpisodeProviderId).toBeUndefined();
+    expect(metadata?.nextEpisodeUrl).toBeUndefined();
+  });
+
   it('captures the visible labelled next-episode card with its real title', () => {
     const metadata = extractCrunchyrollWatchMetadata(
       fixtureDoc(nextEpisodeJapaneseCardHtml),

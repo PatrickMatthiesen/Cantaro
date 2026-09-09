@@ -69,9 +69,6 @@ public class MediaObservationProgressService(
             return MediaObservationProgressResult.None;
         }
 
-        // Resolve the accepted candidate to get the match score for provenance.
-        var matchScore = await GetAcceptedCandidateScoreAsync(observation, cancellationToken);
-
         // Find all library entries for this user and title. Local Cantaro state
         // advances immediately; connected entries also sync to the provider.
         var entries = await _dbContext.MediaLibraryEntries
@@ -142,31 +139,21 @@ public class MediaObservationProgressService(
                     ProgressEpisodes = progressEpisodes,
                     ProgressChapters = progressChapters,
                     ProgressVolumes = progressVolumes,
-                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt,
-                    TriggeredByObservationId = observation.Id.ToString(),
-                    ObservedSiteIdentifier = observation.SiteIdentifier,
-                    ObservedProgressHint = observation.ProgressHint,
-                    ObservationMatchScore = matchScore,
-                    TriggeredAt = DateTimeOffset.UtcNow
+                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
                 };
 
                 await _operationProcessor.EnqueueAutoProgressAsync(
                     entry.UserId, binding, payload, cancellationToken);
 
-            _logger.LogInformation(
-                "Queued auto-progress for user {UserId}, entry {EntryId} " +
-                "(provider={Provider}, providerMediaId={ProviderMediaId}): " +
-                "episodes={Ep} from observation {ObservationId} " +
-                "(site={Site}, hint=\"{Hint}\", score={Score:P0}).",
-                entry.UserId,
-                entry.Id,
-                binding.MediaProviderLink.Provider,
-                binding.MediaProviderLink.ExternalId,
-                progressEpisodes,
-                observation.Id,
-                observation.SiteIdentifier,
-                observation.ProgressHint,
-                matchScore ?? 0);
+                _logger.LogInformation(
+                    "Queued auto-progress for user {UserId}, entry {EntryId} " +
+                    "(provider={Provider}, providerMediaId={ProviderMediaId}): " +
+                    "episodes={Ep}.",
+                    entry.UserId,
+                    entry.Id,
+                    binding.MediaProviderLink.Provider,
+                    binding.MediaProviderLink.ExternalId,
+                    progressEpisodes);
 
                 enqueuedCount++;
             }
@@ -276,21 +263,6 @@ public class MediaObservationProgressService(
         entry.UpdatedAt = now;
     }
 
-    private async Task<decimal?> GetAcceptedCandidateScoreAsync(
-        MediaObservation observation,
-        CancellationToken cancellationToken)
-    {
-        if (observation.AcceptedCandidateId is null)
-        {
-            return null;
-        }
-
-        var candidate = await _dbContext.MediaObservationCandidates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == observation.AcceptedCandidateId, cancellationToken);
-
-        return candidate?.Score;
-    }
 }
 
 public readonly record struct MediaObservationProgressResult(int EnqueuedCount, int LocalUpdatesCount)

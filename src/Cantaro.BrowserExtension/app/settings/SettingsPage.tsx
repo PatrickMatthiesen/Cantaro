@@ -1,15 +1,16 @@
 import { BlurredEmail } from '@cantaro/client-shared/auth';
 import { GradientButton } from '@cantaro/client-shared/ui';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { DEFAULT_BASE_URL } from '../../platform/settings/extensionSettings';
 import type { SettingsController } from './useSettings';
 
 interface SettingsPageProps {
   controller: SettingsController;
   onClose: () => void;
+  collectionConsent: ReactNode;
 }
 
-export function SettingsPage({ controller, onClose }: SettingsPageProps) {
+export function SettingsPage({ controller, onClose, collectionConsent }: SettingsPageProps) {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (await controller.save()) onClose();
@@ -33,7 +34,7 @@ export function SettingsPage({ controller, onClose }: SettingsPageProps) {
 
       <form className="divide-y divide-border-subtle" onSubmit={(event) => void handleSubmit(event)}>
         <ConnectionSettings controller={controller} />
-        <PageFeatureSettings controller={controller} />
+        {collectionConsent}
         <DiagnosticsSettings controller={controller} />
         <SettingsActions controller={controller} onClose={onClose} />
       </form>
@@ -104,21 +105,6 @@ function SignInLabel({ controller }: { controller: SettingsController }) {
   return <>{controller.sessionEmail ? 'Re-authenticate' : 'Sign in'}</>;
 }
 
-function PageFeatureSettings({ controller }: { controller: SettingsController }) {
-  return (
-    <section className="py-5" aria-labelledby="page-features-title">
-      <h2 id="page-features-title" className="text-sm font-bold text-content">Page features</h2>
-      <SettingToggle
-        label="Show lyrics on YouTube"
-        detail="Add a Cantaro lyrics panel to recognised YouTube and YouTube Music song pages."
-        checked={controller.draft.injectLyricsOnYouTube}
-        disabled={controller.loading}
-        onChange={(checked) => controller.updateDraft('injectLyricsOnYouTube', checked)}
-      />
-    </section>
-  );
-}
-
 function DiagnosticsSettings({ controller }: { controller: SettingsController }) {
   return (
     <section className="py-5" aria-labelledby="diagnostics-title">
@@ -136,10 +122,20 @@ function DiagnosticsSettings({ controller }: { controller: SettingsController })
 
 function SettingsActions({ controller, onClose }: { controller: SettingsController; onClose: () => void }) {
   return (
-    <footer className="flex items-center justify-between gap-3 py-4">
-      <p className="text-xs text-content-muted">
-        {controller.hasUnsavedChanges ? 'You have unsaved changes.' : 'Settings are up to date.'}
-      </p>
+    <footer className="flex flex-wrap items-center justify-between gap-3 py-4">
+      <div>
+        <p className="text-xs text-content-muted">
+          {controller.hasUnsavedChanges ? 'You have unsaved changes.' : 'Settings are up to date.'}
+        </p>
+        <a
+          href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md"
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex min-h-8 items-center text-xs font-bold text-personal-accent-strong underline decoration-border-strong underline-offset-4 hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >
+          Privacy policy
+        </a>
+      </div>
       <div className="flex gap-2">
         <GradientButton type="button" tone="soft" onClick={onClose}>Cancel</GradientButton>
         <GradientButton type="submit" disabled={controller.loading || !controller.hasUnsavedChanges}>Save changes</GradientButton>

@@ -1,8 +1,8 @@
 namespace Cantaro.Api.Models;
 
 /// <summary>
-/// Represents a media title observation submitted by the browser extension.
-/// User-scoped: each user's observations are independent and never shared.
+/// Temporary private matching work submitted by the browser extension.
+/// Evidence is removed once its catalog and library effects are safely recorded.
 /// </summary>
 public class MediaObservation
 {
@@ -20,7 +20,7 @@ public class MediaObservation
     public required string SiteIdentifier { get; set; }
 
     /// <summary>
-    /// Full URL that was observed.
+    /// Observed URL with credentials, query and fragment removed.
     /// </summary>
     public required string ObservedUrl { get; set; }
 
@@ -48,25 +48,52 @@ public class MediaObservation
     public DateTimeOffset ObservedAt { get; set; }
 
     /// <summary>
-    /// Version string of the extension that submitted the observation.
+    /// Series title extracted from the page, when the provider exposes one.
     /// </summary>
-    public string? ExtensionVersion { get; set; }
+    public string? SeriesTitle { get; set; }
+
+    public string? SeasonTitle { get; set; }
+
+    public string? EpisodeTitle { get; set; }
+
+    public int? EpisodeNumber { get; set; }
+
+    public string? ProviderSeriesId { get; set; }
+
+    public string? ProviderSeasonId { get; set; }
+
+    public int? SeasonNumber { get; set; }
+
+    public int? ProviderSequenceNumber { get; set; }
+
+    public string? ReleaseTrack { get; set; }
+
+    public string? NextEpisodeProviderId { get; set; }
+
+    public string? NextEpisodeUrl { get; set; }
+
+    public string? NextEpisodeTitle { get; set; }
+
+    public int? NextEpisodeNumber { get; set; }
+
+    public string? NextEpisodeReleaseTrack { get; set; }
 
     /// <summary>
-    /// Raw JSON payload from the extension for replay and debugging.
+    /// True when this row came from the catalog-observation endpoint rather
+    /// than a watch-page observation.
     /// </summary>
-    public string? RawPayload { get; set; }
+    public bool IsCatalogObservation { get; set; }
+
+    /// <summary>
+    /// Bounded provider episode evidence rendered on the observed page.
+    /// </summary>
+    public ICollection<MediaObservationEpisode> Episodes { get; set; } = [];
 
     /// <summary>
     /// Provider search choices shown to the user when automatic matching could
     /// not safely resolve the observation.
     /// </summary>
     public string? ProviderChoicesPayload { get; set; }
-
-    /// <summary>
-    /// JSON audit trail of user resolution decisions and overrides.
-    /// </summary>
-    public string? ResolutionHistoryPayload { get; set; }
 
     /// <summary>
     /// Matching/resolution lifecycle: pending, matched, ambiguous, no_match, rejected.
@@ -118,4 +145,32 @@ public class MediaObservation
     public MediaTitle? MediaTitle { get; set; }
 
     public ICollection<MediaObservationCandidate> Candidates { get; set; } = [];
+}
+
+/// <summary>
+/// Structured provider episode evidence attached to an observation. URLs are
+/// normalized before persistence and language lists contain only provider
+/// availability metadata.
+/// </summary>
+public class MediaObservationEpisode
+{
+    public Guid Id { get; set; }
+
+    public Guid MediaObservationId { get; set; }
+
+    public required string ProviderEpisodeId { get; set; }
+
+    public required string ProviderUrl { get; set; }
+
+    public int EpisodeNumber { get; set; }
+
+    public string? EpisodeTitle { get; set; }
+
+    public string? ReleaseTrack { get; set; }
+
+    public List<string> AvailableSubtitleLanguageCodes { get; set; } = [];
+
+    public List<string> AvailableAudioLanguageCodes { get; set; } = [];
+
+    public MediaObservation? MediaObservation { get; set; }
 }

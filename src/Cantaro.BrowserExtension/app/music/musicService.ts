@@ -1,19 +1,8 @@
 import type { MusicLibraryResponse, MusicLibrarySong } from '@cantaro/client-shared/music';
-import type { MusicTabContext } from '../../features/music/contracts/musicTabContext';
 import { ApiError } from '../../platform/api/apiError';
 import { cantaroApiClient } from '../../platform/api/cantaroApiClient';
 import { browserSettingsRepository } from '../../platform/settings/settingsRepository';
 import type { LyricsResult } from './musicLyrics';
-
-export interface MusicRecognitionResult {
-  classification: 'music' | 'not_music' | 'uncertain';
-  status: string;
-  trackId?: string;
-  title?: string;
-  artist?: string;
-  inUserLibrary: boolean;
-  song?: MusicLibrarySong;
-}
 
 const lyricsCache = new Map<string, LyricsResult>();
 
@@ -23,38 +12,6 @@ function youtubeQuery(youtubeVideoId?: string) {
 
 export async function loadMusicLibrary(): Promise<MusicLibraryResponse> {
   return cantaroApiClient.request('/api/music/library');
-}
-
-export async function recognizeMusicTab(context: MusicTabContext, signal?: AbortSignal) {
-  const request = recognitionRequest(context, signal);
-  if (!request) return null;
-  try {
-    return await cantaroApiClient.request<MusicRecognitionResult>(
-      '/api/music/recognition/youtube',
-      request,
-    );
-  } catch (error) {
-    throw abortAwareError(error, signal);
-  }
-}
-
-function recognitionRequest(
-  context: MusicTabContext,
-  signal?: AbortSignal,
-): RequestInit | null {
-  if (context.pageKind !== 'track') return null;
-  if (!context.externalId) return null;
-  if (context.provider === 'spotify') return null;
-  return {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      videoId: context.externalId,
-      site: context.provider,
-      pageTitle: context.title,
-    }),
-    signal,
-  };
 }
 
 export async function addSongToPlaylist(trackId: string, playlistId: string, youtubeVideoId?: string) {

@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -24,13 +23,15 @@ public class MediaCatalogObservationsController(
     UserManager<User> userManager,
     MediaObservationMatchingService matchingService,
     MediaEpisodeIdentityService episodeIdentityService,
-    ILogger<MediaCatalogObservationsController> logger) : ControllerBase
+    ILogger<MediaCatalogObservationsController> logger,
+    MediaObservationLifecycleService? lifecycleService = null) : ControllerBase
 {
-    private static readonly JsonSerializerOptions RawPayloadJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly UserManager<User> _userManager = userManager;
     private readonly MediaObservationMatchingService _matchingService = matchingService;
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
+    private readonly MediaObservationLifecycleService _lifecycleService = lifecycleService
+        ?? new MediaObservationLifecycleService(dbContext);
     private readonly ILogger<MediaCatalogObservationsController> _logger = logger;
 
     [HttpPost]
@@ -51,9 +52,9 @@ public class MediaCatalogObservationsController(
             validation.ProviderSeriesId,
             request.ProviderSeasonId,
             request.SeasonNumber);
-        var rawPayload = JsonSerializer.Serialize(request, RawPayloadJsonOptions);
         var existing = await _dbContext.MediaObservations
             .Include(item => item.Candidates)
+            .Include(item => item.Episodes)
             .FirstOrDefaultAsync(item =>
                 item.UserId == userId
                 && item.SiteIdentifier == validation.Provider
@@ -66,7 +67,6 @@ public class MediaCatalogObservationsController(
                 existing,
                 request,
                 validation,
-                rawPayload,
                 userId,
                 now,
                 cancellationToken));
@@ -81,13 +81,18 @@ public class MediaCatalogObservationsController(
             ObservedUrl = validation.SeriesUrl,
             ObservedTitle = BuildObservedTitle(request),
             ObservedAt = request.ObservedAt ?? now,
-            ExtensionVersion = TrimToNull(request.ExtensionVersion),
-            RawPayload = rawPayload,
+            SeriesTitle = request.SeriesTitle.Trim(),
+            SeasonTitle = TrimToNull(request.SeasonTitle),
+            ProviderSeriesId = validation.ProviderSeriesId,
+            ProviderSeasonId = TrimToNull(request.ProviderSeasonId),
+            SeasonNumber = request.SeasonNumber,
+            IsCatalogObservation = true,
             MatchStatus = MediaObservationStatuses.Pending,
             CreatedAt = now,
             UpdatedAt = now
         };
 
+        ApplyEpisodeEvidence(observation, request);
         _dbContext.MediaObservations.Add(observation);
         try
         {
@@ -98,6 +103,7 @@ public class MediaCatalogObservationsController(
             _dbContext.Entry(observation).State = EntityState.Detached;
             existing = await _dbContext.MediaObservations
                 .Include(item => item.Candidates)
+                .Include(item => item.Episodes)
                 .FirstOrDefaultAsync(item =>
                     item.UserId == userId
                     && item.SiteIdentifier == validation.Provider
@@ -112,7 +118,6 @@ public class MediaCatalogObservationsController(
                 existing,
                 request,
                 validation,
-                rawPayload,
                 userId,
                 now,
                 cancellationToken));
@@ -132,26 +137,27 @@ public class MediaCatalogObservationsController(
             validation.ProviderSeriesId,
             status);
 
-        return Ok(CreateResponse(
+        var response = CreateResponse(
             observation,
             status,
             validation.ObservedEpisodeCount,
             acceptedCount,
             observation.MatchStatus == MediaObservationStatuses.Matched
                 ? validation.ObservedEpisodeCount - acceptedCount
-                : validation.RejectedEpisodeCount));
+                : validation.RejectedEpisodeCount);
+        await DeleteCompletedCatalogObservationIfSafeAsync(observation, acceptedCount, cancellationToken);
+        return Ok(response);
     }
 
     private async Task<SubmitMediaCatalogObservationResponse> ProcessDuplicateAsync(
         MediaObservation observation,
         SubmitMediaCatalogObservationRequest request,
         CatalogRequestValidation validation,
-        string rawPayload,
         int userId,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        ApplyLatestEvidence(observation, request, validation.SeriesUrl, rawPayload, now);
+        ApplyLatestEvidence(observation, request, validation.SeriesUrl, now);
         observation = await RefreshMatchAsync(observation, cancellationToken);
         var recordedCount = await RecordMatchedCatalogAsync(observation, request, cancellationToken);
 
@@ -162,7 +168,7 @@ public class MediaCatalogObservationsController(
             validation.Provider,
             validation.ProviderSeriesId);
 
-        return CreateResponse(
+        var response = CreateResponse(
             observation,
             MediaCatalogObservationStatuses.Deduplicated,
             validation.ObservedEpisodeCount,
@@ -170,6 +176,8 @@ public class MediaCatalogObservationsController(
             observation.MatchStatus == MediaObservationStatuses.Matched
                 ? validation.ObservedEpisodeCount - recordedCount
                 : validation.RejectedEpisodeCount);
+        await DeleteCompletedCatalogObservationIfSafeAsync(observation, recordedCount, cancellationToken);
+        return response;
     }
 
     private async Task<MediaObservation> RefreshMatchAsync(
@@ -190,25 +198,77 @@ public class MediaCatalogObservationsController(
             return 0;
         }
 
-        return await _episodeIdentityService.RecordCatalogObservationAsync(
-            observation,
-            request,
-            cancellationToken);
+        return await _episodeIdentityService.RecordCatalogObservationAsync(observation, cancellationToken);
     }
 
-    private static void ApplyLatestEvidence(
+    private Task DeleteCompletedCatalogObservationIfSafeAsync(
+        MediaObservation observation,
+        int recordedCount,
+        CancellationToken cancellationToken)
+        => _lifecycleService.DeleteAfterDurableOutcomeAsync(
+            observation,
+            observation.MatchStatus == MediaObservationStatuses.Matched
+                && recordedCount > 0
+                && recordedCount == observation.Episodes.Count,
+            cancellationToken);
+
+    private void ApplyLatestEvidence(
         MediaObservation observation,
         SubmitMediaCatalogObservationRequest request,
         string normalizedSeriesUrl,
-        string rawPayload,
         DateTimeOffset now)
     {
         observation.ObservedUrl = normalizedSeriesUrl;
         observation.ObservedTitle = BuildObservedTitle(request);
         observation.ObservedAt = request.ObservedAt ?? now;
-        observation.ExtensionVersion = TrimToNull(request.ExtensionVersion);
-        observation.RawPayload = rawPayload;
+        observation.SeriesTitle = request.SeriesTitle.Trim();
+        observation.SeasonTitle = TrimToNull(request.SeasonTitle);
+        observation.ProviderSeriesId = observation.ProviderSeriesId ?? request.ProviderSeriesId.Trim();
+        observation.ProviderSeasonId = TrimToNull(request.ProviderSeasonId);
+        observation.SeasonNumber = request.SeasonNumber;
+        observation.IsCatalogObservation = true;
+        ApplyEpisodeEvidence(observation, request);
         observation.UpdatedAt = now;
+    }
+
+    private static void ApplyEpisodeEvidence(MediaObservation observation, SubmitMediaCatalogObservationRequest request)
+    {
+        var incomingIds = request.Episodes
+            .Select(episode => episode.ProviderEpisodeId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var existing in observation.Episodes
+                     .Where(existing => !incomingIds.Contains(existing.ProviderEpisodeId))
+                     .ToList())
+        {
+            // Remove orphaned children explicitly. Clearing a required
+            // relationship and immediately adding replacements can make EF
+            // issue a stale DELETE when the same tracked observation is
+            // refreshed during duplicate handling.
+            observation.Episodes.Remove(existing);
+        }
+
+        foreach (var episode in request.Episodes)
+        {
+            var existing = observation.Episodes.FirstOrDefault(item =>
+                string.Equals(item.ProviderEpisodeId, episode.ProviderEpisodeId, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                observation.Episodes.Add(new MediaObservationEpisode
+                {
+                    Id = Guid.NewGuid(), ProviderEpisodeId = episode.ProviderEpisodeId.Trim(), ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl),
+                    EpisodeNumber = episode.EpisodeNumber, EpisodeTitle = TrimToNull(episode.EpisodeTitle), ReleaseTrack = TrimToNull(episode.ReleaseTrack),
+                    AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(), AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
+                });
+                continue;
+            }
+
+            existing.ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl);
+            existing.EpisodeNumber = episode.EpisodeNumber;
+            existing.EpisodeTitle = TrimToNull(episode.EpisodeTitle);
+            existing.ReleaseTrack = TrimToNull(episode.ReleaseTrack);
+            existing.AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList();
+            existing.AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList();
+        }
     }
 
     private static CatalogRequestValidation ValidateAndNormalize(SubmitMediaCatalogObservationRequest request)

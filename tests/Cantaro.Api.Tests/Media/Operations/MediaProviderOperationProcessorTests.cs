@@ -341,11 +341,6 @@ public class MediaProviderOperationProcessorTests
             ProviderMediaId = "140960",
             ProgressEpisodes = 15,
             LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt,
-            TriggeredByObservationId = Guid.NewGuid().ToString(),
-            ObservedSiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
-            ObservedProgressHint = "15",
-            ObservationMatchScore = 0.97m,
-            TriggeredAt = DateTimeOffset.UtcNow
         };
 
         var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, binding, payload, CancellationToken.None);
@@ -394,8 +389,7 @@ public class MediaProviderOperationProcessorTests
         {
             ProviderMediaId = "140960",
             ProgressEpisodes = 18,
-            LastKnownRemoteUpdateAt = oldKnownAt,  // stale snapshot
-            TriggeredAt = DateTimeOffset.UtcNow
+            LastKnownRemoteUpdateAt = oldKnownAt  // stale snapshot
         };
 
         var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, binding, payload, CancellationToken.None);
