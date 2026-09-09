@@ -178,7 +178,7 @@ Copy the complete output into `CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY` without c
 Cantaro/
 ├── docs/                           # Documentation
 │   ├── infrastructure.md          # Architecture overview
-│   └── agent-extra.md             # Additional specifications
+│   └── music-song-version-model.md # Music identity model
 ├── src/
 │   ├── Cantaro.Api/               # ASP.NET Core Web API
 │   ├── Cantaro.AppHost/           # Aspire orchestration
