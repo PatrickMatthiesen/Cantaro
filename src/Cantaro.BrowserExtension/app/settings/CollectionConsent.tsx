@@ -31,41 +31,37 @@ export function CollectionConsent(props: CollectionConsentProps) {
           {props.needsReview ? 'Keep track of what you watch' : 'Website collection'}
         </h2>
         <p className="mt-2 text-sm leading-6 text-content-muted">
-          Cantaro can automatically mark episodes as watched and keep your library up to date. To do
-          this, the extension reads episode information and playback progress from Crunchyroll while
-          you browse and watch. Choose which features you would like to use below. Nothing is collected
-          until you sign in and give permission.
+          Keep your library up to date as you watch on Crunchyroll. Choose what Cantaro can read
+          from the page—nothing is collected until you sign in and allow it.
         </p>
       </div>
-      <p className="text-sm leading-6 text-content-muted">
-        This information goes to your Cantaro server: <strong className="break-all font-semibold text-content">{props.baseUrl}</strong>.
-        {' '}Watch progress can sync with services you connect there. You can turn either feature off at any time.
-      </p>
-      <p className="text-sm leading-6 text-content-muted">
-        <strong className="font-semibold text-content">What happens to this information?</strong>{' '}
-        Your watch progress is saved in your library. Once Cantaro has processed a page report, it removes
-        the temporary information used to match it. If a match needs your help, that matching task stays
-        until you resolve or dismiss it. Episode and watch-link facts may be added to Cantaro’s shared
-        catalog and can remain after account deletion; they are not kept as your browsing history.
-      </p>
       <div className="divide-y divide-border-subtle border-y border-border-subtle">
         <ConsentChoice
           label="Automatically track what I watch"
-          detail="Use episode information and playback progress to mark completed episodes in my Cantaro library and sync with services I have connected."
+          detail="Read episode information and playback progress to save watched episodes and sync with services I connect."
           checked={draft.watchTracking}
           disabled={props.busy}
           onChange={watchTracking => setDraft(current => ({ ...current, watchTracking }))}
         />
         <ConsentChoice
           label="Help Cantaro find episodes and watch links"
-          detail="Read episode lists and links as you browse Crunchyroll, so Cantaro can identify episodes and help you find where to watch them."
+          detail="Read episode lists and links while I browse, even when I’m not watching, to improve Cantaro’s shared catalog."
           checked={draft.catalogCollection}
           disabled={props.busy}
           onChange={catalogCollection => setDraft(current => ({ ...current, catalogCollection }))}
         />
       </div>
+      <section aria-labelledby="collection-information-title" className="space-y-2 text-xs leading-5 text-content-muted">
+        <h3 id="collection-information-title" className="font-semibold text-content">Where your information goes</h3>
+        <p>To your Cantaro server: <strong className="break-all font-medium text-content">{props.baseUrl}</strong>.</p>
+        <ul className="list-disc space-y-1 pl-4">
+          <li>Watch progress stays in your library. Temporary matching details are deleted once processed; unfinished matches stay until you resolve or dismiss them.</li>
+          <li>Shared episode and watch-link facts can remain after account deletion, without keeping your browsing history.</li>
+        </ul>
+        <p>You can turn either feature off anytime. This stops new collection; it does not delete information already saved.</p>
+      </section>
       <p className="text-xs leading-5 text-content-muted">
-        Music library features do not read music websites. Turning collection off stops new collection.
+        Music features do not read music websites.
         {' '}<a href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md" target="_blank" rel="noreferrer"
           className="font-semibold text-personal-accent-strong underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Read the privacy policy</a>.
       </p>

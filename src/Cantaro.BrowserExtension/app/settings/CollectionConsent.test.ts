@@ -45,11 +45,11 @@ describe('collection consent disclosure', () => {
     const props = await render();
     expect(Array.from(container.querySelectorAll('input')).every(input => !input.checked)).toBe(true);
     expect(container.textContent).toContain('Keep track of what you watch');
-    expect(container.textContent).toContain('automatically mark episodes as watched and keep your library up to date');
+    expect(container.textContent).toContain('Keep your library up to date as you watch on Crunchyroll');
     expect(container.textContent).toContain('Automatically track what I watch');
     expect(container.textContent).toContain('Help Cantaro find episodes and watch links');
-    expect(container.textContent).toContain('What happens to this information?');
-    expect(container.textContent).toContain('temporary information used to match it');
+    expect(container.textContent).toContain('Where your information goes');
+    expect(container.textContent).toContain('Temporary matching details are deleted once processed');
     expect(container.textContent).not.toContain('Cantaro can read supported Crunchyroll pages to update your library');
     expect(container.textContent).toContain('https://cantaro.example');
     expect(container.querySelector('a')?.getAttribute('href')).toContain('/PRIVACY.md');
