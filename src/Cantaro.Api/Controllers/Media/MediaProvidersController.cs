@@ -30,6 +30,7 @@ public class MediaProvidersController(
     IMediaProviderRegistry mediaProviderRegistry,
     MediaLibraryImportQueue mediaLibraryImportQueue,
     MediaProviderOperationProcessor mediaProviderOperationProcessor,
+    MediaLibraryEventHub mediaLibraryEventHub,
     UserManager<User> userManager,
     ILogger<MediaProvidersController> logger,
     IDataProtectionProvider dataProtectionProvider,
@@ -39,6 +40,7 @@ public class MediaProvidersController(
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly MediaLibraryImportQueue _mediaLibraryImportQueue = mediaLibraryImportQueue;
     private readonly MediaProviderOperationProcessor _mediaProviderOperationProcessor = mediaProviderOperationProcessor;
+    private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaProvidersController> _logger = logger;
     private readonly IDataProtector _stateProtector = dataProtectionProvider.CreateProtector("MediaProvider.OAuth.State");
@@ -391,6 +393,7 @@ public class MediaProvidersController(
         if (connectedBindings.Count == 0)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+            _mediaLibraryEventHub.Publish(userId);
             return NoContent();
         }
 
@@ -411,6 +414,7 @@ public class MediaProvidersController(
                 cancellationToken);
             results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
         }
+        _mediaLibraryEventHub.Publish(userId);
         return BuildOperationResult(results);
     }
 
@@ -446,6 +450,7 @@ public class MediaProvidersController(
         if (connectedBindings.Count == 0)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+            _mediaLibraryEventHub.Publish(userId);
             return NoContent();
         }
 
@@ -464,6 +469,7 @@ public class MediaProvidersController(
                 cancellationToken);
             results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
         }
+        _mediaLibraryEventHub.Publish(userId);
         return BuildOperationResult(results);
     }
 
@@ -489,6 +495,7 @@ public class MediaProvidersController(
         if (connectedBindings.Count == 0)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+            _mediaLibraryEventHub.Publish(userId);
             return NoContent();
         }
 
@@ -507,6 +514,7 @@ public class MediaProvidersController(
                 cancellationToken);
             results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
         }
+        _mediaLibraryEventHub.Publish(userId);
         return BuildOperationResult(results);
     }
 

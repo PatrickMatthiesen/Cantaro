@@ -23,10 +23,12 @@ namespace Cantaro.Api.Services;
 public class MediaObservationProgressService(
     ApplicationDbContext dbContext,
     MediaProviderOperationProcessor operationProcessor,
+    MediaLibraryEventHub eventHub,
     ILogger<MediaObservationProgressService> logger)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaProviderOperationProcessor _operationProcessor = operationProcessor;
+    private readonly MediaLibraryEventHub _eventHub = eventHub;
     private readonly ILogger<MediaObservationProgressService> _logger = logger;
 
     /// <summary>
@@ -162,6 +164,7 @@ public class MediaObservationProgressService(
         if (localUpdatesCount > 0)
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+            _eventHub.Publish(observation.UserId);
         }
 
         return new MediaObservationProgressResult(enqueuedCount, localUpdatesCount);

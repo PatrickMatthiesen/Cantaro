@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Threading.Channels;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -582,6 +583,8 @@ public class MediaProviderDtoContractTests
         Assert.Equal(87.5m, persistedEntry.Score);
         Assert.Equal(MediaMutationSources.UserScoreUpdate, persistedEntry.LastMutationSource);
         Assert.NotNull(persistedEntry.LastLocalEditAt);
+        Assert.True(fixture.LibraryEvents.TryRead(out var libraryEvent));
+        Assert.NotNull(libraryEvent);
     }
 
     [Fact]
@@ -694,19 +697,28 @@ public class MediaProviderDtoContractTests
             SqliteConnection connection,
             ApplicationDbContext dbContext,
             MediaProvidersController controller,
+            MediaLibraryEventHub eventHub,
+            ChannelReader<MediaLibraryChangedEvent> libraryEvents,
+            Guid libraryEventSubscriptionId,
             int userId)
         {
             _connection = connection;
             DbContext = dbContext;
             Controller = controller;
+            EventHub = eventHub;
+            LibraryEvents = libraryEvents;
+            _libraryEventSubscriptionId = libraryEventSubscriptionId;
             UserId = userId;
         }
 
         private readonly SqliteConnection _connection;
+        private readonly Guid _libraryEventSubscriptionId;
 
         public ApplicationDbContext DbContext { get; }
 
         public MediaProvidersController Controller { get; }
+        public MediaLibraryEventHub EventHub { get; }
+        public ChannelReader<MediaLibraryChangedEvent> LibraryEvents { get; }
 
         public int UserId { get; }
 
@@ -730,12 +742,15 @@ public class MediaProviderDtoContractTests
 
             var registry = new MediaProviderRegistry([provider]);
             var importQueue = new MediaLibraryImportQueue();
+            var eventHub = new MediaLibraryEventHub();
+            var libraryEvents = eventHub.Subscribe(userId, out var libraryEventSubscriptionId);
             var operationProcessor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
             var controller = new MediaProvidersController(
                 dbContext,
                 registry,
                 importQueue,
                 operationProcessor,
+                eventHub,
                 CreateUserManager(dbContext),
                 NullLogger<MediaProvidersController>.Instance,
                 new PassthroughDataProtectionProvider(),
@@ -755,11 +770,19 @@ public class MediaProviderDtoContractTests
                 }
             };
 
-            return new MediaControllerFixture(connection, dbContext, controller, userId);
+            return new MediaControllerFixture(
+                connection,
+                dbContext,
+                controller,
+                eventHub,
+                libraryEvents,
+                libraryEventSubscriptionId,
+                userId);
         }
 
         public async ValueTask DisposeAsync()
         {
+            EventHub.Unsubscribe(UserId, _libraryEventSubscriptionId);
             await DbContext.DisposeAsync();
             await _connection.DisposeAsync();
         }

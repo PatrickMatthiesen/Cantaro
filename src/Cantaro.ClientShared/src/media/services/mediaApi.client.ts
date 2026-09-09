@@ -79,6 +79,14 @@ export class MediaApiClient {
         });
     }
 
+    async openLibraryEvents(signal: AbortSignal): Promise<Response> {
+        return this.request('/api/media/library/events', {
+            signal,
+            headers: { Accept: 'text/event-stream' },
+            cache: 'no-store',
+        });
+    }
+
     async getLibrary(params: MediaLibraryQueryParams = {}): Promise<MediaLibraryPageDto> {
         const query = new URLSearchParams();
         for (const [key, value] of Object.entries(params)) {

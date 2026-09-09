@@ -1100,9 +1100,11 @@ public class MediaObservationsApiTests
                 db,
                 new EmptyMediaProviderRegistry(),
                 NullLogger<MediaProviderOperationProcessor>.Instance);
+            var eventHub = new MediaLibraryEventHub();
             var progressService = new MediaObservationProgressService(
                 db,
                 operationProcessor,
+                eventHub,
                 NullLogger<MediaObservationProgressService>.Instance);
             var episodeIdentityService = new MediaEpisodeIdentityService(
                 db,
@@ -1118,6 +1120,7 @@ public class MediaObservationsApiTests
                 episodeIdentityService,
                 seasonMappingService,
                 registry ?? new EmptyMediaProviderRegistry(),
+                eventHub,
                 NullLogger<MediaObservationsController>.Instance);
 
             controller.ControllerContext = new ControllerContext

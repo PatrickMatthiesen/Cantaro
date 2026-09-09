@@ -5,7 +5,6 @@ import type { ExtensionLogger } from '../../../platform/diagnostics/logger';
 import type { SeriesCatalogObservation } from '../contracts/catalogObservation';
 import type { WatchProgressObservation, WatchSubmissionResult } from '../contracts/watchObservation';
 import { createMediaRequestHandler } from './mediaRequestHandler';
-import type { MediaProgressNotifier } from './mediaProgressNotifier';
 
 const settingsRepository = { read: vi.fn(async () => ({ baseUrl: 'https://api.example.test', verboseLogging: false })), save: vi.fn() };
 const consentGate = { getStatus: vi.fn(async () => ({
@@ -48,7 +47,7 @@ describe('mediaRequestHandler', () => {
       consentVersion: 1, needsReview: true, authenticated: true,
       watchTrackingAllowed: false, catalogCollectionAllowed: true,
     })) };
-    const handler = createMediaRequestHandler(client, logger, undefined, gate, settingsRepository);
+    const handler = createMediaRequestHandler(client, logger, gate, settingsRepository);
     const result = await handler.handle({ type: 'media.watch.submit', correlationId: 'correlation', payload: watch() });
     expect(result).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'consent_required' }) }));
     expect(client.submitWatch).not.toHaveBeenCalled();
@@ -60,29 +59,28 @@ describe('mediaRequestHandler', () => {
       consentVersion: 1, needsReview: false, authenticated: true,
       watchTrackingAllowed: true, catalogCollectionAllowed: false,
     })) };
-    const handler = createMediaRequestHandler(client, logger, undefined, gate, settingsRepository);
+    const handler = createMediaRequestHandler(client, logger, gate, settingsRepository);
     const result = await handler.handle({ type: 'media.catalog.submit', correlationId: 'correlation', payload: catalog() });
     expect(result).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'consent_required' }) }));
     expect(client.submitCatalog).not.toHaveBeenCalled();
   });
 
-  it('notifies open Cantaro pages after local progress changes', async () => {
+  it('delivers watch progress changes', async () => {
     const client = apiClient(vi.fn());
     client.submitWatch = vi.fn(async (): Promise<WatchSubmissionResult> => ({
       status: 'accepted', observationId: 'observation', matchedMediaTitleId: 'media-title',
       resolvedProgress: 16, progressUpdated: true,
     }));
-    const notifier: MediaProgressNotifier = { notify: vi.fn(async () => {}) };
-    const handler = createMediaRequestHandler(client, logger, notifier, consentGate, settingsRepository);
+    const handler = createMediaRequestHandler(client, logger, consentGate, settingsRepository);
     const result = await handler.handle({ type: 'media.watch.submit', correlationId: 'correlation', payload: watch() });
     expect(result).toEqual(expect.objectContaining({ ok: true }));
-    expect(notifier.notify).toHaveBeenCalledWith(expect.objectContaining({ matchedMediaTitleId: 'media-title', resolvedProgress: 16 }));
+    expect(client.submitWatch).toHaveBeenCalledWith(expect.objectContaining({ providerEpisodeId: 'EPISODE' }));
   });
 
   it('treats pending catalog matching as successful API delivery', async () => {
     const handler = createMediaRequestHandler(apiClient(async () => ({
       status: 'pending_match', observationId: 'observation', acceptedEpisodeCount: 0,
-    })), logger, undefined, consentGate, settingsRepository);
+    })), logger, consentGate, settingsRepository);
     const result = await handler.handle({ type: 'media.catalog.submit', correlationId: 'correlation', payload: catalog() });
     expect(result).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ status: 'pending_match' }) }));
   });
@@ -90,7 +88,7 @@ describe('mediaRequestHandler', () => {
   it('returns an authentication failure without retaining the observation', async () => {
     const handler = createMediaRequestHandler(apiClient(async () => {
       throw new ApiError('Sign in first.', 401, false);
-    }), logger, undefined, consentGate, settingsRepository);
+    }), logger, consentGate, settingsRepository);
     const result = await handler.handle({ type: 'media.catalog.submit', correlationId: 'correlation', payload: catalog() });
     expect(result).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'not_authenticated' }) }));
   });
@@ -98,7 +96,7 @@ describe('mediaRequestHandler', () => {
   it('returns rejected catalog payloads without retaining them', async () => {
     const handler = createMediaRequestHandler(apiClient(async () => {
       throw new ApiError('Unsafe provider URL.', 400, false);
-    }), logger, undefined, consentGate, settingsRepository);
+    }), logger, consentGate, settingsRepository);
     const result = await handler.handle({ type: 'media.catalog.submit', correlationId: 'correlation', payload: catalog() });
     expect(result).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'api_rejected' }) }));
   });

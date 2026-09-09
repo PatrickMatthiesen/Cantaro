@@ -606,6 +606,7 @@ public sealed class MediaProviderInitialSyncServiceTests
             var registry = new MediaProviderRegistry(providers);
             var importService = new MediaLibraryImportService(
                 db,
+                new MediaLibraryEventHub(),
                 NullLogger<MediaLibraryImportService>.Instance);
             var service = new MediaProviderInitialSyncService(
                 db,

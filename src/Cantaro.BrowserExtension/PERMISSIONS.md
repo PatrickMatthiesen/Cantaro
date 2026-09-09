@@ -6,7 +6,6 @@ Cantaro requests only the browser capabilities needed for the enabled integratio
 | --- | --- |
 | `storage` | Stores versioned settings, local consent choices, the persistent refresh session, session-only access credentials, and temporary tracking preferences. Local storage is restricted to trusted extension contexts. |
 | `identity` | Runs the browser extension OAuth/PKCE sign-in flow against the configured Cantaro server. |
-| `scripting` | Notifies an already-open Cantaro web page after the extension updates media progress so the page can refresh the user's visible library state. |
 
 Host access is limited to the configured Cantaro API plus the provider pages where the extension runs:
 

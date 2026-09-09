@@ -110,6 +110,7 @@ builder.Services.AddScoped<MediaFranchiseGraphService>();
 builder.Services.AddSingleton<MediaRelationGraphRefreshQueue>();
 builder.Services.AddScoped<AnimeScheduleAvailabilitySyncService>();
 builder.Services.AddSingleton<MediaLibraryImportQueue>();
+builder.Services.AddSingleton<MediaLibraryEventHub>();
 builder.Services.AddScoped<MediaLibraryQueryService>();
 builder.Services.AddScoped<MediaLibraryLinkService>();
 builder.Services.AddScoped<MusicLibraryQueryService>();
