@@ -90,6 +90,7 @@ coverage/
 .codex/
 
 # Impeccable
+/.agents/skills/impeccable/
 **/.impeccable/**
 !**/.impeccable/
 !**/.impeccable/config.json
