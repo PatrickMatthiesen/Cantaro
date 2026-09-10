@@ -113,7 +113,7 @@ export function MediaEntryDetailPage({
   const [isAddingToLibrary, setIsAddingToLibrary] = useState(false);
 
   useEffect(() => subscribeToMediaProgressUpdates((notification) => {
-    if (notification.mediaTitleId !== mediaTitleId) {
+    if (notification.mediaTitleId && notification.mediaTitleId !== mediaTitleId) {
       return;
     }
     void Promise.all([

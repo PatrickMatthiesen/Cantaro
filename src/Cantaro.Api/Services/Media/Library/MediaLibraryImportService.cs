@@ -7,10 +7,12 @@ namespace Cantaro.Api.Services;
 
 public class MediaLibraryImportService(
     ApplicationDbContext dbContext,
+    MediaLibraryEventHub eventHub,
     ILogger<MediaLibraryImportService> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly MediaLibraryEventHub _eventHub = eventHub;
     private readonly ILogger<MediaLibraryImportService> _logger = logger;
 
     public async Task<MediaLibraryImportPersistenceResult> ImportAsync(
@@ -162,6 +164,7 @@ public class MediaLibraryImportService(
         _dbContext.MediaProviderOperations.AddRange(fanOutOperations);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        _eventHub.Publish(userId);
 
         _logger.LogInformation(
             "Imported {Count} {Provider} media items for user {UserId}. Created titles: {CreatedTitles}, created entries: {CreatedEntries}, created bindings: {CreatedBindings}, updated entries: {UpdatedEntries}",

@@ -103,7 +103,13 @@ api.WithReference(migrationService)
 if (builder.ExecutionContext.IsPublishMode)
 {
     api.WithHttpsEndpoint(port: 7689, name: "https")
-        .WithExternalHttpEndpoints();
+        .WithExternalHttpEndpoints()
+        .PublishAsDockerComposeService((_, service) =>
+        {
+            // Aspire also emits a container-only mapping that publishes a random
+            // host port. Keep only the explicitly configured ingress port.
+            service.Ports.RemoveAll(port => !port.Contains(':'));
+        });
 }
 
 // Add frontend

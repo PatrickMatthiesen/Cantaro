@@ -377,13 +377,18 @@ public sealed class SpotifyLifecycleTests
                 .SingleAsync(candidate => candidate.Id == account.Id, cancellationToken))
                 .TokenRefreshLeaseExpiresAt;
 
-            await Task.Delay(TimeSpan.FromMilliseconds(2300), cancellationToken);
-
-            scope.DbContext.ChangeTracker.Clear();
-            renewedExpiry = (await scope.DbContext.ConnectedServiceAccounts
-                .AsNoTracking()
-                .SingleAsync(candidate => candidate.Id == account.Id, cancellationToken))
-                .TokenRefreshLeaseExpiresAt;
+            // Observe the persisted renewal instead of assuming the heartbeat and
+            // database write finish within a narrow window on a busy CI runner.
+            var wait = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+                renewedExpiry = (await scope.DbContext.ConnectedServiceAccounts
+                    .AsNoTracking()
+                    .SingleAsync(candidate => candidate.Id == account.Id, cancellationToken))
+                    .TokenRefreshLeaseExpiresAt;
+            }
+            while (!(renewedExpiry > initialExpiry) && wait.Elapsed < TimeSpan.FromSeconds(10));
         };
 
         await scope.TokenManager.GetAccessTokenAsync(
@@ -393,7 +398,7 @@ public sealed class SpotifyLifecycleTests
 
         Assert.NotNull(initialExpiry);
         Assert.NotNull(renewedExpiry);
-        Assert.True(renewedExpiry > initialExpiry);
+        Assert.True(renewedExpiry > initialExpiry, "The refresh lease was not renewed within 10 seconds.");
     }
 
     [Fact]

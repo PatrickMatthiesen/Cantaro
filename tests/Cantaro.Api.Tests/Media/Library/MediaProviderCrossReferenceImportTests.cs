@@ -374,7 +374,7 @@ public sealed class MediaProviderCrossReferenceImportTests
             return new ImportFixture(
                 connection,
                 db,
-                new MediaLibraryImportService(db, NullLogger<MediaLibraryImportService>.Instance),
+                new MediaLibraryImportService(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance),
                 user,
                 aniListAccount,
                 malAccount);

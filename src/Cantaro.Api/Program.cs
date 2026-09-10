@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+ProductionHostFilteringConfiguration.Configure(builder.Configuration, builder.Environment.IsProduction());
 var extensionAuthOptions = builder.Configuration
     .GetSection(ExtensionAuthOptions.SectionName)
     .Get<ExtensionAuthOptions>() ?? new ExtensionAuthOptions();
@@ -110,6 +111,7 @@ builder.Services.AddScoped<MediaFranchiseGraphService>();
 builder.Services.AddSingleton<MediaRelationGraphRefreshQueue>();
 builder.Services.AddScoped<AnimeScheduleAvailabilitySyncService>();
 builder.Services.AddSingleton<MediaLibraryImportQueue>();
+builder.Services.AddSingleton<MediaLibraryEventHub>();
 builder.Services.AddScoped<MediaLibraryQueryService>();
 builder.Services.AddScoped<MediaLibraryLinkService>();
 builder.Services.AddScoped<MusicLibraryQueryService>();

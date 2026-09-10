@@ -116,7 +116,7 @@ public class MediaLibraryImportServiceTests
     }
 
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
-        new(db, NullLogger<MediaLibraryImportService>.Instance);
+        new(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance);
 
     private static MediaProviderLibraryImportResult MakeImport(
         DateTimeOffset importedAt,

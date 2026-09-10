@@ -10,7 +10,6 @@ import {
   type MessageResult,
 } from '../../../platform/messaging/messageResult';
 import type { MediaBackgroundRequest, MediaBackgroundResponse } from '../contracts/mediaMessages';
-import { browserMediaProgressNotifier, type MediaProgressNotifier } from './mediaProgressNotifier';
 
 type SubmissionRequest = Exclude<MediaBackgroundRequest, { type: 'media.watch.resolve' }>;
 type ResolutionRequest = Extract<MediaBackgroundRequest, { type: 'media.watch.resolve' }>;
@@ -77,7 +76,6 @@ async function handleSubmission(
   request: SubmissionRequest,
   apiClient: CantaroApiClient,
   logger: ExtensionLogger,
-  progressNotifier: MediaProgressNotifier,
 ): Promise<MessageResult<MediaBackgroundResponse>> {
   try {
     if (request.type === 'media.catalog.submit') {
@@ -87,9 +85,6 @@ async function handleSubmission(
     }
 
     const result = await apiClient.submitWatch(request.payload);
-    await progressNotifier.notify(result).catch((error: unknown) => {
-      logger.warn('Could not notify open Cantaro tabs', { reason: failureMessage(error) });
-    });
     logSubmission(logger, request, result);
     return messageSuccess(result, request.correlationId);
   } catch (error) {
@@ -118,7 +113,6 @@ async function handleResolution(
 export function createMediaRequestHandler(
   apiClient: CantaroApiClient,
   logger: ExtensionLogger,
-  progressNotifier: MediaProgressNotifier = { notify: async () => {} },
   consentGate: MediaConsentGate = browserConsentService,
   settingsRepository: SettingsRepository = browserSettingsRepository,
 ): MediaRequestHandler {
@@ -146,7 +140,7 @@ export function createMediaRequestHandler(
           : request;
         return effectiveRequest.type === 'media.watch.resolve'
           ? handleResolution(effectiveRequest, apiClient, requestLogger)
-          : handleSubmission(effectiveRequest, apiClient, requestLogger, progressNotifier);
+          : handleSubmission(effectiveRequest, apiClient, requestLogger);
       } catch (error) {
         requestLogger.error('Media consent check failed', error);
         return failureResult(request, error);
@@ -158,5 +152,4 @@ export function createMediaRequestHandler(
 export const mediaRequestHandler = createMediaRequestHandler(
   backgroundCantaroApiClient,
   createExtensionLogger({ scope: 'background', feature: 'media' }),
-  browserMediaProgressNotifier,
 );

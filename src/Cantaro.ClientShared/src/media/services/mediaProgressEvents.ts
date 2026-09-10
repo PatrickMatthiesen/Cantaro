@@ -1,39 +1,78 @@
-import { z } from 'zod';
+import { mediaApi } from './mediaApi';
+import { readLibraryEvents, type MediaProgressUpdateNotification } from './mediaLibraryEventStream';
 
-const MEDIA_PROGRESS_UPDATED_EVENT = 'cantaro:media-progress-updated';
+const listeners = new Set<(notification: MediaProgressUpdateNotification) => void>();
+let stopConnection: (() => void) | undefined;
 
-export interface MediaProgressUpdateNotification {
-  mediaTitleId: string;
-  progressEpisodes?: number;
+function isEventStream(response: Response): boolean {
+  return response.ok && response.body !== null
+    && response.headers.get('content-type')?.includes('text/event-stream') === true;
 }
 
-const notificationSchema = z.object({
-  mediaTitleId: z.string().min(1),
-  progressEpisodes: z.number().int().optional(),
-});
+function notifyListeners(notification: MediaProgressUpdateNotification, signal: AbortSignal) {
+  if (signal.aborted) return;
+  for (const listener of listeners) listener(notification);
+}
 
-function parseNotification(detail: unknown): MediaProgressUpdateNotification | null {
-  if (typeof detail !== 'string') {
-    return null;
-  }
+function connect(): () => void {
+  let stopped = false;
+  let controller: AbortController | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 1_000;
 
-  try {
-    const parsed = notificationSchema.safeParse(JSON.parse(detail));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
+  const run = async () => {
+    controller = new AbortController();
+    const activeController = controller;
+    try {
+      const response = await mediaApi.openLibraryEvents(activeController.signal);
+      if (!isEventStream(response)) {
+        await response.body?.cancel();
+        return;
+      }
+      await readLibraryEvents(response.body!, (notification) => {
+        retryDelay = 1_000;
+        notifyListeners(notification, activeController.signal);
+      });
+    } catch {
+      // Reconnect with fresh runtime credentials after network/server interruptions.
+    } finally {
+      activeController.abort();
+      if (!stopped && controller === activeController) {
+        retryTimer = setTimeout(() => { void run(); }, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 30_000);
+      }
+    }
+  };
+
+  const resume = () => {
+    if (document.visibilityState === 'hidden') return;
+    clearTimeout(retryTimer);
+    controller?.abort();
+    void run();
+  };
+  window.addEventListener('online', resume);
+  document.addEventListener('visibilitychange', resume);
+  void run();
+
+  return () => {
+    stopped = true;
+    clearTimeout(retryTimer);
+    controller?.abort();
+    window.removeEventListener('online', resume);
+    document.removeEventListener('visibilitychange', resume);
+  };
 }
 
 export function subscribeToMediaProgressUpdates(
   listener: (notification: MediaProgressUpdateNotification) => void,
 ): () => void {
-  const onProgressUpdated = (event: Event) => {
-    const notification = parseNotification((event as CustomEvent<unknown>).detail);
-    if (notification) {
-      listener(notification);
+  listeners.add(listener);
+  stopConnection ??= connect();
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      stopConnection?.();
+      stopConnection = undefined;
     }
   };
-  window.addEventListener(MEDIA_PROGRESS_UPDATED_EVENT, onProgressUpdated);
-  return () => window.removeEventListener(MEDIA_PROGRESS_UPDATED_EVENT, onProgressUpdated);
 }

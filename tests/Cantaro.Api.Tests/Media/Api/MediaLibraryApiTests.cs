@@ -131,6 +131,53 @@ public class MediaLibraryApiTests
     }
 
     [Fact]
+    public async Task AddToLibrary_PublishesLibraryInvalidation()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var title = fixture.MakeTitle("Notify other tabs");
+        fixture.Db.Add(title);
+        await fixture.Db.SaveChangesAsync();
+        var reader = fixture.EventHub.Subscribe(fixture.UserId, out var subscriptionId);
+
+        try
+        {
+            await fixture.Titles.AddToLibrary(
+                title.Id,
+                new MediaViewerStateCreateDto { Status = MediaLibraryStatuses.Planned },
+                CancellationToken.None);
+
+            Assert.True(reader.TryRead(out var libraryEvent));
+            Assert.NotNull(libraryEvent);
+        }
+        finally
+        {
+            fixture.EventHub.Unsubscribe(fixture.UserId, subscriptionId);
+        }
+    }
+
+    [Fact]
+    public async Task LibraryEventStream_StartsWithCatchupAndCleansUpAfterCancellation()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+        await using var stream = fixture.Library
+            .ReadEvents(fixture.UserId, cancellation.Token)
+            .GetAsyncEnumerator();
+
+        Assert.True(await stream.MoveNextAsync());
+        Assert.Equal("library-changed", stream.Current.EventType);
+        Assert.NotNull(stream.Current.Data);
+        Assert.Equal(1, fixture.EventHub.GetSubscriberCount(fixture.UserId));
+
+        var pendingMove = stream.MoveNextAsync().AsTask();
+        await Task.Yield();
+        cancellation.Cancel();
+
+        Assert.False(await pendingMove);
+        Assert.Equal(0, fixture.EventHub.GetSubscriberCount(fixture.UserId));
+    }
+
+    [Fact]
     public async Task AddToLibrary_IsIdempotentForUserAndTitle()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -155,8 +202,9 @@ public class MediaLibraryApiTests
             _connection = connection;
             Db = db;
             UserId = userId;
+            EventHub = new MediaLibraryEventHub();
             var query = new MediaLibraryQueryService(db);
-            Library = new MediaLibraryController(query, manager);
+            Library = new MediaLibraryController(query, EventHub, manager);
             Titles = new MediaTitlesController(
                 db,
                 query,
@@ -167,6 +215,7 @@ public class MediaLibraryApiTests
                         NullLogger<MediaProviderSeasonMappingService>.Instance),
                     NullLogger<MediaEpisodeIdentityService>.Instance),
                 new MediaLibraryLinkService(db, NullLogger<MediaLibraryLinkService>.Instance),
+                EventHub,
                 manager);
             var principal = new ClaimsPrincipal(new ClaimsIdentity(
                 [new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "Test"));
@@ -177,6 +226,7 @@ public class MediaLibraryApiTests
         public ApplicationDbContext Db { get; }
         public MediaLibraryController Library { get; }
         public MediaTitlesController Titles { get; }
+        public MediaLibraryEventHub EventHub { get; }
         public int UserId { get; }
 
         public static async Task<Fixture> CreateAsync()

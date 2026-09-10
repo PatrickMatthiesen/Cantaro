@@ -15,12 +15,14 @@ public class MediaTitlesController(
     MediaLibraryQueryService queryService,
     MediaEpisodeIdentityService episodeIdentityService,
     MediaLibraryLinkService linkService,
+    MediaLibraryEventHub eventHub,
     UserManager<User> userManager) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaLibraryQueryService _queryService = queryService;
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
     private readonly MediaLibraryLinkService _linkService = linkService;
+    private readonly MediaLibraryEventHub _eventHub = eventHub;
     private readonly UserManager<User> _userManager = userManager;
 
     [HttpGet("{mediaTitleId:guid}")]
@@ -95,6 +97,7 @@ public class MediaTitlesController(
             UpdatedAt = now
         });
         await _dbContext.SaveChangesAsync(cancellationToken);
+        _eventHub.Publish(user.Id);
 
         var created = await _queryService.GetViewerStateAsync(user.Id, mediaTitleId, cancellationToken)
             ?? throw new InvalidOperationException("Created viewer state could not be loaded.");

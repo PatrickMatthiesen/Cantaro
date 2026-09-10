@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -94,6 +95,8 @@ public class MediaObservationProgressServiceTests
         Assert.Equal(7, persistedEntry.ProgressEpisodes);
         Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
         Assert.NotNull(persistedEntry.LastLocalEditAt);
+        Assert.True(fixture.LibraryEvents.TryRead(out var libraryEvent));
+        Assert.NotNull(libraryEvent);
     }
 
     [Fact]
@@ -115,6 +118,7 @@ public class MediaObservationProgressServiceTests
 
         Assert.Equal(0, count);
         Assert.Equal(0, await fixture.Db.MediaProviderOperations.CountAsync());
+        Assert.False(fixture.LibraryEvents.TryRead(out _));
 
         var persistedEntry = await fixture.Db.MediaLibraryEntries.SingleAsync(e => e.Id == entry.Id);
         Assert.Equal(10, persistedEntry.ProgressEpisodes);
@@ -298,13 +302,19 @@ public class MediaObservationProgressServiceTests
 
         public ApplicationDbContext Db { get; }
         public MediaObservationProgressService Service { get; }
+        public ChannelReader<MediaLibraryChangedEvent> LibraryEvents { get; }
         public int UserId { get; } = 901;
 
-        private ProgressFixture(SqliteConnection connection, ApplicationDbContext db, MediaObservationProgressService service)
+        private ProgressFixture(
+            SqliteConnection connection,
+            ApplicationDbContext db,
+            MediaObservationProgressService service,
+            ChannelReader<MediaLibraryChangedEvent> libraryEvents)
         {
             _connection = connection;
             Db = db;
             Service = service;
+            LibraryEvents = libraryEvents;
         }
 
         public static async Task<ProgressFixture> CreateAsync()
@@ -324,9 +334,15 @@ public class MediaObservationProgressServiceTests
 
             var registry = new MediaProviderRegistry([new NoOpMediaProvider("anilist")]);
             var processor = new MediaProviderOperationProcessor(db, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
-            var service = new MediaObservationProgressService(db, processor, NullLogger<MediaObservationProgressService>.Instance);
+            var eventHub = new MediaLibraryEventHub();
+            var libraryEvents = eventHub.Subscribe(901, out _);
+            var service = new MediaObservationProgressService(
+                db,
+                processor,
+                eventHub,
+                NullLogger<MediaObservationProgressService>.Instance);
 
-            return new ProgressFixture(connection, db, service);
+            return new ProgressFixture(connection, db, service, libraryEvents);
         }
 
         public async Task<(MediaTitle title, MediaLibraryEntry entry)> SeedTitleAndEntryAsync(

@@ -24,6 +24,7 @@ public class MediaObservationsController(
     MediaEpisodeIdentityService episodeIdentityService,
     MediaProviderSeasonMappingService seasonMappingService,
     IMediaProviderRegistry mediaProviderRegistry,
+    MediaLibraryEventHub mediaLibraryEventHub,
     ILogger<MediaObservationsController> logger,
     MediaObservationLifecycleService? lifecycleService = null) : ControllerBase
 {
@@ -36,6 +37,7 @@ public class MediaObservationsController(
     private readonly MediaEpisodeIdentityService _episodeIdentityService = episodeIdentityService;
     private readonly MediaProviderSeasonMappingService _seasonMappingService = seasonMappingService;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
+    private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
     private readonly ILogger<MediaObservationsController> _logger = logger;
     private static readonly JsonSerializerOptions PayloadJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -970,6 +972,7 @@ public class MediaObservationsController(
             UpdatedAt = now
         });
         await _dbContext.SaveChangesAsync(cancellationToken);
+        _mediaLibraryEventHub.Publish(userId);
         return new AddProviderTitleResult(entry.Id, title.Id, title.CanonicalTitle, null);
     }
 

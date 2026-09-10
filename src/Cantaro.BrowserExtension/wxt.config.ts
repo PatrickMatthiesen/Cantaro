@@ -54,7 +54,6 @@ export default defineConfig({
     permissions: [
       'storage',
       'identity',
-      'scripting',
     ],
     host_permissions: [
       ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),
