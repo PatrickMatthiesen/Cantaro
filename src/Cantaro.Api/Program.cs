@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+ProductionHostFilteringConfiguration.Configure(builder.Configuration, builder.Environment.IsProduction());
 var extensionAuthOptions = builder.Configuration
     .GetSection(ExtensionAuthOptions.SectionName)
     .Get<ExtensionAuthOptions>() ?? new ExtensionAuthOptions();
