@@ -43,7 +43,8 @@ if (builder.ExecutionContext.IsRunMode) {
 var db = postgres.AddDatabase("cantaro-db");
 
 var garage = builder.AddGarage("garage")
-    .WithLifetime(ContainerLifetime.Persistent)
+    // Clean up the development container on shutdown; the named volume retains its data.
+    .WithLifetime(ContainerLifetime.Session)
     .WithVolume("cantaro-garage-data", GarageResource.DataPath)
     .PublishAsDockerComposeService((_, service) =>
     {
@@ -51,6 +52,7 @@ var garage = builder.AddGarage("garage")
     });
 var avatars = garage.AddBucket("avatars", "cantaro-avatars");
 var garageProvisioner = builder.AddProject<Projects.Cantaro_GarageProvisioner>("garage-provisioner")
+    .WithParentRelationship(garage)
     .WithReference(garage)
     .WithReference(avatars)
     .WaitForStart(garage);
