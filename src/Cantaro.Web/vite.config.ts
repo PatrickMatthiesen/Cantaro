@@ -51,6 +51,12 @@ export default defineConfig({
         xfwd: true,
         secure: false
       },
+      '/signin-google': {
+        target: apiProxyTarget,
+        changeOrigin: false,
+        xfwd: true,
+        secure: false,
+      },
     },
   },
 })

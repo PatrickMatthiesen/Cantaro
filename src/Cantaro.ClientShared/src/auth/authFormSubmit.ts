@@ -10,6 +10,7 @@ interface SubmitAuthFormOptions<TFormData> {
   setIsLoading: (isLoading: boolean) => void;
   fallbackMessage: string;
   onSuccess?: () => void | Promise<void>;
+  onSettled?: () => void | Promise<void>;
 }
 
 function getValidationError<TFormData>(schema: ZodType<TFormData>, formData: TFormData): string | null {
@@ -34,6 +35,7 @@ export async function submitAuthForm<TFormData>({
   setIsLoading,
   fallbackMessage,
   onSuccess,
+  onSettled,
 }: SubmitAuthFormOptions<TFormData>) {
   event.preventDefault();
   setError('');
@@ -53,5 +55,6 @@ export async function submitAuthForm<TFormData>({
     setError(getSubmissionErrorMessage(error, fallbackMessage));
   } finally {
     setIsLoading(false);
+    await onSettled?.();
   }
 }

@@ -6,8 +6,10 @@ import {
   AuthEmailField,
   AuthFormLayout,
   AuthPasswordField,
+  TurnstileWidget,
 } from '@cantaro/client-shared/auth';
 import { submitAuthForm } from '@cantaro/client-shared/auth';
+import { useAuthTurnstile } from '../hooks/useAuthTurnstile';
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
@@ -19,17 +21,21 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { token: turnstileToken, guardSubmission, reset: resetTurnstile, widgetProps } = useAuthTurnstile('login');
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    if (guardSubmission(e, setError)) return;
+
     const formData: LoginFormData = { email, password };
     await submitAuthForm({
       event: e,
       formData,
       schema: loginSchema,
-      submit: () => login({ email, password }),
+      submit: () => login({ email, password, turnstileToken: turnstileToken ?? undefined }),
       setError,
       setIsLoading,
       fallbackMessage: 'Login failed',
+      onSettled: resetTurnstile,
     });
   };
 
@@ -53,6 +59,7 @@ export const LoginForm = ({ onSwitchToRegister }: LoginFormProps) => {
         onChange={(e) => setPassword(e.target.value)}
         autoComplete="current-password"
       />
+      <TurnstileWidget {...widgetProps} />
     </AuthFormLayout>
   );
 };

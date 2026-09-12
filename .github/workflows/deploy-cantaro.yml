@@ -101,8 +101,8 @@ jobs:
           ASPIRE_CONTAINER_RUNTIME: docker
           DEPLOY_HOST: ${{ secrets.SSH_HOST }}
           DEPLOY_USER: ${{ secrets.SSH_USER }}
-          Parameters__YouTubeClientId: ${{ secrets.CANTARO_YOUTUBE_CLIENT_ID }}
-          Parameters__YouTubeClientSecret: ${{ secrets.CANTARO_YOUTUBE_CLIENT_SECRET }}
+          Parameters__GoogleClientId: ${{ secrets.CANTARO_GOOGLE_CLIENT_ID }}
+          Parameters__GoogleClientSecret: ${{ secrets.CANTARO_GOOGLE_CLIENT_SECRET }}
           Parameters__SpotifyClientId: ${{ secrets.CANTARO_SPOTIFY_CLIENT_ID }}
           Parameters__SpotifyClientSecret: ${{ secrets.CANTARO_SPOTIFY_CLIENT_SECRET }}
           Parameters__FrontendHttpsBaseUrl: ${{ vars.CANTARO_HTTPS_BASE_URL }}
@@ -112,6 +112,12 @@ jobs:
           Parameters__MyAnimeListClientSecret: ${{ secrets.CANTARO_MYANIMELIST_CLIENT_SECRET }}
           Parameters__AnimeScheduleId: ${{ secrets.CANTARO_ANIMESCHEDULE_ID }}
           Parameters__AnimeScheduleToken: ${{ secrets.CANTARO_ANIMESCHEDULE_TOKEN }}
+          Parameters__TurnstileMode: ${{ vars.CANTARO_TURNSTILE_MODE || 'Auto' }}
+          Parameters__TurnstileSiteKey: ${{ vars.CANTARO_TURNSTILE_SITE_KEY }}
+          Parameters__TurnstileSecret: ${{ secrets.CANTARO_TURNSTILE_SECRET }}
+          Parameters__TurnstileHostname: ${{ vars.CANTARO_TURNSTILE_HOSTNAME }}
+          Parameters__AuthenticationMode: ${{ vars.CANTARO_AUTHENTICATION_MODE || 'Local' }}
+          Parameters__TrustedProxyIp: ${{ secrets.CANTARO_TRUSTED_PROXY_IP }}
           Parameters__ExtensionAuthJwtSigningKey: ${{ secrets.CANTARO_EXTENSION_AUTH_JWT_SIGNING_KEY }}
           Parameters__postgres_password: ${{ secrets.CANTARO_POSTGRES_PASSWORD }}
         run: |

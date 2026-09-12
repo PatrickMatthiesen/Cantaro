@@ -58,6 +58,6 @@ public sealed class ChangePasswordRequest
 
 public sealed class DeleteAccountRequest
 {
-    [Required]
-    public required string CurrentPassword { get; set; }
+    public string? CurrentPassword { get; set; }
+    public bool UseGoogleReauthentication { get; set; }
 }

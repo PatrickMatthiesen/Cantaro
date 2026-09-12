@@ -283,11 +283,22 @@ public sealed class ProfileController(
     }
 
     [HttpDelete]
+    [Consumes("application/json")]
     public async Task<ActionResult> DeleteAccount(DeleteAccountRequest request, CancellationToken cancellationToken)
     {
         var user = await userManager.GetUserAsync(User);
         if (user is null) return Unauthorized();
-        if (!await userManager.CheckPasswordAsync(user, request.CurrentPassword))
+        if (request.UseGoogleReauthentication)
+        {
+            if (Request.Headers["X-Cantaro-Confirm-Delete"] != "true"
+                || !HasRecentGoogleReauthentication(User, DateTimeOffset.UtcNow)
+                || !(await userManager.GetLoginsAsync(user)).Any(login => login.LoginProvider == "Google"))
+            {
+                return BadRequest(new { error = "Confirm your identity with Google before deleting your account." });
+            }
+        }
+        else if (string.IsNullOrEmpty(request.CurrentPassword)
+            || !await userManager.CheckPasswordAsync(user, request.CurrentPassword))
         {
             return BadRequest(new { error = "The current password is incorrect." });
         }
@@ -304,6 +315,14 @@ public sealed class ProfileController(
         await signInManager.SignOutAsync();
         if (avatarObjectKey is not null) await TryDeleteAvatarAsync(avatarObjectKey, cancellationToken);
         return NoContent();
+    }
+
+    internal static bool HasRecentGoogleReauthentication(System.Security.Claims.ClaimsPrincipal principal, DateTimeOffset now)
+    {
+        var value = principal.FindFirst(GoogleAuthService.GoogleReauthenticatedAtClaim)?.Value;
+        return long.TryParse(value, out var timestamp)
+            && timestamp <= now.ToUnixTimeSeconds()
+            && timestamp >= now.AddMinutes(-5).ToUnixTimeSeconds();
     }
 
     private async Task<User?> GetCurrentUserAsync(CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { LoginForm } from './LoginForm';
 import { RegisterForm } from './RegisterForm';
+import { SignInOptions } from './SignInOptions';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface GlobalHeadingState {
@@ -55,11 +56,11 @@ function LandingPage() {
           </section>
 
           <section className="border-y border-border-subtle py-8 lg:pl-12">
-            {showRegister ? (
+            <SignInOptions>{showRegister ? (
               <RegisterForm onSwitchToLogin={() => setShowRegister(false)} />
             ) : (
               <LoginForm onSwitchToRegister={() => setShowRegister(true)} />
-            )}
+            )}</SignInOptions>
           </section>
         </main>
       </div>

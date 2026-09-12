@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ChangeEventHandler, FormEvent, InputHTMLAttributes, ReactNode } from 'react';
+import { PASSWORD_MIN_LENGTH } from './validation';
 
 interface AuthFormHeaderProps {
   eyebrow: string;
@@ -182,7 +183,7 @@ export function AuthPasswordField({ value, onChange, autoComplete }: AuthPasswor
       value={value}
       onChange={onChange}
       required
-      minLength={6}
+      minLength={autoComplete === 'new-password' ? PASSWORD_MIN_LENGTH : 1}
       autoComplete={autoComplete}
       placeholder="••••••••"
     />

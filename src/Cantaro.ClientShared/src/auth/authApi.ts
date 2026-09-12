@@ -25,11 +25,13 @@ export interface ProfilePreferences {
 export interface RegisterRequest {
   email: string;
   password: string;
+  turnstileToken?: string;
 }
 
 export interface LoginRequest {
   email: string;
   password: string;
+  turnstileToken?: string;
 }
 
 async function readApiError(response: Response, fallbackMessage: string): Promise<string> {

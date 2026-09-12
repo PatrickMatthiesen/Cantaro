@@ -71,7 +71,6 @@ Cantaro requests these browser capabilities for its disclosed features:
 
 - **`storage`:** Stores settings, authentication tokens, and temporary preferences on the user's device.
 - **`identity`:** Runs the browser-managed Authorization Code with PKCE sign-in flow against the configured Cantaro server.
-- **`scripting`:** Notifies an already-open Cantaro web page after the extension updates media progress, allowing the page to refresh the user's visible library state.
 - **Site access:** Lets Cantaro read the rendered page on supported Crunchyroll pages. Broad HTTPS access is optional and is requested only for the exact self-hosted Cantaro origin configured by the user.
 
 ## Sharing and Chrome Web Store Limited Use

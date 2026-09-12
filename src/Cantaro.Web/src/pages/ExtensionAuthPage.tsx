@@ -2,8 +2,10 @@ import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { loginSchema, type LoginFormData } from '@cantaro/client-shared/auth';
 import { AuthInputField } from '@cantaro/client-shared/auth';
+import { TurnstileWidget } from '@cantaro/client-shared/auth';
 import { submitAuthForm } from '@cantaro/client-shared/auth';
 import { GradientButton } from '@cantaro/client-shared/ui';
+import { SignInOptions } from '../components/SignInOptions';
 
 type AuthPhase = 'checking' | 'ready' | 'submitting';
 
@@ -57,6 +59,9 @@ export function ExtensionAuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [turnstileEnabled, setTurnstileEnabled] = useState<boolean | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const authTarget = readAuthTarget();
   const isSubmitting = phase === 'submitting';
 
@@ -102,6 +107,12 @@ export function ExtensionAuthPage() {
       setError('The extension sign-in request could not be resumed.');
       return;
     }
+
+    if (turnstileEnabled !== false && !turnstileToken) {
+      event.preventDefault();
+      setError(turnstileEnabled === null ? 'Checking bot protection. Try again in a moment.' : 'Complete the bot check to continue.');
+      return;
+    }
     const formData: LoginFormData = { email, password };
 
     await submitAuthForm({
@@ -118,6 +129,7 @@ export function ExtensionAuthPage() {
           body: JSON.stringify({
             email: email.trim(),
             password,
+            turnstileToken: turnstileToken ?? undefined,
           }),
         });
 
@@ -130,6 +142,10 @@ export function ExtensionAuthPage() {
       setIsLoading: (isLoading) => setPhase(isLoading ? 'submitting' : 'ready'),
       fallbackMessage: 'Sign-in failed.',
       onSuccess: () => window.location.assign(authTarget.returnTo),
+      onSettled: () => {
+        setTurnstileToken(null);
+        setTurnstileResetKey((key) => key + 1);
+      },
     });
   };
 
@@ -149,12 +165,13 @@ export function ExtensionAuthPage() {
             </p>
           ) : null}
 
-          {phase === 'checking' ? (
-            <div className="mt-8 border-y border-border-subtle px-4 py-5 text-sm text-content-muted">
-              Checking whether the API session is already active…
-            </div>
-          ) : (
-            <form className="mt-8 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
+          <SignInOptions>
+            {phase === 'checking' ? (
+              <div className="mt-8 border-y border-border-subtle px-4 py-5 text-sm text-content-muted">
+                Checking whether the API session is already active…
+              </div>
+            ) : (
+              <form className="mt-8 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
               <AuthInputField
                 id="extension-auth-email"
                 type="email"
@@ -177,6 +194,13 @@ export function ExtensionAuthPage() {
                 placeholder="Your Cantaro password"
               />
 
+              <TurnstileWidget
+                action="login"
+                onConfigured={setTurnstileEnabled}
+                onToken={setTurnstileToken}
+                resetKey={turnstileResetKey}
+              />
+
               {error ? (
                 <div className="border-y border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger-content">
                   {error}
@@ -191,8 +215,9 @@ export function ExtensionAuthPage() {
                   {isSubmitting ? 'Signing in…' : 'Continue to extension'}
                 </GradientButton>
               </div>
-            </form>
-          )}
+              </form>
+            )}
+          </SignInOptions>
         </section>
       </div>
     </div>
