@@ -1,9 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Cantaro.Api/Cantaro.Api.csproj" />
-    <Project Path="src/Cantaro.Aspire.Hosting.Garage/Cantaro.Aspire.Hosting.Garage.csproj" />
     <Project Path="src/Cantaro.AppHost/Cantaro.AppHost.csproj" />
-    <Project Path="src/Cantaro.GarageProvisioner/Cantaro.GarageProvisioner.csproj" />
     <Project Path="src/Cantaro.MigrationService/Cantaro.MigrationService.csproj" />
     <Project Path="src/Cantaro.ServiceDefaults/Cantaro.ServiceDefaults.csproj" />
   </Folder>

@@ -1,7 +1,7 @@
 // #:sdk Aspire.AppHost.Sdk@13.5.0-preview.1.26319.13
 // #:package Aspire.Hosting.JavaScript@13.5.0-preview.1.26319.13
 
-using Cantaro.Aspire.Hosting.Garage;
+using Garage.Hosting;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -42,20 +42,15 @@ if (builder.ExecutionContext.IsRunMode) {
 
 var db = postgres.AddDatabase("cantaro-db");
 
-var garage = builder.AddGarage("garage")
+var garage = builder.AddGarage("garage", new GarageResourceOptions { ConfigPath = "Garage/garage.toml" })
     // Clean up the development container on shutdown; the named volume retains its data.
     .WithLifetime(ContainerLifetime.Session)
-    .WithVolume("cantaro-garage-data", GarageResource.DataPath)
+    .WithDataVolume("cantaro-garage-data")
     .PublishAsDockerComposeService((_, service) =>
     {
         service.Restart = "unless-stopped";
     });
 var avatars = garage.AddBucket("avatars", "cantaro-avatars");
-var garageProvisioner = builder.AddProject<Projects.Cantaro_GarageProvisioner>("garage-provisioner")
-    .WithParentRelationship(garage)
-    .WithReference(garage)
-    .WithReference(avatars)
-    .WaitForStart(garage);
 
 // Optionally, add pgAdmin for database management (runs in a separate container)
 // var pgAdmin = postgres.WithPgAdmin();
@@ -100,7 +95,7 @@ api.WithReference(migrationService)
     .WaitForCompletion(migrationService)
     .WithReference(db)
     .WithReference(avatars)
-    .WaitForCompletion(garageProvisioner);
+    .WaitFor(garage);
 
 if (builder.ExecutionContext.IsPublishMode)
 {
