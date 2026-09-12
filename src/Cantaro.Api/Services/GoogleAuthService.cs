@@ -220,14 +220,14 @@ public sealed class GoogleAuthService
     public static bool TryGetSafeReturnUrl(string? returnUrl, out string safeReturnUrl)
     {
         var candidate = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl.Trim();
+        // Validate URL path syntax directly: Unix root paths are also absolute file URIs.
         var isSafe = candidate.Length <= 2048
             && candidate.StartsWith("/", StringComparison.Ordinal)
             && !candidate.StartsWith("//", StringComparison.Ordinal)
             && !candidate.StartsWith(@"/\\", StringComparison.Ordinal)
             && !candidate.Contains('\\', StringComparison.Ordinal)
             && !candidate.Contains("://", StringComparison.Ordinal)
-            && !candidate.Any(char.IsControl)
-            && !Uri.TryCreate(candidate, UriKind.Absolute, out _);
+            && !candidate.Any(char.IsControl);
 
         safeReturnUrl = isSafe ? candidate : "/";
         return isSafe;
