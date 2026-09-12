@@ -176,20 +176,26 @@ jobs:
           console.log(`Validated extension version ${expectedVersion} for ${expectedOrigin}`);
           NODE
       - name: Upload Chrome artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: cantaro-extension-chrome-${{ steps.package.outputs.version }}
           path: src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.chrome_filename }}
+          archive: false
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload Firefox artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload Firefox artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: cantaro-extension-firefox-${{ steps.package.outputs.version }}
-          path: |
-            src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.firefox_filename }}
-            src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.firefox_sources_filename }}
+          path: src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.firefox_filename }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Firefox sources artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: src/Cantaro.BrowserExtension/.output/${{ steps.package.outputs.firefox_sources_filename }}
+          archive: false
           if-no-files-found: error
           retention-days: 30
 
@@ -274,10 +280,11 @@ jobs:
 
       - name: Download Chrome artifact
         if: ${{ steps.stores.outputs.chrome_enabled == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
-          name: cantaro-extension-chrome-${{ needs.build-extension.outputs.version }}
+          name: ${{ needs.build-extension.outputs.chrome_filename }}
           path: .release/chrome
+          skip-decompress: true
 
       - name: Submit Chrome extension for staged publishing
         if: ${{ steps.stores.outputs.chrome_enabled == 'true' }}
@@ -309,12 +316,21 @@ jobs:
             --chrome-publish-type STAGED_PUBLISH \
             --chrome-zip "$CHROME_ZIP"
 
-      - name: Download Firefox artifacts
+      - name: Download Firefox artifact
         if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
-          name: cantaro-extension-firefox-${{ needs.build-extension.outputs.version }}
+          name: ${{ needs.build-extension.outputs.firefox_filename }}
           path: .release/firefox
+          skip-decompress: true
+
+      - name: Download Firefox sources artifact
+        if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build-extension.outputs.firefox_sources_filename }}
+          path: .release/firefox
+          skip-decompress: true
 
       - name: Submit Firefox extension as unlisted
         if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
