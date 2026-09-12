@@ -12,8 +12,9 @@ var dockerEnv = builder.AddDockerComposeEnvironment("cantaro-compose")
         composeFile.Name = "cantaro";
     });
 
-var youtubeClientId = builder.AddParameter("YouTubeClientId", secret: true);
-var youtubeClientSecret = builder.AddParameter("YouTubeClientSecret", secret: true);
+// One Google OAuth client serves both sign-in and YouTube.
+var googleClientId = builder.AddParameter("GoogleClientId", secret: true);
+var googleClientSecret = builder.AddParameter("GoogleClientSecret", secret: true);
 var spotifyClientId = builder.AddParameter("SpotifyClientId", secret: true);
 var spotifyClientSecret = builder.AddParameter("SpotifyClientSecret", secret: true);
 var aniListClientId = builder.AddParameter("AniListClientId", secret: true);
@@ -22,6 +23,29 @@ var myAnimeListClientId = builder.AddParameter("MyAnimeListClientId", secret: tr
 var myAnimeListClientSecret = builder.AddParameter("MyAnimeListClientSecret", secret: true);
 var animeScheduleId = builder.AddParameter("AnimeScheduleId");
 var animeScheduleToken = builder.AddParameter("AnimeScheduleToken", secret: true);
+var turnstileMode = builder.AddParameter("TurnstileMode", () => builder.Configuration["Parameters:TurnstileMode"] ?? "Auto");
+var turnstileSiteKey = builder.AddParameter("TurnstileSiteKey", () => builder.Configuration["Parameters:TurnstileSiteKey"] ?? "");
+var turnstileSecret = builder.AddParameter("TurnstileSecret", () => builder.Configuration["Parameters:TurnstileSecret"] ?? "", secret: true);
+var turnstileHostname = builder.AddParameter("TurnstileHostname", () => builder.Configuration["Parameters:TurnstileHostname"] ?? "");
+#pragma warning disable ASPIREINTERACTION001
+var authenticationMode = builder.AddParameter("AuthenticationMode", () => builder.Configuration["Parameters:AuthenticationMode"] ?? "Local")
+    .WithCustomInput(parameter => new()
+    {
+        Name = parameter.Name,
+        Label = parameter.Name,
+        InputType = InputType.Choice,
+        Required = true,
+        AllowCustomChoice = false,
+        Options =
+        [
+            new("Local", "Local (password sign-in)"),
+            new("Both", "Both (password and Google sign-in)"),
+            new("GoogleOnly", "GoogleOnly (Google sign-in only)")
+        ]
+    });
+#pragma warning restore ASPIREINTERACTION001
+var trustedProxyIp = builder.AddParameter("TrustedProxyIp", () => builder.Configuration["Parameters:TrustedProxyIp"] ?? "", secret: true)
+    .WithDescription("Comma-separated IP addresses of the proxies connecting directly to the API. Leave empty to disable forwarded-header trust.");
 var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
     ? builder.AddParameter("ExtensionAuthJwtSigningKey", "Cantaro.ExtensionAuth.Development.Signing.Key.2026.04.26", true)
     : builder.AddParameter("ExtensionAuthJwtSigningKey", secret: true);
@@ -61,8 +85,8 @@ var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("mi
 
 // Add API service
 var api = builder.AddProject<Projects.Cantaro_Api>("api")
-    .WithEnvironment("YouTube:ClientId", youtubeClientId)
-    .WithEnvironment("YouTube:ClientSecret", youtubeClientSecret)
+    .WithEnvironment("YouTube:ClientId", googleClientId)
+    .WithEnvironment("YouTube:ClientSecret", googleClientSecret)
     .WithEnvironment("Spotify:ClientId", spotifyClientId)
     .WithEnvironment("Spotify:ClientSecret", spotifyClientSecret)
     .WithEnvironment("AniList:ClientId", aniListClientId)
@@ -71,6 +95,14 @@ var api = builder.AddProject<Projects.Cantaro_Api>("api")
     .WithEnvironment("MyAnimeList:ClientSecret", myAnimeListClientSecret)
     .WithEnvironment("AnimeSchedule:Id", animeScheduleId)
     .WithEnvironment("AnimeSchedule:Token", animeScheduleToken)
+    .WithEnvironment("Turnstile:Mode", turnstileMode)
+    .WithEnvironment("Turnstile:SiteKey", turnstileSiteKey)
+    .WithEnvironment("Turnstile:Secret", turnstileSecret)
+    .WithEnvironment("Turnstile:AllowedHostnames:0", turnstileHostname)
+    .WithEnvironment("Authentication:Mode", authenticationMode)
+    .WithEnvironment("Authentication:Google:ClientId", googleClientId)
+    .WithEnvironment("Authentication:Google:ClientSecret", googleClientSecret)
+    .WithEnvironment("RateLimiting:TrustedProxies:0", trustedProxyIp)
     .WithEnvironment("ExtensionAuth:JwtSigningKey", extensionAuthJwtSigningKey)
     .PublishAsDockerComposeService((_, service) =>
     {

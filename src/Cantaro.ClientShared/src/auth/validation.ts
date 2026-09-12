@@ -5,7 +5,7 @@ import { z } from 'zod';
  * These should match the backend validation rules.
  */
 
-export const PASSWORD_MIN_LENGTH = 6;
+export const PASSWORD_MIN_LENGTH = 15;
 const PASSWORD_MIN_UNIQUE_CHARS = 1;
 
 /**
@@ -33,7 +33,8 @@ const passwordValidation = z
 
 export const loginSchema = z.object({
   email: emailValidation,
-  password: passwordValidation,
+  // Existing passwords remain usable when the policy for new passwords changes.
+  password: z.string().min(1, 'Enter your password'),
 });
 
 export const registerSchema = z.object({

@@ -1,6 +1,7 @@
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
+using Cantaro.Api.Middleware;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Lyrics;
 using Cantaro.Api.Services.Spotify;
@@ -13,6 +14,13 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+var authenticationOptions = builder.Configuration.GetSection(AuthenticationOptions.SectionName)
+    .Get<AuthenticationOptions>() ?? new AuthenticationOptions();
+builder.Services.AddOptions<AuthenticationOptions>()
+    .Bind(builder.Configuration.GetSection(AuthenticationOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AuthenticationOptions>, AuthenticationOptionsValidator>();
+builder.Services.AddScoped<GoogleAuthService>();
 ProductionHostFilteringConfiguration.Configure(builder.Configuration, builder.Environment.IsProduction());
 var extensionAuthOptions = builder.Configuration
     .GetSection(ExtensionAuthOptions.SectionName)
@@ -141,15 +149,18 @@ builder.Services.AddHostedService<AnimeScheduleAvailabilityRefreshWorker>();
 builder.Services.AddScoped<ExtensionAuthorizationCodeStore>();
 builder.Services.AddScoped<ExtensionAuthService>();
 builder.Services.AddSingleton<IAvatarStore, S3AvatarStore>();
+builder.Services.AddTurnstile(builder.Configuration);
+TrustedProxyConfiguration.Configure(builder.Services, builder.Configuration);
+builder.Services.AddRateLimiter(ApiRateLimitingConfiguration.Configure);
 
 builder.Services.AddIdentityApiEndpoints<User>(c =>
 {
-    // Password settings - relaxed for development, should be strengthened in production
+    // Allow passphrases without composition rules; keep short seeded passwords development-only.
     c.Password.RequireDigit = false;
     c.Password.RequireLowercase = false;
     c.Password.RequireUppercase = false;
     c.Password.RequireNonAlphanumeric = false;
-    c.Password.RequiredLength = 6;
+    c.Password.RequiredLength = builder.Environment.IsDevelopment() ? 6 : 15;
     c.Password.RequiredUniqueChars = 1;
 
     // User settings
@@ -167,6 +178,7 @@ builder.Services
         options.DefaultAuthenticateScheme = "CantaroApi";
         options.DefaultChallengeScheme = "CantaroApi";
     })
+    .AddCantaroGoogle(authenticationOptions)
     .AddPolicyScheme("CantaroApi", "Cantaro API authentication", options =>
     {
         options.ForwardDefaultSelector = context =>
@@ -318,6 +330,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseForwardedHeaders();
 app.UseCors();
 app.UseHttpsRedirection();
 var hasWebRoot = Directory.Exists(app.Environment.WebRootPath);
@@ -327,7 +340,11 @@ if (hasWebRoot)
     app.UseStaticFiles();
 }
 
+app.UseRouting();
 app.UseAuthentication();
+app.UseRateLimiter();
+app.UseMiddleware<AuthenticationModeGuardMiddleware>();
+app.UseTurnstileProtection();
 app.UseAuthorization();
 
 app.MapControllers();

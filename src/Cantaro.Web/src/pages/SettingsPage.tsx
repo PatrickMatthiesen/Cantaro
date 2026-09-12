@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
-import { Bell, Check, ChevronRight, Database, Download, ImagePlus, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, Trash2, UserRound } from 'lucide-react';
-import { authApi, BlurredEmail, type ProfilePreferences, type ThemePreference, type User } from '@cantaro/client-shared/auth';
+import { Bell, Check, ChevronRight, Database, Download, ImagePlus, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, UserRound } from 'lucide-react';
+import { authApi, PASSWORD_MIN_LENGTH, BlurredEmail, type ProfilePreferences, type ThemePreference, type User } from '@cantaro/client-shared/auth';
 import { MusicPlatformIcon, platformCatalog, platformManager, type PlatformAccountStatus, type PlatformId } from '@cantaro/client-shared/music';
 import { MediaProviderIcon, mediaApi, mediaProviderCatalog, type MediaProviderAccountStatusDto } from '@cantaro/client-shared/media';
 import { PageShell } from '../components/PageShell';
 import { PageSideNavigation, type PageNavigationSection } from '../components/PageNavigation';
 import { useAuth } from '../contexts/AuthContext';
 import { AvatarCropDialog } from '../components/AvatarCropDialog';
+import { GoogleAccountPanel } from '../components/GoogleAccountPanel';
+import { DeleteAccountPanel } from '../components/DeleteAccountPanel';
+import { useSignInMethods } from '../hooks/useSignInMethods';
+import { useGoogleAccountStatus } from '../hooks/useGoogleAccountStatus';
 
 type SaveState = 'idle' | 'saving' | 'saved';
 type SectionId = 'profile' | 'connections' | 'notifications' | 'appearance' | 'sync' | 'security' | 'data';
@@ -364,11 +368,27 @@ function PreferencesSections({ profile, onProfile }: { profile: User; onProfile:
   </>;
 }
 
-function SecuritySection() {
+function PasswordSection() {
   const [currentPassword, setCurrentPassword] = useState(''); const [newPassword, setNewPassword] = useState(''); const [message, setMessage] = useState<string | null>(null); const [state, setState] = useState<SaveState>('idle');
-  return <SettingsSection id="security" eyebrow="Account security" title="Change your password" description="Updating your password refreshes your current Cantaro session without exposing credentials to connected services."><form onSubmit={async event => { event.preventDefault(); setState('saving'); setMessage(null); try { await authApi.changePassword(currentPassword, newPassword); setCurrentPassword(''); setNewPassword(''); setMessage('Password changed.'); setState('saved'); } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Password change failed'); setState('idle'); } }} className="grid gap-4 md:grid-cols-2"><input type="password" autoComplete="current-password" required placeholder="Current password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} className="min-h-11 border border-border-strong bg-surface px-4 text-sm text-content outline-none focus:border-focus focus-visible:outline-2 focus-visible:outline-focus" /><input type="password" autoComplete="new-password" minLength={6} required placeholder="New password" value={newPassword} onChange={event => setNewPassword(event.target.value)} className="min-h-11 border border-border-strong bg-surface px-4 text-sm text-content outline-none focus:border-focus focus-visible:outline-2 focus-visible:outline-focus" /><div className="flex items-center gap-4 md:col-span-2"><SaveButton state={state}>Change password</SaveButton>{message ? <p className="text-sm text-content-muted" role="status">{message}</p> : null}</div></form></SettingsSection>;
+  return <SettingsSection id="security" eyebrow="Account security" title="Change your password" description="Updating your password refreshes your current Cantaro session without exposing credentials to connected services."><form onSubmit={async event => { event.preventDefault(); setState('saving'); setMessage(null); try { await authApi.changePassword(currentPassword, newPassword); setCurrentPassword(''); setNewPassword(''); setMessage('Password changed.'); setState('saved'); } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Password change failed'); setState('idle'); } }} className="grid gap-4 md:grid-cols-2"><input type="password" autoComplete="current-password" required placeholder="Current password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} className="min-h-11 border border-border-strong bg-surface px-4 text-sm text-content outline-none focus:border-focus focus-visible:outline-2 focus-visible:outline-focus" /><input type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} required placeholder="New password" value={newPassword} onChange={event => setNewPassword(event.target.value)} className="min-h-11 border border-border-strong bg-surface px-4 text-sm text-content outline-none focus:border-focus focus-visible:outline-2 focus-visible:outline-focus" /><div className="flex items-center gap-4 md:col-span-2"><SaveButton state={state}>Change password</SaveButton>{message ? <p className="text-sm text-content-muted" role="status">{message}</p> : null}</div></form></SettingsSection>;
 }
 
+function GoogleSecuritySection({ localLoginEnabled }: { localLoginEnabled: boolean }) {
+  const { status, error } = useGoogleAccountStatus(true);
+  if (error) return <p role="alert" className="py-8 text-sm text-danger-content">{error}</p>;
+  if (!status) return <p role="status" className="py-8 text-sm text-content-muted">Loading security settings…</p>;
+  return <>
+    <section className="pt-8"><GoogleAccountPanel /></section>
+    {localLoginEnabled && status.hasPassword ? <PasswordSection /> : <SettingsSection id="security" eyebrow="Account security" title="Account security" description="Sign-in is managed by Google. Manage your password and recovery options in your Google account."><a href="https://myaccount.google.com/security" className="text-sm text-content underline underline-offset-4">Open Google account security</a></SettingsSection>}
+  </>;
+}
+
+function SecuritySection() {
+  const { methods, error } = useSignInMethods();
+  if (error) return <p role="alert" className="py-8 text-sm text-danger-content">{error}</p>;
+  if (!methods) return <p role="status" className="py-8 text-sm text-content-muted">Loading security settings…</p>;
+  return methods.googleEnabled ? <GoogleSecuritySection localLoginEnabled={methods.localLoginEnabled} /> : <PasswordSection />;
+}
 function withBlurEmailAddress(profile: User, blurEmailAddress: boolean) {
   return {
     ...profile,
@@ -443,10 +463,10 @@ function useBlurEmailAddressPreference(profile: User, onProfile: (profile: User)
 }
 
 function DataSection({ profile, onProfile }: { profile: User; onProfile: (profile: User) => void }) {
-  const [password, setPassword] = useState(''); const [error, setError] = useState<string | null>(null);
+
   const { blurEmailAddress, privacyError, privacyState, setBlurEmailAddress } = useBlurEmailAddressPreference(profile, onProfile);
 
-  return <SettingsSection id="data" eyebrow="You own the archive" title="Data and privacy" description="Take a portable copy of your Cantaro data, reduce stream-visible account details, or permanently remove your account."><div className="mb-5 overflow-hidden border-y border-border-subtle px-1"><Toggle checked={blurEmailAddress} disabled={privacyState === 'saving'} onChange={value => void setBlurEmailAddress(value)} title="Blur account email on screen" detail="Obscure your email anywhere Cantaro shows it, useful while streaming or sharing your screen." />{privacyState !== 'idle' ? <p className="pb-4 text-right text-xs font-bold text-content-muted" role="status">{privacyState === 'saving' ? 'Saving privacy setting…' : 'Privacy setting saved'}</p> : null}{privacyError ? <p className="pb-4 text-right text-xs font-bold text-danger-content" role="alert">{privacyError}</p> : null}</div><div className="grid gap-5 md:grid-cols-2"><a href="/api/profile/export" className="group flex items-center gap-4 border-y border-border-subtle py-5 transition-colors hover:bg-surface-hover"><span className="flex h-11 w-11 items-center justify-center bg-info-surface text-info-content"><Download className="h-5 w-5" /></span><span className="flex-1"><strong className="block text-sm text-content">Export my data</strong><span className="text-xs text-content-muted">Download JSON and your avatar as a ZIP.</span></span><ChevronRight className="h-4 w-4 text-content-subtle" /></a><div className="border border-danger-border bg-danger-surface p-5"><strong className="text-sm text-danger-content">Delete account</strong><p className="mt-1 text-xs leading-5 text-danger-content">This permanently removes your profile, libraries, connections, and settings.</p><input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Current password" className="mt-3 min-h-10 w-full border border-danger-border bg-surface px-3 text-sm text-content outline-none" /><button type="button" disabled={!password} onClick={async () => { if (!window.confirm('Permanently delete your Cantaro account? This cannot be undone.')) return; setError(null); try { await authApi.deleteAccount(password); window.location.assign('/'); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Account deletion failed'); } }} className="mt-3 inline-flex min-h-10 items-center gap-2 bg-danger-action px-4 text-xs font-bold text-danger-action-content transition-colors hover:bg-danger-action-hover disabled:opacity-50"><Trash2 className="h-4 w-4" />Delete permanently</button>{error ? <p className="mt-2 text-xs font-bold text-danger-content">{error}</p> : null}</div></div></SettingsSection>;
+  return <SettingsSection id="data" eyebrow="You own the archive" title="Data and privacy" description="Take a portable copy of your Cantaro data, reduce stream-visible account details, or permanently remove your account."><div className="mb-5 overflow-hidden border-y border-border-subtle px-1"><Toggle checked={blurEmailAddress} disabled={privacyState === 'saving'} onChange={value => void setBlurEmailAddress(value)} title="Blur account email on screen" detail="Obscure your email anywhere Cantaro shows it, useful while streaming or sharing your screen." />{privacyState !== 'idle' ? <p className="pb-4 text-right text-xs font-bold text-content-muted" role="status">{privacyState === 'saving' ? 'Saving privacy setting…' : 'Privacy setting saved'}</p> : null}{privacyError ? <p className="pb-4 text-right text-xs font-bold text-danger-content" role="alert">{privacyError}</p> : null}</div><div className="grid gap-5 md:grid-cols-2"><a href="/api/profile/export" className="group flex items-center gap-4 border-y border-border-subtle py-5 transition-colors hover:bg-surface-hover"><span className="flex h-11 w-11 items-center justify-center bg-info-surface text-info-content"><Download className="h-5 w-5" /></span><span className="flex-1"><strong className="block text-sm text-content">Export my data</strong><span className="text-xs text-content-muted">Download JSON and your avatar as a ZIP.</span></span><ChevronRight className="h-4 w-4 text-content-subtle" /></a><DeleteAccountPanel /></div></SettingsSection>;
 }
 
 export function SettingsPage() {
