@@ -23,6 +23,7 @@ import {
   type StreamingServiceId,
 } from "../../services/streamingServices";
 import { StreamingServiceIcon } from "../../components/StreamingServiceIcon";
+import { mediaLibraryStatusLabel } from "../../components/media-library/mediaLibraryStatus";
 import {
   clampProgressValue,
   getEntryStatusChanged,
@@ -41,12 +42,12 @@ import type {
 } from "./mediaEntryDetailTypes";
 
 const NORMALIZED_STATUSES = [
-  { value: "current", label: "Watching / Reading" },
-  { value: "completed", label: "Completed" },
-  { value: "planned", label: "Planning" },
-  { value: "paused", label: "Paused" },
-  { value: "dropped", label: "Dropped" },
-  { value: "repeating", label: "Rewatching / Rereading" },
+  "current",
+  "completed",
+  "planned",
+  "paused",
+  "dropped",
+  "repeating",
 ];
 
 function ProgressStepper({
@@ -134,10 +135,12 @@ type ProgressCockpitProps = Pick<
 
 function StatusSelect({
   value,
+  mediaKind,
   onChange,
   visuallyHiddenLabel = false,
 }: {
   value: string;
+  mediaKind: string;
   onChange: (value: string) => void;
   visuallyHiddenLabel?: boolean;
 }) {
@@ -151,8 +154,8 @@ function StatusSelect({
       containerClassName="min-w-44"
     >
       {NORMALIZED_STATUSES.map((status) => (
-        <option key={status.value} value={status.value}>
-          {status.label}
+        <option key={status} value={status}>
+          {mediaLibraryStatusLabel(status, mediaKind)}
         </option>
       ))}
     </SelectField>
@@ -160,12 +163,14 @@ function StatusSelect({
 }
 
 export function AddToLibraryActions({
+  entry,
   selectedStatus,
   isAddingToLibrary,
   onSetSelectedStatus,
   onAddToLibrary,
 }: Pick<
   ProgressCockpitProps,
+  | "entry"
   | "selectedStatus"
   | "isAddingToLibrary"
   | "onSetSelectedStatus"
@@ -174,6 +179,7 @@ export function AddToLibraryActions({
   return (
     <>
       <StatusSelect
+        mediaKind={entry.title.mediaKind}
         value={selectedStatus}
         onChange={onSetSelectedStatus}
         visuallyHiddenLabel
@@ -402,6 +408,7 @@ function TrackedProgressCockpit(props: ProgressCockpitProps) {
           />
         </div>
         <StatusSelect
+          mediaKind={props.entry.title.mediaKind}
           value={props.selectedStatus}
           onChange={props.onSetSelectedStatus}
         />

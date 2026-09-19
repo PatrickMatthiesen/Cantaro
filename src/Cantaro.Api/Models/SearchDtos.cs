@@ -38,6 +38,7 @@ public sealed class SearchResultDto
     public string? Detail { get; init; }
     public string? ArtworkUrl { get; init; }
     public required string CanonicalRoute { get; init; }
+    public string? MediaKind { get; init; }
     public bool? IsInLibrary { get; init; }
     public string? LibraryStatus { get; init; }
 }

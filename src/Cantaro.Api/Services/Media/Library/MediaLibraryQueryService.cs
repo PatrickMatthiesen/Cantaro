@@ -9,6 +9,8 @@ public class MediaLibraryQueryOptions
     public string? Query { get; set; }
     public string? Status { get; set; }
     public string? MediaKind { get; set; }
+    public string? Collection { get; set; }
+    public string? Format { get; set; }
     public string? Provider { get; set; }
     public string? ProviderListName { get; set; }
     public string SortBy { get; set; } = "updatedAt";
@@ -55,6 +57,38 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
         if (!string.IsNullOrWhiteSpace(options.MediaKind))
         {
             query = query.Where(entry => entry.MediaTitle != null && entry.MediaTitle.MediaKind == options.MediaKind);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Collection))
+        {
+            query = options.Collection.Trim().ToLowerInvariant() switch
+            {
+                "film-tv" => query.Where(entry => entry.MediaTitle != null
+                    && (entry.MediaTitle.MediaKind == MediaKinds.Anime
+                        || entry.MediaTitle.MediaKind == MediaKinds.Movie
+                        || entry.MediaTitle.MediaKind == MediaKinds.Series)),
+                "anime" => query.Where(entry => entry.MediaTitle != null
+                    && entry.MediaTitle.MediaKind == MediaKinds.Anime),
+                "manga" => query.Where(entry => entry.MediaTitle != null
+                    && (entry.MediaTitle.MediaKind == "oneShot"
+                        || (entry.MediaTitle.MediaKind == MediaKinds.Manga
+                            && (entry.MediaTitle.Format == null
+                                || entry.MediaTitle.Format.ToLower() != MediaFormats.Novel)))),
+                "books" => query.Where(entry => entry.MediaTitle != null
+                    && (entry.MediaTitle.MediaKind == "lightNovel"
+                        || (entry.MediaTitle.MediaKind == MediaKinds.Manga
+                            && entry.MediaTitle.Format != null
+                            && entry.MediaTitle.Format.ToLower() == MediaFormats.Novel))),
+                _ => query.Where(_ => false)
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Format))
+        {
+            var format = options.Format.Trim().ToLowerInvariant();
+            query = query.Where(entry => entry.MediaTitle != null
+                && entry.MediaTitle.Format != null
+                && entry.MediaTitle.Format.ToLower() == format);
         }
 
         if (!string.IsNullOrWhiteSpace(options.Provider))
@@ -226,6 +260,7 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
             OriginalTitle = title.OriginalTitle,
             PosterUrl = title.PosterUrl,
             MediaKind = title.MediaKind,
+            Format = title.Format,
             Status = entry.Status,
             Score = entry.Score,
             ProgressEpisodes = entry.ProgressEpisodes,

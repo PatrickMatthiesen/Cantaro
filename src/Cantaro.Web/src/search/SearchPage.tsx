@@ -92,7 +92,7 @@ export function SearchPage({ query, activeGroup, preview = false }: SearchPagePr
 
   return (
     <PageShell sidebar={<SearchSidebar />} contentClassName="search-page-content">
-      <div className="mx-auto w-full max-w-5xl">
+      <div className="@container w-full">
         <header className="mb-5 border-b border-border-subtle pb-5">
           <h1 className="text-2xl font-black tracking-[-0.02em] text-content sm:text-3xl">Search Cantaro</h1>
           <p className="mt-1 max-w-2xl text-sm leading-6 font-medium text-content-muted">

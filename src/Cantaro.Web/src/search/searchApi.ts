@@ -11,6 +11,7 @@ export interface SearchResultItem {
   id: string;
   title: string;
   subtitle?: string;
+  mediaKind?: string;
   detail?: string;
   artworkUrl?: string;
   canonicalRoute: string;

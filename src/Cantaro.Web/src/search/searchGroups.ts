@@ -9,10 +9,10 @@ export interface SearchGroupPresentation {
 }
 
 export const searchGroups: SearchGroupPresentation[] = [
+  { id: 'media', label: 'Media', singular: 'title', description: 'Find something to watch or read' },
   { id: 'songs', label: 'Songs', singular: 'song', description: 'Recordings in your music archive' },
-  { id: 'artists', label: 'Artists', singular: 'artist', description: 'Artists connected to your saved music' },
   { id: 'playlists', label: 'Playlists', singular: 'playlist', description: 'Collections owned by you' },
-  { id: 'media', label: 'Media', singular: 'title', description: 'Movies, series, anime, and manga' },
+  { id: 'artists', label: 'Artists', singular: 'artist', description: 'Artists connected to your saved music' },
 ];
 
 export const searchTabs: Array<{ id: SearchGroupId; label: string }> = [

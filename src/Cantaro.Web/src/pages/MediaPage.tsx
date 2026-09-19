@@ -6,11 +6,12 @@ import {
   MediaLibraryPage,
   MediaObservationReviewPage,
   type DetailTabId,
+  type MediaLibraryQueryParams,
 } from '@cantaro/client-shared/media';
 import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
 import { MediaPageShell } from '../media/MediaPageShell';
 import { MediaProvidersPage } from './MediaProvidersPage';
-import { getMediaFilterDefaults } from '../media/mediaLibraryRouteFilters';
+import { getMediaFilterDefaults, mediaLibraryFilterSearch } from '../media/mediaLibraryRouteFilters';
 import { useAuth } from '../contexts/AuthContext';
 
 const defaultMediaHeading: GlobalHeadingState = {
@@ -78,26 +79,25 @@ export function MediaLibraryRoutePage() {
   const location = useRouterState({ select: (state) => state.location });
   const { setHeading } = useMediaShell();
   const search = location.search as Record<string, unknown>;
-  const searchQuery = typeof search.q === 'string' ? search.q : '';
   const filterDefaults = useMemo(() => getMediaFilterDefaults(search), [search]);
-  const updateSearchQuery = (query: string) => {
+  const updateFilters = (filters: MediaLibraryQueryParams) => {
     void navigate({
       to: '/media/library',
       search: {
         ...search,
-        q: query || undefined,
+        ...mediaLibraryFilterSearch(filters),
         searchMode: undefined,
       },
       replace: true,
+      resetScroll: false,
     });
   };
 
   return (
     <MediaLibraryPage
       embedded
-      searchQuery={searchQuery}
       filterDefaults={filterDefaults}
-      onSearchQueryChange={updateSearchQuery}
+      onFiltersChange={updateFilters}
       onHeadingChange={setHeading}
       onNavigateProviders={() => void navigate({ to: '/media/providers' })}
       onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}

@@ -26,6 +26,10 @@ export function useLibrarySearchState({
     const updateFilterRef = useRef(updateFilter);
 
     useEffect(() => {
+        setInternalSearchQuery(filters.query ?? '');
+    }, [filters.query]);
+
+    useEffect(() => {
         updateFilterRef.current = updateFilter;
     }, [updateFilter]);
 

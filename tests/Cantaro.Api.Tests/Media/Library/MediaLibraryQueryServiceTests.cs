@@ -127,6 +127,103 @@ public class MediaLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetLibraryAsync_FiltersCollectionsWithoutMixingNovelsAndManga()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var user = TestUserFactory.Create(305, "collections@example.test");
+        var otherUser = TestUserFactory.Create(306, "other-collections@example.test");
+        var titles = new[]
+        {
+            MakeTitle("Anime", MediaKinds.Anime, "TV"),
+            MakeTitle("Movie", MediaKinds.Movie),
+            MakeTitle("Series", MediaKinds.Series),
+            MakeTitle("Manga", MediaKinds.Manga, "MANGA"),
+            MakeTitle("Unformatted manga", MediaKinds.Manga),
+            MakeTitle("Novel", MediaKinds.Manga, "NOVEL"),
+            MakeTitle("Legacy one shot", "oneShot"),
+            MakeTitle("Legacy light novel", "lightNovel")
+        };
+        db.AddRange(user, otherUser);
+        foreach (var title in titles)
+        {
+            db.AddRange(title, MakeEntry(user.Id, title, 0));
+        }
+        db.Add(MakeEntry(otherUser.Id, titles[0], 0));
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+        foreach (var (collection, expectedTitles) in new[]
+        {
+            ("film-tv", new[] { "Anime", "Movie", "Series" }),
+            ("anime", new[] { "Anime" }),
+            ("manga", new[] { "Legacy one shot", "Manga", "Unformatted manga" }),
+            ("books", new[] { "Legacy light novel", "Novel" })
+        })
+        {
+            var page = await service.GetLibraryAsync(user.Id, new()
+            {
+                Collection = collection,
+                SortBy = "title",
+                SortDir = "asc"
+            }, CancellationToken.None);
+
+            Assert.Equal(expectedTitles.Length, page.TotalCount);
+            Assert.Equal(expectedTitles, page.Items.Select(item => item.CanonicalTitle));
+        }
+
+        var firstMangaPage = await service.GetLibraryAsync(user.Id, new()
+        {
+            Collection = "manga",
+            SortBy = "title",
+            SortDir = "asc",
+            PageSize = 1
+        }, CancellationToken.None);
+        Assert.Equal(3, firstMangaPage.TotalCount);
+        Assert.Equal(3, firstMangaPage.TotalPages);
+        Assert.Equal("Legacy one shot", Assert.Single(firstMangaPage.Items).CanonicalTitle);
+    }
+
+    [Fact]
+    public async Task GetLibraryAsync_FormatIsCaseInsensitiveAndCombinesWithMediaKindAndCollection()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var user = TestUserFactory.Create(307, "formats@example.test");
+        var mangaNovel = MakeTitle("Manga novel", MediaKinds.Manga, "NOVEL");
+        var mangaOneShot = MakeTitle("Manga one shot", MediaKinds.Manga, "ONE_SHOT");
+        var animeNovel = MakeTitle("Anime novel", MediaKinds.Anime, "novel");
+        db.AddRange(user, mangaNovel, mangaOneShot, animeNovel,
+            MakeEntry(user.Id, mangaNovel, 0),
+            MakeEntry(user.Id, mangaOneShot, 0),
+            MakeEntry(user.Id, animeNovel, 0));
+        await db.SaveChangesAsync();
+
+        var service = new MediaLibraryQueryService(db);
+        var allNovels = await service.GetLibraryAsync(user.Id,
+            new() { Format = " NoVeL " }, CancellationToken.None);
+        Assert.Equal(2, allNovels.TotalCount);
+        Assert.All(allNovels.Items, item => Assert.NotNull(item.Format));
+
+        var mangaNovels = await service.GetLibraryAsync(user.Id,
+            new() { Collection = "BOOKS", MediaKind = MediaKinds.Manga, Format = "novel" },
+            CancellationToken.None);
+        Assert.Equal("Manga novel", Assert.Single(mangaNovels.Items).CanonicalTitle);
+        Assert.Equal("NOVEL", Assert.Single(mangaNovels.Items).Format);
+
+        var oneShots = await service.GetLibraryAsync(user.Id,
+            new() { Collection = "manga", Format = "one_shot" }, CancellationToken.None);
+        Assert.Equal("Manga one shot", Assert.Single(oneShots.Items).CanonicalTitle);
+
+        var noMatch = await service.GetLibraryAsync(user.Id,
+            new() { Collection = "manga", MediaKind = MediaKinds.Anime }, CancellationToken.None);
+        Assert.Empty(noMatch.Items);
+        Assert.Equal(0, noMatch.TotalCount);
+    }
+
+    [Fact]
     public async Task GetMediaTitleAsync_UsesTypedReleaseMetadata()
     {
         var (db, connection) = await CreateDbAsync();
@@ -162,7 +259,7 @@ public class MediaLibraryQueryServiceTests
         return (db, connection);
     }
 
-    private static MediaTitle MakeTitle(string name)
+    private static MediaTitle MakeTitle(string name, string mediaKind = MediaKinds.Anime, string? format = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new MediaTitle
@@ -170,7 +267,8 @@ public class MediaLibraryQueryServiceTests
             Id = Guid.NewGuid(),
             CanonicalTitle = name,
             SortTitle = name,
-            MediaKind = MediaKinds.Anime,
+            MediaKind = mediaKind,
+            Format = format,
             SupportsEpisodeProgress = true,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode,

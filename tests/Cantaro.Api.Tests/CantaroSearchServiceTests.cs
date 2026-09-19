@@ -90,6 +90,7 @@ public sealed class CantaroSearchServiceTests
             result.Groups.Media.Items.Select(item => item.Id));
         Assert.Equal("https://img.example/poster.jpg", result.Groups.Media.Items[0].ArtworkUrl);
         Assert.Equal($"/media/{exactMedia.Id}", result.Groups.Media.Items[0].CanonicalRoute);
+        Assert.Equal(MediaKinds.Anime, result.Groups.Media.Items[0].MediaKind);
         Assert.True(result.Groups.Media.Items[0].IsInLibrary);
         Assert.Equal("watching", result.Groups.Media.Items[0].LibraryStatus);
         Assert.DoesNotContain(
@@ -240,6 +241,7 @@ public sealed class CantaroSearchServiceTests
         {
             Assert.StartsWith("provider:anilist:", item.Id);
             Assert.StartsWith("/media/catalog/anilist/", item.CanonicalRoute);
+            Assert.Equal(MediaKinds.Anime, item.MediaKind);
             Assert.False(item.IsInLibrary);
         });
         Assert.Equal(first.Groups.Media.Items.Select(item => item.Id), second.Groups.Media.Items.Select(item => item.Id));

@@ -1,5 +1,6 @@
 import type { MediaLibraryQueryParams } from '../../services/mediaApi';
-import { mainMediaProviderId } from '../../services/mediaProviders';
+import { readStoredValue } from '../../services/mediaRefreshCache';
+import { collectionForMediaKind, libraryCollection, libraryCollectionStorageKey } from './libraryCollections';
 
 const DEFAULT_LIBRARY_STATUS = 'current';
 
@@ -15,7 +16,10 @@ export function createInitialMediaLibraryFilters(
   filterDefaults?: Partial<MediaLibraryQueryParams>,
 ): MediaLibraryQueryParams {
   return {
-    provider: mainMediaProviderId,
+    collection: libraryCollection(filterDefaults?.collection)
+      ?? collectionForMediaKind(filterDefaults?.mediaKind)
+      ?? libraryCollection(readStoredValue(libraryCollectionStorageKey))
+      ?? 'film-tv',
     status: DEFAULT_LIBRARY_STATUS,
     sortBy: 'updatedAt',
     sortDir: 'desc',

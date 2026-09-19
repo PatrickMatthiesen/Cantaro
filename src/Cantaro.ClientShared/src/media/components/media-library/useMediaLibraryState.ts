@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { mediaApi } from '../../services/mediaApi';
 import { mainMediaProviderId } from '../../services/mediaProviders';
@@ -20,6 +20,7 @@ import {
   createInitialMediaLibraryFilters,
   definedMediaLibraryFilterDefaults,
 } from './mediaLibraryFilters';
+import { libraryCollectionStorageKey } from './libraryCollections';
 
 const PRIMARY_PROVIDER_ID = mainMediaProviderId;
 const ANILIST_REFRESH_ERROR = 'AniList couldn’t be refreshed. Cantaro will keep using your saved library data; use Reload to try again.';
@@ -32,6 +33,7 @@ function serializeFilterDefaults(filterDefaults?: MediaLibraryFilterDefaults) {
 function hasActiveMediaLibraryFilters(filters: MediaLibraryQueryParams): boolean {
   return Boolean(
     filters.status
+    || filters.format
     || filters.query
     || filters.mediaKind
     || filters.providerListName
@@ -116,7 +118,7 @@ function useAvailableProviderListNameGuard(
 
 function useLibraryFilterActions(setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>>) {
   const updateFilter = <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => {
-    setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
+    setFilters((prev) => (prev[key] || undefined) === (value || undefined) ? prev : { ...prev, [key]: value, page: 1 });
   };
 
   const toggleSortDir = () => {
@@ -136,6 +138,15 @@ function useLibraryFilterActions(setFilters: Dispatch<SetStateAction<MediaLibrar
     }));
   };
 
+  const updateCollection = (collection: string) => {
+    writeStoredValue(libraryCollectionStorageKey, collection);
+    setFilters((prev) => ({ ...prev, collection, mediaKind: undefined, format: undefined, page: 1 }));
+  };
+
+  const clearAdvancedFilters = () => {
+    setFilters((prev) => ({ ...prev, status: '', format: undefined, provider: undefined, providerListName: undefined, page: 1 }));
+  };
+
   const goToPreviousPage = () => {
     setFilters((prev) => ({ ...prev, page: Math.max(1, (prev.page ?? 1) - 1) }));
   };
@@ -144,14 +155,22 @@ function useLibraryFilterActions(setFilters: Dispatch<SetStateAction<MediaLibrar
     setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) + 1 }));
   };
 
-  return { updateFilter, toggleSortDir, updateProviderFilter, goToPreviousPage, goToNextPage };
+  return { updateFilter, toggleSortDir, updateProviderFilter, updateCollection, clearAdvancedFilters, goToPreviousPage, goToNextPage };
 }
 
-function useLibraryFilters(availableProviderListNames: string[], filterDefaults?: MediaLibraryFilterDefaults) {
-  const [filters, setFilters] = useState<MediaLibraryQueryParams>(() => createInitialMediaLibraryFilters(filterDefaults));
+function useLibraryFilters(availableProviderListNames: string[], filterDefaults?: MediaLibraryFilterDefaults,
+  onFiltersChange?: (filters: MediaLibraryQueryParams) => void) {
+  const [internalFilters, setInternalFilters] = useState<MediaLibraryQueryParams>(() => createInitialMediaLibraryFilters(filterDefaults));
+  const routeFilters = useMemo(() => createInitialMediaLibraryFilters(filterDefaults), [filterDefaults]);
+  const filters = onFiltersChange ? routeFilters : internalFilters;
+  const setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>> = (update) => {
+    if (!onFiltersChange) { setInternalFilters(update); return; }
+    const next = typeof update === 'function' ? update(filters) : update;
+    if (next !== filters) onFiltersChange(next);
+  };
   const actions = useLibraryFilterActions(setFilters);
 
-  useFilterDefaults(setFilters, filterDefaults);
+  useFilterDefaults(setInternalFilters, onFiltersChange ? undefined : filterDefaults);
   useAvailableProviderListNameGuard(availableProviderListNames, filters, setFilters);
 
   return {
@@ -261,10 +280,10 @@ function useProviderRefresh(
   };
 }
 
-export function useMediaLibraryState(filterDefaults?: MediaLibraryFilterDefaults) {
+export function useMediaLibraryState(filterDefaults?: MediaLibraryFilterDefaults, onFiltersChange?: (filters: MediaLibraryQueryParams) => void) {
   const libraryData = useLibraryDataState();
   const { availableProviderListNames, loadLibrary } = libraryData;
-  const filterState = useLibraryFilters(availableProviderListNames, filterDefaults);
+  const filterState = useLibraryFilters(availableProviderListNames, filterDefaults, onFiltersChange);
   const filtersRef = useRef(filterState.filters);
 
   useEffect(() => {
