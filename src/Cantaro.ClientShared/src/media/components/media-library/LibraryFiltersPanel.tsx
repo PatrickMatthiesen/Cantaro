@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { Search, SlidersHorizontal, X } from 'lucide-react';
+import { useId, useState } from 'react';
+import { ChevronDown, ChevronUp, Search, SlidersHorizontal, X } from 'lucide-react';
+import { readStoredValue, writeStoredValue } from '../../services/mediaRefreshCache';
 import {
   LibraryAdvancedFilterFields,
   LibraryFormatControl,
@@ -61,213 +62,98 @@ export interface LibraryFiltersPanelProps {
   onRefreshFromRemote: () => Promise<void>;
 }
 
-// fallow-ignore-next-line complexity
+const filtersOpenKey = 'cantaro.media.library.filtersOpen';
+const moreOpenKey = 'cantaro.media.library.moreFiltersOpen';
+
 export function LibraryFiltersPanel({
-  searchQuery,
-  filters,
-  providerStatus,
-  isRefreshing,
-  onSearchQueryChange,
-  onUpdateFilter,
-  onCollectionChange,
-  onClearAdvancedFilters,
-  onUpdateProviderFilter,
-  onToggleSortDir,
-  onRefreshFromRemote,
+  searchQuery, filters, providerStatus, isRefreshing, onSearchQueryChange,
+  onUpdateFilter, onCollectionChange, onClearAdvancedFilters,
+  onUpdateProviderFilter, onToggleSortDir, onRefreshFromRemote,
 }: LibraryFiltersPanelProps) {
   const collection = filters.collection ?? 'film-tv';
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(Boolean(searchQuery));
-  const searchExpanded = searchOpen || Boolean(searchQuery);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const searchButtonRef = useRef<HTMLButtonElement>(null);
-  const filtersButtonRef = useRef<HTMLButtonElement>(null);
-  const popoverRootRef = useRef<HTMLDivElement>(null);
-  const popoverId = useId();
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
-
-  useEffect(() => {
-    if (!filtersOpen) return;
-
-    const dismissOnOutsideClick = (event: PointerEvent) => {
-      if (!popoverRootRef.current?.contains(event.target as Node)) setFiltersOpen(false);
-    };
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setFiltersOpen(false);
-      filtersButtonRef.current?.focus();
-    };
-    document.addEventListener('pointerdown', dismissOnOutsideClick);
-    document.addEventListener('keydown', dismissOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', dismissOnOutsideClick);
-      document.removeEventListener('keydown', dismissOnEscape);
-    };
-  }, [filtersOpen]);
-
-  const providerOptions: FilterOption[] = [
+  const [filtersOpen, setFiltersOpen] = useState(() => readStoredValue(filtersOpenKey) === 'true');
+  const [moreOpen, setMoreOpen] = useState(() => readStoredValue(moreOpenKey) === 'true');
+  const panelId = useId();
+  const moreId = useId();
+  const activeCount = [searchQuery, filters.status, filters.format, filters.provider].filter(Boolean).length;
+  const providerOptions = [
     { value: '', label: 'All providers' },
     ...mediaProviderCatalog.map((provider) => ({ value: provider.id, label: provider.name })),
   ];
-  const advancedCount = [filters.status, filters.format, filters.provider].filter(Boolean).length;
+  const toggleFilters = () => {
+    const next = !filtersOpen;
+    setFiltersOpen(next);
+    writeStoredValue(filtersOpenKey, String(next));
+  };
+  const toggleMore = () => {
+    const next = !moreOpen;
+    setMoreOpen(next);
+    writeStoredValue(moreOpenKey, String(next));
+  };
+  const statusControl = <LibraryStatusControl value={filters.status ?? ''} options={statusOptions(collection)} onChange={(value) => onUpdateFilter('status', value)} />;
+  const formatControl = <LibraryFormatControl value={filters.format ?? ''} options={formatOptions(collection)} onChange={(value) => onUpdateFilter('format', value)} />;
+  const sortControls = <LibrarySortControls sortBy={filters.sortBy ?? 'updatedAt'} sortDir={filters.sortDir ?? 'desc'} onSortByChange={(value) => onUpdateFilter('sortBy', value)} onToggleSortDir={onToggleSortDir} />;
 
   return (
     <section aria-label="Library filters" className="@container/library border-y border-border-subtle py-2">
-      <div className="flex items-center gap-3">
-        <label className={searchExpanded ? 'hidden' : 'shrink-0 @min-[28rem]/library:hidden'}>
+      <div className="flex items-center justify-between gap-3">
+        <label className="@min-[28rem]/library:hidden">
           <span className="sr-only">Collection</span>
           <select value={collection} onChange={(event) => onCollectionChange(event.target.value)} className="h-9 w-30 border border-border-strong bg-surface px-2 text-sm font-semibold text-content">
             {COLLECTION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
-        <div role="group" aria-label="Collection" className={`hidden h-9 shrink-0 overflow-hidden border border-border-strong ${searchExpanded ? '@min-[44rem]/library:inline-flex' : '@min-[28rem]/library:inline-flex'}`}>
-          {COLLECTION_OPTIONS.map((option) => {
-            const selected = collection === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => onCollectionChange(option.value)}
-                className={`h-full whitespace-nowrap px-2 text-xs font-semibold transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:px-3 sm:text-sm [&:not(:last-child)]:border-r [&:not(:last-child)]:border-border-strong ${selected
-                  ? 'bg-personal-accent text-personal-accent-content'
-                  : 'text-content-muted hover:bg-surface-hover hover:text-content'}`}
-              >
-                {option.label}
-              </button>
-            );
-          })}
+        <div role="group" aria-label="Collection" className="hidden h-9 shrink-0 overflow-hidden border border-border-strong @min-[28rem]/library:inline-flex">
+          {COLLECTION_OPTIONS.map((option) => (
+            <button key={option.value} type="button" aria-pressed={collection === option.value} onClick={() => onCollectionChange(option.value)}
+              className={`h-full whitespace-nowrap px-3 text-sm font-semibold transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-focus [&:not(:last-child)]:border-r [&:not(:last-child)]:border-border-strong ${collection === option.value ? 'bg-personal-accent text-personal-accent-content' : 'text-content-muted hover:bg-surface-hover hover:text-content'}`}>
+              {option.label}
+            </button>
+          ))}
         </div>
-
-        <div className={`ml-auto flex min-w-0 items-center gap-1.5 ${searchExpanded ? 'flex-1 @min-[44rem]/library:flex-none' : ''}`}>
-          <div className={searchExpanded ? 'hidden' : 'hidden @min-[36rem]/library:contents'}>
-            <LibraryStatusControl
-              value={filters.status ?? ''}
-              options={statusOptions(collection)}
-              onChange={(value) => onUpdateFilter('status', value)}
-            />
-          </div>
-          <div className={searchExpanded ? 'hidden' : 'contents'}>
-            <LibraryFormatControl
-              value={filters.format ?? ''}
-              options={formatOptions(collection)}
-              onChange={(value) => onUpdateFilter('format', value)}
-            />
-          </div>
-          <div className={searchExpanded ? 'hidden' : 'hidden @min-[52rem]/library:contents'}>
-            <LibrarySortControls
-              sortBy={filters.sortBy ?? 'updatedAt'}
-              sortDir={filters.sortDir ?? 'desc'}
-              onSortByChange={(value) => onUpdateFilter('sortBy', value)}
-              onToggleSortDir={onToggleSortDir}
-            />
-          </div>
-
-          <div className={`flex min-w-0 items-center ${searchExpanded ? 'flex-1 @min-[44rem]/library:flex-none' : ''}`}>
-            <button
-              ref={searchButtonRef}
-              type="button"
-              aria-label={searchExpanded ? 'Focus library search' : 'Search library'}
-              aria-expanded={searchExpanded}
-              onClick={() => {
-                setSearchOpen(true);
-                searchInputRef.current?.focus();
-              }}
-              className="inline-flex size-9 shrink-0 items-center justify-center text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-            >
-              <Search className="size-4" aria-hidden />
-            </button>
-            {searchExpanded ? (
-              <>
-                <label className="min-w-0 flex-1 @min-[44rem]/library:w-48 @min-[44rem]/library:flex-none">
-                  <span className="sr-only">Search library</span>
-                  <input
-                    ref={searchInputRef}
-                    type="search"
-                    value={searchQuery}
-                    onChange={(event) => onSearchQueryChange(event.target.value)}
-                    placeholder="Search library…"
-                    className="h-9 w-full min-w-0 border border-border-strong bg-surface px-2 text-sm text-content outline-none placeholder:text-content-subtle hover:bg-surface-hover focus:border-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                  />
-                </label>
-                <button
-                  type="button"
-                  aria-label="Close search"
-                  onClick={() => {
-                    onSearchQueryChange('');
-                    setSearchOpen(false);
-                    searchButtonRef.current?.focus();
-                  }}
-                  className="inline-flex size-9 shrink-0 items-center justify-center text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                >
-                  <X className="size-4" aria-hidden />
-                </button>
-              </>
-            ) : null}
-          </div>
-
-          <div ref={popoverRootRef} className="relative shrink-0">
-            <button
-              ref={filtersButtonRef}
-              type="button"
-              aria-label={advancedCount ? `Filters, ${advancedCount} active` : 'Filters'}
-              aria-expanded={filtersOpen}
-              aria-controls={popoverId}
-              onClick={() => setFiltersOpen((open) => !open)}
-              className={`inline-flex h-9 items-center gap-1.5 px-2 text-sm font-semibold transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${filtersOpen || advancedCount ? 'text-content' : 'text-content-muted'}`}
-            >
-              <SlidersHorizontal className="size-4" aria-hidden />
-              <span className="hidden sm:inline">Filters</span>
-              {advancedCount > 0 ? <span className="text-xs">{advancedCount}</span> : null}
-            </button>
-            {filtersOpen ? (
-              <div
-                id={popoverId}
-                role="group"
-                aria-label="Advanced filters"
-                className="absolute top-full right-0 z-30 mt-2 w-[min(22rem,calc(100vw-2rem))] border border-border-strong bg-surface p-3 shadow-xl"
-              >
-                <div className={`mb-3 flex flex-wrap gap-3 ${searchExpanded ? '' : '@min-[52rem]/library:hidden'}`}>
-                  <div className={`grid gap-1 text-xs font-semibold text-content-muted ${searchExpanded ? '' : '@min-[36rem]/library:hidden'}`}>
-                    <span>Status</span>
-                    <LibraryStatusControl value={filters.status ?? ''} options={statusOptions(collection)} onChange={(value) => onUpdateFilter('status', value)} />
-                  </div>
-                  <div className="grid gap-1 text-xs font-semibold text-content-muted">
-                    <span>Sort by</span>
-                    <LibrarySortControls sortBy={filters.sortBy ?? 'updatedAt'} sortDir={filters.sortDir ?? 'desc'} onSortByChange={(value) => onUpdateFilter('sortBy', value)} onToggleSortDir={onToggleSortDir} />
-                  </div>
-                </div>
-                <LibraryAdvancedFilterFields
-                  showAllFilters={searchExpanded}
-                  formatValue={filters.format ?? ''}
-                  formatOptions={formatOptions(collection)}
-                  providerValue={filters.provider ?? ''}
-                  providerOptions={providerOptions}
-                  onFormatChange={(value) => onUpdateFilter('format', value)}
-                  onProviderChange={onUpdateProviderFilter}
-                />
-                <div className="mt-3 flex items-center justify-between border-t border-border-subtle pt-2">
-                  <button
-                    type="button"
-                    onClick={onClearAdvancedFilters}
-                    className="h-9 px-2 text-sm font-semibold text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                  >
-                    Clear filters
-                  </button>
-                  <LibraryRefreshAction
-                    isConnected={Boolean(providerStatus?.isConnected)}
-                    isRefreshing={isRefreshing}
-                    onRefresh={onRefreshFromRemote}
-                  />
-                </div>
-              </div>
-            ) : null}
-          </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {!filtersOpen ? (
+            <>
+              <div className="hidden @min-[36rem]/library:contents">{statusControl}</div>
+              <div className="hidden @min-[44rem]/library:contents">{formatControl}</div>
+              <div className="hidden @min-[52rem]/library:contents">{sortControls}</div>
+            </>
+          ) : null}
+        <button type="button" aria-expanded={filtersOpen} aria-controls={panelId} onClick={toggleFilters}
+          className="inline-flex h-9 shrink-0 items-center gap-2 px-2 text-sm font-semibold text-content-muted hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-focus">
+          <SlidersHorizontal className="size-4" aria-hidden />
+          Filters {activeCount > 0 ? <span className="text-xs">{activeCount}</span> : null}
+          {filtersOpen ? <ChevronUp className="size-4" aria-hidden /> : <ChevronDown className="size-4" aria-hidden />}
+        </button>
         </div>
       </div>
+      {filtersOpen ? (
+        <div id={panelId} className="mt-3 space-y-3 border-t border-border-subtle pt-3">
+          <label className="flex h-10 items-center gap-2 border border-border-strong bg-surface px-3 focus-within:border-focus">
+            <Search className="size-4 shrink-0 text-content-muted" aria-hidden />
+            <span className="sr-only">Search library</span>
+            <input type="search" value={searchQuery} onChange={(event) => onSearchQueryChange(event.target.value)} placeholder="Search library…"
+              className="h-full min-w-0 flex-1 bg-transparent text-sm text-content outline-none placeholder:text-content-subtle" />
+            {searchQuery ? <button type="button" aria-label="Clear search" onClick={() => onSearchQueryChange('')} className="flex size-8 items-center justify-center text-content-muted hover:text-content"><X className="size-4" aria-hidden /></button> : null}
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            {statusControl}
+            {formatControl}
+            {sortControls}
+            <button type="button" aria-expanded={moreOpen} aria-controls={moreId} onClick={toggleMore} className="inline-flex h-9 items-center gap-2 px-2 text-sm font-semibold text-content-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus">
+              More {filters.provider ? <span className="text-xs">1</span> : null}
+              {moreOpen ? <ChevronUp className="size-4" aria-hidden /> : <ChevronDown className="size-4" aria-hidden />}
+            </button>
+            <button type="button" onClick={() => { onSearchQueryChange(''); onClearAdvancedFilters(); }} className="ml-auto h-9 px-2 text-sm text-content-muted hover:text-content focus-visible:outline-2 focus-visible:outline-focus">Clear filters</button>
+          </div>
+          {moreOpen ? (
+            <div id={moreId} className="flex flex-wrap items-end gap-3 border-t border-border-subtle pt-3">
+              <LibraryAdvancedFilterFields providerValue={filters.provider ?? ''} providerOptions={providerOptions} onProviderChange={onUpdateProviderFilter} />
+              <LibraryRefreshAction isConnected={Boolean(providerStatus?.isConnected)} isRefreshing={isRefreshing} onRefresh={onRefreshFromRemote} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

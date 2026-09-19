@@ -1,6 +1,5 @@
 import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react';
 
-
 export interface FilterOption {
   value: string;
   label: string;
@@ -38,7 +37,7 @@ interface LibrarySortControlsProps {
 
 export function LibraryFormatControl({ value, options, onChange }: LibraryStatusControlProps) {
   return (
-    <label className="hidden w-30 shrink-0 @min-[44rem]/library:block">
+    <label className="w-30 shrink-0">
       <span className="sr-only">Format</span>
       <select value={value} onChange={(event) => onChange(event.target.value || undefined)} className={selectClassName}>
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -71,32 +70,20 @@ export function LibrarySortControls({ sortBy, sortDir, onSortByChange, onToggleS
 }
 
 interface LibraryAdvancedFilterFieldsProps {
-  showAllFilters: boolean;
-  formatValue: string;
-  formatOptions: FilterOption[];
   providerValue: string;
   providerOptions: FilterOption[];
-  onFormatChange: (value: string | undefined) => void;
+
   onProviderChange: (value: string | undefined) => void;
 }
 
 export function LibraryAdvancedFilterFields({
-  showAllFilters,
-  formatValue,
-  formatOptions,
   providerValue,
   providerOptions,
-  onFormatChange,
+
   onProviderChange,
 }: LibraryAdvancedFilterFieldsProps) {
   return (
-    <div className={`grid gap-3 sm:grid-cols-2 ${showAllFilters ? '' : '@min-[44rem]/library:grid-cols-1'}`}>
-      <label className={`grid min-w-0 gap-1 text-xs font-semibold text-content-muted ${showAllFilters ? '' : '@min-[44rem]/library:hidden'}`}>
-        Format
-        <select value={formatValue} onChange={(event) => onFormatChange(event.target.value || undefined)} className={selectClassName}>
-          {formatOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-      </label>
+    <div className="w-44">
       <label className="grid min-w-0 gap-1 text-xs font-semibold text-content-muted">
         Provider
         <select value={providerValue} onChange={(event) => onProviderChange(event.target.value || undefined)} className={selectClassName}>

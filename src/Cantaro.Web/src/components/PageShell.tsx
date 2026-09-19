@@ -371,7 +371,7 @@ function DesktopSidebar({
 function getSidebarGridClassName(isFolded: boolean) {
   const desktopColumns = isFolded
     ? "lg:grid-cols-[76px_1fr]"
-    : "lg:grid-cols-[248px_1fr]";
+    : "lg:grid-cols-[220px_1fr]";
   return `group/sidebar grid min-h-screen grid-cols-1 sm:grid-cols-[76px_1fr] ${desktopColumns}`;
 }
 
