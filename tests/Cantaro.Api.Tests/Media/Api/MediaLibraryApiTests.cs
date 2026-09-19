@@ -109,6 +109,43 @@ public class MediaLibraryApiTests
     }
 
     [Fact]
+    public async Task GetLibrary_ForwardsCollectionAndFormatFilters()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var book = fixture.MakeTitle("Book");
+        book.MediaKind = MediaKinds.Manga;
+        book.Format = "NOVEL";
+        var manga = fixture.MakeTitle("Manga");
+        manga.MediaKind = MediaKinds.Manga;
+        manga.Format = "MANGA";
+        var animeNovel = fixture.MakeTitle("Anime novel");
+        animeNovel.Format = "NOVEL";
+        fixture.Db.AddRange(book, manga, animeNovel);
+        foreach (var title in new[] { book, manga, animeNovel })
+        {
+            fixture.Db.Add(new MediaLibraryEntry
+            {
+                Id = Guid.NewGuid(),
+                UserId = fixture.UserId,
+                MediaTitleId = title.Id,
+                Status = MediaLibraryStatuses.Current,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+        }
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Library.GetLibrary(
+            null, null, null, null, null, null,
+            collection: "books", format: "novel", cancellationToken: CancellationToken.None);
+        var page = Assert.IsType<MediaLibraryPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(book.Id, Assert.Single(page.Items).MediaTitleId);
+        Assert.Equal("NOVEL", page.Items[0].Format);
+    }
+
+    [Fact]
     public async Task AddToLibrary_CreatesOnlyViewerStateWithoutProviderBinding()
     {
         await using var fixture = await Fixture.CreateAsync();

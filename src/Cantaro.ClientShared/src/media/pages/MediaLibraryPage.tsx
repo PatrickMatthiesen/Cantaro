@@ -5,6 +5,7 @@ import { MediaLibraryRefreshErrorNotice } from '../components/media-library/Medi
 import { useLibrarySearchState } from '../components/media-library/useLibrarySearchState';
 import { useMediaLibraryState } from '../components/media-library/useMediaLibraryState';
 import type { MediaLibraryFilterDefaults } from '../components/media-library/useMediaLibraryState';
+import type { MediaLibraryQueryParams } from '../services/mediaApi';
 
 interface MediaLibraryPageProps {
   onNavigateProviders?: () => void;
@@ -14,6 +15,7 @@ interface MediaLibraryPageProps {
   embedded?: boolean;
   searchQuery?: string;
   filterDefaults?: MediaLibraryFilterDefaults;
+  onFiltersChange?: (filters: MediaLibraryQueryParams) => void;
   onSearchQueryChange?: (query: string) => void;
 }
 
@@ -34,9 +36,10 @@ export function MediaLibraryPage({
   embedded = false,
   searchQuery,
   filterDefaults,
+  onFiltersChange,
   onSearchQueryChange,
 }: MediaLibraryPageProps) {
-  const library = useMediaLibraryState(filterDefaults);
+  const library = useMediaLibraryState(filterDefaults, onFiltersChange);
   const search = useLibrarySearchState({
     filters: library.filters,
     updateFilter: library.updateFilter,
@@ -60,6 +63,8 @@ export function MediaLibraryPage({
         isRefreshing={library.isRefreshing}
         onSearchQueryChange={search.setSearchQuery}
         onUpdateFilter={library.updateFilter}
+        onCollectionChange={library.updateCollection}
+        onClearAdvancedFilters={library.clearAdvancedFilters}
         onUpdateProviderFilter={library.updateProviderFilter}
         onToggleSortDir={library.toggleSortDir}
         onRefreshFromRemote={library.refreshFromRemote}

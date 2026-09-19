@@ -10,6 +10,7 @@ export interface MediaLibraryPageDto {
 }
 
 export interface MediaLibraryListItemDto {
+    format?: string;
     id: string;
     mediaTitleId: string;
     canonicalTitle: string;
@@ -432,6 +433,8 @@ export interface MediaProviderAvailabilityLinkDto {
 }
 
 export interface MediaLibraryQueryParams {
+    collection?: string;
+    format?: string;
     query?: string;
     status?: string;
     mediaKind?: string;

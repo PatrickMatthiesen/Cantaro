@@ -124,6 +124,7 @@ export function LibraryContentSection({
                     <LibraryEntryCard
                         key={entry.id}
                         entry={entry}
+                        collection={filters.collection}
                         density={density}
                         onClick={() => onNavigateEntry(entry.mediaTitleId)}
                     />

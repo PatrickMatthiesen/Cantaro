@@ -1,6 +1,7 @@
 import type { MediaLibraryListItemDto } from '../../services/mediaApi';
 import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
 import { mediaLibraryStatusClassName, mediaLibraryStatusLabel } from './mediaLibraryStatus';
+import { libraryFormatLabel } from './libraryCollections';
 
 interface TopLeftBadge {
     label: string;
@@ -32,6 +33,7 @@ export interface LibraryEntryCardBadgesProps {
 }
 
 export interface LibraryEntryCardDetailsProps {
+    collection?: string;
     entry: MediaLibraryListItemDto;
     progress: LibraryEntryProgressSegments | null;
     density: MediaLibraryDensity;
@@ -138,13 +140,15 @@ function LibraryEntryCompletionBar({ progress, density }: { progress: LibraryEnt
     );
 }
 
-export function LibraryEntryCardDetails({ entry, progress, density }: LibraryEntryCardDetailsProps) {
+export function LibraryEntryCardDetails({ entry, progress, density, collection }: LibraryEntryCardDetailsProps) {
     const classNames = DETAILS_CLASS_NAMES[density];
+    const formatLabel = libraryFormatLabel(entry.mediaKind, entry.format, collection);
 
     return (
         <div className={`absolute inset-x-0 bottom-0 bg-linear-to-t from-black/95 via-black/76 to-transparent ${classNames.panel}`}>
             <p className={`${mediaLibraryStatusClassName(entry.status)} ${classNames.meta} mb-1 font-semibold`}>
                 {mediaLibraryStatusLabel(entry.status, entry.mediaKind)}
+                {formatLabel ? <span className="font-normal text-white/80"> · {formatLabel}</span> : null}
             </p>
             <p className={`${classNames.title} line-clamp-2 leading-tight font-bold text-white transition-colors group-hover:text-amber-200`}>
                 {entry.canonicalTitle}

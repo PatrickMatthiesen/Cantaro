@@ -1,7 +1,9 @@
 import { Link } from '@tanstack/react-router';
+import { mediaLibraryStatusLabel } from '@cantaro/client-shared/media';
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
   Clapperboard,
   Library,
   ListMusic,
@@ -22,6 +24,7 @@ import type {
 import { searchGroups, type SearchGroupPresentation } from './searchGroups';
 import { rankSearchResults } from './searchRanking';
 import { searchResultDomId, trustedCanonicalRoute } from './searchRouting';
+import { mediaSearchCategory } from './mediaSearchGroups';
 
 type SearchNavigateHandler = (route: string) => boolean | void;
 
@@ -77,39 +80,34 @@ function ResultContent({
   item,
   compact,
   showArrow,
-  showEntityType = false,
 }: {
   item: SearchResultItem;
   compact: boolean;
   showArrow: boolean;
-  showEntityType?: boolean;
 }) {
-  const metadata = resultMetadata(item, showEntityType);
-  const titleClassName = compact ? 'text-sm' : 'text-sm sm:text-base';
+  const metadata = resultMetadata(item);
+  const titleClassName = compact ? 'truncate' : 'whitespace-normal break-words';
   const metadataClassName = compact ? 'text-xs' : 'text-xs sm:text-sm';
 
   return (
     <>
       <ResultArtwork item={item} compact={compact} />
       <span className="min-w-0 flex-1">
-        <span className={`block truncate font-black text-content ${titleClassName}`}>{item.title}</span>
-        <span className={`mt-0.5 block truncate font-semibold text-content-muted ${metadataClassName}`}>
-          {metadata || item.entityType}
-        </span>
+        <span className={`block text-sm font-black text-content ${titleClassName}`}>{item.title}</span>
+        {metadata ? <span className={`mt-0.5 block truncate font-semibold text-content-muted ${metadataClassName}`}>
+          {metadata}
+        </span> : null}
       </span>
-      {!compact ? (
-        <span className="hidden bg-surface-subtle px-2.5 py-1 text-[0.68rem] font-semibold text-content-muted capitalize sm:inline">
-          {item.entityType}
-        </span>
-      ) : null}
       {showArrow ? <ArrowRight className="h-4 w-4 shrink-0 text-content-muted transition group-hover:text-accent-strong" aria-hidden /> : null}
     </>
   );
 }
 
-function resultMetadata(item: SearchResultItem, showEntityType: boolean): string {
-  const entityType = showEntityType ? item.entityType : undefined;
-  return [entityType, item.subtitle, item.detail].filter(Boolean).join(' · ');
+function resultMetadata(item: SearchResultItem): string {
+  const detail = item.entityType === 'media' && item.detail
+    ? mediaLibraryStatusLabel(item.detail, item.mediaKind ?? '')
+    : item.detail;
+  return [item.subtitle, detail].filter(Boolean).join(' · ');
 }
 
 function SearchResultRow({
@@ -117,20 +115,18 @@ function SearchResultRow({
   compact = false,
   onNavigate,
   asOption = false,
-  showEntityType = false,
 }: {
   item: SearchResultItem;
   compact?: boolean;
   onNavigate?: SearchNavigateHandler;
   asOption?: boolean;
-  showEntityType?: boolean;
 }) {
   const canonicalRoute = trustedCanonicalRoute(item.canonicalRoute);
 
   if (!canonicalRoute) {
     return (
       <div className="flex min-w-0 items-center gap-3 px-2 py-2 opacity-70" title="This result does not have a safe Cantaro destination yet">
-        <ResultContent item={item} compact={compact} showArrow={false} showEntityType={showEntityType} />
+        <ResultContent item={item} compact={compact} showArrow={false} />
       </div>
     );
   }
@@ -147,7 +143,7 @@ function SearchResultRow({
         if (onNavigate?.(canonicalRoute)) event.preventDefault();
       }}
     >
-      <ResultContent item={item} compact={compact} showArrow showEntityType={showEntityType} />
+      <ResultContent item={item} compact={compact} showArrow />
     </Link>
   );
 }
@@ -233,7 +229,9 @@ function SuccessfulGroup({
 
   return (
     <div>
-      <div className="divide-y divide-border-subtle">
+      {!compact && presentation.id === 'media' ? (
+        <MediaResultColumns items={group.items} onNavigate={onNavigate} />
+      ) : <div className="divide-y divide-border-subtle">
         {group.items.map((item) => (
           <SearchResultRow
             key={`${item.entityType}-${item.id}`}
@@ -243,7 +241,7 @@ function SuccessfulGroup({
             asOption={asListbox}
           />
         ))}
-      </div>
+      </div>}
       {group.message ? (
         <div className="mt-2">
           <SearchStatusMessage
@@ -254,6 +252,43 @@ function SuccessfulGroup({
           />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function MediaResultColumns({ items, onNavigate }: {
+  items: SearchResultItem[];
+  onNavigate?: SearchNavigateHandler;
+}) {
+  const categories = [
+    { id: 'watch', label: 'Watch', description: 'Movies, series, and anime', icon: Clapperboard },
+    { id: 'read', label: 'Read', description: 'Manga, books, and novels', icon: BookOpen },
+    { id: 'other', label: 'Other media', description: 'Titles without a recognized format', icon: Library },
+  ] as const;
+
+  return (
+    <div className="grid items-start gap-6 @xl:grid-cols-2">
+      {categories.map(({ id, label, description, icon: Icon }) => {
+        const results = items.filter((item) => mediaSearchCategory(item) === id);
+        if (id === 'other' && results.length === 0) return null;
+        return (
+          <section key={id} aria-label={label} className="min-w-0">
+            <header className="mb-2 px-2 pt-2">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-content">
+                <Icon className="h-4 w-4 text-content-muted" aria-hidden />
+                {label}
+              </h3>
+              <p className="mt-1 text-xs text-content-muted">{description}</p>
+            </header>
+            <div className="divide-y divide-border-subtle">
+              {results.map((item) => <SearchResultRow key={item.id} item={item} onNavigate={onNavigate} />)}
+            </div>
+            {results.length === 0 ? (
+              <p className="px-2 py-4 text-sm text-content-muted">No {id === 'read' ? 'written' : 'watchable'} titles in these results.</p>
+            ) : null}
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -344,7 +379,7 @@ function SearchGroup({
 }) {
   return (
     <section
-      className={compact ? 'py-2' : 'border-b border-border-subtle py-4'}
+      className={compact ? 'py-2' : 'min-w-0 border-b border-border-subtle pb-4'}
       aria-labelledby={`${idPrefix}-group-${presentation.id}`}
       role={asListbox ? 'group' : undefined}
     >
@@ -524,7 +559,6 @@ function RankedResultsBody({
           compact
           onNavigate={onNavigate}
           asOption={asListbox}
-          showEntityType
         />
       ))}
     </div>
@@ -589,6 +623,24 @@ export function SearchRankedResults({
   );
 }
 
+function GroupedResultsLayout({ presentations, renderGroup, overview }: {
+  presentations: SearchGroupPresentation[];
+  renderGroup: (presentation: SearchGroupPresentation) => ReactNode;
+  overview: boolean;
+}) {
+  if (!overview) return presentations.map(renderGroup);
+  return (
+    <div className="grid items-start gap-8 @5xl:grid-cols-3">
+      <div className="@container min-w-0 @5xl:col-span-2">
+        {presentations.filter(({ id }) => id === 'media').map(renderGroup)}
+      </div>
+      <div className="grid min-w-0 items-start gap-6 @2xl:grid-cols-2 @5xl:grid-cols-1">
+        {presentations.filter(({ id }) => id !== 'media').map(renderGroup)}
+      </div>
+    </div>
+  );
+}
+
 export function SearchGroupedResults({
   query,
   response,
@@ -616,30 +668,32 @@ export function SearchGroupedResults({
   listboxId?: string;
   idPrefix?: string;
 }) {
+  const presentations = searchGroups.filter((presentation) => groupIds.includes(presentation.id));
+  const renderGroup = (presentation: SearchGroupPresentation) => (
+    <SearchGroup
+      key={presentation.id}
+      presentation={presentation}
+      group={response?.groups[presentation.id]}
+      loading={loading}
+      query={query}
+      compact={compact}
+      showGroupLink={showGroupLinks}
+      onRetry={onRetry}
+      onNavigate={onNavigate}
+      asListbox={asListbox}
+      idPrefix={idPrefix}
+    />
+  );
+  const overview = !compact && groupIds.includes('media') && groupIds.length > 1;
+
   return (
     <div
       id={listboxId}
       role={asListbox ? 'listbox' : undefined}
-      className={compact ? 'divide-y divide-border-subtle' : 'space-y-4'}
+      className={compact ? 'divide-y divide-border-subtle' : '@container'}
     >
       {error ? <WholeSearchError message={error} onRetry={onRetry} compact={compact} /> : (
-        searchGroups
-          .filter((presentation) => groupIds.includes(presentation.id))
-          .map((presentation) => (
-            <SearchGroup
-              key={presentation.id}
-              presentation={presentation}
-              group={response?.groups[presentation.id]}
-              loading={loading}
-              query={query}
-              compact={compact}
-              showGroupLink={showGroupLinks}
-              onRetry={onRetry}
-              onNavigate={onNavigate}
-              asListbox={asListbox}
-              idPrefix={idPrefix}
-            />
-          ))
+        <GroupedResultsLayout presentations={presentations} renderGroup={renderGroup} overview={overview} />
       )}
     </div>
   );

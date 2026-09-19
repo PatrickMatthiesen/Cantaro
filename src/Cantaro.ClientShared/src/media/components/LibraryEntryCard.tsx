@@ -13,6 +13,7 @@ export interface LibraryEntryCardProps {
     entry: MediaLibraryListItemDto;
     onClick: () => void;
     density?: MediaLibraryDensity;
+    collection?: string;
 }
 
 function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: string }) {
@@ -39,7 +40,7 @@ function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: strin
     );
 }
 
-export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: LibraryEntryCardProps) {
+export function LibraryEntryCard({ entry, onClick, density = 'comfortable', collection }: LibraryEntryCardProps) {
     const progress = progressText(entry);
     const progressBar = progressSegments(entry);
     const nextReleaseRelative = formatRelativeReleaseTime(entry.nextReleaseAt);
@@ -69,6 +70,7 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable' }: Li
                 />
 
                 <LibraryEntryCardDetails
+                    collection={collection}
                     entry={entry}
                     progress={progressBar}
                     density={density}

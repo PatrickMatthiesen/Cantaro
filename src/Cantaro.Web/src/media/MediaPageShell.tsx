@@ -46,14 +46,14 @@ function createMediaNavigationSections(): PageNavigationSection[] {
           label: "Anime",
           to: "/media/library",
           icon: <Tv aria-hidden />,
-          search: { mediaKind: "anime", sortBy: "updatedAt", sortDir: "desc" },
+          search: { collection: "anime", sortBy: "updatedAt", sortDir: "desc" },
           matchPrefix: "/media/browse/anime",
         },
         {
           label: "Manga",
           to: "/media/library",
           icon: <BookOpen aria-hidden />,
-          search: { mediaKind: "manga", sortBy: "updatedAt", sortDir: "desc" },
+          search: { collection: "manga", sortBy: "updatedAt", sortDir: "desc" },
           matchPrefix: "/media/browse/manga",
         },
         {

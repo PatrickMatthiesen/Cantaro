@@ -6,6 +6,7 @@ export { MediaLibraryPage, type MediaPageHeading } from './pages/MediaLibraryPag
 export { MediaObservationReviewPage } from './pages/MediaObservationReviewPage';
 export { ProviderPanel } from './components/ProviderPanel';
 export { MediaProviderIcon } from './components/MediaProviderIcon';
+export { mediaLibraryStatusLabel } from './components/media-library/mediaLibraryStatus';
 export * from './services/mediaApi';
 export * from './services/mediaFormatting';
 export * from './services/mediaProviders';

@@ -222,6 +222,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                   />
                 ) : (
                   <AddToLibraryActions
+                    entry={props.entry}
                     selectedStatus={props.selectedStatus}
                     isAddingToLibrary={props.isAddingToLibrary}
                     onSetSelectedStatus={props.onSetSelectedStatus}

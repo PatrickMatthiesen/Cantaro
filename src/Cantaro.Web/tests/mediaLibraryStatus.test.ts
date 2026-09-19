@@ -6,7 +6,7 @@ import type {
   MediaLibraryPageDto,
   MediaViewerProviderBindingDto,
 } from '../../Cantaro.ClientShared/src/media/services/mediaApi.types';
-import { getMediaFilterDefaults } from '../src/media/mediaLibraryRouteFilters';
+import { getMediaFilterDefaults, mediaLibraryFilterSearch } from '../src/media/mediaLibraryRouteFilters';
 
 test('media library contracts preserve plural provider-list memberships', () => {
   const pageLists: MediaLibraryPageDto['availableProviderListNames'] = ['Favorites'];
@@ -21,15 +21,26 @@ test('media library contracts preserve plural provider-list memberships', () => 
 });
 
 describe('media library lifecycle filters', () => {
+  test('round trips cleared filters, search, sorting, and pagination through the URL', () => {
+    const saved = mediaLibraryFilterSearch({ query: 'azure sea', sortBy: 'title', sortDir: 'asc', page: 3 });
+    const restored = createInitialMediaLibraryFilters(getMediaFilterDefaults(saved));
+    expect(restored).toMatchObject({ query: 'azure sea', status: '', mediaKind: '', provider: '', sortBy: 'title', sortDir: 'asc', page: 3 });
+  });
+
+  test('reads query-only URLs and rejects invalid pages', () => {
+    expect(getMediaFilterDefaults({ q: 'slime', page: '-2' })).toEqual({ query: 'slime', page: 1 });
+    expect(getMediaFilterDefaults({ page: '2' })?.page).toBe(2);
+  });
   test('defaults the library to the canonical current status without a provider list', () => {
     const filters = createInitialMediaLibraryFilters();
 
     expect(filters).toMatchObject({
-      provider: 'anilist',
+      collection: 'film-tv',
       status: 'current',
       page: 1,
     });
     expect(filters).not.toHaveProperty('providerListName');
+    expect(filters.provider).toBeUndefined();
   });
 
   test('keeps the current default when route defaults only specify another filter', () => {

@@ -414,6 +414,7 @@ public sealed class CantaroSearchService(
                 Detail = libraryState?.Status,
                 ArtworkUrl = candidate.PosterUrl,
                 CanonicalRoute = route,
+                MediaKind = candidate.MediaKind,
                 IsInLibrary = libraryState is not null,
                 LibraryStatus = libraryState?.Status
             };
@@ -524,6 +525,7 @@ public sealed class CantaroSearchService(
             Detail = null,
             ArtworkUrl = result.PosterUrl,
             CanonicalRoute = BuildCatalogRoute(discovery.ProviderId, result.ProviderMediaId),
+            MediaKind = result.MediaKind,
             IsInLibrary = false
         };
     }

@@ -19,6 +19,7 @@ public class MediaLibraryListItemDto
     public string? PosterUrl { get; set; }
     public string? BackgroundUrl { get; set; }
     public required string MediaKind { get; set; }
+    public string? Format { get; set; }
     public required string Status { get; set; }
     public decimal? Score { get; set; }
     public int? ProgressEpisodes { get; set; }

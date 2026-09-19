@@ -34,6 +34,8 @@ public class MediaLibraryController(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         [FromQuery] string? query = null,
+        [FromQuery] string? collection = null,
+        [FromQuery] string? format = null,
         CancellationToken cancellationToken = default)
     {
         var user = await _userManager.GetUserAsync(User)
@@ -45,6 +47,8 @@ public class MediaLibraryController(
                 Query = query,
                 Status = status,
                 MediaKind = mediaKind,
+                Collection = collection,
+                Format = format,
                 Provider = provider,
                 ProviderListName = providerListName,
                 SortBy = string.IsNullOrWhiteSpace(sortBy) ? "updatedAt" : sortBy,
