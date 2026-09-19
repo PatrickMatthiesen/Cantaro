@@ -41,7 +41,7 @@ function statusOptions(collection: string): FilterOption[] {
 function formatOptions(collection: string): FilterOption[] {
   return [
     { value: '', label: 'All formats' },
-    ...(FORMAT_VALUES[collection] ?? FORMAT_VALUES['film-tv']).map((value) => ({
+    ...(FORMAT_VALUES[collection] ?? FORMAT_VALUES['film-tv'] ?? []).map((value) => ({
       value,
       label: mediaFormatLabel(value),
     })),
