@@ -3,6 +3,8 @@
 
 using Garage.Hosting;
 
+#pragma warning disable ASPIREDOTNETPROJECT001 // Opt into experimental Project Resource v2 coordinated builds.
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var dockerEnv = builder.AddDockerComposeEnvironment("cantaro-compose")
@@ -79,12 +81,12 @@ var avatars = garage.AddBucket("avatars", "cantaro-avatars");
 // Optionally, add pgAdmin for database management (runs in a separate container)
 // var pgAdmin = postgres.WithPgAdmin();
 
-var migrationService = builder.AddProject<Projects.Cantaro_MigrationService>("migration-service")
+var migrationService = builder.AddDotnetProject("migration-service", "../Cantaro.MigrationService/Cantaro.MigrationService.csproj")
     .WithReference(db)
     .WaitFor(db);
 
 // Add API service
-var api = builder.AddProject<Projects.Cantaro_Api>("api")
+var api = builder.AddDotnetProject("api", "../Cantaro.Api/Cantaro.Api.csproj")
     .WithEnvironment("YouTube:ClientId", googleClientId)
     .WithEnvironment("YouTube:ClientSecret", googleClientSecret)
     .WithEnvironment("Spotify:ClientId", spotifyClientId)

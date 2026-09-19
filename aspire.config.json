@@ -1,5 +1,9 @@
 {
   "appHost": {
     "path": "src/Cantaro.AppHost/Cantaro.AppHost.csproj"
-  }
+  },
+  "sdk": {
+    "version": "13.6.0-preview.1.26468.12"
+  },
+  "channel": "daily"
 }
