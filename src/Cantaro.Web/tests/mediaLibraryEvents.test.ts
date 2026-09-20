@@ -150,6 +150,37 @@ describe('media progress event subscription', () => {
     }
   });
 
+  test('honors Retry-After when the event stream is rate limited', async () => {
+    installDomStubs();
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    globalThis.setTimeout = ((callback: () => void, delay = 0) => {
+      timers.push({ callback, delay });
+      return timers.length;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
+    let requests = 0;
+    globalThis.fetch = mock(() => {
+      requests++;
+      return Promise.resolve(requests === 1
+        ? new Response(null, { status: 429, headers: { 'Retry-After': '7' } })
+        : eventResponse('data: {}\n\n'));
+    }) as typeof fetch;
+
+    const listener = mock(() => {});
+    const unsubscribe = subscribeToMediaProgressUpdates(listener);
+    try {
+      await flushPromises();
+      expect(requests).toBe(1);
+      expect(timers[0]?.delay).toBe(7_000);
+      timers[0]?.callback();
+      await flushPromises();
+      expect(requests).toBe(2);
+      expect(listener).toHaveBeenCalledWith({});
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test('shares one connection and aborts it after the final unsubscribe', async () => {
     const dom = installDomStubs();
     let requestSignal: AbortSignal | undefined;

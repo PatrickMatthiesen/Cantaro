@@ -24,6 +24,8 @@ public sealed class MyAnimeListMediaProvider(
 
     public string ProviderId => ProviderName;
 
+    public bool SupportsMediaKind(string mediaKind) => mediaKind is MediaKinds.Anime or MediaKinds.Manga;
+
     // MAL currently supports only plain PKCE, so the challenge is the verifier itself.
     public string BuildCodeChallenge(string codeVerifier) => codeVerifier;
 

@@ -65,6 +65,9 @@ builder.Services
     .AddOptions<MyAnimeListOptions>()
     .Bind(builder.Configuration.GetSection(MyAnimeListOptions.SectionName));
 builder.Services
+    .AddOptions<SimklOptions>()
+    .Bind(builder.Configuration.GetSection(SimklOptions.SectionName));
+builder.Services
     .AddOptions<AnimeScheduleOptions>()
     .Bind(builder.Configuration.GetSection(AnimeScheduleOptions.SectionName));
 builder.Services
@@ -99,6 +102,7 @@ builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
 builder.Services.AddMusicBrainzQueryClient();
 builder.Services.AddAniListApiClient();
 builder.Services.AddMyAnimeListApiClient();
+builder.Services.AddSimklApiClient();
 builder.Services.AddHttpClient<AnimeScheduleApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {
@@ -111,6 +115,7 @@ builder.Services.AddSingleton<ILyricsProvider, LrclibLyricsProvider>();
 builder.Services.AddScoped<LyricsService>();
 builder.Services.AddScoped<IMediaProvider, AniListMediaProvider>();
 builder.Services.AddScoped<IMediaProvider, MyAnimeListMediaProvider>();
+builder.Services.AddScoped<IMediaProvider, SimklMediaProvider>();
 builder.Services.AddScoped<MediaLibraryImportService>();
 builder.Services.AddScoped<MediaProviderInitialSyncService>();
 builder.Services.AddSingleton<MediaProviderInitialSyncGate>();

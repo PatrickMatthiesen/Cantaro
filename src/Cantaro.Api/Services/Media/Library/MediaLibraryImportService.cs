@@ -110,7 +110,9 @@ public class MediaLibraryImportService(
                 crossReferenceLinks,
                 titleProviderLinks);
 
-            if (!entriesByTitleId.TryGetValue(link.MediaTitleId, out var entry))
+            entriesByTitleId.TryGetValue(link.MediaTitleId, out var entry);
+            var entryWasCreated = entry is null;
+            if (entry is null)
             {
                 entry = CreateLibraryEntry(userId, link.MediaTitleId, item, importResult.ImportedAt);
                 _dbContext.MediaLibraryEntries.Add(entry);
@@ -118,9 +120,9 @@ public class MediaLibraryImportService(
                 createdEntries++;
             }
 
-            var entryWasCreated = entry.ProviderBindings.Count == 0;
             var previousState = CaptureState(entry);
             existingBindings.TryGetValue(item.ProviderMediaId, out var binding);
+            var sourceBindingExisted = binding is not null;
             var previousSourceRemoteUpdateAt = binding?.LastRemoteUpdateAt;
             if (binding is null)
             {
@@ -136,11 +138,14 @@ public class MediaLibraryImportService(
                 updatedEntries++;
             }
 
-            var shouldApplyRemoteState = entryWasCreated || ShouldApplyRemoteLibraryState(
-                entry,
-                binding,
-                item,
-                previousSourceRemoteUpdateAt);
+            // A newly connected provider contributes its binding and metadata, but
+            // cannot replace an existing viewer history during its first import.
+            var shouldApplyRemoteState = entryWasCreated || (sourceBindingExisted
+                && ShouldApplyRemoteLibraryState(
+                    entry,
+                    binding,
+                    item,
+                    previousSourceRemoteUpdateAt));
             if (shouldApplyRemoteState)
             {
                 ApplyRemoteLibraryState(entry, item, importResult.ImportedAt);
@@ -150,7 +155,8 @@ public class MediaLibraryImportService(
                         entry,
                         binding,
                         previousState,
-                        importResult.ImportedAt));
+                        importResult.ImportedAt,
+                        allowProgress: !item.HasNonContiguousProgress));
                 }
             }
 
@@ -533,7 +539,8 @@ public class MediaLibraryImportService(
         MediaLibraryEntry entry,
         MediaLibraryProviderBinding sourceBinding,
         MediaLibraryEntryState previousState,
-        DateTimeOffset timestamp)
+        DateTimeOffset timestamp,
+        bool allowProgress)
     {
         var operations = new List<MediaProviderOperation>();
         foreach (var target in entry.ProviderBindings.Where(binding =>
@@ -546,7 +553,7 @@ public class MediaLibraryImportService(
             {
                 operations.Add(CreateOperation(
                     target,
-                    MediaProviderOperationTypes.UpdateStatus,
+                    MediaProviderOperationTypes.ImportFanOutStatus,
                     new MediaStatusUpdateRequest
                     {
                         ProviderMediaId = target.MediaProviderLink!.ExternalId,
@@ -560,7 +567,7 @@ public class MediaLibraryImportService(
             {
                 operations.Add(CreateOperation(
                     target,
-                    MediaProviderOperationTypes.UpdateScore,
+                    MediaProviderOperationTypes.ImportFanOutScore,
                     new MediaScoreUpdateRequest
                     {
                         ProviderMediaId = target.MediaProviderLink!.ExternalId,
@@ -570,13 +577,13 @@ public class MediaLibraryImportService(
                     timestamp));
             }
 
-            if (previousState.ProgressEpisodes != entry.ProgressEpisodes
+            if (allowProgress && (previousState.ProgressEpisodes != entry.ProgressEpisodes
                 || previousState.ProgressChapters != entry.ProgressChapters
-                || previousState.ProgressVolumes != entry.ProgressVolumes)
+                || previousState.ProgressVolumes != entry.ProgressVolumes))
             {
                 operations.Add(CreateOperation(
                     target,
-                    MediaProviderOperationTypes.UpdateProgress,
+                    MediaProviderOperationTypes.ImportFanOutProgress,
                     new MediaProgressUpdateRequest
                     {
                         ProviderMediaId = target.MediaProviderLink!.ExternalId,

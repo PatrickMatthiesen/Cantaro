@@ -9,6 +9,7 @@ import type {
   MediaFranchiseGraphDto,
   MediaFranchiseNodeDto,
 } from "../../services/mediaApi";
+import { mediaProviderCatalog } from "../../services/mediaProviders";
 import { DetailSectionHeading } from "./MediaDetailSections";
 import type { FranchiseGraphState } from "./mediaEntryDetailTypes";
 import {
@@ -48,6 +49,10 @@ function nodeMetadata(node: MediaFranchiseNodeDto): string {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+function franchiseProviderName(providerId: string): string {
+  return mediaProviderCatalog.find((provider) => provider.id === providerId)?.name ?? providerId;
 }
 
 function NodeState({ node }: { node: MediaFranchiseNodeDto }) {
@@ -251,7 +256,7 @@ function ErrorSection({ onRetry }: { onRetry: () => void }) {
         role="alert"
       >
         <p className="text-content-muted">
-          Couldn’t load franchise connections from AniList.
+          Couldn’t load franchise connections.
         </p>
         <ActionButton tone="secondary" onClick={onRetry}>
           <RotateCcw size={17} aria-hidden /> Retry
@@ -274,7 +279,7 @@ function FranchiseRelations({
   if (!hasRelations) {
     return (
       <p className="mt-5 py-4 text-content-muted">
-        AniList lists no prequels, sequels, or related titles for this entry.
+        No franchise connections are available for this title.
       </p>
     );
   }
@@ -312,8 +317,7 @@ function LoadedSection({
 }) {
   const presentation = buildFranchisePresentation(graph);
   const viewAllAction = presentation.relatedTitleCount > 0 ? onViewAll : undefined;
-  const providerName =
-    graph.sourceProvider === "anilist" ? "AniList" : graph.sourceProvider;
+  const providerName = franchiseProviderName(graph.sourceProvider);
 
   return (
     <section className="py-9">
@@ -326,10 +330,12 @@ function LoadedSection({
       <FranchisePreviewSummary
         relatedTitleCount={presentation.relatedTitleCount}
       />
-      <p className="mt-5 text-xs text-content-subtle">
-        Relations from {providerName}
-        {graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}
-      </p>
+      {graph.relations.length > 0 || graph.nodes.length > 1 ? (
+        <p className="mt-5 text-xs text-content-subtle">
+          Relations from {providerName}
+          {graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -29,4 +29,24 @@ describe('media library routing', () => {
       { isConnected: false },
     )).toBe(true);
   });
+
+  it('keeps a SIMKL-only library accessible when another provider is disconnected', () => {
+    expect(shouldRedirectEmptyLibraryToProviders(
+      { totalCount: 0 },
+      [
+        { providerId: 'anilist', isConnected: false },
+        { providerId: 'simkl', isConnected: true },
+      ],
+    )).toBe(false);
+  });
+
+  it('redirects only when every provider is disconnected', () => {
+    expect(shouldRedirectEmptyLibraryToProviders(
+      { totalCount: 0 },
+      [
+        { providerId: 'anilist', isConnected: false },
+        { providerId: 'simkl', isConnected: false },
+      ],
+    )).toBe(true);
+  });
 });

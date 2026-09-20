@@ -22,6 +22,10 @@ public class MediaLibraryProviderBinding
 
     public string? ProviderLibraryEntryId { get; set; }
 
+    /// <summary>Last requested and accepted status, used to recognize provider normalization.</summary>
+    public string? LastRequestedStatus { get; set; }
+    public string? LastAppliedStatus { get; set; }
+
     public DateTimeOffset? LastSyncedAt { get; set; }
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }

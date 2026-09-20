@@ -115,6 +115,134 @@ public class MediaLibraryImportServiceTests
         Assert.Equal(28, (await db.MediaTitles.SingleAsync()).TotalKnownCount);
     }
 
+    [Fact]
+    public async Task ImportAsync_NonContiguousRemoteProgress_DoesNotFanOutAggregateProgress()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var (user, sourceAccount) = await SeedAccountAsync(db, 206);
+        var service = MakeService(db);
+        var initialImportAt = DateTimeOffset.UtcNow;
+        await service.ImportAsync(
+            user.Id,
+            sourceAccount,
+            MakeImport(initialImportAt, progress: 10, remoteUpdatedAt: initialImportAt),
+            CancellationToken.None);
+
+        var entry = await db.MediaLibraryEntries.SingleAsync();
+        var title = await db.MediaTitles.SingleAsync();
+        var targetAccount = new ConnectedServiceAccount
+        {
+            Id = 1206,
+            UserId = user.Id,
+            Service = "myanimelist",
+            ExternalAccountId = "viewer-206-target",
+            CreatedAt = initialImportAt.UtcDateTime,
+            UpdatedAt = initialImportAt.UtcDateTime
+        };
+        var targetLink = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = "myanimelist",
+            ExternalId = "anime:52991",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = initialImportAt,
+            UpdatedAt = initialImportAt
+        };
+        var targetBinding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = entry.Id,
+            MediaProviderLinkId = targetLink.Id,
+            ConnectedServiceAccountId = targetAccount.Id,
+            ProviderAccountId = targetAccount.ExternalAccountId,
+            LastRemoteUpdateAt = initialImportAt,
+            CreatedAt = initialImportAt,
+            UpdatedAt = initialImportAt
+        };
+        db.AddRange(targetAccount, targetLink, targetBinding);
+        await db.SaveChangesAsync();
+
+        var newerImportAt = initialImportAt.AddMinutes(2);
+        await service.ImportAsync(
+            user.Id,
+            sourceAccount,
+            MakeImport(
+                newerImportAt,
+                progress: 15,
+                remoteUpdatedAt: newerImportAt,
+                hasNonContiguousProgress: true),
+            CancellationToken.None);
+
+        Assert.Equal(15, (await db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ImportAsync_FirstSimklImport_PreservesCompletedAniListHistoryDespiteNewerActivityTime()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var (user, anilistAccount) = await SeedAccountAsync(db, 207);
+        var service = MakeService(db);
+        var now = DateTimeOffset.UtcNow;
+        var anilistImport = MakeImport(now.AddDays(-30), progress: 28);
+        anilistImport.Items[0].Status = MediaLibraryStatuses.Completed;
+        await service.ImportAsync(user.Id, anilistAccount, anilistImport, CancellationToken.None);
+
+        var simklAccount = new ConnectedServiceAccount
+        {
+            Id = 1207,
+            UserId = user.Id,
+            Service = "simkl",
+            ExternalAccountId = "viewer-207-simkl",
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        };
+        db.ConnectedServiceAccounts.Add(simklAccount);
+        await db.SaveChangesAsync();
+
+        // This timestamp can reflect recent account activity, while this title's
+        // actual viewing history is old. First import must not trust it as a
+        // reason to replace the completed canonical entry.
+        var simklImport = MakeImport(now, progress: 5, remoteUpdatedAt: now);
+        simklImport.ProviderId = "simkl";
+        var simklItem = simklImport.Items[0];
+        simklItem.ProviderMediaId = "show-42";
+        simklItem.Status = MediaLibraryStatuses.Current;
+        simklItem.Score = 20m;
+        simklItem.CrossReferences = [new MediaProviderCrossReference
+        {
+            ProviderId = "anilist",
+            ProviderMediaId = "154587"
+        }];
+
+        await service.ImportAsync(user.Id, simklAccount, simklImport, CancellationToken.None);
+
+        var entry = await db.MediaLibraryEntries.SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Completed, entry.Status);
+        Assert.Equal(28, entry.ProgressEpisodes);
+        Assert.Equal(87.5m, entry.Score);
+        Assert.Equal(MediaMutationSources.ProviderImport, entry.LastMutationSource);
+        Assert.Null(entry.LastLocalEditAt);
+        Assert.Equal(2, await db.MediaLibraryProviderBindings.CountAsync());
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+
+        simklImport.ImportedAt = now.AddMinutes(10);
+        simklItem.LastRemoteUpdateAt = now.AddMinutes(10);
+        simklItem.Status = MediaLibraryStatuses.Completed;
+        simklItem.ProgressEpisodes = 28;
+        simklItem.Score = 95m;
+        await service.ImportAsync(user.Id, simklAccount, simklImport, CancellationToken.None);
+
+        Assert.Equal(95m, (await db.MediaLibraryEntries.SingleAsync()).Score);
+        var fanOut = await db.MediaProviderOperations.SingleAsync();
+        Assert.Equal(MediaProviderOperationTypes.ImportFanOutScore, fanOut.OperationType);
+    }
+
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
         new(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance);
 
@@ -122,7 +250,8 @@ public class MediaLibraryImportServiceTests
         DateTimeOffset importedAt,
         int progress,
         DateTimeOffset? remoteUpdatedAt = null,
-        decimal? score = 87.5m) => new()
+        decimal? score = 87.5m,
+        bool hasNonContiguousProgress = false) => new()
     {
         ProviderId = "anilist",
         ImportedAt = importedAt,
@@ -145,6 +274,7 @@ public class MediaLibraryImportServiceTests
                 Score = score,
                 ProviderListNames = ["Favorites"],
                 ProgressEpisodes = progress,
+                HasNonContiguousProgress = hasNonContiguousProgress,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
                 LastRemoteUpdateAt = remoteUpdatedAt ?? importedAt

@@ -207,7 +207,6 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                   <ActionRail
                     hasStatusChanged={hasStatusChanged}
                     isSavingStatus={props.isSavingStatus}
-                    isRefreshingProgress={props.isRefreshingProgress}
                     onSaveStatus={props.onSaveStatus}
                     continueWatching={props.continueWatching}
                     seriesDestinations={
@@ -217,6 +216,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                     preferredServiceId={preferredServiceId}
                     onSelectStreamingService={setPreferredServiceId}
                     canonicalTitle={props.entry.title.canonicalTitle}
+                    mediaKind={mediaKind}
                     nextReleaseAt={props.entry.nextReleaseAt}
                     nextReleaseLabel={props.entry.nextReleaseLabel}
                   />

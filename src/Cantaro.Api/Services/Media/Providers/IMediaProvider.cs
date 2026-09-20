@@ -6,6 +6,8 @@ public interface IMediaProvider
 {
     string ProviderId { get; }
 
+    bool SupportsMediaKind(string mediaKind) => true;
+
     Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default);
 
     string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)

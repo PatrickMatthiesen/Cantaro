@@ -20,6 +20,11 @@ public class MediaProviderLibraryImportResult
 
 public class MediaProviderLibraryItem
 {
+    /// <summary>Complete provider episode history; null means the provider does not supply it.</summary>
+    public IReadOnlyList<MediaProviderWatchedEpisode>? WatchedEpisodes { get; set; }
+
+    public bool HasNonContiguousProgress { get; set; }
+
     public required string ProviderMediaId { get; set; }
 
     public string? ProviderLibraryEntryId { get; set; }
@@ -238,6 +243,13 @@ public class MediaScoreUpdateRequest
 /// </summary>
 public class MediaLibraryStateSyncRequest
 {
+    public bool UpdateStatus { get; set; } = true;
+
+    /// <summary>False when only status or score changed, preserving the provider's episode history.</summary>
+    public bool UpdateProgress { get; set; } = true;
+
+    public IReadOnlyList<MediaProviderWatchedEpisode>? WatchedEpisodes { get; set; }
+
     public required string ProviderMediaId { get; set; }
 
     public required string Status { get; set; }
@@ -258,6 +270,11 @@ public class MediaLibraryStateSyncRequest
 
 public class MediaProviderMutationResult
 {
+    /// <summary>Canonical status actually accepted by the provider, when returned.</summary>
+    public string? AppliedStatus { get; set; }
+
+    public int? AppliedProgressEpisodes { get; set; }
+
     public required string ProviderId { get; set; }
 
     public required string ProviderMediaId { get; set; }
@@ -265,6 +282,14 @@ public class MediaProviderMutationResult
     public DateTimeOffset AppliedAt { get; set; }
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
+}
+
+public sealed class MediaProviderWatchedEpisode
+{
+    public int? SeasonNumber { get; set; }
+    public int EpisodeNumber { get; set; }
+    public string? ProviderEpisodeId { get; set; }
+    public DateTimeOffset? WatchedAt { get; set; }
 }
 
 public class MediaReleaseMetadata

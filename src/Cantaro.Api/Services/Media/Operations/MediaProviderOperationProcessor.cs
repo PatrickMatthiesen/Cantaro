@@ -33,14 +33,16 @@ public class MediaProviderOperationProcessor(
         int userId,
         MediaLibraryProviderBinding binding,
         MediaProgressUpdateRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferSave = false)
     {
         return await EnqueueAsync(
             userId,
             binding,
             MediaProviderOperationTypes.UpdateProgress,
             request,
-            cancellationToken);
+            cancellationToken,
+            deferSave);
     }
 
     public async Task<MediaProviderOperation> EnqueueAutoProgressAsync(
@@ -61,28 +63,32 @@ public class MediaProviderOperationProcessor(
         int userId,
         MediaLibraryProviderBinding binding,
         MediaStatusUpdateRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferSave = false)
     {
         return await EnqueueAsync(
             userId,
             binding,
             MediaProviderOperationTypes.UpdateStatus,
             request,
-            cancellationToken);
+            cancellationToken,
+            deferSave);
     }
 
     public async Task<MediaProviderOperation> EnqueueScoreUpdateAsync(
         int userId,
         MediaLibraryProviderBinding binding,
         MediaScoreUpdateRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferSave = false)
     {
         return await EnqueueAsync(
             userId,
             binding,
             MediaProviderOperationTypes.UpdateScore,
             request,
-            cancellationToken);
+            cancellationToken,
+            deferSave);
     }
 
     public async Task<MediaProviderOperation> EnqueueLibraryStateSyncAsync(
@@ -119,6 +125,18 @@ public class MediaProviderOperationProcessor(
 
         try
         {
+            if (ShouldSkipStaleOperation(operation))
+            {
+                _logger.LogInformation("Skipped stale media provider operation {OperationId} ({OperationType}).",
+                    operation.Id, operation.OperationType);
+                _dbContext.MediaProviderOperations.Remove(operation);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                return new MediaProviderOperationExecutionResult
+                {
+                    Outcome = MediaProviderOperationExecutionOutcome.Succeeded
+                };
+            }
+
             var provider = _mediaProviderRegistry.GetRequired(
                 operation.MediaLibraryProviderBinding!.MediaProviderLink!.Provider);
             var mutationResult = await ExecuteOperationAsync(provider, operation, cancellationToken);
@@ -237,7 +255,8 @@ public class MediaProviderOperationProcessor(
         MediaLibraryProviderBinding binding,
         string operationType,
         TRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferSave = false)
     {
         var operation = new MediaProviderOperation
         {
@@ -253,7 +272,10 @@ public class MediaProviderOperationProcessor(
         };
 
         _dbContext.MediaProviderOperations.Add(operation);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        if (!deferSave)
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
         return operation;
     }
 
@@ -270,15 +292,15 @@ public class MediaProviderOperationProcessor(
 
         return operation.OperationType switch
         {
-            MediaProviderOperationTypes.UpdateProgress => await ExecuteProgressUpdateAsync(
+            MediaProviderOperationTypes.UpdateProgress or MediaProviderOperationTypes.ImportFanOutProgress => await ExecuteProgressUpdateAsync(
                 provider,
                 operation,
                 cancellationToken),
-            MediaProviderOperationTypes.UpdateStatus => await provider.UpdateStatusAsync(
+            MediaProviderOperationTypes.UpdateStatus or MediaProviderOperationTypes.ImportFanOutStatus => await provider.UpdateStatusAsync(
                 operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
                 DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
-            MediaProviderOperationTypes.UpdateScore => await provider.UpdateScoreAsync(
+            MediaProviderOperationTypes.UpdateScore or MediaProviderOperationTypes.ImportFanOutScore => await provider.UpdateScoreAsync(
                 operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
                 DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
@@ -299,6 +321,53 @@ public class MediaProviderOperationProcessor(
         return JsonSerializer.Deserialize<TRequest>(payloadJson, SerializerOptions)
             ?? throw new InvalidOperationException("Provider operation payload could not be deserialized.");
     }
+
+    private static bool ShouldSkipStaleOperation(MediaProviderOperation operation)
+    {
+        var entry = operation.MediaLibraryProviderBinding?.MediaLibraryEntry;
+        if (entry is null)
+        {
+            return false;
+        }
+
+        var isImportFanOut = operation.OperationType is
+            MediaProviderOperationTypes.ImportFanOutStatus or
+            MediaProviderOperationTypes.ImportFanOutScore or
+            MediaProviderOperationTypes.ImportFanOutProgress;
+        var isNewerLocalEdit = entry.LastLocalEditAt > operation.CreatedAt;
+        if (!isImportFanOut && !isNewerLocalEdit
+            && operation.OperationType != MediaProviderOperationTypes.SyncLibraryState)
+        {
+            return false;
+        }
+
+        return operation.OperationType switch
+        {
+            MediaProviderOperationTypes.UpdateStatus or MediaProviderOperationTypes.ImportFanOutStatus
+                => DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson).Status != entry.Status,
+            MediaProviderOperationTypes.UpdateScore or MediaProviderOperationTypes.ImportFanOutScore
+                => DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson).Score != entry.Score,
+            MediaProviderOperationTypes.UpdateProgress or MediaProviderOperationTypes.ImportFanOutProgress
+                => ProgressDoesNotMatch(entry,
+                    DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson), isImportFanOut),
+            MediaProviderOperationTypes.SyncLibraryState => SyncStateDoesNotMatch(
+                entry, DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson)),
+            _ => false
+        };
+    }
+
+    private static bool ProgressDoesNotMatch(
+        MediaLibraryEntry entry, MediaProgressUpdateRequest request, bool compareNulls)
+        => (compareNulls || request.ProgressEpisodes.HasValue) && request.ProgressEpisodes != entry.ProgressEpisodes
+            || (compareNulls || request.ProgressChapters.HasValue) && request.ProgressChapters != entry.ProgressChapters
+            || (compareNulls || request.ProgressVolumes.HasValue) && request.ProgressVolumes != entry.ProgressVolumes;
+
+    private static bool SyncStateDoesNotMatch(MediaLibraryEntry entry, MediaLibraryStateSyncRequest request)
+        => request.UpdateStatus && request.Status != entry.Status
+            || request.Score != entry.Score
+            || request.UpdateProgress && (request.ProgressEpisodes != entry.ProgressEpisodes
+                || request.ProgressChapters != entry.ProgressChapters
+                || request.ProgressVolumes != entry.ProgressVolumes);
 
     private async Task<MediaProviderMutationResult> ExecuteProgressUpdateAsync(
         IMediaProvider provider,
@@ -387,6 +456,14 @@ public class MediaProviderOperationProcessor(
     private void ApplyMutationSuccess(MediaProviderOperation operation, MediaProviderMutationResult result)
     {
         var now = DateTimeOffset.UtcNow;
+        var isProviderPropagation = operation.OperationType is
+            MediaProviderOperationTypes.UpdateProgress or
+            MediaProviderOperationTypes.UpdateStatus or
+            MediaProviderOperationTypes.UpdateScore or
+            MediaProviderOperationTypes.SyncLibraryState or
+            MediaProviderOperationTypes.ImportFanOutProgress or
+            MediaProviderOperationTypes.ImportFanOutStatus or
+            MediaProviderOperationTypes.ImportFanOutScore;
         var binding = operation.MediaLibraryProviderBinding
             ?? throw new InvalidOperationException("Provider operation is missing a provider binding.");
         var entry = binding.MediaLibraryEntry
@@ -394,29 +471,6 @@ public class MediaProviderOperationProcessor(
 
         switch (operation.OperationType)
         {
-            case MediaProviderOperationTypes.UpdateProgress:
-            {
-                var request = DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson);
-                entry.ProgressEpisodes = request.ProgressEpisodes ?? entry.ProgressEpisodes;
-                entry.ProgressChapters = request.ProgressChapters ?? entry.ProgressChapters;
-                entry.ProgressVolumes = request.ProgressVolumes ?? entry.ProgressVolumes;
-                entry.LastMutationSource = MediaMutationSources.UserProgressUpdate;
-                break;
-            }
-            case MediaProviderOperationTypes.UpdateStatus:
-            {
-                var request = DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson);
-                entry.Status = request.Status;
-                entry.LastMutationSource = MediaMutationSources.UserStatusUpdate;
-                break;
-            }
-            case MediaProviderOperationTypes.UpdateScore:
-            {
-                var request = DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson);
-                entry.Score = request.Score;
-                entry.LastMutationSource = MediaMutationSources.UserScoreUpdate;
-                break;
-            }
             case MediaProviderOperationTypes.AutoProgressUpdate:
             {
                 var payload = DeserializePayload<AutoProgressUpdatePayload>(operation.PayloadJson);
@@ -436,13 +490,38 @@ public class MediaProviderOperationProcessor(
                 break;
             }
             case MediaProviderOperationTypes.SyncLibraryState:
-                // Cantaro is the source of truth for a whole-state sync. The
-                // canonical entry already contains the desired values, so only
-                // provider synchronization metadata should change here.
+            case MediaProviderOperationTypes.UpdateProgress:
+            case MediaProviderOperationTypes.UpdateStatus:
+            case MediaProviderOperationTypes.UpdateScore:
+            case MediaProviderOperationTypes.ImportFanOutProgress:
+            case MediaProviderOperationTypes.ImportFanOutStatus:
+            case MediaProviderOperationTypes.ImportFanOutScore:
+                // The local entry already contains the requested values.
                 break;
         }
 
-        if (operation.OperationType != MediaProviderOperationTypes.SyncLibraryState)
+        if (result.AppliedStatus is not null)
+        {
+            binding.LastRequestedStatus = operation.OperationType switch
+            {
+                MediaProviderOperationTypes.UpdateStatus => DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson).Status,
+                MediaProviderOperationTypes.ImportFanOutStatus => DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson).Status,
+                MediaProviderOperationTypes.SyncLibraryState => DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson).Status,
+                _ => null
+            };
+            binding.LastAppliedStatus = result.AppliedStatus;
+            if (!isProviderPropagation)
+            {
+                entry.Status = result.AppliedStatus;
+            }
+        }
+        if (result.AppliedProgressEpisodes.HasValue
+            && !isProviderPropagation)
+        {
+            entry.ProgressEpisodes = result.AppliedProgressEpisodes.Value;
+        }
+
+        if (!isProviderPropagation)
         {
             entry.LastLocalEditAt = now;
             entry.UpdatedAt = now;
@@ -495,6 +574,7 @@ public class MediaProviderOperationProcessor(
         {
             AniListRequestException { RetryAfter: { } retryAfter } => retryAfter,
             MyAnimeListRequestException { RetryAfter: { } retryAfter } => retryAfter,
+            SimklRequestException { RetryAfter: { } retryAfter } => retryAfter,
             _ => TimeSpan.Zero
         };
 

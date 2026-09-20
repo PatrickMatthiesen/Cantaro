@@ -6,6 +6,10 @@ import type {
 } from "./mediaEntryDetailTypes";
 
 export function releaseStatusLabel(dimension: string): string {
+  if (["episode", "chapter", "volume"].includes(dimension.toLowerCase())) {
+    return "Unknown";
+  }
+
   const map: Record<string, string> = {
     airing: "Currently Airing",
     finished: "Finished",

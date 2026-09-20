@@ -27,6 +27,11 @@ describe('library collections', () => {
     expect(createInitialMediaLibraryFilters({ mediaKind: 'manga' }).collection).toBe('manga');
   });
 
+  test('movie and series links select the Film & TV collection', () => {
+    expect(createInitialMediaLibraryFilters(getMediaFilterDefaults({ mediaKind: 'movie' }))).toMatchObject({ collection: 'film-tv', format: 'movie' });
+    expect(createInitialMediaLibraryFilters(getMediaFilterDefaults({ mediaKind: 'series' }))).toMatchObject({ collection: 'film-tv', format: 'tv' });
+  });
+
   test('old written-format links use the stored format instead of a nonexistent category', () => {
     expect(getMediaFilterDefaults({ mediaKind: 'lightNovel' })).toMatchObject({ collection: 'books', format: 'novel' });
     expect(getMediaFilterDefaults({ mediaKind: 'oneShot' })).toMatchObject({ collection: 'manga', format: 'one_shot' });

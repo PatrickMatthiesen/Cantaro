@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { mediaApi } from '../../services/mediaApi';
-import { mainMediaProviderId } from '../../services/mediaProviders';
+import { toMediaApiError, type MediaApiError } from '../../services/mediaApi.errors';
+import { connectedMediaProviderIds } from '../../services/mediaProviders';
 import { subscribeToMediaProgressUpdates } from '../../services/mediaProgressEvents';
 import {
   formatTimestamp,
@@ -22,12 +23,19 @@ import {
 } from './mediaLibraryFilters';
 import { libraryCollectionStorageKey } from './libraryCollections';
 
-const PRIMARY_PROVIDER_ID = mainMediaProviderId;
-const ANILIST_REFRESH_ERROR = 'AniList couldn’t be refreshed. Cantaro will keep using your saved library data; use Reload to try again.';
+const PROVIDER_REFRESH_ERROR = 'Provider sync could not be refreshed. You can still use your saved Cantaro library.';
 export type MediaLibraryFilterDefaults = Partial<MediaLibraryQueryParams>;
 
 function serializeFilterDefaults(filterDefaults?: MediaLibraryFilterDefaults) {
   return JSON.stringify(filterDefaults ?? {});
+}
+
+function serializeLibraryQuery(params: MediaLibraryQueryParams): string {
+  return JSON.stringify(
+    Object.entries(params)
+      .filter(([, value]) => value !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
 }
 
 function hasActiveMediaLibraryFilters(filters: MediaLibraryQueryParams): boolean {
@@ -37,12 +45,8 @@ function hasActiveMediaLibraryFilters(filters: MediaLibraryQueryParams): boolean
     || filters.query
     || filters.mediaKind
     || filters.providerListName
-    || (filters.provider && filters.provider !== PRIMARY_PROVIDER_ID)
+    || filters.provider
   );
-}
-
-function shouldRefreshPrimaryProvider(status: MediaProviderAccountStatusDto): boolean {
-  return status.isConnected && isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID)));
 }
 
 function useLibraryDataState() {
@@ -51,24 +55,51 @@ function useLibraryDataState() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<MediaApiError | null>(null);
+  const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
+  const activeQueryKeyRef = useRef<string | null>(null);
+  const inFlightRequestsRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const loadLibrary = useCallback(async (params: MediaLibraryQueryParams) => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const result = await mediaApi.getLibrary(params);
-      setItems(result.items);
-      setAvailableProviderListNames(result.availableProviderListNames);
-      setTotalPages(result.totalPages);
-      setTotalCount(result.totalCount);
-    } catch (err) {
-      setAvailableProviderListNames([]);
-      setError(err instanceof Error ? err.message : 'Failed to load library');
-    } finally {
-      setIsLoading(false);
+    const queryKey = serializeLibraryQuery(params);
+    const inFlightRequest = inFlightRequestsRef.current.get(queryKey);
+    if (inFlightRequest) {
+      activeQueryKeyRef.current = queryKey;
+      return inFlightRequest;
     }
+
+    activeQueryKeyRef.current = queryKey;
+    const request = (async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const result = await mediaApi.getLibrary(params);
+        if (activeQueryKeyRef.current !== queryKey) return;
+        setItems(result.items);
+        setAvailableProviderListNames(result.availableProviderListNames);
+        setTotalPages(result.totalPages);
+        setTotalCount(result.totalCount);
+        setLoadedQueryKey(queryKey);
+      } catch (err) {
+        if (activeQueryKeyRef.current !== queryKey) return;
+        // Keep successful data and provider-list options available while a
+        // background reload fails. The view decides whether that data matches
+        // the active query before displaying it.
+        setError(toMediaApiError(err, 'Cantaro could not load your library.'));
+      } finally {
+        if (activeQueryKeyRef.current === queryKey) {
+          setIsLoading(false);
+        }
+      }
+    })();
+    inFlightRequestsRef.current.set(queryKey, request);
+    void request.finally(() => {
+      if (inFlightRequestsRef.current.get(queryKey) === request) {
+        inFlightRequestsRef.current.delete(queryKey);
+      }
+    });
+    return request;
   }, []);
 
   return {
@@ -78,6 +109,7 @@ function useLibraryDataState() {
     totalCount,
     isLoading,
     error,
+    loadedQueryKey,
     loadLibrary,
   };
 }
@@ -99,7 +131,7 @@ function useFilterDefaults(
       page: 1,
       pageSize: prev.pageSize ?? 24,
     }));
-  }, [filterDefaults, filterDefaultsKey]);
+  }, [filterDefaults, filterDefaultsKey, setFilters]);
 }
 
 function useAvailableProviderListNameGuard(
@@ -160,8 +192,10 @@ function useLibraryFilterActions(setFilters: Dispatch<SetStateAction<MediaLibrar
 
 function useLibraryFilters(availableProviderListNames: string[], filterDefaults?: MediaLibraryFilterDefaults,
   onFiltersChange?: (filters: MediaLibraryQueryParams) => void) {
+  const filterDefaultsKey = serializeFilterDefaults(filterDefaults);
+  const stableFilterDefaults = useMemo(() => filterDefaults, [filterDefaultsKey]);
   const [internalFilters, setInternalFilters] = useState<MediaLibraryQueryParams>(() => createInitialMediaLibraryFilters(filterDefaults));
-  const routeFilters = useMemo(() => createInitialMediaLibraryFilters(filterDefaults), [filterDefaults]);
+  const routeFilters = useMemo(() => createInitialMediaLibraryFilters(stableFilterDefaults), [stableFilterDefaults]);
   const filters = onFiltersChange ? routeFilters : internalFilters;
   const setFilters: Dispatch<SetStateAction<MediaLibraryQueryParams>> = (update) => {
     if (!onFiltersChange) { setInternalFilters(update); return; }
@@ -170,7 +204,7 @@ function useLibraryFilters(availableProviderListNames: string[], filterDefaults?
   };
   const actions = useLibraryFilterActions(setFilters);
 
-  useFilterDefaults(setInternalFilters, onFiltersChange ? undefined : filterDefaults);
+  useFilterDefaults(setInternalFilters, onFiltersChange ? undefined : stableFilterDefaults);
   useAvailableProviderListNameGuard(availableProviderListNames, filters, setFilters);
 
   return {
@@ -178,7 +212,6 @@ function useLibraryFilters(availableProviderListNames: string[], filterDefaults?
     setFilters,
     ...actions,
     hasActiveFilters: hasActiveMediaLibraryFilters(filters),
-    isPrimaryProviderSelected: filters.provider === PRIMARY_PROVIDER_ID,
   };
 }
 
@@ -187,79 +220,107 @@ function useProviderRefresh(
   filtersRef: MutableRefObject<MediaLibraryQueryParams>,
 ) {
   const [providerStatus, setProviderStatus] = useState<MediaProviderAccountStatusDto | null>(null);
+  const connectedProviderIdsRef = useRef<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [lastRemoteCheckAt, setLastRemoteCheckAt] = useState<string | null>(() => readStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID)));
-  const activeImportEventsRef = useRef<EventSource | null>(null);
+  const [lastRemoteCheckAt, setLastRemoteCheckAt] = useState<string | null>(null);
+  const activeImportEventsRef = useRef<Map<string, EventSource>>(new Map());
 
-  useEffect(() => () => {
-    activeImportEventsRef.current?.close();
+  const closeImportEvent = useCallback((providerId: string) => {
+    activeImportEventsRef.current.get(providerId)?.close();
+    activeImportEventsRef.current.delete(providerId);
   }, []);
 
-  const refreshFromRemote = useCallback(async () => {
-    activeImportEventsRef.current?.close();
-    activeImportEventsRef.current = null;
+  useEffect(() => () => {
+    for (const eventSource of activeImportEventsRef.current.values()) {
+      eventSource.close();
+    }
+    activeImportEventsRef.current.clear();
+  }, []);
+
+  const importProvider = useCallback((providerId: string) => new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      closeImportEvent(providerId);
+      callback();
+    };
+
+    void mediaApi.importLibrary(providerId)
+      .then(async (request) => {
+        const eventSource = await mediaApi.subscribeToImportEvents(
+          providerId,
+          request.importId,
+          (event: MediaLibraryImportEventDto) => {
+            if (event.status === 'completed') {
+              writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
+              setLastRemoteCheckAt(event.occurredAt);
+              settle(() => resolve(event.occurredAt));
+            } else if (event.status === 'failed') {
+              settle(() => reject(new Error(event.errorMessage || PROVIDER_REFRESH_ERROR)));
+            }
+          },
+          () => settle(() => reject(new Error(PROVIDER_REFRESH_ERROR))),
+        );
+        if (settled) {
+          eventSource.close();
+          return;
+        }
+        activeImportEventsRef.current.set(providerId, eventSource);
+      })
+      .catch((error) => settle(() => reject(error)));
+  }), [closeImportEvent]);
+
+  const refreshFromRemote = useCallback(async (providerIds?: string[]) => {
+    const providersToRefresh = providerIds ?? connectedProviderIdsRef.current;
+    if (providersToRefresh.length === 0) return;
+
+    for (const providerId of providersToRefresh) {
+      closeImportEvent(providerId);
+    }
     setIsRefreshing(true);
     setRefreshError(null);
 
-    try {
-      const request = await mediaApi.importLibrary(PRIMARY_PROVIDER_ID);
-      const eventSource = await mediaApi.subscribeToImportEvents(
-        PRIMARY_PROVIDER_ID,
-        request.importId,
-        (event: MediaLibraryImportEventDto) => {
-          if (event.status === 'queued' || event.status === 'running') {
-            setIsRefreshing(true);
-            return;
-          }
-
-          activeImportEventsRef.current?.close();
-          activeImportEventsRef.current = null;
-
-          if (event.status === 'completed') {
-            writeStoredValue(remoteCheckTimestampKey(PRIMARY_PROVIDER_ID), event.occurredAt);
-            setLastRemoteCheckAt(event.occurredAt);
-            setIsRefreshing(false);
-            void loadLibrary(filtersRef.current);
-            return;
-          }
-
-          if (event.status === 'failed') {
-            setRefreshError(ANILIST_REFRESH_ERROR);
-            setIsRefreshing(false);
-          }
-        },
-        () => {
-          activeImportEventsRef.current?.close();
-          activeImportEventsRef.current = null;
-          setRefreshError(ANILIST_REFRESH_ERROR);
-          setIsRefreshing(false);
-        },
-      );
-      activeImportEventsRef.current = eventSource;
-    } catch {
-      setRefreshError(ANILIST_REFRESH_ERROR);
-      setIsRefreshing(false);
+    const results = await Promise.allSettled(providersToRefresh.map((providerId) => importProvider(providerId)));
+    if (results.some((result) => result.status === 'rejected')) {
+      setRefreshError(PROVIDER_REFRESH_ERROR);
     }
-  }, [filtersRef, loadLibrary]);
+    if (results.some((result) => result.status === 'fulfilled')) {
+      void loadLibrary(filtersRef.current);
+    }
+    setIsRefreshing(false);
+  }, [closeImportEvent, filtersRef, importProvider, loadLibrary]);
 
   useEffect(() => {
     let isCancelled = false;
 
+    // fallow-ignore-next-line complexity
     const loadProviderState = async () => {
       try {
-        const status = await mediaApi.getProviderStatus(PRIMARY_PROVIDER_ID);
+        const summary = await mediaApi.getProviderStatuses();
         if (isCancelled) {
           return;
         }
 
-        setProviderStatus(status);
-        if (shouldRefreshPrimaryProvider(status)) {
-          await refreshFromRemote();
+        const connectedIds = connectedMediaProviderIds(summary.statuses);
+        connectedProviderIdsRef.current = connectedIds;
+        setProviderStatus(connectedIds.length > 0
+          ? { providerId: connectedIds[0], isConnected: true }
+          : null);
+        if (summary.statuses.length === 0 && summary.failedProviderIds.length > 0) {
+          setRefreshError(PROVIDER_REFRESH_ERROR);
+          return;
+        }
+
+        const staleProviderIds = connectedIds.filter((providerId) =>
+          isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(providerId))));
+        if (staleProviderIds.length > 0) {
+          await refreshFromRemote(staleProviderIds);
         }
       } catch {
         if (!isCancelled) {
-          setRefreshError(ANILIST_REFRESH_ERROR);
+          setRefreshError(PROVIDER_REFRESH_ERROR);
         }
       }
     };
@@ -285,6 +346,7 @@ export function useMediaLibraryState(filterDefaults?: MediaLibraryFilterDefaults
   const { availableProviderListNames, loadLibrary } = libraryData;
   const filterState = useLibraryFilters(availableProviderListNames, filterDefaults, onFiltersChange);
   const filtersRef = useRef(filterState.filters);
+  const currentQueryKey = serializeLibraryQuery(filterState.filters);
 
   useEffect(() => {
     filtersRef.current = filterState.filters;
@@ -302,8 +364,8 @@ export function useMediaLibraryState(filterDefaults?: MediaLibraryFilterDefaults
 
   return {
     ...libraryData,
+    hasCurrentData: libraryData.loadedQueryKey === currentQueryKey,
     ...filterState,
     ...providerState,
-    primaryProviderId: PRIMARY_PROVIDER_ID,
   };
 }

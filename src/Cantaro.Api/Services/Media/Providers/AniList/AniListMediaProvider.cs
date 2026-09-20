@@ -22,6 +22,8 @@ public class AniListMediaProvider(
 
     public string ProviderId => ProviderName;
 
+    public bool SupportsMediaKind(string mediaKind) => mediaKind is MediaKinds.Anime or MediaKinds.Manga;
+
     public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge)
     {
         return _apiClient.BuildAuthorizationUrl(redirectUri, state, codeChallenge);

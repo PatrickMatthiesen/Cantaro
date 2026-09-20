@@ -74,7 +74,7 @@ export function SquareOverlayNode({
         role="tooltip"
         className="pointer-events-none fixed inset-auto m-0 aspect-3/4 w-44 overflow-hidden bg-surface-subtle p-0 text-white shadow-lg"
       >
-        <DetailArtwork posterUrl={node.posterUrl} title={node.canonicalTitle} />
+        <DetailArtwork posterUrl={node.posterUrl} title={node.canonicalTitle} providerId={node.provider} />
         <span className="absolute inset-0 bg-linear-to-t from-black/95 via-black/35 via-55% to-transparent" aria-hidden />
         <div className="absolute inset-x-0 bottom-0 p-3">
           <strong className="block text-pretty text-sm leading-5">{node.canonicalTitle}</strong>

@@ -9,7 +9,7 @@ public static class MediaCanonicalMetadataPolicy
         IEnumerable<string> existingProviderIds)
     {
         var normalizedIncomingProviderId = NormalizeProviderId(incomingProviderId);
-        return normalizedIncomingProviderId != MediaObservationSiteIdentifiers.MyAnimeList
+        return normalizedIncomingProviderId is not (MediaObservationSiteIdentifiers.MyAnimeList or "simkl")
             || !existingProviderIds.Any(providerId =>
                 NormalizeProviderId(providerId) == MediaObservationSiteIdentifiers.AniList);
     }

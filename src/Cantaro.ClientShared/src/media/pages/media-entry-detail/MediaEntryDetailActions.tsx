@@ -459,18 +459,16 @@ export function ProgressCockpit(props: ProgressCockpitProps) {
 
 function SaveProgressAction({
   isSavingStatus,
-  isRefreshingProgress,
   onSaveStatus,
 }: {
   isSavingStatus: boolean;
-  isRefreshingProgress: boolean;
   onSaveStatus: () => void;
 }) {
   return (
     <ActionButton
       tone="personal"
       onClick={onSaveStatus}
-      disabled={isSavingStatus || isRefreshingProgress}
+      disabled={isSavingStatus}
       aria-busy={isSavingStatus}
       busyLabel="Saving…"
     >
@@ -611,6 +609,7 @@ function ContinueWatchingAction({
   preferredServiceId,
   onSelectStreamingService,
   canonicalTitle,
+  mediaKind,
   nextReleaseAt,
   nextReleaseLabel,
 }: {
@@ -620,6 +619,7 @@ function ContinueWatchingAction({
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   canonicalTitle: string;
+  mediaKind: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
 }) {
@@ -646,6 +646,7 @@ function ContinueWatchingAction({
     episodeDestinations,
     preferredServiceId,
     canonicalTitle,
+    mediaKind,
   );
   return linkActions.length > 0 ? (
     <ContinueDestinationMenu
@@ -660,7 +661,6 @@ function ContinueWatchingAction({
 export function ActionRail({
   hasStatusChanged,
   isSavingStatus,
-  isRefreshingProgress,
   onSaveStatus,
   continueWatching,
   seriesDestinations,
@@ -668,12 +668,12 @@ export function ActionRail({
   preferredServiceId,
   onSelectStreamingService,
   canonicalTitle,
+  mediaKind,
   nextReleaseAt,
   nextReleaseLabel,
 }: {
   hasStatusChanged: boolean;
   isSavingStatus: boolean;
-  isRefreshingProgress: boolean;
   onSaveStatus: () => void;
   continueWatching: ContinueWatchingState;
   seriesDestinations: readonly StreamingDestination[];
@@ -681,6 +681,7 @@ export function ActionRail({
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   canonicalTitle: string;
+  mediaKind: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
 }) {
@@ -689,7 +690,6 @@ export function ActionRail({
       {hasStatusChanged ? (
         <SaveProgressAction
           isSavingStatus={isSavingStatus}
-          isRefreshingProgress={isRefreshingProgress}
           onSaveStatus={onSaveStatus}
         />
       ) : (
@@ -700,6 +700,7 @@ export function ActionRail({
           preferredServiceId={preferredServiceId}
           onSelectStreamingService={onSelectStreamingService}
           canonicalTitle={canonicalTitle}
+          mediaKind={mediaKind}
           nextReleaseAt={nextReleaseAt}
           nextReleaseLabel={nextReleaseLabel}
         />

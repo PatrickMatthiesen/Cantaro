@@ -93,7 +93,7 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
         }
 
         if (event.status === 'failed') {
-          setError('The provider couldn’t be refreshed. Cantaro will keep using your saved library data.');
+          setError('The provider could not be refreshed. Try again when the provider is available.');
           setIsImporting(false);
         }
       },
@@ -119,7 +119,7 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
     try {
       return await mediaApi.importLibrary(providerId);
     } catch {
-      setError('The provider couldn’t be refreshed. Cantaro will keep using your saved library data.');
+      setError('The provider could not be refreshed. Try again when the provider is available.');
       setIsImporting(false);
       return null;
     }

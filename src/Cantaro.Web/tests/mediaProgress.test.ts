@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { progressSegments } from '../../Cantaro.ClientShared/src/media/components/media-library/libraryEntryProgress';
+import { releaseStatusLabel } from '../../Cantaro.ClientShared/src/media/pages/media-entry-detail/mediaEntryDetailModel';
 import type { MediaLibraryListItemDto } from '../../Cantaro.ClientShared/src/media/services/mediaApi.types';
 
 function makeEntry(overrides: Partial<MediaLibraryListItemDto> = {}): MediaLibraryListItemDto {
@@ -99,5 +100,13 @@ describe('progressSegments', () => {
       total: null,
       visualTotal: 10 / 0.9,
     });
+  });
+});
+
+describe('releaseStatusLabel', () => {
+  test('does not expose progress dimensions as release statuses', () => {
+    expect(releaseStatusLabel('episode')).toBe('Unknown');
+    expect(releaseStatusLabel('chapter')).toBe('Unknown');
+    expect(releaseStatusLabel('volume')).toBe('Unknown');
   });
 });

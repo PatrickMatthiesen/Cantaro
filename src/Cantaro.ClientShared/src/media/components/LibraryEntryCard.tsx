@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ImageIcon } from 'lucide-react';
 import {
     LibraryEntryCardBadges,
     LibraryEntryCardDetails,
@@ -8,6 +9,7 @@ import { formatRelativeReleaseTime } from '../services/mediaFormatting';
 import type { MediaLibraryDensity } from '../pages/MediaLibraryPage';
 import type { MediaLibraryListItemDto } from '../services/mediaApi';
 import { MediaProviderIcon } from './MediaProviderIcon';
+import { mediaProviderIconId } from '../services/mediaProviders';
 
 export interface LibraryEntryCardProps {
     entry: MediaLibraryListItemDto;
@@ -16,13 +18,14 @@ export interface LibraryEntryCardProps {
     collection?: string;
 }
 
-function LibraryArtwork({ posterUrl, title }: { posterUrl?: string; title: string }) {
+function LibraryArtwork({ posterUrl, title, provider }: { posterUrl?: string; title: string; provider?: string }) {
     const [failed, setFailed] = useState(false);
+    const iconId = mediaProviderIconId(provider);
 
     if (!posterUrl || failed) {
         return (
             <div className="flex h-full w-full items-center justify-center bg-surface-subtle">
-                <MediaProviderIcon providerId="anilist" className="h-8 w-8" aria-hidden />
+                {iconId ? <MediaProviderIcon providerId={iconId} className="h-8 w-8" aria-hidden /> : <ImageIcon className="h-8 w-8 text-content-muted" aria-hidden />}
                 <span className="sr-only">{title} — no artwork available</span>
             </div>
         );
@@ -60,7 +63,7 @@ export function LibraryEntryCard({ entry, onClick, density = 'comfortable', coll
             className="group h-full w-full border border-border-subtle bg-surface-subtle text-left transition-colors hover:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
             <div className="relative aspect-[0.72] overflow-hidden bg-surface-subtle">
-                <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} />
+                <LibraryArtwork posterUrl={entry.posterUrl} title={entry.canonicalTitle} provider={entry.provider} />
 
                 <LibraryEntryCardBadges
                     topLeftBadge={topLeftBadge}

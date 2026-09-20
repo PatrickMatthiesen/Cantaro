@@ -110,6 +110,8 @@ jobs:
           Parameters__AniListClientSecret: ${{ secrets.CANTARO_ANILIST_CLIENT_SECRET }}
           Parameters__MyAnimeListClientId: ${{ secrets.CANTARO_MYANIMELIST_CLIENT_ID }}
           Parameters__MyAnimeListClientSecret: ${{ secrets.CANTARO_MYANIMELIST_CLIENT_SECRET }}
+          Parameters__SimklClientId: ${{ secrets.CANTARO_SIMKL_CLIENT_ID }}
+          Parameters__SimklClientSecret: ${{ secrets.CANTARO_SIMKL_CLIENT_SECRET }}
           Parameters__AnimeScheduleId: ${{ secrets.CANTARO_ANIMESCHEDULE_ID }}
           Parameters__AnimeScheduleToken: ${{ secrets.CANTARO_ANIMESCHEDULE_TOKEN }}
           Parameters__TurnstileMode: ${{ vars.CANTARO_TURNSTILE_MODE || 'Auto' }}

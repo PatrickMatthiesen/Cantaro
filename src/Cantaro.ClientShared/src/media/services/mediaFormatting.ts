@@ -4,6 +4,8 @@ const MEDIA_KIND_LABELS: Record<string, string> = {
   lightNovel: 'Light Novel',
   oneShot: 'One Shot',
   novel: 'Novel',
+  movie: 'Movie',
+  series: 'TV Series',
 };
 
 const MEDIA_FORMAT_LABELS: Record<string, string> = {
