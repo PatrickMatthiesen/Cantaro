@@ -58,7 +58,7 @@ episode history retains watched episodes beyond a gap and specials. The displaye
 progress stops at the first unwatched regular episode.
 
 For TV titles with a verified episode catalog, the episode list groups episodes
-by season and shows the overall regular-episode number as secondary text. The
+by season and shows the series-wide regular-episode number in a tooltip. The
 season selector also scopes the watched-through progress controls. Selecting a
 season changes only the view; saving a progress edit maps the chosen episode
 back to Cantaro's overall watched-through count. Titles without a reliable

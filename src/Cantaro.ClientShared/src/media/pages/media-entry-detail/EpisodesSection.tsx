@@ -16,10 +16,8 @@ import {
 import { StreamingServiceIcon } from "../../components/StreamingServiceIcon";
 import {
   formatEpisodeAvailability,
-  formatReleaseAvailability,
 } from "./episodeAvailability";
 import { getEpisodeRows } from "./episodeRows";
-import { DetailSectionHeading } from "./MediaDetailSections";
 import type { EpisodeCatalogState } from "./mediaEntryDetailTypes";
 import { resolvePreferredEpisodeAudioLanguage } from "./preferredEpisodeAudio";
 import {
@@ -163,7 +161,7 @@ function EpisodeDestinationActions({
   }
 
   return (
-    <div className="flex flex-wrap justify-end gap-2">
+    <div className="flex min-w-0 flex-wrap gap-2 @4xl/episodes:justify-end">
       {destinations.map((destination) => {
         const service = STREAMING_SERVICES[destination.serviceId];
         const opensEpisode = destination.kind === "episode";
@@ -218,6 +216,7 @@ function EpisodeRow({
   preferredReleaseTrack?: string;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
+  const hasLinks = seriesDestinations.length > 0 || (destination?.destinations.length ?? 0) > 0;
   const isNext = episodeNumber === watchedThrough + 1;
   const progressLabel = getEpisodeProgressLabel(episodeNumber, watchedThrough);
   const number = formatEpisodeNumber(
@@ -227,47 +226,73 @@ function EpisodeRow({
 
   return (
     <li
-      className={`grid gap-3 border-t border-border-subtle px-3 py-4 first:border-t-0 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-center ${isNext ? "bg-personal-accent/10" : ""}`}
+      className={`grid items-center gap-x-3 gap-y-2 border-t border-border-subtle px-2 py-3 first:border-t-0 ${hasLinks ? "grid-cols-[max-content_minmax(0,1fr)] @4xl/episodes:grid-cols-[max-content_minmax(0,1fr)_minmax(0,auto)]" : "grid-cols-[max-content_minmax(0,1fr)_auto]"} ${isNext ? "bg-personal-accent/10" : ""}`}
     >
-      <EpisodeNumberLabel number={number} />
+      <EpisodeNumberLabel
+        label={number.primary}
+        value={destination?.seasonEpisodeNumber ?? episodeNumber}
+        season={seasonSelection === "all" ? destination?.seasonNumber : undefined}
+        seriesNumber={number.secondary ? episodeNumber : undefined}
+      />
       <EpisodeDescription
         title={destination?.title}
         progressLabel={progressLabel}
         destination={destination}
       />
-      <EpisodeDestinationActions
-        episodeNumber={episodeNumber}
-        episodeLabel={number.secondary
-          ? `${number.primary}, ${number.secondary.toLowerCase()}`
-          : number.primary}
-        episodeDestinations={filterDestinationsByAudioLanguage(
-          destination?.destinations ?? [],
-          audioLanguage,
-          preferredReleaseTrack,
-        )}
-        seriesDestinations={seriesDestinations}
-        onSelectStreamingService={onSelectStreamingService}
-      />
+      <div className={hasLinks ? "col-start-2 min-w-0 @4xl/episodes:col-start-3 @4xl/episodes:row-start-1" : "col-start-3 min-w-0"}>
+        <EpisodeDestinationActions
+          episodeNumber={episodeNumber}
+          episodeLabel={number.secondary
+            ? `${number.primary}, ${number.secondary.toLowerCase()}`
+            : number.primary}
+          episodeDestinations={filterDestinationsByAudioLanguage(
+            destination?.destinations ?? [],
+            audioLanguage,
+            preferredReleaseTrack,
+          )}
+          seriesDestinations={seriesDestinations}
+          onSelectStreamingService={onSelectStreamingService}
+        />
+      </div>
     </li>
   );
 }
 
 function EpisodeNumberLabel({
-  number,
+  label,
+  value,
+  season,
+  seriesNumber,
 }: {
-  number: ReturnType<typeof formatEpisodeNumber>;
+  label: string;
+  value: number;
+  season?: number;
+  seriesNumber?: number;
 }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const visibleLabel = season ? `S${season} · ${value}` : String(value);
+  if (seriesNumber === undefined) {
+    return <span className="min-w-6 text-center text-sm font-bold tabular-nums text-content" aria-label={label}>{visibleLabel}</span>;
+  }
   return (
-    <div className="tabular-nums">
-      <span className="block text-sm font-bold text-content">
-        {number.primary}
-      </span>
-      {number.secondary ? (
-        <span className="mt-0.5 block text-xs text-content-subtle">
-          {number.secondary}
+    <span className="relative self-center" onMouseEnter={() => setShowDetails(true)} onMouseLeave={() => setShowDetails(false)}>
+      <button
+        type="button"
+        aria-label={`${label}, series number ${seriesNumber}`}
+        onFocus={() => setShowDetails(true)}
+        onBlur={() => setShowDetails(false)}
+        onClick={() => setShowDetails(true)}
+        onKeyDown={(event) => { if (event.key === "Escape") setShowDetails(false); }}
+        className="min-h-8 min-w-6 cursor-help text-center text-sm font-bold tabular-nums text-content focus-visible:outline-2 focus-visible:outline-focus"
+      >
+        {visibleLabel}
+      </button>
+      {showDetails ? (
+        <span role="tooltip" className="absolute left-0 bottom-full z-10 whitespace-nowrap border border-border-strong bg-surface-raised px-2 py-1 text-xs font-medium text-content">
+          Series #{seriesNumber}
         </span>
       ) : null}
-    </div>
+    </span>
   );
 }
 
@@ -285,7 +310,7 @@ function EpisodeDescription({
       {title ? (
         <strong className="block truncate text-content">{title}</strong>
       ) : null}
-      <div className={`${title ? "mt-1" : ""} grid grid-cols-[5.5rem_minmax(0,1fr)] items-baseline gap-x-3 text-sm`}>
+      <div className={`${title ? "mt-1" : ""} flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm`}>
         <span className={episodeProgressClassName(progressLabel)}>
           {progressLabel}
         </span>
@@ -484,7 +509,7 @@ function getEpisodeSectionData(
   streamingDestinations: MediaStreamingDestinations,
   seasonSelection: SeasonSelection,
 ) {
-  if (state.status !== "loaded") return { rows: [], availableCount: 0 };
+  if (state.status !== "loaded") return { rows: [] };
   const allRows = getEpisodeRows(entry, streamingDestinations.episodes);
   const selectedEpisodes = getEpisodesForSeason(
     streamingDestinations.episodes,
@@ -497,9 +522,6 @@ function getEpisodeSectionData(
     rows: seasonSelection === "all"
       ? allRows
       : allRows.filter((row) => selectedEpisodeNumbers.has(row.episodeNumber)),
-    availableCount: streamingDestinations.episodes.filter(
-      (episode) => episode.destinations.length > 0,
-    ).length,
   };
 }
 
@@ -513,20 +535,6 @@ function orderSeriesDestinations(
     if (right.serviceId === preferredServiceId) return 1;
     return 0;
   });
-}
-
-function getEpisodeSummary(
-  state: EpisodeCatalogState,
-  availableCount: number,
-  selectedSeason: SeasonSelection,
-  selectedEpisodeCount: number,
-) {
-  if (state.status !== "loaded") return "Loading collected episode links…";
-  const overallSummary = formatReleaseAvailability(state.value.releaseAvailability)
-    ?? `${availableCount} episode links collected`;
-  return typeof selectedSeason === "number"
-    ? `${selectedEpisodeCount} episodes in Season ${selectedSeason} · ${overallSummary} overall`
-    : overallSummary;
 }
 
 export function EpisodesSection({
@@ -552,7 +560,7 @@ export function EpisodesSection({
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
 }) {
-  const { rows, availableCount } = getEpisodeSectionData(
+  const { rows } = getEpisodeSectionData(
     entry,
     state,
     streamingDestinations,
@@ -595,20 +603,16 @@ export function EpisodesSection({
   );
   const isLoading = state.status === "loading";
   const specials = state.status === "loaded" ? state.value.specials : [];
-  const summary = selectedSeason === "specials"
-    ? `${specials.length} specials`
-    : getEpisodeSummary(state, availableCount, selectedSeason, rows.length);
 
   return (
     <section
-      className="py-9"
+      className="@container/episodes py-6"
       role="tabpanel"
       id="media-detail-panel-episodes"
       aria-labelledby="media-detail-tab-episodes"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <DetailSectionHeading title="Episodes" detail={summary} />
-        <div className="flex flex-wrap items-end justify-end gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
           {seasonOptions.length > 1 ? (
             <SelectField
               label="Season"
@@ -652,6 +656,7 @@ export function EpisodesSection({
               </select>
             </label>
           ) : null}
+        </div>
           <ActionButton tone="ghost" onClick={onRefresh} disabled={isLoading}>
             <RefreshCcw
               size={17}
@@ -660,7 +665,6 @@ export function EpisodesSection({
             />
             Check for updates
           </ActionButton>
-        </div>
       </div>
       <EpisodeSectionContent
         entry={entry}

@@ -237,10 +237,13 @@ Media cards are artwork-led with poster aspect ratios, dark gradient overlays, p
 
 ### TV episode navigation
 
-Use the shared square season dropdown above the episode list. Show the episode
-number within its season as the primary label, with `Overall episode N` in
-smaller `text-content-subtle` text. In the All seasons view, include the season
-in the primary label. Keep both labels available to screen readers.
+Place the shared square season dropdown at the left of the episode toolbar,
+without a repeated Episodes heading or count summary. Use compact episode
+numbers without the word Episode. In All seasons, include the season as `S3 · 1`.
+Reveal the series-wide number as `Series #34` in a tooltip on hover, focus, or
+tap, without reserving space in the row. Keep descriptive accessible labels.
+At narrow content widths, place provider links below the episode description
+and allow language metadata to wrap without squeezing the title.
 
 The selected season also scopes the watched-through progress control. Changing
 the selection only changes the view. Default to the season containing the next

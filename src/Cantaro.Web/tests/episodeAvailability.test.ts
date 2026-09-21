@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
   formatEpisodeAvailability,
-  formatReleaseAvailability,
 } from '../../Cantaro.ClientShared/src/media/pages/media-entry-detail/episodeAvailability';
 
 describe('episode availability presentation', () => {
@@ -25,27 +24,5 @@ describe('episode availability presentation', () => {
 
   test('omits the availability label when no episode track is known', () => {
     expect(formatEpisodeAvailability()).toBeNull();
-  });
-
-  test('keeps the actual maximum beside language-specific counts', () => {
-    expect(formatReleaseAvailability({
-      maxReleasedEpisodes: 12,
-      languages: [{
-        languageCode: 'en',
-        subReleasedEpisodes: 12,
-        dubReleasedEpisodes: 8,
-      }],
-    })).toBe('12 episodes released · EN: Sub 12 · Dub 8');
-  });
-
-  test('does not render nullable release counts as literal null', () => {
-    expect(formatReleaseAvailability({
-      maxReleasedEpisodes: null,
-      languages: [{
-        languageCode: 'en',
-        subReleasedEpisodes: null,
-        dubReleasedEpisodes: null,
-      }],
-    })).toBeNull();
   });
 });
