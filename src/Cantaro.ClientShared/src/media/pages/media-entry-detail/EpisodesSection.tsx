@@ -272,7 +272,7 @@ function EpisodeNumberLabel({
   seriesNumber?: number;
 }) {
   const [showDetails, setShowDetails] = useState(false);
-  const visibleLabel = season ? `S${season} · ${value}` : String(value);
+  const visibleLabel = season ? `S${season} · #${value}` : `#${value}`;
   if (seriesNumber === undefined) {
     return <span className="min-w-6 text-center text-sm font-bold tabular-nums text-content" aria-label={label}>{visibleLabel}</span>;
   }

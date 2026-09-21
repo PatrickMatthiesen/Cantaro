@@ -163,12 +163,15 @@ public sealed class SimklMediaProviderTests
         await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsolutePath switch
         {
             "/tv/123" => Json("""{"title":"Show","ids":{"simkl":123},"total_episodes":12}"""),
-            "/tv/episodes/123" => Json("""[{"season":1,"episode":1},{"season":2,"episode":1}]"""),
+            "/tv/episodes/123" => Json("""[{"season":1,"episode":1,"title":"Pilot"},{"season":2,"episode":1,"title":"Premiere"}]"""),
             _ => throw new InvalidOperationException(request.RequestUri!.AbsolutePath)
         });
         var details = await fixture.Provider.GetTitleDetailsAsync(1, "tv:123", CancellationToken.None);
         Assert.Equal("Show", details?.Title);
         Assert.Equal([(1, 1), (2, 1)], details?.EpisodeCatalog?.Select(item => (item.SeasonNumber, item.EpisodeNumber)));
+        Assert.Equal(["Pilot", "Premiere"], details?.EpisodeCatalog?.Select(item => item.Title));
+        var catalogRequest = Assert.Single(fixture.Handler.Uris, uri => uri.AbsolutePath == "/tv/episodes/123");
+        Assert.Contains("extended=full", catalogRequest.Query);
         Assert.All(fixture.Handler.Authorizations, authorization => Assert.Equal("Bearer access-token", authorization));
     }
 

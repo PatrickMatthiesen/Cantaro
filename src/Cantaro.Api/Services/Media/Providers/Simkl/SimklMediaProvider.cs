@@ -389,7 +389,9 @@ public sealed class SimklMediaProvider(
         CancellationToken cancellationToken)
     {
         using var page = await GetAuthenticatedAsync(userId,
-            $"/{(id.Type == "tv" ? "tv" : "anime")}/episodes/{id.Id}", null, cancellationToken);
+            $"/{(id.Type == "tv" ? "tv" : "anime")}/episodes/{id.Id}",
+            new Dictionary<string, string?> { ["extended"] = "full" },
+            cancellationToken);
         return SimklJson.MapEpisodeCatalogSnapshot(page.RootElement, id.Type);
     }
 

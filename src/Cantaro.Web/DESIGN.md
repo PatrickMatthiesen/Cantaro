@@ -239,7 +239,7 @@ Media cards are artwork-led with poster aspect ratios, dark gradient overlays, p
 
 Place the shared square season dropdown at the left of the episode toolbar,
 without a repeated Episodes heading or count summary. Use compact episode
-numbers without the word Episode. In All seasons, include the season as `S3 · 1`.
+numbers prefixed with `#`, without the word Episode. In All seasons, include the season as `S3 · #1`.
 Reveal the series-wide number as `Series #34` in a tooltip on hover, focus, or
 tap, without reserving space in the row. Keep descriptive accessible labels.
 At narrow content widths, place provider links below the episode description
@@ -252,6 +252,10 @@ the selection only changes the view. Default to the season containing the next
 unwatched episode, or the last season when all regular episodes are watched.
 List Specials separately without overall numbering or regular progress controls.
 Keep overall numbering when reliable season metadata is unavailable.
+
+Do not repeat the selected season, progress values, or control behavior in
+helper paragraphs beneath the slider. The selector, label, and count provide
+that information.
 
 **The Artwork Is the Affordance Rule.** Clickable posters, covers, and banners should communicate direct manipulation through a restrained hover or focus treatment such as a slight scale, crop shift, saturation change, focus ring, or contextual overlay icon. Do not add persistent instructional text such as “open artwork” when the image itself is the control. Keep an accessible name and an equally clear keyboard focus state; touch behavior must not depend on hover.
 

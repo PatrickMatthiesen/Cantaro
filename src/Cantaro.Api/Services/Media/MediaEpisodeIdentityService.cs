@@ -509,6 +509,16 @@ public class MediaEpisodeIdentityService(
                 _dbContext.MediaEpisodes.Add(episode);
             }
 
+            // SIMKL supplies episode titles with the extended catalog response.
+            // Keep a title already learned from another provider authoritative,
+            // but fill an empty canonical title from this metadata-only refresh.
+            if (string.IsNullOrWhiteSpace(episode.Title)
+                && !string.IsNullOrWhiteSpace(providerEpisode.Title))
+            {
+                episode.Title = providerEpisode.Title.Trim();
+                episode.UpdatedAt = now;
+            }
+
             var contentKey = GetProviderContentKey(normalizedSeriesId, providerEpisode);
             if (!existingByKey.TryGetValue(contentKey, out var content))
             {

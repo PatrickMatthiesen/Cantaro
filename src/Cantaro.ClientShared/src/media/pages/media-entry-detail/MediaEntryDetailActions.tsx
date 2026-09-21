@@ -9,7 +9,6 @@ import {
   Save,
   Star,
 } from "lucide-react";
-import type { ReactNode } from "react";
 import {
   ActionButton,
   IconButton,
@@ -63,13 +62,11 @@ function ProgressStepper({
   value,
   max,
   onChange,
-  detail,
 }: {
   label: string;
   value: number | undefined;
   max?: number;
   onChange: (value: number) => void;
-  detail?: ReactNode;
 }) {
   const currentValue = clampProgressValue(value ?? 0, max);
   const sliderMax = Math.max(max ?? 100, currentValue, 1);
@@ -119,9 +116,6 @@ function ProgressStepper({
           <Plus size={18} aria-hidden />
         </IconButton>
       </div>
-      {detail ? (
-        <p className="text-sm text-content-muted">{detail}</p>
-      ) : null}
     </div>
   );
 }
@@ -318,21 +312,6 @@ function SelectedSeasonProgressControl({
       value={progress.value}
       max={progress.total}
       onChange={onChange}
-      detail={(
-        <>
-          {progress.value > 0
-            ? `Watched through Season ${progress.seasonNumber}, Episode ${progress.value}`
-            : `Season ${progress.seasonNumber} not started`}
-          {progress.overallValue > 0 ? (
-            <span className="ml-2 text-content-subtle">
-              {progress.overallValue} episodes watched overall
-            </span>
-          ) : null}
-          <span className="mt-1 block text-xs text-content-subtle">
-            Changing this value updates the overall watched-through point.
-          </span>
-        </>
-      )}
     />
   );
 }
