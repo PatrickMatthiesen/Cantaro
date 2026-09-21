@@ -204,13 +204,39 @@ export function useEntryDetailState(mediaTitleId: string) {
   const [progressChapters, setProgressChapters] = useState<number | undefined>();
   const [progressVolumes, setProgressVolumes] = useState<number | undefined>();
   const [selectedStatus, setSelectedStatus] = useState('');
+  const entryRef = useRef<MediaEntryDetailModel | null>(null);
+  const draftRef = useRef<StatusDraft>({
+    selectedStatus: '',
+    progressEpisodes: undefined,
+    progressChapters: undefined,
+    progressVolumes: undefined,
+  });
 
-  const applyEntryData = useCallback((data: MediaEntryDetailModel) => {
+  useEffect(() => {
+    entryRef.current = entry;
+  }, [entry]);
+
+  useEffect(() => {
+    draftRef.current = {
+      selectedStatus,
+      progressEpisodes,
+      progressChapters,
+      progressVolumes,
+    };
+  }, [progressChapters, progressEpisodes, progressVolumes, selectedStatus]);
+
+  const applyEntryData = useCallback((data: MediaEntryDetailModel, draft?: StatusDraft) => {
+    const nextDraft = draft ?? {
+      selectedStatus: data.status,
+      progressEpisodes: data.progressEpisodes,
+      progressChapters: data.progressChapters,
+      progressVolumes: data.progressVolumes,
+    };
     setEntry(data);
-    setProgressEpisodes(data.progressEpisodes);
-    setProgressChapters(data.progressChapters);
-    setProgressVolumes(data.progressVolumes);
-    setSelectedStatus(data.status);
+    setProgressEpisodes(nextDraft.progressEpisodes);
+    setProgressChapters(nextDraft.progressChapters);
+    setProgressVolumes(nextDraft.progressVolumes);
+    setSelectedStatus(nextDraft.selectedStatus);
   }, []);
 
   const loadEntry = useCallback(async () => {
@@ -239,7 +265,15 @@ export function useEntryDetailState(mediaTitleId: string) {
 
   const reloadEntry = useCallback(async () => {
     const data = await loadComposedEntry(mediaTitleId);
-    applyEntryData(data);
+    const currentEntry = entryRef.current;
+    const currentDraft = draftRef.current;
+    const hasUnsavedProgress = currentEntry !== null && (
+      currentDraft.selectedStatus !== currentEntry.status
+      || currentDraft.progressEpisodes !== currentEntry.progressEpisodes
+      || currentDraft.progressChapters !== currentEntry.progressChapters
+      || currentDraft.progressVolumes !== currentEntry.progressVolumes
+    );
+    applyEntryData(data, hasUnsavedProgress ? currentDraft : undefined);
     return data;
   }, [applyEntryData, mediaTitleId]);
 
@@ -268,6 +302,7 @@ export function useEntryDetailState(mediaTitleId: string) {
 export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
   const [availabilityByProviderLink, setAvailabilityByProviderLink] = useState<ProviderAvailabilityMap>({});
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [seasonCatalogHydrationRevision, setSeasonCatalogHydrationRevision] = useState(0);
   const forceRefreshRef = useRef(false);
 
   const reload = useCallback(() => {
@@ -287,19 +322,18 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     setAvailabilityByProviderLink((current) => buildAvailabilityMap(entry.providerLinks, current));
 
     const loadAvailability = async () => {
-      const results = await loadAvailabilityStates(entry.providerLinks, forceRefresh);
-      if (isCancelled) {
-        return;
-      }
+      await Promise.all(entry.providerLinks.map(async (link) => {
+        const [result] = await loadAvailabilityStates([link], forceRefresh);
+        if (isCancelled || !result) return;
 
-      setAvailabilityByProviderLink((current) => {
-        const next = { ...current };
-        for (const result of results) {
-          next[result.key] = result.state;
+        setAvailabilityByProviderLink((current) => ({
+          ...current,
+          [result.key]: result.state,
+        }));
+        if (link.provider.toLowerCase() === 'simkl') {
+          setSeasonCatalogHydrationRevision((revision) => revision + 1);
         }
-
-        return next;
-      });
+      }));
     };
 
     void loadAvailability();
@@ -309,7 +343,7 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     };
   }, [entry, refreshRevision]);
 
-  return { availabilityByProviderLink, reload };
+  return { availabilityByProviderLink, seasonCatalogHydrationRevision, reload };
 }
 
 function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
@@ -367,8 +401,10 @@ function useReloadableMediaResource<TValue, TError>(
   createErrorState: (error: unknown) => TError,
 ) {
   const [state, setState] = useState<ReloadableResourceState<TValue, TError>>({ status: 'loading' });
+  const requestGenerationRef = useRef(0);
 
   const reload = useCallback(() => {
+    const requestGeneration = ++requestGenerationRef.current;
     if (!mediaTitleId) {
       setState({ status: 'loading' });
       return;
@@ -376,12 +412,23 @@ function useReloadableMediaResource<TValue, TError>(
 
     setState({ status: 'loading' });
     void loader(mediaTitleId)
-      .then((value) => setState({ status: 'loaded', value }))
-      .catch((error) => setState(createErrorState(error)));
+      .then((value) => {
+        if (requestGenerationRef.current === requestGeneration) {
+          setState({ status: 'loaded', value });
+        }
+      })
+      .catch((error) => {
+        if (requestGenerationRef.current === requestGeneration) {
+          setState(createErrorState(error));
+        }
+      });
   }, [createErrorState, loader, mediaTitleId]);
 
   useEffect(() => {
     reload();
+    return () => {
+      requestGenerationRef.current += 1;
+    };
   }, [reload]);
 
   return { state, reload };
@@ -622,7 +669,7 @@ export function useStatusSaveAction(
     try {
       await saveStatusChanges(mediaTitleId, draft, changes);
       setEntry((current) => applySavedStatus(current, draft));
-      showSnackbar({ message: 'Status saved', variant: 'success' });
+      showSnackbar({ message: 'Saved in Cantaro', variant: 'success' });
     } catch (saveError) {
       showSnackbar({
         message: getPrefixedErrorMessage(saveError, 'Failed to save status'),
@@ -699,7 +746,7 @@ export function useScoreSaveAction(
 
     try {
       await mediaApi.updateScore(mediaTitleId, { score });
-      showSnackbar({ message: 'Score saved', variant: 'success' });
+      showSnackbar({ message: 'Score saved in Cantaro', variant: 'success' });
     } catch (saveError) {
       // The API persists the local viewer state before attempting provider sync.
       // Reload first so a provider error cannot erase a score Cantaro already saved.

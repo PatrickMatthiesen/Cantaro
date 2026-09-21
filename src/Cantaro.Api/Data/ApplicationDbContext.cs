@@ -40,6 +40,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
     public DbSet<MediaLibraryProviderBinding> MediaLibraryProviderBindings => Set<MediaLibraryProviderBinding>();
+    public DbSet<MediaProviderLibrarySnapshot> MediaProviderLibrarySnapshots => Set<MediaProviderLibrarySnapshot>();
     public DbSet<MediaProviderListMembership> MediaProviderListMemberships => Set<MediaProviderListMembership>();
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
     public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
@@ -544,6 +545,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => new { e.Provider, e.ExternalId })
                 .IsUnique();
 
+            entity.Property(e => e.SpecialEpisodeCatalogSnapshot).HasColumnType("jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -675,6 +677,16 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(t => t.LibraryEntries)
                 .HasForeignKey(e => e.MediaTitleId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<MediaProviderLibrarySnapshot>(entity =>
+        {
+            entity.HasKey(e => e.ConnectedServiceAccountId);
+            entity.Property(e => e.ItemsJson).IsRequired();
+            entity.HasOne(e => e.ConnectedServiceAccount)
+                .WithOne()
+                .HasForeignKey<MediaProviderLibrarySnapshot>(e => e.ConnectedServiceAccountId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MediaLibraryProviderBinding>(entity =>

@@ -2,6 +2,13 @@
 
 This is a media and music library management application.
 
+## UI copy
+
+Do not add redundant helper text, subtitles, or explanations beneath controls.
+Use clear labels and the displayed values. Add visible guidance only when it is
+needed to make a decision or resolve an error. Keep accessibility labels and
+image alt text; they are not decorative copy.
+
 ## Music
 
 The goal for music in Cantaro is to have a unified experience across platforms and sync playlists and libraries across platforms, and to have a web interface for managing the library.

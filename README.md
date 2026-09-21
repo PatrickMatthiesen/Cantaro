@@ -122,8 +122,11 @@ Configure the OAuth applications with callback URLs based on the public HTTPS or
 - YouTube/Google: `https://cantaro.example.com/api/platforms/youtube/callback`
 - Spotify: `https://cantaro.example.com/api/platforms/spotify/callback`
 - AniList: `https://cantaro.example.com/api/media/providers/anilist/callback`
+- SIMKL: `https://cantaro.example.com/api/media/providers/simkl/callback`
 
 The redirect URLs must match exactly, including the `https` scheme and path.
+
+See [SIMKL setup](docs/simkl.md) for development credentials and synchronization behavior.
 Set the `CANTARO_HTTPS_BASE_URL` GitHub environment variable to the public
 HTTPS origin, for example `https://cantaro.example.com`. Cantaro uses that
 global origin when generating OAuth callbacks behind the HTTP reverse proxy.

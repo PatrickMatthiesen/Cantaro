@@ -9,6 +9,7 @@ describe('getContinueLinkActions', () => {
       [],
       'netflix',
       'Title',
+      'anime',
     )).toEqual([{
       serviceId: 'netflix',
       url: 'https://www.netflix.com/title/123',
@@ -24,6 +25,7 @@ describe('getContinueLinkActions', () => {
       [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/FINAL24', kind: 'episode', displayName: 'Crunchyroll' }],
       'crunchyroll',
       'Completed title',
+      'anime',
     )).toEqual([{
       serviceId: 'crunchyroll',
       url: 'https://www.crunchyroll.com/series/ABC123',
@@ -39,6 +41,7 @@ describe('getContinueLinkActions', () => {
       [],
       null,
       "STEEL BALL RUN JoJo's Bizarre Adventure 1st STAGE",
+      'anime',
     )[0]?.url).toBe(
       "https://www.crunchyroll.com/search?q=STEEL%20BALL%20RUN%20JoJo's%20Bizarre%20Ad",
     );
@@ -51,6 +54,7 @@ describe('getContinueLinkActions', () => {
       [],
       null,
       'Black Clover',
+      'anime',
     )[0]?.url).toBe('https://www.crunchyroll.com/search?q=Black%20Clover');
   });
 
@@ -61,6 +65,7 @@ describe('getContinueLinkActions', () => {
       [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/EP123', kind: 'episode', displayName: 'Crunchyroll' }],
       'crunchyroll',
       'Title',
+      'anime',
     );
 
     expect(actions[0]).toMatchObject({ kind: 'episode', url: 'https://www.crunchyroll.com/watch/EP123' });
@@ -73,6 +78,7 @@ describe('getContinueLinkActions', () => {
       [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/EP123', kind: 'episode', displayName: 'Crunchyroll' }],
       'netflix',
       'Title',
+      'anime',
     );
 
     expect(actions.map(action => action.serviceId)).toEqual(['netflix', 'crunchyroll']);
@@ -86,6 +92,7 @@ describe('getContinueLinkActions', () => {
       [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/EP123', kind: 'episode', displayName: 'Crunchyroll' }],
       'crunchyroll',
       'Title',
+      'anime',
     );
 
     expect(actions).toEqual([{
@@ -111,6 +118,7 @@ describe('getContinueLinkActions', () => {
       [],
       null,
       'Title',
+      'anime',
     );
 
     expect(actions[0]).toMatchObject({
@@ -118,5 +126,18 @@ describe('getContinueLinkActions', () => {
       url: 'https://www.crunchyroll.com/watch/RESOLVED/episode',
       kind: 'episode',
     });
+  });
+
+  it('does not search Crunchyroll for a movie or TV series without a destination', () => {
+    for (const mediaKind of ['series', 'movie']) {
+      expect(getContinueLinkActions(
+        { status: 'loaded', value: { outcome: 'unavailable', episodeNumber: 4 } },
+        [],
+        [],
+        null,
+        "Marvel's Luke Cage",
+        mediaKind,
+      )).toEqual([]);
+    }
   });
 });

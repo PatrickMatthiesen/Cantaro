@@ -168,6 +168,12 @@ public sealed class MediaProviderCrossReferenceImportTests
             fixture.AniListAccount,
             fixture.AniListImport,
             CancellationToken.None);
+        await fixture.Service.ImportAsync(
+            fixture.User.Id,
+            fixture.MalAccount,
+            fixture.MalImport,
+            CancellationToken.None);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
 
         fixture.MalImport.Items = [ImportFixture.CreateItem(
             "anime:52991",
@@ -195,12 +201,12 @@ public sealed class MediaProviderCrossReferenceImportTests
             Assert.Equal("154587", operation.MediaLibraryProviderBinding.MediaProviderLink.ExternalId);
         });
 
-        var status = Assert.Single(operations, operation => operation.OperationType == MediaProviderOperationTypes.UpdateStatus);
+        var status = Assert.Single(operations, operation => operation.OperationType == MediaProviderOperationTypes.ImportFanOutStatus);
         Assert.Equal(MediaLibraryStatuses.Completed,
             JsonSerializer.Deserialize<MediaStatusUpdateRequest>(status.PayloadJson, SerializerOptions)!.Status);
-        var score = Assert.Single(operations, operation => operation.OperationType == MediaProviderOperationTypes.UpdateScore);
+        var score = Assert.Single(operations, operation => operation.OperationType == MediaProviderOperationTypes.ImportFanOutScore);
         Assert.Equal(90m, JsonSerializer.Deserialize<MediaScoreUpdateRequest>(score.PayloadJson, SerializerOptions)!.Score);
-        var progress = Assert.Single(operations, operation => operation.OperationType == MediaProviderOperationTypes.UpdateProgress);
+        var progress = Assert.Single(operations, operation => operation.OperationType == MediaProviderOperationTypes.ImportFanOutProgress);
         Assert.Equal(28, JsonSerializer.Deserialize<MediaProgressUpdateRequest>(progress.PayloadJson, SerializerOptions)!.ProgressEpisodes);
     }
 

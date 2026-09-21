@@ -11,6 +11,156 @@ namespace Cantaro.Api.Tests;
 public class MediaEpisodeIdentityServiceTests
 {
     [Fact]
+    public async Task CacheProviderEpisodeCatalog_PersistsSeasonMetadataAndSpecialsWithoutChangingProgress()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(
+            episodeCount: 4,
+            progressEpisodes: 2);
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = fixture.TitleId,
+            Provider = "simkl",
+            ExternalId = "tv:123",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await fixture.Db.SaveChangesAsync();
+        var regular = new MediaProviderWatchedEpisode[]
+        {
+            new() { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "101", Title = "Pilot" },
+            new() { SeasonNumber = 1, EpisodeNumber = 2, ProviderEpisodeId = "102", Title = "Second episode" },
+            new() { SeasonNumber = 2, EpisodeNumber = 1, ProviderEpisodeId = "201", Title = "Season two premiere" },
+            new() { SeasonNumber = 2, EpisodeNumber = 2, ProviderEpisodeId = "202", Title = "Finale" }
+        };
+        var specials = new MediaProviderWatchedEpisode[]
+        {
+            new() { SeasonNumber = 0, EpisodeNumber = 1, ProviderEpisodeId = "S1", Title = "Holiday Special" }
+        };
+
+        await fixture.Service.CacheProviderEpisodeCatalogAsync(
+            fixture.TitleId,
+            "simkl",
+            "tv:123",
+            regular,
+            specials,
+            expectedEpisodeCount: 4,
+            CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Service.CacheProviderEpisodeCatalogAsync(
+            fixture.TitleId,
+            "simkl",
+            "tv:123",
+            regular,
+            specials,
+            expectedEpisodeCount: 4,
+            CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None);
+        Assert.NotNull(catalog);
+        Assert.Equal(4, await fixture.Db.MediaEpisodes.CountAsync());
+        Assert.Equal(4, await fixture.Db.MediaEpisodeProviderContents.CountAsync(content => content.Provider == "simkl"));
+        Assert.Empty(catalog.Episodes.SelectMany(episode => episode.Destinations));
+        Assert.Equal(
+            [(1, 1, 1), (2, 1, 2), (3, 2, 1), (4, 2, 2)],
+            catalog.Episodes.Select(episode =>
+                (episode.EpisodeNumber, episode.SeasonNumber, episode.SeasonEpisodeNumber)));
+        Assert.Equal(
+            ["Pilot", "Second episode", "Season two premiere", "Finale"],
+            catalog.Episodes.Select(episode => episode.Title));
+        var special = Assert.Single(catalog.Specials);
+        Assert.Equal(1, special.SpecialEpisodeNumber);
+        Assert.Equal("Holiday Special", special.Title);
+        Assert.Equal(2, (await fixture.Db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
+
+        await fixture.Service.CacheProviderEpisodeCatalogAsync(
+            fixture.TitleId,
+            "simkl",
+            "tv:123",
+            [
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "101" },
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 3, ProviderEpisodeId = "103" }
+            ],
+            specials,
+            expectedEpisodeCount: 4,
+            CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        var cachedAfterPartialRefresh = await fixture.Service.GetEpisodeCatalogAsync(
+            fixture.TitleId,
+            CancellationToken.None);
+        Assert.Equal(
+            [(1, 1, 1), (2, 1, 2), (3, 2, 1), (4, 2, 2)],
+            cachedAfterPartialRefresh!.Episodes.Select(episode =>
+                (episode.EpisodeNumber, episode.SeasonNumber, episode.SeasonEpisodeNumber)));
+
+        await fixture.Service.CacheProviderEpisodeCatalogAsync(
+            fixture.TitleId,
+            "simkl",
+            "tv:123",
+            [
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "CHANGED" },
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 2, ProviderEpisodeId = "102" },
+                new MediaProviderWatchedEpisode { SeasonNumber = 2, EpisodeNumber = 1, ProviderEpisodeId = "201" },
+                new MediaProviderWatchedEpisode { SeasonNumber = 2, EpisodeNumber = 2, ProviderEpisodeId = "202" }
+            ],
+            specials,
+            expectedEpisodeCount: 4,
+            CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.Equal(
+            ["101", "102", "201", "202"],
+            await fixture.Db.MediaEpisodeProviderContents
+                .Where(content => content.Provider == "simkl")
+                .OrderBy(content => content.ProviderSequenceNumber)
+                .Select(content => content.ProviderContentKey)
+                .ToListAsync());
+    }
+
+    [Fact]
+    public async Task CacheProviderEpisodeCatalog_FillsMissingTitlesWithoutReplacingLocalTitles()
+    {
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(episodeCount: 2);
+        var catalog = new[]
+        {
+            new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "101" },
+            new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 2, ProviderEpisodeId = "102" }
+        };
+        await fixture.Service.CacheProviderEpisodeCatalogAsync(
+            fixture.TitleId, "simkl", "tv:123", catalog, [], 2, CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        var episodes = await fixture.Db.MediaEpisodes
+            .OrderBy(episode => episode.EpisodeNumber).ToListAsync();
+        episodes[0].Title = "Local title";
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.CacheProviderEpisodeCatalogAsync(
+            fixture.TitleId,
+            "simkl",
+            "tv:123",
+            [
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "101", Title = "SIMKL title" },
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 2, ProviderEpisodeId = "102", Title = "Second title" }
+            ],
+            [],
+            expectedEpisodeCount: 2,
+            CancellationToken.None);
+        await fixture.Db.SaveChangesAsync();
+
+        var refreshed = await fixture.Db.MediaEpisodes
+            .AsNoTracking()
+            .OrderBy(episode => episode.EpisodeNumber)
+            .ToListAsync();
+        Assert.Equal("Local title", refreshed[0].Title);
+        Assert.Equal("Second title", refreshed[1].Title);
+    }
+
+    [Fact]
     public async Task RecordObservation_CreatesCurrentAndRenderedNextDestination()
     {
         await using var fixture = await EpisodeIdentityFixture.CreateAsync(progressEpisodes: 7);

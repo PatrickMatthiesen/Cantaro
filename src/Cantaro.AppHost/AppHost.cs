@@ -23,6 +23,8 @@ var aniListClientId = builder.AddParameter("AniListClientId", secret: true);
 var aniListClientSecret = builder.AddParameter("AniListClientSecret", secret: true);
 var myAnimeListClientId = builder.AddParameter("MyAnimeListClientId", secret: true);
 var myAnimeListClientSecret = builder.AddParameter("MyAnimeListClientSecret", secret: true);
+var simklClientId = builder.AddParameter("SimklClientId", () => builder.Configuration["Parameters:SimklClientId"] ?? "");
+var simklClientSecret = builder.AddParameter("SimklClientSecret", () => builder.Configuration["Parameters:SimklClientSecret"] ?? "", secret: true);
 var animeScheduleId = builder.AddParameter("AnimeScheduleId");
 var animeScheduleToken = builder.AddParameter("AnimeScheduleToken", secret: true);
 var turnstileMode = builder.AddParameter("TurnstileMode", () => builder.Configuration["Parameters:TurnstileMode"] ?? "Auto");
@@ -95,6 +97,8 @@ var api = builder.AddDotnetProject("api", "../Cantaro.Api/Cantaro.Api.csproj")
     .WithEnvironment("AniList:ClientSecret", aniListClientSecret)
     .WithEnvironment("MyAnimeList:ClientId", myAnimeListClientId)
     .WithEnvironment("MyAnimeList:ClientSecret", myAnimeListClientSecret)
+    .WithEnvironment("Simkl:ClientId", simklClientId)
+    .WithEnvironment("Simkl:ClientSecret", simklClientSecret)
     .WithEnvironment("AnimeSchedule:Id", animeScheduleId)
     .WithEnvironment("AnimeSchedule:Token", animeScheduleToken)
     .WithEnvironment("Turnstile:Mode", turnstileMode)

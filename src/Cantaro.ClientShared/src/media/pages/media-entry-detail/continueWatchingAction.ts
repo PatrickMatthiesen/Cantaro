@@ -116,6 +116,7 @@ export function getContinueLinkActions(
   episodeDestinations: readonly StreamingDestination[],
   preferredServiceId: StreamingServiceId | null,
   canonicalTitle: string,
+  mediaKind: string,
 ): ContinueLinkAction[] {
   if (state.status !== 'loaded') return [];
   const candidates = destinationCandidates(state.value, seriesDestinations, episodeDestinations);
@@ -124,6 +125,8 @@ export function getContinueLinkActions(
     .map(serviceId => serviceDestination(serviceId, candidates.episodes, candidates.series))
     .filter((value): value is StreamingDestination => value !== null)
     .map(destinationAction);
-  const fallback = searchFallback(canonicalTitle, preferredServiceId);
+  const fallback = mediaKind.toLowerCase() === 'anime'
+    ? searchFallback(canonicalTitle, preferredServiceId)
+    : null;
   return actions.length > 0 || !fallback ? actions : [fallback];
 }

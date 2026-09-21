@@ -12,6 +12,8 @@ internal enum ApiRateLimitBucket
     Identity,
     ExtensionAuthentication,
     Costly,
+    ViewerWrite,
+    LocalMediaRead,
     GeneralApi
 }
 
@@ -41,6 +43,8 @@ public static class ApiRateLimitingConfiguration
                     {
                         ApiRateLimitBucket.Identity => 10,
                         ApiRateLimitBucket.ExtensionAuthentication => 30,
+                        ApiRateLimitBucket.ViewerWrite => 120,
+                        ApiRateLimitBucket.LocalMediaRead => 120,
                         _ => 120
                     },
                     Window = FixedWindow,
@@ -113,6 +117,16 @@ public static class ApiRateLimitingConfiguration
             return ApiRateLimitBucket.Costly;
         }
 
+        if (IsViewerWriteEndpoint(context, path))
+        {
+            return ApiRateLimitBucket.ViewerWrite;
+        }
+
+        if (IsLocalMediaReadEndpoint(context, path))
+        {
+            return ApiRateLimitBucket.LocalMediaRead;
+        }
+
         return ApiRateLimitBucket.GeneralApi;
     }
 
@@ -147,6 +161,48 @@ public static class ApiRateLimitingConfiguration
             || path.StartsWithSegments("/api/media/providers")
                 && (path.Value?.Contains("/import", StringComparison.OrdinalIgnoreCase) == true
                     || path.Value?.Contains("/initial-sync", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private static bool IsViewerWriteEndpoint(HttpContext context, PathString path)
+    {
+        if (!HttpMethods.IsPost(context.Request.Method))
+        {
+            return false;
+        }
+
+        var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments is { Length: 5 or 6 }
+            && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[1], "media", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[2], "titles", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segments[3], out _)
+            && string.Equals(segments[4], "viewer", StringComparison.OrdinalIgnoreCase)
+            && (segments.Length == 5
+                || string.Equals(segments[5], "progress", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(segments[5], "status", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(segments[5], "score", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsLocalMediaReadEndpoint(HttpContext context, PathString path)
+    {
+        if (!HttpMethods.IsGet(context.Request.Method))
+        {
+            return false;
+        }
+
+        if (path.StartsWithSegments("/api/media/library"))
+        {
+            return true;
+        }
+
+        var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments is { Length: 4 or 5 }
+            && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[1], "media", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[2], "titles", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segments[3], out _)
+            && (segments.Length == 4
+                || string.Equals(segments[4], "viewer", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string GetClientKey(HttpContext context, ApiRateLimitBucket bucket)

@@ -2,6 +2,8 @@ import {
     normalizeMediaApiBaseUrl,
     resolveMediaApiRuntimeConfig,
 } from './mediaApi.runtime';
+import { createMediaApiConnectionError, mediaApiErrorFromStatus } from './mediaApi.errors';
+import { mediaProviderCatalog } from './mediaProviders';
 import type {
     MediaApiRuntimeConfig,
     MediaViewerStateCreateDto,
@@ -60,22 +62,34 @@ export class MediaApiClient {
     }
 
     private async request(path: string, init: RequestInit = {}): Promise<Response> {
-        return fetch(await this.buildUrl(path), {
-            ...init,
-            credentials: await this.getCredentialsMode(),
-            headers: {
-                ...(await this.getHeaders()),
-                ...(init.headers ?? {}),
-            },
-        });
+        const url = await this.buildUrl(path);
+        const credentials = await this.getCredentialsMode();
+        const headers = await this.getHeaders();
+
+        try {
+            return await fetch(url, {
+                ...init,
+                credentials,
+                headers: {
+                    ...headers,
+                    ...(init.headers ?? {}),
+                },
+            });
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                throw error;
+            }
+            throw createMediaApiConnectionError(error);
+        }
     }
 
     private async ensureOk(response: Response, fallbackMessage: string): Promise<void> {
         if (response.ok) return;
-        const body = await response.json().catch(() => ({ error: fallbackMessage }));
-        throw Object.assign(new Error(body.error || fallbackMessage), {
-            status: response.status,
-            responseBody: body,
+        const responseBody = await response.json().catch(() => undefined);
+        const body = responseBody && typeof responseBody === 'object' ? responseBody as Record<string, unknown> : undefined;
+        throw mediaApiErrorFromStatus(response.status, fallbackMessage, {
+            code: typeof body?.code === 'string' ? body.code : undefined,
+            responseBody,
         });
     }
 
@@ -159,6 +173,29 @@ export class MediaApiClient {
         const response = await this.request(`/api/media/providers/${encodeURIComponent(providerId)}/status`);
         await this.ensureOk(response, 'Failed to get media provider status');
         return response.json() as Promise<MediaProviderAccountStatusDto>;
+    }
+
+    async getProviderStatuses(): Promise<{
+        statuses: MediaProviderAccountStatusDto[];
+        failedProviderIds: string[];
+    }> {
+        const providers = mediaProviderCatalog.filter((provider) => provider.implemented);
+        const results = await Promise.allSettled(
+            providers.map(async (provider) => this.getProviderStatus(provider.id)),
+        );
+
+        return results.reduce<{ statuses: MediaProviderAccountStatusDto[]; failedProviderIds: string[] }>(
+            (summary, result, index) => {
+                const provider = providers[index];
+                if (result.status === 'fulfilled') {
+                    summary.statuses.push(result.value);
+                } else if (provider) {
+                    summary.failedProviderIds.push(provider.id);
+                }
+                return summary;
+            },
+            { statuses: [], failedProviderIds: [] },
+        );
     }
 
     async connectProvider(providerId: string, options: { route?: string; trigger?: string } = {}): Promise<void> {

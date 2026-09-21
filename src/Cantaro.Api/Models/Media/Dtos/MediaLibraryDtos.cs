@@ -194,7 +194,14 @@ public class MediaEpisodeCatalogDto
 {
     public required IReadOnlyList<MediaStreamingDestinationDto> SeriesDestinations { get; set; }
     public required IReadOnlyList<MediaEpisodeDestinationDto> Episodes { get; set; }
+    public required IReadOnlyList<MediaSpecialEpisodeDestinationDto> Specials { get; set; }
     public required MediaReleaseAvailabilityDto ReleaseAvailability { get; set; }
+}
+
+public class MediaSpecialEpisodeDestinationDto
+{
+    public int SpecialEpisodeNumber { get; set; }
+    public string? Title { get; set; }
 }
 
 public class MediaReleaseAvailabilityDto
@@ -213,6 +220,8 @@ public class MediaReleaseLanguageAvailabilityDto
 public class MediaEpisodeDestinationDto
 {
     public int EpisodeNumber { get; set; }
+    public int? SeasonNumber { get; set; }
+    public int? SeasonEpisodeNumber { get; set; }
     public string? Title { get; set; }
     public required IReadOnlyList<string> AvailableSubtitleLanguageCodes { get; set; }
     public required IReadOnlyList<string> AvailableAudioLanguageCodes { get; set; }

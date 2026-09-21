@@ -46,6 +46,7 @@ describe('streaming destination resolution', () => {
         lastSeenAt: '2026-08-20T00:00:00Z',
       }],
       episodes: [],
+      specials: [],
     });
 
     expect(result.seriesDestinations).toHaveLength(1);
@@ -78,6 +79,7 @@ describe('streaming destination resolution', () => {
   it('keeps the strongest observed identity first for one service', () => {
     const result = resolveStreamingDestinations([], {
       seriesDestinations: [],
+      specials: [],
       episodes: [{
         episodeNumber: 1,
         seenCount: 4,
@@ -130,6 +132,7 @@ describe('streaming destination resolution', () => {
           ],
         },
       ],
+      specials: [],
     }, 'crunchyroll');
 
     expect(result.seriesDestinations).toHaveLength(1);

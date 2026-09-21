@@ -245,6 +245,7 @@ public sealed class MediaProviderInitialSyncServiceTests
         var entry = await fixture.SeedEntryAsync(
             includeTargetLink: true,
             includeExistingLink: true);
+        await fixture.SeedExistingBindingAsync(entry);
         var newerRemoteAt = fixture.Now.AddHours(1);
         fixture.ExistingProvider!.Snapshot = SnapshotFor(
             InitialSyncFixture.ExistingProviderId,
@@ -337,6 +338,132 @@ public sealed class MediaProviderInitialSyncServiceTests
         Assert.Equal(0, preview.WillUpdate);
         Assert.Equal(1, preview.AlreadyAligned);
         Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PreviewAsync_MatchingProgressWithScoreMismatch_QueuesMetadataOnlySync()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        await fixture.SeedEntryAsync(includeTargetLink: true);
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(score: 70m, progressEpisodes: 4));
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+
+        Assert.Equal("ready", preview.Status);
+        Assert.Equal(1, preview.WillUpdate);
+
+        var result = await fixture.Service.ApplyAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.QueuedOperations);
+        var operation = await fixture.Db.MediaProviderOperations.SingleAsync();
+        var request = JsonSerializer.Deserialize<MediaLibraryStateSyncRequest>(
+            operation.PayloadJson,
+            SerializerOptions);
+        Assert.NotNull(request);
+        Assert.False(request.UpdateProgress);
+        Assert.Equal(4, request.ProgressEpisodes);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_NonContiguousRemoteProgress_DoesNotRewriteAggregateProgress()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        await fixture.SeedEntryAsync(includeTargetLink: true);
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(
+            progressEpisodes: 1,
+            hasNonContiguousProgress: true));
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+
+        Assert.Equal("ready", preview.Status);
+        Assert.Equal(0, preview.WillUpdate);
+        Assert.Equal(1, preview.AlreadyAligned);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PreviewAsync_UsesPreviouslyAppliedProviderStatusAsAligned()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true);
+        var binding = await fixture.SeedTargetBindingAsync(entry);
+        binding.LastRemoteUpdateAt = fixture.Now.AddHours(2);
+        binding.LastRequestedStatus = MediaLibraryStatuses.Current;
+        binding.LastAppliedStatus = MediaLibraryStatuses.Completed;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(
+            status: MediaLibraryStatuses.Completed,
+            remoteUpdatedAt: fixture.Now.AddHours(1)));
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+
+        Assert.Equal("ready", preview.Status);
+        Assert.Equal(0, preview.WillUpdate);
+        Assert.Equal(1, preview.AlreadyAligned);
+        await fixture.Db.Entry(entry).ReloadAsync();
+        Assert.Equal(MediaLibraryStatuses.Current, entry.Status);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PreviewAsync_SkipsMediaKindsUnsupportedByProvider()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        fixture.Provider.SupportedMediaKinds = new HashSet<string>
+        {
+            MediaKinds.Anime,
+            MediaKinds.Movie,
+            MediaKinds.Series
+        };
+        await fixture.SeedEntryAsync(includeTargetLink: false, mediaKind: MediaKinds.Anime);
+        await fixture.SeedEntryAsync(includeTargetLink: false, mediaKind: MediaKinds.Manga);
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id,
+            fixture.Provider.ProviderId,
+            CancellationToken.None);
+
+        Assert.Equal("ready", preview.Status);
+        Assert.Equal(1, preview.NeedsMatching);
+        Assert.Equal(MediaKinds.Anime, Assert.Single(preview.UnresolvedTitles).MediaKind);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ScoreChangePreservesPreviouslyAcceptedStatusAndEpisodeHistory()
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true);
+        entry.Status = MediaLibraryStatuses.Completed;
+        var binding = await fixture.SeedTargetBindingAsync(entry);
+        binding.LastRequestedStatus = MediaLibraryStatuses.Completed;
+        binding.LastAppliedStatus = MediaLibraryStatuses.Current;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(status: MediaLibraryStatuses.Current, score: 60m));
+
+        var preview = await fixture.Service.PreviewAsync(fixture.User.Id, fixture.Provider.ProviderId, CancellationToken.None);
+        Assert.Equal(1, preview.WillUpdate);
+        await fixture.Service.ApplyAsync(fixture.User.Id, fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint), CancellationToken.None);
+
+        var operation = await fixture.Db.MediaProviderOperations.SingleAsync();
+        var request = JsonSerializer.Deserialize<MediaLibraryStateSyncRequest>(operation.PayloadJson, SerializerOptions)!;
+        Assert.False(request.UpdateStatus);
+        Assert.False(request.UpdateProgress);
+        Assert.Equal(MediaLibraryStatuses.Completed, request.Status);
+        Assert.Equal(80m, request.Score);
     }
 
     [Fact]
@@ -485,7 +612,8 @@ public sealed class MediaProviderInitialSyncServiceTests
         string status = MediaLibraryStatuses.Current,
         decimal? score = 80m,
         int? progressEpisodes = 4,
-        DateTimeOffset? remoteUpdatedAt = null)
+        DateTimeOffset? remoteUpdatedAt = null,
+        bool hasNonContiguousProgress = false)
         => new()
         {
             ProviderMediaId = providerMediaId,
@@ -496,6 +624,7 @@ public sealed class MediaProviderInitialSyncServiceTests
             Status = status,
             Score = score,
             ProgressEpisodes = progressEpisodes,
+            HasNonContiguousProgress = hasNonContiguousProgress,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode,
             LastRemoteUpdateAt = remoteUpdatedAt
@@ -629,17 +758,24 @@ public sealed class MediaProviderInitialSyncServiceTests
 
         public async Task<MediaLibraryEntry> SeedEntryAsync(
             bool includeTargetLink,
-            bool includeExistingLink = false)
+            bool includeExistingLink = false,
+            string mediaKind = MediaKinds.Anime)
         {
             var title = new MediaTitle
             {
                 Id = Guid.NewGuid(),
                 CanonicalTitle = "Frieren: Beyond Journey's End",
-                MediaKind = MediaKinds.Anime,
-                EpisodeCount = 28,
-                SupportsEpisodeProgress = true,
-                PrimaryProgressDimension = MediaProgressDimensions.Episode,
-                ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                MediaKind = mediaKind,
+                EpisodeCount = mediaKind == MediaKinds.Anime ? 28 : null,
+                ChapterCount = mediaKind == MediaKinds.Manga ? 28 : null,
+                SupportsEpisodeProgress = mediaKind == MediaKinds.Anime,
+                SupportsChapterProgress = mediaKind == MediaKinds.Manga,
+                PrimaryProgressDimension = mediaKind == MediaKinds.Manga
+                    ? MediaProgressDimensions.Chapter
+                    : MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = mediaKind == MediaKinds.Manga
+                    ? MediaProgressDimensions.Chapter
+                    : MediaProgressDimensions.Episode,
                 CreatedAt = Now,
                 UpdatedAt = Now
             };
@@ -663,7 +799,7 @@ public sealed class MediaProviderInitialSyncServiceTests
             }
             if (!includeTargetLink || includeExistingLink)
             {
-                AddProviderLink(title, ExistingProviderId, ExistingMediaId);
+                AddProviderLink(title, ExistingProviderId, mediaKind == MediaKinds.Manga ? "manga:999" : ExistingMediaId);
             }
             title.LibraryEntries.Add(entry);
             Db.AddRange(title, entry);
@@ -749,6 +885,10 @@ public sealed class MediaProviderInitialSyncServiceTests
         public string ProviderId => _providerId;
         public required MediaProviderLibraryImportResult Snapshot { get; set; }
         public int ImportCallCount { get; private set; }
+        public IReadOnlySet<string>? SupportedMediaKinds { get; set; }
+
+        public bool SupportsMediaKind(string mediaKind)
+            => SupportedMediaKinds is null || SupportedMediaKinds.Contains(mediaKind);
 
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(
             int userId,

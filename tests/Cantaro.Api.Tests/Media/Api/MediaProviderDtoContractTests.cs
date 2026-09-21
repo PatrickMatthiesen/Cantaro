@@ -481,7 +481,7 @@ public class MediaProviderDtoContractTests
     }
 
     [Fact]
-    public async Task UpdateProgress_ReturnsNoContentAndDeletesCompletedQueueRow()
+    public async Task UpdateProgress_ReturnsAcceptedAndPersistsPendingOperationWithoutProviderCall()
     {
         var provider = new StubMediaProvider
         {
@@ -501,11 +501,13 @@ public class MediaProviderDtoContractTests
             new MediaProgressUpdateDto { ProgressEpisodes = 17 },
             CancellationToken.None);
 
-        Assert.IsType<NoContentResult>(result);
+        Assert.IsType<AcceptedResult>(result);
 
         var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync(item => item.Id == entry.Id);
         Assert.Equal(17, persistedEntry.ProgressEpisodes);
-        Assert.Equal(0, await fixture.DbContext.MediaProviderOperations.CountAsync());
+        Assert.Equal(MediaProviderOperationStatuses.Pending,
+            (await fixture.DbContext.MediaProviderOperations.SingleAsync()).Status);
+        Assert.Equal(0, provider.ProgressUpdateCallCount);
     }
 
     [Fact]
@@ -563,8 +565,9 @@ public class MediaProviderDtoContractTests
         Assert.NotNull(persistedEntry.LastLocalEditAt);
 
         var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
-        Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);
-        Assert.Contains("simulated", queuedOperation.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(MediaProviderOperationStatuses.Pending, queuedOperation.Status);
+        Assert.Null(queuedOperation.LastError);
+        Assert.Equal(0, provider.ProgressUpdateCallCount);
     }
 
     [Fact]
@@ -578,7 +581,7 @@ public class MediaProviderDtoContractTests
             new MediaScoreUpdateDto { Score = 87.5m },
             CancellationToken.None);
 
-        Assert.IsType<NoContentResult>(result);
+        Assert.IsType<AcceptedResult>(result);
         var persistedEntry = await fixture.DbContext.MediaLibraryEntries.SingleAsync();
         Assert.Equal(87.5m, persistedEntry.Score);
         Assert.Equal(MediaMutationSources.UserScoreUpdate, persistedEntry.LastMutationSource);
@@ -603,7 +606,8 @@ public class MediaProviderDtoContractTests
         Assert.Equal(75m, (await fixture.DbContext.MediaLibraryEntries.SingleAsync()).Score);
         var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationTypes.UpdateScore, queuedOperation.OperationType);
-        Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);
+        Assert.Equal(MediaProviderOperationStatuses.Pending, queuedOperation.Status);
+        Assert.Equal(0, provider.ScoreUpdateCallCount);
     }
 
     [Theory]
@@ -649,8 +653,9 @@ public class MediaProviderDtoContractTests
         Assert.NotNull(persistedEntry.LastLocalEditAt);
 
         var queuedOperation = await fixture.DbContext.MediaProviderOperations.SingleAsync();
-        Assert.Equal(MediaProviderOperationStatuses.Retrying, queuedOperation.Status);
-        Assert.Contains("simulated", queuedOperation.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(MediaProviderOperationStatuses.Pending, queuedOperation.Status);
+        Assert.Null(queuedOperation.LastError);
+        Assert.Equal(0, provider.StatusUpdateCallCount);
     }
 
     [Fact]
@@ -675,6 +680,7 @@ public class MediaProviderDtoContractTests
             new MediaStatusUpdateDto { Status = MediaLibraryStatuses.Completed },
             CancellationToken.None);
         Assert.IsType<AcceptedResult>(updateResult);
+        fixture.DbContext.ChangeTracker.Clear();
 
         var currentAfter = await queryService.GetLibraryAsync(
             fixture.UserId,
@@ -689,6 +695,9 @@ public class MediaProviderDtoContractTests
         var completedEntry = Assert.Single(completedAfter.Items);
         Assert.Equal(entry.Id, completedEntry.Id);
         Assert.Equal(["Favorites"], completedEntry.ProviderListNames);
+        Assert.Equal(MediaProviderOperationStatuses.Pending,
+            (await fixture.DbContext.MediaProviderOperations.SingleAsync()).Status);
+        Assert.Equal(0, provider.StatusUpdateCallCount);
     }
 
     private sealed class MediaControllerFixture : IAsyncDisposable
@@ -745,12 +754,19 @@ public class MediaProviderDtoContractTests
             var eventHub = new MediaLibraryEventHub();
             var libraryEvents = eventHub.Subscribe(userId, out var libraryEventSubscriptionId);
             var operationProcessor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
+            var episodeIdentityService = new MediaEpisodeIdentityService(
+                dbContext,
+                new MediaProviderSeasonMappingService(
+                    dbContext,
+                    NullLogger<MediaProviderSeasonMappingService>.Instance),
+                NullLogger<MediaEpisodeIdentityService>.Instance);
             var controller = new MediaProvidersController(
                 dbContext,
                 registry,
                 importQueue,
                 operationProcessor,
                 eventHub,
+                episodeIdentityService,
                 CreateUserManager(dbContext),
                 NullLogger<MediaProvidersController>.Instance,
                 new PassthroughDataProtectionProvider(),
@@ -812,6 +828,10 @@ public class MediaProviderDtoContractTests
 
         public bool ThrowOnTitleDetails { get; set; }
 
+        public int ProgressUpdateCallCount { get; private set; }
+        public int StatusUpdateCallCount { get; private set; }
+        public int ScoreUpdateCallCount { get; private set; }
+
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(ConnectedAccount);
@@ -859,6 +879,7 @@ public class MediaProviderDtoContractTests
 
         public Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken)
         {
+            ProgressUpdateCallCount++;
             if (ThrowOnProgressUpdate)
             {
                 throw new InvalidOperationException("Simulated provider write failure.");
@@ -875,6 +896,7 @@ public class MediaProviderDtoContractTests
 
         public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
         {
+            StatusUpdateCallCount++;
             if (ThrowOnStatusUpdate)
             {
                 throw new InvalidOperationException("Simulated provider write failure.");
@@ -891,6 +913,7 @@ public class MediaProviderDtoContractTests
 
         public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken)
         {
+            ScoreUpdateCallCount++;
             if (ThrowOnStatusUpdate)
             {
                 throw new InvalidOperationException("Simulated provider write failure.");

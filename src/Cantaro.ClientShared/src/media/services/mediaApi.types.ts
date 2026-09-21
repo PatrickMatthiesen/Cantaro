@@ -191,6 +191,7 @@ export interface MediaContinueWatchingDto {
 export interface MediaEpisodeCatalogDto {
     seriesDestinations: MediaStreamingDestinationDto[];
     episodes: MediaEpisodeDestinationDto[];
+    specials: MediaSpecialEpisodeDestinationDto[];
     releaseAvailability?: MediaReleaseAvailabilityDto;
 }
 
@@ -207,12 +208,19 @@ export interface MediaReleaseLanguageAvailabilityDto {
 
 export interface MediaEpisodeDestinationDto {
     episodeNumber: number;
+    seasonNumber?: number | null;
+    seasonEpisodeNumber?: number | null;
     title?: string;
     destinations: MediaStreamingDestinationDto[];
     availableAudioLanguageCodes?: string[];
     availableSubtitleLanguageCodes?: string[];
     seenCount: number;
     hasConflict: boolean;
+}
+
+export interface MediaSpecialEpisodeDestinationDto {
+    specialEpisodeNumber: number;
+    title?: string;
 }
 
 export interface MediaStreamingDestinationDto {

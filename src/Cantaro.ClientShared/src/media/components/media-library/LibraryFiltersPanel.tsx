@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import { ChevronDown, ChevronUp, Search, SlidersHorizontal, X } from 'lucide-react';
 import { readStoredValue, writeStoredValue } from '../../services/mediaRefreshCache';
 import {
-  LibraryAdvancedFilterFields,
+  LibraryProviderControl,
   LibraryFormatControl,
   LibraryRefreshAction,
   LibrarySortControls,
@@ -63,7 +63,6 @@ export interface LibraryFiltersPanelProps {
 }
 
 const filtersOpenKey = 'cantaro.media.library.filtersOpen';
-const moreOpenKey = 'cantaro.media.library.moreFiltersOpen';
 
 export function LibraryFiltersPanel({
   searchQuery, filters, providerStatus, isRefreshing, onSearchQueryChange,
@@ -72,9 +71,7 @@ export function LibraryFiltersPanel({
 }: LibraryFiltersPanelProps) {
   const collection = filters.collection ?? 'film-tv';
   const [filtersOpen, setFiltersOpen] = useState(() => readStoredValue(filtersOpenKey) === 'true');
-  const [moreOpen, setMoreOpen] = useState(() => readStoredValue(moreOpenKey) === 'true');
   const panelId = useId();
-  const moreId = useId();
   const activeCount = [searchQuery, filters.status, filters.format, filters.provider].filter(Boolean).length;
   const providerOptions = [
     { value: '', label: 'All providers' },
@@ -84,11 +81,6 @@ export function LibraryFiltersPanel({
     const next = !filtersOpen;
     setFiltersOpen(next);
     writeStoredValue(filtersOpenKey, String(next));
-  };
-  const toggleMore = () => {
-    const next = !moreOpen;
-    setMoreOpen(next);
-    writeStoredValue(moreOpenKey, String(next));
   };
   const statusControl = <LibraryStatusControl value={filters.status ?? ''} options={statusOptions(collection)} onChange={(value) => onUpdateFilter('status', value)} />;
   const formatControl = <LibraryFormatControl value={filters.format ?? ''} options={formatOptions(collection)} onChange={(value) => onUpdateFilter('format', value)} />;
@@ -140,18 +132,10 @@ export function LibraryFiltersPanel({
             {statusControl}
             {formatControl}
             {sortControls}
-            <button type="button" aria-expanded={moreOpen} aria-controls={moreId} onClick={toggleMore} className="inline-flex h-9 items-center gap-2 px-2 text-sm font-semibold text-content-muted hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus">
-              More {filters.provider ? <span className="text-xs">1</span> : null}
-              {moreOpen ? <ChevronUp className="size-4" aria-hidden /> : <ChevronDown className="size-4" aria-hidden />}
-            </button>
+            <LibraryProviderControl providerValue={filters.provider ?? ''} providerOptions={providerOptions} onProviderChange={onUpdateProviderFilter} />
+            <LibraryRefreshAction isConnected={Boolean(providerStatus?.isConnected)} isRefreshing={isRefreshing} onRefresh={onRefreshFromRemote} />
             <button type="button" onClick={() => { onSearchQueryChange(''); onClearAdvancedFilters(); }} className="ml-auto h-9 px-2 text-sm text-content-muted hover:text-content focus-visible:outline-2 focus-visible:outline-focus">Clear filters</button>
           </div>
-          {moreOpen ? (
-            <div id={moreId} className="flex flex-wrap items-end gap-3 border-t border-border-subtle pt-3">
-              <LibraryAdvancedFilterFields providerValue={filters.provider ?? ''} providerOptions={providerOptions} onProviderChange={onUpdateProviderFilter} />
-              <LibraryRefreshAction isConnected={Boolean(providerStatus?.isConnected)} isRefreshing={isRefreshing} onRefresh={onRefreshFromRemote} />
-            </div>
-          ) : null}
         </div>
       ) : null}
     </section>

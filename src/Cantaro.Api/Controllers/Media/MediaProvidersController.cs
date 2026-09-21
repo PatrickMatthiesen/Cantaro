@@ -31,6 +31,7 @@ public class MediaProvidersController(
     MediaLibraryImportQueue mediaLibraryImportQueue,
     MediaProviderOperationProcessor mediaProviderOperationProcessor,
     MediaLibraryEventHub mediaLibraryEventHub,
+    MediaEpisodeIdentityService mediaEpisodeIdentityService,
     UserManager<User> userManager,
     ILogger<MediaProvidersController> logger,
     IDataProtectionProvider dataProtectionProvider,
@@ -41,6 +42,7 @@ public class MediaProvidersController(
     private readonly MediaLibraryImportQueue _mediaLibraryImportQueue = mediaLibraryImportQueue;
     private readonly MediaProviderOperationProcessor _mediaProviderOperationProcessor = mediaProviderOperationProcessor;
     private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
+    private readonly MediaEpisodeIdentityService _mediaEpisodeIdentityService = mediaEpisodeIdentityService;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaProvidersController> _logger = logger;
     private readonly IDataProtector _stateProtector = dataProtectionProvider.CreateProtector("MediaProvider.OAuth.State");
@@ -158,7 +160,7 @@ public class MediaProvidersController(
         }
         catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or InvalidOperationException)
         {
-            _logger.LogWarning(ex, "AniList media provider callback failed.");
+            _logger.LogWarning(ex, "Media provider {ProviderId} callback failed.", normalizedProviderId);
             return Redirect($"{frontendUrl}/?error=exchange_failed&provider={normalizedProviderId}");
         }
     }
@@ -351,6 +353,17 @@ public class MediaProvidersController(
             details,
             now,
             cancellationToken);
+        if (details.EpisodeCatalog is { } episodeCatalog)
+        {
+            await _mediaEpisodeIdentityService.CacheProviderEpisodeCatalogAsync(
+                title.Id,
+                provider.ProviderId,
+                providerMediaId,
+                episodeCatalog,
+                details.SpecialEpisodeCatalog ?? [],
+                details.EpisodeCount,
+                cancellationToken);
+        }
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);
@@ -397,10 +410,9 @@ public class MediaProvidersController(
             return NoContent();
         }
 
-        var results = new List<MediaProviderOperationExecutionResult>();
         foreach (var binding in connectedBindings)
         {
-            var operation = await _mediaProviderOperationProcessor.EnqueueProgressUpdateAsync(
+            await _mediaProviderOperationProcessor.EnqueueProgressUpdateAsync(
                 userId,
                 binding,
                 new MediaProgressUpdateRequest
@@ -411,11 +423,12 @@ public class MediaProvidersController(
                     ProgressVolumes = request.ProgressVolumes,
                     LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
                 },
-                cancellationToken);
-            results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
+                cancellationToken,
+                deferSave: true);
         }
+        await _dbContext.SaveChangesAsync(cancellationToken);
         _mediaLibraryEventHub.Publish(userId);
-        return BuildOperationResult(results);
+        return Accepted();
     }
 
     [HttpPost("titles/{mediaTitleId:guid}/viewer/status")]
@@ -454,10 +467,9 @@ public class MediaProvidersController(
             return NoContent();
         }
 
-        var results = new List<MediaProviderOperationExecutionResult>();
         foreach (var binding in connectedBindings)
         {
-            var operation = await _mediaProviderOperationProcessor.EnqueueStatusUpdateAsync(
+            await _mediaProviderOperationProcessor.EnqueueStatusUpdateAsync(
                 userId,
                 binding,
                 new MediaStatusUpdateRequest
@@ -466,11 +478,12 @@ public class MediaProvidersController(
                     Status = request.Status,
                     LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
                 },
-                cancellationToken);
-            results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
+                cancellationToken,
+                deferSave: true);
         }
+        await _dbContext.SaveChangesAsync(cancellationToken);
         _mediaLibraryEventHub.Publish(userId);
-        return BuildOperationResult(results);
+        return Accepted();
     }
 
     [HttpPost("titles/{mediaTitleId:guid}/viewer/score")]
@@ -499,10 +512,9 @@ public class MediaProvidersController(
             return NoContent();
         }
 
-        var results = new List<MediaProviderOperationExecutionResult>();
         foreach (var binding in connectedBindings)
         {
-            var operation = await _mediaProviderOperationProcessor.EnqueueScoreUpdateAsync(
+            await _mediaProviderOperationProcessor.EnqueueScoreUpdateAsync(
                 userId,
                 binding,
                 new MediaScoreUpdateRequest
@@ -511,11 +523,12 @@ public class MediaProvidersController(
                     Score = request.Score,
                     LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
                 },
-                cancellationToken);
-            results.Add(await _mediaProviderOperationProcessor.ProcessOperationAsync(operation.Id, cancellationToken));
+                cancellationToken,
+                deferSave: true);
         }
+        await _dbContext.SaveChangesAsync(cancellationToken);
         _mediaLibraryEventHub.Publish(userId);
-        return BuildOperationResult(results);
+        return Accepted();
     }
 
     private static void ApplyLocalProgressUpdate(MediaLibraryEntry entry, MediaProgressUpdateDto request)
@@ -545,37 +558,6 @@ public class MediaProvidersController(
         entry.LastLocalEditAt = now;
         entry.LastMutationSource = MediaMutationSources.UserScoreUpdate;
         entry.UpdatedAt = now;
-    }
-
-    private static ActionResult BuildOperationResult(MediaProviderOperationExecutionResult result)
-    {
-        return result.Outcome switch
-        {
-            MediaProviderOperationExecutionOutcome.Succeeded => new NoContentResult(),
-            MediaProviderOperationExecutionOutcome.Queued => new AcceptedResult(),
-            MediaProviderOperationExecutionOutcome.Failed => new ObjectResult(new
-            {
-                error = string.IsNullOrWhiteSpace(result.LastError)
-                    ? "Media provider operation failed."
-                    : result.LastError
-            })
-            {
-                StatusCode = StatusCodes.Status502BadGateway
-            },
-            _ => new AcceptedResult()
-        };
-    }
-
-    private static ActionResult BuildOperationResult(IReadOnlyCollection<MediaProviderOperationExecutionResult> results)
-    {
-        if (results.Any(result => result.Outcome == MediaProviderOperationExecutionOutcome.Failed))
-        {
-            return BuildOperationResult(results.First(result => result.Outcome == MediaProviderOperationExecutionOutcome.Failed));
-        }
-
-        return results.All(result => result.Outcome == MediaProviderOperationExecutionOutcome.Succeeded)
-            ? new NoContentResult()
-            : new AcceptedResult();
     }
 
     private static MediaProviderSearchResultDto MapSearchResult(

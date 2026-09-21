@@ -69,28 +69,24 @@ export function LibrarySortControls({ sortBy, sortDir, onSortByChange, onToggleS
   );
 }
 
-interface LibraryAdvancedFilterFieldsProps {
+interface LibraryProviderControlProps {
   providerValue: string;
   providerOptions: FilterOption[];
-
   onProviderChange: (value: string | undefined) => void;
 }
 
-export function LibraryAdvancedFilterFields({
+export function LibraryProviderControl({
   providerValue,
   providerOptions,
-
   onProviderChange,
-}: LibraryAdvancedFilterFieldsProps) {
+}: LibraryProviderControlProps) {
   return (
-    <div className="w-44">
-      <label className="grid min-w-0 gap-1 text-xs font-semibold text-content-muted">
-        Provider
-        <select value={providerValue} onChange={(event) => onProviderChange(event.target.value || undefined)} className={selectClassName}>
-          {providerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-      </label>
-    </div>
+    <label className="w-44 shrink-0">
+      <span className="sr-only">Provider</span>
+      <select value={providerValue} onChange={(event) => onProviderChange(event.target.value || undefined)} className={selectClassName}>
+        {providerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
   );
 }
 

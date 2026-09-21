@@ -1,6 +1,8 @@
 import { useState } from "react";
 import DOMPurify from "dompurify";
+import { ImageIcon } from "lucide-react";
 import { MediaProviderIcon } from "../MediaProviderIcon";
+import { mediaProviderIconId } from "../../services/mediaProviders";
 
 export function SanitizedSynopsis({
   html,
@@ -25,24 +27,27 @@ export function SanitizedSynopsis({
 export function DetailArtwork({
   posterUrl,
   title,
+  providerId,
   className = "",
 }: {
   posterUrl?: string;
   title: string;
+  providerId?: string;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const iconId = mediaProviderIconId(providerId);
 
   if (!posterUrl || failed) {
     return (
       <div
         className={`flex h-full w-full items-center justify-center bg-surface-subtle ${className}`}
       >
-        <MediaProviderIcon
-          providerId="anilist"
-          className="h-12 w-12"
-          aria-hidden
-        />
+        {iconId ? (
+          <MediaProviderIcon providerId={iconId} className="h-12 w-12" aria-hidden />
+        ) : (
+          <ImageIcon className="h-12 w-12 text-content-muted" aria-hidden />
+        )}
         <span className="sr-only">{title} — no artwork available</span>
       </div>
     );

@@ -14,6 +14,20 @@ function notifyListeners(notification: MediaProgressUpdateNotification, signal: 
   for (const listener of listeners) listener(notification);
 }
 
+function retryAfterMilliseconds(response: Response): number | undefined {
+  const retryAfter = response.headers.get('Retry-After');
+  if (!retryAfter) return undefined;
+
+  const seconds = Number.parseInt(retryAfter, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(seconds * 1_000, 1_000);
+  }
+
+  const retryAt = Date.parse(retryAfter);
+  if (!Number.isFinite(retryAt)) return undefined;
+  return Math.max(retryAt - Date.now(), 1_000);
+}
+
 function connect(): () => void {
   let stopped = false;
   let controller: AbortController | undefined;
@@ -26,6 +40,8 @@ function connect(): () => void {
     try {
       const response = await mediaApi.openLibraryEvents(activeController.signal);
       if (!isEventStream(response)) {
+        const retryAfter = retryAfterMilliseconds(response);
+        if (retryAfter !== undefined) retryDelay = retryAfter;
         await response.body?.cancel();
         return;
       }

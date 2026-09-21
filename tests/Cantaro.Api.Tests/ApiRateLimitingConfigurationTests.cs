@@ -72,6 +72,37 @@ public class ApiRateLimitingConfigurationTests
         Assert.Equal(ApiRateLimitBucket.GeneralApi, ApiRateLimitingConfiguration.Classify(context));
     }
 
+    [Theory]
+    [InlineData("GET", "/api/media/library")]
+    [InlineData("GET", "/api/media/library/events")]
+    [InlineData("GET", "/api/media/titles/11111111-1111-1111-1111-111111111111")]
+    [InlineData("GET", "/api/media/titles/11111111-1111-1111-1111-111111111111/viewer")]
+    public void Classify_LocalMediaReads_UseIndependentBucket(string method, string path)
+    {
+        Assert.Equal(ApiRateLimitBucket.LocalMediaRead,
+            ApiRateLimitingConfiguration.Classify(CreateContext(path, method)));
+    }
+
+    [Theory]
+    [InlineData("/api/media/titles/11111111-1111-1111-1111-111111111111/viewer")]
+    [InlineData("/api/media/titles/11111111-1111-1111-1111-111111111111/viewer/progress")]
+    [InlineData("/api/media/titles/11111111-1111-1111-1111-111111111111/viewer/status")]
+    [InlineData("/api/media/titles/11111111-1111-1111-1111-111111111111/viewer/score")]
+    public void Classify_ViewerWrites_UseIndependentBucket(string path)
+    {
+        Assert.Equal(ApiRateLimitBucket.ViewerWrite,
+            ApiRateLimitingConfiguration.Classify(CreateContext(path)));
+    }
+
+    [Fact]
+    public void Classify_ProviderAndEpisodeReads_RemainInGeneralBucket()
+    {
+        Assert.Equal(ApiRateLimitBucket.GeneralApi, ApiRateLimitingConfiguration.Classify(
+            CreateContext("/api/media/providers/anilist/status", "GET")));
+        Assert.Equal(ApiRateLimitBucket.GeneralApi, ApiRateLimitingConfiguration.Classify(
+            CreateContext("/api/media/titles/11111111-1111-1111-1111-111111111111/episodes", "GET")));
+    }
+
     [Fact]
     public async Task Configure_RejectsTheEleventhIdentityRequestInOneWindow()
     {
@@ -170,6 +201,59 @@ public class ApiRateLimitingConfigurationTests
 
         using var otherUserResponse = await SendAsync(fixture, HttpMethod.Get, "/api/profile", userId: "user-two");
         Assert.Equal(StatusCodes.Status200OK, (int)otherUserResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Pipeline_LocalMediaReadsAndViewerWritesRemainAvailableAfterGeneralBucketIsExhausted()
+    {
+        const string titleId = "11111111-1111-1111-1111-111111111111";
+        var viewerPath = $"/api/media/titles/{titleId}/viewer/progress";
+        await using var fixture = await StartAppAsync(app =>
+        {
+            app.MapGet("/api/media/providers/anilist/status", () => Results.Ok());
+            app.MapGet("/api/media/library", () => Results.Ok());
+            app.MapPost(viewerPath, () => Results.Ok());
+        });
+
+        for (var request = 0; request < 120; request++)
+        {
+            using var response = await SendAsync(fixture, HttpMethod.Get,
+                "/api/media/providers/anilist/status", userId: "local-media-user");
+            Assert.Equal(StatusCodes.Status200OK, (int)response.StatusCode);
+        }
+
+        using var generalRejection = await SendAsync(fixture, HttpMethod.Get,
+            "/api/media/providers/anilist/status", userId: "local-media-user");
+        Assert.Equal(StatusCodes.Status429TooManyRequests, (int)generalRejection.StatusCode);
+
+        using var localRead = await SendAsync(fixture, HttpMethod.Get,
+            "/api/media/library", userId: "local-media-user");
+        using var localWrite = await SendAsync(fixture, HttpMethod.Post,
+            viewerPath, userId: "local-media-user");
+        Assert.Equal(StatusCodes.Status200OK, (int)localRead.StatusCode);
+        Assert.Equal(StatusCodes.Status200OK, (int)localWrite.StatusCode);
+
+        for (var request = 1; request < 120; request++)
+        {
+            using var response = await SendAsync(fixture, HttpMethod.Get,
+                "/api/media/library", userId: "local-media-user");
+            Assert.Equal(StatusCodes.Status200OK, (int)response.StatusCode);
+        }
+
+        using var localReadRejection = await SendAsync(fixture, HttpMethod.Get,
+            "/api/media/library", userId: "local-media-user");
+        Assert.Equal(StatusCodes.Status429TooManyRequests, (int)localReadRejection.StatusCode);
+
+        for (var request = 1; request < 120; request++)
+        {
+            using var response = await SendAsync(fixture, HttpMethod.Post,
+                viewerPath, userId: "local-media-user");
+            Assert.Equal(StatusCodes.Status200OK, (int)response.StatusCode);
+        }
+
+        using var viewerRejection = await SendAsync(fixture, HttpMethod.Post,
+            viewerPath, userId: "local-media-user");
+        Assert.Equal(StatusCodes.Status429TooManyRequests, (int)viewerRejection.StatusCode);
     }
 
     [Fact]

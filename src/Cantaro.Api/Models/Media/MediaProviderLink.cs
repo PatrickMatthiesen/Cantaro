@@ -27,6 +27,14 @@ public class MediaProviderLink
     public DateTimeOffset? AvailabilityLastVerifiedAt { get; set; }
 
     /// <summary>
+    /// Last successfully fetched display-only special episode metadata.
+    /// Specials have no canonical overall episode number and never drive progress.
+    /// </summary>
+    public string? SpecialEpisodeCatalogSnapshot { get; set; }
+
+    public DateTimeOffset? EpisodeCatalogLastVerifiedAt { get; set; }
+
+    /// <summary>
     /// Tracks whether the mapping was imported, automatic, or user-confirmed.
     /// </summary>
     public required string LinkSource { get; set; }

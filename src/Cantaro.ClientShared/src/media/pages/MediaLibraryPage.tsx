@@ -72,6 +72,7 @@ export function MediaLibraryPage({
       <LibraryContentSection
         error={library.error}
         isLoading={library.isLoading}
+        hasCurrentData={library.hasCurrentData}
         items={library.items}
         filters={library.filters}
         hasActiveFilters={library.hasActiveFilters}

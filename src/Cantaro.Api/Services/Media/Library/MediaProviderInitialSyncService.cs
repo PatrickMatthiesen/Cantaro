@@ -224,7 +224,7 @@ public sealed class MediaProviderInitialSyncService(
         CancellationToken cancellationToken)
     {
         var providerId = NormalizeProviderId(snapshot.ProviderId);
-        var entries = await _dbContext.MediaLibraryEntries
+        var allEntries = await _dbContext.MediaLibraryEntries
             .Include(entry => entry.MediaTitle)
                 .ThenInclude(title => title!.ProviderLinks)
             .Include(entry => entry.ProviderBindings)
@@ -234,6 +234,9 @@ public sealed class MediaProviderInitialSyncService(
             .Where(entry => entry.UserId == userId)
             .OrderBy(entry => entry.Id)
             .ToListAsync(cancellationToken);
+
+        var provider = _mediaProviderRegistry.GetRequired(providerId);
+        var entries = allEntries.Where(entry => provider.SupportsMediaKind(entry.MediaTitle!.MediaKind)).ToList();
 
         var entryByProviderIdentity = entries
             .SelectMany(entry => entry.MediaTitle!.ProviderLinks.Select(link => new { entry, link }))
@@ -478,8 +481,24 @@ public sealed class MediaProviderInitialSyncService(
             || title.PrimaryProgressDimension is MediaProgressDimensions.Chapter or MediaProgressDimensions.Volume;
         int? progressChapters = tracksReadingProgress ? entry.ProgressChapters ?? 0 : null;
         int? progressVolumes = tracksReadingProgress ? entry.ProgressVolumes ?? 0 : null;
+        var progressChanged = remoteItem is null
+            || progressEpisodes.HasValue && progressEpisodes != (remoteItem.ProgressEpisodes ?? 0)
+            || progressChapters.HasValue && progressChapters != (remoteItem.ProgressChapters ?? 0)
+            || progressVolumes.HasValue && progressVolumes != (remoteItem.ProgressVolumes ?? 0);
+        // Aggregate progress cannot safely describe a provider history with gaps.
+        // Only explicit progress edits may replace that history with a watched-through range.
+        var updateProgress = progressChanged && remoteItem?.HasNonContiguousProgress != true;
+        var binding = entry.ProviderBindings.FirstOrDefault(candidate =>
+            candidate.MediaProviderLink?.Provider == providerId
+            && candidate.MediaProviderLink.ExternalId == providerMediaId);
+        var statusAligned = remoteItem is not null && (
+            string.Equals(entry.Status, remoteItem.Status, StringComparison.Ordinal)
+            || binding?.LastRequestedStatus == entry.Status
+                && binding.LastAppliedStatus == remoteItem.Status);
         var request = new MediaLibraryStateSyncRequest
         {
+            UpdateStatus = !statusAligned,
+            UpdateProgress = updateProgress,
             ProviderMediaId = providerMediaId,
             Status = entry.Status,
             Score = entry.Score,
@@ -490,11 +509,9 @@ public sealed class MediaProviderInitialSyncService(
         };
 
         var requiresWrite = remoteItem is null || (
-            !string.Equals(entry.Status, remoteItem.Status, StringComparison.Ordinal)
+            !statusAligned
             || ProjectProviderScore(providerId, entry.Score) != NormalizeScore(remoteItem.Score)
-            || progressEpisodes.HasValue && progressEpisodes != (remoteItem.ProgressEpisodes ?? 0)
-            || progressChapters.HasValue && progressChapters != (remoteItem.ProgressChapters ?? 0)
-            || progressVolumes.HasValue && progressVolumes != (remoteItem.ProgressVolumes ?? 0));
+            || updateProgress);
 
         return new InitialSyncMatch
         {
@@ -535,6 +552,8 @@ public sealed class MediaProviderInitialSyncService(
                 item.ProgressChapters,
                 item.ProgressVolumes,
                 item.LastRemoteUpdateAt,
+                item.HasNonContiguousProgress,
+                item.WatchedEpisodes,
                 CrossReferences = item.CrossReferences
                     .OrderBy(reference => reference.ProviderId, StringComparer.Ordinal)
                     .ThenBy(reference => reference.ProviderMediaId, StringComparer.Ordinal)
@@ -633,7 +652,7 @@ public sealed class MediaProviderInitialSyncService(
             return null;
         }
 
-        if (string.Equals(providerId, MediaObservationSiteIdentifiers.MyAnimeList, StringComparison.Ordinal))
+        if (providerId is MediaObservationSiteIdentifiers.MyAnimeList or "simkl")
         {
             return Math.Clamp(
                 decimal.Round(normalized.Value / 10m, 0, MidpointRounding.AwayFromZero),

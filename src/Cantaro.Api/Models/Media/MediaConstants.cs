@@ -90,6 +90,12 @@ public static class MediaProviderOperationTypes
     public const string UpdateStatus = "update_status";
     public const string UpdateScore = "update_score";
 
+    // Writes caused by an established provider import. These must not become
+    // local user edits when the destination provider accepts them.
+    public const string ImportFanOutProgress = "import_fan_out_progress";
+    public const string ImportFanOutStatus = "import_fan_out_status";
+    public const string ImportFanOutScore = "import_fan_out_score";
+
     public const string SyncLibraryState = "sync_library_state";
 
     /// <summary>

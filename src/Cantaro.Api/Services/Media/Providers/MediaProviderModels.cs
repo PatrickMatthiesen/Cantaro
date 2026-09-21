@@ -20,6 +20,11 @@ public class MediaProviderLibraryImportResult
 
 public class MediaProviderLibraryItem
 {
+    /// <summary>Complete provider episode history; null means the provider does not supply it.</summary>
+    public IReadOnlyList<MediaProviderWatchedEpisode>? WatchedEpisodes { get; set; }
+
+    public bool HasNonContiguousProgress { get; set; }
+
     public required string ProviderMediaId { get; set; }
 
     public string? ProviderLibraryEntryId { get; set; }
@@ -161,6 +166,19 @@ public class MediaProviderTitleDetails
     public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
 
     public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
+
+    /// <summary>
+    /// Provider season-relative episode metadata ordered by the provider's
+    /// canonical regular-episode sequence. This is internal import metadata;
+    /// API DTOs continue to expose Cantaro's overall episode number.
+    /// </summary>
+    public IReadOnlyList<MediaProviderWatchedEpisode>? EpisodeCatalog { get; set; }
+
+    /// <summary>
+    /// Provider specials that do not map to Cantaro's overall episode sequence.
+    /// These entries are display-only and must not drive scalar progress.
+    /// </summary>
+    public IReadOnlyList<MediaProviderWatchedEpisode>? SpecialEpisodeCatalog { get; set; }
 }
 
 public sealed class MediaProviderCrossReference
@@ -238,6 +256,13 @@ public class MediaScoreUpdateRequest
 /// </summary>
 public class MediaLibraryStateSyncRequest
 {
+    public bool UpdateStatus { get; set; } = true;
+
+    /// <summary>False when only status or score changed, preserving the provider's episode history.</summary>
+    public bool UpdateProgress { get; set; } = true;
+
+    public IReadOnlyList<MediaProviderWatchedEpisode>? WatchedEpisodes { get; set; }
+
     public required string ProviderMediaId { get; set; }
 
     public required string Status { get; set; }
@@ -258,6 +283,11 @@ public class MediaLibraryStateSyncRequest
 
 public class MediaProviderMutationResult
 {
+    /// <summary>Canonical status actually accepted by the provider, when returned.</summary>
+    public string? AppliedStatus { get; set; }
+
+    public int? AppliedProgressEpisodes { get; set; }
+
     public required string ProviderId { get; set; }
 
     public required string ProviderMediaId { get; set; }
@@ -265,6 +295,21 @@ public class MediaProviderMutationResult
     public DateTimeOffset AppliedAt { get; set; }
 
     public DateTimeOffset? LastRemoteUpdateAt { get; set; }
+}
+
+public sealed class MediaProviderWatchedEpisode
+{
+    public int? SeasonNumber { get; set; }
+    public int EpisodeNumber { get; set; }
+    public string? ProviderEpisodeId { get; set; }
+    public string? Title { get; set; }
+    public DateTimeOffset? WatchedAt { get; set; }
+}
+
+public sealed class MediaProviderEpisodeCatalogSnapshot
+{
+    public IReadOnlyList<MediaProviderWatchedEpisode> RegularEpisodes { get; set; } = [];
+    public IReadOnlyList<MediaProviderWatchedEpisode> Specials { get; set; } = [];
 }
 
 public class MediaReleaseMetadata

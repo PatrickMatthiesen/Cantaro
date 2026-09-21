@@ -18,7 +18,7 @@ namespace Cantaro.Api.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("ProductVersion", "10.0.12")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -465,8 +465,14 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("LastAppliedStatus")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset?>("LastRemoteUpdateAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastRequestedStatus")
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset?>("LastSyncedAt")
                         .HasColumnType("timestamp with time zone");
@@ -772,6 +778,26 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("MediaObservationEpisodeOffsets");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderLibrarySnapshot", b =>
+                {
+                    b.Property<int>("ConnectedServiceAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Cursor")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ItemsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ConnectedServiceAccountId");
+
+                    b.ToTable("MediaProviderLibrarySnapshots");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.MediaProviderLink", b =>
                 {
                     b.Property<Guid>("Id")
@@ -791,6 +817,9 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTimeOffset?>("EpisodeCatalogLastVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ExternalId")
                         .IsRequired()
@@ -821,6 +850,9 @@ namespace Cantaro.Api.Migrations
 
                     b.Property<Guid?>("RelationsSnapshotId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SpecialEpisodeCatalogSnapshot")
+                        .HasColumnType("jsonb");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -2258,6 +2290,17 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("MediaTitle");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.MediaProviderLibrarySnapshot", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
+                        .WithOne()
+                        .HasForeignKey("Cantaro.Api.Models.MediaProviderLibrarySnapshot", "ConnectedServiceAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ConnectedServiceAccount");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.MediaProviderLink", b =>

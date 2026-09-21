@@ -1,11 +1,13 @@
 import { LibraryEntryCard } from '../LibraryEntryCard';
 import { ActionButton } from '../../../ui';
 import type { MediaLibraryDensity } from '../../pages/MediaLibraryPage';
+import type { MediaApiError } from '../../services/mediaApi.errors';
 import type { MediaLibraryListItemDto, MediaLibraryQueryParams } from '../../services/mediaApi';
 
 export interface LibraryContentSectionProps {
-    error: string | null;
+    error: MediaApiError | null;
     isLoading: boolean;
+    hasCurrentData: boolean;
     items: MediaLibraryListItemDto[];
     filters: MediaLibraryQueryParams;
     hasActiveFilters: boolean;
@@ -39,15 +41,49 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
     );
 }
 
-function LibraryErrorState({ onRetry }: { onRetry: () => Promise<void> }) {
+function LibraryErrorState({ error, onRetry }: { error: MediaApiError; onRetry: () => Promise<void> }) {
+    const title = error.kind === 'connection'
+        ? "Can't connect to the Cantaro server"
+        : error.kind === 'authentication'
+            ? 'Your Cantaro session has expired'
+                : error.kind === 'authorization'
+                    ? "Cantaro can't access your library"
+                : error.kind === 'service-unavailable'
+                    ? 'The Cantaro server is temporarily unavailable'
+                    : error.kind === 'server'
+                        ? "The Cantaro server couldn't load your library"
+                        : "Cantaro couldn't load your library";
+    const detail = error.kind === 'connection'
+        ? 'Check your connection, then try again.'
+        : error.kind === 'authentication'
+            ? 'Sign in again, then try loading your library.'
+            : error.kind === 'authorization'
+                ? 'Check your account permissions, then try again.'
+                : error.kind === 'service-unavailable'
+                    ? 'Try again in a moment.'
+                    : error.kind === 'server'
+                        ? 'Try again in a moment.'
+                        : 'Try again to reload your library.';
+
     return (
         <section className="border-y border-danger-border bg-danger-surface px-4 py-6">
-            <p className="font-semibold text-danger-content">Cantaro couldn’t load your saved library.</p>
-            <p className="mt-1 text-sm text-content-muted">Your library data is still stored in Cantaro. Try loading it again.</p>
+            <p className="font-semibold text-danger-content">{title}</p>
+            <p className="mt-1 text-sm text-danger-content">{detail}</p>
             <div className="mt-3">
                 <ActionButton tone="secondary" onClick={() => void onRetry()}>Try again</ActionButton>
             </div>
         </section>
+    );
+}
+
+function LibraryInlineError({ error, onRetry }: { error: MediaApiError; onRetry: () => Promise<void> }) {
+    return (
+        <div className="border-y border-danger-border bg-danger-surface px-4 py-3" role="status">
+            <p className="text-sm font-medium text-danger-content">{error.message}</p>
+            <div className="mt-2">
+                <ActionButton tone="secondary" onClick={() => void onRetry()}>Try again</ActionButton>
+            </div>
+        </div>
     );
 }
 
@@ -94,6 +130,7 @@ function LibraryPagination({ filters, totalPages, onPreviousPage, onNextPage }: 
 export function LibraryContentSection({
     error,
     isLoading,
+    hasCurrentData,
     items,
     filters,
     hasActiveFilters,
@@ -105,20 +142,26 @@ export function LibraryContentSection({
     onNextPage,
     density = 'comfortable',
 }: LibraryContentSectionProps) {
-    if (error) {
-        return <LibraryErrorState onRetry={onRetry} />;
+    if (error && !hasCurrentData) {
+        return <LibraryErrorState error={error} onRetry={onRetry} />;
     }
 
-    if (isLoading) {
+    if (isLoading && !hasCurrentData) {
         return <LibraryLoadingGrid density={density} />;
     }
 
     if (items.length === 0) {
-        return <LibraryEmptyState hasActiveFilters={hasActiveFilters} onNavigateProviders={onNavigateProviders} />;
+        return (
+            <>
+                {error && hasCurrentData ? <LibraryInlineError error={error} onRetry={onRetry} /> : null}
+                <LibraryEmptyState hasActiveFilters={hasActiveFilters} onNavigateProviders={onNavigateProviders} />
+            </>
+        );
     }
 
     return (
         <>
+            {error && hasCurrentData ? <LibraryInlineError error={error} onRetry={onRetry} /> : null}
             <div className={libraryGridClassName(density)}>
                 {items.map((entry) => (
                     <LibraryEntryCard

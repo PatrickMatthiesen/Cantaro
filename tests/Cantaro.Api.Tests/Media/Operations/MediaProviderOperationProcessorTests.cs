@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Net;
+using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -15,7 +16,7 @@ namespace Cantaro.Api.Tests;
 public class MediaProviderOperationProcessorTests
 {
     [Fact]
-    public async Task ProcessOperationAsync_UpdatesEntryOnSuccessfulProgressWrite()
+    public async Task ProcessOperationAsync_LeavesLocallySavedProgressUnchangedOnSuccessfulProviderWrite()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -31,6 +32,11 @@ public class MediaProviderOperationProcessorTests
         var registry = new MediaProviderRegistry([new FakeMediaProvider("anilist")]);
         var logger = new RecordingLogger<MediaProviderOperationProcessor>();
         var processor = new MediaProviderOperationProcessor(dbContext, registry, logger);
+
+        entry.ProgressEpisodes = 17;
+        entry.LastMutationSource = MediaMutationSources.UserProgressUpdate;
+        entry.LastLocalEditAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync();
 
         var operation = await processor.EnqueueProgressUpdateAsync(
             entry.UserId,
@@ -59,7 +65,7 @@ public class MediaProviderOperationProcessorTests
     }
 
     [Fact]
-    public async Task ProcessOperationAsync_UpdatesEntryOnSuccessfulScoreWrite()
+    public async Task ProcessOperationAsync_LeavesLocallySavedScoreUnchangedOnSuccessfulProviderWrite()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -72,6 +78,11 @@ public class MediaProviderOperationProcessorTests
             dbContext,
             new MediaProviderRegistry([new FakeMediaProvider("anilist")]),
             NullLogger<MediaProviderOperationProcessor>.Instance);
+
+        entry.Score = 82.5m;
+        entry.LastMutationSource = MediaMutationSources.UserScoreUpdate;
+        entry.LastLocalEditAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync();
 
         var operation = await processor.EnqueueScoreUpdateAsync(
             entry.UserId,
@@ -93,6 +104,75 @@ public class MediaProviderOperationProcessorTests
     }
 
     [Fact]
+    public async Task ProcessOperationAsync_StatusWrite_RecordsAppliedStatusWithoutChangingLocalStatus()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 415, "status-normalization@example.com");
+        var provider = new FakeMediaProvider("anilist", appliedStatus: MediaLibraryStatuses.Completed);
+        var processor = new MediaProviderOperationProcessor(
+            dbContext,
+            new MediaProviderRegistry([provider]),
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+
+        var operation = await processor.EnqueueStatusUpdateAsync(
+            entry.UserId,
+            binding,
+            new MediaStatusUpdateRequest
+            {
+                ProviderMediaId = "140960",
+                Status = MediaLibraryStatuses.Current,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            },
+            CancellationToken.None);
+
+        var processed = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, processed.Outcome);
+        Assert.Equal(MediaLibraryStatuses.Current, (await dbContext.MediaLibraryEntries.SingleAsync()).Status);
+        var persistedBinding = await dbContext.MediaLibraryProviderBindings.SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Current, persistedBinding.LastRequestedStatus);
+        Assert.Equal(MediaLibraryStatuses.Completed, persistedBinding.LastAppliedStatus);
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_SkipsOlderStatusWriteAfterNewerLocalEdit()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 416, "stale-status@example.com");
+        var provider = new FakeMediaProvider("anilist");
+        var processor = new MediaProviderOperationProcessor(dbContext,
+            new MediaProviderRegistry([provider]), NullLogger<MediaProviderOperationProcessor>.Instance);
+        var operation = await processor.EnqueueStatusUpdateAsync(entry.UserId, binding,
+            new MediaStatusUpdateRequest
+            {
+                ProviderMediaId = "140960",
+                Status = MediaLibraryStatuses.Completed,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            }, CancellationToken.None);
+
+        entry.Status = MediaLibraryStatuses.Paused;
+        entry.LastLocalEditAt = operation.CreatedAt.AddSeconds(1);
+        await dbContext.SaveChangesAsync();
+
+        var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, provider.StatusUpdateCallCount);
+        Assert.Equal(MediaLibraryStatuses.Paused, (await dbContext.MediaLibraryEntries.SingleAsync()).Status);
+        Assert.Empty(await dbContext.MediaProviderOperations.ToListAsync());
+    }
+
+    [Fact]
     public async Task ProcessOperationAsync_SyncLibraryState_UpdatesOnlyProviderBinding()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -110,7 +190,7 @@ public class MediaProviderOperationProcessorTests
         entry.UpdatedAt = originalEntryUpdatedAt;
         await dbContext.SaveChangesAsync();
 
-        var provider = new FakeMediaProvider("anilist");
+        var provider = new FakeMediaProvider("anilist", appliedStatus: MediaLibraryStatuses.Completed);
         var processor = new MediaProviderOperationProcessor(
             dbContext,
             new MediaProviderRegistry([provider]),
@@ -140,11 +220,71 @@ public class MediaProviderOperationProcessorTests
         Assert.Equal(originalEntryUpdatedAt, persistedEntry.UpdatedAt);
         Assert.Equal(MediaMutationSources.ProviderImport, persistedEntry.LastMutationSource);
         Assert.Equal(82.5m, persistedEntry.Score);
+        Assert.Equal(MediaLibraryStatuses.Current, persistedEntry.Status);
+        Assert.Equal(MediaLibraryStatuses.Current, persistedBinding.LastRequestedStatus);
+        Assert.Equal(MediaLibraryStatuses.Completed, persistedBinding.LastAppliedStatus);
         Assert.NotNull(persistedBinding.LastSyncedAt);
         Assert.NotNull(persistedBinding.LastRemoteUpdateAt);
         Assert.NotNull(request.LastKnownRemoteUpdateAt);
         Assert.True(persistedBinding.LastRemoteUpdateAt.Value > request.LastKnownRemoteUpdateAt.Value);
         Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_ImportFanOut_PreservesProviderImportProvenance()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var (entry, binding) = await SeedMediaEntryAsync(db, 416, "fanout@example.com");
+        entry.Status = MediaLibraryStatuses.Completed;
+        entry.LastMutationSource = MediaMutationSources.ProviderImport;
+        await db.SaveChangesAsync();
+        var operation = CreateImportFanOutStatus(binding, MediaLibraryStatuses.Completed);
+        db.MediaProviderOperations.Add(operation);
+        await db.SaveChangesAsync();
+
+        var provider = new FakeMediaProvider("anilist", appliedStatus: MediaLibraryStatuses.Current);
+        var processor = new MediaProviderOperationProcessor(db,
+            new MediaProviderRegistry([provider]), NullLogger<MediaProviderOperationProcessor>.Instance);
+        var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(1, provider.StatusUpdateCallCount);
+        Assert.Equal(MediaLibraryStatuses.Completed, entry.Status);
+        Assert.Equal(MediaMutationSources.ProviderImport, entry.LastMutationSource);
+        Assert.Null(entry.LastLocalEditAt);
+        Assert.Equal(MediaLibraryStatuses.Completed, binding.LastRequestedStatus);
+        Assert.Equal(MediaLibraryStatuses.Current, binding.LastAppliedStatus);
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_StaleImportFanOut_DropsWriteAfterCanonicalStateChanges()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var (entry, binding) = await SeedMediaEntryAsync(db, 417, "stale-fanout@example.com");
+        var operation = CreateImportFanOutStatus(binding, MediaLibraryStatuses.Current);
+        db.MediaProviderOperations.Add(operation);
+        await db.SaveChangesAsync();
+        entry.Status = MediaLibraryStatuses.Completed;
+        entry.LastMutationSource = MediaMutationSources.ProviderImport;
+        await db.SaveChangesAsync();
+
+        var provider = new FakeMediaProvider("anilist");
+        var processor = new MediaProviderOperationProcessor(db,
+            new MediaProviderRegistry([provider]), NullLogger<MediaProviderOperationProcessor>.Instance);
+        var result = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, provider.StatusUpdateCallCount);
+        Assert.Equal(MediaLibraryStatuses.Completed, entry.Status);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
     }
 
     [Fact]
@@ -404,6 +544,27 @@ public class MediaProviderOperationProcessorTests
         Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
     }
 
+    private static MediaProviderOperation CreateImportFanOutStatus(MediaLibraryProviderBinding binding, string status)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new MediaProviderOperation
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryProviderBindingId = binding.Id,
+            OperationType = MediaProviderOperationTypes.ImportFanOutStatus,
+            PayloadJson = JsonSerializer.Serialize(new MediaStatusUpdateRequest
+            {
+                ProviderMediaId = "140960",
+                Status = status,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            Status = MediaProviderOperationStatuses.Pending,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
     private static async Task<(MediaLibraryEntry Entry, MediaLibraryProviderBinding Binding)> SeedMediaEntryAsync(ApplicationDbContext dbContext, int userId, string email)
     {
         var now = DateTimeOffset.UtcNow;
@@ -467,12 +628,18 @@ public class MediaProviderOperationProcessorTests
         private readonly string _providerId;
         private readonly bool _shouldThrow;
         private readonly Exception? _failure;
+        private readonly string? _appliedStatus;
 
-        public FakeMediaProvider(string providerId, bool shouldThrow = false, Exception? failure = null)
+        public FakeMediaProvider(
+            string providerId,
+            bool shouldThrow = false,
+            Exception? failure = null,
+            string? appliedStatus = null)
         {
             _providerId = providerId;
             _shouldThrow = shouldThrow;
             _failure = failure;
+            _appliedStatus = appliedStatus;
         }
 
         public string ProviderId => _providerId;
@@ -553,6 +720,7 @@ public class MediaProviderOperationProcessorTests
             {
                 ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
+                AppliedStatus = _appliedStatus,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow
             });
@@ -593,6 +761,7 @@ public class MediaProviderOperationProcessorTests
             {
                 ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
+                AppliedStatus = _appliedStatus,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow
             });

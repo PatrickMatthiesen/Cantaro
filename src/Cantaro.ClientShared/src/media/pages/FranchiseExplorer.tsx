@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ComponentType, type PointerE
 import { DetailArtwork } from "../components/media-entry-detail/EntryDisplayPrimitives";
 import type { MediaFranchiseGraphDto, MediaFranchiseNodeDto } from "../services/mediaApi";
 import { mediaFormatLabel, mediaKindLabel } from "../services/mediaFormatting";
+import { mediaProviderCatalog } from "../services/mediaProviders";
 import {
   buildFranchisePresentation,
   relationLabel,
@@ -28,6 +29,10 @@ function nodeMeta(node: MediaFranchiseNodeDto) {
     node.episodeCount ? `${node.episodeCount} ep.` : null,
     node.startYear,
   ].filter(Boolean).join(" · ");
+}
+
+function franchiseProviderName(providerId: string): string {
+  return mediaProviderCatalog.find((provider) => provider.id === providerId)?.name ?? providerId;
 }
 
 function CompactNode({
@@ -73,7 +78,7 @@ function TextOverlayNode({ node, onNavigate, shape }: OverlayNodeProps & { shape
       className="group block w-full text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
     >
       <span className={`relative block overflow-hidden bg-surface-subtle ${overlayShapeClasses[shape]}`}>
-        <DetailArtwork posterUrl={artworkUrl} title={node.canonicalTitle} className="transition-transform duration-200 ease-out group-hover:scale-[1.025]" />
+        <DetailArtwork posterUrl={artworkUrl} title={node.canonicalTitle} providerId={node.provider} className="transition-transform duration-200 ease-out group-hover:scale-[1.025]" />
         <span className="absolute inset-0 bg-linear-to-t from-black/95 via-black/35 via-55% to-transparent" aria-hidden />
         <span className="absolute inset-x-0 bottom-0 block p-3 text-white sm:p-4">
           <strong className="block text-pretty text-sm leading-5 sm:text-base">{node.canonicalTitle}</strong>
@@ -554,7 +559,8 @@ function ExplorerContent({
 
 function ExplorerFooter({ graph }: { graph: MediaFranchiseGraphDto | null }) {
   if (!graph) return null;
-  return <footer className="border-t border-border-subtle pt-5 text-sm text-content-muted"><p><strong className="text-content">Reading key:</strong> every title appears once in the selected view.</p><p className="mt-1">Relations from {graph.sourceProvider === "anilist" ? "AniList" : graph.sourceProvider}{graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}</p></footer>;
+  const hasRelations = graph.relations.length > 0 || graph.nodes.length > 1;
+  return <footer className="border-t border-border-subtle pt-5 text-sm text-content-muted"><p><strong className="text-content">Reading key:</strong> every title appears once in the selected view.</p>{hasRelations ? <p className="mt-1">Relations from {franchiseProviderName(graph.sourceProvider)}{graph.continuity.isComplete ? "" : " · Continuity may be incomplete"}</p> : null}</footer>;
 }
 
 export function FranchiseExplorer({

@@ -235,6 +235,33 @@ Music tables are dense but warm: translucent table shell, uppercase header row, 
 ### Media Library Card
 Media cards are artwork-led with poster aspect ratios, dark gradient overlays, progress metadata, and status badges. The card hover scale is acceptable because it is attached to artwork browsing, not routine form controls.
 
+### TV episode navigation
+
+Place the shared square season dropdown at the left of the episode toolbar,
+without a repeated Episodes heading or count summary. Use compact episode
+numbers prefixed with `#`, without the word Episode. In All seasons, include the season as `S3 · #1`.
+Reveal the series-wide number as `Series #34` in a tooltip on hover, focus, or
+tap, without reserving space in the row. Keep descriptive accessible labels.
+Keep provider links beside episode details when the episode container is at
+least 42rem wide; stack them below at narrower widths. Episode titles use small
+text and wrap onto additional lines instead of truncating. Language metadata
+can wrap independently.
+
+Use a compact, unlabeled season selector inline with the progress count above
+the tabs, replacing the repeated season heading. Keep its accessible label.
+The episode toolbar selector also has no visible label. With only one season
+and no Specials, omit both dropdowns and label progress Episodes.
+The synchronized selected season scopes the
+watched-through progress control. Changing
+the selection only changes the view. Default to the season containing the next
+unwatched episode, or the last season when all regular episodes are watched.
+List Specials separately without overall numbering or regular progress controls.
+Keep overall numbering when reliable season metadata is unavailable.
+
+Do not repeat the selected season, progress values, or control behavior in
+helper paragraphs beneath the slider. The selector, label, and count provide
+that information.
+
 **The Artwork Is the Affordance Rule.** Clickable posters, covers, and banners should communicate direct manipulation through a restrained hover or focus treatment such as a slight scale, crop shift, saturation change, focus ring, or contextual overlay icon. Do not add persistent instructional text such as “open artwork” when the image itself is the control. Keep an accessible name and an equally clear keyboard focus state; touch behavior must not depend on hover.
 
 ## 6. Do's and Don'ts
