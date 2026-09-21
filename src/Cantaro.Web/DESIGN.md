@@ -242,8 +242,10 @@ without a repeated Episodes heading or count summary. Use compact episode
 numbers prefixed with `#`, without the word Episode. In All seasons, include the season as `S3 · #1`.
 Reveal the series-wide number as `Series #34` in a tooltip on hover, focus, or
 tap, without reserving space in the row. Keep descriptive accessible labels.
-At narrow content widths, place provider links below the episode description
-and allow language metadata to wrap without squeezing the title.
+Keep provider links beside episode details when the episode container is at
+least 42rem wide; stack them below at narrower widths. Episode titles use small
+text and wrap onto additional lines instead of truncating. Language metadata
+can wrap independently.
 
 Use a compact, unlabeled season selector inline with the progress count above
 the tabs, replacing the repeated season heading. Keep its accessible label.

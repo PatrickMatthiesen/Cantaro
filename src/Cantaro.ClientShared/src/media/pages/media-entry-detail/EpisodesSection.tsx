@@ -163,7 +163,7 @@ function EpisodeDestinationActions({
   }
 
   return (
-    <div className="flex min-w-0 flex-wrap gap-2 @4xl/episodes:justify-end">
+    <div className="flex min-w-0 flex-wrap gap-2 @2xl/episodes:justify-end">
       {destinations.map((destination) => {
         const service = STREAMING_SERVICES[destination.serviceId];
         const opensEpisode = destination.kind === "episode";
@@ -228,7 +228,7 @@ function EpisodeRow({
 
   return (
     <li
-      className={`grid items-center gap-x-3 gap-y-2 border-t border-border-subtle px-2 py-3 first:border-t-0 ${hasLinks ? "grid-cols-[max-content_minmax(0,1fr)] @4xl/episodes:grid-cols-[max-content_minmax(0,1fr)_minmax(0,auto)]" : "grid-cols-[max-content_minmax(0,1fr)_auto]"} ${isNext ? "bg-personal-accent/10" : ""}`}
+      className={`grid items-center gap-x-3 gap-y-2 border-t border-border-subtle px-2 py-3 first:border-t-0 ${hasLinks ? "grid-cols-[max-content_minmax(0,1fr)] @2xl/episodes:grid-cols-[max-content_minmax(0,1fr)_minmax(0,auto)]" : "grid-cols-[max-content_minmax(0,1fr)_auto]"} ${isNext ? "bg-personal-accent/10" : ""}`}
     >
       <EpisodeNumberLabel
         label={number.primary}
@@ -241,7 +241,7 @@ function EpisodeRow({
         progressLabel={progressLabel}
         destination={destination}
       />
-      <div className={hasLinks ? "col-start-2 min-w-0 @4xl/episodes:col-start-3 @4xl/episodes:row-start-1" : "col-start-3 min-w-0"}>
+      <div className={hasLinks ? "col-start-2 min-w-0 @2xl/episodes:col-start-3 @2xl/episodes:row-start-1" : "col-start-3 min-w-0"}>
         <EpisodeDestinationActions
           episodeNumber={episodeNumber}
           episodeLabel={number.secondary
@@ -310,7 +310,7 @@ function EpisodeDescription({
   return (
     <div className="min-w-0">
       {title ? (
-        <strong className="block truncate text-content">{title}</strong>
+        <strong className="block text-sm leading-snug wrap-break-word text-content">{title}</strong>
       ) : null}
       <div className={`${title ? "mt-1" : ""} flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm`}>
         <span className={episodeProgressClassName(progressLabel)}>
