@@ -245,8 +245,11 @@ tap, without reserving space in the row. Keep descriptive accessible labels.
 At narrow content widths, place provider links below the episode description
 and allow language metadata to wrap without squeezing the title.
 
-Repeat the synchronized season selector beside the progress controls above the
-tabs, so every tab allows season selection. The selected season scopes the
+Use a compact, unlabeled season selector inline with the progress count above
+the tabs, replacing the repeated season heading. Keep its accessible label.
+The episode toolbar selector also has no visible label. With only one season
+and no Specials, omit both dropdowns and label progress Episodes.
+The synchronized selected season scopes the
 watched-through progress control. Changing
 the selection only changes the view. Default to the season containing the next
 unwatched episode, or the last season when all regular episodes are watched.

@@ -46,7 +46,8 @@ import type {
   SelectedSeasonProgress,
 } from "./seasonEpisodes";
 
-import { SeasonSelector } from "./SeasonSelector";
+import type { ReactNode } from "react";
+import { hasSeasonChoices, SeasonSelector } from "./SeasonSelector";
 
 const NORMALIZED_STATUSES = [
   "current",
@@ -59,11 +60,13 @@ const NORMALIZED_STATUSES = [
 
 function ProgressStepper({
   label,
+  heading,
   value,
   max,
   onChange,
 }: {
   label: string;
+  heading?: ReactNode;
   value: number | undefined;
   max?: number;
   onChange: (value: number) => void;
@@ -78,8 +81,8 @@ function ProgressStepper({
 
   return (
     <div className="grid min-w-0 gap-2">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-sm font-semibold text-content-muted">{label}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        {heading ?? <h3 className="text-sm font-semibold text-content-muted">{label}</h3>}
         <p className="text-lg font-black tabular-nums text-content">
           <span className="text-personal-accent-strong">{currentValue}</span>
           <span className="text-content-subtle"> / {max ?? "?"}</span>
@@ -220,15 +223,7 @@ function ProgressControls({
   return (
     <div className="grid min-w-0 flex-1 gap-4">
       {capabilities.supportsEpisodes ? (
-        <div className="grid gap-3">
-          <SeasonSelector
-            options={props.seasonOptions}
-            value={props.selectedSeason}
-            onChange={props.onSelectSeason}
-            label="Progress season"
-          />
-          <EpisodeProgressControl props={props} />
-        </div>
+        <EpisodeProgressControl props={props} />
       ) : null}
       {capabilities.supportsChapters ? (
         <ProgressStepper
@@ -251,10 +246,14 @@ function ProgressControls({
 }
 
 function EpisodeProgressControl({ props }: { props: ProgressCockpitProps }) {
+  const heading = hasSeasonChoices(props.seasonOptions) ? (
+    <SeasonSelector options={props.seasonOptions} value={props.selectedSeason}
+      onChange={props.onSelectSeason} label="Progress season" />
+  ) : <h3 className="text-sm font-semibold text-content-muted">Episodes</h3>;
   if (props.selectedSeason === "specials") {
     return (
       <div className="grid gap-1">
-        <h3 className="text-sm font-semibold text-content-muted">Specials</h3>
+        {heading}
         <p className="text-sm text-content">
           Specials do not change watched-through progress.
         </p>
@@ -265,6 +264,7 @@ function EpisodeProgressControl({ props }: { props: ProgressCockpitProps }) {
   if (props.selectedSeasonProgress) {
     return (
       <SelectedSeasonProgressControl
+        heading={heading}
         progress={props.selectedSeasonProgress}
         onChange={props.onSetSelectedSeasonProgress}
       />
@@ -274,6 +274,7 @@ function EpisodeProgressControl({ props }: { props: ProgressCockpitProps }) {
   return (
     <ProgressStepper
       label="Episodes"
+      heading={heading}
       value={props.progressEpisodes}
       max={props.entry.title.episodeCount}
       onChange={props.onSetProgressEpisodes}
@@ -282,18 +283,18 @@ function EpisodeProgressControl({ props }: { props: ProgressCockpitProps }) {
 }
 
 function SelectedSeasonProgressControl({
+  heading,
   progress,
   onChange,
 }: {
+  heading: ReactNode;
   progress: SelectedSeasonProgress;
   onChange: (value: number) => void;
 }) {
   if (!progress.canEdit) {
     return (
       <div className="grid gap-1">
-        <h3 className="text-sm font-semibold text-content-muted">
-          Season {progress.seasonNumber} episodes
-        </h3>
+        {heading}
         <p className="text-sm text-content">
           This season cannot edit watched-through progress because its episode mapping is incomplete.
         </p>
@@ -309,6 +310,7 @@ function SelectedSeasonProgressControl({
   return (
     <ProgressStepper
       label={`Season ${progress.seasonNumber} episodes`}
+      heading={heading}
       value={progress.value}
       max={progress.total}
       onChange={onChange}
