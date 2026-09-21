@@ -1,6 +1,7 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Cantaro.Api.Services;
 
@@ -356,8 +357,8 @@ public class MediaEpisodeIdentityService(
     {
         var title = await _dbContext.MediaTitles
             .AsNoTracking()
+            .Include(item => item.ProviderLinks)
             .Where(item => item.Id == mediaTitleId)
-            .Select(item => new { item.Id, item.ReleasedCount })
             .SingleOrDefaultAsync(cancellationToken);
         if (title is null)
         {
@@ -373,15 +374,216 @@ public class MediaEpisodeIdentityService(
             .ToListAsync(cancellationToken);
         var seriesDestinations = SelectSeriesDestinations(
             episodes.SelectMany(episode => episode.ProviderContents));
+        var specials = title.ProviderLinks
+            .Where(link => link.Provider == "simkl" && link.SpecialEpisodeCatalogSnapshot is not null)
+            .SelectMany(link => DeserializeSpecialEpisodeCatalog(link.SpecialEpisodeCatalogSnapshot!))
+            .OrderBy(item => item.SpecialEpisodeNumber)
+            .ToList();
 
         return new MediaEpisodeCatalogDto
         {
             SeriesDestinations = seriesDestinations,
             Episodes = episodes.Select(MapEpisodeDestination).ToList(),
+            Specials = specials,
             ReleaseAvailability = BuildReleaseAvailability(
                 episodes,
                 title.ReleasedCount)
         };
+    }
+
+    public async Task CacheProviderEpisodeCatalogAsync(
+        Guid mediaTitleId,
+        string provider,
+        string providerSeriesId,
+        IReadOnlyList<MediaProviderWatchedEpisode> catalog,
+        IReadOnlyList<MediaProviderWatchedEpisode> specials,
+        int? expectedEpisodeCount,
+        CancellationToken cancellationToken)
+    {
+        var normalizedProvider = provider.Trim().ToLowerInvariant();
+        var normalizedSeriesId = providerSeriesId.Trim();
+        if (normalizedProvider.Length == 0 || normalizedSeriesId.Length == 0)
+        {
+            return;
+        }
+
+        var orderedRegularEpisodes = catalog
+            .Where(item => item.SeasonNumber is > 0 && item.EpisodeNumber > 0)
+            .OrderBy(item => item.SeasonNumber)
+            .ThenBy(item => item.EpisodeNumber)
+            .DistinctBy(item => (item.SeasonNumber, item.EpisodeNumber))
+            .ToList();
+        var contiguousEpisodes = TakeContiguousCatalogPrefix(orderedRegularEpisodes);
+
+        var now = DateTimeOffset.UtcNow;
+        var providerLink = _dbContext.MediaProviderLinks.Local.FirstOrDefault(link =>
+                link.MediaTitleId == mediaTitleId
+                && link.Provider == normalizedProvider
+                && link.ExternalId == normalizedSeriesId)
+            ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(link =>
+                link.MediaTitleId == mediaTitleId
+                && link.Provider == normalizedProvider
+                && link.ExternalId == normalizedSeriesId,
+                cancellationToken);
+        if (providerLink is not null)
+        {
+            providerLink.SpecialEpisodeCatalogSnapshot = JsonSerializer.Serialize(
+                specials
+                    .Where(item => item.EpisodeNumber > 0)
+                    .OrderBy(item => item.EpisodeNumber)
+                    .Select(item => new MediaSpecialEpisodeDestinationDto
+                    {
+                        SpecialEpisodeNumber = item.EpisodeNumber,
+                        Title = item.Title
+                    }));
+            providerLink.EpisodeCatalogLastVerifiedAt = now;
+            providerLink.UpdatedAt = now;
+        }
+
+        var episodes = await _dbContext.MediaEpisodes
+            .Where(episode => episode.MediaTitleId == mediaTitleId)
+            .Include(episode => episode.ProviderContents)
+                .ThenInclude(content => content.Variants)
+            .OrderBy(episode => episode.EpisodeNumber)
+            .ToListAsync(cancellationToken);
+        var episodesByNumber = episodes.ToDictionary(episode => episode.EpisodeNumber);
+        var existingContents = episodes
+            .SelectMany(episode => episode.ProviderContents)
+            .Where(content => content.Provider == normalizedProvider
+                && content.ProviderSeriesId == normalizedSeriesId)
+            .ToList();
+        var existingByKey = existingContents
+            .Where(content => content.ProviderContentKey is not null)
+            .GroupBy(content => content.ProviderContentKey!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var existingSequence = existingContents
+            .Where(content => content.ProviderSequenceNumber is > 0)
+            .OrderBy(content => content.ProviderSequenceNumber)
+            .ToList();
+        var incomingKeys = orderedRegularEpisodes
+            .Select(item => GetProviderContentKey(normalizedSeriesId, item))
+            .ToList();
+        var changesExistingSequence = existingSequence.Any(content =>
+            content.ProviderSequenceNumber is { } sequence
+            && sequence <= incomingKeys.Count
+            && content.ProviderContentKey is { } existingKey
+            && existingKey != incomingKeys[sequence - 1]);
+        var isShorterThanExistingCache = orderedRegularEpisodes.Count < existingSequence.Count;
+        var hasTrustedCompleteCatalog = contiguousEpisodes.Count == orderedRegularEpisodes.Count
+            && expectedEpisodeCount is > 0
+            && orderedRegularEpisodes.Count == expectedEpisodeCount
+            && !changesExistingSequence
+            && !isShorterThanExistingCache;
+        IReadOnlyList<MediaProviderWatchedEpisode> regularEpisodes;
+        if (changesExistingSequence || isShorterThanExistingCache)
+        {
+            regularEpisodes = [];
+        }
+        else if (hasTrustedCompleteCatalog)
+        {
+            regularEpisodes = contiguousEpisodes;
+        }
+        else
+        {
+            regularEpisodes = contiguousEpisodes
+                .TakeWhile(item => item.SeasonNumber == 1)
+                .ToList();
+        }
+        var retainedContentIds = new HashSet<Guid>();
+
+        for (var index = 0; index < regularEpisodes.Count; index++)
+        {
+            var providerEpisode = regularEpisodes[index];
+            var canonicalEpisodeNumber = index + 1;
+            if (!episodesByNumber.TryGetValue(canonicalEpisodeNumber, out var episode))
+            {
+                episode = new MediaEpisode
+                {
+                    Id = Guid.NewGuid(),
+                    MediaTitleId = mediaTitleId,
+                    EpisodeNumber = canonicalEpisodeNumber,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                episodesByNumber[canonicalEpisodeNumber] = episode;
+                _dbContext.MediaEpisodes.Add(episode);
+            }
+
+            var contentKey = GetProviderContentKey(normalizedSeriesId, providerEpisode);
+            if (!existingByKey.TryGetValue(contentKey, out var content))
+            {
+                content = new MediaEpisodeProviderContent
+                {
+                    Id = Guid.NewGuid(),
+                    MediaEpisodeId = episode.Id,
+                    Provider = normalizedProvider,
+                    ProviderContentKey = contentKey
+                };
+                _dbContext.MediaEpisodeProviderContents.Add(content);
+                existingByKey[contentKey] = content;
+            }
+
+            content.MediaEpisodeId = episode.Id;
+            content.MediaEpisode = episode;
+            content.ProviderSeriesId = normalizedSeriesId;
+            content.ProviderSeasonNumber = providerEpisode.SeasonNumber;
+            content.ProviderEpisodeNumber = providerEpisode.EpisodeNumber;
+            content.ProviderSequenceNumber = canonicalEpisodeNumber;
+            retainedContentIds.Add(content.Id);
+        }
+
+        var staleContents = existingContents
+            .Where(content => hasTrustedCompleteCatalog
+                && !retainedContentIds.Contains(content.Id)
+                && content.Variants.Count == 0)
+            .ToList();
+        _dbContext.MediaEpisodeProviderContents.RemoveRange(staleContents);
+    }
+
+    private static string GetProviderContentKey(
+        string providerSeriesId,
+        MediaProviderWatchedEpisode episode)
+        => !string.IsNullOrWhiteSpace(episode.ProviderEpisodeId)
+            ? episode.ProviderEpisodeId.Trim()
+            : $"{providerSeriesId}:s{episode.SeasonNumber}:e{episode.EpisodeNumber}";
+
+    private static IReadOnlyList<MediaProviderWatchedEpisode> TakeContiguousCatalogPrefix(
+        IReadOnlyList<MediaProviderWatchedEpisode> episodes)
+    {
+        var prefix = new List<MediaProviderWatchedEpisode>();
+        var expectedSeason = 1;
+        var expectedEpisode = 1;
+        foreach (var episode in episodes)
+        {
+            if (episode.SeasonNumber != expectedSeason || episode.EpisodeNumber != expectedEpisode)
+            {
+                if (episode.SeasonNumber == expectedSeason + 1 && episode.EpisodeNumber == 1)
+                {
+                    expectedSeason++;
+                    expectedEpisode = 1;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            prefix.Add(episode);
+            expectedEpisode++;
+        }
+        return prefix;
+    }
+
+    private static IReadOnlyList<MediaSpecialEpisodeDestinationDto> DeserializeSpecialEpisodeCatalog(string snapshot)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<MediaSpecialEpisodeDestinationDto>>(snapshot) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static MediaReleaseAvailabilityDto BuildReleaseAvailability(
@@ -415,6 +617,13 @@ public class MediaEpisodeIdentityService(
 
     private static MediaEpisodeDestinationDto MapEpisodeDestination(MediaEpisode episode)
     {
+        var seasonMapping = episode.ProviderContents
+            .Where(content => content.Provider == "simkl"
+                && content.ProviderSequenceNumber == episode.EpisodeNumber
+                && content.ProviderSeasonNumber is > 0
+                && content.ProviderEpisodeNumber is > 0)
+            .OrderBy(content => content.ProviderContentKey, StringComparer.Ordinal)
+            .FirstOrDefault();
         var identities = episode.ProviderContents
             .SelectMany(content => content.Variants.Select(variant => (Content: content, Variant: variant)))
             .OrderBy(item => item.Variant.HasConflict)
@@ -430,6 +639,8 @@ public class MediaEpisodeIdentityService(
         return new MediaEpisodeDestinationDto
         {
             EpisodeNumber = episode.EpisodeNumber,
+            SeasonNumber = seasonMapping?.ProviderSeasonNumber,
+            SeasonEpisodeNumber = seasonMapping?.ProviderEpisodeNumber,
             Title = episode.Title,
             AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes,
             AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes,

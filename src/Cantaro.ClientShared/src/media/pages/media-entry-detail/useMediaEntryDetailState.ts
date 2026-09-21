@@ -302,6 +302,7 @@ export function useEntryDetailState(mediaTitleId: string) {
 export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
   const [availabilityByProviderLink, setAvailabilityByProviderLink] = useState<ProviderAvailabilityMap>({});
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [seasonCatalogHydrationRevision, setSeasonCatalogHydrationRevision] = useState(0);
   const forceRefreshRef = useRef(false);
 
   const reload = useCallback(() => {
@@ -321,19 +322,18 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     setAvailabilityByProviderLink((current) => buildAvailabilityMap(entry.providerLinks, current));
 
     const loadAvailability = async () => {
-      const results = await loadAvailabilityStates(entry.providerLinks, forceRefresh);
-      if (isCancelled) {
-        return;
-      }
+      await Promise.all(entry.providerLinks.map(async (link) => {
+        const [result] = await loadAvailabilityStates([link], forceRefresh);
+        if (isCancelled || !result) return;
 
-      setAvailabilityByProviderLink((current) => {
-        const next = { ...current };
-        for (const result of results) {
-          next[result.key] = result.state;
+        setAvailabilityByProviderLink((current) => ({
+          ...current,
+          [result.key]: result.state,
+        }));
+        if (link.provider.toLowerCase() === 'simkl') {
+          setSeasonCatalogHydrationRevision((revision) => revision + 1);
         }
-
-        return next;
-      });
+      }));
     };
 
     void loadAvailability();
@@ -343,7 +343,7 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     };
   }, [entry, refreshRevision]);
 
-  return { availabilityByProviderLink, reload };
+  return { availabilityByProviderLink, seasonCatalogHydrationRevision, reload };
 }
 
 function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
@@ -401,8 +401,10 @@ function useReloadableMediaResource<TValue, TError>(
   createErrorState: (error: unknown) => TError,
 ) {
   const [state, setState] = useState<ReloadableResourceState<TValue, TError>>({ status: 'loading' });
+  const requestGenerationRef = useRef(0);
 
   const reload = useCallback(() => {
+    const requestGeneration = ++requestGenerationRef.current;
     if (!mediaTitleId) {
       setState({ status: 'loading' });
       return;
@@ -410,12 +412,23 @@ function useReloadableMediaResource<TValue, TError>(
 
     setState({ status: 'loading' });
     void loader(mediaTitleId)
-      .then((value) => setState({ status: 'loaded', value }))
-      .catch((error) => setState(createErrorState(error)));
+      .then((value) => {
+        if (requestGenerationRef.current === requestGeneration) {
+          setState({ status: 'loaded', value });
+        }
+      })
+      .catch((error) => {
+        if (requestGenerationRef.current === requestGeneration) {
+          setState(createErrorState(error));
+        }
+      });
   }, [createErrorState, loader, mediaTitleId]);
 
   useEffect(() => {
     reload();
+    return () => {
+      requestGenerationRef.current += 1;
+    };
   }, [reload]);
 
   return { state, reload };

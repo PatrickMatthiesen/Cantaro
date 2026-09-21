@@ -27,6 +27,8 @@ export interface StreamingDestination {
 
 export interface EpisodeStreamingDestinations {
   episodeNumber: number;
+  seasonNumber?: number;
+  seasonEpisodeNumber?: number;
   title?: string;
   availableAudioLanguageCodes: string[];
   availableSubtitleLanguageCodes: string[];
@@ -75,6 +77,8 @@ function resolveEpisodeDestinations(
 ): EpisodeStreamingDestinations[] {
   return (catalog?.episodes ?? []).map(episode => ({
     episodeNumber: episode.episodeNumber,
+    seasonNumber: episode.seasonNumber ?? undefined,
+    seasonEpisodeNumber: episode.seasonEpisodeNumber ?? undefined,
     title: episode.title,
     availableAudioLanguageCodes: episode.availableAudioLanguageCodes ?? [],
     availableSubtitleLanguageCodes: episode.availableSubtitleLanguageCodes ?? [],

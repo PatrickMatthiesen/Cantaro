@@ -166,6 +166,19 @@ public class MediaProviderTitleDetails
     public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
 
     public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
+
+    /// <summary>
+    /// Provider season-relative episode metadata ordered by the provider's
+    /// canonical regular-episode sequence. This is internal import metadata;
+    /// API DTOs continue to expose Cantaro's overall episode number.
+    /// </summary>
+    public IReadOnlyList<MediaProviderWatchedEpisode>? EpisodeCatalog { get; set; }
+
+    /// <summary>
+    /// Provider specials that do not map to Cantaro's overall episode sequence.
+    /// These entries are display-only and must not drive scalar progress.
+    /// </summary>
+    public IReadOnlyList<MediaProviderWatchedEpisode>? SpecialEpisodeCatalog { get; set; }
 }
 
 public sealed class MediaProviderCrossReference
@@ -289,7 +302,14 @@ public sealed class MediaProviderWatchedEpisode
     public int? SeasonNumber { get; set; }
     public int EpisodeNumber { get; set; }
     public string? ProviderEpisodeId { get; set; }
+    public string? Title { get; set; }
     public DateTimeOffset? WatchedAt { get; set; }
+}
+
+public sealed class MediaProviderEpisodeCatalogSnapshot
+{
+    public IReadOnlyList<MediaProviderWatchedEpisode> RegularEpisodes { get; set; } = [];
+    public IReadOnlyList<MediaProviderWatchedEpisode> Specials { get; set; } = [];
 }
 
 public class MediaReleaseMetadata

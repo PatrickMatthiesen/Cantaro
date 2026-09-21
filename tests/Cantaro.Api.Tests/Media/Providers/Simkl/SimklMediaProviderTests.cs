@@ -160,12 +160,33 @@ public sealed class SimklMediaProviderTests
     [Fact]
     public async Task TitleDetailsUsesConnectedBearerToken()
     {
-        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsolutePath == "/tv/123"
-            ? Json("""{"title":"Show","ids":{"simkl":123},"total_episodes":12}""")
-            : throw new InvalidOperationException(request.RequestUri!.AbsolutePath));
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/tv/123" => Json("""{"title":"Show","ids":{"simkl":123},"total_episodes":12}"""),
+            "/tv/episodes/123" => Json("""[{"season":1,"episode":1},{"season":2,"episode":1}]"""),
+            _ => throw new InvalidOperationException(request.RequestUri!.AbsolutePath)
+        });
         var details = await fixture.Provider.GetTitleDetailsAsync(1, "tv:123", CancellationToken.None);
         Assert.Equal("Show", details?.Title);
-        Assert.Equal("Bearer access-token", Assert.Single(fixture.Handler.Authorizations));
+        Assert.Equal([(1, 1), (2, 1)], details?.EpisodeCatalog?.Select(item => (item.SeasonNumber, item.EpisodeNumber)));
+        Assert.All(fixture.Handler.Authorizations, authorization => Assert.Equal("Bearer access-token", authorization));
+    }
+
+    [Fact]
+    public async Task TitleDetailsRemainAvailableWhenEpisodeCatalogRefreshFails()
+    {
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/tv/123" => Json("""{"title":"Show","ids":{"simkl":123},"total_episodes":12}"""),
+            "/tv/episodes/123" => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+            _ => throw new InvalidOperationException(request.RequestUri!.AbsolutePath)
+        });
+
+        var details = await fixture.Provider.GetTitleDetailsAsync(1, "tv:123", CancellationToken.None);
+
+        Assert.Equal("Show", details?.Title);
+        Assert.Null(details?.EpisodeCatalog);
+        Assert.Null(details?.SpecialEpisodeCatalog);
     }
 
     [Fact]

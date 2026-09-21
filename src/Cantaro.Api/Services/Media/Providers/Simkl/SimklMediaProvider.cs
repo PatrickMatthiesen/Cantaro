@@ -218,7 +218,24 @@ public sealed class SimklMediaProvider(
         try
         {
             using var result = await GetAuthenticatedAsync(userId, $"/{path}/{id.Id}", null, cancellationToken);
-            return SimklJson.MapDetails(result.RootElement, id.Type, id.Id);
+            var details = SimklJson.MapDetails(result.RootElement, id.Type, id.Id);
+            if (id.Type == "tv")
+            {
+                try
+                {
+                    var catalog = await ReadEpisodeCatalogSnapshotAsync(userId, id, cancellationToken);
+                    details.EpisodeCatalog = catalog.RegularEpisodes;
+                    details.SpecialEpisodeCatalog = catalog.Specials;
+                }
+                catch (Exception ex) when (
+                    !cancellationToken.IsCancellationRequested
+                    && ex is SimklRequestException or HttpRequestException or JsonException or OperationCanceledException)
+                {
+                    // Keep title details usable and retain the last local catalog
+                    // when SIMKL's episode endpoint is temporarily unavailable.
+                }
+            }
+            return details;
         }
         catch (SimklRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound) { return null; }
     }
@@ -364,10 +381,16 @@ public sealed class SimklMediaProvider(
     }
 
     private async Task<IReadOnlyList<MediaProviderWatchedEpisode>> ReadEpisodeCatalogAsync(int userId, SimklIdentity id, CancellationToken cancellationToken)
+        => (await ReadEpisodeCatalogSnapshotAsync(userId, id, cancellationToken)).RegularEpisodes;
+
+    private async Task<MediaProviderEpisodeCatalogSnapshot> ReadEpisodeCatalogSnapshotAsync(
+        int userId,
+        SimklIdentity id,
+        CancellationToken cancellationToken)
     {
         using var page = await GetAuthenticatedAsync(userId,
             $"/{(id.Type == "tv" ? "tv" : "anime")}/episodes/{id.Id}", null, cancellationToken);
-        return SimklJson.MapEpisodeCatalog(page.RootElement, id.Type);
+        return SimklJson.MapEpisodeCatalogSnapshot(page.RootElement, id.Type);
     }
 
     private static MediaProviderMutationResult Result(string id, string? appliedStatus = null, int? appliedProgress = null)

@@ -64,6 +64,7 @@ export function MediaEntryDetailPage({
   } = useEntryDetailState(mediaTitleId);
   const {
     availabilityByProviderLink,
+    seasonCatalogHydrationRevision,
     reload: reloadProviderAvailability,
   } = useProviderAvailability(entry);
   const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
@@ -122,6 +123,12 @@ export function MediaEntryDetailPage({
       Promise.resolve(reloadProviderAvailability()),
     ]);
   }), [mediaTitleId, reloadEntry, reloadEpisodes, reloadProviderAvailability]);
+
+  useEffect(() => {
+    if (seasonCatalogHydrationRevision > 0) {
+      reloadEpisodes();
+    }
+  }, [reloadEpisodes, seasonCatalogHydrationRevision]);
 
   const handleAddToLibrary = async () => {
     if (!entry) return;

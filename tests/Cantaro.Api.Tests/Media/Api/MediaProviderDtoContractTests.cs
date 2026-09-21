@@ -754,12 +754,19 @@ public class MediaProviderDtoContractTests
             var eventHub = new MediaLibraryEventHub();
             var libraryEvents = eventHub.Subscribe(userId, out var libraryEventSubscriptionId);
             var operationProcessor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
+            var episodeIdentityService = new MediaEpisodeIdentityService(
+                dbContext,
+                new MediaProviderSeasonMappingService(
+                    dbContext,
+                    NullLogger<MediaProviderSeasonMappingService>.Instance),
+                NullLogger<MediaEpisodeIdentityService>.Instance);
             var controller = new MediaProvidersController(
                 dbContext,
                 registry,
                 importQueue,
                 operationProcessor,
                 eventHub,
+                episodeIdentityService,
                 CreateUserManager(dbContext),
                 NullLogger<MediaProvidersController>.Instance,
                 new PassthroughDataProtectionProvider(),

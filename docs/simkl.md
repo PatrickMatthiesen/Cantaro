@@ -57,6 +57,17 @@ a ten-episode first season, progress 12 means season 2, episode 2. Imported
 episode history retains watched episodes beyond a gap and specials. The displayed
 progress stops at the first unwatched regular episode.
 
+For TV titles with a verified episode catalog, the episode list groups episodes
+by season and shows the overall regular-episode number as secondary text. The
+season selector also scopes the watched-through progress controls. Selecting a
+season changes only the view; saving a progress edit maps the chosen episode
+back to Cantaro's overall watched-through count. Titles without a reliable
+season mapping retain overall numbering.
+
+Specials appear in a separate list without an overall episode number. They do
+not change the regular watched-through count. Catalog refreshes update episode
+metadata only and preserve the last cached mapping when SIMKL is unavailable.
+
 Status and rating edits do not replace episode history. Automatic reconciliation
 does not flatten a history with gaps into an episode count. Explicit progress
 edits change the watched-through range while retaining separately watched episodes

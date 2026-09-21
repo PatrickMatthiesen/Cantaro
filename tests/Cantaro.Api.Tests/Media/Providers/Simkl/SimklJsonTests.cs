@@ -48,6 +48,24 @@ public sealed class SimklJsonTests
     }
 
     [Fact]
+    public void CatalogSeparatesSpecialsWithoutInventingOverallNumbers()
+    {
+        using var catalog = JsonDocument.Parse("""
+            [{"season":1,"episode":1,"title":"Pilot"},
+             {"type":"special","episode":2,"title":"Behind the Scenes"},
+             {"season":0,"episode":1,"title":"Holiday Special"},
+             {"season":2,"episode":1,"title":"Return"}]
+            """);
+
+        var result = SimklJson.MapEpisodeCatalogSnapshot(catalog.RootElement, "tv");
+
+        Assert.Equal([(1, 1), (2, 1)], result.RegularEpisodes.Select(item => (item.SeasonNumber, item.EpisodeNumber)));
+        Assert.Equal([1, 2], result.Specials.Select(item => item.EpisodeNumber));
+        Assert.Equal(["Holiday Special", "Behind the Scenes"], result.Specials.Select(item => item.Title));
+        Assert.All(result.Specials, item => Assert.Equal(0, item.SeasonNumber));
+    }
+
+    [Fact]
     public void EpisodeEnvelopeAddressesExactSeasonAndEpisode()
     {
         var payload = JsonSerializer.Serialize(SimklJson.EpisodeEnvelope(new SimklIdentity("tv", 123),

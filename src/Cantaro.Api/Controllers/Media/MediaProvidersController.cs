@@ -31,6 +31,7 @@ public class MediaProvidersController(
     MediaLibraryImportQueue mediaLibraryImportQueue,
     MediaProviderOperationProcessor mediaProviderOperationProcessor,
     MediaLibraryEventHub mediaLibraryEventHub,
+    MediaEpisodeIdentityService mediaEpisodeIdentityService,
     UserManager<User> userManager,
     ILogger<MediaProvidersController> logger,
     IDataProtectionProvider dataProtectionProvider,
@@ -41,6 +42,7 @@ public class MediaProvidersController(
     private readonly MediaLibraryImportQueue _mediaLibraryImportQueue = mediaLibraryImportQueue;
     private readonly MediaProviderOperationProcessor _mediaProviderOperationProcessor = mediaProviderOperationProcessor;
     private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
+    private readonly MediaEpisodeIdentityService _mediaEpisodeIdentityService = mediaEpisodeIdentityService;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaProvidersController> _logger = logger;
     private readonly IDataProtector _stateProtector = dataProtectionProvider.CreateProtector("MediaProvider.OAuth.State");
@@ -351,6 +353,17 @@ public class MediaProvidersController(
             details,
             now,
             cancellationToken);
+        if (details.EpisodeCatalog is { } episodeCatalog)
+        {
+            await _mediaEpisodeIdentityService.CacheProviderEpisodeCatalogAsync(
+                title.Id,
+                provider.ProviderId,
+                providerMediaId,
+                episodeCatalog,
+                details.SpecialEpisodeCatalog ?? [],
+                details.EpisodeCount,
+                cancellationToken);
+        }
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);

@@ -9,6 +9,7 @@ import {
   Save,
   Star,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import {
   ActionButton,
   IconButton,
@@ -40,6 +41,10 @@ import type {
   ContinueWatchingState,
   MediaEntryDetailContentProps,
 } from "./mediaEntryDetailTypes";
+import type {
+  SeasonSelection,
+  SelectedSeasonProgress,
+} from "./seasonEpisodes";
 
 const NORMALIZED_STATUSES = [
   "current",
@@ -55,11 +60,13 @@ function ProgressStepper({
   value,
   max,
   onChange,
+  detail,
 }: {
   label: string;
   value: number | undefined;
   max?: number;
   onChange: (value: number) => void;
+  detail?: ReactNode;
 }) {
   const currentValue = clampProgressValue(value ?? 0, max);
   const sliderMax = Math.max(max ?? 100, currentValue, 1);
@@ -109,6 +116,9 @@ function ProgressStepper({
           <Plus size={18} aria-hidden />
         </IconButton>
       </div>
+      {detail ? (
+        <p className="text-sm text-content-muted">{detail}</p>
+      ) : null}
     </div>
   );
 }
@@ -131,7 +141,11 @@ type ProgressCockpitProps = Pick<
   | "onRefreshProgress"
   | "onAddToLibrary"
   | "onScoreChange"
->;
+> & {
+  selectedSeason: SeasonSelection;
+  selectedSeasonProgress: SelectedSeasonProgress | null;
+  onSetSelectedSeasonProgress: (value: number) => void;
+};
 
 function StatusSelect({
   value,
@@ -207,12 +221,7 @@ function ProgressControls({
   return (
     <div className="grid min-w-0 flex-1 gap-4">
       {capabilities.supportsEpisodes ? (
-        <ProgressStepper
-          label="Episodes"
-          value={props.progressEpisodes}
-          max={props.entry.title.episodeCount}
-          onChange={props.onSetProgressEpisodes}
-        />
+        <EpisodeProgressControl props={props} />
       ) : null}
       {capabilities.supportsChapters ? (
         <ProgressStepper
@@ -231,6 +240,87 @@ function ProgressControls({
         />
       ) : null}
     </div>
+  );
+}
+
+function EpisodeProgressControl({ props }: { props: ProgressCockpitProps }) {
+  if (props.selectedSeason === "specials") {
+    return (
+      <div className="grid gap-1">
+        <h3 className="text-sm font-semibold text-content-muted">Specials</h3>
+        <p className="text-sm text-content">
+          Specials do not change watched-through progress.
+        </p>
+      </div>
+    );
+  }
+
+  if (props.selectedSeasonProgress) {
+    return (
+      <SelectedSeasonProgressControl
+        progress={props.selectedSeasonProgress}
+        onChange={props.onSetSelectedSeasonProgress}
+      />
+    );
+  }
+
+  return (
+    <ProgressStepper
+      label="Episodes"
+      value={props.progressEpisodes}
+      max={props.entry.title.episodeCount}
+      onChange={props.onSetProgressEpisodes}
+    />
+  );
+}
+
+function SelectedSeasonProgressControl({
+  progress,
+  onChange,
+}: {
+  progress: SelectedSeasonProgress;
+  onChange: (value: number) => void;
+}) {
+  if (!progress.canEdit) {
+    return (
+      <div className="grid gap-1">
+        <h3 className="text-sm font-semibold text-content-muted">
+          Season {progress.seasonNumber} episodes
+        </h3>
+        <p className="text-sm text-content">
+          This season cannot edit watched-through progress because its episode mapping is incomplete.
+        </p>
+        {progress.overallValue > 0 ? (
+          <p className="text-sm tabular-nums text-content-subtle">
+            {progress.overallValue} episodes watched overall
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <ProgressStepper
+      label={`Season ${progress.seasonNumber} episodes`}
+      value={progress.value}
+      max={progress.total}
+      onChange={onChange}
+      detail={(
+        <>
+          {progress.value > 0
+            ? `Watched through Season ${progress.seasonNumber}, Episode ${progress.value}`
+            : `Season ${progress.seasonNumber} not started`}
+          {progress.overallValue > 0 ? (
+            <span className="ml-2 text-content-subtle">
+              {progress.overallValue} episodes watched overall
+            </span>
+          ) : null}
+          <span className="mt-1 block text-xs text-content-subtle">
+            Changing this value updates the overall watched-through point.
+          </span>
+        </>
+      )}
+    />
   );
 }
 

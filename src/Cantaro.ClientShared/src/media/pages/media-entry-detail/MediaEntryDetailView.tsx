@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Snackbar } from "../../../ui";
 import {
   ActionRail,
@@ -41,6 +41,73 @@ import {
   type MediaEntryDetailPageViewProps,
   type ProgressSummary,
 } from "./mediaEntryDetailTypes";
+import {
+  getDefaultSeasonSelection,
+  getSeasonOptions,
+  getSelectedSeasonProgress,
+  isSeasonSelectionAvailable,
+  mapSeasonProgressToOverall,
+  type SeasonOption,
+  type SeasonSelection,
+} from "./seasonEpisodes";
+import type { MediaEpisodeCatalogDto } from "../../services/mediaApi";
+
+interface SeasonViewState {
+  options: SeasonOption[];
+  selected: SeasonSelection;
+  progress: ReturnType<typeof getSelectedSeasonProgress>;
+  select: (selection: SeasonSelection) => void;
+  setProgress: (value: number) => void;
+}
+
+function resolveSelectedSeason(
+  state: { mediaTitleId: string; value: SeasonSelection } | null,
+  mediaTitleId: string,
+  options: readonly SeasonOption[],
+  fallback: SeasonSelection,
+) {
+  if (state?.mediaTitleId !== mediaTitleId) return fallback;
+  return isSeasonSelectionAvailable(state.value, options)
+    ? state.value
+    : fallback;
+}
+
+function useSeasonView(
+  episodes: MediaStreamingDestinations["episodes"],
+  specialCount: number,
+  mediaTitleId: string,
+  persistedProgress: number | undefined,
+  currentProgress: number | undefined,
+  onSetProgress: (value: number) => void,
+): SeasonViewState {
+  const options = getSeasonOptions(episodes, specialCount);
+  const fallback = getDefaultSeasonSelection(episodes, persistedProgress ?? 0);
+  const [selectionState, setSelectionState] = useState<{
+    mediaTitleId: string;
+    value: SeasonSelection;
+  } | null>(null);
+  const selected = resolveSelectedSeason(
+    selectionState,
+    mediaTitleId,
+    options,
+    fallback,
+  );
+  const progress = getSelectedSeasonProgress(episodes, selected, currentProgress ?? 0);
+  const select = (value: SeasonSelection) => {
+    setSelectionState({ mediaTitleId, value });
+  };
+  const setProgress = (value: number) => {
+    if (typeof selected !== "number") return;
+    const overallProgress = mapSeasonProgressToOverall(episodes, selected, value);
+    if (overallProgress !== null) onSetProgress(overallProgress);
+  };
+
+  return { options, selected, progress, select, setProgress };
+}
+
+function getSpecials(catalog: MediaEpisodeCatalogDto | null) {
+  return catalog?.specials ?? [];
+}
 
 function MediaDetailTabPanel({
   activeTab,
@@ -49,6 +116,9 @@ function MediaDetailTabPanel({
   streamingDestinations,
   preferredServiceId,
   onSelectStreamingService,
+  seasonOptions,
+  selectedSeason,
+  onSelectSeason,
   onViewFullFranchise,
 }: {
   activeTab: DetailTabId;
@@ -57,6 +127,9 @@ function MediaDetailTabPanel({
   streamingDestinations: MediaStreamingDestinations;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
+  seasonOptions: readonly SeasonOption[];
+  selectedSeason: SeasonSelection;
+  onSelectSeason: (selection: SeasonSelection) => void;
   onViewFullFranchise: () => void;
 }) {
   const panels: Record<DetailTabId, ReactNode> = {
@@ -100,6 +173,9 @@ function MediaDetailTabPanel({
         streamingDestinations={streamingDestinations}
         preferredServiceId={preferredServiceId}
         preferredMediaReleaseTrack={props.preferredMediaReleaseTrack}
+        seasonOptions={seasonOptions}
+        selectedSeason={selectedSeason}
+        onSelectSeason={onSelectSeason}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={props.onReloadEpisodes}
       />
@@ -188,6 +264,15 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     episodeCatalog,
     preferredServiceId,
   );
+  const specials = getSpecials(episodeCatalog);
+  const season = useSeasonView(
+    streamingDestinations.episodes,
+    specials.length,
+    props.entry.mediaTitleId,
+    props.entry.progressEpisodes,
+    props.progressEpisodes,
+    props.onSetProgressEpisodes,
+  );
   const nextEpisodeNumber = (props.progressEpisodes ?? 0) + 1;
   const nextEpisodeDestinations =
     streamingDestinations.episodes.find(
@@ -231,7 +316,12 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 )
               }
             />
-            <ProgressCockpit {...props} />
+            <ProgressCockpit
+              {...props}
+              selectedSeason={season.selected}
+              selectedSeasonProgress={season.progress}
+              onSetSelectedSeasonProgress={season.setProgress}
+            />
           </section>
           <section>
             <DetailTabs
@@ -248,6 +338,9 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 streamingDestinations={streamingDestinations}
                 preferredServiceId={preferredServiceId}
                 onSelectStreamingService={setPreferredServiceId}
+                seasonOptions={season.options}
+                selectedSeason={season.selected}
+                onSelectSeason={season.select}
                 onViewFullFranchise={() => props.onTabChange("franchise")}
               />
             </div>

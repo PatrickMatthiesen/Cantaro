@@ -183,21 +183,39 @@ internal static class SimklJson
     }
 
     public static IReadOnlyList<MediaProviderWatchedEpisode> MapEpisodeCatalog(JsonElement response, string type)
+        => MapEpisodeCatalogSnapshot(response, type).RegularEpisodes;
+
+    public static MediaProviderEpisodeCatalogSnapshot MapEpisodeCatalogSnapshot(JsonElement response, string type)
     {
-        var episodes = new List<MediaProviderWatchedEpisode>();
+        var regularEpisodes = new List<MediaProviderWatchedEpisode>();
+        var specials = new List<MediaProviderWatchedEpisode>();
         foreach (var row in Array(response))
         {
-            if (String(row, "type") == "special") continue;
-            var season = Int(row, "season") ?? (type == "anime" ? 1 : null);
+            var isSpecial = String(row, "type") == "special" || Int(row, "season") == 0;
+            var season = isSpecial ? 0 : Int(row, "season") ?? (type == "anime" ? 1 : null);
             var number = Int(row, "episode");
-            if (season is not > 0 || number is not > 0) continue;
-            episodes.Add(new MediaProviderWatchedEpisode
+            if (number is not > 0 || season is null || (!isSpecial && season <= 0)) continue;
+            var episode = new MediaProviderWatchedEpisode
             {
-                SeasonNumber = season, EpisodeNumber = number.Value,
-                ProviderEpisodeId = String(Property(row, "ids"), "simkl_id")
-            });
+                SeasonNumber = isSpecial ? 0 : season,
+                EpisodeNumber = number.Value,
+                ProviderEpisodeId = String(Property(row, "ids"), "simkl_id"),
+                Title = String(row, "title")
+            };
+            (isSpecial ? specials : regularEpisodes).Add(episode);
         }
-        return episodes.OrderBy(x => x.SeasonNumber).ThenBy(x => x.EpisodeNumber).DistinctBy(EpisodeKey).ToArray();
+        return new MediaProviderEpisodeCatalogSnapshot
+        {
+            RegularEpisodes = regularEpisodes
+                .OrderBy(x => x.SeasonNumber)
+                .ThenBy(x => x.EpisodeNumber)
+                .DistinctBy(EpisodeKey)
+                .ToArray(),
+            Specials = specials
+                .OrderBy(x => x.EpisodeNumber)
+                .DistinctBy(x => x.EpisodeNumber)
+                .ToArray()
+        };
     }
 
     private static bool HasGaps(IReadOnlyList<MediaProviderWatchedEpisode>? watched, int? count, string type)

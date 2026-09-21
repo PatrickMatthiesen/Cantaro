@@ -235,6 +235,19 @@ Music tables are dense but warm: translucent table shell, uppercase header row, 
 ### Media Library Card
 Media cards are artwork-led with poster aspect ratios, dark gradient overlays, progress metadata, and status badges. The card hover scale is acceptable because it is attached to artwork browsing, not routine form controls.
 
+### TV episode navigation
+
+Use the shared square season dropdown above the episode list. Show the episode
+number within its season as the primary label, with `Overall episode N` in
+smaller `text-content-subtle` text. In the All seasons view, include the season
+in the primary label. Keep both labels available to screen readers.
+
+The selected season also scopes the watched-through progress control. Changing
+the selection only changes the view. Default to the season containing the next
+unwatched episode, or the last season when all regular episodes are watched.
+List Specials separately without overall numbering or regular progress controls.
+Keep overall numbering when reliable season metadata is unavailable.
+
 **The Artwork Is the Affordance Rule.** Clickable posters, covers, and banners should communicate direct manipulation through a restrained hover or focus treatment such as a slight scale, crop shift, saturation change, focus ring, or contextual overlay icon. Do not add persistent instructional text such as “open artwork” when the image itself is the control. Keep an accessible name and an equally clear keyboard focus state; touch behavior must not depend on hover.
 
 ## 6. Do's and Don'ts
