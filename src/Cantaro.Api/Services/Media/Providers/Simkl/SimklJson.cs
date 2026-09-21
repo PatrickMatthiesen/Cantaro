@@ -126,7 +126,7 @@ internal static class SimklJson
         var type = kind switch { MediaKinds.Series => "tv", MediaKinds.Movie => "movie", _ => "anime" };
         return new MediaProviderSearchResult
         {
-            ProviderId = "simkl", ProviderMediaId = $"{type}:{id}", Title = title,
+            ProviderId = MediaObservationSiteIdentifiers.Simkl, ProviderMediaId = $"{type}:{id}", Title = title,
             NativeTitle = String(media, "title_romaji"),
             Synonyms = Array(Property(media, "all_titles")).Where(x => x.ValueKind == JsonValueKind.String)
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),
@@ -144,7 +144,7 @@ internal static class SimklJson
         var release = String(media, "status");
         return new MediaProviderTitleDetails
         {
-            ProviderId = "simkl", ProviderMediaId = $"{type}:{id}", Title = title,
+            ProviderId = MediaObservationSiteIdentifiers.Simkl, ProviderMediaId = $"{type}:{id}", Title = title,
             NativeTitle = String(media, "title_romaji"),
             Synonyms = Array(Property(media, "all_titles")).Where(x => x.ValueKind == JsonValueKind.String)
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),

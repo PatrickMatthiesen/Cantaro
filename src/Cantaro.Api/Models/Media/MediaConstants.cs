@@ -161,6 +161,7 @@ public static class MediaObservationSiteIdentifiers
 {
     public const string AniList = "anilist";
     public const string MyAnimeList = "myanimelist";
+    public const string Simkl = "simkl";
     public const string Crunchyroll = "crunchyroll";
     public const string Unknown = "unknown";
 

@@ -652,7 +652,7 @@ public sealed class MediaProviderInitialSyncService(
             return null;
         }
 
-        if (providerId is MediaObservationSiteIdentifiers.MyAnimeList or "simkl")
+        if (providerId is MediaObservationSiteIdentifiers.MyAnimeList or MediaObservationSiteIdentifiers.Simkl)
         {
             return Math.Clamp(
                 decimal.Round(normalized.Value / 10m, 0, MidpointRounding.AwayFromZero),

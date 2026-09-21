@@ -14,7 +14,7 @@ public sealed class SimklMediaProvider(
     SimklTokenRefreshGate refreshGate,
     SimklImportGate importGate) : IMediaProvider
 {
-    private const string ProviderName = "simkl";
+    private const string ProviderName = MediaObservationSiteIdentifiers.Simkl;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public string ProviderId => ProviderName;
     public bool SupportsMediaKind(string mediaKind) => mediaKind is MediaKinds.Anime or MediaKinds.Movie or MediaKinds.Series;
