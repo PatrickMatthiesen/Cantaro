@@ -245,7 +245,9 @@ tap, without reserving space in the row. Keep descriptive accessible labels.
 At narrow content widths, place provider links below the episode description
 and allow language metadata to wrap without squeezing the title.
 
-The selected season also scopes the watched-through progress control. Changing
+Repeat the synchronized season selector beside the progress controls above the
+tabs, so every tab allows season selection. The selected season scopes the
+watched-through progress control. Changing
 the selection only changes the view. Default to the season containing the next
 unwatched episode, or the last season when all regular episodes are watched.
 List Specials separately without overall numbering or regular progress controls.

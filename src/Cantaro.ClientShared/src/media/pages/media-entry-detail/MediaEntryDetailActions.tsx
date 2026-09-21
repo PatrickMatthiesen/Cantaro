@@ -42,9 +42,12 @@ import type {
   MediaEntryDetailContentProps,
 } from "./mediaEntryDetailTypes";
 import type {
+  SeasonOption,
   SeasonSelection,
   SelectedSeasonProgress,
 } from "./seasonEpisodes";
+
+import { SeasonSelector } from "./SeasonSelector";
 
 const NORMALIZED_STATUSES = [
   "current",
@@ -142,6 +145,8 @@ type ProgressCockpitProps = Pick<
   | "onAddToLibrary"
   | "onScoreChange"
 > & {
+  seasonOptions: readonly SeasonOption[];
+  onSelectSeason: (selection: SeasonSelection) => void;
   selectedSeason: SeasonSelection;
   selectedSeasonProgress: SelectedSeasonProgress | null;
   onSetSelectedSeasonProgress: (value: number) => void;
@@ -221,7 +226,15 @@ function ProgressControls({
   return (
     <div className="grid min-w-0 flex-1 gap-4">
       {capabilities.supportsEpisodes ? (
-        <EpisodeProgressControl props={props} />
+        <div className="grid gap-3">
+          <SeasonSelector
+            options={props.seasonOptions}
+            value={props.selectedSeason}
+            onChange={props.onSelectSeason}
+            label="Progress season"
+          />
+          <EpisodeProgressControl props={props} />
+        </div>
       ) : null}
       {capabilities.supportsChapters ? (
         <ProgressStepper

@@ -318,6 +318,8 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
             />
             <ProgressCockpit
               {...props}
+              seasonOptions={season.options}
+              onSelectSeason={season.select}
               selectedSeason={season.selected}
               selectedSeasonProgress={season.progress}
               onSetSelectedSeasonProgress={season.setProgress}

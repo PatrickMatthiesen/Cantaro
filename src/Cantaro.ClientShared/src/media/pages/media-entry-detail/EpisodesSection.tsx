@@ -1,6 +1,6 @@
 import { ExternalLink, Play, RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { ActionButton, SelectField } from "../../../ui";
+import { ActionButton } from "../../../ui";
 import type {
   MediaEntryDetailModel,
   MediaSpecialEpisodeDestinationDto,
@@ -26,6 +26,8 @@ import {
   type SeasonOption,
   type SeasonSelection,
 } from "./seasonEpisodes";
+
+import { SeasonSelector } from "./SeasonSelector";
 
 const EPISODE_WINDOW_SIZE = 100;
 
@@ -613,32 +615,7 @@ export function EpisodesSection({
     >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
-          {seasonOptions.length > 1 ? (
-            <SelectField
-              label="Season"
-              value={typeof selectedSeason === "number"
-                ? `season:${selectedSeason}`
-                : selectedSeason}
-              onChange={(event) => {
-                const value = event.target.value;
-                onSelectSeason(value.startsWith("season:")
-                  ? Number(value.slice("season:".length))
-                  : value as SeasonSelection);
-              }}
-              containerClassName="min-w-40"
-            >
-              {seasonOptions.map((option) => (
-                <option
-                  key={option.value}
-                  value={typeof option.value === "number"
-                    ? `season:${option.value}`
-                    : option.value}
-                >
-                  {option.label}
-                </option>
-              ))}
-            </SelectField>
-          ) : null}
+          <SeasonSelector options={seasonOptions} value={selectedSeason} onChange={onSelectSeason} />
           {audioLanguages.length > 0 ? (
             <label className="grid gap-1 text-xs font-semibold text-content-muted">
               Audio
