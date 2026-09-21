@@ -16,8 +16,8 @@ https://cantaro.dev.localhost:5173/api/media/providers/simkl/callback
 
 Store `Parameters:SimklClientId` and `Parameters:SimklClientSecret` in the
 AppHost's local user-secrets. Aspire passes them to the API as `Simkl:ClientId`
-and `Simkl:ClientSecret`. Leaving them empty allows the application to start,
-but SIMKL connection requires a configured client ID and the server app's secret.
+and `Simkl:ClientSecret`. Both are required Aspire secret parameters,
+matching the other media providers.
 
 Production uses its own SIMKL app and public HTTPS callback. Configure
 `CANTARO_SIMKL_CLIENT_ID` and `CANTARO_SIMKL_CLIENT_SECRET` in the deployment

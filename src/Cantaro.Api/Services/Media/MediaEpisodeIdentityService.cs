@@ -375,7 +375,7 @@ public class MediaEpisodeIdentityService(
         var seriesDestinations = SelectSeriesDestinations(
             episodes.SelectMany(episode => episode.ProviderContents));
         var specials = title.ProviderLinks
-            .Where(link => link.Provider == "simkl" && link.SpecialEpisodeCatalogSnapshot is not null)
+            .Where(link => link.Provider == MediaObservationSiteIdentifiers.Simkl && link.SpecialEpisodeCatalogSnapshot is not null)
             .SelectMany(link => DeserializeSpecialEpisodeCatalog(link.SpecialEpisodeCatalogSnapshot!))
             .OrderBy(item => item.SpecialEpisodeNumber)
             .ToList();
@@ -628,7 +628,7 @@ public class MediaEpisodeIdentityService(
     private static MediaEpisodeDestinationDto MapEpisodeDestination(MediaEpisode episode)
     {
         var seasonMapping = episode.ProviderContents
-            .Where(content => content.Provider == "simkl"
+            .Where(content => content.Provider == MediaObservationSiteIdentifiers.Simkl
                 && content.ProviderSequenceNumber == episode.EpisodeNumber
                 && content.ProviderSeasonNumber is > 0
                 && content.ProviderEpisodeNumber is > 0)
