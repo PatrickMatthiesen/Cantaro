@@ -146,9 +146,17 @@ public class MediaLibraryImportService(
                     binding,
                     item,
                     previousSourceRemoteUpdateAt));
+            var preserveNormalizedStatus = shouldApplyRemoteState
+                && ShouldPreserveNormalizedStatus(entry, binding, item);
+            if (shouldApplyRemoteState && sourceBindingExisted && !preserveNormalizedStatus
+                && (binding.LastRequestedStatus is not null || binding.LastAppliedStatus is not null))
+            {
+                binding.LastRequestedStatus = null;
+                binding.LastAppliedStatus = null;
+            }
             if (shouldApplyRemoteState)
             {
-                ApplyRemoteLibraryState(entry, item, importResult.ImportedAt);
+                ApplyRemoteLibraryState(entry, item, importResult.ImportedAt, preserveNormalizedStatus);
                 if (!entryWasCreated && fanOutChanges)
                 {
                     fanOutOperations.AddRange(CreateFanOutOperations(
@@ -527,6 +535,15 @@ public class MediaLibraryImportService(
         return latestKnownUpdateAt == default || item.LastRemoteUpdateAt > latestKnownUpdateAt;
     }
 
+    private static bool ShouldPreserveNormalizedStatus(
+        MediaLibraryEntry entry,
+        MediaLibraryProviderBinding binding,
+        MediaProviderLibraryItem item)
+        => binding.LastRequestedStatus is not null
+            && binding.LastAppliedStatus is not null
+            && string.Equals(entry.Status, binding.LastRequestedStatus, StringComparison.Ordinal)
+            && string.Equals(item.Status, binding.LastAppliedStatus, StringComparison.Ordinal);
+
     private static MediaLibraryEntryState CaptureState(MediaLibraryEntry entry)
         => new(
             entry.Status,
@@ -630,9 +647,13 @@ public class MediaLibraryImportService(
     private static void ApplyRemoteLibraryState(
         MediaLibraryEntry entry,
         MediaProviderLibraryItem item,
-        DateTimeOffset timestamp)
+        DateTimeOffset timestamp,
+        bool preserveNormalizedStatus)
     {
-        entry.Status = item.Status;
+        if (!preserveNormalizedStatus)
+        {
+            entry.Status = item.Status;
+        }
         entry.Score = NormalizeScore(item.Score);
         entry.ProgressEpisodes = ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount);
         entry.ProgressChapters = item.ProgressChapters;

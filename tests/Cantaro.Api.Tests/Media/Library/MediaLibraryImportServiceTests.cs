@@ -243,6 +243,97 @@ public class MediaLibraryImportServiceTests
         Assert.Equal(MediaProviderOperationTypes.ImportFanOutScore, fanOut.OperationType);
     }
 
+    [Fact]
+    public async Task ImportAsync_PreservesNormalizedStatusWhileApplyingNewerScore()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var (user, account) = await SeedAccountAsync(db, 208);
+        var service = MakeService(db);
+        var now = DateTimeOffset.UtcNow;
+        await service.ImportAsync(user.Id, account, MakeImport(now, 12, now, score: 80m), CancellationToken.None);
+
+        var entry = await db.MediaLibraryEntries.SingleAsync();
+        var sourceBinding = await db.MediaLibraryProviderBindings.SingleAsync();
+        entry.Status = MediaLibraryStatuses.Completed;
+        sourceBinding.LastRequestedStatus = MediaLibraryStatuses.Completed;
+        sourceBinding.LastAppliedStatus = MediaLibraryStatuses.Current;
+
+        var targetAccount = new ConnectedServiceAccount
+        {
+            Id = 1208,
+            UserId = user.Id,
+            Service = "myanimelist",
+            ExternalAccountId = "viewer-208-target",
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        };
+        var targetLink = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = entry.MediaTitleId,
+            Provider = "myanimelist",
+            ExternalId = "anime:52991",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.AddRange(targetAccount, targetLink, new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(),
+            MediaLibraryEntryId = entry.Id,
+            MediaProviderLinkId = targetLink.Id,
+            ConnectedServiceAccountId = targetAccount.Id,
+            ProviderAccountId = targetAccount.ExternalAccountId,
+            LastRemoteUpdateAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+
+        var newer = now.AddMinutes(2);
+        var import = MakeImport(newer, 12, newer, score: 90m);
+        import.Items[0].Status = MediaLibraryStatuses.Current;
+        await service.ImportAsync(user.Id, account, import, CancellationToken.None);
+
+        var persistedEntry = await db.MediaLibraryEntries.SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.Status);
+        Assert.Equal(90m, persistedEntry.Score);
+        var operations = await db.MediaProviderOperations.ToListAsync();
+        Assert.Equal(MediaProviderOperationTypes.ImportFanOutScore, Assert.Single(operations).OperationType);
+    }
+
+    [Fact]
+    public async Task ImportAsync_GenuineRemoteStatusChangeClearsNormalizationAndImportsStatus()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var (user, account) = await SeedAccountAsync(db, 209);
+        var service = MakeService(db);
+        var now = DateTimeOffset.UtcNow;
+        await service.ImportAsync(user.Id, account, MakeImport(now, 12, now), CancellationToken.None);
+
+        var entry = await db.MediaLibraryEntries.SingleAsync();
+        var binding = await db.MediaLibraryProviderBindings.SingleAsync();
+        entry.Status = MediaLibraryStatuses.Completed;
+        binding.LastRequestedStatus = MediaLibraryStatuses.Completed;
+        binding.LastAppliedStatus = MediaLibraryStatuses.Current;
+        await db.SaveChangesAsync();
+
+        var newer = now.AddMinutes(2);
+        var import = MakeImport(newer, 12, newer);
+        import.Items[0].Status = MediaLibraryStatuses.Paused;
+        await service.ImportAsync(user.Id, account, import, CancellationToken.None);
+
+        var persistedEntry = await db.MediaLibraryEntries.SingleAsync();
+        var persistedBinding = await db.MediaLibraryProviderBindings.SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Paused, persistedEntry.Status);
+        Assert.Null(persistedBinding.LastRequestedStatus);
+        Assert.Null(persistedBinding.LastAppliedStatus);
+    }
+
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
         new(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance);
 

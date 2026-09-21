@@ -76,7 +76,10 @@ deferred.
 
 When SIMKL normalizes a requested status, Cantaro records the accepted status.
 Initial synchronization recognizes that result instead of repeatedly requesting
-the same normalization. Ratings use SIMKL's integer 1-10 scale, mapped to
+the same normalization. Later imports preserve Cantaro's requested status when
+SIMKL returns that accepted status, while still importing rating and progress
+changes. A different remote status ends that normalization match.
+Ratings use SIMKL's integer 1-10 scale, mapped to
 Cantaro's 1-100 scale.
 
 The browser extension still observes Crunchyroll. Netflix observation support is

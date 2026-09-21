@@ -305,8 +305,9 @@ function useProviderRefresh(
 
         const connectedIds = connectedMediaProviderIds(summary.statuses);
         connectedProviderIdsRef.current = connectedIds;
-        setProviderStatus(connectedIds.length > 0
-          ? { providerId: connectedIds[0], isConnected: true }
+        const primaryProviderId = connectedIds[0];
+        setProviderStatus(primaryProviderId !== undefined
+          ? { providerId: primaryProviderId, isConnected: true }
           : null);
         if (summary.statuses.length === 0 && summary.failedProviderIds.length > 0) {
           setRefreshError(PROVIDER_REFRESH_ERROR);
