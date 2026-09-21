@@ -73,6 +73,7 @@ function buildLoadedAvailabilityState(details: MediaProviderTitleDetailsDto) {
       : 'loaded' as const,
     links,
     characters: details.characters ?? [],
+    stremioTarget: details.stremioTarget,
     isStale: isAvailabilityStale(details),
     refreshedAt: metadata.refreshedAt,
   };

@@ -80,6 +80,11 @@ public class MediaProviderDtoContractTests
                 TotalKnownCount = 25,
                 PrimaryProgressDimension = MediaProgressDimensions.Episode,
                 ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                StremioTarget = new MediaProviderStremioTarget
+                {
+                    Type = "series",
+                    Id = "kitsu:1"
+                },
                 AvailabilityLinks =
                 [
                     new MediaProviderAvailabilityLink
@@ -124,6 +129,8 @@ public class MediaProviderDtoContractTests
         Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", availability.Url);
         Assert.Equal("fresh", payload.AvailabilityStatus);
         Assert.NotNull(payload.AvailabilityLastVerifiedAt);
+        Assert.Equal("series", payload.StremioTarget?.Type);
+        Assert.Equal("kitsu:1", payload.StremioTarget?.Id);
         var character = Assert.Single(payload.Characters);
         Assert.Equal("170732", character.CharacterId);
         Assert.Equal("Anya Forger", character.Name);
@@ -298,6 +305,45 @@ public class MediaProviderDtoContractTests
         Assert.Equal("crunchyroll", cachedLink.ServiceId);
         Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", cachedLink.Url);
 
+        var persistedLink = await fixture.DbContext.MediaProviderLinks.SingleAsync();
+        Assert.Equal(verifiedAt, persistedLink.AvailabilityLastVerifiedAt);
+    }
+
+    [Fact]
+    public async Task GetTitleDetails_WhenOptionalAvailabilityRefreshFails_PreservesVerificationTimestamp()
+    {
+        var cachedAvailability = new MediaProviderAvailabilityLink
+        {
+            ServiceId = "netflix",
+            DisplayName = "Netflix",
+            Url = "https://www.netflix.com/title/80001305",
+            AvailabilityKind = "streaming"
+        };
+        var provider = new StubMediaProvider
+        {
+            ProviderId = MediaObservationSiteIdentifiers.Simkl,
+            TitleDetails = CreateTitleDetails(cachedAvailability)
+        };
+        provider.TitleDetails.ProviderId = MediaObservationSiteIdentifiers.Simkl;
+        provider.TitleDetails.ProviderMediaId = "anime:123";
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider);
+
+        var firstResult = await fixture.Controller.GetTitleDetails("simkl", "anime:123", CancellationToken.None);
+        var firstPayload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(firstResult.Result).Value);
+        var verifiedAt = Assert.IsType<DateTimeOffset>(firstPayload.AvailabilityLastVerifiedAt);
+
+        provider.TitleDetails = CreateTitleDetails(cachedAvailability);
+        provider.TitleDetails.ProviderId = MediaObservationSiteIdentifiers.Simkl;
+        provider.TitleDetails.ProviderMediaId = "anime:123";
+        provider.TitleDetails.AvailabilityRefreshSucceeded = false;
+        var secondResult = await fixture.Controller.GetTitleDetails("simkl", "anime:123", CancellationToken.None);
+
+        var stalePayload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(secondResult.Result).Value);
+        Assert.Equal("stale", stalePayload.AvailabilityStatus);
+        Assert.Equal(verifiedAt, stalePayload.AvailabilityLastVerifiedAt);
+        Assert.Equal("netflix", Assert.Single(stalePayload.AvailabilityLinks).ServiceId);
         var persistedLink = await fixture.DbContext.MediaProviderLinks.SingleAsync();
         Assert.Equal(verifiedAt, persistedLink.AvailabilityLastVerifiedAt);
     }

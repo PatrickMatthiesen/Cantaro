@@ -142,6 +142,7 @@ internal static class SimklJson
         var title = String(media, "title_en") ?? String(media, "title") ?? "Unknown title";
         var total = Int(media, "total_episodes") ?? Int(media, "ep_count");
         var release = String(media, "status");
+        var format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie, _ => MapAnimeFormat(String(media, "anime_type")) };
         return new MediaProviderTitleDetails
         {
             ProviderId = MediaObservationSiteIdentifiers.Simkl, ProviderMediaId = $"{type}:{id}", Title = title,
@@ -149,14 +150,48 @@ internal static class SimklJson
             Synonyms = Array(Property(media, "all_titles")).Where(x => x.ValueKind == JsonValueKind.String)
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),
             MediaKind = MediaKind(type), Synopsis = String(media, "overview"),
-            Format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie, _ => MapAnimeFormat(String(media, "anime_type")) },
+            Format = format,
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
             CrossReferences = CrossReferences(type, ids), StartYear = Int(media, "year"),
+            StremioTarget = StremioTarget(type, format, ids),
             EpisodeCount = total, TotalKnownCount = total,
             ReleasedCount = release is "ended" or "released" ? total : null,
             PrimaryProgressDimension = ProgressDimension(type), ReleaseStatusDimension = ProgressDimension(type)
         };
+    }
+
+    private static MediaProviderStremioTarget? StremioTarget(string type, string? format, JsonElement ids)
+    {
+        var stremioType = type == "movie" || format == MediaFormats.Movie ? "movie" : "series";
+        var kitsuId = Int(ids, "kitsu");
+        if (type == "anime" && kitsuId is > 0)
+        {
+            return new MediaProviderStremioTarget
+            {
+                Type = stremioType,
+                Id = $"kitsu:{kitsuId.Value.ToString(CultureInfo.InvariantCulture)}"
+            };
+        }
+
+        var imdb = String(ids, "imdb")?.Trim();
+        if (imdb is null || imdb.Length <= 2 || !imdb.StartsWith("tt", StringComparison.Ordinal)
+            || !imdb.AsSpan(2).ContainsOnlyAsciiDigits())
+        {
+            return null;
+        }
+
+        return new MediaProviderStremioTarget { Type = stremioType, Id = imdb };
+    }
+
+    private static bool ContainsOnlyAsciiDigits(this ReadOnlySpan<char> value)
+    {
+        foreach (var character in value)
+        {
+            if (character is < '0' or > '9') return false;
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<MediaProviderWatchedEpisode>? ReadWatched(JsonElement row, string type)

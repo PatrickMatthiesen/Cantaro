@@ -367,7 +367,18 @@ public class MediaProvidersController(
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);
-        return Ok(MapTitleDetails(details, title.Id, libraryState, "fresh", now));
+        var availabilityStatus = details.AvailabilityRefreshSucceeded
+            ? "fresh"
+            : cachedLink?.AvailabilitySnapshot is not null ? "stale" : "unavailable";
+        var availabilityLastVerifiedAt = details.AvailabilityRefreshSucceeded
+            ? now
+            : cachedLink?.AvailabilityLastVerifiedAt;
+        return Ok(MapTitleDetails(
+            details,
+            title.Id,
+            libraryState,
+            availabilityStatus,
+            availabilityLastVerifiedAt));
     }
 
     [HttpGet("providers/{providerId}/titles/{providerMediaId}/release")]
@@ -612,6 +623,13 @@ public class MediaProvidersController(
             ReleaseStatusDimension = details.ReleaseStatusDimension,
             AvailabilityStatus = availabilityStatus,
             AvailabilityLastVerifiedAt = availabilityLastVerifiedAt,
+            StremioTarget = details.StremioTarget is null
+                ? null
+                : new MediaProviderStremioTargetDto
+                {
+                    Type = details.StremioTarget.Type,
+                    Id = details.StremioTarget.Id
+                },
             AvailabilityLinks = details.AvailabilityLinks.Select(link => new MediaProviderAvailabilityLinkDto
             {
                 ServiceId = link.ServiceId,
@@ -788,8 +806,11 @@ public class MediaProvidersController(
                 ApplyProviderDetails(linkedTitle, details, now);
             }
             await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
-            existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
-            existingLink.AvailabilityLastVerifiedAt = now;
+            if (details.AvailabilityRefreshSucceeded)
+            {
+                existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
+                existingLink.AvailabilityLastVerifiedAt = now;
+            }
             existingLink.LastVerifiedAt = now;
             existingLink.UpdatedAt = now;
             return linkedTitle;
@@ -884,8 +905,10 @@ public class MediaProvidersController(
             ExternalId = providerMediaId,
             LinkSource = MediaMappingSources.Imported,
             LastVerifiedAt = now,
-            AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
-            AvailabilityLastVerifiedAt = now,
+            AvailabilitySnapshot = details.AvailabilityRefreshSucceeded
+                ? MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks)
+                : null,
+            AvailabilityLastVerifiedAt = details.AvailabilityRefreshSucceeded ? now : null,
             CreatedAt = now,
             UpdatedAt = now
         });

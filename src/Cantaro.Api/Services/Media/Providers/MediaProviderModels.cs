@@ -165,6 +165,10 @@ public class MediaProviderTitleDetails
 
     public IReadOnlyList<MediaProviderAvailabilityLink> AvailabilityLinks { get; set; } = [];
 
+    public bool AvailabilityRefreshSucceeded { get; set; } = true;
+
+    public MediaProviderStremioTarget? StremioTarget { get; set; }
+
     public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
 
     /// <summary>
@@ -179,6 +183,13 @@ public class MediaProviderTitleDetails
     /// These entries are display-only and must not drive scalar progress.
     /// </summary>
     public IReadOnlyList<MediaProviderWatchedEpisode>? SpecialEpisodeCatalog { get; set; }
+}
+
+public sealed class MediaProviderStremioTarget
+{
+    public required string Type { get; set; }
+
+    public required string Id { get; set; }
 }
 
 public sealed class MediaProviderCrossReference

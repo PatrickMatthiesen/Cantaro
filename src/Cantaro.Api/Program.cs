@@ -101,6 +101,7 @@ builder.Services.AddScoped<IMediaProviderRegistry, MediaProviderRegistry>();
 builder.Services.AddScoped<IFrontendUrlResolver, FrontendUrlResolver>();
 builder.Services.AddMusicBrainzQueryClient();
 builder.Services.AddAniListApiClient();
+builder.Services.AddScoped<IAniListAvailabilityEnricher, AniListAvailabilityEnricher>();
 builder.Services.AddMyAnimeListApiClient();
 builder.Services.AddSimklApiClient();
 builder.Services.AddHttpClient<AnimeScheduleApiClient>();

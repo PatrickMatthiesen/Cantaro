@@ -10,6 +10,7 @@ import {
   type MediaStreamingDestinations,
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
+import { findStremioDetailUrl } from "../../services/stremioLinks";
 import type { StreamingServiceId } from "../../services/streamingServices";
 import {
   DetailErrorState,
@@ -114,6 +115,7 @@ function MediaDetailTabPanel({
   props,
   progressSummary,
   streamingDestinations,
+  stremioUrl,
   preferredServiceId,
   onSelectStreamingService,
   seasonOptions,
@@ -125,6 +127,7 @@ function MediaDetailTabPanel({
   props: MediaEntryDetailContentProps;
   progressSummary: ProgressSummary;
   streamingDestinations: MediaStreamingDestinations;
+  stremioUrl: string | null;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   seasonOptions: readonly SeasonOption[];
@@ -142,8 +145,9 @@ function MediaDetailTabPanel({
       >
         <StreamingDestinationsSection
           destinations={streamingDestinations.seriesDestinations}
+          stremioUrl={stremioUrl}
           isStale={Object.values(props.availabilityByProviderLink).some(
-            (availability) => availability.isStale || availability.status === "unavailable",
+            (availability) => availability.isStale,
           )}
           onSelect={onSelectStreamingService}
         />
@@ -264,6 +268,9 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     episodeCatalog,
     preferredServiceId,
   );
+  const stremioUrl = findStremioDetailUrl(
+    availabilityStates.map((state) => state.stremioTarget),
+  );
   const specials = getSpecials(episodeCatalog);
   const season = useSeasonView(
     streamingDestinations.episodes,
@@ -338,6 +345,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 props={props}
                 progressSummary={progressSummary}
                 streamingDestinations={streamingDestinations}
+                stremioUrl={stremioUrl}
                 preferredServiceId={preferredServiceId}
                 onSelectStreamingService={setPreferredServiceId}
                 seasonOptions={season.options}

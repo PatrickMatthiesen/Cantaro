@@ -85,6 +85,19 @@ public class AniListApiClient(
         string query,
         object? variables,
         CancellationToken cancellationToken)
+        => await SendGraphQlRequestAsync<TData>(accessToken, query, variables, cancellationToken);
+
+    public async Task<TData> SendPublicGraphQlAsync<TData>(
+        string query,
+        object? variables,
+        CancellationToken cancellationToken)
+        => await SendGraphQlRequestAsync<TData>(null, query, variables, cancellationToken);
+
+    private async Task<TData> SendGraphQlRequestAsync<TData>(
+        string? accessToken,
+        string query,
+        object? variables,
+        CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, _options.GraphQlUrl)
         {
@@ -95,7 +108,10 @@ public class AniListApiClient(
             })
         };
 
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        if (!string.IsNullOrWhiteSpace(accessToken))
+        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        }
 
         using var requestLease = await _requestGate.AcquireAsync(cancellationToken);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
