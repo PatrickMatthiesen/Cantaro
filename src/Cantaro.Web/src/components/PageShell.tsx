@@ -384,7 +384,7 @@ export function PageShell({
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
-  const { user, logout } = useAuth();
+  const { user, logout, logoutError } = useAuth();
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [isSidebarFolded, setIsSidebarFolded] = useState(
     readSidebarFoldedPreference,
@@ -453,6 +453,9 @@ export function PageShell({
           <main
             className={`w-full px-3 py-5 sm:px-5 sm:py-6 lg:px-8 ${contentClassName}`}
           >
+            {logoutError ? (
+              <p role="alert" className="mb-4 text-danger-content">{logoutError}</p>
+            ) : null}
             {children}
           </main>
         </div>
