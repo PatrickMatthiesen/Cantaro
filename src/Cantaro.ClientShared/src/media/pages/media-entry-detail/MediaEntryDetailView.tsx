@@ -11,6 +11,7 @@ import {
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
 import { addStremioDestinations } from "../../services/stremioLinks";
+import { getEpisodeRows } from "./episodeRows";
 import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
 import {
@@ -261,11 +262,15 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.episodeCatalog.status === "loaded"
       ? props.episodeCatalog.value
       : null;
+  const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
   const streamingDestinations = filterWatchProviders(
     addStremioDestinations(
-      resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId),
-      availabilityStates.map((state) => state.stremioTarget),
+      providerDestinations,
+      availabilityStates.flatMap((state) => state.stremioTargets?.length
+        ? state.stremioTargets : [state.stremioTarget]),
       mediaKind,
+      getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
+        .map((row) => row.episodeNumber),
     ),
     props.disabledWatchProviders,
   );

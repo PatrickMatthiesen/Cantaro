@@ -32,6 +32,7 @@ public class MediaProvidersController(
     MediaProviderOperationProcessor mediaProviderOperationProcessor,
     MediaLibraryEventHub mediaLibraryEventHub,
     MediaEpisodeIdentityService mediaEpisodeIdentityService,
+    IAioStreamsAnimeEnricher aioStreamsAnimeEnricher,
     UserManager<User> userManager,
     ILogger<MediaProvidersController> logger,
     IDataProtectionProvider dataProtectionProvider,
@@ -43,6 +44,7 @@ public class MediaProvidersController(
     private readonly MediaProviderOperationProcessor _mediaProviderOperationProcessor = mediaProviderOperationProcessor;
     private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
     private readonly MediaEpisodeIdentityService _mediaEpisodeIdentityService = mediaEpisodeIdentityService;
+    private readonly IAioStreamsAnimeEnricher _aioStreamsAnimeEnricher = aioStreamsAnimeEnricher;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaProvidersController> _logger = logger;
     private readonly IDataProtector _stateProtector = dataProtectionProvider.CreateProtector("MediaProvider.OAuth.State");
@@ -346,6 +348,8 @@ public class MediaProvidersController(
             return NotFound();
         }
 
+        await _aioStreamsAnimeEnricher.EnrichAsync(details, cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         var title = await FindOrCreateMediaTitleAsync(
             provider.ProviderId,
@@ -604,6 +608,7 @@ public class MediaProvidersController(
         string availabilityStatus = "fresh",
         DateTimeOffset? availabilityLastVerifiedAt = null)
     {
+        var stremioTargets = GetStremioTargets(details);
         return new MediaProviderTitleDetailsDto
         {
             MediaTitleId = mediaTitleId,
@@ -623,13 +628,10 @@ public class MediaProvidersController(
             ReleaseStatusDimension = details.ReleaseStatusDimension,
             AvailabilityStatus = availabilityStatus,
             AvailabilityLastVerifiedAt = availabilityLastVerifiedAt,
-            StremioTarget = details.StremioTarget is null
-                ? null
-                : new MediaProviderStremioTargetDto
-                {
-                    Type = details.StremioTarget.Type,
-                    Id = details.StremioTarget.Id
-                },
+            StremioTargets = stremioTargets.Select(MapStremioTarget).ToList(),
+            StremioTarget = stremioTargets.FirstOrDefault() is { } stremioTarget
+                ? MapStremioTarget(stremioTarget)
+                : null,
             AvailabilityLinks = details.AvailabilityLinks.Select(link => new MediaProviderAvailabilityLinkDto
             {
                 ServiceId = link.ServiceId,
@@ -651,6 +653,25 @@ public class MediaProvidersController(
             LibraryState = libraryState ?? new MediaCatalogLibraryStateDto()
         };
     }
+
+    private static IReadOnlyList<MediaProviderStremioTarget> GetStremioTargets(MediaProviderTitleDetails details)
+        => details.StremioTargets.Count > 0
+            ? details.StremioTargets
+            : details.StremioTarget is null ? [] : [details.StremioTarget];
+
+    private static MediaProviderStremioTargetDto MapStremioTarget(MediaProviderStremioTarget target)
+        => new()
+        {
+            Type = target.Type,
+            Id = target.Id,
+            EpisodeMapping = target.EpisodeMapping is null
+                ? null
+                : new MediaProviderStremioEpisodeMappingDto
+                {
+                    SeasonNumber = target.EpisodeMapping.SeasonNumber,
+                    EpisodeOffset = target.EpisodeMapping.EpisodeOffset
+                }
+        };
 
     private static MediaProviderTitleDetailsDto MapCachedTitleDetails(
         MediaProviderLink link,

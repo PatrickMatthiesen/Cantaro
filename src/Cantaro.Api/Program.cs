@@ -71,6 +71,12 @@ builder.Services
     .AddOptions<AnimeScheduleOptions>()
     .Bind(builder.Configuration.GetSection(AnimeScheduleOptions.SectionName));
 builder.Services
+    .AddOptions<AioStreamsOptions>()
+    .Bind(builder.Configuration.GetSection(AioStreamsOptions.SectionName))
+    .Validate(AioStreamsOptions.HasValidBaseUrl,
+        "AioStreams:BaseUrl must be empty or an absolute HTTPS URL without credentials, a query, or a fragment.")
+    .ValidateOnStart();
+builder.Services
     .AddOptions<LyricsOptions>()
     .Bind(builder.Configuration.GetSection(LyricsOptions.SectionName))
     .ValidateDataAnnotations();
@@ -104,6 +110,13 @@ builder.Services.AddAniListApiClient();
 builder.Services.AddScoped<IAniListAvailabilityEnricher, AniListAvailabilityEnricher>();
 builder.Services.AddMyAnimeListApiClient();
 builder.Services.AddSimklApiClient();
+builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient(AioStreamsAnimeEnricher.HttpClientName, client =>
+{
+    client.Timeout = AioStreamsAnimeEnricher.RequestTimeout;
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
+});
+builder.Services.AddSingleton<IAioStreamsAnimeEnricher, AioStreamsAnimeEnricher>();
 builder.Services.AddHttpClient<AnimeScheduleApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {

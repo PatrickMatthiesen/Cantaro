@@ -167,6 +167,11 @@ public class MediaProviderTitleDetails
 
     public bool AvailabilityRefreshSucceeded { get; set; } = true;
 
+    public IReadOnlyList<MediaProviderStremioTarget> StremioTargets { get; set; } = [];
+
+    /// <summary>
+    /// Legacy single-target contract. New callers should use <see cref="StremioTargets"/>.
+    /// </summary>
     public MediaProviderStremioTarget? StremioTarget { get; set; }
 
     public IReadOnlyList<MediaProviderCharacterCredit> Characters { get; set; } = [];
@@ -190,6 +195,15 @@ public sealed class MediaProviderStremioTarget
     public required string Type { get; set; }
 
     public required string Id { get; set; }
+
+    public MediaProviderStremioEpisodeMapping? EpisodeMapping { get; set; }
+}
+
+public sealed class MediaProviderStremioEpisodeMapping
+{
+    public int? SeasonNumber { get; set; }
+
+    public int EpisodeOffset { get; set; }
 }
 
 public sealed class MediaProviderCrossReference

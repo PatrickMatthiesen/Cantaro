@@ -108,6 +108,52 @@ describe('Stremio title links', () => {
     )).toBeTrue();
   });
 
+  it('uses a mapped IMDb episode even when Kitsu is the first title fallback', () => {
+    const result = addStremioDestinations(catalogDestinations(), [
+      { type: 'series', id: 'kitsu:6448' },
+      { type: 'series', id: 'tt2098220', episodeMapping: { seasonNumber: 1, episodeOffset: 12 } },
+    ], 'anime', [1, 1, 59]);
+
+    expect(result.seriesDestinations.at(-1)?.url).toBe('stremio:///detail/series/kitsu:6448');
+    expect(result.episodes.find(item => item.episodeNumber === 59)?.destinations.at(-1)?.url)
+      .toBe('stremio:///detail/series/tt2098220/tt2098220:1:71');
+    expect(result.episodes.filter(item => item.episodeNumber === 1)).toHaveLength(1);
+    expect(result.episodes.find(item => item.episodeNumber === 15)?.destinations[0]?.serviceId)
+      .toBe('crunchyroll');
+  });
+
+  it('uses a Kitsu entry mapping for synthetic anime episodes', () => {
+    const result = addStremioDestinations({ seriesDestinations: [], episodes: [] }, [
+      { type: 'series', id: 'kitsu:6448', episodeMapping: { seasonNumber: null, episodeOffset: 0 } },
+    ], 'anime', [59, -1, 0, 1.5, Number.MAX_SAFE_INTEGER + 1]);
+
+    expect(result.episodes).toHaveLength(1);
+    expect(result.episodes[0]?.destinations[0]?.url)
+      .toBe('stremio:///detail/series/kitsu:6448/kitsu:6448:59');
+    expect(result.episodes[0]?.seasonNumber).toBeUndefined();
+  });
+
+  it('does not assume that an anime catalog season uses IMDb numbering', () => {
+    const result = addStremioDestinations(catalogDestinations(), [
+      { type: 'series', id: 'tt2098220' },
+    ], 'anime', [59]);
+    expect(result.episodes).toHaveLength(2);
+    expect(result.episodes[0]?.destinations).toHaveLength(1);
+  });
+
+  it('keeps title fallbacks for invalid or incompatible episode mappings', () => {
+    for (const target of [
+      { type: 'series', id: 'tt2098220', episodeMapping: { seasonNumber: null, episodeOffset: 0 } },
+      { type: 'series', id: 'tt2098220', episodeMapping: { seasonNumber: 1, episodeOffset: -1 } },
+      { type: 'series', id: 'kitsu:6448', episodeMapping: { seasonNumber: 1, episodeOffset: 0 } },
+      { type: 'series', id: 'kitsu:6448', episodeMapping: { seasonNumber: null, episodeOffset: Number.MAX_SAFE_INTEGER } },
+    ]) {
+      const result = addStremioDestinations({ seriesDestinations: [], episodes: [] }, [target], 'anime', [1]);
+      expect(result.seriesDestinations).toHaveLength(1);
+      expect(result.episodes).toHaveLength(0);
+    }
+  });
+
   it('rejects malformed targets and media kinds that cannot be watched', () => {
     const destinations = catalogDestinations();
 

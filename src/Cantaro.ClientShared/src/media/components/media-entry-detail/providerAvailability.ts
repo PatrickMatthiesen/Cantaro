@@ -7,6 +7,7 @@ export interface ProviderAvailabilityState {
   links: MediaProviderAvailabilityLinkDto[];
   characters: MediaProviderCharacterCreditDto[];
   stremioTarget?: MediaProviderStremioTargetDto | null;
+  stremioTargets?: MediaProviderStremioTargetDto[];
   /** The provider returned cached data rather than a fresh availability check. */
   isStale?: boolean;
   refreshedAt?: string;

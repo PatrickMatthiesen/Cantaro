@@ -254,6 +254,10 @@ The main Continue Watching action uses the same provider destination selection
 as the next episode row. Prefer that provider's episode link when available;
 use its series link only as a fallback. Completed titles and unresolved episode
 conflicts retain the series fallback.
+Keep both Kitsu and IMDb targets when available. Select an exact episode target
+before falling back to a title, regardless of which ID was listed first. Kitsu
+uses numbering within its anime entry; IMDb uses its own season and episode
+mapping. Do not substitute another provider's anime season numbering.
 
 Settings has a separate Watch providers section with one labeled toggle per
 provider. All providers are visible by default. Save these choices on the user

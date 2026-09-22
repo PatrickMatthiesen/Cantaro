@@ -143,6 +143,7 @@ internal static class SimklJson
         var total = Int(media, "total_episodes") ?? Int(media, "ep_count");
         var release = String(media, "status");
         var format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie, _ => MapAnimeFormat(String(media, "anime_type")) };
+        var stremioTargets = StremioTargets(type, format, ids);
         return new MediaProviderTitleDetails
         {
             ProviderId = MediaObservationSiteIdentifiers.Simkl, ProviderMediaId = $"{type}:{id}", Title = title,
@@ -154,34 +155,36 @@ internal static class SimklJson
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
             CrossReferences = CrossReferences(type, ids), StartYear = Int(media, "year"),
-            StremioTarget = StremioTarget(type, format, ids),
+            StremioTargets = stremioTargets,
+            StremioTarget = stremioTargets.FirstOrDefault(),
             EpisodeCount = total, TotalKnownCount = total,
             ReleasedCount = release is "ended" or "released" ? total : null,
             PrimaryProgressDimension = ProgressDimension(type), ReleaseStatusDimension = ProgressDimension(type)
         };
     }
 
-    private static MediaProviderStremioTarget? StremioTarget(string type, string? format, JsonElement ids)
+    private static IReadOnlyList<MediaProviderStremioTarget> StremioTargets(string type, string? format, JsonElement ids)
     {
         var stremioType = type == "movie" || format == MediaFormats.Movie ? "movie" : "series";
+        var targets = new List<MediaProviderStremioTarget>();
         var kitsuId = Int(ids, "kitsu");
         if (type == "anime" && kitsuId is > 0)
         {
-            return new MediaProviderStremioTarget
+            targets.Add(new MediaProviderStremioTarget
             {
                 Type = stremioType,
                 Id = $"kitsu:{kitsuId.Value.ToString(CultureInfo.InvariantCulture)}"
-            };
+            });
         }
 
         var imdb = String(ids, "imdb")?.Trim();
-        if (imdb is null || imdb.Length <= 2 || !imdb.StartsWith("tt", StringComparison.Ordinal)
-            || !imdb.AsSpan(2).ContainsOnlyAsciiDigits())
+        if (imdb is not null && imdb.Length > 2 && imdb.StartsWith("tt", StringComparison.Ordinal)
+            && imdb.AsSpan(2).ContainsOnlyAsciiDigits())
         {
-            return null;
+            targets.Add(new MediaProviderStremioTarget { Type = stremioType, Id = imdb });
         }
 
-        return new MediaProviderStremioTarget { Type = stremioType, Id = imdb };
+        return targets;
     }
 
     private static bool ContainsOnlyAsciiDigits(this ReadOnlySpan<char> value)

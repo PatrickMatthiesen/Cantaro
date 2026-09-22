@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.Channels;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
@@ -85,6 +86,24 @@ public class MediaProviderDtoContractTests
                     Type = "series",
                     Id = "kitsu:1"
                 },
+                StremioTargets =
+                [
+                    new MediaProviderStremioTarget
+                    {
+                        Type = "series",
+                        Id = "kitsu:1",
+                        EpisodeMapping = new MediaProviderStremioEpisodeMapping
+                        {
+                            SeasonNumber = null,
+                            EpisodeOffset = 0
+                        }
+                    },
+                    new MediaProviderStremioTarget
+                    {
+                        Type = "series",
+                        Id = "tt0213338"
+                    }
+                ],
                 AvailabilityLinks =
                 [
                     new MediaProviderAvailabilityLink
@@ -131,6 +150,18 @@ public class MediaProviderDtoContractTests
         Assert.NotNull(payload.AvailabilityLastVerifiedAt);
         Assert.Equal("series", payload.StremioTarget?.Type);
         Assert.Equal("kitsu:1", payload.StremioTarget?.Id);
+        Assert.Equal(
+            [("series", "kitsu:1"), ("series", "tt0213338")],
+            payload.StremioTargets.Select(target => (target.Type, target.Id)));
+        Assert.Null(payload.StremioTarget?.EpisodeMapping?.SeasonNumber);
+        Assert.Equal(0, payload.StremioTarget?.EpisodeMapping?.EpisodeOffset);
+        Assert.Null(payload.StremioTargets[1].EpisodeMapping);
+        var stremioTargetsJson = JsonSerializer.Serialize(
+            payload.StremioTargets,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal(
+            "[{\"type\":\"series\",\"id\":\"kitsu:1\",\"episodeMapping\":{\"seasonNumber\":null,\"episodeOffset\":0}},{\"type\":\"series\",\"id\":\"tt0213338\"}]",
+            stremioTargetsJson);
         var character = Assert.Single(payload.Characters);
         Assert.Equal("170732", character.CharacterId);
         Assert.Equal("Anya Forger", character.Name);
@@ -157,6 +188,43 @@ public class MediaProviderDtoContractTests
         Assert.Equal("https://www.crunchyroll.com/series/GEXH3W8XG", persistedAvailability.Url);
         Assert.Equal(payload.AvailabilityLastVerifiedAt, providerLink.AvailabilityLastVerifiedAt);
         Assert.Equal(payload.AvailabilityLastVerifiedAt, providerLink.LastVerifiedAt);
+    }
+
+    [Fact]
+    public async Task GetTitleDetails_EnrichesStremioTargetsBeforeMappingTheResponse()
+    {
+        var provider = new StubMediaProvider
+        {
+            TitleDetails = CreateTitleDetails()
+        };
+        var enricher = new StubAioStreamsAnimeEnricher
+        {
+            OnEnrich = details => details.StremioTargets =
+            [
+                new MediaProviderStremioTarget
+                {
+                    Type = "series",
+                    Id = "tt0213338",
+                    EpisodeMapping = new MediaProviderStremioEpisodeMapping
+                    {
+                        SeasonNumber = 1,
+                        EpisodeOffset = 3
+                    }
+                }
+            ]
+        };
+        await using var fixture = await MediaControllerFixture.CreateAsync(provider, enricher);
+
+        var result = await fixture.Controller.GetTitleDetails("anilist", "140960", CancellationToken.None);
+
+        var payload = Assert.IsType<MediaProviderTitleDetailsDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(1, enricher.CallCount);
+        var target = Assert.Single(payload.StremioTargets);
+        Assert.Equal("tt0213338", target.Id);
+        Assert.Equal(1, target.EpisodeMapping?.SeasonNumber);
+        Assert.Equal(3, target.EpisodeMapping?.EpisodeOffset);
+        Assert.Equal("tt0213338", payload.StremioTarget?.Id);
     }
 
     [Fact]
@@ -777,7 +845,9 @@ public class MediaProviderDtoContractTests
 
         public int UserId { get; }
 
-        public static async Task<MediaControllerFixture> CreateAsync(StubMediaProvider provider)
+        public static async Task<MediaControllerFixture> CreateAsync(
+            StubMediaProvider provider,
+            IAioStreamsAnimeEnricher? aioStreamsAnimeEnricher = null)
         {
             const int userId = 901;
             const string email = "media.dto@example.com";
@@ -813,6 +883,7 @@ public class MediaProviderDtoContractTests
                 operationProcessor,
                 eventHub,
                 episodeIdentityService,
+                aioStreamsAnimeEnricher ?? new StubAioStreamsAnimeEnricher(),
                 CreateUserManager(dbContext),
                 NullLogger<MediaProvidersController>.Instance,
                 new PassthroughDataProtectionProvider(),
@@ -847,6 +918,20 @@ public class MediaProviderDtoContractTests
             EventHub.Unsubscribe(UserId, _libraryEventSubscriptionId);
             await DbContext.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    private sealed class StubAioStreamsAnimeEnricher : IAioStreamsAnimeEnricher
+    {
+        public Action<MediaProviderTitleDetails>? OnEnrich { get; init; }
+
+        public int CallCount { get; private set; }
+
+        public Task EnrichAsync(MediaProviderTitleDetails details, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            OnEnrich?.Invoke(details);
+            return Task.CompletedTask;
         }
     }
 
