@@ -11,14 +11,22 @@ describe('streaming service definitions', () => {
     expect(resolveStreamingServiceId('Crunchyroll')).toBe('crunchyroll');
     expect(resolveStreamingServiceId('Disney+')).toBe('disney-plus');
     expect(resolveStreamingServiceId('Amazon Prime')).toBe('prime-video');
+    expect(resolveStreamingServiceId('Stremio')).toBe('stremio');
     expect(resolveStreamingServiceId('unknown')).toBeNull();
     expect(STREAMING_SERVICES.crunchyroll.capabilities.episodeDestinations).toBeTrue();
+    expect(STREAMING_SERVICES.stremio.capabilities.episodeDestinations).toBeTrue();
   });
 
   it('allows only HTTPS destinations on a service-owned host', () => {
     expect(isAllowedStreamingUrl('crunchyroll', 'https://www.crunchyroll.com/watch/EP1')).toBeTrue();
     expect(isAllowedStreamingUrl('crunchyroll', 'https://crunchyroll.com.evil.test/watch/EP1')).toBeFalse();
     expect(isAllowedStreamingUrl('crunchyroll', 'http://crunchyroll.com/watch/EP1')).toBeFalse();
+  });
+
+  it('does not accept imported URLs for the generated-only Stremio service', () => {
+    expect(STREAMING_SERVICES.stremio.allowedHosts).toEqual([]);
+    expect(isAllowedStreamingUrl('stremio', 'stremio:///detail/series/tt0108778')).toBeFalse();
+    expect(isAllowedStreamingUrl('stremio', 'https://web.stremio.com/#/detail/series/tt0108778')).toBeFalse();
   });
 });
 

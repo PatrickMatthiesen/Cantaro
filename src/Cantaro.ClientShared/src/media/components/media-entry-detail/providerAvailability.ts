@@ -1,4 +1,4 @@
-import { mediaApi, type MediaProviderAvailabilityLinkDto, type MediaProviderCharacterCreditDto, type MediaProviderLinkSummaryDto, type MediaProviderTitleDetailsDto } from '../../services/mediaApi';
+import { mediaApi, type MediaProviderAvailabilityLinkDto, type MediaProviderCharacterCreditDto, type MediaProviderLinkSummaryDto, type MediaProviderStremioTargetDto, type MediaProviderTitleDetailsDto } from '../../services/mediaApi';
 
 export type ProviderAvailabilityStatus = 'loading' | 'loaded' | 'unavailable' | 'error';
 
@@ -6,6 +6,8 @@ export interface ProviderAvailabilityState {
   status: ProviderAvailabilityStatus;
   links: MediaProviderAvailabilityLinkDto[];
   characters: MediaProviderCharacterCreditDto[];
+  stremioTarget?: MediaProviderStremioTargetDto | null;
+  stremioTargets?: MediaProviderStremioTargetDto[];
   /** The provider returned cached data rather than a fresh availability check. */
   isStale?: boolean;
   refreshedAt?: string;

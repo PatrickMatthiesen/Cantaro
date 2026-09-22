@@ -172,6 +172,8 @@ public sealed class SimklMediaProviderTests
         Assert.Equal(["Pilot", "Premiere"], details?.EpisodeCatalog?.Select(item => item.Title));
         var catalogRequest = Assert.Single(fixture.Handler.Uris, uri => uri.AbsolutePath == "/tv/episodes/123");
         Assert.Contains("extended=full", catalogRequest.Query);
+        var detailsRequest = Assert.Single(fixture.Handler.Uris, uri => uri.AbsolutePath == "/tv/123");
+        Assert.Contains("extended=full", detailsRequest.Query);
         Assert.All(fixture.Handler.Authorizations, authorization => Assert.Equal("Bearer access-token", authorization));
     }
 
@@ -190,6 +192,103 @@ public sealed class SimklMediaProviderTests
         Assert.Equal("Show", details?.Title);
         Assert.Null(details?.EpisodeCatalog);
         Assert.Null(details?.SpecialEpisodeCatalog);
+    }
+
+    [Fact]
+    public async Task AnimeTitleDetailsUseAccountIndependentAniListAvailability()
+    {
+        var enricher = new StubAniListAvailabilityEnricher
+        {
+            Availability =
+            [
+                new MediaProviderAvailabilityLink
+                {
+                    ServiceId = "netflix",
+                    DisplayName = "Netflix",
+                    Url = "https://www.netflix.com/title/80001305",
+                    AvailabilityKind = "streaming"
+                }
+            ]
+        };
+        await using var fixture = await Fixture.CreateAsync(
+            request => request.RequestUri!.AbsolutePath == "/anime/123"
+                ? Json("""{"title":"Cowboy Bebop","anime_type":"tv","ids":{"simkl":123,"anilist":1,"mal":1,"kitsu":1}}""")
+                : throw new InvalidOperationException(request.RequestUri!.AbsolutePath),
+            enricher);
+
+        var details = await fixture.Provider.GetTitleDetailsAsync(1, "anime:123", CancellationToken.None);
+
+        var availability = Assert.Single(details!.AvailabilityLinks);
+        Assert.Equal("netflix", availability.ServiceId);
+        Assert.True(details.AvailabilityRefreshSucceeded);
+        Assert.Equal(1, enricher.CallCount);
+        Assert.Contains(enricher.LastCrossReferences!, reference =>
+            reference.ProviderId == MediaObservationSiteIdentifiers.AniList
+            && reference.ProviderMediaId == "1");
+    }
+
+    [Fact]
+    public async Task AnimeAvailabilityFailurePreservesCachedSnapshot()
+    {
+        var enricher = new StubAniListAvailabilityEnricher
+        {
+            Exception = new HttpRequestException("AniList unavailable")
+        };
+        await using var fixture = await Fixture.CreateAsync(
+            request => request.RequestUri!.AbsolutePath == "/anime/123"
+                ? Json("""{"title":"Cowboy Bebop","anime_type":"tv","ids":{"simkl":123,"anilist":1}}""")
+                : throw new InvalidOperationException(request.RequestUri!.AbsolutePath),
+            enricher);
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Cowboy Bebop",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        fixture.Db.MediaTitles.Add(title);
+        fixture.Db.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            Provider = MediaObservationSiteIdentifiers.Simkl,
+            ExternalId = "anime:123",
+            LinkSource = MediaMappingSources.Imported,
+            AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(
+            [
+                new MediaProviderAvailabilityLink
+                {
+                    ServiceId = "netflix",
+                    DisplayName = "Netflix",
+                    Url = "https://www.netflix.com/title/80001305",
+                    AvailabilityKind = "streaming"
+                }
+            ])
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var details = await fixture.Provider.GetTitleDetailsAsync(1, "anime:123", CancellationToken.None);
+
+        Assert.Equal("Cowboy Bebop", details?.Title);
+        Assert.Equal("netflix", Assert.Single(details!.AvailabilityLinks).ServiceId);
+        Assert.False(details.AvailabilityRefreshSucceeded);
+    }
+
+    [Fact]
+    public async Task ReleaseMetadataDoesNotCallOptionalAvailabilityEnrichment()
+    {
+        var enricher = new StubAniListAvailabilityEnricher();
+        await using var fixture = await Fixture.CreateAsync(
+            request => request.RequestUri!.AbsolutePath == "/anime/123"
+                ? Json("""{"title":"Cowboy Bebop","anime_type":"tv","ids":{"simkl":123,"anilist":1},"total_episodes":26}""")
+                : throw new InvalidOperationException(request.RequestUri!.AbsolutePath),
+            enricher);
+
+        var metadata = await fixture.Provider.GetReleaseMetadataAsync(1, "anime:123", CancellationToken.None);
+
+        Assert.Equal(26, metadata?.TotalKnownCount);
+        Assert.Equal(0, enricher.CallCount);
     }
 
     [Fact]
@@ -349,7 +448,9 @@ public sealed class SimklMediaProviderTests
         private Fixture(SqliteConnection connection, string directory, ApplicationDbContext db, SimklMediaProvider provider, Handler handler)
         { _connection = connection; _directory = directory; Db = db; Provider = provider; Handler = handler; }
 
-        public static async Task<Fixture> CreateAsync(Func<HttpRequestMessage, HttpResponseMessage> respond)
+        public static async Task<Fixture> CreateAsync(
+            Func<HttpRequestMessage, HttpResponseMessage> respond,
+            IAniListAvailabilityEnricher? availabilityEnricher = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -369,7 +470,18 @@ public sealed class SimklMediaProviderTests
             await db.SaveChangesAsync();
             var handler = new Handler(respond);
             var api = new SimklApiClient(new HttpClient(handler), Options.Create(new SimklOptions { ClientId = "client" }));
-            return new Fixture(connection, directory, db, new SimklMediaProvider(db, api, encryption, new SimklTokenRefreshGate(), new SimklImportGate()), handler);
+            return new Fixture(
+                connection,
+                directory,
+                db,
+                new SimklMediaProvider(
+                    db,
+                    api,
+                    encryption,
+                    new SimklTokenRefreshGate(),
+                    new SimklImportGate(),
+                    availabilityEnricher ?? new StubAniListAvailabilityEnricher()),
+                handler);
         }
 
         public async ValueTask DisposeAsync()
@@ -377,6 +489,24 @@ public sealed class SimklMediaProviderTests
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
             if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
+        }
+    }
+
+    private sealed class StubAniListAvailabilityEnricher : IAniListAvailabilityEnricher
+    {
+        public IReadOnlyList<MediaProviderAvailabilityLink>? Availability { get; init; }
+        public Exception? Exception { get; init; }
+        public IReadOnlyList<MediaProviderCrossReference>? LastCrossReferences { get; private set; }
+        public int CallCount { get; private set; }
+
+        public Task<IReadOnlyList<MediaProviderAvailabilityLink>?> GetAvailabilityAsync(
+            IReadOnlyList<MediaProviderCrossReference> crossReferences,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastCrossReferences = crossReferences;
+            if (Exception is not null) throw Exception;
+            return Task.FromResult(Availability);
         }
     }
 

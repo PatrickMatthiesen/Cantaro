@@ -32,6 +32,7 @@ public class MediaProvidersController(
     MediaProviderOperationProcessor mediaProviderOperationProcessor,
     MediaLibraryEventHub mediaLibraryEventHub,
     MediaEpisodeIdentityService mediaEpisodeIdentityService,
+    IAioStreamsAnimeEnricher aioStreamsAnimeEnricher,
     UserManager<User> userManager,
     ILogger<MediaProvidersController> logger,
     IDataProtectionProvider dataProtectionProvider,
@@ -43,6 +44,7 @@ public class MediaProvidersController(
     private readonly MediaProviderOperationProcessor _mediaProviderOperationProcessor = mediaProviderOperationProcessor;
     private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
     private readonly MediaEpisodeIdentityService _mediaEpisodeIdentityService = mediaEpisodeIdentityService;
+    private readonly IAioStreamsAnimeEnricher _aioStreamsAnimeEnricher = aioStreamsAnimeEnricher;
     private readonly UserManager<User> _userManager = userManager;
     private readonly ILogger<MediaProvidersController> _logger = logger;
     private readonly IDataProtector _stateProtector = dataProtectionProvider.CreateProtector("MediaProvider.OAuth.State");
@@ -346,6 +348,8 @@ public class MediaProvidersController(
             return NotFound();
         }
 
+        await _aioStreamsAnimeEnricher.EnrichAsync(details, cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         var title = await FindOrCreateMediaTitleAsync(
             provider.ProviderId,
@@ -367,7 +371,18 @@ public class MediaProvidersController(
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);
-        return Ok(MapTitleDetails(details, title.Id, libraryState, "fresh", now));
+        var availabilityStatus = details.AvailabilityRefreshSucceeded
+            ? "fresh"
+            : cachedLink?.AvailabilitySnapshot is not null ? "stale" : "unavailable";
+        var availabilityLastVerifiedAt = details.AvailabilityRefreshSucceeded
+            ? now
+            : cachedLink?.AvailabilityLastVerifiedAt;
+        return Ok(MapTitleDetails(
+            details,
+            title.Id,
+            libraryState,
+            availabilityStatus,
+            availabilityLastVerifiedAt));
     }
 
     [HttpGet("providers/{providerId}/titles/{providerMediaId}/release")]
@@ -593,6 +608,7 @@ public class MediaProvidersController(
         string availabilityStatus = "fresh",
         DateTimeOffset? availabilityLastVerifiedAt = null)
     {
+        var stremioTargets = GetStremioTargets(details);
         return new MediaProviderTitleDetailsDto
         {
             MediaTitleId = mediaTitleId,
@@ -612,6 +628,10 @@ public class MediaProvidersController(
             ReleaseStatusDimension = details.ReleaseStatusDimension,
             AvailabilityStatus = availabilityStatus,
             AvailabilityLastVerifiedAt = availabilityLastVerifiedAt,
+            StremioTargets = stremioTargets.Select(MapStremioTarget).ToList(),
+            StremioTarget = stremioTargets.FirstOrDefault() is { } stremioTarget
+                ? MapStremioTarget(stremioTarget)
+                : null,
             AvailabilityLinks = details.AvailabilityLinks.Select(link => new MediaProviderAvailabilityLinkDto
             {
                 ServiceId = link.ServiceId,
@@ -633,6 +653,25 @@ public class MediaProvidersController(
             LibraryState = libraryState ?? new MediaCatalogLibraryStateDto()
         };
     }
+
+    private static IReadOnlyList<MediaProviderStremioTarget> GetStremioTargets(MediaProviderTitleDetails details)
+        => details.StremioTargets.Count > 0
+            ? details.StremioTargets
+            : details.StremioTarget is null ? [] : [details.StremioTarget];
+
+    private static MediaProviderStremioTargetDto MapStremioTarget(MediaProviderStremioTarget target)
+        => new()
+        {
+            Type = target.Type,
+            Id = target.Id,
+            EpisodeMapping = target.EpisodeMapping is null
+                ? null
+                : new MediaProviderStremioEpisodeMappingDto
+                {
+                    SeasonNumber = target.EpisodeMapping.SeasonNumber,
+                    EpisodeOffset = target.EpisodeMapping.EpisodeOffset
+                }
+        };
 
     private static MediaProviderTitleDetailsDto MapCachedTitleDetails(
         MediaProviderLink link,
@@ -788,8 +827,11 @@ public class MediaProvidersController(
                 ApplyProviderDetails(linkedTitle, details, now);
             }
             await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
-            existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
-            existingLink.AvailabilityLastVerifiedAt = now;
+            if (details.AvailabilityRefreshSucceeded)
+            {
+                existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
+                existingLink.AvailabilityLastVerifiedAt = now;
+            }
             existingLink.LastVerifiedAt = now;
             existingLink.UpdatedAt = now;
             return linkedTitle;
@@ -884,8 +926,10 @@ public class MediaProvidersController(
             ExternalId = providerMediaId,
             LinkSource = MediaMappingSources.Imported,
             LastVerifiedAt = now,
-            AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
-            AvailabilityLastVerifiedAt = now,
+            AvailabilitySnapshot = details.AvailabilityRefreshSucceeded
+                ? MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks)
+                : null,
+            AvailabilityLastVerifiedAt = details.AvailabilityRefreshSucceeded ? now : null,
             CreatedAt = now,
             UpdatedAt = now
         });

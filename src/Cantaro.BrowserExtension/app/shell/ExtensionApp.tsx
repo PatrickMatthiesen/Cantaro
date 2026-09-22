@@ -88,7 +88,7 @@ function PopupContent({ settings, consentLoading, navigation, consentProps, cons
   if (consentProps.needsReview) return <div className="mx-auto max-w-2xl px-5">{collectionConsent}</div>;
   return <MediaPage configured={settings.configured} watchCollectionAllowed={consentProps.choices.watchTracking}
     isSigningIn={settings.isSigningIn} activeTabContext={activeTabContext.state} onSignIn={settings.signIn}
-    onOpenSettings={navigation.openSettings} onNotice={showNotice} />;
+    disabledWatchProviders={settings.disabledWatchProviders} onOpenSettings={navigation.openSettings} onNotice={showNotice} />;
 }
 
 function PopupLoadingState() {

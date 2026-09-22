@@ -27,6 +27,7 @@ var simklClientId = builder.AddParameter("SimklClientId", secret: true);
 var simklClientSecret = builder.AddParameter("SimklClientSecret", secret: true);
 var animeScheduleId = builder.AddParameter("AnimeScheduleId");
 var animeScheduleToken = builder.AddParameter("AnimeScheduleToken", secret: true);
+var aioStreamsBaseUrl = builder.AddParameter("AioStreamsBaseUrl", () => builder.Configuration["Parameters:AioStreamsBaseUrl"] ?? "");
 var turnstileMode = builder.AddParameter("TurnstileMode", () => builder.Configuration["Parameters:TurnstileMode"] ?? "Auto");
 var turnstileSiteKey = builder.AddParameter("TurnstileSiteKey", () => builder.Configuration["Parameters:TurnstileSiteKey"] ?? "");
 var turnstileSecret = builder.AddParameter("TurnstileSecret", () => builder.Configuration["Parameters:TurnstileSecret"] ?? "", secret: true);
@@ -101,6 +102,7 @@ var api = builder.AddDotnetProject("api", "../Cantaro.Api/Cantaro.Api.csproj")
     .WithEnvironment("Simkl:ClientSecret", simklClientSecret)
     .WithEnvironment("AnimeSchedule:Id", animeScheduleId)
     .WithEnvironment("AnimeSchedule:Token", animeScheduleToken)
+    .WithEnvironment("AioStreams:BaseUrl", aioStreamsBaseUrl)
     .WithEnvironment("Turnstile:Mode", turnstileMode)
     .WithEnvironment("Turnstile:SiteKey", turnstileSiteKey)
     .WithEnvironment("Turnstile:Secret", turnstileSecret)

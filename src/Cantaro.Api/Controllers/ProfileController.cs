@@ -65,6 +65,13 @@ public sealed class ProfileController(
             return BadRequest(new { error = "Preferred media release track must use sub or dub with a language code, for example sub:en or dub:en." });
         }
 
+        string[]? disabledWatchProviderIds = null;
+        if (request.DisabledWatchProviders is { } disabledWatchProviders
+            && !WatchProviderPreferences.TryNormalize(disabledWatchProviders, out disabledWatchProviderIds))
+        {
+            return BadRequest(new { error = "Disabled watch providers must use known provider IDs." });
+        }
+
         var user = await GetCurrentUserAsync(cancellationToken);
         if (user is null) return Unauthorized();
         var settings = await GetOrCreateSettingsAsync(user, cancellationToken);
@@ -78,6 +85,10 @@ public sealed class ProfileController(
         settings.ScheduledSync = request.ScheduledSync;
         settings.BlurEmailAddress = request.BlurEmailAddress;
         settings.PreferredMediaReleaseTrack = preferredMediaReleaseTrack;
+        if (disabledWatchProviderIds is not null)
+        {
+            settings.DisabledWatchProviders = disabledWatchProviderIds;
+        }
         settings.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(MapProfile(user, settings));
@@ -364,7 +375,8 @@ public sealed class ProfileController(
         HideUnavailableTracks = settings.HideUnavailableTracks,
         ScheduledSync = settings.ScheduledSync,
         BlurEmailAddress = settings.BlurEmailAddress,
-        PreferredMediaReleaseTrack = settings.PreferredMediaReleaseTrack
+        PreferredMediaReleaseTrack = settings.PreferredMediaReleaseTrack,
+        DisabledWatchProviders = settings.DisabledWatchProviders
     };
 
     private static string ResolveDisplayName(User user, UserSettings settings) =>

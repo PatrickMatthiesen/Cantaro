@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ExtensionSettings } from '../../platform/settings/extensionSettings';
 import { hasSettingsChanges, type SettingsDraft } from './settingsModel';
 import { useMediaApiConfiguration } from './useMediaApiConfiguration';
@@ -14,6 +14,7 @@ export interface SettingsController {
   draft: SettingsDraft;
   sessionEmail: string | null;
   blurEmailAddress: boolean;
+  disabledWatchProviders?: string[];
   loading: boolean;
   isSigningIn: boolean;
   isDisconnecting: boolean;
@@ -26,9 +27,21 @@ export interface SettingsController {
   disconnect: () => Promise<boolean>;
 }
 
-export function useSettings(notify: SettingsNotice): SettingsController {
+type ResolvedSettingsController = SettingsController & {
+  disabledWatchProviders: string[];
+};
+
+export function useSettings(notify: SettingsNotice): ResolvedSettingsController {
   const state = useSettingsState(notify);
   const [blurEmailAddress, setBlurEmailAddress] = useState(true);
+  const [disabledWatchProviders, setDisabledWatchProviders] = useState<string[]>([]);
+  const updateProfilePreferences = useCallback((preferences: {
+    blurEmailAddress: boolean;
+    disabledWatchProviders: string[];
+  }) => {
+    setBlurEmailAddress(preferences.blurEmailAddress);
+    setDisabledWatchProviders(preferences.disabledWatchProviders);
+  }, []);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
   const actions = useSettingsActions({
     savedSettings: state.savedSettings,
@@ -47,13 +60,14 @@ export function useSettings(notify: SettingsNotice): SettingsController {
     onEmail: state.setSessionEmail,
     onChecking: setIsCheckingSession,
   });
-  useProfilePreferences(state.savedSettings, Boolean(state.session), setBlurEmailAddress);
+  useProfilePreferences(state.savedSettings, Boolean(state.session), updateProfilePreferences);
 
   return {
     savedSettings: state.savedSettings,
     draft: state.draft,
     sessionEmail: state.sessionEmail,
     blurEmailAddress,
+    disabledWatchProviders,
     loading: state.loading,
     isSigningIn: actions.isSigningIn,
     isDisconnecting: actions.isDisconnecting,

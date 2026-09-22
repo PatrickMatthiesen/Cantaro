@@ -3,11 +3,26 @@ import { runtimeAccessTokenProvider } from '../../platform/auth/runtimeAuthClien
 import type { ExtensionSettings } from '../../platform/settings/extensionSettings';
 
 type ProfilePreferencesResponse = {
-  preferences?: { theme?: 'system' | 'light' | 'dark'; blurEmailAddress?: boolean };
+  preferences?: {
+    theme?: 'system' | 'light' | 'dark';
+    blurEmailAddress?: boolean;
+    disabledWatchProviders?: string[];
+  };
 };
 
-function resolveTheme(profile: ProfilePreferencesResponse): 'light' | 'dark' {
-  const preference = profile.preferences?.theme ?? 'system';
+type ExtensionProfilePreferences = {
+  blurEmailAddress: boolean;
+  disabledWatchProviders: string[];
+  theme: 'light' | 'dark';
+};
+
+const defaultProfilePreferences = {
+  blurEmailAddress: true,
+  disabledWatchProviders: [] as string[],
+  theme: 'system' as const,
+};
+
+function resolveTheme(preference: 'system' | 'light' | 'dark'): 'light' | 'dark' {
   if (preference !== 'system') return preference;
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
@@ -20,13 +35,15 @@ async function loadProfilePreferences(settings: ExtensionSettings) {
   });
   if (!response.ok) throw new Error('Could not load profile preferences.');
   const profile = await response.json() as ProfilePreferencesResponse;
+  const preferences = { ...defaultProfilePreferences, ...profile.preferences };
   return {
-    blurEmailAddress: profile.preferences?.blurEmailAddress ?? true,
-    theme: resolveTheme(profile),
+    blurEmailAddress: preferences.blurEmailAddress,
+    disabledWatchProviders: preferences.disabledWatchProviders,
+    theme: resolveTheme(preferences.theme),
   };
 }
 
-async function applyProfilePreferences(preferences: { blurEmailAddress: boolean; theme: 'light' | 'dark' }) {
+async function applyProfilePreferences(preferences: ExtensionProfilePreferences) {
   await browser.storage.local.set({
     blurEmailAddress: preferences.blurEmailAddress,
     cantaroTheme: preferences.theme,
@@ -39,7 +56,7 @@ async function readStoredBlurPreference() {
   return typeof stored.blurEmailAddress === 'boolean' ? stored.blurEmailAddress : true;
 }
 
-export function useProfilePreferences(settings: ExtensionSettings, configured: boolean, onBlurPreference: (blur: boolean) => void) {
+export function useProfilePreferences(settings: ExtensionSettings, configured: boolean, onPreferences: (preferences: ExtensionProfilePreferences) => void) {
   useEffect(() => {
     if (!configured) return;
     let active = true;
@@ -47,15 +64,15 @@ export function useProfilePreferences(settings: ExtensionSettings, configured: b
     void loadProfilePreferences(settings)
       .then((preferences) => {
         if (!active) return;
-        onBlurPreference(preferences.blurEmailAddress);
+        onPreferences(preferences);
         void applyProfilePreferences(preferences);
       })
       .catch(() => {
         void readStoredBlurPreference().then((blur) => {
-          if (active) onBlurPreference(blur);
+          if (active) onPreferences({ blurEmailAddress: blur, disabledWatchProviders: [], theme: 'light' });
         });
       });
 
     return () => { active = false; };
-  }, [configured, onBlurPreference, settings]);
+  }, [configured, onPreferences, settings]);
 }

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Cantaro.Api.Models;
 
 public class MediaProviderAccountStatusDto
@@ -161,14 +163,31 @@ public class MediaProviderTitleDetailsDto
     public required string PrimaryProgressDimension { get; set; }
     public required string ReleaseStatusDimension { get; set; }
     public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
+    public IReadOnlyList<MediaProviderStremioTargetDto> StremioTargets { get; set; } = [];
+    public MediaProviderStremioTargetDto? StremioTarget { get; set; }
     /// <summary>
     /// fresh when returned by the provider, stale when served from the last
-    /// successful snapshot after a provider failure.
+    /// successful snapshot, or unavailable when no snapshot exists after an
+    /// optional availability lookup fails.
     /// </summary>
     public required string AvailabilityStatus { get; set; }
     public DateTimeOffset? AvailabilityLastVerifiedAt { get; set; }
     public IReadOnlyList<MediaProviderCharacterCreditDto> Characters { get; set; } = [];
     public MediaCatalogLibraryStateDto? LibraryState { get; set; }
+}
+
+public sealed class MediaProviderStremioTargetDto
+{
+    public required string Type { get; set; }
+    public required string Id { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MediaProviderStremioEpisodeMappingDto? EpisodeMapping { get; set; }
+}
+
+public sealed class MediaProviderStremioEpisodeMappingDto
+{
+    public int? SeasonNumber { get; set; }
+    public int EpisodeOffset { get; set; }
 }
 
 public class MediaProviderCharacterCreditDto

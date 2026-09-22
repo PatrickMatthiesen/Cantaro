@@ -32,6 +32,7 @@ public sealed class ProfileControllerTests
         Assert.Equal(UserThemePreferences.System, profile.Preferences.Theme);
         Assert.True(profile.Preferences.KeepPlaylistOrder);
         Assert.Equal(MediaReleaseTrackPreferences.Default, profile.Preferences.PreferredMediaReleaseTrack);
+        Assert.Empty(profile.Preferences.DisabledWatchProviders);
         Assert.Single(fixture.Db.UserSettings);
     }
 
@@ -72,6 +73,76 @@ public sealed class ProfileControllerTests
         var profile = Assert.IsType<ProfileDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal("dub:pt-BR", profile.Preferences.PreferredMediaReleaseTrack);
         Assert.Equal("dub:pt-BR", (await fixture.Db.UserSettings.SingleAsync()).PreferredMediaReleaseTrack);
+    }
+
+    [Fact]
+    public async Task UpdatePreferencesPersistsDeduplicatedDisabledWatchProviders()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+
+        var result = await fixture.Controller.UpdatePreferences(new UpdateProfilePreferencesRequest
+        {
+            Theme = UserThemePreferences.Dark,
+            KeepPlaylistOrder = true,
+            KeepPlaylistMetadata = true,
+            HideUnavailableTracks = true,
+            ScheduledSync = true,
+            DisabledWatchProviders = ["stremio", "netflix", "stremio"]
+        }, CancellationToken.None);
+
+        var profile = Assert.IsType<ProfileDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(["stremio", "netflix"], profile.Preferences.DisabledWatchProviders);
+
+        fixture.Db.ChangeTracker.Clear();
+        var settings = await fixture.Db.UserSettings.SingleAsync();
+        Assert.Equal(["stremio", "netflix"], settings.DisabledWatchProviders);
+    }
+
+    [Fact]
+    public async Task UpdatePreferencesWithoutDisabledWatchProvidersPreservesExistingSelection()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var initial = new UpdateProfilePreferencesRequest
+        {
+            Theme = UserThemePreferences.Dark,
+            KeepPlaylistOrder = true,
+            KeepPlaylistMetadata = true,
+            HideUnavailableTracks = true,
+            ScheduledSync = true,
+            DisabledWatchProviders = ["stremio"]
+        };
+        await fixture.Controller.UpdatePreferences(initial, CancellationToken.None);
+
+        var result = await fixture.Controller.UpdatePreferences(new UpdateProfilePreferencesRequest
+        {
+            Theme = UserThemePreferences.Light,
+            KeepPlaylistOrder = false,
+            KeepPlaylistMetadata = false,
+            HideUnavailableTracks = false,
+            ScheduledSync = false
+        }, CancellationToken.None);
+
+        var profile = Assert.IsType<ProfileDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(["stremio"], profile.Preferences.DisabledWatchProviders);
+    }
+
+    [Fact]
+    public async Task UpdatePreferencesRejectsUnknownDisabledWatchProvider()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+
+        var result = await fixture.Controller.UpdatePreferences(new UpdateProfilePreferencesRequest
+        {
+            Theme = UserThemePreferences.Dark,
+            KeepPlaylistOrder = true,
+            KeepPlaylistMetadata = true,
+            HideUnavailableTracks = true,
+            ScheduledSync = true,
+            DisabledWatchProviders = ["pluto-tv"]
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(fixture.Db.UserSettings);
     }
 
     [Theory]

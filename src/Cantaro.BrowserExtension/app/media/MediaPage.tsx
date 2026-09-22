@@ -14,6 +14,7 @@ interface MediaPageProps {
   configured: boolean;
   watchCollectionAllowed: boolean;
   isSigningIn: boolean;
+  disabledWatchProviders: readonly string[];
   activeTabContext: ActiveTabContextState;
   onSignIn: () => Promise<boolean>;
   onOpenSettings: () => void;
@@ -59,6 +60,7 @@ export function MediaPage(props: MediaPageProps) {
           <MediaEntryDetailPage
             mediaTitleId={route.id}
             embedded
+            disabledWatchProviders={props.disabledWatchProviders}
             onNavigateBack={() => startTransition(() => setRoute({ kind: 'library' }))}
             onNavigateTitle={(id) => startTransition(() => setRoute({ kind: 'title', id }))}
           />

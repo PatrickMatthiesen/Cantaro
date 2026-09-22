@@ -602,7 +602,7 @@ function ContinueDestinationLink({
             })
       }
       href={action.url}
-      target="_blank"
+      target={service.linkTarget}
       rel="noopener noreferrer"
       aria-label={action.label}
       onClick={() => onSelect(action.serviceId)}
@@ -693,6 +693,7 @@ function ContinueWatchingAction({
   preferredServiceId,
   onSelectStreamingService,
   canonicalTitle,
+  disabledWatchProviders,
   mediaKind,
   nextReleaseAt,
   nextReleaseLabel,
@@ -703,6 +704,7 @@ function ContinueWatchingAction({
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   canonicalTitle: string;
+  disabledWatchProviders?: readonly string[];
   mediaKind: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
@@ -731,6 +733,7 @@ function ContinueWatchingAction({
     preferredServiceId,
     canonicalTitle,
     mediaKind,
+    disabledWatchProviders,
   );
   return linkActions.length > 0 ? (
     <ContinueDestinationMenu
@@ -752,6 +755,7 @@ export function ActionRail({
   preferredServiceId,
   onSelectStreamingService,
   canonicalTitle,
+  disabledWatchProviders,
   mediaKind,
   nextReleaseAt,
   nextReleaseLabel,
@@ -765,6 +769,7 @@ export function ActionRail({
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   canonicalTitle: string;
+  disabledWatchProviders?: readonly string[];
   mediaKind: string;
   nextReleaseAt?: string;
   nextReleaseLabel?: string;
@@ -784,6 +789,7 @@ export function ActionRail({
           preferredServiceId={preferredServiceId}
           onSelectStreamingService={onSelectStreamingService}
           canonicalTitle={canonicalTitle}
+          disabledWatchProviders={disabledWatchProviders}
           mediaKind={mediaKind}
           nextReleaseAt={nextReleaseAt}
           nextReleaseLabel={nextReleaseLabel}

@@ -415,11 +415,19 @@ export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
     providerId: string;
     providerMediaId: string;
     availabilityLinks: MediaProviderAvailabilityLinkDto[];
+    stremioTarget: MediaProviderStremioTargetDto | null;
+    stremioTargets?: MediaProviderStremioTargetDto[];
     /** `fresh` when the provider was reached; `stale` when a cached snapshot was returned. */
     availabilityStatus?: string;
     availabilityLastVerifiedAt?: string;
     characters: MediaProviderCharacterCreditDto[];
     libraryState?: MediaCatalogLibraryStateDto;
+}
+
+export interface MediaProviderStremioTargetDto {
+    type: 'movie' | 'series';
+    id: string;
+    episodeMapping?: { seasonNumber: number | null; episodeOffset: number } | null;
 }
 
 export interface MediaProviderCharacterCreditDto {

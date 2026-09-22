@@ -12,7 +12,8 @@ public sealed class SimklMediaProvider(
     SimklApiClient api,
     TokenEncryptionService encryption,
     SimklTokenRefreshGate refreshGate,
-    SimklImportGate importGate) : IMediaProvider
+    SimklImportGate importGate,
+    IAniListAvailabilityEnricher aniListAvailabilityEnricher) : IMediaProvider
 {
     private const string ProviderName = MediaObservationSiteIdentifiers.Simkl;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -211,14 +212,32 @@ public sealed class SimklMediaProvider(
         return results.Take(request.Limit).ToList();
     }
 
-    public async Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
+    public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(
+        int userId,
+        string providerMediaId,
+        CancellationToken cancellationToken)
+        => GetTitleDetailsCoreAsync(userId, providerMediaId, includeAvailability: true, cancellationToken);
+
+    private async Task<MediaProviderTitleDetails?> GetTitleDetailsCoreAsync(
+        int userId,
+        string providerMediaId,
+        bool includeAvailability,
+        CancellationToken cancellationToken)
     {
         var id = SimklJson.ParseId(providerMediaId);
         var path = id.Type switch { "tv" => "tv", "movie" => "movies", _ => "anime" };
         try
         {
-            using var result = await GetAuthenticatedAsync(userId, $"/{path}/{id.Id}", null, cancellationToken);
+            using var result = await GetAuthenticatedAsync(
+                userId,
+                $"/{path}/{id.Id}",
+                new Dictionary<string, string?> { ["extended"] = "full" },
+                cancellationToken);
             var details = SimklJson.MapDetails(result.RootElement, id.Type, id.Id);
+            if (id.Type == "anime" && includeAvailability)
+            {
+                await ApplyAnimeAvailabilityAsync(details, cancellationToken);
+            }
             if (id.Type == "tv")
             {
                 try
@@ -240,9 +259,45 @@ public sealed class SimklMediaProvider(
         catch (SimklRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound) { return null; }
     }
 
+    private async Task ApplyAnimeAvailabilityAsync(
+        MediaProviderTitleDetails details,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var availability = await aniListAvailabilityEnricher.GetAvailabilityAsync(
+                details.CrossReferences,
+                cancellationToken);
+            if (availability is not null)
+            {
+                details.AvailabilityLinks = availability;
+                details.AvailabilityRefreshSucceeded = true;
+                return;
+            }
+        }
+        catch (Exception ex) when (
+            !cancellationToken.IsCancellationRequested
+            && ex is AniListRequestException or HttpRequestException or JsonException or InvalidOperationException or OperationCanceledException)
+        {
+            // SIMKL details remain usable when optional AniList availability is unavailable.
+        }
+
+        var snapshot = await db.MediaProviderLinks
+            .AsNoTracking()
+            .Where(link => link.Provider == ProviderName && link.ExternalId == details.ProviderMediaId)
+            .Select(link => link.AvailabilitySnapshot)
+            .FirstOrDefaultAsync(cancellationToken);
+        details.AvailabilityLinks = MediaProviderAvailabilitySnapshotCodec.Deserialize(snapshot);
+        details.AvailabilityRefreshSucceeded = false;
+    }
+
     public async Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
     {
-        var details = await GetTitleDetailsAsync(userId, providerMediaId, cancellationToken);
+        var details = await GetTitleDetailsCoreAsync(
+            userId,
+            providerMediaId,
+            includeAvailability: false,
+            cancellationToken);
         return details is null ? null : new MediaReleaseMetadata
         {
             ProviderId = ProviderName, ProviderMediaId = providerMediaId,

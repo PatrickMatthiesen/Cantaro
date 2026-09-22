@@ -6,6 +6,7 @@ import type {
   MediaSpecialEpisodeDestinationDto,
 } from "../../services/mediaApi";
 import {
+  preferEpisodeDestinationsByService,
   type MediaStreamingDestinations,
   type StreamingDestination,
 } from "../../services/streamingDestinations";
@@ -17,6 +18,10 @@ import { StreamingServiceIcon } from "../../components/StreamingServiceIcon";
 import {
   formatEpisodeAvailability,
 } from "./episodeAvailability";
+import {
+  filterDestinationsByAudioLanguage,
+  getLanguageCode,
+} from "./episodeAudioDestinations";
 import { getEpisodeRows } from "./episodeRows";
 import type { EpisodeCatalogState } from "./mediaEntryDetailTypes";
 import { resolvePreferredEpisodeAudioLanguage } from "./preferredEpisodeAudio";
@@ -70,37 +75,6 @@ function EpisodeAvailabilityLabel({
   ) : null;
 }
 
-function getEpisodeServiceDestinations(
-  episodeDestinations: readonly StreamingDestination[],
-  seriesDestinations: readonly StreamingDestination[],
-) {
-  const serviceIds = new Set([
-    ...episodeDestinations.map((destination) => destination.serviceId),
-    ...seriesDestinations.map((destination) => destination.serviceId),
-  ]);
-  return [...serviceIds]
-    .map(
-      (serviceId) =>
-        episodeDestinations.find(
-          (destination) => destination.serviceId === serviceId,
-        ) ??
-        seriesDestinations.find(
-          (destination) => destination.serviceId === serviceId,
-        ),
-    )
-    .filter((destination): destination is StreamingDestination =>
-      Boolean(destination),
-    );
-}
-
-function getLanguageCode(locale: string) {
-  try {
-    return new Intl.Locale(locale).language;
-  } catch {
-    return locale.split("-")[0]?.toLowerCase() ?? locale;
-  }
-}
-
 function formatAudioLanguage(language: string) {
   try {
     return new Intl.DisplayNames(undefined, { type: "language" }).of(language)
@@ -122,23 +96,6 @@ function getAudioLanguages(destinations: MediaStreamingDestinations) {
     .sort((left, right) => formatAudioLanguage(left).localeCompare(formatAudioLanguage(right)));
 }
 
-function filterDestinationsByAudioLanguage(
-  destinations: readonly StreamingDestination[],
-  audioLanguage: string | null,
-  preferredReleaseTrack?: string,
-) {
-  return audioLanguage
-    ? destinations.filter((destination) =>
-        (destination.audioLocale
-          && getLanguageCode(destination.audioLocale) === audioLanguage)
-        || (preferredReleaseTrack !== undefined
-          && destination.releaseTrack === preferredReleaseTrack
-          && (preferredReleaseTrack.startsWith("dub:")
-            ? getLanguageCode(preferredReleaseTrack.slice(4)) === audioLanguage
-            : audioLanguage === "ja")))
-    : destinations;
-}
-
 function EpisodeDestinationActions({
   episodeNumber,
   episodeLabel,
@@ -152,7 +109,7 @@ function EpisodeDestinationActions({
   seriesDestinations: readonly StreamingDestination[];
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
-  const destinations = getEpisodeServiceDestinations(
+  const destinations = preferEpisodeDestinationsByService(
     episodeDestinations,
     seriesDestinations,
   );
@@ -171,7 +128,7 @@ function EpisodeDestinationActions({
           <a
             key={destination.serviceId}
             href={destination.url}
-            target="_blank"
+            target={service.linkTarget}
             rel="noopener noreferrer"
             aria-label={`${opensEpisode ? `Open ${episodeLabel ?? `episode ${episodeNumber}`}` : "Open series"} on ${service.displayName}`}
             title={

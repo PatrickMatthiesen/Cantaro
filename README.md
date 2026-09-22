@@ -233,6 +233,29 @@ Authentication uses httpOnly cookies with the following security features:
 
 The browser automatically includes the authentication cookie in all API requests—no manual token management required.
 
+### Optional anime mapping enrichment
+
+Cantaro keeps both Kitsu and IMDb targets for Stremio. Entry-specific Kitsu IDs
+support episode links directly. Optional AIOStreams enrichment supplies missing
+IDs and IMDb season/episode offsets through its public anime mapping API.
+
+Set the Aspire parameter `Parameters:AioStreamsBaseUrl` to your AIOStreams HTTPS
+base URL, for example `https://aiostreams.example.com/`. For an API deployment
+without Aspire, set `AioStreams__BaseUrl`. Leave it empty to disable remote lookup.
+This is server-wide public metadata configuration; it does not require a secret,
+a personal addon URL, or a user's streaming account. It does not call stream search.
+
+For GitHub deployments, set the `Production` environment variable
+`CANTARO_AIOSTREAMS_BASE_URL` to the AIOStreams HTTPS base URL. The deployment
+workflow passes it to Aspire. No additional GitHub secret is required; leaving
+the variable unset disables remote enrichment.
+
+Mappings must match the requested provider entry and agree with known target IDs.
+Cantaro caches results for 24 hours and retains them for up to seven days during
+outages. Failed requests have a five-minute retry cooldown. Unmapped entries keep
+their title-level Stremio fallback. Opening Kitsu links still requires a Kitsu-capable
+metadata addon in the user's Stremio installation.
+
 ### Browser Extension Development
 
 The optional browser extension accelerates playlist sync and observes supported media pages in real time:

@@ -52,6 +52,7 @@ export interface MediaEntryDetailContentProps {
   entry: MediaEntryDetailModel;
   embedded: boolean;
   preferredMediaReleaseTrack?: string;
+  disabledWatchProviders?: readonly string[];
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingProgress: boolean;
   isSavingStatus: boolean;

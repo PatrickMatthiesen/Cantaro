@@ -10,6 +10,9 @@ import {
   type MediaStreamingDestinations,
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
+import { addStremioDestinations } from "../../services/stremioLinks";
+import { getEpisodeRows } from "./episodeRows";
+import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
 import {
   DetailErrorState,
@@ -143,7 +146,7 @@ function MediaDetailTabPanel({
         <StreamingDestinationsSection
           destinations={streamingDestinations.seriesDestinations}
           isStale={Object.values(props.availabilityByProviderLink).some(
-            (availability) => availability.isStale || availability.status === "unavailable",
+            (availability) => availability.isStale,
           )}
           onSelect={onSelectStreamingService}
         />
@@ -259,10 +262,17 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.episodeCatalog.status === "loaded"
       ? props.episodeCatalog.value
       : null;
-  const streamingDestinations = resolveStreamingDestinations(
-    availabilityLinks,
-    episodeCatalog,
-    preferredServiceId,
+  const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
+  const streamingDestinations = filterWatchProviders(
+    addStremioDestinations(
+      providerDestinations,
+      availabilityStates.flatMap((state) => state.stremioTargets?.length
+        ? state.stremioTargets : [state.stremioTarget]),
+      mediaKind,
+      getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
+        .map((row) => row.episodeNumber),
+    ),
+    props.disabledWatchProviders,
   );
   const specials = getSpecials(episodeCatalog);
   const season = useSeasonView(
@@ -301,6 +311,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                     preferredServiceId={preferredServiceId}
                     onSelectStreamingService={setPreferredServiceId}
                     canonicalTitle={props.entry.title.canonicalTitle}
+                    disabledWatchProviders={props.disabledWatchProviders}
                     mediaKind={mediaKind}
                     nextReleaseAt={props.entry.nextReleaseAt}
                     nextReleaseLabel={props.entry.nextReleaseLabel}

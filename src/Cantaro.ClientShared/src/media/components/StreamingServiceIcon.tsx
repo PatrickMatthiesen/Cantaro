@@ -8,6 +8,10 @@ function getOpticalClassName(serviceId: StreamingServiceId): string {
   return serviceId === 'apple-tv' ? ' dark:invert' : '';
 }
 
+function getDefaultFill(serviceId: StreamingServiceId, iconColor: string): string {
+  return serviceId === 'stremio' ? 'none' : iconColor;
+}
+
 export function StreamingServiceIcon({
   serviceId,
   className = 'h-5 w-5',
@@ -31,7 +35,7 @@ export function StreamingServiceIcon({
   return (
     <Icon
       className={`${className}${getOpticalClassName(serviceId)}`}
-      style={{ color: iconColor, fill: style?.fill ?? iconColor, ...style }}
+      style={{ color: iconColor, fill: style?.fill ?? getDefaultFill(serviceId, iconColor), ...style }}
       {...props}
     />
   );

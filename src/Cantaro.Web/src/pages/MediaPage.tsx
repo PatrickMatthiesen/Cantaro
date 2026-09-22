@@ -162,6 +162,7 @@ export function MediaTitleRoutePage({
       embedded
       mediaTitleId={mediaTitleId}
       preferredMediaReleaseTrack={user?.preferences.preferredMediaReleaseTrack}
+      disabledWatchProviders={user?.preferences.disabledWatchProviders}
       franchiseMediaTitleId={franchiseMediaTitleId}
       activeTab={tab}
       onTabChange={(nextTab) => void navigate({

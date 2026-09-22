@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
-import { Bell, Check, ChevronRight, Database, Download, ImagePlus, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, UserRound } from 'lucide-react';
+import { Bell, Check, ChevronRight, Database, Download, Eye, ImagePlus, Palette, Plug, RefreshCw, Shield, SlidersHorizontal, UserRound } from 'lucide-react';
 import { authApi, PASSWORD_MIN_LENGTH, BlurredEmail, type ProfilePreferences, type ThemePreference, type User } from '@cantaro/client-shared/auth';
 import { MusicPlatformIcon, platformCatalog, platformManager, type PlatformAccountStatus, type PlatformId } from '@cantaro/client-shared/music';
-import { MediaProviderIcon, mediaApi, mediaProviderCatalog, type MediaProviderAccountStatusDto } from '@cantaro/client-shared/media';
+import { MediaProviderIcon, mediaApi, mediaProviderCatalog, type MediaProviderAccountStatusDto, type StreamingServiceId } from '@cantaro/client-shared/media';
 import { PageShell } from '../components/PageShell';
 import { PageSideNavigation, type PageNavigationSection } from '../components/PageNavigation';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,9 +12,10 @@ import { GoogleAccountPanel } from '../components/GoogleAccountPanel';
 import { DeleteAccountPanel } from '../components/DeleteAccountPanel';
 import { useSignInMethods } from '../hooks/useSignInMethods';
 import { useGoogleAccountStatus } from '../hooks/useGoogleAccountStatus';
+import { isWatchProviderVisible, setWatchProviderVisible, watchProviderOptions } from '../settings/watchProviderVisibility';
 
 type SaveState = 'idle' | 'saving' | 'saved';
-type SectionId = 'profile' | 'connections' | 'notifications' | 'appearance' | 'sync' | 'security' | 'data';
+type SectionId = 'profile' | 'connections' | 'watch-providers' | 'notifications' | 'appearance' | 'sync' | 'security' | 'data';
 interface AvatarCropSource { file: File; imageUrl: string }
 
 const settingsNavigationSections: PageNavigationSection[] = [
@@ -23,6 +24,7 @@ const settingsNavigationSections: PageNavigationSection[] = [
     items: [
       { label: 'Profile', to: '/settings', hash: 'profile', icon: <UserRound className="h-4 w-4" />, tone: 'violet' },
       { label: 'Connections', to: '/settings', hash: 'connections', icon: <Plug className="h-4 w-4" />, tone: 'indigo' },
+      { label: 'Watch providers', to: '/settings', hash: 'watch-providers', icon: <Eye className="h-4 w-4" />, tone: 'sky' },
       { label: 'Notifications', to: '/settings', hash: 'notifications', icon: <Bell className="h-4 w-4" />, tone: 'sky' },
       { label: 'Appearance', to: '/settings', hash: 'appearance', icon: <Palette className="h-4 w-4" />, tone: 'pink' },
       { label: 'Sync defaults', to: '/settings', hash: 'sync', icon: <SlidersHorizontal className="h-4 w-4" />, tone: 'emerald' },
@@ -52,12 +54,12 @@ function SettingsSidebar() {
   );
 }
 
-function SettingsSection({ id, title, description, children }: { id: SectionId; eyebrow: string; title: string; description: string; children: ReactNode }) {
+function SettingsSection({ id, title, description, children }: { id: SectionId; eyebrow: string; title: string; description?: string; children: ReactNode }) {
   return (
     <section id={id} className="scroll-mt-28 border-b border-border-subtle py-8 sm:py-10">
       <header className="mb-6 max-w-2xl">
         <h2 className="text-2xl font-black tracking-tight text-content">{title}</h2>
-        <p className="mt-2 text-sm leading-6 text-content-muted">{description}</p>
+        {description ? <p className="mt-2 text-sm leading-6 text-content-muted">{description}</p> : null}
       </header>
       {children}
     </section>
@@ -327,6 +329,83 @@ function useThemeAutosave(
   return { previewTheme, themeSaveState };
 }
 
+function WatchProviderToggle({
+  name,
+  visible,
+  disabled,
+  onChange,
+}: {
+  name: string;
+  visible: boolean;
+  disabled: boolean;
+  onChange: (visible: boolean) => void;
+}) {
+  return (
+    <label className={`flex items-center justify-between gap-5 border-b border-border-subtle py-4 last:border-0 ${disabled ? 'cursor-not-allowed opacity-65' : 'cursor-pointer'}`}>
+      <span className="min-w-0">
+        <strong className="block text-sm text-content">{name}</strong>
+      </span>
+      <input
+        type="checkbox"
+        checked={visible}
+        disabled={disabled}
+        onChange={event => onChange(event.target.checked)}
+        className="peer sr-only"
+        aria-label={`${name} watch links`}
+      />
+      <span className="relative h-7 w-12 shrink-0 rounded-full bg-surface-subtle transition peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-disabled:bg-surface-subtle after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-surface after:shadow after:transition-transform peer-checked:after:translate-x-5 peer-disabled:after:bg-surface-raised" aria-hidden />
+    </label>
+  );
+}
+
+function WatchProviderVisibilitySection({ profile, onProfile }: { profile: User; onProfile: (profile: User) => void }) {
+  const [preferences, setPreferences] = useState(profile.preferences);
+  const [state, setState] = useState<SaveState>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => setPreferences(profile.preferences), [profile.preferences]);
+
+  const change = (providerId: StreamingServiceId, visible: boolean) => {
+    setError(null);
+    setState('idle');
+    setPreferences(current => setWatchProviderVisible(current, providerId, visible));
+  };
+
+  const save = async () => {
+    setState('saving');
+    setError(null);
+    try {
+      onProfile(await authApi.updatePreferences(preferences));
+      setState('saved');
+      window.setTimeout(() => setState('idle'), 1600);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to save watch-provider visibility');
+      setState('idle');
+    }
+  };
+
+  return (
+    <SettingsSection id="watch-providers" eyebrow="Watch links" title="Watch providers">
+      <div className="overflow-hidden border-y border-border-subtle px-1" aria-busy={state === 'saving'}>
+        {watchProviderOptions.map(provider => (
+          <WatchProviderToggle
+            key={provider.id}
+            name={provider.name}
+            visible={isWatchProviderVisible(preferences, provider.id)}
+            disabled={state === 'saving'}
+            onChange={visible => change(provider.id, visible)}
+          />
+        ))}
+      </div>
+      <div className="mt-5 flex items-center justify-between gap-4">
+        {state !== 'idle' ? <p className="text-xs font-bold text-content-muted" role="status">{state === 'saving' ? 'Saving watch providers…' : 'Watch providers saved'}</p> : <span />}
+        <SaveButton state={state} type="button" onClick={save} />
+      </div>
+      {error ? <p className="mt-3 text-sm text-danger-content" role="alert">{error}</p> : null}
+    </SettingsSection>
+  );
+}
+
 function PreferencesSections({ profile, onProfile }: { profile: User; onProfile: (profile: User) => void }) {
   const [preferences, setPreferences] = useState(profile.preferences);
   const [state, setState] = useState<SaveState>('idle');
@@ -473,5 +552,5 @@ export function SettingsPage() {
   const { user, setProfile } = useAuth();
   const profile = useMemo(() => user, [user]);
   if (!profile) return null;
-  return <PageShell sidebar={<SettingsSidebar />}><div className="mx-auto max-w-5xl"><header className="border-b border-border-subtle pb-7"><h1 className="text-3xl font-black tracking-[-.03em] text-content sm:text-4xl">Settings</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-content-muted">Your profile, connected services, sync defaults, security, and archive ownership.</p></header><ProfileSection profile={profile} onProfile={setProfile} /><ConnectionsSection /><PreferencesSections profile={profile} onProfile={setProfile} /><SecuritySection /><DataSection profile={profile} onProfile={setProfile} /></div></PageShell>;
+  return <PageShell sidebar={<SettingsSidebar />}><div className="mx-auto max-w-5xl"><header className="border-b border-border-subtle pb-7"><h1 className="text-3xl font-black tracking-[-.03em] text-content sm:text-4xl">Settings</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-content-muted">Your profile, connected services, sync defaults, security, and archive ownership.</p></header><ProfileSection profile={profile} onProfile={setProfile} /><ConnectionsSection /><WatchProviderVisibilitySection profile={profile} onProfile={setProfile} /><PreferencesSections profile={profile} onProfile={setProfile} /><SecuritySection /><DataSection profile={profile} onProfile={setProfile} /></div></PageShell>;
 }

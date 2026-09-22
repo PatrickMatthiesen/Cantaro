@@ -663,7 +663,7 @@ public class AniListMediaProvider(
     private static string SelectCharacterName(AniListCharacterName? name)
         => name?.UserPreferred ?? name?.Full ?? name?.Native ?? string.Empty;
 
-    private static IReadOnlyList<MediaProviderAvailabilityLink> BuildAvailabilityLinks(AniListMedia media)
+    internal static IReadOnlyList<MediaProviderAvailabilityLink> BuildAvailabilityLinks(AniListMedia media)
     {
         var results = new List<MediaProviderAvailabilityLink>();
         var seenServiceIds = new HashSet<string>(StringComparer.Ordinal);

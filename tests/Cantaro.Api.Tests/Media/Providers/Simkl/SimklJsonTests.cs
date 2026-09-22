@@ -95,4 +95,58 @@ public sealed class SimklJsonTests
         Assert.Contains("\"episodes\":[{\"number\":2}]", payload);
         Assert.DoesNotContain("\"seasons\"", payload);
     }
+
+    [Theory]
+    [InlineData("anime", "tv", "{\"kitsu\":1,\"imdb\":\"tt0213338\"}", "series", "kitsu:1")]
+    [InlineData("anime", "movie", "{\"kitsu\":2,\"imdb\":\"tt0275277\"}", "movie", "kitsu:2")]
+    [InlineData("anime", "tv", "{\"kitsu\":\"bad:id\",\"imdb\":\"tt0213338\"}", "series", "tt0213338")]
+    [InlineData("tv", null, "{\"imdb\":\"tt1520211\"}", "series", "tt1520211")]
+    [InlineData("movie", null, "{\"imdb\":\"tt0133093\"}", "movie", "tt0133093")]
+    public void DetailsMapValidatedStremioTarget(
+        string type,
+        string? animeType,
+        string ids,
+        string expectedType,
+        string expectedId)
+    {
+        using var json = JsonDocument.Parse($$"""
+            {"title":"Example","anime_type":{{JsonSerializer.Serialize(animeType)}},"ids":{{ids}}}
+            """);
+
+        var target = SimklJson.MapDetails(json.RootElement, type, 123).StremioTarget;
+
+        Assert.NotNull(target);
+        Assert.Equal(expectedType, target.Type);
+        Assert.Equal(expectedId, target.Id);
+    }
+
+    [Fact]
+    public void DetailsRetainKitsuAndImdbStremioTargets()
+    {
+        using var json = JsonDocument.Parse("""
+            {"title":"Example","anime_type":"tv","ids":{"kitsu":1,"imdb":"tt0213338"}}
+            """);
+
+        var details = SimklJson.MapDetails(json.RootElement, "anime", 123);
+
+        Assert.Equal(
+            [("series", "kitsu:1"), ("series", "tt0213338")],
+            details.StremioTargets.Select(target => (target.Type, target.Id)));
+        Assert.Equal("kitsu:1", details.StremioTarget?.Id);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"imdb\":\"tt123?autoplay=1\"}")]
+    [InlineData("{\"imdb\":\"https://imdb.com/title/tt123\"}")]
+    [InlineData("{\"kitsu\":\"1:1\",\"imdb\":\"also-bad\"}")]
+    public void DetailsRejectMalformedOrMissingStremioIds(string ids)
+    {
+        using var json = JsonDocument.Parse($$"""
+            {"title":"Example","anime_type":"tv","ids":{{ids}}}
+            """);
+
+        Assert.Null(SimklJson.MapDetails(json.RootElement, "anime", 123).StremioTarget);
+        Assert.Empty(SimklJson.MapDetails(json.RootElement, "anime", 123).StremioTargets);
+    }
 }
