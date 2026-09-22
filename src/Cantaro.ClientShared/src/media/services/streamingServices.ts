@@ -40,6 +40,7 @@ export interface StreamingServiceDefinition {
   allowedHosts: readonly string[];
   brandColor: string;
   buttonColor: string;
+  linkTarget: '_self' | '_blank';
   icon?: StreamingServiceIcon;
   capabilities: StreamingServiceCapabilities;
   seriesPathPatterns: readonly RegExp[];
@@ -160,6 +161,8 @@ function service(
     allowedHosts,
     brandColor,
     buttonColor,
+    // App protocols launch from the current tab instead of creating an empty tab.
+    linkTarget: id === 'stremio' ? '_self' : '_blank',
     capabilities,
     icon,
     seriesPathPatterns,

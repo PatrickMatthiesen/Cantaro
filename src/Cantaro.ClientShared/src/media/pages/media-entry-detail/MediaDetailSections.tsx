@@ -226,7 +226,7 @@ export function StreamingDestinationsSection({
               >
                 <a
                   href={destination.url}
-                  target="_blank"
+                  target={service.linkTarget}
                   rel="noopener noreferrer"
                   onClick={() => onSelect(destination.serviceId)}
                   className="group flex min-h-18 items-center gap-3 py-4 focus-visible:outline-2 focus-visible:outline-focus"

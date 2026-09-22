@@ -128,7 +128,7 @@ function EpisodeDestinationActions({
           <a
             key={destination.serviceId}
             href={destination.url}
-            target="_blank"
+            target={service.linkTarget}
             rel="noopener noreferrer"
             aria-label={`${opensEpisode ? `Open ${episodeLabel ?? `episode ${episodeNumber}`}` : "Open series"} on ${service.displayName}`}
             title={

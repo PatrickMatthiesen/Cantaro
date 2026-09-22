@@ -602,7 +602,7 @@ function ContinueDestinationLink({
             })
       }
       href={action.url}
-      target="_blank"
+      target={service.linkTarget}
       rel="noopener noreferrer"
       aria-label={action.label}
       onClick={() => onSelect(action.serviceId)}
