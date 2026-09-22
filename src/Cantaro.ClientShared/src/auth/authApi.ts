@@ -88,6 +88,7 @@ class AuthApiClient {
     await this.request('/api/logout', {
       method: 'POST',
       fallbackMessage: 'Logout failed',
+      body: {},
     });
   }
 

@@ -11,6 +11,7 @@ interface AuthContextType {
   login: (request: LoginRequest) => Promise<void>;
   register: (request: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
+  logoutError: string | null;
   setProfile: (user: User) => void;
   refreshProfile: () => Promise<User>;
 }
@@ -33,6 +34,7 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -61,13 +63,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const logout = async () => {
+    setLogoutError(null);
     try {
       await authApi.logout();
-    } catch (error) {
-      console.error('Logout failed:', error);
-    } finally {
-      setUser(null);
+    } catch {
+      setLogoutError('Could not sign out. Please try again.');
+      return;
     }
+    setUser(null);
+    await router.invalidate();
   };
 
   const setProfile = (profile: User) => setUser(profile);
@@ -98,6 +102,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     login,
     register,
     logout,
+    logoutError,
     setProfile,
     refreshProfile,
   };
