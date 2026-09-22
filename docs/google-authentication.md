@@ -12,6 +12,10 @@ The deployment workflow uses `CANTARO_AUTHENTICATION_MODE` and the secrets `CANT
 
 The Google OAuth redirect URI is the public application origin followed by `/signin-google`, unless `Authentication:Google:CallbackPath` changes it. The Google handler receives that callback and completes the Cantaro flow at `/api/auth/google/callback`. Register the handler callback URI with Google. Do not register or expose the completion endpoint as the Google provider callback.
 
+Behind an HTTPS-terminating proxy, set `Frontend:HttpsBaseUrl` to the public HTTPS origin (`CANTARO_HTTPS_BASE_URL` in the deployment workflow). Google sign-in uses this origin for both the authorization request and code exchange, preserving the handler callback path and any request path base. Without this setting, the handler uses the request origin, including trusted forwarded headers. Continue configuring the immediate trusted proxy IP for accurate client IPs and other request-scheme-dependent behavior; this setting does not broaden proxy trust.
+
+If extension sign-in works with an existing Cantaro session but fails with `redirect_uri_mismatch` when signed out, inspect the Google request's `redirect_uri`. An existing session skips the Google challenge and can hide an HTTP/HTTPS callback mismatch. Register the public HTTPS `/signin-google` URI on the same Google OAuth client used by Cantaro.
+
 The frontend can discover the active providers with `GET /api/auth/methods`:
 
 ```json

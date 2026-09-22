@@ -108,10 +108,17 @@ public class AuthController : ControllerBase
         if (user is null)
         {
             var frontendUrl = _frontendUrlResolver.GetFrontendUrl();
+            var frontendOrigin = new Uri(frontendUrl);
+            var returnTo = UriHelper.BuildAbsolute(
+                frontendOrigin.Scheme,
+                HostString.FromUriComponent(frontendOrigin),
+                Request.PathBase,
+                Request.Path,
+                Request.QueryString);
             var loginUrl = QueryHelpers.AddQueryString(
                 $"{frontendUrl}{_extensionAuthOptions.FrontendLoginPath}",
                 "returnTo",
-                Request.GetDisplayUrl());
+                returnTo);
 
             return Redirect(loginUrl);
         }

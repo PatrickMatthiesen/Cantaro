@@ -15,7 +15,7 @@ public static class GoogleAuthenticationConfiguration
             return authentication;
         }
 
-        return authentication.AddGoogle(GoogleDefaults.AuthenticationScheme, google =>
+        return authentication.AddOAuth<GoogleOptions, CantaroGoogleHandler>(GoogleDefaults.AuthenticationScheme, GoogleDefaults.DisplayName, google =>
         {
             google.ClientId = options.Google.ClientId;
             google.ClientSecret = options.Google.ClientSecret;
