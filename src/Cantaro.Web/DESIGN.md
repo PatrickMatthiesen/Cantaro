@@ -250,6 +250,10 @@ can wrap independently.
 Use the play icon for a provider link that identifies the episode and the
 external-link icon for a series fallback. Apply this convention to Stremio too.
 Only show the episode icon when the destination has a reliable episode identity.
+The main Continue Watching action uses the same provider destination selection
+as the next episode row. Prefer that provider's episode link when available;
+use its series link only as a fallback. Completed titles and unresolved episode
+conflicts retain the series fallback.
 
 Settings has a separate Watch providers section with one labeled toggle per
 provider. All providers are visible by default. Save these choices on the user

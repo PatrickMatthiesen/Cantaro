@@ -1,4 +1,7 @@
-import type { StreamingDestination } from '../../services/streamingDestinations';
+import {
+  preferEpisodeDestinationsByService,
+  type StreamingDestination,
+} from '../../services/streamingDestinations';
 import type { MediaContinueWatchingDto } from '../../services/mediaApi';
 import {
   STREAMING_SERVICE_IDS,
@@ -14,16 +17,6 @@ export interface ContinueLinkAction {
   url: string;
   label: string;
   kind: 'episode' | 'series' | 'search';
-}
-
-function serviceDestination(
-  serviceId: StreamingServiceId,
-  episodeDestinations: readonly StreamingDestination[],
-  seriesDestinations: readonly StreamingDestination[],
-): StreamingDestination | null {
-  return episodeDestinations.find(item => item.serviceId === serviceId)
-    ?? seriesDestinations.find(item => item.serviceId === serviceId)
-    ?? null;
 }
 
 function destinationAction(destination: StreamingDestination): ContinueLinkAction {
@@ -84,11 +77,17 @@ function destinationCandidates(
 ): { series: readonly StreamingDestination[]; episodes: readonly StreamingDestination[] } {
   const kind = resolvedKind(value.outcome);
   const serverDestination = kind ? resolvedDestination(value.provider, value.url, kind) : null;
-  const episodes = value.outcome === 'direct' ? episodeDestinations : [];
+  const episodes = includesNextEpisode(value.outcome) ? episodeDestinations : [];
   return {
     series: prependDestination(serverDestination, 'series', seriesDestinations),
     episodes: prependDestination(serverDestination, 'episode', episodes),
   };
+}
+
+function includesNextEpisode(outcome: MediaContinueWatchingDto['outcome']): boolean {
+  return outcome === 'direct'
+    || outcome === 'series_fallback'
+    || outcome === 'unavailable';
 }
 
 function prependDestination(
@@ -99,15 +98,16 @@ function prependDestination(
   return candidate?.kind === kind ? [candidate, ...destinations] : destinations;
 }
 
-function orderServiceIds(
+function orderDestinations(
   destinations: readonly StreamingDestination[],
   preferredServiceId: StreamingServiceId | null,
-): StreamingServiceId[] {
-  const serviceIds = new Set(destinations.map(item => item.serviceId));
-  return [...serviceIds].sort((left, right) => {
-    if (left === preferredServiceId) return -1;
-    if (right === preferredServiceId) return 1;
-    return STREAMING_SERVICES[left].displayName.localeCompare(STREAMING_SERVICES[right].displayName);
+): StreamingDestination[] {
+  return [...destinations].sort((left, right) => {
+    if (left.serviceId === preferredServiceId) return -1;
+    if (right.serviceId === preferredServiceId) return 1;
+    return STREAMING_SERVICES[left.serviceId].displayName.localeCompare(
+      STREAMING_SERVICES[right.serviceId].displayName,
+    );
   });
 }
 
@@ -122,11 +122,9 @@ export function getContinueLinkActions(
 ): ContinueLinkAction[] {
   if (state.status !== 'loaded') return [];
   const candidates = destinationCandidates(state.value, seriesDestinations, episodeDestinations);
-  const serviceIds = orderServiceIds([...candidates.episodes, ...candidates.series], preferredServiceId);
-  const actions = serviceIds
-    .filter(serviceId => !disabledProviderIds.includes(serviceId))
-    .map(serviceId => serviceDestination(serviceId, candidates.episodes, candidates.series))
-    .filter((value): value is StreamingDestination => value !== null)
+  const destinations = preferEpisodeDestinationsByService(candidates.episodes, candidates.series);
+  const actions = orderDestinations(destinations, preferredServiceId)
+    .filter(destination => !disabledProviderIds.includes(destination.serviceId))
     .map(destinationAction);
   const fallback = mediaKind.toLowerCase() === 'anime'
     ? searchFallback(canonicalTitle, preferredServiceId, disabledProviderIds)

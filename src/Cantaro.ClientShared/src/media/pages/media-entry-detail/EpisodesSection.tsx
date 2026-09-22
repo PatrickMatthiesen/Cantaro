@@ -6,6 +6,7 @@ import type {
   MediaSpecialEpisodeDestinationDto,
 } from "../../services/mediaApi";
 import {
+  preferEpisodeDestinationsByService,
   type MediaStreamingDestinations,
   type StreamingDestination,
 } from "../../services/streamingDestinations";
@@ -74,29 +75,6 @@ function EpisodeAvailabilityLabel({
   ) : null;
 }
 
-function getEpisodeServiceDestinations(
-  episodeDestinations: readonly StreamingDestination[],
-  seriesDestinations: readonly StreamingDestination[],
-) {
-  const serviceIds = new Set([
-    ...episodeDestinations.map((destination) => destination.serviceId),
-    ...seriesDestinations.map((destination) => destination.serviceId),
-  ]);
-  return [...serviceIds]
-    .map(
-      (serviceId) =>
-        episodeDestinations.find(
-          (destination) => destination.serviceId === serviceId,
-        ) ??
-        seriesDestinations.find(
-          (destination) => destination.serviceId === serviceId,
-        ),
-    )
-    .filter((destination): destination is StreamingDestination =>
-      Boolean(destination),
-    );
-}
-
 function formatAudioLanguage(language: string) {
   try {
     return new Intl.DisplayNames(undefined, { type: "language" }).of(language)
@@ -131,7 +109,7 @@ function EpisodeDestinationActions({
   seriesDestinations: readonly StreamingDestination[];
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
-  const destinations = getEpisodeServiceDestinations(
+  const destinations = preferEpisodeDestinationsByService(
     episodeDestinations,
     seriesDestinations,
   );

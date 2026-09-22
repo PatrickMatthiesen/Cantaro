@@ -40,6 +40,20 @@ export interface MediaStreamingDestinations {
   episodes: EpisodeStreamingDestinations[];
 }
 
+export function preferEpisodeDestinationsByService(
+  episodeDestinations: readonly StreamingDestination[],
+  seriesDestinations: readonly StreamingDestination[],
+): StreamingDestination[] {
+  const serviceIds = new Set([
+    ...episodeDestinations.map(destination => destination.serviceId),
+    ...seriesDestinations.map(destination => destination.serviceId),
+  ]);
+  return [...serviceIds]
+    .map(serviceId => episodeDestinations.find(destination => destination.serviceId === serviceId)
+      ?? seriesDestinations.find(destination => destination.serviceId === serviceId))
+    .filter((destination): destination is StreamingDestination => destination !== undefined);
+}
+
 type DestinationSource = Partial<MediaStreamingDestinationDto> & {
   serviceId: string;
   url?: string;

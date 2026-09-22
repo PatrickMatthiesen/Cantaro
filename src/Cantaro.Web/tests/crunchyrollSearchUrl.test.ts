@@ -71,6 +71,46 @@ describe('getContinueLinkActions', () => {
     expect(actions[0]).toMatchObject({ kind: 'episode', url: 'https://www.crunchyroll.com/watch/EP123' });
   });
 
+  it('uses the generated Stremio episode when the server has no direct episode link', () => {
+    for (const outcome of ['unavailable', 'series_fallback'] as const) {
+      const actions = getContinueLinkActions(
+        { status: 'loaded', value: { outcome, episodeNumber: 4 } },
+        [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778', kind: 'series', displayName: 'Stremio' }],
+        [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778/tt0108778:1:4', kind: 'episode', displayName: 'Stremio' }],
+        'stremio',
+        'Title',
+        'series',
+      );
+
+      expect(actions).toEqual([{
+        serviceId: 'stremio',
+        url: 'stremio:///detail/series/tt0108778/tt0108778:1:4',
+        label: 'Continue on Stremio',
+        kind: 'episode',
+      }]);
+    }
+  });
+
+  it('suppresses generated Stremio episodes after completion or a conflict', () => {
+    for (const outcome of ['completed', 'conflict'] as const) {
+      const actions = getContinueLinkActions(
+        { status: 'loaded', value: { outcome, episodeNumber: 4 } },
+        [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778', kind: 'series', displayName: 'Stremio' }],
+        [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778/tt0108778:1:4', kind: 'episode', displayName: 'Stremio' }],
+        'stremio',
+        'Title',
+        'series',
+      );
+
+      expect(actions).toEqual([{
+        serviceId: 'stremio',
+        url: 'stremio:///detail/series/tt0108778',
+        label: 'Open on Stremio',
+        kind: 'series',
+      }]);
+    }
+  });
+
   it('prefers a saved series service over another services episode link', () => {
     const actions = getContinueLinkActions(
       { status: 'loaded', value: { outcome: 'direct', episodeNumber: 4 } },
