@@ -92,6 +92,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.Theme).HasMaxLength(16);
             entity.Property(e => e.PreferredMediaReleaseTrack)
                 .HasDefaultValue(MediaReleaseTrackPreferences.Default);
+            entity.Property(e => e.DisabledWatchProviders)
+                .HasDefaultValue(Array.Empty<string>());
             entity.Property(e => e.AvatarObjectKey).HasMaxLength(512);
             entity.Property(e => e.AvatarETag).HasMaxLength(128);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

@@ -17,6 +17,10 @@ import { StreamingServiceIcon } from "../../components/StreamingServiceIcon";
 import {
   formatEpisodeAvailability,
 } from "./episodeAvailability";
+import {
+  filterDestinationsByAudioLanguage,
+  getLanguageCode,
+} from "./episodeAudioDestinations";
 import { getEpisodeRows } from "./episodeRows";
 import type { EpisodeCatalogState } from "./mediaEntryDetailTypes";
 import { resolvePreferredEpisodeAudioLanguage } from "./preferredEpisodeAudio";
@@ -93,14 +97,6 @@ function getEpisodeServiceDestinations(
     );
 }
 
-function getLanguageCode(locale: string) {
-  try {
-    return new Intl.Locale(locale).language;
-  } catch {
-    return locale.split("-")[0]?.toLowerCase() ?? locale;
-  }
-}
-
 function formatAudioLanguage(language: string) {
   try {
     return new Intl.DisplayNames(undefined, { type: "language" }).of(language)
@@ -120,23 +116,6 @@ function getAudioLanguages(destinations: MediaStreamingDestinations) {
     .filter((locale): locale is string => Boolean(locale))
     .map(getLanguageCode))]
     .sort((left, right) => formatAudioLanguage(left).localeCompare(formatAudioLanguage(right)));
-}
-
-function filterDestinationsByAudioLanguage(
-  destinations: readonly StreamingDestination[],
-  audioLanguage: string | null,
-  preferredReleaseTrack?: string,
-) {
-  return audioLanguage
-    ? destinations.filter((destination) =>
-        (destination.audioLocale
-          && getLanguageCode(destination.audioLocale) === audioLanguage)
-        || (preferredReleaseTrack !== undefined
-          && destination.releaseTrack === preferredReleaseTrack
-          && (preferredReleaseTrack.startsWith("dub:")
-            ? getLanguageCode(preferredReleaseTrack.slice(4)) === audioLanguage
-            : audioLanguage === "ja")))
-    : destinations;
 }
 
 function EpisodeDestinationActions({

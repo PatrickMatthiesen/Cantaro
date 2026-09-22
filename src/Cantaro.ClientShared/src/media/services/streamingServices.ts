@@ -9,6 +9,7 @@ import ParamountPlus from '@thesvg/react/paramountplus';
 import Peacock from '@thesvg/react/peacock';
 import PrimeVideo from '@thesvg/react/prime-video';
 import YouTube from '@thesvg/react/youtube';
+import { MonitorPlay } from 'lucide-react';
 
 export const STREAMING_SERVICE_IDS = [
   'crunchyroll',
@@ -22,6 +23,7 @@ export const STREAMING_SERVICE_IDS = [
   'paramount-plus',
   'peacock',
   'youtube',
+  'stremio',
 ] as const;
 
 export type StreamingServiceId = typeof STREAMING_SERVICE_IDS[number];
@@ -74,6 +76,7 @@ export const STREAMING_SERVICES: Readonly<Record<StreamingServiceId, StreamingSe
   'paramount-plus': service('paramount-plus', 'Paramount+', ['paramountplus.com'], '#0064ff', '#003280', seriesOnly, ParamountPlus, [/^\/(?:shows|movies)\//i]),
   peacock: service('peacock', 'Peacock', ['peacocktv.com'], '#f5e500', '#7b7300', seriesOnly, Peacock, [/^\/(?:watch\/asset|collections)\//i]),
   youtube: service('youtube', 'YouTube', ['youtube.com', 'youtu.be'], '#ff0033', '#ed002f', seriesOnly, YouTube, [/^\/(?:playlist|channel|@)/i]),
+  stremio: service('stremio', 'Stremio', [], '#8b7cf6', '#6758d9', direct, MonitorPlay),
 };
 
 const SERVICE_ALIASES: Readonly<Record<string, StreamingServiceId>> = {
@@ -99,6 +102,7 @@ const SERVICE_ALIASES: Readonly<Record<string, StreamingServiceId>> = {
   'paramount-plus': 'paramount-plus',
   peacock: 'peacock',
   youtube: 'youtube',
+  stremio: 'stremio',
 };
 
 export function resolveStreamingServiceId(value: string): StreamingServiceId | null {

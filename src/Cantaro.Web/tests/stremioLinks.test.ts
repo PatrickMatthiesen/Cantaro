@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  addStremioDestinations,
   buildStremioDetailUrl,
   findStremioDetailUrl,
 } from '@cantaro/client-shared/media';
+import type { MediaStreamingDestinations } from '@cantaro/client-shared/media';
 
 describe('Stremio title links', () => {
   it('builds the Stremio movie route with its required repeated IMDb id', () => {
@@ -51,4 +53,105 @@ describe('Stremio title links', () => {
       { type: 'series', id: 'tt0108778:1:1' },
     ])).toBeNull();
   });
+
+  it('appends title and exact IMDb episode destinations after existing services', () => {
+    const destinations = catalogDestinations();
+
+    const result = addStremioDestinations(
+      destinations,
+      [null, { type: 'series', id: 'tt0108778' }],
+      'series',
+    );
+
+    expect(result.seriesDestinations.map(item => item.serviceId)).toEqual([
+      'crunchyroll',
+      'stremio',
+    ]);
+    expect(result.seriesDestinations[1]?.url)
+      .toBe('stremio:///detail/series/tt0108778');
+    expect(result.episodes[0]?.destinations.at(-1)).toEqual({
+      serviceId: 'stremio',
+      displayName: 'Stremio',
+      kind: 'episode',
+      url: 'stremio:///detail/series/tt0108778/tt0108778:2:3',
+    });
+    expect(result.episodes[1]?.destinations).toEqual([]);
+    expect(destinations.seriesDestinations).toHaveLength(1);
+    expect(destinations.episodes[0]?.destinations).toHaveLength(1);
+  });
+
+  it('uses the Kitsu title route without guessing overall episode numbers', () => {
+    const result = addStremioDestinations(
+      catalogDestinations(),
+      [{ type: 'series', id: 'kitsu:1' }],
+      'anime',
+    );
+
+    expect(result.seriesDestinations.at(-1)?.url)
+      .toBe('stremio:///detail/series/kitsu:1');
+    expect(result.episodes.every(episode =>
+      episode.destinations.every(destination => destination.serviceId !== 'stremio'),
+    )).toBeTrue();
+  });
+
+  it('keeps the repeated movie id and does not add episode routes', () => {
+    const result = addStremioDestinations(
+      catalogDestinations(),
+      [{ type: 'movie', id: 'tt1254207' }],
+      'movie',
+    );
+
+    expect(result.seriesDestinations.at(-1)?.url)
+      .toBe('stremio:///detail/movie/tt1254207/tt1254207');
+    expect(result.episodes.every(episode =>
+      episode.destinations.every(destination => destination.serviceId !== 'stremio'),
+    )).toBeTrue();
+  });
+
+  it('rejects malformed targets and media kinds that cannot be watched', () => {
+    const destinations = catalogDestinations();
+
+    expect(addStremioDestinations(
+      destinations,
+      [{ type: 'series', id: 'tt0108778:1:1' }],
+      'series',
+    )).toBe(destinations);
+    expect(addStremioDestinations(
+      destinations,
+      [{ type: 'series', id: 'tt0108778' }],
+      'manga',
+    )).toBe(destinations);
+  });
 });
+
+function catalogDestinations(): MediaStreamingDestinations {
+  return {
+    seriesDestinations: [{
+      serviceId: 'crunchyroll',
+      displayName: 'Crunchyroll',
+      kind: 'series',
+      url: 'https://www.crunchyroll.com/series/SERIES1/show',
+    }],
+    episodes: [
+      {
+        episodeNumber: 15,
+        seasonNumber: 2,
+        seasonEpisodeNumber: 3,
+        availableAudioLanguageCodes: [],
+        availableSubtitleLanguageCodes: [],
+        destinations: [{
+          serviceId: 'crunchyroll',
+          displayName: 'Crunchyroll',
+          kind: 'episode',
+          url: 'https://www.crunchyroll.com/watch/EP15/title',
+        }],
+      },
+      {
+        episodeNumber: 16,
+        availableAudioLanguageCodes: [],
+        availableSubtitleLanguageCodes: [],
+        destinations: [],
+      },
+    ],
+  };
+}

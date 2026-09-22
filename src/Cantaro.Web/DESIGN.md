@@ -247,6 +247,15 @@ least 42rem wide; stack them below at narrower widths. Episode titles use small
 text and wrap onto additional lines instead of truncating. Language metadata
 can wrap independently.
 
+Use the play icon for a provider link that identifies the episode and the
+external-link icon for a series fallback. Apply this convention to Stremio too.
+Only show the episode icon when the destination has a reliable episode identity.
+
+Settings has a separate Watch providers section with one labeled toggle per
+provider. All providers are visible by default. Save these choices on the user
+account and apply them to overview, episode, and Continue Watching links in the
+web app and extension. These choices do not change provider sync connections.
+
 Use a compact, unlabeled season selector inline with the progress count above
 the tabs, replacing the repeated season heading. Keep its accessible label.
 The episode toolbar selector also has no visible label. With only one season

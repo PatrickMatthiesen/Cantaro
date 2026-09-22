@@ -24,6 +24,7 @@ public sealed class ProfilePreferencesDto
     public bool ScheduledSync { get; set; }
     public bool BlurEmailAddress { get; set; }
     public required string PreferredMediaReleaseTrack { get; set; }
+    public string[] DisabledWatchProviders { get; set; } = [];
 }
 
 public sealed class UpdateProfileRequest
@@ -45,6 +46,7 @@ public sealed class UpdateProfilePreferencesRequest
     public bool ScheduledSync { get; set; }
     public bool BlurEmailAddress { get; set; }
     public string PreferredMediaReleaseTrack { get; set; } = MediaReleaseTrackPreferences.Default;
+    public List<string>? DisabledWatchProviders { get; set; }
 }
 
 public sealed class ChangePasswordRequest

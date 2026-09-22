@@ -56,10 +56,11 @@ function resolvedDestination(
 function searchFallback(
   canonicalTitle: string,
   preferredServiceId: StreamingServiceId | null,
+  disabledProviderIds: readonly string[],
 ): ContinueLinkAction | null {
-  const serviceId = preferredServiceId && STREAMING_SERVICES[preferredServiceId].searchUrl
+  const serviceId = preferredServiceId && !disabledProviderIds.includes(preferredServiceId) && STREAMING_SERVICES[preferredServiceId].searchUrl
     ? preferredServiceId
-    : STREAMING_SERVICE_IDS.find(id => STREAMING_SERVICES[id].searchUrl);
+    : STREAMING_SERVICE_IDS.find(id => !disabledProviderIds.includes(id) && STREAMING_SERVICES[id].searchUrl);
   if (!serviceId) return null;
   const service = STREAMING_SERVICES[serviceId];
   return {
@@ -117,16 +118,18 @@ export function getContinueLinkActions(
   preferredServiceId: StreamingServiceId | null,
   canonicalTitle: string,
   mediaKind: string,
+  disabledProviderIds: readonly string[] = [],
 ): ContinueLinkAction[] {
   if (state.status !== 'loaded') return [];
   const candidates = destinationCandidates(state.value, seriesDestinations, episodeDestinations);
   const serviceIds = orderServiceIds([...candidates.episodes, ...candidates.series], preferredServiceId);
   const actions = serviceIds
+    .filter(serviceId => !disabledProviderIds.includes(serviceId))
     .map(serviceId => serviceDestination(serviceId, candidates.episodes, candidates.series))
     .filter((value): value is StreamingDestination => value !== null)
     .map(destinationAction);
   const fallback = mediaKind.toLowerCase() === 'anime'
-    ? searchFallback(canonicalTitle, preferredServiceId)
+    ? searchFallback(canonicalTitle, preferredServiceId, disabledProviderIds)
     : null;
   return actions.length > 0 || !fallback ? actions : [fallback];
 }

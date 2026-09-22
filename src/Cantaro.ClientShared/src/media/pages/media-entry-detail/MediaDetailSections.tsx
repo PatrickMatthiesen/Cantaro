@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { ExternalLink, Link2, Plus, Unlink } from "lucide-react";
-import { ActionButton, IconButton, actionClassName } from "../../../ui";
+import { ActionButton, IconButton } from "../../../ui";
 import { DetailArtwork } from "../../components/media-entry-detail/EntryDisplayPrimitives";
 import {
   providerAvailabilityKey,
@@ -192,12 +192,10 @@ export function ProviderSection({
 
 export function StreamingDestinationsSection({
   destinations,
-  stremioUrl,
   isStale = false,
   onSelect,
 }: {
   destinations: readonly StreamingDestination[];
-  stremioUrl: string | null;
   isStale?: boolean;
   onSelect: (serviceId: StreamingServiceId) => void;
 }) {
@@ -213,15 +211,6 @@ export function StreamingDestinationsSection({
           ? "Showing cached destinations; availability may be out of date."
           : "Verified streaming destinations linked to this title."}
       />
-      {stremioUrl ? (
-        <a
-          href={stremioUrl}
-          className={actionClassName({ tone: "secondary", className: "mt-5" })}
-        >
-          Open in Stremio
-          <ExternalLink size={17} aria-hidden />
-        </a>
-      ) : null}
       {destinations.length === 0 ? (
         <p className="mt-5 py-4 text-content-muted">
           No verified streaming destinations are available yet.

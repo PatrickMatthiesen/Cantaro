@@ -20,6 +20,7 @@ export interface ProfilePreferences {
   hideUnavailableTracks: boolean;
   scheduledSync: boolean;
   blurEmailAddress: boolean;
+  disabledWatchProviders?: string[];
 }
 
 export interface RegisterRequest {

@@ -10,7 +10,8 @@ import {
   type MediaStreamingDestinations,
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
-import { findStremioDetailUrl } from "../../services/stremioLinks";
+import { addStremioDestinations } from "../../services/stremioLinks";
+import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
 import {
   DetailErrorState,
@@ -115,7 +116,6 @@ function MediaDetailTabPanel({
   props,
   progressSummary,
   streamingDestinations,
-  stremioUrl,
   preferredServiceId,
   onSelectStreamingService,
   seasonOptions,
@@ -127,7 +127,6 @@ function MediaDetailTabPanel({
   props: MediaEntryDetailContentProps;
   progressSummary: ProgressSummary;
   streamingDestinations: MediaStreamingDestinations;
-  stremioUrl: string | null;
   preferredServiceId: StreamingServiceId | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   seasonOptions: readonly SeasonOption[];
@@ -145,7 +144,6 @@ function MediaDetailTabPanel({
       >
         <StreamingDestinationsSection
           destinations={streamingDestinations.seriesDestinations}
-          stremioUrl={stremioUrl}
           isStale={Object.values(props.availabilityByProviderLink).some(
             (availability) => availability.isStale,
           )}
@@ -263,13 +261,13 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.episodeCatalog.status === "loaded"
       ? props.episodeCatalog.value
       : null;
-  const streamingDestinations = resolveStreamingDestinations(
-    availabilityLinks,
-    episodeCatalog,
-    preferredServiceId,
-  );
-  const stremioUrl = findStremioDetailUrl(
-    availabilityStates.map((state) => state.stremioTarget),
+  const streamingDestinations = filterWatchProviders(
+    addStremioDestinations(
+      resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId),
+      availabilityStates.map((state) => state.stremioTarget),
+      mediaKind,
+    ),
+    props.disabledWatchProviders,
   );
   const specials = getSpecials(episodeCatalog);
   const season = useSeasonView(
@@ -308,6 +306,7 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                     preferredServiceId={preferredServiceId}
                     onSelectStreamingService={setPreferredServiceId}
                     canonicalTitle={props.entry.title.canonicalTitle}
+                    disabledWatchProviders={props.disabledWatchProviders}
                     mediaKind={mediaKind}
                     nextReleaseAt={props.entry.nextReleaseAt}
                     nextReleaseLabel={props.entry.nextReleaseLabel}
@@ -345,7 +344,6 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
                 props={props}
                 progressSummary={progressSummary}
                 streamingDestinations={streamingDestinations}
-                stremioUrl={stremioUrl}
                 preferredServiceId={preferredServiceId}
                 onSelectStreamingService={setPreferredServiceId}
                 seasonOptions={season.options}

@@ -64,6 +64,48 @@ public static class MediaReleaseTrackPreferences
     }
 }
 
+public static class WatchProviderPreferences
+{
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "crunchyroll",
+        "hidive",
+        "netflix",
+        "hulu",
+        "disney-plus",
+        "prime-video",
+        "max",
+        "apple-tv",
+        "paramount-plus",
+        "peacock",
+        "youtube",
+        "stremio"
+    };
+
+    public static bool TryNormalize(IEnumerable<string> values, out string[] normalized)
+    {
+        var providerIds = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value) || !All.Contains(value))
+            {
+                normalized = [];
+                return false;
+            }
+
+            if (seen.Add(value))
+            {
+                providerIds.Add(value);
+            }
+        }
+
+        normalized = [.. providerIds];
+        return true;
+    }
+}
+
 public class UserSettings
 {
     public int UserId { get; set; }
@@ -80,6 +122,7 @@ public class UserSettings
     public bool ScheduledSync { get; set; } = true;
     public bool BlurEmailAddress { get; set; }
     public string PreferredMediaReleaseTrack { get; set; } = MediaReleaseTrackPreferences.Default;
+    public string[] DisabledWatchProviders { get; set; } = [];
 
     public string? AvatarObjectKey { get; set; }
     public string? AvatarETag { get; set; }
