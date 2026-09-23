@@ -59,11 +59,44 @@ describe('collection consent disclosure', () => {
     expect(props.onSignIn).not.toHaveBeenCalled();
   });
 
-  it('does not grant consent when signing in', async () => {
-    const props = await render();
+  it.each([
+    { watchTracking: true, catalogCollection: false },
+    { watchTracking: false, catalogCollection: true },
+    { watchTracking: true, catalogCollection: true },
+    { watchTracking: false, catalogCollection: false },
+  ])('saves the selected choices only after successful sign-in: %j', async choices => {
+    let finishSignIn: (success: boolean) => void = () => {};
+    const props = await render({
+      choices,
+      onSignIn: vi.fn(() => new Promise<boolean>(resolve => { finishSignIn = resolve; })),
+    });
     await clickButton('Sign in to enable collection');
     expect(props.onSignIn).toHaveBeenCalledOnce();
     expect(props.onSave).not.toHaveBeenCalled();
+
+    // Authentication can rerender the form before its sign-in promise resolves.
+    await render({ ...props, authenticated: true });
+    await act(async () => finishSignIn(true));
+    expect(props.onSave).toHaveBeenCalledExactlyOnceWith(choices);
+  });
+
+  it('keeps choices available and does not save when sign-in is cancelled or fails', async () => {
+    const choices = { watchTracking: true, catalogCollection: false };
+    const props = await render({ choices, onSignIn: vi.fn(async () => false) });
+    await clickButton('Sign in to enable collection');
+    expect(props.onSave).not.toHaveBeenCalled();
+    const inputs = Array.from(container.querySelectorAll('input'));
+    expect(inputs.map(input => input.checked)).toEqual([true, false]);
+  });
+
+  it('keeps the selected choices available for retry when saving after sign-in fails', async () => {
+    const choices = { watchTracking: true, catalogCollection: false };
+    const props = await render({ choices });
+    await clickButton('Sign in to enable collection');
+    await render({ ...props, authenticated: true, error: 'Could not save choices.' });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Could not save choices.');
+    await clickButton('Allow selected collection');
+    expect(props.onSave).toHaveBeenNthCalledWith(2, choices);
   });
 
   it('requires a separate explicit save and preserves granular choices', async () => {

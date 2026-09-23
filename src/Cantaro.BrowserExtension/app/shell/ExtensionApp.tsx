@@ -25,7 +25,7 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
   const consentProps = createConsentProps(settings, consent);
   const anyCollection = consentProps.choices.watchTracking || consentProps.choices.catalogCollection;
   const activeTabContext = useActiveTabContext(services, anyCollection);
-  const consentKey = JSON.stringify([consentProps.baseUrl, consentProps.authenticated, consentProps.choices]);
+  const consentKey = JSON.stringify([consentProps.baseUrl, consentProps.choices]);
 
   return (
     <div className="h-screen overflow-hidden bg-canvas text-content">

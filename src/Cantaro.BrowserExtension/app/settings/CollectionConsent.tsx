@@ -72,10 +72,15 @@ export function CollectionConsent(props: CollectionConsentProps) {
 }
 
 function ConsentActions(props: CollectionConsentProps & { draft: CollectionChoices; changed: boolean; enabling: boolean }) {
+  const signInAndSave = async () => {
+    const choices = { ...props.draft };
+    if (await props.onSignIn()) await props.onSave(choices);
+  };
+
   return (
       <div className="flex flex-wrap items-center gap-3">
         {!props.authenticated ? (
-          <GradientButton type="button" disabled={props.busy} onClick={() => void props.onSignIn()}>Sign in to enable collection</GradientButton>
+          <GradientButton type="button" disabled={props.busy} onClick={() => void signInAndSave()}>Sign in to enable collection</GradientButton>
         ) : (
           <GradientButton type="button" disabled={props.busy || (!props.needsReview && !props.changed)} onClick={() => void props.onSave(props.draft)}>
             {props.busy ? 'Saving…' : props.enabling ? 'Allow selected collection' : 'Keep collection off'}
