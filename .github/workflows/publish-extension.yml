@@ -288,7 +288,6 @@ jobs:
 
       - name: Submit Chrome extension for staged publishing
         if: ${{ steps.stores.outputs.chrome_enabled == 'true' }}
-        working-directory: src/Cantaro.BrowserExtension
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
           CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
@@ -296,25 +295,7 @@ jobs:
           CHROME_ZIP: ${{ github.workspace }}/.release/chrome/${{ needs.build-extension.outputs.chrome_filename }}
         run: |
           set -euo pipefail
-
-          chrome_client_email=$(node -e \
-            "process.stdout.write(JSON.parse(process.env.CHROME_SERVICE_ACCOUNT_JSON).client_email ?? '')")
-          chrome_private_key=$(node -e \
-            "process.stdout.write(JSON.parse(process.env.CHROME_SERVICE_ACCOUNT_JSON).private_key ?? '')")
-
-          if [ -z "$chrome_client_email" ] || [ -z "$chrome_private_key" ]; then
-            echo "::error::CHROME_SERVICE_ACCOUNT_JSON must contain client_email and private_key."
-            exit 1
-          fi
-
-          bun wxt submit \
-            --chrome-api-version v2 \
-            --chrome-extension-id "$CHROME_EXTENSION_ID" \
-            --chrome-publisher-id "$CHROME_PUBLISHER_ID" \
-            --chrome-service-account-client-email "$chrome_client_email" \
-            --chrome-service-account-private-key "$chrome_private_key" \
-            --chrome-publish-type STAGED_PUBLISH \
-            --chrome-zip "$CHROME_ZIP"
+          bun run scripts/submit-browser-extension.ts chrome
 
       - name: Download Firefox artifact
         if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
@@ -334,7 +315,6 @@ jobs:
 
       - name: Submit Firefox extension as unlisted
         if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
-        working-directory: src/Cantaro.BrowserExtension
         env:
           FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
           FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
@@ -352,11 +332,7 @@ jobs:
             exit 1
           fi
 
-          bun wxt submit \
-            --firefox-channel unlisted \
-            --firefox-extension-id "$FIREFOX_EXTENSION_ID" \
-            --firefox-zip "$FIREFOX_ZIP" \
-            --firefox-sources-zip "$FIREFOX_SOURCES_ZIP"
+          bun run scripts/submit-browser-extension.ts firefox
 
   tag-release:
     name: Tag submitted extension version
@@ -388,27 +364,4 @@ jobs:
           FIREFOX_SUBMITTED: ${{ needs.publish-stores.outputs.firefox_submitted }}
         run: |
           set -euo pipefail
-
-          TAG="extension/v$EXTENSION_VERSION"
-          EXISTING_SHA=$(git rev-parse "$TAG^{commit}" 2>/dev/null || true)
-
-          if [ -n "$EXISTING_SHA" ]; then
-            if [ "$EXISTING_SHA" != "$TARGET_SHA" ]; then
-              echo "::error::Tag $TAG already points to $EXISTING_SHA; refusing to move it to $TARGET_SHA."
-              exit 1
-            fi
-
-            echo "Tag $TAG already points to $TARGET_SHA."
-            exit 0
-          fi
-
-          stores=()
-          [ "$CHROME_SUBMITTED" = "true" ] && stores+=("Chrome")
-          [ "$FIREFOX_SUBMITTED" = "true" ] && stores+=("Firefox")
-          store_list=$(IFS=,; echo "${stores[*]}")
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" "$TARGET_SHA" -m "Extension version $EXTENSION_VERSION submitted to $store_list"
-          git push origin "$TAG"
-          echo "Created and pushed tag $TAG for $TARGET_SHA."
+          bash scripts/tag-extension-release.sh
