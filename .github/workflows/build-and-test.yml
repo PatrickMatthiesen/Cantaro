@@ -50,12 +50,9 @@ jobs:
             extension:
               - '.github/workflows/build-and-test.yml'
               - '.github/workflows/publish-extension.yml'
+              - 'scripts/extension-release.test.ts'
               - 'package.json'
               - 'bun.lock'
-              - 'scripts/submit-browser-extension.ts'
-              - 'scripts/submit-browser-extension.test.ts'
-              - 'scripts/tag-extension-release.sh'
-              - 'scripts/tag-extension-release.test.sh'
               - 'src/Cantaro.ClientShared/**'
               - 'src/Cantaro.BrowserExtension/**'
 

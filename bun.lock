@@ -6,7 +6,6 @@
       "name": "cantaro-repo",
       "devDependencies": {
         "postcss": "^8.5.15",
-        "publish-browser-extension": "6.1.1",
       },
     },
     "src/Cantaro.BrowserExtension": {
