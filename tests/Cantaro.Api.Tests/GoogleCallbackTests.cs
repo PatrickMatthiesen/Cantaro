@@ -2,10 +2,12 @@ using System.Net;
 using Cantaro.Api.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -16,17 +18,25 @@ namespace Cantaro.Api.Tests;
 public sealed class GoogleCallbackTests
 {
     [Theory]
-    [InlineData("https://cantaro.example", "", "/signin-google", "https://cantaro.example/signin-google")]
-    [InlineData("https://cantaro.example:8443/", "/cantaro", "/google/callback", "https://cantaro.example:8443/cantaro/google/callback")]
-    [InlineData(null, "", "/signin-google", "http://localhost:5000/signin-google")]
-    public async Task ChallengeAndCodeExchange_UseTheSamePublicCallback(
-        string? publicOrigin, string pathBase, string callbackPath, string expectedCallback)
+    [InlineData("http", "192.168.1.151", "https", "", "/signin-google", "https://cantaro.example/signin-google")]
+    [InlineData("http", "::ffff:192.168.1.151", "https", "/cantaro", "/google/callback", "https://cantaro.example/cantaro/google/callback")]
+    [InlineData("http", "192.168.1.99", "https", "", "/signin-google", "http://cantaro.example/signin-google")]
+    [InlineData("https", "127.0.0.1", null, "", "/signin-google", "https://cantaro.example/signin-google")]
+    [InlineData("http", "127.0.0.1", null, "", "/signin-google", "http://cantaro.example/signin-google")]
+    public async Task ChallengeAndCodeExchange_UseRequestOriginAfterTrustedForwarding(
+        string scheme, string peer, string? forwardedScheme, string pathBase, string callbackPath, string expectedCallback)
     {
         using var backchannel = new GoogleBackchannel();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
-        services.Configure<FrontendUrlOptions>(options => options.HttpsBaseUrl = publicOrigin);
+        // Frontend return URLs must not override the Google handler callback.
+        services.Configure<FrontendUrlOptions>(options => options.HttpsBaseUrl = "https://frontend.example");
+        TrustedProxyConfiguration.Configure(services, new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RateLimiting:TrustedProxies:0"] = "192.168.1.151"
+            }).Build());
         services.AddAuthentication()
             .AddCookie(IdentityConstants.ExternalScheme)
             .AddCantaroGoogle(new CantaroAuthenticationOptions
@@ -46,9 +56,13 @@ public sealed class GoogleCallbackTests
         });
         using var provider = services.BuildServiceProvider();
         using var challengeScope = provider.CreateScope();
-        var challenge = CreateContext(challengeScope.ServiceProvider, pathBase, "/api/auth/google/login");
-        challenge.Request.Headers["X-Forwarded-Host"] = "attacker.example";
-        challenge.Request.Headers["X-Forwarded-Proto"] = "https";
+        var challenge = CreateContext(challengeScope.ServiceProvider, pathBase, "/api/auth/google/login", scheme, peer, forwardedScheme);
+        await ApplyForwardedHeaders(challenge);
+        Assert.Equal(new Uri(expectedCallback).Scheme, challenge.Request.Scheme);
+        Assert.Equal("cantaro.example", challenge.Request.Host.Value);
+        var expectedClient = peer.EndsWith("192.168.1.151", StringComparison.Ordinal)
+            ? IPAddress.Parse("203.0.113.42") : IPAddress.Parse(peer);
+        Assert.Equal(expectedClient, challenge.Connection.RemoteIpAddress);
         await challenge.ChallengeAsync(GoogleDefaults.AuthenticationScheme, new AuthenticationProperties
         {
             RedirectUri = "/api/auth/google/callback",
@@ -66,8 +80,8 @@ public sealed class GoogleCallbackTests
         // Exercise the real callback pipeline, including protected state,
         // correlation validation, PKCE redemption and external-cookie sign-in.
         using var callbackScope = provider.CreateScope();
-        var callback = CreateContext(callbackScope.ServiceProvider, pathBase, callbackPath);
-        callback.Request.Host = new HostString("different-internal-host");
+        var callback = CreateContext(callbackScope.ServiceProvider, pathBase, callbackPath, scheme, peer, forwardedScheme);
+        await ApplyForwardedHeaders(callback);
         callback.Request.QueryString = QueryString.Create(new Dictionary<string, string?>
         {
             ["code"] = "test-code",
@@ -83,14 +97,30 @@ public sealed class GoogleCallbackTests
         Assert.Equal("/api/auth/google/callback", callback.Response.Headers.Location.ToString());
     }
 
-    private static DefaultHttpContext CreateContext(IServiceProvider services, string pathBase, string path)
+    private static DefaultHttpContext CreateContext(
+        IServiceProvider services, string pathBase, string path, string scheme, string peer, string? forwardedScheme)
     {
         var context = new DefaultHttpContext { RequestServices = services };
-        context.Request.Scheme = "http";
-        context.Request.Host = new HostString("localhost", 5000);
+        context.Request.Scheme = scheme;
+        context.Request.Host = new HostString("cantaro.example");
         context.Request.PathBase = pathBase;
         context.Request.Path = path;
+        context.Connection.RemoteIpAddress = IPAddress.Parse(peer);
+        context.Request.Headers["X-Forwarded-Host"] = "attacker.example";
+        if (forwardedScheme is not null)
+        {
+            context.Request.Headers["X-Forwarded-Proto"] = forwardedScheme;
+            context.Request.Headers["X-Forwarded-For"] = "203.0.113.42";
+        }
         return context;
+    }
+
+    private static Task ApplyForwardedHeaders(HttpContext context)
+    {
+        var app = new ApplicationBuilder(context.RequestServices);
+        app.UseForwardedHeaders();
+        app.Run(_ => Task.CompletedTask);
+        return app.Build()(context);
     }
 
     private sealed class GoogleBackchannel : HttpMessageHandler
