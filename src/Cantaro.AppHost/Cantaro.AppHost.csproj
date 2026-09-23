@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.6.0-preview.1.26468.12">
+<Project Sdk="Aspire.AppHost.Sdk/14.0.0-preview.1.26473.3">
 
   <ItemGroup>
     <ProjectReference Include="..\Cantaro.Api\Cantaro.Api.csproj" />
@@ -7,11 +7,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.Dotnet" Version="13.6.0-preview.1.26468.12" />
+    <PackageReference Include="Aspire.Hosting.Dotnet" Version="14.0.0-preview.1.26473.3" />
     <PackageReference Include="Subjective.Aspire.Hosting.Garage" Version="0.1.0-preview.6" />
-    <PackageReference Include="Aspire.Hosting.Docker" Version="13.6.0-preview.1.26468.12" />
-    <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.6.0-preview.1.26468.12" />
-    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.6.0-preview.1.26468.12" />
+    <PackageReference Include="Aspire.Hosting.Docker" Version="14.0.0-preview.1.26473.3" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" Version="14.0.0-preview.1.26473.3" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="14.0.0-preview.1.26473.3" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
