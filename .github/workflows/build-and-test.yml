@@ -49,6 +49,8 @@ jobs:
               - 'src/Cantaro.Web/**'
             extension:
               - '.github/workflows/build-and-test.yml'
+              - '.github/workflows/publish-extension.yml'
+              - 'scripts/extension-release.test.ts'
               - 'package.json'
               - 'bun.lock'
               - 'src/Cantaro.ClientShared/**'
@@ -134,3 +136,6 @@ jobs:
 
       - name: Check extension
         run: bun run check:extension
+
+      - name: Test extension release workflow
+        run: bun run test:extension-release

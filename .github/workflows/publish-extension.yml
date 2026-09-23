@@ -294,27 +294,24 @@ jobs:
           CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
           CHROME_SERVICE_ACCOUNT_JSON: ${{ secrets.CHROME_SERVICE_ACCOUNT_JSON }}
           CHROME_ZIP: ${{ github.workspace }}/.release/chrome/${{ needs.build-extension.outputs.chrome_filename }}
+          CHROME_API_VERSION: v2
+          CHROME_PUBLISH_TYPE: STAGED_PUBLISH
         run: |
           set -euo pipefail
 
-          chrome_client_email=$(node -e \
+          CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL=$(node -e \
             "process.stdout.write(JSON.parse(process.env.CHROME_SERVICE_ACCOUNT_JSON).client_email ?? '')")
-          chrome_private_key=$(node -e \
+          CHROME_SERVICE_ACCOUNT_PRIVATE_KEY=$(node -e \
             "process.stdout.write(JSON.parse(process.env.CHROME_SERVICE_ACCOUNT_JSON).private_key ?? '')")
 
-          if [ -z "$chrome_client_email" ] || [ -z "$chrome_private_key" ]; then
+          if [ -z "$CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL" ] || [ -z "$CHROME_SERVICE_ACCOUNT_PRIVATE_KEY" ]; then
             echo "::error::CHROME_SERVICE_ACCOUNT_JSON must contain client_email and private_key."
             exit 1
           fi
 
-          bun wxt submit \
-            --chrome-api-version v2 \
-            --chrome-extension-id "$CHROME_EXTENSION_ID" \
-            --chrome-publisher-id "$CHROME_PUBLISHER_ID" \
-            --chrome-service-account-client-email "$chrome_client_email" \
-            --chrome-service-account-private-key "$chrome_private_key" \
-            --chrome-publish-type STAGED_PUBLISH \
-            --chrome-zip "$CHROME_ZIP"
+          # PEM keys begin with hyphens, which the submit CLI can parse as flags.
+          export CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL CHROME_SERVICE_ACCOUNT_PRIVATE_KEY
+          bun wxt submit
 
       - name: Download Firefox artifact
         if: ${{ steps.stores.outputs.firefox_enabled == 'true' }}
@@ -390,9 +387,8 @@ jobs:
           set -euo pipefail
 
           TAG="extension/v$EXTENSION_VERSION"
-          EXISTING_SHA=$(git rev-parse "$TAG^{commit}" 2>/dev/null || true)
-
-          if [ -n "$EXISTING_SHA" ]; then
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            EXISTING_SHA=$(git rev-parse "$TAG^{commit}")
             if [ "$EXISTING_SHA" != "$TARGET_SHA" ]; then
               echo "::error::Tag $TAG already points to $EXISTING_SHA; refusing to move it to $TARGET_SHA."
               exit 1
