@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Google;
 
 namespace Cantaro.Api.Configuration;
 
@@ -15,7 +14,7 @@ public static class GoogleAuthenticationConfiguration
             return authentication;
         }
 
-        return authentication.AddOAuth<GoogleOptions, CantaroGoogleHandler>(GoogleDefaults.AuthenticationScheme, GoogleDefaults.DisplayName, google =>
+        return authentication.AddGoogle(google =>
         {
             google.ClientId = options.Google.ClientId;
             google.ClientSecret = options.Google.ClientSecret;
