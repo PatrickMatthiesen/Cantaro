@@ -286,7 +286,7 @@ jobs:
           path: .release/chrome
           skip-decompress: true
 
-      - name: Submit Chrome extension for staged publishing
+      - name: Submit Chrome extension for automatic publishing after approval
         if: ${{ steps.stores.outputs.chrome_enabled == 'true' }}
         working-directory: src/Cantaro.BrowserExtension
         env:
@@ -295,7 +295,7 @@ jobs:
           CHROME_SERVICE_ACCOUNT_JSON: ${{ secrets.CHROME_SERVICE_ACCOUNT_JSON }}
           CHROME_ZIP: ${{ github.workspace }}/.release/chrome/${{ needs.build-extension.outputs.chrome_filename }}
           CHROME_API_VERSION: v2
-          CHROME_PUBLISH_TYPE: STAGED_PUBLISH
+          CHROME_PUBLISH_TYPE: DEFAULT_PUBLISH
         run: |
           set -euo pipefail
 
