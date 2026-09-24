@@ -19,7 +19,7 @@ export function SongDetail({ song, playlists, onBack }: {
       <button type="button" onClick={onBack} className="min-h-9 px-2 text-xs font-bold text-content-muted hover:bg-surface-hover hover:text-content">← Back to music</button>
       <SongSummary song={song} />
       <PlatformLinks song={song} />
-      <SongLyrics trackId={controller.trackId} />
+      <SongLyrics song={song} />
       <Identifiers song={song} />
       <YouTubeVersion controller={controller} />
       <Playlists controller={controller} />

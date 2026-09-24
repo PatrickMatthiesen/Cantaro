@@ -12,7 +12,7 @@ const runtime = vi.hoisted(() => ({
 vi.mock('../../platform/consent/runtimeConsentClient', () => runtime);
 
 const denied: ConsentStatus = { consentVersion: 1, needsReview: true, authenticated: true,
-  watchTrackingAllowed: false, catalogCollectionAllowed: false };
+  watchTrackingAllowed: false, catalogCollectionAllowed: false, musicLyricsAllowed: false };
 const allowed = { ...denied, needsReview: false, watchTrackingAllowed: true };
 let root: Root;
 let current: ReturnType<typeof useCollectionConsent>;
@@ -52,7 +52,7 @@ describe('collection consent popup state', () => {
     await act(async () => root.render(createElement(Harness, { url: 'https://first.example' })));
     const saveForOriginalServer = current.save;
     await act(async () => root.render(createElement(Harness, { url: 'https://second.example' })));
-    await act(async () => saveForOriginalServer({ watchTracking: true, catalogCollection: true }));
+    await act(async () => saveForOriginalServer({ watchTracking: true, catalogCollection: true, musicLyrics: false }));
     expect(runtime.saveRuntimeConsent).not.toHaveBeenCalled();
   });
 
@@ -61,7 +61,7 @@ describe('collection consent popup state', () => {
     runtime.saveRuntimeConsent.mockImplementation(() => new Promise((_, reject) => { rejectSave = reject; }));
     await act(async () => root.render(createElement(Harness, { url: 'https://api.example' })));
     let pending: Promise<void>;
-    await act(async () => { pending = current.save({ watchTracking: true, catalogCollection: false }); });
+    await act(async () => { pending = current.save({ watchTracking: true, catalogCollection: false, musicLyrics: false }); });
     await act(async () => notify(denied));
     expect(current.busy).toBe(true);
     await act(async () => { rejectSave(new Error('Storage unavailable')); await pending; });
@@ -75,7 +75,7 @@ describe('collection consent popup state', () => {
     runtime.saveRuntimeConsent.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
     await act(async () => root.render(createElement(Harness, { url: 'https://first.example' })));
     let pending: Promise<void>;
-    await act(async () => { pending = current.save({ watchTracking: true, catalogCollection: false }); });
+    await act(async () => { pending = current.save({ watchTracking: true, catalogCollection: false, musicLyrics: false }); });
     await act(async () => root.render(createElement(Harness, { url: 'https://second.example' })));
     await act(async () => { complete(allowed); await pending; });
     expect(current.status?.watchTrackingAllowed).toBe(false);
@@ -86,7 +86,7 @@ describe('collection consent popup state', () => {
     runtime.saveRuntimeConsent.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
     await act(async () => root.render(createElement(Harness, { url: 'https://api.example' })));
     let pending: Promise<void>;
-    await act(async () => { pending = current.save({ watchTracking: true, catalogCollection: false }); });
+    await act(async () => { pending = current.save({ watchTracking: true, catalogCollection: false, musicLyrics: false }); });
     await act(async () => notify(denied));
     await act(async () => { complete(allowed); await pending; });
     expect(current.status?.watchTrackingAllowed).toBe(false);

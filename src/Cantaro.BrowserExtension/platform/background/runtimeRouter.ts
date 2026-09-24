@@ -11,6 +11,8 @@ import { messageFailure, messageSuccess } from '../messaging/messageResult';
 import { normalizeBaseUrl } from '../settings/extensionSettings';
 import { browserSettingsRepository, type SettingsRepository } from '../settings/settingsRepository';
 import { handleContentPreferencesRequest, isContentPreferencesRequest } from '../settings/contentPreferences';
+import { isYouTubeLyricsRequest } from '../../features/music/youtube/youtubeLyrics';
+import { handleYouTubeLyrics } from '../../features/music/youtube/youtubeLyricsHandler';
 
 const logger = createExtensionLogger({ scope: 'background' });
 
@@ -33,6 +35,7 @@ export function consentDenyStatus(authenticated: boolean) {
     authenticated,
     watchTrackingAllowed: false,
     catalogCollectionAllowed: false,
+    musicLyricsAllowed: false,
   };
 }
 
@@ -211,6 +214,7 @@ export function createRuntimeRouter(
     if (isContentPreferencesRequest(message)) return handleContentPreferencesRequest(message);
     if (isAuthBackgroundRequest(message)) return handleAuthRequest(message, sender, dependencies);
     if (isConsentBackgroundRequest(message)) return handleConsentRequest(message, sender, dependencies);
+    if (isYouTubeLyricsRequest(message)) return handleYouTubeLyrics(message, sender);
     if (isMediaBackgroundRequest(message)) return mediaHandler.handle(message, tabId);
     return undefined;
   };

@@ -54,6 +54,7 @@ function createConsentProps(settings: ReturnType<typeof useSettings>, consent: R
     choices: {
       watchTracking: consent.status?.watchTrackingAllowed === true,
       catalogCollection: consent.status?.catalogCollectionAllowed === true,
+      musicLyrics: consent.status?.musicLyricsAllowed === true,
     },
     needsReview: consent.status?.needsReview !== false,
     authenticated: consent.status?.authenticated === true,

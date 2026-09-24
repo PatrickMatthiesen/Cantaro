@@ -23,7 +23,7 @@ afterEach(async () => {
 
 async function render(overrides: Partial<CollectionConsentProps> = {}) {
   const props: CollectionConsentProps = {
-    choices: { watchTracking: false, catalogCollection: false },
+    choices: { watchTracking: false, catalogCollection: false, musicLyrics: false },
     needsReview: true, authenticated: false, baseUrl: 'https://cantaro.example',
     busy: false, error: null,
     onSave: vi.fn(async () => {}), onRevoke: vi.fn(async () => {}),
@@ -44,10 +44,15 @@ describe('collection consent disclosure', () => {
   it('starts unchecked and allows declining without signing in', async () => {
     const props = await render();
     expect(Array.from(container.querySelectorAll('input')).every(input => !input.checked)).toBe(true);
-    expect(container.textContent).toContain('Keep track of what you watch');
-    expect(container.textContent).toContain('Keep your library up to date as you watch on Crunchyroll');
+    expect(container.textContent).toContain('Choose website features');
+    expect(container.textContent).toContain('Choose what Cantaro can read on Crunchyroll and YouTube');
     expect(container.textContent).toContain('Automatically track what I watch');
     expect(container.textContent).toContain('Help Cantaro find episodes and watch links');
+    expect(container.textContent).toContain('YouTube lyrics');
+    expect(container.textContent).toContain('independently of the YouTube option');
+    expect(container.textContent).toContain("Read the video's ID and match it to a song already in your Cantaro library");
+    expect(container.textContent).toContain("YouTube lyrics lookups send the song's title and artist directly to LRCLIB");
+    expect(container.textContent).toContain('Album and duration help rank results and stay in the extension');
     expect(container.textContent).toContain('Where your information goes');
     expect(container.textContent).toContain('Temporary matching details are deleted once processed');
     expect(container.textContent).not.toContain('Cantaro can read supported Crunchyroll pages to update your library');
@@ -60,10 +65,11 @@ describe('collection consent disclosure', () => {
   });
 
   it.each([
-    { watchTracking: true, catalogCollection: false },
-    { watchTracking: false, catalogCollection: true },
-    { watchTracking: true, catalogCollection: true },
-    { watchTracking: false, catalogCollection: false },
+    { watchTracking: true, catalogCollection: false, musicLyrics: false },
+    { watchTracking: false, catalogCollection: true, musicLyrics: false },
+    { watchTracking: true, catalogCollection: true, musicLyrics: false },
+    { watchTracking: false, catalogCollection: false, musicLyrics: false },
+    { watchTracking: false, catalogCollection: false, musicLyrics: true },
   ])('saves the selected choices only after successful sign-in: %j', async choices => {
     let finishSignIn: (success: boolean) => void = () => {};
     const props = await render({
@@ -81,16 +87,16 @@ describe('collection consent disclosure', () => {
   });
 
   it('keeps choices available and does not save when sign-in is cancelled or fails', async () => {
-    const choices = { watchTracking: true, catalogCollection: false };
+    const choices = { watchTracking: true, catalogCollection: false, musicLyrics: false };
     const props = await render({ choices, onSignIn: vi.fn(async () => false) });
     await clickButton('Sign in to enable collection');
     expect(props.onSave).not.toHaveBeenCalled();
     const inputs = Array.from(container.querySelectorAll('input'));
-    expect(inputs.map(input => input.checked)).toEqual([true, false]);
+    expect(inputs.map(input => input.checked)).toEqual([true, false, false]);
   });
 
   it('keeps the selected choices available for retry when saving after sign-in fails', async () => {
-    const choices = { watchTracking: true, catalogCollection: false };
+    const choices = { watchTracking: true, catalogCollection: false, musicLyrics: false };
     const props = await render({ choices });
     await clickButton('Sign in to enable collection');
     await render({ ...props, authenticated: true, error: 'Could not save choices.' });
@@ -100,15 +106,15 @@ describe('collection consent disclosure', () => {
   });
 
   it('requires a separate explicit save and preserves granular choices', async () => {
-    const props = await render({ authenticated: true, choices: { watchTracking: true, catalogCollection: false } });
+    const props = await render({ authenticated: true, choices: { watchTracking: true, catalogCollection: false, musicLyrics: false } });
     expect(props.onSave).not.toHaveBeenCalled();
     await clickButton('Allow selected collection');
-    expect(props.onSave).toHaveBeenCalledWith({ watchTracking: true, catalogCollection: false });
+    expect(props.onSave).toHaveBeenCalledWith({ watchTracking: true, catalogCollection: false, musicLyrics: false });
   });
 
   it('exposes revocation after onboarding and announces storage errors', async () => {
     const props = await render({ authenticated: true, needsReview: false,
-      choices: { watchTracking: true, catalogCollection: true }, error: 'Could not save choices.' });
+      choices: { watchTracking: true, catalogCollection: true, musicLyrics: true }, error: 'Could not save choices.' });
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('Could not save choices.');
     await clickButton('Turn off all collection');
     expect(props.onRevoke).toHaveBeenCalledOnce();

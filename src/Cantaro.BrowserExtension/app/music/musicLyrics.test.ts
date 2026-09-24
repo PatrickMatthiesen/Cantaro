@@ -19,7 +19,20 @@ describe('displayLyricsText', () => {
     });
   });
 
-  it('falls back to plain lyrics', () => {
+  it('displays plain lyrics', () => {
     expect(displayLyricsText(result({ plainLyrics: 'Words' }))).toEqual({ synchronized: false, text: 'Words' });
   });
+
+  it('prefers plain lyrics and preserves their verse spacing exactly', () => {
+    const plainLyrics = 'First line\nSecond line\n\nNext verse\n';
+    expect(displayLyricsText(result({ plainLyrics, syncedLyrics: '[00:01]First line\n[00:02]Second line\n[00:03]Next verse' })))
+      .toEqual({ synchronized: false, text: plainLyrics });
+  });
+
+  it.each(['\n', '\r\n'])('preserves blank lines and timestamp-only lines with newline %j', newline => {
+    const syncedLyrics = ['[00:01] First', '[00:02.000]', '', '[00:03][00:04.50] Second', ''].join(newline);
+    expect(displayLyricsText(result({ plainLyrics: '  ', syncedLyrics })))
+      .toEqual({ synchronized: true, text: ['First', '', '', 'Second', ''].join(newline) });
+  });
+
 });

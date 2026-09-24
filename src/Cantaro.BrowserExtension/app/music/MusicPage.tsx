@@ -3,6 +3,7 @@ import type { ActiveTabContextState } from '../shell/extensionAppTypes';
 import { MusicResults } from './MusicResults';
 import { MusicState } from './MusicState';
 import { SongDetail } from './SongDetail';
+import { YouTubeLyricsCard } from './YouTubeLyricsCard';
 import { useMusicPage } from './useMusicPage';
 
 interface MusicPageProps {
@@ -15,7 +16,7 @@ interface MusicPageProps {
 export function MusicPage(props: MusicPageProps) {
   if (!props.configured) {
     return (
-      <MusicState title="Your music, in reach" detail="Sign in to search Cantaro and recognize the song playing in this tab.">
+      <MusicState title="Your music, in reach" detail="Sign in to search your Cantaro music library. Allow YouTube lyrics in Settings to see lyrics for the current song.">
         <GradientButton className="mt-4" onClick={() => void props.onSignIn()} disabled={props.isSigningIn}>
           {props.isSigningIn ? 'Signing in…' : 'Sign in'}
         </GradientButton>
@@ -41,6 +42,7 @@ function ConfiguredMusicPage() {
 
   return (
     <section className="space-y-3 p-1" aria-label="Music">
+      <YouTubeLyricsCard enabled />
       <label className="block">
         <span className="sr-only">Search music</span>
         <input

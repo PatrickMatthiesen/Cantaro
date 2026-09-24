@@ -1,8 +1,8 @@
 # Cantaro Browser Extension Privacy Policy
 
-Effective September 9, 2026
+Effective September 24, 2026
 
-Cantaro observes supported streaming pages only to provide its media-library and watch-tracking features. Cantaro does not sell user data or use it for advertising.
+Cantaro reads supported streaming pages to provide opted-in media tracking and YouTube lyrics. Cantaro does not sell user data or use it for advertising.
 
 ## Scope
 
@@ -19,7 +19,8 @@ Depending on the features used, the extension handles the following data:
 - **Account and authentication data:** The user's Cantaro account email, configured server address, and access and refresh tokens used to keep the extension signed in. Cantaro does not receive the user's password through the extension.
 - **Settings and temporary state:** Page feature preferences, versioned consent choices, diagnostic logging preference, tracking pauses, and popup state.
 - **Crunchyroll activity and content:** Only after the user has opted in to the relevant media feature and is signed in, the extension can read the rendered page URL, provider identifiers, series, season, and episode titles, episode numbers, available audio or subtitle languages, playback position, duration, watch progress, observation time, and extension version. Catalog observations are collected from rendered series pages when catalog collection is enabled. Watch-progress observations are submitted when playback reaches Cantaro's completion threshold and watch tracking is enabled.
-- **Music features:** The extension's music features use authenticated Cantaro account and popup requests to manage the library, playlists, and lyrics. They do not scrape Spotify, YouTube, or other music websites and do not collect music-page browsing activity.
+- **Music library and playlists:** These features use authenticated Cantaro account and popup requests. They do not read music websites or collect music-page browsing activity. When the user opens a song's lyrics in the extension, it sends the song's title and artist directly to LRCLIB over HTTPS. The song's album and duration stay in the extension and help rank results.
+- **YouTube lyrics:** Only after the user enables this separate option and is signed in, the extension reads the YouTube video ID from the active video page and checks it against the user's existing Cantaro music library. The video ID stays within the extension. For a match, the extension sends the song's title and artist directly to LRCLIB over HTTPS to find lyrics. Album and duration stay in the extension and help rank results. It does not send the Cantaro song ID to LRCLIB. If there is no match, Cantaro reports that the video is not linked to a library song. It does not automatically match songs or change the library. The page title may prefill manual search fields locally. Suggested terms are sent to LRCLIB only when the user submits the search. The extension does not send ad text, full URLs, or browsing history. The lyrics feature does not read playback timing.
 - **Standard server request data:** The configured server and its hosting provider may process IP addresses, request timestamps, browser or user-agent details, and requested endpoints in operational or security logs. The extension does not separately collect precise location.
 
 The extension does not collect health, financial, payment, or personal communication data. It does not include third-party advertising or analytics SDKs.
@@ -29,7 +30,9 @@ The extension does not collect health, financial, payment, or personal communica
 Cantaro uses this data only to:
 
 - authenticate the user with the selected Cantaro server;
-- show the user's Cantaro music library, playlists, and lyrics information;
+- show the user's Cantaro music library and playlists;
+- find an existing library song for an opted-in YouTube video and request lyrics from LRCLIB using that song's title and artist, then rank results locally with album and duration;
+- request lyrics from LRCLIB when the user opens a library song's lyrics in the extension;
 - record supported media catalog information and watch progress in the user's library when the user has enabled those separate collection purposes;
 - apply the user's settings and provide diagnostics the user explicitly enables; and
 - maintain, secure, and troubleshoot those user-facing features.
@@ -44,26 +47,38 @@ The extension stores settings, the versioned consent choices, the refresh creden
 
 The extension sends account requests and delivered Crunchyroll media observations over HTTPS to the Cantaro server configured by the user. Observation URLs have query strings and fragments removed before delivery and again at server ingestion. The server turns each report into the structured facts needed for matching and library features. It does not retain full serialized observation requests or playback position, duration and percentage in observation records. Duplicate title values are not stored in a second request body. Once a report has been processed successfully, its temporary matching evidence is removed. If Cantaro cannot identify the episode automatically, the evidence is kept as a private matching task until it is resolved or dismissed.
 
-When a user connects an external music or media provider, the configured server may exchange the identifiers, library state, playlists, or progress needed to perform the action requested by the user. Those services process data under their own privacy terms. The extension does not send supported-page observations to advertising networks or data brokers.
+When a user connects an external music or media provider, the configured server may exchange the identifiers, library state, playlists, or progress needed to perform the action requested by the user. Those services process data under their own privacy terms. For YouTube lyrics, the extension keeps the video ID local and checks it against the user's Cantaro library. It sends the matched song's title and artist directly to LRCLIB for the lyrics search. The extension uses the song's album and duration to rank results locally. Opening lyrics for a library song in the extension sends the same title and artist to LRCLIB. The extension does not send supported-page observations to advertising networks or data brokers.
 
 ## Consent and user controls
+
+The YouTube lyrics drawer also supports manual search. When the user submits
+a song title and optional artist, the extension sends those entered terms directly to
+LRCLIB. Manual searches do not require a Cantaro library entry, import songs,
+or change library identities. Search results remain in the current drawer. The page title may supply editable search suggestions, which stay local until the user submits them.
 
 On first use, the extension shows a consent screen before a supported page is
 read for media collection. It explains the information read, the purpose of
 each collection feature, the configured server that receives it, and links to
 this policy. Collection is disabled until the user affirmatively saves a
-choice. Media watch tracking and catalog collection have separate controls.
-The extension has no music website collection purpose: music actions are
-authenticated popup and account operations.
+choice. Media watch tracking, catalog collection, and YouTube lyrics have
+separate controls. The YouTube lyrics option requires a signed-in account. The
+extension reads the active video's ID and checks for an existing song in the
+user's Cantaro library. For a match, it sends the song's title and artist
+directly to LRCLIB for a lyrics search. The extension uses the album and
+duration to rank results locally. Opening lyrics for a library song in the
+extension sends the same title and artist to LRCLIB. If there is no match, Cantaro reports
+that the video is not linked to a library song and leaves the library unchanged. The
+extension does not automatically transmit YouTube page titles, ad text, full URLs, or browsing
+history. The lyrics feature does not read playback timing.
 
 Consent is stored locally with a policy version and the user's choices. A
 material change to what a feature reads or sends raises the required version
 and pauses that feature until the user reviews and accepts the new disclosure.
 The user can revoke or reset a choice from the extension settings. Revocation
 immediately stops new collection for that purpose and clears pending local
-delivery state. Signing out also stops all media collection; signing in again
-does not re-enable it until the user is authenticated and has an accepted
-consent choice.
+delivery state. Signing out also stops media collection and YouTube lyrics
+requests; signing in again does not re-enable them until the user is
+authenticated and has an accepted consent choice.
 
 ## Browser permissions
 
@@ -71,7 +86,7 @@ Cantaro requests these browser capabilities for its disclosed features:
 
 - **`storage`:** Stores settings, authentication tokens, and temporary preferences on the user's device.
 - **`identity`:** Runs the browser-managed Authorization Code with PKCE sign-in flow against the configured Cantaro server.
-- **Site access:** Lets Cantaro read the rendered page on supported Crunchyroll pages. Broad HTTPS access is optional and is requested only for the exact self-hosted Cantaro origin configured by the user.
+- **Site access:** Lets Cantaro read rendered Crunchyroll pages for opted-in media collection and the active YouTube video ID for opted-in lyrics. The lyrics feature also contacts LRCLIB directly with matched song titles and artist names. Broad HTTPS access is optional and is requested only for the exact self-hosted Cantaro origin configured by the user.
 
 ## Sharing and Chrome Web Store Limited Use
 

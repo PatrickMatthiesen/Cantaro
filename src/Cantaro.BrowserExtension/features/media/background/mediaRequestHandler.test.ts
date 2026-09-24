@@ -9,7 +9,7 @@ import { createMediaRequestHandler } from './mediaRequestHandler';
 const settingsRepository = { read: vi.fn(async () => ({ baseUrl: 'https://api.example.test', verboseLogging: false })), save: vi.fn() };
 const consentGate = { getStatus: vi.fn(async () => ({
   consentVersion: 1, needsReview: false, authenticated: true,
-  watchTrackingAllowed: true, catalogCollectionAllowed: true,
+  watchTrackingAllowed: true, catalogCollectionAllowed: true, musicLyricsAllowed: false,
 })) };
 
 function catalog(): SeriesCatalogObservation {
@@ -45,7 +45,7 @@ describe('mediaRequestHandler', () => {
     const client = apiClient(vi.fn());
     const gate = { getStatus: vi.fn(async () => ({
       consentVersion: 1, needsReview: true, authenticated: true,
-      watchTrackingAllowed: false, catalogCollectionAllowed: true,
+      watchTrackingAllowed: false, catalogCollectionAllowed: true, musicLyricsAllowed: false,
     })) };
     const handler = createMediaRequestHandler(client, logger, gate, settingsRepository);
     const result = await handler.handle({ type: 'media.watch.submit', correlationId: 'correlation', payload: watch() });
@@ -57,7 +57,7 @@ describe('mediaRequestHandler', () => {
     const client = apiClient(vi.fn());
     const gate = { getStatus: vi.fn(async () => ({
       consentVersion: 1, needsReview: false, authenticated: true,
-      watchTrackingAllowed: true, catalogCollectionAllowed: false,
+      watchTrackingAllowed: true, catalogCollectionAllowed: false, musicLyricsAllowed: false,
     })) };
     const handler = createMediaRequestHandler(client, logger, gate, settingsRepository);
     const result = await handler.handle({ type: 'media.catalog.submit', correlationId: 'correlation', payload: catalog() });
