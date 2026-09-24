@@ -18,7 +18,7 @@ describe('runtimeRouter', () => {
     const dependencies = testDependencies();
     dependencies.consentService.getStatus = vi.fn(async () => ({
       consentVersion: 1, needsReview: false, authenticated: true,
-      watchTrackingAllowed: true, catalogCollectionAllowed: false,
+      watchTrackingAllowed: true, catalogCollectionAllowed: false, musicLyricsAllowed: false,
     }));
     const response = await createRuntimeRouter(mediaHandler, dependencies)(
       { type: 'consent.status', correlationId: 'status', payload: {} },
@@ -32,7 +32,7 @@ describe('runtimeRouter', () => {
     const dependencies = testDependencies();
     const response = await createRuntimeRouter(mediaHandler, dependencies)(
       { type: 'consent.save', correlationId: 'save', payload: {
-        baseUrl: 'https://api.example.test', watchTracking: true, catalogCollection: false,
+        baseUrl: 'https://api.example.test', watchTracking: true, catalogCollection: false, musicLyrics: false,
       } },
       { tab: { id: 17 } } as Browser.runtime.MessageSender,
     ) as { ok: boolean; error: { code: string } };
@@ -50,11 +50,11 @@ describe('runtimeRouter', () => {
     const dependencies = testDependencies();
     dependencies.consentService.save = vi.fn(async () => ({
       consentVersion: 1, needsReview: false, authenticated: true,
-      watchTrackingAllowed: true, catalogCollectionAllowed: false,
+      watchTrackingAllowed: true, catalogCollectionAllowed: false, musicLyricsAllowed: false,
     }));
     await createRuntimeRouter(mediaHandler, dependencies)(
       { type: 'consent.save', correlationId: 'save', payload: {
-        baseUrl: 'https://api.example.test', watchTracking: true, catalogCollection: false,
+        baseUrl: 'https://api.example.test', watchTracking: true, catalogCollection: false, musicLyrics: false,
       } },
       {},
     );
@@ -111,7 +111,7 @@ describe('runtimeRouter', () => {
       { type: 'consent.revoke', correlationId: 'revoke', payload: { baseUrl: 'https://api.example.test' } }, {},
     );
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({ watchTrackingAllowed: false, catalogCollectionAllowed: false }),
+      payload: expect.objectContaining({ watchTrackingAllowed: false, catalogCollectionAllowed: false, musicLyricsAllowed: false }),
     })));
     release();
     await result;
@@ -122,6 +122,6 @@ function testDependencies(): RuntimeRouterDependencies {
   return {
     settingsRepository: { read: vi.fn(async () => ({ baseUrl: 'https://api.example.test', verboseLogging: false })), save: vi.fn() },
     authService: { getAccessToken: vi.fn(async () => 'token'), getVerifiedUser: vi.fn(async () => ({ email: 'user@example.test' })), signOut: vi.fn(async () => {}) },
-    consentService: { getStatus: vi.fn(async () => ({ consentVersion: 1, needsReview: true, authenticated: true, watchTrackingAllowed: false, catalogCollectionAllowed: false })), save: vi.fn(async () => ({ consentVersion: 1, needsReview: false, authenticated: true, watchTrackingAllowed: true, catalogCollectionAllowed: true })), revoke: vi.fn(async () => {}) },
+    consentService: { getStatus: vi.fn(async () => ({ consentVersion: 1, needsReview: true, authenticated: true, watchTrackingAllowed: false, catalogCollectionAllowed: false, musicLyricsAllowed: false })), save: vi.fn(async () => ({ consentVersion: 1, needsReview: false, authenticated: true, watchTrackingAllowed: true, catalogCollectionAllowed: true, musicLyricsAllowed: false })), revoke: vi.fn(async () => {}) },
   };
 }

@@ -14,6 +14,7 @@ export interface ConsentStatus {
   authenticated: boolean;
   watchTrackingAllowed: boolean;
   catalogCollectionAllowed: boolean;
+  musicLyricsAllowed: boolean;
 }
 
 export interface ConsentAuthProvider {
@@ -33,6 +34,7 @@ function emptyStatus(authenticated = false, needsReview = true): ConsentStatus {
     authenticated,
     watchTrackingAllowed: false,
     catalogCollectionAllowed: false,
+    musicLyricsAllowed: false,
   };
 }
 
@@ -40,11 +42,18 @@ function sameIdentity(left: string, right: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
+// Versions 1 and 2 predate the lyrics purpose; the repository maps that choice
+// to false. Version 4 added editable local search hints, so versions 3 and 4
+// retain their existing explicit lyrics choice.
+function isCompatibleConsentVersion(version: number): boolean {
+  return version === 1 || version === 2 || version === 3 || version === 4;
+}
+
 function isCurrentConsentForApi(
   stored: Awaited<ReturnType<ConsentRepository['read']>>,
   baseUrl: string,
 ): stored is NonNullable<typeof stored> {
-  return Boolean(stored && stored.version === CURRENT_CONSENT_VERSION && stored.baseUrl === baseUrl);
+  return Boolean(stored && isCompatibleConsentVersion(stored.version) && stored.baseUrl === baseUrl);
 }
 
 function statusForConsent(
@@ -57,11 +66,12 @@ function statusForConsent(
     authenticated,
     watchTrackingAllowed: allowed.watchTracking,
     catalogCollectionAllowed: allowed.catalogCollection,
+    musicLyricsAllowed: allowed.musicLyrics,
   };
 }
 
 function collectionEnabled(choices: ConsentChoices): boolean {
-  return choices.watchTracking || choices.catalogCollection;
+  return choices.watchTracking || choices.catalogCollection || choices.musicLyrics;
 }
 
 function canReuseIdentity(
@@ -70,10 +80,11 @@ function canReuseIdentity(
   choices: ConsentChoices,
 ): boolean {
   if (!existing?.userEmail) return false;
-  return existing.version === CURRENT_CONSENT_VERSION
+  return isCompatibleConsentVersion(existing.version)
     && existing.baseUrl === baseUrl
     && (!choices.watchTracking || existing.watchTracking)
-    && (!choices.catalogCollection || existing.catalogCollection);
+    && (!choices.catalogCollection || existing.catalogCollection)
+    && (!choices.musicLyrics || existing.musicLyrics);
 }
 
 async function resolveSaveIdentity(
@@ -112,7 +123,8 @@ function statusFromStoredConsent(
 ): ConsentStatus {
   const current = isCurrentConsentForApi(stored, baseUrl);
   const identityMatches = current && (!stored.userEmail || sameIdentity(stored.userEmail, user?.email ?? ''));
-  const deniedForApi = current && !stored.userEmail && !stored.watchTracking && !stored.catalogCollection;
+  const deniedForApi = current && !stored.userEmail && !stored.watchTracking
+    && !stored.catalogCollection && !stored.musicLyrics;
   if (!user) return emptyStatus(false, !deniedForApi);
   if (!identityMatches) return emptyStatus(true);
   return statusForConsent(true, stored);
@@ -166,12 +178,14 @@ export function createConsentService(
         consentedAt: new Date().toISOString(),
         watchTracking: choices.watchTracking === true,
         catalogCollection: choices.catalogCollection === true,
+        musicLyrics: choices.musicLyrics === true,
       }));
       if (saveRevision !== revision) throw new Error('Collection consent changed while it was being saved.');
       inMemoryRevoked = false;
       return statusForConsent(Boolean(user), {
         watchTracking: user ? choices.watchTracking === true : false,
         catalogCollection: user ? choices.catalogCollection === true : false,
+        musicLyrics: user ? choices.musicLyrics === true : false,
       });
     },
 

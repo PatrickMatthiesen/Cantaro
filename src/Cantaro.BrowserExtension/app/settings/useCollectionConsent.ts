@@ -80,6 +80,6 @@ export function useCollectionConsent(baseUrl: string, configured: boolean) {
     error,
     save,
     reset,
-    revoke: () => save({ watchTracking: false, catalogCollection: false }),
+    revoke: () => save({ watchTracking: false, catalogCollection: false, musicLyrics: false }),
   };
 }

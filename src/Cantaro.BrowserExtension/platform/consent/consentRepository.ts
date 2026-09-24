@@ -1,11 +1,13 @@
 import { normalizeBaseUrl } from '../settings/extensionSettings';
 
-export const CONSENT_STORAGE_KEY = 'cantaro.consent.v1';
-export const CURRENT_CONSENT_VERSION = 1;
+export const CONSENT_STORAGE_KEY = 'cantaro.consent.v2';
+export const LEGACY_CONSENT_STORAGE_KEY = 'cantaro.consent.v1';
+export const CURRENT_CONSENT_VERSION = 4;
 
 export interface ConsentChoices {
   watchTracking: boolean;
   catalogCollection: boolean;
+  musicLyrics: boolean;
 }
 
 export interface StoredConsent extends ConsentChoices {
@@ -16,7 +18,7 @@ export interface StoredConsent extends ConsentChoices {
 }
 
 interface StorageArea {
-  get(key: string): Promise<Record<string, unknown>>;
+  get(key: string | string[]): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
   remove(key: string): Promise<void>;
 }
@@ -38,6 +40,7 @@ function hasConsentShape(value: Record<string, unknown>): value is Record<string
   consentedAt: string;
   watchTracking: boolean;
   catalogCollection: boolean;
+  musicLyrics?: boolean;
 } {
   return typeof value.version === 'number'
     && Number.isInteger(value.version)
@@ -45,7 +48,8 @@ function hasConsentShape(value: Record<string, unknown>): value is Record<string
     && typeof value.userEmail === 'string'
     && typeof value.consentedAt === 'string'
     && typeof value.watchTracking === 'boolean'
-    && typeof value.catalogCollection === 'boolean';
+    && typeof value.catalogCollection === 'boolean'
+    && (value.musicLyrics === undefined || typeof value.musicLyrics === 'boolean');
 }
 
 function parseConsent(value: unknown): StoredConsent | null {
@@ -53,7 +57,8 @@ function parseConsent(value: unknown): StoredConsent | null {
   const baseUrl = normalizeBaseUrl(value.baseUrl);
   const userEmail = value.userEmail.trim().toLowerCase();
   if (!baseUrl || !value.consentedAt) return null;
-  if (!userEmail && (value.watchTracking || value.catalogCollection)) return null;
+  const musicLyrics = value.musicLyrics === true;
+  if (!userEmail && (value.watchTracking || value.catalogCollection || musicLyrics)) return null;
   return {
     version: value.version,
     baseUrl,
@@ -61,14 +66,20 @@ function parseConsent(value: unknown): StoredConsent | null {
     consentedAt: value.consentedAt,
     watchTracking: value.watchTracking,
     catalogCollection: value.catalogCollection,
+    // Older consent records predate the lyrics purpose. Preserve their media
+    // choices while keeping the newly introduced purpose denied by default.
+    musicLyrics,
   };
 }
 
 export function createConsentRepository(storage: StorageArea): ConsentRepository {
   return {
     async read() {
-      const stored = await storage.get(CONSENT_STORAGE_KEY);
-      return parseConsent(stored[CONSENT_STORAGE_KEY]);
+      const stored = await storage.get([CONSENT_STORAGE_KEY, LEGACY_CONSENT_STORAGE_KEY]);
+      if (Object.prototype.hasOwnProperty.call(stored, CONSENT_STORAGE_KEY)) {
+        return parseConsent(stored[CONSENT_STORAGE_KEY]);
+      }
+      return parseConsent(stored[LEGACY_CONSENT_STORAGE_KEY]);
     },
 
     async save(consent) {
@@ -78,11 +89,13 @@ export function createConsentRepository(storage: StorageArea): ConsentRepository
         userEmail: consent.userEmail.trim().toLowerCase(),
       };
       await storage.set({ [CONSENT_STORAGE_KEY]: normalized });
+      await storage.remove(LEGACY_CONSENT_STORAGE_KEY);
       return normalized;
     },
 
-    clear() {
-      return storage.remove(CONSENT_STORAGE_KEY);
+    async clear() {
+      await storage.remove(LEGACY_CONSENT_STORAGE_KEY);
+      await storage.remove(CONSENT_STORAGE_KEY);
     },
   };
 }

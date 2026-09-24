@@ -8,6 +8,11 @@ export interface LyricsResult {
   confidence?: number;
   attribution: string;
   explanation?: string;
+  candidates?: LyricsCandidate[];
+}
+
+export interface LyricsCandidate extends Omit<LyricsResult, 'candidates'> {
+  label: string;
 }
 
 function hasText(value: string | undefined): value is string {

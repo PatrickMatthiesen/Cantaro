@@ -13,27 +13,40 @@ export type ConsentChangedMessage = {
   payload: ConsentStatus;
 };
 
-export function isConsentBackgroundRequest(value: unknown): value is ConsentBackgroundRequest {
-  if (!value || typeof value !== 'object') return false;
-  const request = value as { type?: unknown; correlationId?: unknown; payload?: unknown };
-  if (typeof request.correlationId !== 'string' || !request.payload || typeof request.payload !== 'object') return false;
-  const payload = request.payload as { baseUrl?: unknown; watchTracking?: unknown; catalogCollection?: unknown };
-  if (request.type === 'consent.status') return payload.baseUrl === undefined || typeof payload.baseUrl === 'string';
-  if (typeof payload.baseUrl !== 'string') return false;
-  if (request.type === 'consent.revoke') return true;
-  return request.type === 'consent.save'
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasOptionalBaseUrl(payload: unknown): boolean {
+  return isRecord(payload) && (payload.baseUrl === undefined || typeof payload.baseUrl === 'string');
+}
+
+function hasBaseUrl(payload: unknown): boolean {
+  return isRecord(payload) && typeof payload.baseUrl === 'string';
+}
+
+function hasConsentChoices(payload: unknown): boolean {
+  return isRecord(payload)
+    && typeof payload.baseUrl === 'string'
     && typeof payload.watchTracking === 'boolean'
-    && typeof payload.catalogCollection === 'boolean';
+    && typeof payload.catalogCollection === 'boolean'
+    && typeof payload.musicLyrics === 'boolean';
+}
+
+export function isConsentBackgroundRequest(value: unknown): value is ConsentBackgroundRequest {
+  if (!isRecord(value) || typeof value.correlationId !== 'string') return false;
+  if (value.type === 'consent.status') return hasOptionalBaseUrl(value.payload);
+  if (value.type === 'consent.revoke') return hasBaseUrl(value.payload);
+  return value.type === 'consent.save' && hasConsentChoices(value.payload);
 }
 
 export function isConsentChangedMessage(value: unknown): value is ConsentChangedMessage {
-  if (!value || typeof value !== 'object') return false;
-  const message = value as { type?: unknown; payload?: unknown };
-  if (message.type !== 'consent.changed' || !message.payload || typeof message.payload !== 'object') return false;
-  const status = message.payload as Record<string, unknown>;
+  if (!isRecord(value) || value.type !== 'consent.changed' || !isRecord(value.payload)) return false;
+  const status = value.payload;
   return Number.isInteger(status.consentVersion)
     && typeof status.needsReview === 'boolean'
     && typeof status.authenticated === 'boolean'
     && typeof status.watchTrackingAllowed === 'boolean'
-    && typeof status.catalogCollectionAllowed === 'boolean';
+    && typeof status.catalogCollectionAllowed === 'boolean'
+    && typeof status.musicLyricsAllowed === 'boolean';
 }

@@ -31,7 +31,7 @@ vi.mock('../media/MediaPage', () => ({ MediaPage: () => 'Media ready' }));
 
 const initialStatus = {
   consentVersion: 1, needsReview: true, authenticated: false,
-  watchTrackingAllowed: false, catalogCollectionAllowed: false,
+  watchTrackingAllowed: false, catalogCollectionAllowed: false, musicLyricsAllowed: false,
 };
 let root: Root;
 let container: HTMLElement;
@@ -79,15 +79,15 @@ describe('extension consent sign-in', () => {
     mocks.configured = true;
     mocks.getRuntimeConsentStatus.mockResolvedValue({ ...initialStatus, authenticated: true });
     await act(async () => root.render(createElement(ExtensionApp)));
-    expect(Array.from(container.querySelectorAll('input')).map(input => input.checked)).toEqual([true, false]);
+    expect(Array.from(container.querySelectorAll('input')).map(input => input.checked)).toEqual([true, false, false]);
 
     await act(async () => finishSignIn(true));
     expect(mocks.saveRuntimeConsent).toHaveBeenCalledExactlyOnceWith('https://cantaro.example', {
-      watchTracking: true, catalogCollection: false,
+      watchTracking: true, catalogCollection: false, musicLyrics: false,
     });
     if (saveFails) {
       expect(container.querySelector('[role="alert"]')?.textContent).toContain('Could not save collection choices');
-      expect(Array.from(container.querySelectorAll('input')).map(input => input.checked)).toEqual([true, false]);
+      expect(Array.from(container.querySelectorAll('input')).map(input => input.checked)).toEqual([true, false, false]);
       expect(container.textContent).toContain('Allow selected collection');
     } else {
       expect(container.textContent).toContain('Media ready');

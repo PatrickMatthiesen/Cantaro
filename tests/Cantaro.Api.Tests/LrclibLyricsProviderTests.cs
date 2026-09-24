@@ -42,9 +42,29 @@ public sealed class LrclibLyricsProviderTests
     }
 
     [Fact]
+    public async Task GetLyricsAsync_FallsBackToSearchWhenExactMatchHasNoLyrics()
+    {
+        var searchRecord = Record(48, plainLyrics: "Found by search", syncedLyrics: null);
+        var searchResponse = $"[{searchRecord}]";
+        var handler = new StubHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/api/get", StringComparison.Ordinal)
+            ? Json(HttpStatusCode.OK, Record(47, plainLyrics: null, syncedLyrics: null))
+            : Json(HttpStatusCode.OK, searchResponse));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup(), CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Available, result.State);
+        Assert.Equal(LyricsMatchStatuses.Fallback, result.MatchStatus);
+        Assert.Equal("48", result.ProviderRecordId);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task GetLyricsAsync_DoesNotSelectAmbiguousSearchResults()
     {
-        var body = $"[{Record(43)},{Record(44)}]";
+        var first = Record(43, plainLyrics: "First synthetic lyric");
+        var second = Record(44, plainLyrics: "Second synthetic lyric");
+        var body = $"[{first},{second}]";
         var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
         using var provider = CreateProvider(handler);
 
@@ -54,6 +74,154 @@ public sealed class LrclibLyricsProviderTests
         Assert.Equal(LyricsMatchStatuses.Ambiguous, result.MatchStatus);
         Assert.Null(result.PlainLyrics);
         Assert.Null(result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_TreatsEquivalentLyricsAsOneCandidateAcrossAlbumsAndPunctuation()
+    {
+        var body = $$"""
+            [
+              {{Record(48, trackName: "TEST—SONG!", albumName: "Album One", plainLyrics: "Words, in order. Repeated words words.")}},
+              {{Record(49, trackName: "Test Song", albumName: "Album Two", plainLyrics: "words in order repeated words WORDS")}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Available, result.State);
+        Assert.Equal(LyricsMatchStatuses.Fallback, result.MatchStatus);
+        Assert.Equal("48", result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_PrefersSyncedLyricsAmongEquivalentEqualScoreCandidates()
+    {
+        var body = $$"""
+            [
+              {{Record(50, plainLyrics: "A short synthetic line", syncedLyrics: null)}},
+              {{Record(51, plainLyrics: "A short synthetic line", syncedLyrics: "[00:01.00]A short synthetic line")}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Available, result.State);
+        Assert.Equal("51", result.ProviderRecordId);
+        Assert.NotNull(result.SyncedLyrics);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_UsesNearestDurationThenSmallestIdForEquivalentCandidates()
+    {
+        var body = $$"""
+            [
+              {{Record(55, duration: 201, plainLyrics: "Same synthetic words")}},
+              {{Record(54, duration: 199, plainLyrics: "Same synthetic words")}},
+              {{Record(53, duration: 200, plainLyrics: "Same synthetic words")}},
+              {{Record(52, duration: 200, plainLyrics: "Same synthetic words")}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Available, result.State);
+        Assert.Equal("52", result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_DoesNotTreatSyncedOnlyDuplicateAsAmbiguous()
+    {
+        var body = $$"""
+            [
+              {{Record(56, plainLyrics: "A synthetic phrase", syncedLyrics: null)}},
+              {{Record(57, plainLyrics: null, syncedLyrics: "[00:02.00]a synthetic phrase!")}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Available, result.State);
+        Assert.Equal("57", result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_KeepsCandidatesWithDifferentLyricsAmbiguous()
+    {
+        var body = $$"""
+            [
+              {{Record(58, plainLyrics: "A synthetic phrase")}},
+              {{Record(59, plainLyrics: "a synthetic phrase!")}},
+              {{Record(60, plainLyrics: "A different synthetic phrase")}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Ambiguous, result.State);
+        Assert.Null(result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_KeepsSameLyricsAtDifferentDurationAndVersionAmbiguous()
+    {
+        var body = $$"""
+            [
+              {{Record(60, duration: 200, albumName: "Studio", plainLyrics: "Same synthetic words")}},
+              {{Record(61, duration: 203, albumName: "Live Version", plainLyrics: "Same synthetic words")}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Ambiguous, result.State);
+        Assert.Null(result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_DoesNotSelectCandidateWithEmptyLyrics()
+    {
+        var body = $$"""
+            [
+              {{Record(62, plainLyrics: "  ", syncedLyrics: null)}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Unavailable, result.State);
+        Assert.Null(result.ProviderRecordId);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_IgnoresEmptyCandidateWhenSelectingEquivalentLyrics()
+    {
+        var body = $$"""
+            [
+              {{Record(63, plainLyrics: null, syncedLyrics: null)}},
+              {{Record(64, plainLyrics: "Valid synthetic words", syncedLyrics: null)}}
+            ]
+            """;
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, body));
+        using var provider = CreateProvider(handler);
+
+        var result = await provider.Instance.GetLyricsAsync(CompleteLookup() with { Album = null }, CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Available, result.State);
+        Assert.Equal("64", result.ProviderRecordId);
     }
 
     [Fact]
@@ -153,9 +321,18 @@ public sealed class LrclibLyricsProviderTests
         "recording-id",
         "ISRC123");
 
-    private static string Record(long id, bool instrumental = false) => $$"""
-        {"id":{{id}},"trackName":"Test Song","artistName":"Test Artist","albumName":"Test Album","duration":200,"instrumental":{{instrumental.ToString().ToLowerInvariant()}},"plainLyrics":"Line one","syncedLyrics":"[00:01.00]Line one"}
+    private static string Record(
+        long id,
+        bool instrumental = false,
+        string? trackName = "Test Song",
+        string? albumName = "Test Album",
+        decimal duration = 200,
+        string? plainLyrics = "Line one",
+        string? syncedLyrics = "[00:01.00]Line one") => $$"""
+        {"id":{{id}},"trackName":{{JsonValue(trackName)}},"artistName":"Test Artist","albumName":{{JsonValue(albumName)}},"duration":{{duration.ToString(System.Globalization.CultureInfo.InvariantCulture)}},"instrumental":{{instrumental.ToString().ToLowerInvariant()}},"plainLyrics":{{JsonValue(plainLyrics)}},"syncedLyrics":{{JsonValue(syncedLyrics)}}}
         """;
+
+    private static string JsonValue(string? value) => System.Text.Json.JsonSerializer.Serialize(value);
 
     private static HttpResponseMessage Json(HttpStatusCode status, string body) => new(status)
     {

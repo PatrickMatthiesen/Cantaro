@@ -11,6 +11,7 @@ interface ContentConsentStatus {
   authenticated: boolean;
   watch: boolean;
   catalog: boolean;
+  musicLyrics: boolean;
 }
 
 function toContentStatus(status: ConsentStatus): ContentConsentStatus {
@@ -18,6 +19,7 @@ function toContentStatus(status: ConsentStatus): ContentConsentStatus {
     authenticated: status.authenticated,
     watch: status.watchTrackingAllowed,
     catalog: status.catalogCollectionAllowed,
+    musicLyrics: status.musicLyricsAllowed,
   };
 }
 
@@ -28,6 +30,7 @@ function denyStatus(version: number): ConsentStatus {
     authenticated: false,
     watchTrackingAllowed: false,
     catalogCollectionAllowed: false,
+    musicLyricsAllowed: false,
   };
 }
 
@@ -67,7 +70,7 @@ export function subscribeRuntimeConsent(
       const revision = ++notificationRevision;
       const status = (message as ConsentChangedMessage).payload;
       const permitsCollection = status.authenticated
-        && (status.watchTrackingAllowed || status.catalogCollectionAllowed);
+        && (status.watchTrackingAllowed || status.catalogCollectionAllowed || status.musicLyricsAllowed);
       if (!active) return;
       if (!permitsCollection) {
         listener(status);

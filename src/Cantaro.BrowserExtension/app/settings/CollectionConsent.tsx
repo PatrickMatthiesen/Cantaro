@@ -4,6 +4,7 @@ import { GradientButton } from '@cantaro/client-shared/ui';
 export interface CollectionChoices {
   watchTracking: boolean;
   catalogCollection: boolean;
+  musicLyrics: boolean;
 }
 
 export interface CollectionConsentProps {
@@ -22,17 +23,18 @@ export interface CollectionConsentProps {
 export function CollectionConsent(props: CollectionConsentProps) {
   const [draft, setDraft] = useState(props.choices);
   const changed = draft.watchTracking !== props.choices.watchTracking
-    || draft.catalogCollection !== props.choices.catalogCollection;
-  const enabling = draft.watchTracking || draft.catalogCollection;
+    || draft.catalogCollection !== props.choices.catalogCollection
+    || draft.musicLyrics !== props.choices.musicLyrics;
+  const enabling = draft.watchTracking || draft.catalogCollection || draft.musicLyrics;
   return (
     <section className="space-y-4 py-5" aria-labelledby="collection-consent-title">
       <div>
         <h2 id="collection-consent-title" className="text-lg font-bold text-content">
-          {props.needsReview ? 'Keep track of what you watch' : 'Website collection'}
+          {props.needsReview ? 'Choose website features' : 'Website collection'}
         </h2>
         <p className="mt-2 text-sm leading-6 text-content-muted">
-          Keep your library up to date as you watch on Crunchyroll. Choose what Cantaro can read
-          from the page—nothing is collected until you sign in and allow it.
+          Choose what Cantaro can read on Crunchyroll and YouTube. Nothing is collected until
+          you sign in and allow it.
         </p>
       </div>
       <div className="divide-y divide-border-subtle border-y border-border-subtle">
@@ -50,6 +52,13 @@ export function CollectionConsent(props: CollectionConsentProps) {
           disabled={props.busy}
           onChange={catalogCollection => setDraft(current => ({ ...current, catalogCollection }))}
         />
+        <ConsentChoice
+          label="YouTube lyrics"
+          detail="Read the video's ID and match it to a song already in your Cantaro library. YouTube lyrics lookups send the song's title and artist directly to LRCLIB. Album and duration help rank results and stay in the extension. The YouTube page title can prefill manual search locally; those terms are sent only when you submit the search."
+          checked={draft.musicLyrics}
+          disabled={props.busy}
+          onChange={musicLyrics => setDraft(current => ({ ...current, musicLyrics }))}
+        />
       </div>
       <section aria-labelledby="collection-information-title" className="space-y-2 text-xs leading-5 text-content-muted">
         <h3 id="collection-information-title" className="font-semibold text-content">Where your information goes</h3>
@@ -58,10 +67,10 @@ export function CollectionConsent(props: CollectionConsentProps) {
           <li>Watch progress stays in your library. Temporary matching details are deleted once processed; unfinished matches stay until you resolve or dismiss them.</li>
           <li>Shared episode and watch-link facts can remain after account deletion, without keeping your browsing history.</li>
         </ul>
-        <p>You can turn either feature off anytime. This stops new collection; it does not delete information already saved.</p>
+        <p>You can turn any feature off anytime. This stops new collection; it does not delete information already saved.</p>
       </section>
       <p className="text-xs leading-5 text-content-muted">
-        Music features do not read music websites.
+        Music library and playlist features do not read music websites. Opening a library song's lyrics sends its title and artist directly to LRCLIB, independently of the YouTube option.
         {' '}<a href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md" target="_blank" rel="noreferrer"
           className="font-semibold text-personal-accent-strong underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Read the privacy policy</a>.
       </p>

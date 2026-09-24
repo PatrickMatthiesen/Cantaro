@@ -58,6 +58,9 @@ export default defineConfig({
     host_permissions: [
       ...(defaultApiHostPermission ? [defaultApiHostPermission] : []),
       'https://www.crunchyroll.com/*',
+      'https://www.youtube.com/*',
+      'https://music.youtube.com/*',
+      'https://lrclib.net/*',
     ],
     optional_host_permissions: ['https://*/*'],
     ...(browser === 'firefox' ? {

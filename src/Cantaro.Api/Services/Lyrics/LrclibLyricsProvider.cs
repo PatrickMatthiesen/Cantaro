@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Cantaro.Api.Configuration;
 using Microsoft.Extensions.Options;
 
@@ -81,7 +82,7 @@ public sealed class LrclibLyricsProvider(
 
         response.EnsureSuccessStatusCode();
         var candidate = await response.Content.ReadFromJsonAsync<LrclibRecord>(cancellationToken);
-        if (candidate is null || !IsExactMatch(lookup, candidate))
+        if (candidate is null || !HasLyrics(candidate) || !IsExactMatch(lookup, candidate))
         {
             return await SearchAsync(lookup, cancellationToken);
         }
@@ -101,9 +102,14 @@ public sealed class LrclibLyricsProvider(
         response.EnsureSuccessStatusCode();
         var candidates = await response.Content.ReadFromJsonAsync<List<LrclibRecord>>(cancellationToken) ?? [];
         var ranked = candidates
+            .Where(HasLyrics)
             .Select(candidate => new RankedCandidate(candidate, Score(lookup, candidate)))
             .Where(candidate => IsAcceptable(lookup, candidate))
             .OrderByDescending(candidate => candidate.Score)
+            .ThenByDescending(candidate => !string.IsNullOrWhiteSpace(candidate.Record.SyncedLyrics))
+            .ThenBy(candidate => lookup.DurationSeconds.HasValue
+                ? Math.Abs(lookup.DurationSeconds.Value - candidate.Record.Duration)
+                : 0)
             .ThenBy(candidate => candidate.Record.Id)
             .ToList();
 
@@ -112,7 +118,8 @@ public sealed class LrclibLyricsProvider(
             return Status(LyricsStates.Unavailable, LyricsMatchStatuses.Unavailable, "LRCLIB has no confident match for this track.");
         }
 
-        if (ranked.Count > 1 && ranked[0].Score - ranked[1].Score < 0.08m)
+        if (ranked.Skip(1).Any(candidate => ranked[0].Score - candidate.Score < 0.08m
+            && !HasEquivalentLyrics(ranked[0].Record, candidate.Record)))
         {
             return new LyricsResult
             {
@@ -127,6 +134,34 @@ public sealed class LrclibLyricsProvider(
 
         return ToResult(ranked[0].Record, LyricsMatchStatuses.Fallback, ranked[0].Score, "Matched using a conservative LRCLIB search.");
     }
+
+    private static bool HasLyrics(LrclibRecord record) => record.Instrumental
+        || !string.IsNullOrWhiteSpace(record.PlainLyrics)
+        || !string.IsNullOrWhiteSpace(record.SyncedLyrics);
+
+    private static bool HasEquivalentLyrics(LrclibRecord left, LrclibRecord right)
+    {
+        // Releases can have separate LRCLIB records for the same recording.
+        // Compare the ordered words, not record IDs or album names. Keep the
+        // duration guard because shared lyrics do not establish shared timing.
+        if (Normalize(left.TrackName) != Normalize(right.TrackName)
+            || Normalize(left.ArtistName) != Normalize(right.ArtistName)
+            || Math.Abs(left.Duration - right.Duration) > 2
+            || left.Instrumental != right.Instrumental)
+        {
+            return false;
+        }
+
+        if (left.Instrumental) return true;
+
+        var leftWords = LyricsWords(left);
+        return leftWords.Length > 0 && leftWords == LyricsWords(right);
+    }
+
+    private static string LyricsWords(LrclibRecord record) => Normalize(
+        !string.IsNullOrWhiteSpace(record.PlainLyrics)
+            ? record.PlainLyrics
+            : Regex.Replace(record.SyncedLyrics ?? string.Empty, @"\[\d+:\d+(?:\.\d+)?\]", " "));
 
     private async Task<HttpResponseMessage> GetAsync(string path, IReadOnlyDictionary<string, string?> parameters, CancellationToken cancellationToken)
     {
