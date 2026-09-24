@@ -7,7 +7,7 @@ type Step = { name: string; run?: string; env?: Record<string, string> };
 const workflow = Bun.YAML.parse(readFileSync(new URL('../.github/workflows/publish-extension.yml', import.meta.url), 'utf8')) as {
   jobs: Record<string, { steps: Step[] }>;
 };
-const chrome = workflow.jobs['publish-stores'].steps.find(step => step.name === 'Submit Chrome extension for staged publishing')!;
+const chrome = workflow.jobs['publish-stores'].steps.find(step => step.name === 'Submit Chrome extension for automatic publishing after approval')!;
 const tag = workflow.jobs['tag-release'].steps.find(step => step.name === 'Create immutable extension version tag')!;
 const temporaryRoot = resolve(tmpdir());
 const fixtures: string[] = [];
@@ -68,7 +68,7 @@ describe('Chrome submission workflow', () => {
       expect(result.code).toBe(0);
       expect(result.captured).toEqual({
         args: ['wxt', 'submit'], email: 'publisher@example.test', key,
-        api: 'v2', publishType: 'STAGED_PUBLISH', zip: 'extension.zip',
+        api: 'v2', publishType: 'DEFAULT_PUBLISH', zip: 'extension.zip',
         id: 'test-extension', publisher: 'test-publisher',
       });
     },
