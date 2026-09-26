@@ -281,6 +281,41 @@ public class MusicLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task LocalEdits_AllowDuplicatesAndRemoveOnlySelectedOccurrence()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(709, "duplicate-owner@example.com");
+        var playlist = MakePlaylist(owner.Id, "Duplicates", now);
+        playlist.AllowDuplicateTracks = true;
+        playlist.SyncEnabled = true;
+        var track = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        db.AddRange(owner, playlist, track);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var service = new MusicLibraryQueryService(db);
+
+        Assert.True(await service.AddCanonicalSongToPlaylistAsync(track.Id, playlist.Id, owner.Id, default));
+        Assert.True(await service.AddCanonicalSongToPlaylistAsync(track.Id, playlist.Id, owner.Id, default));
+        var entries = await db.PlaylistEntries.Where(item => item.PlaylistId == playlist.Id)
+            .OrderBy(item => item.Position).ToListAsync();
+        Assert.Equal(2, entries.Count);
+        Assert.Equal([0, 1], entries.Select(item => item.Position));
+        Assert.True(await service.RemoveCanonicalSongFromPlaylistAsync(
+            track.Id, playlist.Id, owner.Id, default, entries[0].Id));
+
+        var remaining = Assert.Single(await db.PlaylistEntries.Where(item => item.PlaylistId == playlist.Id).ToListAsync());
+        Assert.Equal(entries[1].Id, remaining.Id);
+        Assert.Equal(0, remaining.Position);
+        var updated = await db.Playlists.SingleAsync(item => item.Id == playlist.Id);
+        Assert.Equal(3, updated.SyncRevision);
+        Assert.NotNull(updated.NextSyncAt);
+        Assert.InRange(updated.NextSyncAt.Value, now.AddHours(23), DateTimeOffset.UtcNow.AddHours(25));
+    }
+
+    [Fact]
     public async Task GetCanonicalSongAsync_DoesNotExposeTrackOutsideUsersLibrary()
     {
         var (db, connection) = await CreateDbAsync();

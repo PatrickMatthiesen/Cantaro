@@ -6,6 +6,7 @@ using Google.Apis.Auth.OAuth2.Responses;
 using Google.Apis.Services;
 using Google.Apis.YouTube.v3;
 using Google.Apis.YouTube.v3.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Xml;
@@ -58,6 +59,7 @@ public sealed class YouTubeVideoMetadataDto
     public required string VideoId { get; init; }
     public required string Title { get; init; }
     public string? ChannelTitle { get; init; }
+    public string? Description { get; init; }
     public string? ThumbnailUrl { get; init; }
     public string? CategoryId { get; init; }
     public bool LicensedContent { get; init; }
@@ -69,8 +71,21 @@ public sealed class YouTubeVideoMetadataDto
 /// <summary>
 /// Service for YouTube OAuth and API operations
 /// </summary>
-public class YouTubeService
+public class YouTubeService : IYouTubePlaylistClient
 {
+    public static string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
+    {
+        var preferred = new Uri(callbackUrls.Preferred);
+        if (!preferred.Host.EndsWith(".dev.localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return callbackUrls.Preferred;
+        }
+
+        // Google accepts localhost redirect hosts but rejects the Aspire-only
+        // development subdomain. Keep the same scheme, port, and callback path.
+        return new UriBuilder(preferred) { Host = "localhost" }.Uri.AbsoluteUri;
+    }
+
     private readonly IConfiguration _configuration;
     private readonly ApplicationDbContext _dbContext;
     private readonly TokenEncryptionService _tokenEncryption;
@@ -113,7 +128,7 @@ public class YouTubeService
         VideoListResponse response;
         try
         {
-            using var youtubeService = await CreateYouTubeServiceAsync(account);
+            using var youtubeService = await CreateYouTubeServiceAsync(account, cancellationToken);
             var request = youtubeService.Videos.List("snippet,contentDetails,topicDetails");
             request.Id = videoId;
             request.MaxResults = 1;
@@ -139,6 +154,7 @@ public class YouTubeService
             VideoId = video.Id,
             Title = video.Snippet?.Title ?? videoId,
             ChannelTitle = video.Snippet?.ChannelTitle,
+            Description = video.Snippet?.Description,
             ThumbnailUrl = video.Snippet?.Thumbnails?.High?.Url ?? video.Snippet?.Thumbnails?.Default__?.Url,
             CategoryId = video.Snippet?.CategoryId,
             LicensedContent = video.ContentDetails?.LicensedContent ?? false,
@@ -189,7 +205,7 @@ public class YouTubeService
         var account = await GetConnectedAccountAsync(userId) ?? throw new InvalidOperationException("YouTube account not connected");
         if (!HasPlaylistWriteScope(account.Scopes))
             throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
-        using var service = await CreateYouTubeServiceAsync(account);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
         var existing = service.PlaylistItems.List("id");
         existing.PlaylistId = playlistId;
         existing.VideoId = videoId;
@@ -210,7 +226,7 @@ public class YouTubeService
         var account = await GetConnectedAccountAsync(userId) ?? throw new InvalidOperationException("YouTube account not connected");
         if (!HasPlaylistWriteScope(account.Scopes))
             throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
-        using var service = await CreateYouTubeServiceAsync(account);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
         await InsertVideoIntoPlaylistAsync(service, playlistId, videoId, position, cancellationToken);
     }
 
@@ -238,7 +254,7 @@ public class YouTubeService
         var account = await GetConnectedAccountAsync(userId) ?? throw new InvalidOperationException("YouTube account not connected");
         if (!HasPlaylistWriteScope(account.Scopes))
             throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
-        using var service = await CreateYouTubeServiceAsync(account);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
         var items = new List<PlaylistItem>();
         string? pageToken = null;
         do
@@ -288,6 +304,388 @@ public class YouTubeService
         .Split(' ', StringSplitOptions.RemoveEmptyEntries)
         .Any(scope => scope is "https://www.googleapis.com/auth/youtube" or "https://www.googleapis.com/auth/youtube.force-ssl");
 
+    internal sealed record SyncReadItem(string ExternalId, string PlaylistItemId, string Title, string? Artist,
+        string? ThumbnailUrl, int? DurationSeconds, int Position, bool IsAvailable,
+        string? Description = null);
+    internal sealed record SyncReadSnapshot(string Id, string Name, string? Revision,
+        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount);
+
+    internal async Task ValidateSyncAccountAsync(
+        PlatformAccountContext accountContext, CancellationToken cancellationToken)
+        => _ = await RequireAccountAsync(accountContext, cancellationToken);
+
+    internal async Task<SyncReadSnapshot> GetSyncReadSnapshotAsync(
+        PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
+        var metadataRequest = service.Playlists.List("snippet,contentDetails");
+        metadataRequest.Id = playlistId;
+        var before = (await metadataRequest.ExecuteAsync(cancellationToken)).Items?.SingleOrDefault();
+        if (before?.Id != playlistId || string.IsNullOrWhiteSpace(before.Snippet?.Title))
+            throw new PlatformApiException("youtube_playlist_unavailable",
+                "YouTube did not return complete playlist details.", 404);
+
+        var items = new List<SyncReadItem>();
+        var seenTokens = new HashSet<string>(StringComparer.Ordinal);
+        string? pageToken = null;
+        var complete = true;
+        var pageCount = 0;
+        var unavailableItemCount = 0;
+        do
+        {
+            if (++pageCount > 120)
+                throw new PlatformApiException("youtube_playlist_incomplete_response",
+                    "YouTube playlist has too many pages to read completely.", 502);
+            var request = service.PlaylistItems.List("id,snippet,contentDetails,status");
+            request.PlaylistId = playlistId;
+            request.MaxResults = 50;
+            request.PageToken = pageToken;
+            var response = await request.ExecuteAsync(cancellationToken);
+            if (response.Items is null)
+                throw new PlatformApiException("youtube_playlist_incomplete_response",
+                    "YouTube returned an incomplete playlist page.", 502);
+            var videoIds = response.Items.Select(item => item?.ContentDetails?.VideoId
+                    ?? item?.Snippet?.ResourceId?.VideoId)
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            var videosById = new Dictionary<string, Video>(StringComparer.Ordinal);
+            if (videoIds.Length > 0)
+            {
+                var videosRequest = service.Videos.List("snippet,contentDetails,status");
+                videosRequest.Id = string.Join(',', videoIds);
+                videosRequest.MaxResults = videoIds.Length;
+                var videos = await videosRequest.ExecuteAsync(cancellationToken);
+                foreach (var video in videos.Items ?? [])
+                    if (!string.IsNullOrWhiteSpace(video.Id)) videosById[video.Id] = video;
+            }
+            foreach (var item in response.Items)
+            {
+                var position = items.Count;
+                var videoId = item?.ContentDetails?.VideoId ?? item?.Snippet?.ResourceId?.VideoId;
+                var foundVideo = videosById.TryGetValue(videoId ?? string.Empty, out var video);
+                var unavailable = IsPlaylistItemUnavailable(foundVideo, video?.Status?.PrivacyStatus,
+                    item?.Status?.PrivacyStatus);
+                unavailable |= string.IsNullOrWhiteSpace(videoId);
+                if (unavailable) unavailableItemCount++;
+                var available = !unavailable;
+                var playlistItemId = item?.Id;
+                var structurallyReadable = IsPlaylistItemStructurallyReadable(item?.Snippet?.Position,
+                    position, playlistItemId, item?.Snippet?.Title);
+                if (!structurallyReadable) complete = false;
+                items.Add(new SyncReadItem(videoId ?? $"!unavailable:{playlistItemId ?? position.ToString(CultureInfo.InvariantCulture)}",
+                    playlistItemId ?? $"!missing-playlist-item:{position.ToString(CultureInfo.InvariantCulture)}",
+                    item?.Snippet?.Title ?? "Unavailable YouTube item",
+                    item?.Snippet?.VideoOwnerChannelTitle,
+                    item?.Snippet?.Thumbnails?.Medium?.Url ?? item?.Snippet?.Thumbnails?.Default__?.Url,
+                    available ? ParseVideoDuration(video!.ContentDetails?.Duration) : null,
+                    position, available, available ? video!.Snippet?.Description : null));
+            }
+            pageToken = response.NextPageToken;
+            if (!string.IsNullOrWhiteSpace(pageToken) && !seenTokens.Add(pageToken))
+                throw new PlatformApiException("youtube_playlist_incomplete_response",
+                    "YouTube repeated a playlist page.", 502);
+        } while (!string.IsNullOrWhiteSpace(pageToken));
+
+        if (before.ContentDetails?.ItemCount != items.Count) complete = false;
+        var afterRequest = service.Playlists.List("snippet,contentDetails");
+        afterRequest.Id = playlistId;
+        var after = (await afterRequest.ExecuteAsync(cancellationToken)).Items?.SingleOrDefault();
+        if (after?.Id != playlistId || after.ETag != before.ETag
+            || after.ContentDetails?.ItemCount != before.ContentDetails?.ItemCount)
+            complete = false;
+        return new SyncReadSnapshot(playlistId, before.Snippet.Title, before.ETag, items, complete,
+            unavailableItemCount);
+    }
+
+    internal static bool IsPlaylistItemUnavailable(
+        bool videoMetadataFound, string? videoPrivacyStatus, string? playlistItemPrivacyStatus)
+        => !videoMetadataFound
+            || videoPrivacyStatus is not ("public" or "unlisted")
+            || string.Equals(playlistItemPrivacyStatus, "private", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsPlaylistItemStructurallyReadable(
+        long? providerPosition, int expectedPosition, string? playlistItemId, string? title)
+        => providerPosition == expectedPosition
+            && !string.IsNullOrWhiteSpace(playlistItemId)
+            && !string.IsNullOrWhiteSpace(title);
+
+    internal async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchVideoCandidatesAsync(
+        PlatformAccountContext accountContext, TrackObservation evidence, CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
+        var request = service.Search.List("snippet");
+        var parsedEvidence = TrackObservationParser.Parse(evidence);
+        var searchTitle = parsedEvidence.SearchTitle ?? evidence.Title;
+        var searchArtist = parsedEvidence.SearchArtist ?? evidence.Artist;
+        request.Q = string.Join(" ", new[] { searchTitle, searchArtist }.Where(part => !string.IsNullOrWhiteSpace(part)));
+        request.Type = "video";
+        request.MaxResults = 10;
+        var result = await request.ExecuteAsync(cancellationToken);
+        var ids = result.Items?.Select(item => item.Id?.VideoId)
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray() ?? [];
+        if (ids.Length == 0 && !string.IsNullOrWhiteSpace(searchArtist))
+        {
+            request.Q = searchTitle;
+            result = await request.ExecuteAsync(cancellationToken);
+            ids = result.Items?.Select(item => item.Id?.VideoId)
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray() ?? [];
+        }
+        if (ids.Length == 0) return [];
+        var videosRequest = service.Videos.List("snippet,contentDetails,status");
+        videosRequest.Id = string.Join(',', ids);
+        videosRequest.MaxResults = ids.Length;
+        var videos = await videosRequest.ExecuteAsync(cancellationToken);
+        return videos.Items?.Where(video => video.Id is { Length: > 0 }
+                && video.Snippet?.Title is { Length: > 0 }
+                && video.Status?.PrivacyStatus == "public")
+            .Select(video =>
+            {
+                var parsed = TrackMetadataParser.Parse(video.Snippet.Title, video.Snippet.ChannelTitle);
+                return new TrackMatchSearchCandidate
+                {
+                    CandidateSource = "youtube", ExternalId = video.Id,
+                    Title = parsed.DisplayTitle,
+                    Artist = parsed.DisplayArtist ?? video.Snippet.ChannelTitle,
+                    ArtistCredits = parsed.ArtistCredits,
+                    DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration),
+                    RawMetadata = System.Text.Json.JsonSerializer.Serialize(new TrackObservationMetadata
+                    {
+                        SourceType = "youtube", ExternalId = video.Id,
+                        Title = parsed.DisplayTitle,
+                        Artist = parsed.DisplayArtist ?? video.Snippet.ChannelTitle,
+                        OriginalTitle = video.Snippet.Title,
+                        OriginalArtist = video.Snippet.ChannelTitle,
+                        ChannelTitle = video.Snippet.ChannelTitle,
+                        Description = video.Snippet.Description,
+                        DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration)
+                    })
+                };
+            }).ToArray() ?? [];
+    }
+
+    private static int? ParseVideoDuration(string? duration)
+    {
+        if (string.IsNullOrWhiteSpace(duration)) return null;
+        try { return (int)Math.Round(XmlConvert.ToTimeSpan(duration).TotalSeconds); }
+        catch (FormatException) { return null; }
+    }
+
+    internal async Task RenamePlaylistForSyncAsync(
+        PlatformAccountContext accountContext, string playlistId, string name, CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
+        var read = service.Playlists.List("snippet,status");
+        read.Id = playlistId;
+        var playlist = (await read.ExecuteAsync(cancellationToken)).Items?.SingleOrDefault();
+        if (playlist?.Snippet?.ChannelId != account.ExternalAccountId)
+            throw new PlatformApiException("youtube_playlist_not_owned", "Only the playlist owner can rename it.", 403);
+        playlist.Snippet.Title = name;
+        await service.Playlists.Update(playlist, "snippet").ExecuteAsync(cancellationToken);
+    }
+
+    internal async Task DeletePlaylistForSyncAsync(
+        PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
+        var read = service.Playlists.List("snippet");
+        read.Id = playlistId;
+        var playlist = (await read.ExecuteAsync(cancellationToken)).Items?.SingleOrDefault();
+        if (playlist?.Snippet?.ChannelId != account.ExternalAccountId)
+            throw new PlatformApiException("youtube_playlist_not_owned", "Only the playlist owner can delete it.", 403);
+        await service.Playlists.Delete(playlistId).ExecuteAsync(cancellationToken);
+    }
+
+    private async Task<ConnectedServiceAccount> RequireWritableAccountAsync(
+        PlatformAccountContext accountContext, CancellationToken cancellationToken)
+    {
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        if (account.ConnectionState != "connected" || string.IsNullOrWhiteSpace(account.EncryptedRefreshToken))
+            throw new InvalidOperationException("Reconnect the selected YouTube account before editing playlists.");
+        if (!HasPlaylistWriteScope(account.Scopes))
+            throw new InvalidOperationException("Reconnect YouTube to allow playlist edits.");
+        return account;
+    }
+
+    async Task IYouTubePlaylistClient.ValidatePlaylistCreationAsync(
+        PlatformAccountContext accountContext, CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
+        var request = service.Channels.List("id");
+        request.Mine = true;
+        request.MaxResults = 50;
+        var response = await request.ExecuteAsync(cancellationToken);
+        if (response.Items?.Any(channel => channel.Id == account.ExternalAccountId) != true)
+            throw new InvalidOperationException("The selected YouTube channel changed. Reconnect YouTube before creating a playlist.");
+    }
+
+    async Task<string> IYouTubePlaylistClient.CreatePrivatePlaylistAsync(
+        PlatformAccountContext accountContext, string name, CancellationToken cancellationToken)
+    {
+        Google.Apis.YouTube.v3.YouTubeService service;
+        try
+        {
+            var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+            service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (Exception ex)
+        {
+            // ExecuteAsync has not started, so creation definitely did not happen.
+            throw new PlatformApiException("youtube_playlist_creation_rejected",
+                "YouTube playlist creation could not start. Check the connection and retry.",
+                ex is InvalidOperationException or OperationCanceledException ? 409 : 503,
+                innerException: ex);
+        }
+        using var ownedService = service;
+        var playlist = new Google.Apis.YouTube.v3.Data.Playlist
+        {
+            Snippet = new PlaylistSnippet { Title = name },
+            Status = new PlaylistStatus { PrivacyStatus = "private" }
+        };
+        var created = await service.Playlists.Insert(playlist, "snippet,status").ExecuteAsync(cancellationToken);
+        return !string.IsNullOrWhiteSpace(created.Id)
+            && created.Status?.PrivacyStatus == "private"
+            ? created.Id
+            : throw new InvalidOperationException("YouTube did not confirm the private playlist and its ID.");
+    }
+
+    async Task IYouTubePlaylistClient.ValidateWritablePlaylistAsync(
+        PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
+        var seenTokens = new HashSet<string>(StringComparer.Ordinal);
+        string? pageToken = null;
+        do
+        {
+            var request = service.Playlists.List("id");
+            request.Mine = true;
+            request.MaxResults = 50;
+            request.PageToken = pageToken;
+            var response = await request.ExecuteAsync(cancellationToken);
+            if (response.Items?.Any(item => item.Id == playlistId) == true)
+                return;
+            pageToken = response.NextPageToken;
+            if (!string.IsNullOrEmpty(pageToken) && !seenTokens.Add(pageToken))
+                throw new InvalidOperationException("YouTube returned a repeated playlist page token.");
+        } while (!string.IsNullOrEmpty(pageToken));
+        throw new InvalidOperationException("The selected YouTube account does not own this playlist.");
+    }
+
+    async Task<IReadOnlyList<YouTubeWritablePlaylistItem>> IYouTubePlaylistClient.GetRawPlaylistItemsAsync(
+        PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
+        var items = new List<YouTubeWritablePlaylistItem>();
+        var seenTokens = new HashSet<string>(StringComparer.Ordinal);
+        var seenItemIds = new HashSet<string>(StringComparer.Ordinal);
+        string? pageToken = null;
+        do
+        {
+            var request = service.PlaylistItems.List("id,snippet,contentDetails,status");
+            request.PlaylistId = playlistId;
+            request.MaxResults = 50;
+            request.PageToken = pageToken;
+            var response = await request.ExecuteAsync(cancellationToken);
+            var pageItems = response.Items
+                ?? throw new InvalidOperationException("YouTube returned a missing playlist page. No changes were made.");
+            var videoIds = pageItems.Select(item => item?.ContentDetails?.VideoId ?? item?.Snippet?.ResourceId?.VideoId)
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            var availableVideoIds = new HashSet<string>(StringComparer.Ordinal);
+            if (videoIds.Length > 0)
+            {
+                var videosRequest = service.Videos.List("id,status");
+                videosRequest.Id = string.Join(',', videoIds);
+                videosRequest.MaxResults = videoIds.Length;
+                var videosResponse = await videosRequest.ExecuteAsync(cancellationToken);
+                foreach (var video in videosResponse.Items ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(video.Id)
+                        && video.Status?.PrivacyStatus is ("public" or "unlisted"))
+                        availableVideoIds.Add(video.Id);
+                }
+            }
+            foreach (var item in pageItems)
+            {
+                if (item is null)
+                    throw new InvalidOperationException("YouTube returned a playlist item without details. No changes were made.");
+                if (string.IsNullOrWhiteSpace(item.Id))
+                    throw new InvalidOperationException("YouTube returned a playlist item without an ID. No changes were made.");
+                var snippet = item.Snippet;
+                if (!seenItemIds.Add(item.Id) || snippet is null || snippet.Position is null)
+                    throw new InvalidOperationException("YouTube returned an incomplete playlist snapshot. No changes were made.");
+                var videoId = item.ContentDetails?.VideoId ?? item.Snippet?.ResourceId?.VideoId;
+                var isAvailable = !string.IsNullOrWhiteSpace(videoId)
+                    && availableVideoIds.Contains(videoId)
+                    && !string.Equals(item.Status?.PrivacyStatus, "private", StringComparison.OrdinalIgnoreCase);
+                items.Add(new YouTubeWritablePlaylistItem(
+                    item.Id,
+                    videoId,
+                    snippet.Position,
+                    isAvailable));
+            }
+            pageToken = response.NextPageToken;
+            if (!string.IsNullOrEmpty(pageToken) && !seenTokens.Add(pageToken))
+                throw new InvalidOperationException("YouTube returned a repeated playlist item page token. No changes were made.");
+        } while (!string.IsNullOrEmpty(pageToken));
+        return items.OrderBy(item => item.Position ?? long.MaxValue).ToArray();
+    }
+
+    async Task<string> IYouTubePlaylistClient.InsertPlaylistItemAsync(
+        PlatformAccountContext accountContext, string playlistId, string videoId, long position,
+        CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
+        var item = new PlaylistItem
+        {
+            Snippet = new PlaylistItemSnippet
+            {
+                PlaylistId = playlistId,
+                Position = position,
+                ResourceId = new ResourceId { Kind = "youtube#video", VideoId = videoId }
+            }
+        };
+        var inserted = await service.PlaylistItems.Insert(item, "snippet").ExecuteAsync(cancellationToken);
+        return inserted.Id ?? throw new InvalidOperationException("YouTube inserted a playlist item without returning its ID.");
+    }
+
+    async Task IYouTubePlaylistClient.MovePlaylistItemAsync(
+        PlatformAccountContext accountContext, string playlistId, YouTubeWritablePlaylistItem item,
+        long position, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(item.VideoId))
+            throw new InvalidOperationException("Cannot move a YouTube item without a video ID.");
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
+        var body = new PlaylistItem
+        {
+            Id = item.Id,
+            Snippet = new PlaylistItemSnippet
+            {
+                PlaylistId = playlistId,
+                Position = position,
+                ResourceId = new ResourceId { Kind = "youtube#video", VideoId = item.VideoId }
+            }
+        };
+        await service.PlaylistItems.Update(body, "snippet").ExecuteAsync(cancellationToken);
+    }
+
+    async Task IYouTubePlaylistClient.DeletePlaylistItemAsync(
+        PlatformAccountContext accountContext, string itemId, CancellationToken cancellationToken)
+    {
+        var account = await RequireWritableAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
+        await service.PlaylistItems.Delete(itemId).ExecuteAsync(cancellationToken);
+    }
+
     /// <summary>
     /// Exchanges authorization code for tokens and saves the connected account
     /// </summary>
@@ -329,8 +727,14 @@ public class YouTubeService
         channelRequest.Mine = true;
         var channelResponse = await channelRequest.ExecuteAsync();
         var channel = channelResponse.Items?.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(channel?.Id))
+        {
+            throw new PlatformApiException("youtube_channel_missing_id",
+                "YouTube did not return a stable channel ID. No playlist links were changed.",
+                StatusCodes.Status502BadGateway);
+        }
 
-        var displayName = channel?.Snippet?.Title ?? "Unknown";
+        var displayName = channel.Snippet?.Title ?? "Unknown";
 
         // Check if account already exists
         var existingAccount = await _dbContext.ConnectedServiceAccounts
@@ -338,13 +742,16 @@ public class YouTubeService
 
         if (existingAccount != null)
         {
-            // Update external account ID only if we got a real channel ID from the API
-            if (channel?.Id != null)
+            if (tokenResponse.RefreshToken == null
+                && (string.IsNullOrWhiteSpace(existingAccount.EncryptedRefreshToken)
+                    || !string.Equals(existingAccount.ExternalAccountId, channel.Id, StringComparison.Ordinal)))
             {
-                existingAccount.ExternalAccountId = channel.Id;
+                throw new PlatformApiException("youtube_refresh_token_missing",
+                    "YouTube did not provide a refresh token. Reconnect YouTube with account access before syncing.",
+                    StatusCodes.Status409Conflict);
             }
-            // Keep existing ExternalAccountId if we didn't get a channel ID
 
+            existingAccount.ExternalAccountId = channel.Id;
             existingAccount.DisplayName = displayName;
             // Only update refresh token if we received a new one
             if (tokenResponse.RefreshToken != null)
@@ -358,6 +765,10 @@ public class YouTubeService
             }
             existingAccount.Scopes = tokenResponse.Scope;
             existingAccount.TokenExpiresAt = tokenResponse.IssuedUtc.AddSeconds(tokenResponse.ExpiresInSeconds ?? 3600);
+            existingAccount.ConnectionState = "connected";
+            existingAccount.ReconnectRequiredAt = null;
+            existingAccount.ReconnectReason = null;
+            existingAccount.TokenVersion++;
             existingAccount.UpdatedAt = DateTime.UtcNow;
         }
         else
@@ -368,14 +779,11 @@ public class YouTubeService
                 throw new InvalidOperationException("No refresh token received from Google. User may need to revoke access at https://myaccount.google.com/permissions and reconnect.");
             }
 
-            // Use channel ID if available, otherwise generate a unique fallback ID for new accounts
-            var externalAccountId = channel?.Id ?? $"yt_user_{Guid.NewGuid():N}";
-
             existingAccount = new ConnectedServiceAccount
             {
                 UserId = userId,
                 Service = ServiceName,
-                ExternalAccountId = externalAccountId,
+                ExternalAccountId = channel.Id,
                 DisplayName = displayName,
                 EncryptedRefreshToken = _tokenEncryption.Encrypt(tokenResponse.RefreshToken),
                 Scopes = tokenResponse.Scope,
@@ -387,7 +795,35 @@ public class YouTubeService
         }
 
         await _dbContext.SaveChangesAsync();
+        await RestoreMappingsForConnectedAccountAsync(existingAccount);
         return existingAccount;
+    }
+
+    private async Task RestoreMappingsForConnectedAccountAsync(ConnectedServiceAccount account)
+    {
+        var mappings = await _dbContext.ServicePlaylistMappings
+            .Where(mapping => mapping.ConnectedServiceAccountId == account.Id
+                && mapping.UserId == account.UserId && mapping.Service == ServiceName)
+            .ToListAsync();
+        foreach (var mapping in mappings)
+        {
+            if (!string.Equals(mapping.ExternalAccountId, account.ExternalAccountId, StringComparison.Ordinal))
+            {
+                if (mapping.State is "active" or "paused")
+                {
+                    mapping.State = "paused";
+                    mapping.LastError = "account_changed";
+                    mapping.NextAttemptAt = null;
+                }
+            }
+            else if (mapping.State == "paused" && mapping.LastError is "account_disconnected" or "account_changed")
+            {
+                mapping.State = "active";
+                mapping.LastError = null;
+            }
+        }
+
+        await _dbContext.SaveChangesAsync();
     }
 
     /// <summary>
@@ -403,12 +839,14 @@ public class YouTubeService
         PlatformAccountContext accountContext,
         CancellationToken cancellationToken)
     {
-        return await _dbContext.ConnectedServiceAccounts.SingleOrDefaultAsync(
+        return await _dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(
                 account => account.Id == accountContext.ConnectedServiceAccountId
                     && account.UserId == accountContext.UserId
-                    && account.Service == ServiceName,
+                    && account.Service == ServiceName
+                    && (accountContext.ExpectedExternalAccountId == null
+                        || account.ExternalAccountId == accountContext.ExpectedExternalAccountId),
                 cancellationToken)
-            ?? throw new InvalidOperationException("The selected YouTube account is no longer connected.");
+            ?? throw new InvalidOperationException("The selected YouTube account has changed or is no longer connected.");
     }
 
     /// <summary>
@@ -438,7 +876,29 @@ public class YouTubeService
                 }
             }
 
-            _dbContext.ConnectedServiceAccounts.Remove(account);
+            var mappings = await _dbContext.ServicePlaylistMappings
+                .Where(mapping => mapping.ConnectedServiceAccountId == account.Id
+                    && mapping.UserId == userId && mapping.Service == ServiceName)
+                .ToListAsync();
+            foreach (var mapping in mappings.Where(mapping => mapping.State == "active"))
+            {
+                mapping.State = "paused";
+                mapping.LastError = "account_disconnected";
+                mapping.NextAttemptAt = null;
+            }
+
+            account.EncryptedAccessToken = null;
+            account.EncryptedRefreshToken = null;
+            account.TokenExpiresAt = null;
+            account.RefreshTokenExpiresAt = null;
+            account.Scopes = null;
+            account.TokenVersion++;
+            account.TokenRefreshLeaseId = null;
+            account.TokenRefreshLeaseExpiresAt = null;
+            account.ConnectionState = "disconnected";
+            account.ReconnectRequiredAt = null;
+            account.ReconnectReason = null;
+            account.UpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
         }
     }
@@ -608,7 +1068,7 @@ public class YouTubeService
 
     internal static YouTubePlaylistItemMappingResult MapAvailablePlaylistItem(
         PlaylistItem? item,
-        IReadOnlyDictionary<string, int?> availableVideos)
+        IReadOnlyDictionary<string, AvailableVideoMetadata> availableVideos)
     {
         if (item?.Snippet == null)
         {
@@ -627,7 +1087,7 @@ public class YouTubeService
         }
 
         var videoId = item.ContentDetails.VideoId;
-        if (!availableVideos.TryGetValue(videoId, out var durationSeconds))
+        if (!availableVideos.TryGetValue(videoId, out var video))
         {
             return new(null, "provider_unavailable", position);
         }
@@ -637,19 +1097,21 @@ public class YouTubeService
             {
                 VideoId = videoId,
                 Title = item.Snippet.Title,
-                Description = item.Snippet.Description,
+                Description = string.IsNullOrWhiteSpace(video.Description)
+                    ? item.Snippet.Description
+                    : video.Description,
                 ThumbnailUrl = item.Snippet.Thumbnails?.Medium?.Url
                     ?? item.Snippet.Thumbnails?.Default__?.Url,
                 ChannelTitle = item.Snippet.VideoOwnerChannelTitle,
                 Position = (int)(position ?? 0),
                 PublishedAt = ParsePublishedAtRaw(item.Snippet.PublishedAtRaw),
-                DurationSeconds = durationSeconds
+                DurationSeconds = video.DurationSeconds
             },
             null,
             position);
     }
 
-    private async Task<Dictionary<string, int?>> GetAvailableVideosAsync(
+    private async Task<Dictionary<string, AvailableVideoMetadata>> GetAvailableVideosAsync(
         Google.Apis.YouTube.v3.YouTubeService youtubeService,
         IReadOnlyCollection<string> videoIds)
     {
@@ -658,12 +1120,12 @@ public class YouTubeService
             return [];
         }
 
-        var request = youtubeService.Videos.List("contentDetails,status");
+        var request = youtubeService.Videos.List("snippet,contentDetails,status");
         request.Id = string.Join(",", videoIds);
         request.MaxResults = videoIds.Count;
 
         var response = await request.ExecuteAsync();
-        var availableVideos = new Dictionary<string, int?>(StringComparer.Ordinal);
+        var availableVideos = new Dictionary<string, AvailableVideoMetadata>(StringComparer.Ordinal);
 
         if (response.Items == null)
         {
@@ -692,13 +1154,18 @@ public class YouTubeService
                 }
             }
 
-            availableVideos[video.Id] = durationSeconds;
+            availableVideos[video.Id] = new AvailableVideoMetadata(
+                durationSeconds, video.Snippet?.Description);
         }
 
         return availableVideos;
     }
 
-    private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(ConnectedServiceAccount account)
+    internal sealed record AvailableVideoMetadata(int? DurationSeconds, string? Description);
+
+    private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(
+        ConnectedServiceAccount account, CancellationToken cancellationToken = default,
+        bool disableAutomaticRetries = false)
     {
         if (string.IsNullOrEmpty(account.EncryptedRefreshToken))
             throw new InvalidOperationException("No refresh token available");
@@ -727,15 +1194,25 @@ public class YouTubeService
         var credential = new UserCredential(flow, account.UserId.ToString(), token);
 
         // Refresh the access token
-        if (await credential.RefreshTokenAsync(CancellationToken.None))
+        if (await credential.RefreshTokenAsync(cancellationToken))
         {
             _logger.LogDebug("Successfully refreshed YouTube access token for user {UserId}", account.UserId);
         }
 
-        return new Google.Apis.YouTube.v3.YouTubeService(new BaseClientService.Initializer
+        var service = new Google.Apis.YouTube.v3.YouTubeService(new BaseClientService.Initializer
         {
             HttpClientInitializer = credential,
-            ApplicationName = "Cantaro"
+            ApplicationName = "Cantaro",
+            // An insert can succeed before its response is lost. The next job attempt
+            // rereads the playlist; an SDK retry here could create a duplicate video.
+            DefaultExponentialBackOffPolicy = disableAutomaticRetries
+                ? Google.Apis.Http.ExponentialBackOffPolicy.None
+                : Google.Apis.Http.ExponentialBackOffPolicy.UnsuccessfulResponse503
         });
+        // The credential's 401 handler can replay a POST too. Access is already
+        // refreshed above; a failed mutation must return to the caller once.
+        if (disableAutomaticRetries && credential is Google.Apis.Http.IHttpUnsuccessfulResponseHandler handler)
+            service.HttpClient.MessageHandler.RemoveUnsuccessfulResponseHandler(handler);
+        return service;
     }
 }

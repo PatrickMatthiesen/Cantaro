@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router';
+import { Link, useCanGoBack } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   MusicPlatformIcon,
@@ -13,6 +13,8 @@ import { ActionButton, SelectField, actionClassName } from '@cantaro/client-shar
 import { MusicPageShell } from './MusicPageShell';
 import { lyricsForDisplay } from './musicLyrics';
 import { formatDuration, isPlatformId, platformName, songArtist } from './musicPresentation';
+import { requestPlaylistSyncDataRefresh } from './playlistSyncProgress';
+import { canAddSongToPlaylist, withoutPlaylistEntry } from './musicPlaylistMemberships';
 
 interface SongDerivedMetadata {
   platformIds: PlatformId[];
@@ -22,6 +24,10 @@ interface SongDerivedMetadata {
 }
 
 type SongPlaylistMembership = MusicLibrarySong['playlists'][number];
+
+function membershipKey(membership: SongPlaylistMembership) {
+  return membership.entryId;
+}
 
 function mutationErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -137,6 +143,8 @@ function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata:
 }
 
 function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
+  const canGoBack = useCanGoBack();
+
   return (
     <section className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content">
       {song.thumbnailUrl ? (
@@ -151,7 +159,12 @@ function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: 
 
       <Link
         to="/music/songs"
-        aria-label="Back to songs"
+        aria-label={canGoBack ? 'Back' : 'Back to songs'}
+        onClick={(event) => {
+          if (!canGoBack || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+          event.preventDefault();
+          window.history.back();
+        }}
         className="absolute left-4 top-4 z-30 inline-flex size-11 items-center justify-center bg-black/35 text-white transition-colors hover:bg-black/60 focus-visible:outline-2 focus-visible:outline-focus sm:left-6 sm:top-6"
       >
         <MusicUiIcon name="arrowLeft" className="h-5 w-5" />
@@ -298,8 +311,8 @@ function LyricsSection({ song }: { song: MusicLibrarySong }) {
       .then((result) => {
         if (requestId.current === currentRequest && !controller.signal.aborted) setView({ kind: 'ready', result });
       })
-      .catch(() => {
-        if (requestId.current === currentRequest && !controller.signal.aborted) setView({ kind: 'error', message: 'Lyrics could not be loaded right now.' });
+      .catch((error: unknown) => {
+        if (requestId.current === currentRequest && !controller.signal.aborted) setView({ kind: 'error', message: error instanceof Error ? error.message : 'Lyrics could not be loaded right now.' });
       });
   };
 
@@ -318,13 +331,12 @@ function LyricsSection({ song }: { song: MusicLibrarySong }) {
 
   return (
     <section className="border-b border-border-subtle py-9">
-      <SectionHeader title="Lyrics" detail="Loaded on demand with match confidence and source attribution." action={action} />
+      <SectionHeader title="Lyrics" action={action} />
       {view.kind === 'closed' ? null : view.kind === 'loading' ? (
         <LyricsLoading />
       ) : view.kind === 'error' ? (
         <div className="mt-5 border-y border-danger-border py-5">
-          <p className="font-bold text-danger-content">Lyrics could not be loaded</p>
-          <p className="mt-1 text-sm text-danger-content">{view.message}</p>
+          <p role="alert" className="text-sm text-danger-content">{view.message}</p>
           <ActionButton tone="secondary" className="mt-4" onClick={load}><MusicUiIcon name="refresh" className="h-4 w-4" />Try again</ActionButton>
         </div>
       ) : (
@@ -342,7 +354,7 @@ function PlaylistAppearancesSection({ song, library }: { song: MusicLibrarySong;
   const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
   const youtubeIds = song.sourceIdentities.filter((identity) => identity.source === 'youtube').map((identity) => identity.externalId);
   const [selectedYouTubeId, setSelectedYouTubeId] = useState(youtubeIds.length === 1 ? youtubeIds[0] : '');
-  const available = library.playlists.filter((playlist) => !memberships.some((item) => item.playlistId === playlist.id));
+  const available = library.playlists.filter((playlist) => canAddSongToPlaylist(playlist, memberships));
 
   useEffect(() => {
     setMemberships(song.playlists);
@@ -359,8 +371,10 @@ function PlaylistAppearancesSection({ song, library }: { song: MusicLibrarySong;
     try {
       ensureYouTubeVersionSelected(youtubeIds, selectedYouTubeId);
       await musicLibraryApi.addSongToPlaylist(song.id, playlistId, selectedSourceId(selectedYouTubeId));
-      setMemberships((current) => [...current, { playlistId, playlistName: playlist.name, position: playlist.entryCount }]);
-      setMessage(`Added to ${playlist.name} and synced.`);
+      const refreshedSong = await musicLibraryApi.getCanonicalSong(song.id).catch(() => null);
+      if (refreshedSong) setMemberships(refreshedSong.playlists);
+      setMessage(refreshedSong ? `Added to ${playlist.name}.` : `Added to ${playlist.name}. Refresh to see the updated list.`);
+      requestPlaylistSyncDataRefresh();
       setSelectedPlaylistId('');
     } catch (error) {
       setMessage(mutationErrorMessage(error, 'Could not add this song.'));
@@ -369,14 +383,14 @@ function PlaylistAppearancesSection({ song, library }: { song: MusicLibrarySong;
     }
   };
 
-  const remove = async (playlistId: string) => {
-    const playlist = memberships.find((item) => item.playlistId === playlistId);
-    setBusy(playlistId);
+  const remove = async (playlist: SongPlaylistMembership) => {
+    setBusy(membershipKey(playlist));
     setMessage(undefined);
     try {
-      await musicLibraryApi.removeSongFromPlaylist(song.id, playlistId, selectedSourceId(selectedYouTubeId));
-      setMemberships((current) => current.filter((item) => item.playlistId !== playlistId));
-      setMessage(`Removed from ${playlist?.playlistName ?? 'playlist'} and synced.`);
+      await musicLibraryApi.removeSongFromPlaylist(song.id, playlist.playlistId, selectedSourceId(selectedYouTubeId), playlist.entryId);
+      setMemberships((current) => withoutPlaylistEntry(current, playlist.entryId));
+      setMessage(`Removed from ${playlist.playlistName}.`);
+      requestPlaylistSyncDataRefresh();
       setConfirming(undefined);
     } catch (error) {
       setMessage(mutationErrorMessage(error, 'Could not remove this song.'));
@@ -392,7 +406,7 @@ function PlaylistAppearancesSection({ song, library }: { song: MusicLibrarySong;
 
   return (
     <section className="border-b border-border-subtle py-9">
-      <SectionHeader title="Playlists" detail="Synced playlists that currently contain this song." />
+      <SectionHeader title="Playlists" />
       {available.length > 0 ? (
         <form onSubmit={submit} className="mt-5 flex flex-wrap items-end gap-3">
           <SelectField label="Add to playlist" value={selectedPlaylistId} onChange={(event) => setSelectedPlaylistId(event.target.value)} containerClassName="min-w-[15rem] flex-1 sm:max-w-sm">
@@ -414,18 +428,18 @@ function PlaylistAppearancesSection({ song, library }: { song: MusicLibrarySong;
   );
 }
 
-function PlaylistMembershipList({ memberships, confirming, busy, onConfirm, onRemove }: { memberships: SongPlaylistMembership[]; confirming?: string; busy?: string; onConfirm: (playlistId?: string) => void; onRemove: (playlistId: string) => Promise<void> }) {
+function PlaylistMembershipList({ memberships, confirming, busy, onConfirm, onRemove }: { memberships: SongPlaylistMembership[]; confirming?: string; busy?: string; onConfirm: (entryId?: string) => void; onRemove: (membership: SongPlaylistMembership) => Promise<void> }) {
   if (memberships.length === 0) return <p className="mt-5 py-4 text-content-muted">This song is not in a synced playlist yet.</p>;
   return (
     <ul className="mt-5 divide-y divide-border-subtle border-t border-border-subtle">
       {memberships.map((playlist) => (
-        <PlaylistMembershipRow key={`${playlist.playlistId}-${playlist.position}`} playlist={playlist} confirming={confirming === playlist.playlistId} busy={busy} onConfirm={onConfirm} onRemove={onRemove} />
+        <PlaylistMembershipRow key={membershipKey(playlist)} playlist={playlist} confirming={confirming === membershipKey(playlist)} busy={busy} onConfirm={onConfirm} onRemove={onRemove} />
       ))}
     </ul>
   );
 }
 
-function PlaylistMembershipRow({ playlist, confirming, busy, onConfirm, onRemove }: { playlist: SongPlaylistMembership; confirming: boolean; busy?: string; onConfirm: (playlistId?: string) => void; onRemove: (playlistId: string) => Promise<void> }) {
+function PlaylistMembershipRow({ playlist, confirming, busy, onConfirm, onRemove }: { playlist: SongPlaylistMembership; confirming: boolean; busy?: string; onConfirm: (entryId?: string) => void; onRemove: (membership: SongPlaylistMembership) => Promise<void> }) {
   return (
     <li className="flex min-w-0 flex-col items-stretch gap-2 py-4 sm:flex-row sm:items-center sm:gap-3">
       <Link to="/music/playlists/$playlistId" params={{ playlistId: playlist.playlistId }} className="flex min-w-0 flex-1 items-center justify-between gap-3 focus-visible:outline-2 focus-visible:outline-focus">
@@ -438,11 +452,11 @@ function PlaylistMembershipRow({ playlist, confirming, busy, onConfirm, onRemove
       {confirming ? (
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <span className="text-sm font-semibold text-danger-content">Remove?</span>
-          <ActionButton tone="danger" disabled={Boolean(busy)} onClick={() => void onRemove(playlist.playlistId)}>{busy ? 'Removing…' : 'Confirm'}</ActionButton>
+          <ActionButton tone="danger" disabled={Boolean(busy)} onClick={() => void onRemove(playlist)}>{busy ? 'Removing…' : 'Confirm'}</ActionButton>
           <ActionButton tone="ghost" onClick={() => onConfirm(undefined)}>Cancel</ActionButton>
         </div>
       ) : (
-        <ActionButton tone="ghost" className="self-start hover:bg-danger-surface hover:text-danger-content sm:self-auto" onClick={() => onConfirm(playlist.playlistId)}>Remove</ActionButton>
+        <ActionButton tone="ghost" className="self-start hover:bg-danger-surface hover:text-danger-content sm:self-auto" onClick={() => onConfirm(membershipKey(playlist))}>Remove</ActionButton>
       )}
     </li>
   );

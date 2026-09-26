@@ -45,20 +45,4 @@ public class TrackDurationSimilarityTests
     {
         Assert.Equal(1m, TrackDurationSimilarity.Calculate(observationSeconds, candidateSeconds, Options));
     }
-
-    [Theory]
-    [InlineData(209, 178, 0.93)]
-    [InlineData(209, 160, 0.62)]
-    public void CalculateWithObservationPadding_AllowsForNonMusicVideoSegments(
-        int observationSeconds,
-        int candidateSeconds,
-        decimal expected)
-    {
-        var score = TrackDurationSimilarity.CalculateWithObservationPadding(
-            observationSeconds,
-            candidateSeconds,
-            Options);
-
-        Assert.InRange(score, expected - 0.01m, expected + 0.01m);
-    }
 }

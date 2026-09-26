@@ -14,9 +14,13 @@ internal sealed class PlatformOAuthState
     public required int UserId { get; set; }
     public required string PlatformId { get; set; }
     public required string ReturnUrl { get; set; }
+    public string? FrontendOrigin { get; set; }
+    public string? RedirectUri { get; set; }
     public required string Trigger { get; set; }
     public required long CreatedAtTicksUtc { get; set; }
 }
+
+public sealed record DisconnectPlatformRequest(IReadOnlyList<PlaylistDisconnectChoice> Links);
 
 [ApiController]
 [Route("api/platforms/{platformId}")]
@@ -28,19 +32,22 @@ public class PlatformsController : ControllerBase
     private readonly ILogger<PlatformsController> _logger;
     private readonly IDataProtector _stateProtector;
     private readonly IFrontendUrlResolver _urlResolver;
+    private readonly PlaylistLinkLifecycleService _playlistLifecycle;
 
     public PlatformsController(
         IPlatformRegistry platformRegistry,
         UserManager<User> userManager,
         ILogger<PlatformsController> logger,
         IDataProtectionProvider dataProtectionProvider,
-        IFrontendUrlResolver urlResolver)
+        IFrontendUrlResolver urlResolver,
+        PlaylistLinkLifecycleService playlistLifecycle)
     {
         _platformRegistry = platformRegistry;
         _userManager = userManager;
         _logger = logger;
         _stateProtector = dataProtectionProvider.CreateProtector("Platform.OAuth.State");
         _urlResolver = urlResolver;
+        _playlistLifecycle = playlistLifecycle;
     }
 
     [HttpGet("status")]
@@ -55,10 +62,11 @@ public class PlatformsController : ControllerBase
         var userId = await GetCurrentUserIdAsync();
         var account = await platform.GetConnectedAccountAsync(userId, cancellationToken);
         var needsReconnect = string.Equals(account?.ConnectionState, "reconnect_required", StringComparison.Ordinal);
+        var isConnected = account is not null && account.ConnectionState != "disconnected";
 
         return Ok(new ConnectedAccountDto
         {
-            IsConnected = account != null,
+            IsConnected = isConnected,
             DisplayName = account?.DisplayName,
             ExternalAccountId = account?.ExternalAccountId,
             ConnectedAt = account?.CreatedAt,
@@ -86,16 +94,17 @@ public class PlatformsController : ControllerBase
             UserId = userId,
             PlatformId = normalizedPlatformId,
             ReturnUrl = safeReturnRoute,
+            FrontendOrigin = _urlResolver.GetFrontendUrl(),
             Trigger = string.IsNullOrWhiteSpace(trigger) ? "platform-manager" : trigger,
             CreatedAtTicksUtc = DateTime.UtcNow.Ticks
         };
 
-        var state = _stateProtector.Protect(JsonSerializer.Serialize(statePayload));
         try
         {
             var redirectUri = platform.ResolveRedirectUri(
                 _urlResolver.GetCallbackUrls($"api/platforms/{normalizedPlatformId}/callback"));
-
+            statePayload.RedirectUri = redirectUri;
+            var state = _stateProtector.Protect(JsonSerializer.Serialize(statePayload));
             var authUrl = platform.GetAuthorizationUrl(redirectUri, state);
             return Redirect(authUrl);
         }
@@ -125,13 +134,7 @@ public class PlatformsController : ControllerBase
 
         var platform = _platformRegistry.GetRequired(normalizedPlatformId);
 
-        if (!string.IsNullOrWhiteSpace(error))
-        {
-            _logger.LogWarning("{Platform} OAuth error: {Error}", normalizedPlatformId, error);
-            return Redirect($"{frontendUrl}{defaultPlatformPath}?error=oauth_denied");
-        }
-
-        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+        if (string.IsNullOrWhiteSpace(state))
         {
             return Redirect($"{frontendUrl}{defaultPlatformPath}?error=invalid_callback");
         }
@@ -153,6 +156,18 @@ public class PlatformsController : ControllerBase
                 return Redirect($"{frontendUrl}{defaultPlatformPath}?error=state_expired");
             }
 
+            frontendUrl = GetSafeStateOrigin(payload.FrontendOrigin) ?? frontendUrl;
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                _logger.LogWarning("{Platform} OAuth error: {Error}", normalizedPlatformId, error);
+                return Redirect($"{frontendUrl}{defaultPlatformPath}?error=oauth_denied");
+            }
+
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                return Redirect($"{frontendUrl}{defaultPlatformPath}?error=invalid_callback");
+            }
+
             var currentUser = await _userManager.GetUserAsync(User);
             if (currentUser != null && currentUser.Id != payload.UserId)
             {
@@ -161,7 +176,7 @@ public class PlatformsController : ControllerBase
             }
 
             var returnUrl = SanitizeReturnUrl(payload.ReturnUrl, defaultPath: defaultPlatformPath);
-            var redirectUri = platform.ResolveRedirectUri(
+            var redirectUri = payload.RedirectUri ?? platform.ResolveRedirectUri(
                 _urlResolver.GetCallbackUrls($"api/platforms/{normalizedPlatformId}/callback"));
 
             await platform.ExchangeCodeAndSaveAsync(payload.UserId, code, redirectUri, cancellationToken);
@@ -188,21 +203,51 @@ public class PlatformsController : ControllerBase
         }
     }
 
-    [HttpPost("disconnect")]
-    public async Task<ActionResult> Disconnect(string platformId, CancellationToken cancellationToken)
+    internal static string? GetSafeStateOrigin(string? value)
     {
-        if (!_platformRegistry.IsSupported(platformId))
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || uri.UserInfo.Length != 0
+            || uri.AbsolutePath != "/"
+            || uri.Query.Length != 0
+            || uri.Fragment.Length != 0)
         {
-            return NotFound(new { error = $"Platform '{platformId}' is not implemented" });
+            return null;
         }
 
-        var platform = _platformRegistry.GetRequired(platformId);
+        return uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    [HttpGet("disconnect/preview")]
+    public async Task<ActionResult<PlaylistDisconnectPreview>> DisconnectPreview(
+        string platformId, CancellationToken cancellationToken)
+    {
+        if (!_platformRegistry.IsSupported(platformId))
+            return NotFound(new { error = $"Platform '{platformId}' is not implemented" });
+        try
+        {
+            return Ok(await _playlistLifecycle.PreviewDisconnectAsync(
+                await GetCurrentUserIdAsync(), platformId.ToLowerInvariant(), cancellationToken));
+        }
+        catch (PlatformApiException ex) { return PlatformError(ex); }
+    }
+
+    [HttpPost("disconnect")]
+    public async Task<ActionResult> Disconnect(
+        string platformId, [FromBody] DisconnectPlatformRequest request, CancellationToken cancellationToken)
+    {
+        if (!_platformRegistry.IsSupported(platformId))
+            return NotFound(new { error = $"Platform '{platformId}' is not implemented" });
         var userId = await GetCurrentUserIdAsync();
-        await platform.DisconnectAsync(userId, cancellationToken);
+        try
+        {
+            await _playlistLifecycle.DisconnectAsync(userId, platformId.ToLowerInvariant(),
+                request.Links, cancellationToken);
+        }
+        catch (PlatformApiException ex) { return PlatformError(ex); }
+        _logger.LogInformation("Disconnected {Platform} account for user {UserId}", platformId, userId);
 
-        _logger.LogInformation("Disconnected {Platform} account for user {UserId}", platform.PlatformId, userId);
-
-        return Ok(new { message = $"{platform.PlatformId} account disconnected" });
+        return Ok(new { disconnected = true });
     }
 
     [HttpGet("playlists")]
@@ -220,7 +265,7 @@ public class PlatformsController : ControllerBase
             var platform = _platformRegistry.GetRequired(platformId);
             var userId = await GetCurrentUserIdAsync();
             var account = await platform.GetConnectedAccountAsync(userId, cancellationToken);
-            if (account is null)
+            if (account is null || account.ConnectionState != "connected")
             {
                 return BadRequest(new { error = $"Connect {platformId} before loading playlists." });
             }
@@ -269,6 +314,9 @@ public class PlatformsController : ControllerBase
         try
         {
             var userId = await GetCurrentUserIdAsync();
+            var account = await platform.GetConnectedAccountAsync(userId, cancellationToken);
+            if (account is null || account.ConnectionState != "connected")
+                return BadRequest(new { error = $"Connect {platformId} before loading playlist songs." });
             var items = await platform.GetPlaylistSongsAsync(userId, playlistId, cancellationToken);
             return Ok(items);
         }

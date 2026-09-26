@@ -2,10 +2,12 @@ import { Link } from '@tanstack/react-router';
 import { type ReactNode } from 'react';
 import { MusicPlatformIcon, type PlatformId } from '@cantaro/client-shared/music';
 import { MusicUpNextPanel } from './MusicUpNextPanel';
-import { formatDuration, formatTimestamp, platformName } from './musicPresentation';
+import { MusicRelativeTime } from './MusicRelativeTime';
+import { formatDuration, platformName } from './musicPresentation';
 
 export interface MusicCollectionTrack {
   id: string;
+  entryId?: string;
   detailSongId?: string;
   title: string;
   artist?: string;
@@ -32,7 +34,7 @@ export interface MusicCollectionSuggestion {
 }
 
 interface MusicCollectionDetailPageProps {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description?: string;
   artworkUrl?: string;
@@ -41,11 +43,11 @@ interface MusicCollectionDetailPageProps {
   backTo: '/music/playlists' | '/music/platforms/$platformId';
   backParams?: Record<string, string>;
   backLabel: string;
-  ownerLabel: string;
+  ownerLabel?: string;
   updatedAt?: string;
   songsLabel: string;
   durationLabel?: string;
-  chips: string[];
+  chips?: string[];
   tracks: MusicCollectionTrack[];
   isLoadingTracks?: boolean;
   emptyTrackLabel: string;
@@ -54,6 +56,7 @@ interface MusicCollectionDetailPageProps {
   rightRailTitle?: string;
   suggestions?: MusicCollectionSuggestion[];
   actionSlot?: ReactNode;
+  afterHeroSlot?: ReactNode;
   onPlayAll?: () => void;
   onShuffle?: () => void;
   onPlayTrack?: (track: MusicCollectionTrack) => void;
@@ -106,14 +109,6 @@ function CollectionArtwork({
   );
 }
 
-function Pill({ children }: { children: ReactNode }) {
-  return (
-    <span className="border-l border-border-strong pl-2 text-xs font-bold text-content-muted first:border-0 first:pl-0">
-      {children}
-    </span>
-  );
-}
-
 function PlayIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -151,24 +146,28 @@ function HeaderActions({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        className="inline-flex h-10 items-center gap-2 bg-personal-accent px-4 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-6"
-        disabled={!hasTracks || !onPlayAll}
-        onClick={onPlayAll}
-      >
-        <PlayIcon />
-        Play
-      </button>
-      <button
-        type="button"
-        className="inline-flex h-10 items-center gap-2 border border-border-strong bg-surface px-4 text-sm font-black text-content transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-5"
-        disabled={!hasTracks || !onShuffle}
-        onClick={onShuffle}
-      >
-        <ShuffleIcon />
-        Shuffle
-      </button>
+      {onPlayAll ? (
+        <button
+          type="button"
+          className="inline-flex h-10 items-center gap-2 bg-personal-accent px-4 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-5"
+          disabled={!hasTracks}
+          onClick={onPlayAll}
+        >
+          <PlayIcon />
+          Play
+        </button>
+      ) : null}
+      {onShuffle ? (
+        <button
+          type="button"
+          className="inline-flex h-10 items-center gap-2 border border-border-strong bg-surface px-4 text-sm font-black text-content transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:px-5"
+          disabled={!hasTracks}
+          onClick={onShuffle}
+        >
+          <ShuffleIcon />
+          Shuffle
+        </button>
+      ) : null}
       {actionSlot}
     </div>
   );
@@ -449,7 +448,7 @@ export function MusicTrackTable({
       </div>
       <ol className="divide-y divide-border-subtle">
         {tracks.map((track, index) => (
-          <TrackRow key={track.id} track={track} index={index} showAlbums={showAlbums} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
+          <TrackRow key={track.entryId ?? track.id} track={track} index={index} showAlbums={showAlbums} onPlayTrack={onPlayTrack} onQueueTrack={onQueueTrack} />
         ))}
       </ol>
     </section>
@@ -573,24 +572,41 @@ function getCollectionDurationLabel(tracks: MusicCollectionTrack[], fallback?: s
 type CollectionHeroProps = Omit<MusicCollectionDetailPageProps, 'backTo' | 'backParams' | 'backLabel' | 'emptyTrackLabel' | 'onPlayTrack' | 'onQueueTrack'>;
 
 function CollectionHeroTitle({
-  eyebrow,
   title,
   description,
-}: Pick<CollectionHeroProps, 'eyebrow' | 'title' | 'description'>) {
+}: Pick<CollectionHeroProps, 'title' | 'description'>) {
   return (
     <div>
-      <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">{eyebrow}</p>
-      <h1 className="mt-1.5 text-3xl leading-tight font-black text-content sm:mt-2 sm:text-4xl md:text-5xl">{title}</h1>
-      {description ? <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-content-muted">{description}</p> : null}
+      <h1 className="text-2xl leading-tight font-black text-content sm:text-4xl">{title}</h1>
+      {description ? <p className="mt-2 line-clamp-2 max-w-2xl text-sm leading-5 font-semibold text-content-muted">{description}</p> : null}
     </div>
   );
 }
 
-function CollectionHeroChips({ chips }: Pick<CollectionHeroProps, 'chips'>) {
+function CollectionTrackSummary({
+  songsLabel,
+  durationLabel,
+  tracks,
+}: Pick<CollectionHeroProps, 'songsLabel' | 'durationLabel' | 'tracks'>) {
+  const computedDurationLabel = getCollectionDurationLabel(tracks, durationLabel);
+
   return (
-    <div className="flex flex-wrap gap-2">
-      {chips.length > 0 ? chips.map((chip) => <Pill key={chip}>{chip}</Pill>) : <Pill>Cantaro</Pill>}
-    </div>
+    <p className="text-sm font-black text-content sm:text-base">
+      {songsLabel}
+      {computedDurationLabel ? <span className="font-semibold text-content-muted"> · {computedDurationLabel}</span> : null}
+    </p>
+  );
+}
+
+function CollectionOwnerMeta({ ownerLabel, updatedAt }: Pick<CollectionHeroProps, 'ownerLabel' | 'updatedAt'>) {
+  if (!ownerLabel && !updatedAt) return null;
+
+  return (
+    <p className="mt-1 text-xs font-semibold text-content-muted sm:text-sm">
+      {ownerLabel}
+      {ownerLabel && updatedAt ? <span aria-hidden> · </span> : null}
+      {updatedAt ? <>Updated <MusicRelativeTime value={updatedAt} /></> : null}
+    </p>
   );
 }
 
@@ -604,40 +620,31 @@ function CollectionHeroMeta({
   onPlayAll,
   onShuffle,
 }: Pick<CollectionHeroProps, 'ownerLabel' | 'updatedAt' | 'songsLabel' | 'durationLabel' | 'tracks' | 'actionSlot' | 'onPlayAll' | 'onShuffle'>) {
-  const computedDurationLabel = getCollectionDurationLabel(tracks, durationLabel);
-
   return (
-    <div className="col-span-2 flex flex-wrap items-center justify-between gap-4 sm:col-span-1 sm:gap-5">
-      <div className="space-y-3">
-        <p className="text-sm font-black text-content">
-          {songsLabel}
-          {computedDurationLabel ? <span className="font-semibold text-content-muted"> · {computedDurationLabel}</span> : null}
-        </p>
-        <p className="text-sm font-semibold text-content-muted">
-          {ownerLabel}
-          {updatedAt ? <span className="block text-xs text-content-muted">Updated {formatTimestamp(updatedAt) ?? updatedAt}</span> : null}
-        </p>
+    <div className="flex min-w-0 flex-col justify-between gap-3">
+      <div>
+        <CollectionTrackSummary songsLabel={songsLabel} durationLabel={durationLabel} tracks={tracks} />
+        <CollectionOwnerMeta ownerLabel={ownerLabel} updatedAt={updatedAt} />
       </div>
-      <HeaderActions actionSlot={actionSlot} hasTracks={tracks.length > 0} onPlayAll={onPlayAll} onShuffle={onShuffle} />
+      {actionSlot || onPlayAll || onShuffle ? (
+        <HeaderActions actionSlot={actionSlot} hasTracks={tracks.length > 0} onPlayAll={onPlayAll} onShuffle={onShuffle} />
+      ) : null}
     </div>
   );
 }
 
 function CollectionHero(props: CollectionHeroProps) {
   return (
-    <section className="relative isolate overflow-hidden border-y border-border-subtle bg-surface-subtle px-4 py-5 sm:px-5 md:px-7">
-      {props.artworkUrl ? <img src={props.artworkUrl} alt="" className="absolute inset-0 -z-20 size-full scale-110 object-cover opacity-15 blur-3xl" /> : null}
-      <div className="absolute inset-0 -z-10 bg-linear-to-r from-canvas via-canvas/90 to-canvas/55" aria-hidden />
-      <div className="relative grid grid-cols-[76px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[minmax(132px,180px)_1fr] sm:gap-5 md:grid-cols-[minmax(180px,270px)_1fr] md:items-end md:gap-6">
+    <section className="border-y border-border-subtle bg-surface-subtle px-3 py-3 sm:px-4 sm:py-4">
+      <div className="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-3 sm:gap-4 md:grid-cols-[180px_minmax(0,1fr)] md:gap-5">
         <CollectionArtwork
           artworkUrl={props.artworkUrl}
           artworkExternalUrl={props.artworkExternalUrl}
           preserveArtworkAspectRatio={props.preserveArtworkAspectRatio}
           title={props.title}
         />
-        <div className="min-w-0 space-y-4 sm:space-y-5">
+        <div className="flex min-h-28 min-w-0 flex-col justify-between gap-3 md:min-h-[180px]">
           <CollectionHeroTitle {...props} />
-          <CollectionHeroChips chips={props.chips} />
           <CollectionHeroMeta {...props} />
         </div>
       </div>
@@ -701,6 +708,8 @@ export function MusicCollectionDetailPage(props: MusicCollectionDetailPageProps)
             onPlayAll={props.onPlayAll}
             onShuffle={props.onShuffle}
           />
+
+          {props.afterHeroSlot}
 
           <MusicTrackTable
             tracks={props.tracks}

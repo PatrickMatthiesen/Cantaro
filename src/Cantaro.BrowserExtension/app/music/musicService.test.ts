@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_STORAGE_KEY } from '../../platform/settings/settingsRepository';
-import { openCantaroPage } from './musicService';
+import { cantaroApiClient } from '../../platform/api/cantaroApiClient';
+import { openCantaroPage, removeSongFromPlaylist } from './musicService';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+it('removes the selected playlist occurrence by entry ID', async () => {
+  const request = vi.spyOn(cantaroApiClient, 'request').mockResolvedValue(undefined);
+
+  await removeSongFromPlaylist('track', 'playlist', 'video', 'second-entry');
+
+  expect(request).toHaveBeenCalledWith('/api/music/library/playlists/playlist/songs/track?youtubeVideoId=video&entryId=second-entry', { method: 'DELETE' });
 });
 
 describe('openCantaroPage', () => {

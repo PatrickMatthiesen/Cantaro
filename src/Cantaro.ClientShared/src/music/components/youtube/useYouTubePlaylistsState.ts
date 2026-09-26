@@ -60,6 +60,7 @@ function useYouTubeLoaders(state: ReturnType<typeof useYouTubeBrowserState>) {
 
   const handleLoadError = useCallback((loadError: unknown, fallbackMessage: string) => {
     if (isYouTubeReconnectRequiredError(loadError)) {
+      youtubePlatform.clearCache();
       setNeedsReconnect(true);
       clearPlaylistState();
       setError(null);
@@ -67,20 +68,26 @@ function useYouTubeLoaders(state: ReturnType<typeof useYouTubeBrowserState>) {
     }
 
     setError(getYouTubeErrorMessage(loadError, fallbackMessage));
-  }, [clearPlaylistState, setError, setNeedsReconnect]);
+  }, [clearPlaylistState, setError, setNeedsReconnect, youtubePlatform]);
 
   const loadStatus = useCallback(async () => {
     try {
       const statusData = await youtubePlatform.status();
       setStatus(statusData);
-      setNeedsReconnect(false);
+      const reconnectRequired = Boolean(statusData.needsReconnect || statusData.connectionState === 'reconnect_required');
+      setNeedsReconnect(reconnectRequired);
+      if (reconnectRequired) {
+        youtubePlatform.clearCache();
+        clearPlaylistState();
+        setError(null);
+      }
       return statusData;
     } catch (loadError) {
       console.error('Failed to load YouTube status:', loadError);
       setError('Failed to check YouTube connection status');
       return null;
     }
-  }, [setError, setNeedsReconnect, setStatus, youtubePlatform]);
+  }, [clearPlaylistState, setError, setNeedsReconnect, setStatus, youtubePlatform]);
 
   const loadPlaylists = useCallback(async () => {
     try {
@@ -177,7 +184,7 @@ function useInitialYouTubeLoad(
     const init = async () => {
       setIsLoading(true);
       const statusData = await loadStatus();
-      if (statusData?.isConnected) {
+      if (statusData?.isConnected && !statusData.needsReconnect && statusData.connectionState !== 'reconnect_required') {
         await loadPlaylists();
       }
       setIsLoading(false);

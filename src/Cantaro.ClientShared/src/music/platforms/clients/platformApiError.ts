@@ -43,8 +43,7 @@ export function isPlatformReconnectRequiredError(error: unknown): error is Platf
 
 function isReconnectCode(platformId: PlatformId, code?: string) {
     return code === 'platform_reconnect_required'
-        || code === `${platformId}_reconnect_required`
-        || code?.endsWith('_reconnect_required') === true;
+        || code === `${platformId}_reconnect_required`;
 }
 
 function readRetryAfterSeconds(response: Response, body: PlatformApiErrorResponse) {
@@ -61,7 +60,7 @@ function fallbackForStatus(platformId: PlatformId, response: Response, fallbackM
         return 'Your Cantaro session expired. Sign in again, then retry.';
     }
     if (response.status === 403) {
-        const platformName = platformId === 'spotify' ? 'Spotify' : 'The music platform';
+        const platformName = platformId === 'spotify' ? 'Spotify' : platformId === 'youtube' ? 'YouTube' : 'The music platform';
         return `${platformName} denied this request. Reconnect the account if the permission changed.`;
     }
     if (response.status === 429) {

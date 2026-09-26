@@ -40,10 +40,11 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             return [];
         }
 
-        var parsedMetadata = TrackObservationParser.Parse(observation);
+        var parsedMetadata = TrackObservationParser.ParseSearchHypotheses(observation);
         var queryPlans = BuildSearchPlans(parsedMetadata)
             .Take(_options.MusicBrainzMaxRequestsPerSearch)
             .ToList();
+        var strictQueryCount = queryPlans.TakeWhile(plan => plan.IsStrictTitleAndCredit).Count();
         var candidates = new Dictionary<string, RankedSearchCandidate>(StringComparer.OrdinalIgnoreCase);
 
         for (var queryIndex = 0; queryIndex < queryPlans.Count; queryIndex++)
@@ -88,11 +89,14 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
                 candidates.Add(match.ExternalId, candidate);
             }
 
-            if (matches.Any(match => IsLocallyCredibleExactMatch(observation, parsedMetadata, match)))
+            if (queryIndex + 1 >= strictQueryCount
+                && TrackMatchDecisionEngine.Evaluate(
+                    observation,
+                    candidates.Values.Select(candidate => candidate.Candidate),
+                    _options).Decision.MatchStatus == TrackMatchingStatuses.Matched)
             {
                 _logger.LogDebug(
-                    "Stopping MusicBrainz search after credible exact candidate from {Description} query for observation {ObservationId}",
-                    queryPlan.Description,
+                    "Stopping MusicBrainz search after shared matching accepted a candidate from the searched title/credit hypotheses for observation {ObservationId}",
                     observation.Id);
                 break;
             }
@@ -133,7 +137,46 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         }
     }
 
-    private List<MusicBrainzSearchPlan> BuildSearchPlans(ParsedTrackMetadata parsedMetadata)
+    private List<MusicBrainzSearchPlan> BuildSearchPlans(IReadOnlyList<ParsedTrackMetadata> hypotheses)
+    {
+        var plansByHypothesis = hypotheses
+            .Select(BuildSearchPlansForHypothesis)
+            .ToList();
+        var plans = new List<MusicBrainzSearchPlan>();
+
+        // Search every title/credit interpretation before spending requests on broad fallbacks.
+        foreach (var hypothesisPlans in plansByHypothesis)
+        {
+            if (hypothesisPlans.Count > 0)
+            {
+                plans.Add(hypothesisPlans[0]);
+            }
+        }
+
+        // Keep the current formatted hypothesis's title-only fallbacks near the front
+        // of the bounded request list. Alternate hypotheses still get their strict query
+        // before those broad fallbacks.
+        for (var phase = 1; phase < plansByHypothesis[0].Count; phase++)
+        {
+            plans.Add(plansByHypothesis[0][phase]);
+        }
+
+        for (var hypothesisIndex = 1; hypothesisIndex < plansByHypothesis.Count; hypothesisIndex++)
+        {
+            var hypothesisPlans = plansByHypothesis[hypothesisIndex];
+            for (var phase = 1; phase < hypothesisPlans.Count; phase++)
+            {
+                plans.Add(hypothesisPlans[phase]);
+            }
+        }
+
+        return plans
+            .GroupBy(plan => plan.Query, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private List<MusicBrainzSearchPlan> BuildSearchPlansForHypothesis(ParsedTrackMetadata parsedMetadata)
     {
         var plans = new List<MusicBrainzSearchPlan>();
         IReadOnlyList<string> individualArtistFallbacks = [];
@@ -167,10 +210,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             individualArtistFallbacks,
             "title-and-individual-artist");
 
-        return plans
-            .GroupBy(plan => plan.Query, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToList();
+        return plans;
     }
 
     private static void AddPlans(List<MusicBrainzSearchPlan> plans, string? title, IReadOnlyList<string> artists, string description)
@@ -244,33 +284,6 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         plans.Add(new MusicBrainzSearchPlan(string.Join(" AND ", queryParts), "compact-title-spacing-and-artist-credit"));
     }
 
-    private bool IsLocallyCredibleExactMatch(
-        TrackObservation observation,
-        ParsedTrackMetadata parsedObservation,
-        MusicBrainzRecordingMatch match)
-    {
-        var parsedCandidate = TrackMetadataParser.Parse(match.Title, match.Artist);
-        var exactTitle = HaveEqualNormalizedText(parsedObservation.SearchTitle, parsedCandidate.SearchTitle);
-        var exactArtistCredit = TrackMetadataParser.HaveEquivalentArtistCredits(
-            parsedObservation,
-            parsedCandidate,
-            match.ArtistCredits);
-        var semanticsAgree = !TrackMatchScorer.HaveDifferentMarkers(parsedObservation.VersionMarkers, parsedCandidate.VersionMarkers)
-            && !TrackMatchScorer.HaveDifferentMarkers(parsedObservation.PlaybackModifiers, parsedCandidate.PlaybackModifiers);
-        var durationIsConsistent = !observation.DurationSeconds.HasValue
-            || !match.DurationSeconds.HasValue
-            || Math.Abs(observation.DurationSeconds.Value - match.DurationSeconds.Value) <= _options.AutoMatchDurationToleranceSeconds;
-
-        // SearchScore is deliberately excluded: it is a remote ranking signal, not enough evidence
-        // to stop the local fallback search safely.
-        return exactTitle && exactArtistCredit && semanticsAgree && durationIsConsistent;
-    }
-
-    private static bool HaveEqualNormalizedText(string? left, string? right)
-    {
-        return TrackTextNormalizer.AreEquivalentTitles(left, right);
-    }
-
     private static List<string> SplitCollaborators(string artist)
     {
         var segments = System.Text.RegularExpressions.Regex
@@ -310,7 +323,10 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
 
     private static string EscapeSearchTerm(string value) => value.Replace("\"", string.Empty, StringComparison.Ordinal);
 
-    private sealed record MusicBrainzSearchPlan(string Query, string Description);
+    private sealed record MusicBrainzSearchPlan(string Query, string Description)
+    {
+        public bool IsStrictTitleAndCredit => Description == "strict title-and-full-credit";
+    }
 
     private sealed record RankedSearchCandidate(
         TrackMatchSearchCandidate Candidate,

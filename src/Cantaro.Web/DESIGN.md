@@ -232,6 +232,16 @@ The shared segmented switch is a signature control for search modes and filters:
 ### Music Track Table
 Music tables are dense but warm: translucent table shell, uppercase header row, album artwork thumbnails, hover playback affordances, and a violet now-playing state. Do not make tables look like enterprise grids.
 
+### Music platform browsing
+
+Keep music platform controls, menus, playlist cards and panels square. Do not add rounded containers or button corners when extending this UI. Circular provider marks, status indicators and switch controls keep their functional shapes.
+
+Use the same compact header and playlist cards for Spotify and YouTube. Keep provider color in the logo, with a neutral panel behind the name, account, and connection actions. Do not repeat playlist counts or explain provider links in header copy. Show Reconnect directly when permissions expire, and suppress the empty playlist state when loading fails.
+
+Playlist grids show three columns on desktop and four on wider screens, then collapse to two or one on smaller screens. Let artwork keep its natural aspect ratio without cropping or a forced square frame. Keep compact titles and track counts, and a single branded external link per card. Beside the title, show a sync action for playlists not yet in Cantaro, or a status icon linking to their Cantaro playlist. Describe the last sync in the accessible label and tooltip; a saved link does not establish that the current remote contents are up to date.
+
+Playlist detail shows one sync row per connected platform. A linked row shows its direction, daily sync state, last result, resolved track count, and a Sync now action. Sync now follows the link direction and the shared reconciliation rules. An unlinked row can attach an existing provider playlist after a first-sync preview. Direction and initial contents are separate choices; the preview shows additions and removals before confirmation. Keep Allow duplicate tracks off by default. Renaming prepares a fresh provider read before showing the names and affected links for confirmation. Unlinking and disconnecting review which remote and Cantaro copies to keep, with keep selected by default. Resolve provider identities from saved links on the server.
+
 ### Media Library Card
 Media cards are artwork-led with poster aspect ratios, dark gradient overlays, progress metadata, and status badges. The card hover scale is acceptable because it is attached to artwork browsing, not routine form controls.
 
@@ -299,6 +309,24 @@ that information.
 - **Don't** add glassmorphism as decoration. Glass is allowed only when it clarifies layers.
 - **Don't** pair 1px borders with huge decorative shadows on routine cards. Pick a restrained layer treatment that matches the component's importance.
 
+### Playlist details and sync
+
+Use square corners for playlist panels, menus, fields, rows and action buttons. This overrides the older rounded component examples above for this surface. Keep circles only where they communicate a specific control shape, such as radio buttons and switch thumbs.
+
+Keep the collection header compact, with artwork beside the title and track totals. Place Rename with the collection actions. Omit generic ownership claims, repeated platform labels and playback buttons without a playback handler.
+
+Each sync row has a platform link and short status on the left, with consistently aligned primary and secondary actions on the right. Stack actions below the identity on narrow screens. Successful syncs use relative times; show track counts when some tracks remain unmatched. Exact timestamps remain available on the time label's tooltip.
+
+Daily sync and duplicate handling live in an inline Settings disclosure with labeled switches. Keep unlinking in the platform options menu, followed by the existing deletion review. Creation and attachment remain separate, labeled choices. Do not repeat instructions beneath these controls.
+
+Create playlist checks for existing playlists with the same name before creating a copy. Show those candidates in a compact inline panel with known shared-track counts and separate Link existing and Create new playlist actions. A name match alone never links playlists. Keep playlists linked elsewhere unavailable for attachment, with a link to their Cantaro owner. Creating a new playlist queues its first sync and returns promptly. Show pending matching progress and provider cooldowns on the link row, including the next retry time. Keep the status copy compact.
+
+Link existing opens a compact inline panel aligned beneath the platform actions. Use a searchable, height-limited playlist list rather than a full-width native dropdown. Put same-name remote playlists first and label them "Same name"; require an explicit selection and first-sync review. Already-linked playlists remain unavailable and link to their Cantaro owner on the same row as the title and track count. Close the panel on outside click or Escape.
+
+Settings and platform options dismiss on outside click or Escape. Escape returns focus to the trigger. Keep error details below the platform's identity/action row, aligned with its text. When reconnection is required, keep the normal primary action visible but disabled and place Reconnect beside the error. Position options menus beside their trigger so they do not cover the next platform's options button.
+
+Show the unmatched count as an inline button that opens an inline list for that platform. Each entry shows its source recording and duration, automatic match suggestions with reasons, and editable search to refine results. Choosing a candidate opens an explicit same-recording confirmation; confirming saves the identity across the library, then syncs the playlist. Keep actionable errors beside the review, retain a saved match if syncing fails, and move keyboard focus with each review step. Closing returns focus to the unmatched button.
+
 ## 7. Semantic Theme API
 
 The shared Tailwind theme contract lives in `src/Cantaro.ClientShared/src/theme.css` and is imported by both the web app and browser-extension popup. Theme selection continues to set `data-theme="light"` or `data-theme="dark"` on the document root; the shared stylesheet registers that selector as Tailwind's `dark` custom variant and sets the matching native `color-scheme`.
@@ -315,3 +343,5 @@ Use the same utility names in every theme:
 - **Destructive actions:** `bg-danger-action`, `hover:bg-danger-action-hover`, and `text-danger-action-content`. Filled controls must not use a status text color as their background.
 
 Provider brand colors, album/poster artwork, chart or visualization palettes, image scrims, and intentionally theme-specific optical treatments remain bespoke. Authored dark CSS is acceptable for those cases, but it must target the component directly; broad selectors that reinterpret arbitrary Tailwind palette classes are prohibited.
+
+Use "YouTube" as the platform label. In the first-sync preview, summarize additions as "YouTube: 16 new" and omit zero additions. Keep unavailable-entry details behind an accessible info button; keep removal counts visible when replacing contents.

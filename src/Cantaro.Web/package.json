@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build && tsc -b",
     "lint": "eslint .",
-    "check": "bun run lint && bun run build",
+    "test:playlist-sync": "bun test tests/platformPlaylistSyncState.test.ts tests/playlistPlatformActions.test.ts tests/musicPlaylistMemberships.test.ts tests/playlistAttachCandidates.test.ts tests/playlistCreateRequest.test.ts tests/playlistLinkResultLabel.test.ts",
+    "check": "bun run test:playlist-sync && bun run lint && bun run build",
     "check:fallow": "bunx fallow",
     "preview": "vite preview"
   },

@@ -10,7 +10,7 @@ namespace Cantaro.Api.Services.Spotify;
 public sealed class SpotifyService
 {
     public const string ServiceName = "spotify";
-    public const string AuthorizationScopes = "playlist-read-private playlist-read-collaborative user-read-private";
+    public const string AuthorizationScopes = "playlist-read-private playlist-read-collaborative user-read-private playlist-modify-public playlist-modify-private";
 
     private readonly ApplicationDbContext _dbContext;
     private readonly SpotifyApiClient _apiClient;
@@ -111,6 +111,18 @@ public sealed class SpotifyService
         var refreshTokenExpiresAt = now.AddMonths(6);
         var scopes = string.IsNullOrWhiteSpace(token.Scope) ? AuthorizationScopes : token.Scope;
 
+        var priorAccount = await _dbContext.ConnectedServiceAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.UserId == userId && candidate.Service == ServiceName,
+                cancellationToken);
+        if (priorAccount is not null && encryptedRefreshToken is null
+            && (string.IsNullOrWhiteSpace(priorAccount.EncryptedRefreshToken)
+                || !string.Equals(priorAccount.ExternalAccountId, externalAccountId, StringComparison.Ordinal)))
+        {
+            throw new PlatformApiException("spotify_refresh_token_missing",
+                "Spotify did not provide a refresh token. Reconnect Spotify with account access before syncing.",
+                StatusCodes.Status409Conflict);
+        }
+
         var replaced = await ReplaceExistingAccountAsync();
         if (replaced == 0)
         {
@@ -148,11 +160,13 @@ public sealed class SpotifyService
             }
         }
 
-        return await _dbContext.ConnectedServiceAccounts
+        var connectedAccount = await _dbContext.ConnectedServiceAccounts
             .AsNoTracking()
             .SingleAsync(
                 candidate => candidate.UserId == userId && candidate.Service == ServiceName,
                 cancellationToken);
+        await RestoreMappingsForConnectedAccountAsync(connectedAccount, cancellationToken);
+        return connectedAccount;
 
         Task<int> ReplaceExistingAccountAsync()
         {
@@ -193,6 +207,34 @@ public sealed class SpotifyService
                         .SetProperty(candidate => candidate.UpdatedAt, now),
                     cancellationToken);
         }
+    }
+
+    private async Task RestoreMappingsForConnectedAccountAsync(
+        ConnectedServiceAccount account, CancellationToken cancellationToken)
+    {
+        var mappings = await _dbContext.ServicePlaylistMappings
+            .Where(mapping => mapping.ConnectedServiceAccountId == account.Id
+                && mapping.UserId == account.UserId && mapping.Service == ServiceName)
+            .ToListAsync(cancellationToken);
+        foreach (var mapping in mappings)
+        {
+            if (!string.Equals(mapping.ExternalAccountId, account.ExternalAccountId, StringComparison.Ordinal))
+            {
+                if (mapping.State is "active" or "paused")
+                {
+                    mapping.State = "paused";
+                    mapping.LastError = "account_changed";
+                    mapping.NextAttemptAt = null;
+                }
+            }
+            else if (mapping.State == "paused" && mapping.LastError is "account_disconnected" or "account_changed")
+            {
+                mapping.State = "active";
+                mapping.LastError = null;
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<SpotifyPlaylistSnapshot>> GetPlaylistsAsync(
@@ -292,65 +334,35 @@ public sealed class SpotifyService
 
     public async Task DisconnectAsync(int userId, CancellationToken cancellationToken)
     {
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         var account = await _dbContext.ConnectedServiceAccounts.SingleOrDefaultAsync(
             candidate => candidate.UserId == userId && candidate.Service == ServiceName,
             cancellationToken);
-        if (account is null)
-        {
-            return;
-        }
+        if (account is null) return;
 
-        var importedPlaylistIds = await _dbContext.ServicePlaylistMappings
+        var mappings = await _dbContext.ServicePlaylistMappings
             .Where(mapping => mapping.ConnectedServiceAccountId == account.Id
-                && mapping.Service == ServiceName
-                && mapping.Playlist!.UserId == userId)
-            .Select(mapping => mapping.PlaylistId)
+                && mapping.UserId == userId && mapping.Service == ServiceName)
             .ToListAsync(cancellationToken);
-
-        var importedPlaylists = await _dbContext.Playlists
-            .Where(playlist => importedPlaylistIds.Contains(playlist.Id)
-                && playlist.UserId == userId
-                && playlist.ImportedFromService == ServiceName)
-            .ToListAsync(cancellationToken);
-
-        await _dbContext.MusicSyncJobs
-            .Where(job => job.UserId == userId && job.Service == ServiceName)
-            .ExecuteDeleteAsync(cancellationToken);
-        _dbContext.Playlists.RemoveRange(importedPlaylists);
-        _dbContext.ConnectedServiceAccounts.Remove(account);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        var orphanObservations = await _dbContext.TrackObservations
-            .Where(observation => observation.SourceType == ServiceName
-                && !observation.PlaylistEntries.Any())
-            .Select(observation => new { observation.Id, observation.ExternalId })
-            .ToListAsync(cancellationToken);
-        var orphanObservationIds = orphanObservations.Select(observation => observation.Id).ToList();
-
-        if (orphanObservationIds.Count > 0)
+        foreach (var mapping in mappings.Where(mapping => mapping.State == "active"))
         {
-            await _dbContext.TrackResolutionCandidates
-                .Where(candidate => orphanObservationIds.Contains(candidate.TrackObservationId))
-                .ExecuteDeleteAsync(cancellationToken);
-            await _dbContext.TrackObservations
-                .Where(observation => orphanObservationIds.Contains(observation.Id))
-                .ExecuteDeleteAsync(cancellationToken);
-
-            var orphanExternalIds = orphanObservations
-                .Select(observation => observation.ExternalId)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-            await _dbContext.TrackSourceIds
-                .Where(sourceId => sourceId.SourceType == ServiceName
-                    && orphanExternalIds.Contains(sourceId.ExternalId)
-                    && !_dbContext.TrackObservations.Any(observation =>
-                        observation.SourceType == ServiceName
-                        && observation.ExternalId == sourceId.ExternalId))
-                .ExecuteDeleteAsync(cancellationToken);
+            mapping.State = "paused";
+            mapping.LastError = "account_disconnected";
+            mapping.NextAttemptAt = null;
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        account.EncryptedAccessToken = null;
+        account.EncryptedRefreshToken = null;
+        account.TokenExpiresAt = null;
+        account.RefreshTokenExpiresAt = null;
+        account.Scopes = null;
+        account.TokenVersion++;
+        account.TokenRefreshLeaseId = null;
+        account.TokenRefreshLeaseExpiresAt = null;
+        account.ConnectionState = "disconnected";
+        account.ReconnectRequiredAt = null;
+        account.ReconnectReason = null;
+        account.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<T> WithAuthorizedRetryAsync<T>(

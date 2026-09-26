@@ -13,7 +13,7 @@ public sealed class PlaylistCanonicalReconciliationService(ApplicationDbContext 
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
 
-    public IReadOnlyList<PlaylistEntry> ReconcileImportedEntries(IEnumerable<PlaylistEntry> entries)
+    public IReadOnlyList<PlaylistEntry> ReconcileImportedEntries(IEnumerable<PlaylistEntry> entries, bool allowDuplicates = false)
     {
         var retainedEntries = new List<PlaylistEntry>();
         var retainedCountByPlaylist = new Dictionary<Guid, int>();
@@ -22,13 +22,13 @@ public sealed class PlaylistCanonicalReconciliationService(ApplicationDbContext 
 
         foreach (var entry in entries.OrderBy(entry => entry.Position).ThenBy(entry => entry.Id))
         {
-            if (entry.TrackObservationId is { } observationId
+            if (!allowDuplicates && entry.TrackObservationId is { } observationId
                 && !seenObservationsByPlaylist.Add((entry.PlaylistId, observationId)))
             {
                 continue;
             }
 
-            if (entry.TrackId is { } trackId
+            if (!allowDuplicates && entry.TrackId is { } trackId
                 && !seenTracksByPlaylist.Add((entry.PlaylistId, trackId)))
             {
                 continue;
@@ -75,6 +75,14 @@ public sealed class PlaylistCanonicalReconciliationService(ApplicationDbContext 
         foreach (var playlistId in playlistIds)
         {
             var observationEntries = entries.Where(entry => entry.PlaylistId == playlistId);
+            var playlist = await _dbContext.Playlists.SingleAsync(item => item.Id == playlistId, cancellationToken);
+            playlist.SyncRevision++;
+            if (playlist.SyncEnabled) playlist.NextSyncAt ??= DateTimeOffset.UtcNow.AddDays(1);
+            if (playlist.AllowDuplicateTracks)
+            {
+                foreach (var entry in observationEntries) entry.TrackId = trackId;
+                continue;
+            }
             var canonicalEntries = existingCanonicalEntries.Where(entry => entry.PlaylistId == playlistId);
             var candidates = observationEntries
                 .Concat(canonicalEntries)

@@ -36,7 +36,7 @@ public sealed class SpotifyLifecycleTests
         Assert.Equal("test-client", query["client_id"]);
         Assert.Equal("protected-state", query["state"]);
         Assert.Equal(
-            "playlist-read-private playlist-read-collaborative user-read-private",
+            "playlist-read-private playlist-read-collaborative user-read-private playlist-modify-public playlist-modify-private",
             query["scope"]);
         Assert.DoesNotContain("user-read-email", query["scope"].ToString(), StringComparison.Ordinal);
     }
@@ -115,7 +115,7 @@ public sealed class SpotifyLifecycleTests
         Assert.Equal("initial-refresh", scope.Encryption.Decrypt(account.EncryptedRefreshToken!));
         Assert.Equal(Now.AddHours(1).UtcDateTime, account.TokenExpiresAt);
         Assert.Equal(Now.AddMonths(6).UtcDateTime, account.RefreshTokenExpiresAt);
-        Assert.Equal(SpotifyService.AuthorizationScopes, account.Scopes);
+        Assert.Equal("playlist-read-private playlist-read-collaborative user-read-private", account.Scopes);
         Assert.Equal("connected", account.ConnectionState);
         Assert.Equal(2, scope.Handler.Requests.Count);
     }
@@ -632,7 +632,7 @@ public sealed class SpotifyLifecycleTests
     }
 
     [Fact]
-    public async Task DisconnectAsync_RemovesSpotifyPersonalDataAndPreservesCanonicalTrack()
+    public async Task DisconnectAsync_PreservesPlaylistLinksAndClearsCredentials()
     {
         await using var scope = await SpotifyTestScope.CreateAsync();
         var account = await scope.AddAccountAsync(
@@ -709,6 +709,8 @@ public sealed class SpotifyLifecycleTests
                 {
                     Id = mappingId,
                     ConnectedServiceAccountId = account.Id,
+                    UserId = scope.UserId,
+                    ExternalAccountId = account.ExternalAccountId,
                     Service = SpotifyService.ServiceName,
                     ServicePlaylistId = "spotify-playlist-1",
                     SyncMode = "import_only"
@@ -733,13 +735,18 @@ public sealed class SpotifyLifecycleTests
         await scope.Service.DisconnectAsync(scope.UserId, CancellationToken.None);
 
         scope.DbContext.ChangeTracker.Clear();
-        Assert.False(await scope.DbContext.ConnectedServiceAccounts.AnyAsync());
-        Assert.False(await scope.DbContext.Playlists.AnyAsync(playlist => playlist.Id == playlistId));
-        Assert.False(await scope.DbContext.ServicePlaylistMappings.AnyAsync(mapping => mapping.Id == mappingId));
-        Assert.False(await scope.DbContext.TrackObservations.AnyAsync(observation => observation.Id == observationId));
-        Assert.False(await scope.DbContext.TrackResolutionCandidates.AnyAsync(candidate => candidate.Id == candidateId));
-        Assert.False(await scope.DbContext.TrackSourceIds.AnyAsync(source => source.Id == sourceId));
-        Assert.False(await scope.DbContext.MusicSyncJobs.AnyAsync(
+        var disconnected = await scope.DbContext.ConnectedServiceAccounts.SingleAsync();
+        Assert.Equal("disconnected", disconnected.ConnectionState);
+        Assert.Null(disconnected.EncryptedAccessToken);
+        Assert.Null(disconnected.EncryptedRefreshToken);
+        Assert.True(await scope.DbContext.Playlists.AnyAsync(playlist => playlist.Id == playlistId));
+        var retainedMapping = await scope.DbContext.ServicePlaylistMappings.SingleAsync(mapping => mapping.Id == mappingId);
+        Assert.Equal("paused", retainedMapping.State);
+        Assert.Equal("account_disconnected", retainedMapping.LastError);
+        Assert.True(await scope.DbContext.TrackObservations.AnyAsync(observation => observation.Id == observationId));
+        Assert.True(await scope.DbContext.TrackResolutionCandidates.AnyAsync(candidate => candidate.Id == candidateId));
+        Assert.True(await scope.DbContext.TrackSourceIds.AnyAsync(source => source.Id == sourceId));
+        Assert.True(await scope.DbContext.MusicSyncJobs.AnyAsync(
             job => job.UserId == scope.UserId && job.Service == SpotifyService.ServiceName));
         Assert.True(await scope.DbContext.Tracks.AnyAsync(track => track.Id == trackId));
     }

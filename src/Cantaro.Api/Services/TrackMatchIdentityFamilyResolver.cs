@@ -15,7 +15,7 @@ internal static class TrackMatchIdentityFamilyResolver
 
         var providerConsensusByIsrc = eligibleCandidates
             .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Candidate.Isrc))
-            .GroupBy(candidate => candidate.Candidate.Isrc!, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(candidate => TrackIdentityResolver.NormalizeIsrc(candidate.Candidate.Isrc)!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
                 group => group.Select(candidate => candidate.Candidate.CandidateSource)
@@ -29,7 +29,8 @@ internal static class TrackMatchIdentityFamilyResolver
             {
                 var members = group.ToArray();
                 var representative = members
-                    .OrderByDescending(candidate => GetProviderConsensus(candidate, providerConsensusByIsrc))
+                    .OrderByDescending(candidate => candidate.HasConfirmedRecordingIdentity)
+                    .ThenByDescending(candidate => GetProviderConsensus(candidate, providerConsensusByIsrc))
                     .ThenBy(candidate => candidate.DurationDifferenceSeconds ?? int.MaxValue)
                     .ThenByDescending(candidate => candidate.Score)
                     .ThenByDescending(candidate => !string.IsNullOrWhiteSpace(candidate.Candidate.MbidRecording))
@@ -45,7 +46,8 @@ internal static class TrackMatchIdentityFamilyResolver
                         GetProviderConsensus(candidate, providerConsensusByIsrc))
                 };
             })
-            .OrderByDescending(family => family.ProviderConsensusCount)
+            .OrderByDescending(family => family.Representative.HasConfirmedRecordingIdentity)
+            .ThenByDescending(family => family.ProviderConsensusCount)
             .ThenByDescending(family => family.Representative.Score)
             .ThenBy(family => family.Representative.DurationDifferenceSeconds ?? int.MaxValue)
             .ThenBy(family => family.FamilyId, StringComparer.Ordinal)
@@ -56,11 +58,11 @@ internal static class TrackMatchIdentityFamilyResolver
     {
         var title = TrackTextNormalizer.Normalize(candidate.CandidateMetadata.SearchTitle);
         var credits = string.Join("+", TrackMatchClusterer.GetCandidateCredits(candidate));
-        var versions = string.Join("+", candidate.CandidateMetadata.VersionMarkers);
-        var playback = string.Join("+", candidate.CandidateMetadata.PlaybackModifiers);
+        var versions = string.Join("+", candidate.CandidateMetadata.VersionMarkers.Order(StringComparer.Ordinal));
+        var playback = string.Join("+", candidate.CandidateMetadata.PlaybackModifiers.Order(StringComparer.Ordinal));
         var recordingIdentity = string.IsNullOrWhiteSpace(candidate.Candidate.Isrc)
             ? "unidentified"
-            : $"isrc:{candidate.Candidate.Isrc.Trim().ToUpperInvariant()}";
+            : $"isrc:{TrackIdentityResolver.NormalizeIsrc(candidate.Candidate.Isrc)}";
         return $"{title}|{credits}|{versions}|{playback}|{recordingIdentity}";
     }
 
@@ -69,7 +71,7 @@ internal static class TrackMatchIdentityFamilyResolver
         IReadOnlyDictionary<string, int> providerConsensusByIsrc)
     {
         return !string.IsNullOrWhiteSpace(candidate.Candidate.Isrc)
-            && providerConsensusByIsrc.TryGetValue(candidate.Candidate.Isrc, out var providerCount)
+            && providerConsensusByIsrc.TryGetValue(TrackIdentityResolver.NormalizeIsrc(candidate.Candidate.Isrc)!, out var providerCount)
                 ? providerCount
                 : 1;
     }

@@ -11,8 +11,8 @@ namespace Cantaro.Api.Controllers;
 [Authorize]
 public sealed class LyricsController(LyricsService lyricsService, UserManager<User> userManager) : ControllerBase
 {
-    [HttpGet("{trackId:guid}/lyrics")]
-    public async Task<ActionResult<LyricsResult>> GetLyrics(Guid trackId, CancellationToken cancellationToken)
+    [HttpGet("{songId}/lyrics")]
+    public async Task<ActionResult<LyricsResult>> GetLyrics(string songId, CancellationToken cancellationToken)
     {
         var user = await userManager.GetUserAsync(User);
         if (user is null)
@@ -20,7 +20,7 @@ public sealed class LyricsController(LyricsService lyricsService, UserManager<Us
             return Unauthorized();
         }
 
-        var result = await lyricsService.GetLyricsAsync(user.Id, trackId, cancellationToken);
+        var result = await lyricsService.GetLyricsAsync(user.Id, songId, cancellationToken);
         return result is null ? NotFound() : Ok(result);
     }
 }

@@ -22,7 +22,8 @@ public sealed record TrackIdentityQuery(
     int? DurationSeconds,
     string? Isrc = null,
     string? MusicBrainzRecordingId = null,
-    IReadOnlyList<string>? ArtistCredits = null);
+    IReadOnlyList<string>? ArtistCredits = null,
+    string? RawMetadata = null);
 
 public sealed record TrackIdentityMatch(
     Track Track,
@@ -210,29 +211,37 @@ public sealed class TrackIdentityResolver
         TrackIdentityQuery query,
         CancellationToken cancellationToken)
     {
-        var parsedQuery = TrackMetadataParser.Parse(query.Title, query.Artist);
-        var normalizedTitle = TrackTextNormalizer.Normalize(parsedQuery.SearchTitle);
-        if (normalizedTitle.Length == 0 || query.DurationSeconds == null)
+        var queryObservation = CreateQueryObservation(query);
+        var queryHypotheses = TrackObservationParser.ParseSearchHypotheses(queryObservation);
+        var normalizedTitles = queryHypotheses.Select(hypothesis =>
+                TrackTextNormalizer.Normalize(hypothesis.SearchTitle))
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedTitles.Length == 0)
         {
             return null;
         }
-
-        var minimumDuration = Math.Max(
-            0,
-            query.DurationSeconds.Value - _options.AutoMatchDurationToleranceSeconds);
-        var maximumDuration =
-            query.DurationSeconds.Value + _options.AutoMatchDurationToleranceSeconds;
+        var normalizedArtists = queryHypotheses.Select(hypothesis =>
+                TrackTextNormalizer.Normalize(hypothesis.SearchArtist))
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         var storedCandidates = await _dbContext.TrackObservations
             .AsNoTracking()
-            .Include(candidate => candidate.Track)
+            .Include(candidate => candidate.Track)!
+                .ThenInclude(track => track!.ArtistCredits)
             .Where(candidate =>
                 candidate.TrackId != null
-                && (candidate.NormalizedTitle == normalizedTitle
+                && (normalizedTitles.Contains(candidate.NormalizedTitle!)
                     || candidate.NormalizedTitle == null
                     || candidate.NormalizedTitle == string.Empty)
-                && candidate.DurationSeconds >= minimumDuration
-                && candidate.DurationSeconds <= maximumDuration)
+                && (candidate.SourceType == "youtube"
+                    || normalizedArtists.Length == 0
+                    || normalizedArtists.Contains(candidate.NormalizedArtist!)
+                    || candidate.NormalizedArtist == null
+                    || candidate.NormalizedArtist == string.Empty))
             .Take(MaximumMetadataCandidates + 1)
             .ToListAsync(cancellationToken);
 
@@ -244,42 +253,75 @@ public sealed class TrackIdentityResolver
         var candidates = _dbContext.TrackObservations.Local
             .Where(candidate =>
                 candidate.TrackId != null
-                && (candidate.NormalizedTitle == normalizedTitle
+                && (normalizedTitles.Contains(candidate.NormalizedTitle ?? string.Empty)
                     || string.IsNullOrWhiteSpace(candidate.NormalizedTitle))
-                && candidate.DurationSeconds >= minimumDuration
-                && candidate.DurationSeconds <= maximumDuration)
+                && (candidate.SourceType == "youtube"
+                    || normalizedArtists.Contains(TrackTextNormalizer.Normalize(candidate.NormalizedArtist))
+                    || string.IsNullOrWhiteSpace(candidate.NormalizedArtist)))
             .Concat(storedCandidates)
             .DistinctBy(candidate => candidate.Id);
-
-        var incomingCredits = TrackMetadataParser.NormalizeArtistCredits(
-            query.ArtistCredits is { Count: > 0 }
-                ? query.ArtistCredits
-                : parsedQuery.ArtistCredits);
-
-        var metadataMatchingTrackIds = candidates
-            .Where(candidate => MetadataMatches(parsedQuery, incomingCredits, candidate))
-            .Select(candidate => candidate.TrackId!.Value)
-            .Distinct()
-            .ToArray();
-
-        if (metadataMatchingTrackIds.Length == 0)
-        {
+        var candidateObservations = candidates.Where(candidate => candidate.TrackId is not null).ToArray();
+        if (candidateObservations.Length == 0)
             return null;
+
+        var candidateTrackIds = candidateObservations.Select(candidate => candidate.TrackId!.Value)
+            .Distinct().ToArray();
+        var candidateTracks = candidateObservations.Where(candidate => candidate.Track is not null)
+            .Select(candidate => candidate.Track!)
+            .Concat(_dbContext.Tracks.Local.Where(track => candidateTrackIds.Contains(track.Id)))
+            .DistinctBy(track => track.Id)
+            .ToDictionary(track => track.Id);
+        var missingTrackIds = candidateTrackIds.Where(trackId => !candidateTracks.ContainsKey(trackId)).ToArray();
+        if (missingTrackIds.Length > 0)
+        {
+            var missingTracks = await _dbContext.Tracks.AsNoTracking()
+                .Include(track => track.ArtistCredits)
+                .Where(track => missingTrackIds.Contains(track.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var track in missingTracks)
+                candidateTracks.TryAdd(track.Id, track);
         }
 
-        var compatibleTrackIds = _dbContext.Tracks.Local
-            .Where(track => metadataMatchingTrackIds.Contains(track.Id))
-            .Concat(storedCandidates
-                .Where(candidate => candidate.Track != null
-                    && metadataMatchingTrackIds.Contains(candidate.Track.Id))
-                .Select(candidate => candidate.Track!))
-            .DistinctBy(track => track.Id)
-            .Where(track => StableIdentitiesAreCompatible(query, track))
-            .Select(track => track.Id)
+        var matchedObservations = candidateObservations
+            .Where(candidate => candidate.TrackId is { } trackId
+                && candidateTracks.TryGetValue(trackId, out var track)
+                && StableIdentitiesAreCompatible(query, track))
+            .ToArray();
+        if (matchedObservations.Length == 0)
+            return null;
+
+        var byIdentity = matchedObservations.ToDictionary(
+            candidate => (candidate.SourceType, candidate.ExternalId));
+        var searchCandidates = matchedObservations.Select(candidate => ToSearchCandidate(
+            candidate, candidateTracks[candidate.TrackId!.Value])).ToArray();
+        var assessment = TrackMatchDecisionEngine.Evaluate(queryObservation, searchCandidates, _options);
+        if (assessment.Decision.AcceptedCandidate is not { } accepted)
+            return null;
+
+        // Several stored source observations can support one Track. Never choose
+        // between distinct Tracks just because one provider snapshot scores higher.
+        // Ineligible alternatives, such as a Live version, do not make an otherwise
+        // accepted identity ambiguous.
+        var credibleTrackIds = assessment.Ranked
+            .Where(result => result.IsAutoMatchEligible
+                && result.Score >= _options.AmbiguousThreshold)
+            .Select(result => byIdentity.TryGetValue(
+                (result.Candidate.CandidateSource, result.Candidate.ExternalId), out var observation)
+                    ? observation.TrackId
+                    : null)
+            .Where(trackId => trackId.HasValue)
+            .Select(trackId => trackId!.Value)
+            .Distinct()
             .Take(2)
             .ToArray();
+        if (credibleTrackIds.Length != 1)
+            return null;
 
-        return compatibleTrackIds.Length == 1 ? compatibleTrackIds[0] : null;
+        return byIdentity.TryGetValue(
+                (accepted.Candidate.CandidateSource, accepted.Candidate.ExternalId), out var acceptedObservation)
+            && acceptedObservation.TrackId == credibleTrackIds[0]
+                ? acceptedObservation.TrackId
+                : null;
     }
 
     private async Task<bool> MetadataCorroboratesTrackAsync(
@@ -287,62 +329,68 @@ public sealed class TrackIdentityResolver
         Guid trackId,
         CancellationToken cancellationToken)
     {
-        if (query.DurationSeconds == null)
-        {
+        var track = await LoadRequiredTrackAsync(trackId, cancellationToken);
+        if (!StableIdentitiesAreCompatible(query, track))
             return false;
-        }
-
-        var parsedQuery = TrackMetadataParser.Parse(query.Title, query.Artist);
-        var incomingCredits = TrackMetadataParser.NormalizeArtistCredits(
-            query.ArtistCredits is { Count: > 0 }
-                ? query.ArtistCredits
-                : parsedQuery.ArtistCredits);
-        var minimumDuration = Math.Max(
-            0,
-            query.DurationSeconds.Value - _options.AutoMatchDurationToleranceSeconds);
-        var maximumDuration =
-            query.DurationSeconds.Value + _options.AutoMatchDurationToleranceSeconds;
 
         var observations = _dbContext.TrackObservations.Local
-            .Where(observation => observation.TrackId == trackId
-                && observation.DurationSeconds >= minimumDuration
-                && observation.DurationSeconds <= maximumDuration)
+            .Where(observation => observation.TrackId == trackId)
             .Concat(await _dbContext.TrackObservations
                 .AsNoTracking()
-                .Where(observation => observation.TrackId == trackId
-                    && observation.DurationSeconds >= minimumDuration
-                    && observation.DurationSeconds <= maximumDuration)
+                .Include(observation => observation.Track)!
+                    .ThenInclude(candidateTrack => candidateTrack!.ArtistCredits)
+                .Where(observation => observation.TrackId == trackId)
+                .Take(MaximumMetadataCandidates + 1)
                 .ToListAsync(cancellationToken))
             .DistinctBy(observation => observation.Id);
+        var storedObservations = observations.Take(MaximumMetadataCandidates + 1).ToArray();
+        if (storedObservations.Length == 0 || storedObservations.Length > MaximumMetadataCandidates)
+            return false;
 
-        return observations.Any(observation =>
-            MetadataMatches(parsedQuery, incomingCredits, observation));
+        var queryObservation = CreateQueryObservation(query);
+        var candidates = storedObservations
+            .Select(observation => ToSearchCandidate(observation, track))
+            .ToArray();
+        var assessment = TrackMatchDecisionEngine.Evaluate(queryObservation, candidates, _options);
+        return assessment.Decision.AcceptedCandidate is not null;
     }
 
-    private static bool MetadataMatches(
-        ParsedTrackMetadata parsedQuery,
-        IReadOnlyList<string> incomingCredits,
-        TrackObservation candidate)
+    private static TrackObservation CreateQueryObservation(TrackIdentityQuery query)
     {
-        var parsedCandidate = TrackMetadataParser.Parse(candidate.Title, candidate.Artist);
-        var candidateCredits = TrackMetadataParser.NormalizeArtistCredits(parsedCandidate.ArtistCredits);
-        var artistCreditsMatch = incomingCredits.Count > 0 && candidateCredits.Count > 0
-            ? incomingCredits.SequenceEqual(candidateCredits, StringComparer.Ordinal)
-            : string.Equals(
-                TrackTextNormalizer.Normalize(parsedQuery.SearchArtist),
-                TrackTextNormalizer.Normalize(parsedCandidate.SearchArtist),
-                StringComparison.Ordinal);
+        var artist = query.ArtistCredits is { Count: > 0 }
+            ? string.Join(", ", query.ArtistCredits)
+            : query.Artist;
+        return new TrackObservation
+        {
+            Id = Guid.Empty,
+            SourceType = query.SourceType,
+            ExternalId = query.ExternalId,
+            Title = query.Title,
+            Artist = artist,
+            RawMetadata = query.RawMetadata,
+            DurationSeconds = query.DurationSeconds,
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+    }
 
-        return TrackTextNormalizer.AreEquivalentTitles(
-                parsedQuery.SearchTitle,
-                parsedCandidate.SearchTitle)
-            && artistCreditsMatch
-            && parsedQuery.VersionMarkers.SequenceEqual(
-                parsedCandidate.VersionMarkers,
-                StringComparer.Ordinal)
-            && parsedQuery.PlaybackModifiers.SequenceEqual(
-                parsedCandidate.PlaybackModifiers,
-                StringComparer.Ordinal);
+    private static TrackMatchSearchCandidate ToSearchCandidate(
+        TrackObservation observation,
+        Track track)
+    {
+        return new TrackMatchSearchCandidate
+        {
+            CandidateSource = observation.SourceType,
+            ExternalId = observation.ExternalId,
+            Title = observation.Title,
+            Artist = observation.Artist,
+            ArtistCredits = track?.ArtistCredits
+                .OrderBy(credit => credit.Position)
+                .Select(credit => credit.CreditedName).ToArray() ?? [],
+            Isrc = track?.Isrc,
+            MbidRecording = track?.MbidRecording,
+            DurationSeconds = observation.DurationSeconds,
+            RawMetadata = observation.RawMetadata
+        };
     }
 
     private static bool StableIdentitiesAreCompatible(

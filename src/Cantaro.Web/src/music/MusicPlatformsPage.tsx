@@ -20,6 +20,7 @@ import {
   playlistSyncDataRefreshEventName,
   progressFromSyncJob,
   requestPlaylistSyncDataRefresh,
+  writePlaylistSyncActivityFocus,
   type PlaylistSyncProgress,
 } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
@@ -48,10 +49,16 @@ function asPlatformId(service: string): PlatformId | null {
 }
 
 function statusLabel(status?: string | null): string {
-  if (status === 'success') return 'Synced';
-  if (status === 'partial_failure') return 'Partial';
-  if (status === 'error') return 'Issue';
-  return 'Ready';
+  const labels: Record<string, string> = {
+    success: 'Synced', pending: 'Sync pending', running: 'Syncing',
+    rate_limited: 'Waiting for platform', quota_limited: 'Spotify quota reached', partial_failure: 'Partial', error: 'Issue',
+  };
+  return labels[status ?? ''] ?? 'Ready';
+}
+
+function platformPlaylistSummary(entryCount: number, status: string | null | undefined, platform: string, syncedAt?: string) {
+  const state = status === 'rate_limited' ? `Waiting for ${platform}` : statusLabel(status);
+  return `${entryCount.toLocaleString()} songs · ${['pending', 'running', 'rate_limited', 'quota_limited'].includes(status ?? '') ? state : formatRelativeTime(syncedAt)}`;
 }
 
 function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPlatform }: AddPlatformMenuProps) {
@@ -76,7 +83,7 @@ function AddPlatformMenu({ menuRef, isOpen, platformsToAdd, onToggle, onSelectPl
               <button
                 key={platform.id}
                 type="button"
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold text-content transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm font-semibold text-content transition hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={!platform.implemented}
                 onClick={() => onSelectPlatform(platform)}
               >
@@ -284,7 +291,7 @@ function PlatformGroupedView({
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-black text-content">{playlist.name}</span>
                       <span className="block text-xs font-semibold text-content-muted">
-                        {playlist.entryCount.toLocaleString()} songs · {formatRelativeTime(mapping?.lastSyncedAt)}
+                        {platformPlaylistSummary(playlist.entryCount, mapping?.lastSyncStatus, platform.name, mapping?.lastSyncedAt)}
                       </span>
                     </span>
                     <PlaylistStatusIcon status={mapping?.lastSyncStatus} />
@@ -351,7 +358,7 @@ function SyncGroupView({ library }: { library: MusicLibraryResponse }) {
                       : <MusicUiIcon name="cable" className="h-8 w-8 shrink-0 p-1.5 text-content-muted" />}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-black text-content">{serviceName(service.service)}</span>
-                      <span className="block truncate text-xs font-semibold text-content-muted">{statusLabel(service.lastSyncStatus)} · {formatRelativeTime(service.lastSyncedAt)}</span>
+                      <span className="block truncate text-xs font-semibold text-content-muted">{statusLabel(service.lastSyncStatus)}{['pending', 'running', 'rate_limited', 'quota_limited'].includes(service.lastSyncStatus ?? '') ? '' : ` · ${formatRelativeTime(service.lastSyncedAt)}`}</span>
                     </span>
                   </div>
                 );
@@ -419,9 +426,10 @@ function ProgressCurrentSong({ progress }: { progress: PlaylistSyncProgress }) {
     return <ProgressPlaylistNames names={progress.playlistNames} />;
   }
 
+  const verb = progress.direction === 'export' ? 'Updating' : 'Matching';
   const activity = progress.currentPlaylistName
-    ? `Matching ${progress.currentSongName} · ${progress.currentPlaylistName}`
-    : `Matching ${progress.currentSongName}`;
+    ? `${verb} ${progress.currentSongName} · ${progress.currentPlaylistName}`
+    : `${verb} ${progress.currentSongName}`;
 
   return (
     <span className="mt-1 block truncate text-[11px] font-semibold text-content-muted" title={activity}>
@@ -430,29 +438,87 @@ function ProgressCurrentSong({ progress }: { progress: PlaylistSyncProgress }) {
   );
 }
 
-function ProgressActivityRow({ progress }: { progress: PlaylistSyncProgress }) {
-  const sourcePlatformName = serviceName(progress.sourcePlatformId);
-  const statusStyles = {
-    className: progressStatusClassName(progress.phase),
-    label: progressStatusLabel(progress.phase),
-  };
+function retryFailedSyncJob(job: MusicSyncJobResponse, failedResults: MusicSyncJobResponse['results']) {
+  if (job.direction === 'export') {
+    return syncApi.createOutboundSyncJob({
+      service: job.service as 'youtube' | 'spotify',
+      cantaroPlaylistId: job.cantaroPlaylistId!,
+    });
+  }
+  return syncApi.createSyncJob({
+    service: job.service,
+    servicePlaylistIds: failedResults.map((result) => result.servicePlaylistId),
+  });
+}
 
+function useJobRetry(job: MusicSyncJobResponse) {
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const failedResults = job.results.filter((result) => !result.success && result.retryable);
+  const canRetry = (job.status === 'failed' || job.failureCount > 0) && failedResults.length > 0
+    && (job.direction !== 'export' || Boolean(job.cantaroPlaylistId));
+
+  async function retry() {
+    if (!canRetry || isRetrying) return;
+    setIsRetrying(true);
+    setRetryError(null);
+    try {
+      const nextJob = await retryFailedSyncJob(job, failedResults);
+      writePlaylistSyncActivityFocus(nextJob.id);
+      requestPlaylistSyncDataRefresh();
+    } catch (error) {
+      setRetryError(error instanceof Error ? error.message : 'Could not retry playlist sync.');
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+  return { canRetry, isRetrying, retryError, retry };
+}
+
+function ProgressActivityBody({ progress, retryError }: { progress: PlaylistSyncProgress; retryError: string | null }) {
+  const sourcePlatformName = serviceName(progress.sourcePlatformId);
+  const activityLabel = progress.direction === 'export'
+    ? `syncing to ${sourcePlatformName}`
+    : `importing from ${sourcePlatformName}`;
+
+  return (
+    <span className="min-w-0">
+        <span className="block truncate text-sm font-black text-content">
+          {progress.playlistCount.toLocaleString()} playlist{progress.playlistCount === 1 ? '' : 's'} {activityLabel}
+        </span>
+        <span className={`block text-xs font-semibold text-content-muted ${progress.phase === 'failed' && progress.errorMessage ? 'whitespace-normal break-words' : 'truncate'}`}>
+          {progressDetail(progress)}
+        </span>
+        <ProgressCurrentSong progress={progress} />
+        {retryError ? <span className="mt-1 block break-words text-xs font-semibold text-danger-content" role="alert">{retryError}</span> : null}
+    </span>
+  );
+}
+
+function ProgressActivityActions({ phase, retryState }: { phase: PlaylistSyncProgress['phase']; retryState: ReturnType<typeof useJobRetry> }) {
+  return (
+    <span className="flex flex-col items-end gap-2">
+      <span className={`px-3 py-1.5 text-right text-xs font-bold ${progressStatusClassName(phase)}`}>{progressStatusLabel(phase)}</span>
+      {retryState.canRetry ? (
+        <button type="button" onClick={() => void retryState.retry()} disabled={retryState.isRetrying} className="text-xs font-bold text-accent-strong underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50">
+          {retryState.isRetrying ? 'Queuing...' : 'Retry'}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+function ProgressActivityRow({ job }: { job: MusicSyncJobResponse }) {
+  const progress = progressFromSyncJob(job);
+  const retryState = useJobRetry(job);
   return (
     <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-y border-info-border bg-info-surface px-3 py-3">
       <span className="relative flex h-10 w-10 shrink-0 items-center justify-center">
         <MusicPlatformIcon platformId={progress.sourcePlatformId} className="h-8 w-8 text-content" />
         <ProgressSpinner phase={progress.phase} />
       </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-black text-content">
-          {progress.playlistCount.toLocaleString()} playlist{progress.playlistCount === 1 ? '' : 's'} importing from {sourcePlatformName}
-        </span>
-        <span className="block truncate text-xs font-semibold text-content-muted">
-          {progressDetail(progress)}
-        </span>
-        <ProgressCurrentSong progress={progress} />
-      </span>
-      <span className={`px-3 py-1.5 text-right text-xs font-bold ${statusStyles.className}`}>{statusStyles.label}</span>
+      <ProgressActivityBody progress={progress} retryError={retryState.retryError} />
+      <ProgressActivityActions phase={progress.phase} retryState={retryState} />
     </div>
   );
 }
@@ -494,7 +560,7 @@ function ActivityPanel({ library, syncStatus, syncJobs }: { library: MusicLibrar
       </div>
 
       <div className="mt-4 space-y-2">
-        {syncJobs.slice(0, 5).map((job) => <ProgressActivityRow key={job.id} progress={progressFromSyncJob(job)} />)}
+        {syncJobs.slice(0, 5).map((job) => <ProgressActivityRow key={job.id} job={job} />)}
         {activities.length > 0 ? activities.map((activity) => {
           const platformId = asPlatformId(activity.service);
           return (
@@ -505,7 +571,7 @@ function ActivityPanel({ library, syncStatus, syncJobs }: { library: MusicLibrar
               <span className="min-w-0">
                 <span className="block truncate text-sm font-black text-content">{activity.playlistName}</span>
                 <span className="block truncate text-xs font-semibold text-content-muted">
-                  {serviceName(activity.service)} -&gt; Cantaro -&gt; connected platforms
+                  {serviceName(activity.service)} playlist linked to Cantaro
                 </span>
               </span>
               <span className="text-right text-xs font-black text-content-muted">{formatRelativeTime(activity.lastSyncedAt)}</span>

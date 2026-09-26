@@ -15,6 +15,254 @@ namespace Cantaro.Api.Tests;
 public class TrackMatchingServiceTests
 {
     [Fact]
+    public async Task CreateTrackFromMatchAsync_UsesCatalogMetadataAndPreservesOriginalObservation()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var rawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        {
+            OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022",
+            OriginalArtist = "Riot Games"
+        });
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "everything-goes-on-video",
+            Title = "Porter Robinson | Star Guardian 2022",
+            Artist = "Everything Goes On",
+            DurationSeconds = 230,
+            RawMetadata = rawMetadata,
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify",
+            ExternalId = "spotify-everything-goes-on",
+            Title = "Everything Goes On",
+            Artist = "Porter Robinson",
+            ArtistCredits = ["Porter Robinson"],
+            Isrc = "USUG12204601",
+            DurationSeconds = 221
+        };
+        var service = new TrackMatchingService(dbContext, [], NullLogger<TrackMatchingService>.Instance);
+
+        var result = await service.CreateTrackFromMatchAsync(observation.Id, candidate, CancellationToken.None);
+
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.Equal("Automatically created canonical track from matched catalog result.", result.ResolutionNotes);
+        Assert.Equal(rawMetadata, result.RawMetadata);
+        Assert.Null(result.AcceptedCandidateId);
+        var track = await dbContext.Tracks.SingleAsync();
+        Assert.Equal(track.Id, result.TrackId);
+        Assert.Equal(candidate.Isrc, track.Isrc);
+        var canonical = JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata!);
+        Assert.Equal("Everything Goes On", canonical?.Title);
+        Assert.Equal("Porter Robinson", canonical?.Artist);
+        Assert.Equal(221, canonical?.DurationSeconds);
+        Assert.Equal("Porter Robinson", Assert.Single(track.ArtistCredits).CreditedName);
+        var sources = await dbContext.TrackSourceIds.ToListAsync();
+        Assert.Equal(2, sources.Count);
+        Assert.Contains(sources, source => source.SourceType == "youtube"
+            && source.ExternalId == observation.ExternalId && source.TrackId == track.Id);
+        Assert.Contains(sources, source => source.SourceType == "spotify"
+            && source.ExternalId == candidate.ExternalId && source.TrackId == track.Id);
+    }
+
+    [Fact]
+    public async Task CreateTrackFromMatchAsync_PersistsCatalogIdentityAndReusesItAfterRestart()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using (var setup = new ApplicationDbContext(options))
+        {
+            await setup.Database.EnsureCreatedAsync();
+            setup.TrackObservations.AddRange(
+                new TrackObservation
+                {
+                    Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "first-video",
+                    Title = "Catalog song", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
+                },
+                new TrackObservation
+                {
+                    Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "second-video",
+                    Title = "Catalog song", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
+                });
+            await setup.SaveChangesAsync();
+        }
+
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify", ExternalId = "catalog-song-id",
+            Title = "Catalog song", Artist = "Artist", ArtistCredits = ["Artist"],
+            MbidRecording = "recording-id", Isrc = "USABC1234567", DurationSeconds = 200
+        };
+        Guid firstTrackId;
+        Guid firstObservationId;
+        await using (var firstRun = new ApplicationDbContext(options))
+        {
+            var firstObservation = await firstRun.TrackObservations.SingleAsync(item => item.ExternalId == "first-video");
+            firstObservationId = firstObservation.Id;
+            var service = new TrackMatchingService(firstRun, [], NullLogger<TrackMatchingService>.Instance);
+            var accepted = await service.CreateTrackFromMatchAsync(firstObservationId, candidate, CancellationToken.None);
+            firstTrackId = accepted.TrackId!.Value;
+            Assert.Equal(3, await firstRun.TrackSourceIds.CountAsync());
+            Assert.Contains(await firstRun.TrackSourceIds.ToListAsync(), source =>
+                source.SourceType == "spotify" && source.ExternalId == candidate.ExternalId
+                && source.TrackId == firstTrackId);
+            Assert.Contains(await firstRun.TrackSourceIds.ToListAsync(), source =>
+                source.SourceType == "musicbrainz" && source.ExternalId == candidate.MbidRecording
+                && source.TrackId == firstTrackId);
+        }
+
+        await using (var restarted = new ApplicationDbContext(options))
+        {
+            var secondObservation = await restarted.TrackObservations.SingleAsync(item => item.ExternalId == "second-video");
+            var service = new TrackMatchingService(restarted, [], NullLogger<TrackMatchingService>.Instance);
+            var accepted = await service.CreateTrackFromMatchAsync(secondObservation.Id, candidate, CancellationToken.None);
+            Assert.Equal(firstTrackId, accepted.TrackId);
+            Assert.Equal(1, await restarted.Tracks.CountAsync());
+            Assert.Equal(4, await restarted.TrackSourceIds.CountAsync());
+
+            var acceptedAgain = await service.CreateTrackFromMatchAsync(secondObservation.Id, candidate, CancellationToken.None);
+            Assert.Equal(firstTrackId, acceptedAgain.TrackId);
+            Assert.Equal(1, await restarted.Tracks.CountAsync());
+            Assert.Equal(4, await restarted.TrackSourceIds.CountAsync());
+        }
+    }
+
+    [Fact]
+    public async Task CreateTrackFromMatchAsync_DoesNotDuplicateMappingWhenObservationIsCatalogSource()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "same-song",
+            Title = "Same song", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
+        };
+        dbContext.TrackObservations.Add(observation);
+        await dbContext.SaveChangesAsync();
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify", ExternalId = "same-song",
+            Title = "Same song", Artist = "Artist", ArtistCredits = ["Artist"]
+        };
+
+        var result = await new TrackMatchingService(dbContext, [], NullLogger<TrackMatchingService>.Instance)
+            .CreateTrackFromMatchAsync(observation.Id, candidate, CancellationToken.None);
+
+        Assert.Single(await dbContext.TrackSourceIds.ToListAsync());
+        Assert.Equal(result.TrackId, (await dbContext.TrackSourceIds.SingleAsync()).TrackId);
+    }
+
+    [Fact]
+    public async Task CreateTrackFromMatchAsync_AlreadyResolvedObservationPersistsNewCatalogIdentity()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        Guid trackId;
+        Guid observationId;
+        await using (var setup = new ApplicationDbContext(options))
+        {
+            await setup.Database.EnsureCreatedAsync();
+            trackId = Guid.NewGuid();
+            observationId = Guid.NewGuid();
+            setup.Tracks.Add(new Track { Id = trackId });
+            setup.TrackObservations.Add(new TrackObservation
+            {
+                Id = observationId, SourceType = "youtube", ExternalId = "resolved-video",
+                Title = "Resolved song", Artist = "Artist", TrackId = trackId,
+                MatchStatus = TrackMatchingStatuses.Matched
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify", ExternalId = "new-catalog-id",
+            Title = "Resolved song", Artist = "Artist", ArtistCredits = ["Artist"],
+            MbidRecording = "new-recording-id"
+        };
+        await using (var dbContext = new ApplicationDbContext(options))
+        {
+            var service = new TrackMatchingService(dbContext, [], NullLogger<TrackMatchingService>.Instance);
+            var result = await service.CreateTrackFromMatchAsync(observationId, candidate, CancellationToken.None);
+            Assert.Equal(trackId, result.TrackId);
+            Assert.Equal(3, await dbContext.TrackSourceIds.CountAsync());
+            await service.CreateTrackFromMatchAsync(observationId, candidate, CancellationToken.None);
+            Assert.Equal(3, await dbContext.TrackSourceIds.CountAsync());
+        }
+        await using (var restarted = new ApplicationDbContext(options))
+        {
+            Assert.Equal(1, await restarted.Tracks.CountAsync());
+            Assert.All(await restarted.TrackSourceIds.ToListAsync(), source => Assert.Equal(trackId, source.TrackId));
+            Assert.Contains(await restarted.TrackSourceIds.ToListAsync(), source =>
+                source.SourceType == "spotify" && source.ExternalId == candidate.ExternalId);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateTrackFromMatchAsync_AlreadyResolvedObservationRejectsConflictingMapping(
+        bool conflictIsCandidate)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var trackId = Guid.NewGuid();
+        var conflictingTrackId = Guid.NewGuid();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "resolved-video",
+            Title = "Resolved song", Artist = "Artist", TrackId = trackId,
+            MatchStatus = TrackMatchingStatuses.Matched
+        };
+        dbContext.Tracks.AddRange(new Track { Id = trackId }, new Track { Id = conflictingTrackId });
+        dbContext.TrackObservations.Add(observation);
+        dbContext.TrackSourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = conflictingTrackId,
+            SourceType = conflictIsCandidate ? "spotify" : "youtube",
+            ExternalId = conflictIsCandidate ? "conflicting-catalog-id" : observation.ExternalId
+        });
+        await dbContext.SaveChangesAsync();
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify", ExternalId = "conflicting-catalog-id",
+            Title = "Resolved song", Artist = "Artist", ArtistCredits = ["Artist"]
+        };
+
+        var service = new TrackMatchingService(dbContext, [], NullLogger<TrackMatchingService>.Instance);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateTrackFromMatchAsync(observation.Id, candidate, CancellationToken.None));
+
+        Assert.Equal(trackId, observation.TrackId);
+        Assert.Equal(conflictingTrackId, (await dbContext.TrackSourceIds.SingleAsync()).TrackId);
+        Assert.Equal(2, await dbContext.Tracks.CountAsync());
+    }
+
+    [Fact]
     public async Task AcceptCandidateAsync_RemovesDuplicatePlaylistEntryWhenTrackAlreadyExists()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -667,7 +915,7 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
-    public async Task ProcessObservationAsync_MuchShorterCompetingCandidateDoesNotBlockExactDurationMatch()
+    public async Task ProcessObservationAsync_DifferentIsrcsRemainAmbiguousDespiteCloserDuration()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -728,12 +976,12 @@ public class TrackMatchingServiceTests
 
         var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
-        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
-        Assert.NotNull(result.AcceptedCandidateId);
+        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
+        Assert.Null(result.AcceptedCandidateId);
     }
 
     [Fact]
-    public async Task ProcessObservationAsync_UnknownDurationCompetitorsRemainAmbiguous()
+    public async Task ProcessObservationAsync_UnknownDurationAcceptsEquivalentIdentityFamily()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -792,8 +1040,8 @@ public class TrackMatchingServiceTests
 
         var result = await service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
-        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
-        Assert.Null(result.AcceptedCandidateId);
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
     }
 
     [Fact]
@@ -1081,7 +1329,7 @@ public class TrackMatchingServiceTests
             Id = Guid.NewGuid(),
             SourceType = "spotify",
             ExternalId = "custom-policy-threshold",
-            Title = "All Time Low (Acoustic)",
+            Title = "All Time Low",
             Artist = "Jon Bellion",
             DurationSeconds = 230,
             MatchStatus = TrackMatchingStatuses.Pending,
@@ -1097,10 +1345,10 @@ public class TrackMatchingServiceTests
             {
                 CandidateSource = "musicbrainz",
                 ExternalId = "custom-policy-candidate",
-                Title = "All Time Low (Acoustic)",
+                Title = "All Time Lows",
                 Artist = "Jon Bellion",
                 MbidRecording = "custom-policy-candidate",
-                DurationSeconds = 217,
+                DurationSeconds = 230,
                 Explanation = "Suggested by test fixture.",
                 RawMetadata = "{}"
             });
@@ -1323,7 +1571,7 @@ public class TrackMatchingServiceTests
     }
 
     [Fact]
-    public async Task ProcessObservationAsync_WithoutOfficialVideoMarkerDoesNotIgnoreLargeDurationMismatch()
+    public async Task ProcessObservationAsync_ExactIdentityIgnoresLargeDurationMismatchWithoutVideoMarker()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -1358,8 +1606,8 @@ public class TrackMatchingServiceTests
         var result = await new TrackMatchingService(dbContext, [provider], NullLogger<TrackMatchingService>.Instance)
             .ProcessObservationAsync(observation.Id, CancellationToken.None);
 
-        Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
-        Assert.Null(result.AcceptedCandidateId);
+        Assert.Equal(TrackMatchingStatuses.Matched, result.MatchStatus);
+        Assert.NotNull(result.AcceptedCandidateId);
     }
 
     [Theory]
@@ -1461,7 +1709,7 @@ public class TrackMatchingServiceTests
 
         Assert.Equal(TrackMatchingStatuses.Ambiguous, result.MatchStatus);
         Assert.Null(result.AcceptedCandidateId);
-        Assert.Contains("exact artist credits", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("all observed artist credits", result.ResolutionNotes, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

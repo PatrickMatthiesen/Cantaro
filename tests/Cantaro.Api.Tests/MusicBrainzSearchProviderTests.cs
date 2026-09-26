@@ -295,7 +295,7 @@ public class MusicBrainzSearchProviderTests
     }
 
     [Fact]
-    public async Task SearchAsync_StopsAfterCredibleStrictExactMatch()
+    public async Task SearchAsync_StopsAfterCredibleStrictExactMatchDespiteDurationDifference()
     {
         var fakeClient = new FakeMusicBrainzQueryClient();
         fakeClient.AddResult(
@@ -312,11 +312,69 @@ public class MusicBrainzSearchProviderTests
         var provider = CreateProvider(fakeClient);
 
         var candidates = await provider.SearchAsync(
-            CreateObservation("Good Things Fall Apart", "ILLENIUM, Jon Bellion", durationSeconds: 217),
+            CreateObservation("Good Things Fall Apart", "ILLENIUM, Jon Bellion", durationSeconds: 160),
             CancellationToken.None);
 
         Assert.Single(fakeClient.Queries);
         Assert.Single(candidates);
+    }
+
+    [Fact]
+    public async Task SearchAsync_TriesBothTitleArtistOrientationsBeforeBroadFallbacks()
+    {
+        const string alternateQuery = "recording:\"Song Name\" AND artist:\"Actual Artist\"";
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        fakeClient.AddResult(
+            alternateQuery,
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "recording-song-name",
+                Title = "Song Name",
+                Artist = "Actual Artist",
+                DurationSeconds = 202,
+                SearchScore = 100,
+                RawMetadata = "{}"
+            });
+        var provider = CreateProvider(fakeClient);
+        var observation = CreateObservation("Uploader Promo Title", "Uploader", durationSeconds: 160);
+        observation.RawMetadata = """{"OriginalTitle":"Song Name - Actual Artist"}""";
+
+        var candidates = await provider.SearchAsync(observation, CancellationToken.None);
+
+        Assert.Equal(["recording:\"Actual Artist\" AND artist:\"Song Name\"", alternateQuery], fakeClient.Queries);
+        Assert.Contains(candidates, candidate => candidate.ExternalId == "recording-song-name");
+    }
+
+    [Fact]
+    public async Task SearchAsync_UsesDescriptionCreditsToFindAndAcceptMortalsDespiteUploaderArtist()
+    {
+        const string descriptionQuery = "recording:\"Mortals Funk Remix\" AND artist:\"LXNGVX, Warriyo\"";
+        var fakeClient = new FakeMusicBrainzQueryClient();
+        fakeClient.AddResult(
+            descriptionQuery,
+            new MusicBrainzRecordingMatch
+            {
+                ExternalId = "mortals-normal",
+                Title = "Mortals Funk Remix",
+                Artist = "LXNGVX, Warriyo",
+                ArtistCredits = ["LXNGVX", "Warriyo"],
+                DurationSeconds = 146,
+                SearchScore = 100,
+                RawMetadata = "{}"
+            });
+        var provider = CreateProvider(fakeClient);
+        const string title = "MORTALS FUNK REMIX // Victory Royale B**ch!";
+        var observation = CreateObservation(title, "MrMoMMusic", durationSeconds: 147);
+        observation.RawMetadata = """{"OriginalTitle":"MORTALS FUNK REMIX // Victory Royale B**ch!","OriginalArtist":"MrMoMMusic","ChannelTitle":"MrMoMMusic","Description":"LXNGVX, Warriyo - Mortals Funk Remix\n\nAvailable here: https://open.spotify.com/album/example\n\nFollow Lxngvx"}""";
+
+        var candidates = await provider.SearchAsync(observation, CancellationToken.None);
+
+        Assert.Equal(descriptionQuery, fakeClient.Queries[0]);
+        Assert.Equal("MrMoMMusic", observation.Artist);
+        var accepted = TrackMatchDecisionEngine.Evaluate(observation, candidates, new()).Decision.AcceptedCandidate;
+        Assert.NotNull(accepted);
+        Assert.Equal("mortals-normal", accepted.Candidate.ExternalId);
+        Assert.Equal(1m, accepted.Score);
     }
 
     [Fact]

@@ -31,6 +31,44 @@ public class TrackMetadataParserTests
     }
 
     [Fact]
+    public void Parse_StripsFranchiseContextAfterPipeDelimitedCoverTitle()
+    {
+        const string rawTitle = "Zoltraak | Epic Orchestral Cover - Frieren: Beyond Journey's End 葬送のフリーレン";
+
+        var parsed = TrackMetadataParser.Parse(rawTitle, "Luke Chu");
+
+        Assert.Equal("Zoltraak | Epic Orchestral Cover", parsed.DisplayTitle);
+        Assert.Equal("Zoltraak - Epic Orchestral Cover", parsed.SearchTitle);
+        Assert.Equal("Luke Chu", parsed.SearchArtist);
+        Assert.Equal(["luke chu"], parsed.ArtistCredits);
+        Assert.Contains("cover", parsed.VersionMarkers);
+    }
+
+    [Fact]
+    public void Parse_CatalogTitlePreservesDashAndStructuredArtist()
+    {
+        var parsed = TrackMetadataParser.Parse(
+            "Zoltraak - Epic Orchestral Cover",
+            "Luke Chu",
+            parseArtistFromTitle: false);
+
+        Assert.Equal("Zoltraak - Epic Orchestral Cover", parsed.SearchTitle);
+        Assert.Equal("Luke Chu", parsed.SearchArtist);
+        Assert.Equal(["luke chu"], parsed.ArtistCredits);
+    }
+
+    [Fact]
+    public void Parse_DoesNotStripJapaneseTitleAndArtistAfterPipeAlone()
+    {
+        const string title = "Zoltraak | 葬送のフリーレン - Luke Chu";
+
+        var parsed = TrackMetadataParser.Parse(title, "Luke Chu");
+
+        Assert.Equal(title, parsed.DisplayTitle);
+        Assert.Equal(title, parsed.SearchTitle);
+    }
+
+    [Fact]
     public void Parse_ExtractsVersionMarkersFromBracketedTitleContext()
     {
         var parsed = TrackMetadataParser.Parse("Crop Circles (Acoustic Vertical Video)", "Jon Bellion");
@@ -48,6 +86,16 @@ public class TrackMetadataParserTests
             "OneRepublic");
 
         Assert.Contains("source-context", parsed.VersionMarkers);
+    }
+
+    [Fact]
+    public void Parse_TreatsDashAndParentheticalSourceContextAsEquivalent()
+    {
+        var parenthetical = TrackMetadataParser.Parse("Nobody (from Kaiju No. 8)", "OneRepublic");
+        var dash = TrackMetadataParser.Parse("Nobody - from Kaiju No. 8", "OneRepublic");
+
+        Assert.Equal(parenthetical.VersionMarkers, dash.VersionMarkers);
+        Assert.Contains("source-context", dash.VersionMarkers);
     }
 
     [Fact]
@@ -121,6 +169,33 @@ public class TrackMetadataParserTests
         Assert.Equal("Guy.exe", parsed.DisplayTitle);
         Assert.Equal("Superfruit", parsed.DisplayArtist);
         Assert.Contains("speed up", parsed.PlaybackModifiers);
+    }
+
+    [Fact]
+    public void ParseObservation_ExtractsNestedFeaturedArtistsFromOriginalProviderTitle()
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "pop-stars-video",
+            Title = "POP/STARS I-DLE, Jaira Burns)",
+            Artist = "K/DA, Madison Beer",
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            {
+                OriginalTitle = "K/DA - POP/STARS (ft. Madison Beer, (G)I-DLE, Jaira Burns) | Music Video - League of Legends",
+                OriginalArtist = "League of Legends",
+                SearchTitle = "POP/STARS I-DLE, Jaira Burns)",
+                SearchArtist = "K/DA, Madison Beer"
+            }),
+            MatchStatus = TrackMatchingStatuses.Pending
+        };
+
+        var parsed = TrackObservationParser.Parse(observation);
+
+        Assert.Equal("POP/STARS", parsed.SearchTitle);
+        Assert.Equal("K/DA, Madison Beer, (G)I-DLE, Jaira Burns", parsed.DisplayArtist);
+        Assert.Equal(["g i dle", "jaira burns", "k da", "madison beer"], parsed.ArtistCredits);
     }
 
     [Fact]

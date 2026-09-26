@@ -31,6 +31,7 @@ public class SyncStatusInfo
 
 public class PlaylistSyncInfo
 {
+    public string SyncMode { get; set; } = "import_only";
     public required string PlaylistId { get; set; }
     public required string Name { get; set; }
     public required string Service { get; set; }
@@ -97,7 +98,8 @@ public class SyncController : ControllerBase
             // Get all synced playlists for this user
             var mappings = await _dbContext.ServicePlaylistMappings
                 .Include(m => m.Playlist)
-                .Where(m => m.Playlist!.UserId == userId)
+                .Where(m => m.Playlist!.UserId == userId && m.State != "unlinked"
+                    && !m.ServicePlaylistId.StartsWith("pending:"))
                 .OrderByDescending(m => m.LastSyncedAt)
                 .ToListAsync(cancellationToken);
 
@@ -108,7 +110,8 @@ public class SyncController : ControllerBase
                 Service = m.Service,
                 ServicePlaylistId = m.ServicePlaylistId,
                 LastSyncedAt = m.LastSyncedAt,
-                LastSyncStatus = m.LastSyncStatus
+                LastSyncStatus = m.LastSyncStatus,
+                SyncMode = m.SyncMode
             }).ToList();
 
             // Calculate overall status

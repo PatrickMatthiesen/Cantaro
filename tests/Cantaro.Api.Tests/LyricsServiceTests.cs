@@ -57,7 +57,7 @@ public sealed class LyricsServiceTests
     }
 
     [Fact]
-    public async Task GetLyricsAsync_AllowsCanonicalTrackOutsideUsersLibrary()
+    public async Task GetLyricsAsync_RejectsCanonicalTrackOutsideUsersLibrary()
     {
         await using var db = CreateDb();
         var trackId = Guid.NewGuid();
@@ -83,8 +83,160 @@ public sealed class LyricsServiceTests
 
         var result = await new LyricsService(db, provider).GetLyricsAsync(7, trackId, CancellationToken.None);
 
+        Assert.Null(result);
+        Assert.Null(provider.Lookup);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_UsesCanonicalMetadataForLinkedObservation()
+    {
+        await using var db = CreateDb();
+        var track = new Track
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                Title = "Canonical Song",
+                Artist = "Canonical Artist"
+            })
+        };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "video-id",
+            Title = "Raw video title",
+            MatchStatus = TrackMatchingStatuses.Matched,
+            TrackId = track.Id
+        };
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
+        db.AddRange(track, observation, playlist, new PlaylistEntry
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id,
+            Position = 0
+        });
+        await db.SaveChangesAsync();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(
+            7, $"observation:{observation.Id}", CancellationToken.None);
+
         Assert.NotNull(result);
-        Assert.Equal(trackId, provider.Lookup?.TrackId);
+        Assert.Equal(track.Id, provider.Lookup?.TrackId);
+        Assert.Equal("Canonical Song", provider.Lookup?.Title);
+        Assert.Equal("Canonical Artist", provider.Lookup?.Artist);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_UsesParsedMetadataForUnlinkedObservation()
+    {
+        await using var db = CreateDb();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "video-id",
+            Title = "Test Artist - Test Song (Official Video)",
+            Artist = "Test Artist",
+            DurationSeconds = 200,
+            MatchStatus = TrackMatchingStatuses.NoMatch
+        };
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
+        db.AddRange(observation, playlist, new PlaylistEntry
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id,
+            Position = 0
+        });
+        await db.SaveChangesAsync();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(
+            7, $"observation:{observation.Id}", CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(observation.Id, provider.Lookup?.TrackId);
+        Assert.Equal("Test Song", provider.Lookup?.Title);
+        Assert.Equal("Test Artist", provider.Lookup?.Artist);
+        Assert.Equal(200, provider.Lookup?.DurationSeconds);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_RejectsObservationOutsideUsersLibrary()
+    {
+        await using var db = CreateDb();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "spotify",
+            ExternalId = "source-id",
+            Title = "Private Song",
+            Artist = "Private Artist",
+            MatchStatus = TrackMatchingStatuses.NoMatch
+        };
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 8, Name = "Private" };
+        db.AddRange(observation, playlist, new PlaylistEntry
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id,
+            Position = 0
+        });
+        await db.SaveChangesAsync();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(
+            7, $"observation:{observation.Id}", CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Null(provider.Lookup);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_ReturnsUnavailableForObservationWithoutArtist()
+    {
+        await using var db = CreateDb();
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "spotify",
+            ExternalId = "source-id",
+            Title = "Song Without Artist",
+            MatchStatus = TrackMatchingStatuses.NoMatch
+        };
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
+        db.AddRange(observation, playlist, new PlaylistEntry
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id,
+            Position = 0
+        });
+        await db.SaveChangesAsync();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(
+            7, $"observation:{observation.Id}", CancellationToken.None);
+
+        Assert.Equal(LyricsStates.Unavailable, result?.State);
+        Assert.Null(provider.Lookup);
+    }
+
+    [Theory]
+    [InlineData("observation:not-a-guid")]
+    [InlineData("entry:7772ae09-8ad1-497e-90aa-1357aadd31ca")]
+    public async Task GetLyricsAsync_RejectsInvalidSongIdentifiers(string songId)
+    {
+        await using var db = CreateDb();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(7, songId, CancellationToken.None);
+
+        Assert.Null(result);
+        Assert.Null(provider.Lookup);
     }
 
     [Fact]

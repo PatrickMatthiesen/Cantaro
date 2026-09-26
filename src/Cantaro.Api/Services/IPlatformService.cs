@@ -4,7 +4,7 @@ namespace Cantaro.Api.Services;
 
 public sealed record PlatformSyncProgress(int ProcessedSongCount, string? CurrentSongName);
 
-public sealed record PlatformAccountContext(int UserId, int ConnectedServiceAccountId);
+public sealed record PlatformAccountContext(int UserId, int ConnectedServiceAccountId, string? ExpectedExternalAccountId = null);
 
 public interface IPlatformService
 {

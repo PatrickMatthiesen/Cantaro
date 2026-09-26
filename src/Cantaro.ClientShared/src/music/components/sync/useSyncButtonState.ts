@@ -122,9 +122,10 @@ function useSyncSetup(platformId: PlatformId, isSyncing: boolean, stopProgressSi
     }
   }, [platformId]);
 
-  const loadAvailablePlaylists = useCallback(async () => {
+  const loadAvailablePlaylists = useCallback(async (status: SyncStatusResponse | null) => {
     try {
-      setAvailablePlaylists(await platformManager.playlists(platformId, false));
+      const outboundPlaylistIds = new Set(status?.playlists.filter((playlist) => playlist.syncMode === 'from_cantaro').map((playlist) => playlist.servicePlaylistId));
+      setAvailablePlaylists((await platformManager.playlists(platformId, false)).filter((playlist) => !outboundPlaylistIds.has(playlist.id)));
     } catch (loadError) {
       console.error('Failed to load playlists:', loadError);
     }
@@ -133,8 +134,8 @@ function useSyncSetup(platformId: PlatformId, isSyncing: boolean, stopProgressSi
   useEffect(() => {
     const init = async () => {
       setIsLoading(true);
-      await loadSyncStatus();
-      await loadAvailablePlaylists();
+      const status = await loadSyncStatus();
+      await loadAvailablePlaylists(status);
       setIsLoading(false);
     };
 

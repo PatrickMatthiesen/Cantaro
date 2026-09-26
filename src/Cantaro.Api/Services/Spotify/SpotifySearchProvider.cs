@@ -12,38 +12,67 @@ public sealed class SpotifySearchProvider(
         TrackObservation observation,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(observation.Title))
-        {
-            return [];
-        }
-
+        var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
+        var parsed = hypotheses[0];
         var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
         if (token == null)
         {
             return [];
         }
 
-        var parsed = TrackObservationParser.Parse(observation);
-        var query = $"track:{Quote(parsed.SearchTitle ?? observation.Title)}";
-        var artist = GetPrimaryArtist(parsed);
-        if (!string.IsNullOrWhiteSpace(artist))
+        var metadata = TrackObservationParser.ReadMetadata(observation);
+        var isrc = TrackIdentityResolver.NormalizeIsrc(metadata?.Isrc);
+        if (!string.IsNullOrWhiteSpace(isrc))
         {
-            query += $" artist:{Quote(artist)}";
+            var isrcTracks = await apiClient.SearchTracksAsync(token, $"isrc:{isrc}", ResultLimit, cancellationToken);
+            var isrcMatches = isrcTracks
+                .Where(track => string.Equals(
+                    TrackIdentityResolver.NormalizeIsrc(track.Isrc), isrc, StringComparison.Ordinal))
+                .ToArray();
+            if (isrcMatches.Length > 0)
+            {
+                return ToCandidates(isrcMatches);
+            }
         }
 
-        var tracks = await apiClient.SearchTracksAsync(token, query, ResultLimit, cancellationToken);
-        return tracks.Select(track => new TrackMatchSearchCandidate
+        var searchTitle = parsed.SearchTitle ?? observation.Title;
+        if (string.IsNullOrWhiteSpace(searchTitle))
         {
-            CandidateSource = SpotifyService.ServiceName,
-            ExternalId = track.Id,
-            Title = track.Name,
-            Artist = track.Artist,
-            ArtistCredits = track.ArtistNames,
-            Isrc = track.Isrc,
-            DurationSeconds = track.DurationSeconds,
-            Explanation = "Suggested by Spotify catalog search."
-        }).ToArray();
+            return [];
+        }
+
+        var tracks = new List<SpotifyTrackSnapshot>();
+        var queries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var hypothesis in hypotheses.Take(4))
+        {
+            var query = $"track:{Quote(hypothesis.SearchTitle)}";
+            var hypothesisArtist = GetPrimaryArtist(hypothesis);
+            if (!string.IsNullOrWhiteSpace(hypothesisArtist)) query += $" artist:{Quote(hypothesisArtist)}";
+            if (!queries.Add(query)) continue;
+            tracks.AddRange(await apiClient.SearchTracksAsync(token, query, ResultLimit, cancellationToken));
+        }
+
+        if (tracks.Count == 0 && !string.IsNullOrWhiteSpace(GetPrimaryArtist(parsed)))
+        {
+            tracks.AddRange(await apiClient.SearchTracksAsync(
+                token, $"track:{Quote(searchTitle)}", ResultLimit, cancellationToken));
+        }
+
+        return ToCandidates(tracks.DistinctBy(track => track.Id));
     }
+
+    private static IReadOnlyList<TrackMatchSearchCandidate> ToCandidates(
+        IEnumerable<SpotifyTrackSnapshot> tracks) => tracks.Select(track => new TrackMatchSearchCandidate
+    {
+        CandidateSource = SpotifyService.ServiceName,
+        ExternalId = track.Id,
+        Title = track.Name,
+        Artist = track.Artist,
+        ArtistCredits = track.ArtistNames,
+        Isrc = track.Isrc,
+        DurationSeconds = track.DurationSeconds,
+        Explanation = "Suggested by Spotify catalog search."
+    }).ToArray();
 
     private static string Quote(string value) => $"\"{value.Replace("\"", string.Empty, StringComparison.Ordinal).Trim()}\"";
 
@@ -56,7 +85,7 @@ public sealed class SpotifySearchProvider(
         }
 
         return displayArtist
-            .Split([",", " & ", " and "], 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Split([",", " & ", " and ", " × ", " x "], 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .FirstOrDefault();
     }
 }

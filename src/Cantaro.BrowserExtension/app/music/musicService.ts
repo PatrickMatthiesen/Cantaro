@@ -5,22 +5,29 @@ import type { LyricsResult } from './musicLyrics';
 
 import { getLocalLyrics } from '../../features/music/musicLyricsProvider';
 
-function youtubeQuery(youtubeVideoId?: string) {
-  return youtubeVideoId ? `?youtubeVideoId=${encodeURIComponent(youtubeVideoId)}` : '';
+function playlistMutationQuery(youtubeVideoId?: string, entryId?: string) {
+  const query = new URLSearchParams();
+  if (youtubeVideoId) query.set('youtubeVideoId', youtubeVideoId);
+  if (entryId) query.set('entryId', entryId);
+  return query.size > 0 ? `?${query.toString()}` : '';
 }
 
 export async function loadMusicLibrary(): Promise<MusicLibraryResponse> {
   return cantaroApiClient.request('/api/music/library');
 }
 
+export async function loadCanonicalSong(trackId: string): Promise<MusicLibrarySong> {
+  return cantaroApiClient.request(`/api/music/library/songs/${encodeURIComponent(trackId)}`);
+}
+
 export async function addSongToPlaylist(trackId: string, playlistId: string, youtubeVideoId?: string) {
-  await cantaroApiClient.request(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${youtubeQuery(youtubeVideoId)}`, {
+  await cantaroApiClient.request(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${playlistMutationQuery(youtubeVideoId)}`, {
     method: 'POST',
   });
 }
 
-export async function removeSongFromPlaylist(trackId: string, playlistId: string, youtubeVideoId?: string) {
-  await cantaroApiClient.request(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${youtubeQuery(youtubeVideoId)}`, {
+export async function removeSongFromPlaylist(trackId: string, playlistId: string, youtubeVideoId?: string, entryId?: string) {
+  await cantaroApiClient.request(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${playlistMutationQuery(youtubeVideoId, entryId)}`, {
     method: 'DELETE',
   });
 }

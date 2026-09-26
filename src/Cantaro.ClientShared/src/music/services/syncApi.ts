@@ -14,6 +14,7 @@ export interface PlaylistSyncInfo {
   name: string;
   service: string;
   servicePlaylistId: string;
+  syncMode?: string;
   lastSyncedAt: string | null;
   lastSyncStatus: string | null;
 }
@@ -26,6 +27,11 @@ export interface SyncStatusResponse {
 interface BatchSyncRequest {
   service: string;
   servicePlaylistIds?: string[] | null; // null or empty = sync all
+}
+
+export interface OutboundSyncRequest {
+  service: 'youtube' | 'spotify';
+  cantaroPlaylistId: string;
 }
 
 export type MusicSyncJobStatus = 'queued' | 'running' | 'completed' | 'failed';
@@ -43,6 +49,8 @@ export interface MusicSyncJobPlaylistResult {
 export interface MusicSyncJobResponse {
   id: string;
   status: MusicSyncJobStatus;
+  direction: 'import' | 'export';
+  cantaroPlaylistId: string | null;
   service: string;
   playlistCount: number;
   songCount: number;
@@ -103,6 +111,22 @@ export const syncApi = {
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Failed to start playlist sync' }));
       throw new Error(error.error || 'Failed to start playlist sync');
+    }
+
+    return response.json();
+  },
+
+  async createOutboundSyncJob(request: OutboundSyncRequest): Promise<MusicSyncJobResponse> {
+    const response = await fetch('/api/sync/jobs/outbound', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to start playlist export' }));
+      throw new Error(error.error || 'Failed to start playlist export');
     }
 
     return response.json();

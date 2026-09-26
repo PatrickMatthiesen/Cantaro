@@ -4,6 +4,24 @@ namespace Cantaro.Api.Services;
 
 internal static class TrackMatchDecisionEngine
 {
+    public static TrackMatchAssessment Evaluate(
+        Models.TrackObservation observation,
+        IEnumerable<TrackMatchSearchCandidate> candidates,
+        Configuration.TrackMatchingOptions options) => EvaluateScored(
+            candidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, options)), options);
+
+    public static TrackMatchAssessment EvaluateScored(
+        IEnumerable<TrackMatchScoredCandidate> candidates,
+        Configuration.TrackMatchingOptions options)
+    {
+        var ranked = candidates.Where(candidate => candidate.Score >= options.MinimumCandidateScore)
+            .OrderByDescending(candidate => candidate.HasConfirmedRecordingIdentity)
+            .ThenByDescending(candidate => candidate.Score).ToArray();
+        var clusters = TrackMatchClusterer.BuildClusters(ranked, options.ClusterDurationToleranceSeconds);
+        return new(ranked, clusters, Decide(ranked, clusters,
+            options.AutoMatchThreshold, options.AmbiguousThreshold, options.AutoMatchMargin));
+    }
+
     public static TrackMatchDecision Decide(
         IReadOnlyList<TrackMatchScoredCandidate> rankedCandidates,
         IReadOnlyList<TrackMatchCluster> clusters,
@@ -33,6 +51,7 @@ internal static class TrackMatchDecisionEngine
             && (identityFamilies.Count == 1
                 || identityFamilies[0].ProviderConsensusCount > identityFamilies[1].ProviderConsensusCount);
         var secondDistinctScore = identityFamilies.Count > 1 && !hasStrongProviderConsensus
+            && !topCandidate.HasConfirmedRecordingIdentity
             ? identityFamilies[1].Representative.Score
             : 0m;
         var margin = topCandidate.Score - secondDistinctScore;

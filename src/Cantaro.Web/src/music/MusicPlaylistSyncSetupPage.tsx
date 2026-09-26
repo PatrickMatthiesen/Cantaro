@@ -17,7 +17,6 @@ import { MusicLibraryPanel } from './MusicLibraryPanel';
 import { MusicPageShell } from './MusicPageShell';
 import { writePlaylistSyncActivityFocus } from './playlistSyncProgress';
 import { useConnectedMusicPlatforms } from './useConnectedMusicPlatforms';
-import { useAuth } from '../contexts/AuthContext';
 
 const platformById = new Map(platformCatalog.map((platform) => [platform.id, platform]));
 
@@ -60,45 +59,15 @@ function selectInitialSourcePlatform(requestedPlatformId: PlatformId | undefined
   return requestedPlatformId ?? fallbackPlatformId;
 }
 
-function ToggleRow({
-  title,
-  detail,
-  enabled,
-  onToggle,
-}: {
-  title: string;
-  detail: string;
-  enabled: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="flex w-full items-center justify-between gap-4 border-b border-border-subtle/70 px-4 py-3 text-left last:border-b-0"
-      onClick={onToggle}
-    >
-      <span className="min-w-0">
-        <span className="block text-sm font-black text-content">{title}</span>
-        <span className="block text-xs font-semibold text-content-muted">{detail}</span>
-      </span>
-      <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? 'bg-personal-accent' : 'bg-border-strong'}`}>
-        <span className={`absolute top-1 h-4 w-4 rounded-full bg-surface shadow-sm transition ${enabled ? 'left-6' : 'left-1'}`} />
-      </span>
-    </button>
-  );
-}
-
 function SourcePlatformSelector({
   sourcePlatformId,
   connectedPlatformIds,
   selectedPlaylists,
-  targetPlatformIds,
   onChange,
 }: {
   sourcePlatformId: PlatformId;
   connectedPlatformIds: PlatformId[];
   selectedPlaylists: PlatformPlaylist[];
-  targetPlatformIds: PlatformId[];
   onChange: (platformId: PlatformId) => void;
 }) {
   const connectedSourcePlatforms = platformCatalog.filter((platform) => platform.implemented && connectedPlatformIds.includes(platform.id));
@@ -132,12 +101,12 @@ function SourcePlatformSelector({
           </div>
         </div>
         <div className="border-t border-border-subtle pt-4 xl:border-t-0 xl:border-l xl:pt-0 xl:pl-4">
-          <SyncSetupMetrics selectedPlaylists={selectedPlaylists} targetPlatformIds={targetPlatformIds} />
+          <SyncSetupMetrics selectedPlaylists={selectedPlaylists} />
         </div>
       </div>
       {connectedSourcePlatforms.length === 0 ? (
         <div className="mt-3 border-y border-border-subtle p-4 text-sm font-semibold text-content-muted">
-          Connect YouTube Music first, then return here to choose source playlists.
+          Connect YouTube or Spotify to import playlists.
         </div>
       ) : null}
     </GlassCard>
@@ -149,7 +118,7 @@ function SyncSetupMetric({
   value,
   label,
 }: {
-  icon: 'refresh' | 'cable' | 'music' | 'clock';
+  icon: 'refresh' | 'music';
   value: string;
   label: string;
 }) {
@@ -164,23 +133,15 @@ function SyncSetupMetric({
   );
 }
 
-function SyncSetupMetrics({
-  selectedPlaylists,
-  targetPlatformIds,
-}: {
-  selectedPlaylists: PlatformPlaylist[];
-  targetPlatformIds: PlatformId[];
-}) {
+function SyncSetupMetrics({ selectedPlaylists }: { selectedPlaylists: PlatformPlaylist[] }) {
   const totalSongs = selectedPlaylists.reduce((sum, playlist) => sum + playlist.itemCount, 0);
 
   return (
     <div>
-      <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">Sync summary</p>
+      <p className="text-xs font-black tracking-[0.18em] text-content-muted uppercase">Import summary</p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <SyncSetupMetric icon="refresh" value={selectedPlaylists.length.toLocaleString()} label="Source playlists" />
-        <SyncSetupMetric icon="cable" value={targetPlatformIds.length.toLocaleString()} label="Other platforms" />
         <SyncSetupMetric icon="music" value={totalSongs.toLocaleString()} label="Total songs" />
-        <SyncSetupMetric icon="clock" value="~2 min" label="Estimated time" />
       </div>
     </div>
   );
@@ -204,8 +165,8 @@ function PlaylistPickerHeader({
   return (
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0 flex-1">
-        <h2 className="text-lg font-black text-content">1. Source playlists</h2>
-        <p className="mt-1 text-sm font-semibold text-content-muted">Choose playlists to sync from {platformById.get(sourcePlatformId)?.name}.</p>
+        <h2 className="text-lg font-black text-content">Source playlists</h2>
+        <p className="mt-1 text-sm font-semibold text-content-muted">Choose playlists to import from {platformById.get(sourcePlatformId)?.name}.</p>
       </div>
       <button
         type="button"
@@ -333,75 +294,9 @@ function PlaylistPicker({
   );
 }
 
-function RulesPanel({
-  keepOrder,
-  keepMetadata,
-  hideUnavailable,
-  scheduledSync,
-  onToggleKeepOrder,
-  onToggleKeepMetadata,
-  onToggleHideUnavailable,
-  onToggleScheduledSync,
-}: {
-  keepOrder: boolean;
-  keepMetadata: boolean;
-  hideUnavailable: boolean;
-  scheduledSync: boolean;
-  onToggleKeepOrder: () => void;
-  onToggleKeepMetadata: () => void;
-  onToggleHideUnavailable: () => void;
-  onToggleScheduledSync: () => void;
-}) {
-  return (
-    <GlassCard className="p-4">
-      <h2 className="text-lg font-black text-content">2. Sync rules</h2>
-      <p className="mt-1 text-sm font-semibold text-content-muted">This run imports the selected source playlists into Cantaro. These rules describe how Cantaro should preserve them for later platform updates.</p>
-
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <div className="border-y border-personal-accent bg-surface p-4 text-left">
-          <div className="flex items-center justify-between gap-3">
-            <MusicUiIcon name="repeat" className="h-5 w-5 text-personal-accent-strong" />
-            <MusicUiIcon name="squareCheck" className="h-5 w-5 text-personal-accent-strong" />
-          </div>
-          <p className="mt-3 text-sm font-black text-content">Mirror sync</p>
-          <p className="mt-1 text-xs leading-5 font-semibold text-content-muted">Keep selected playlists aligned through Cantaro.</p>
-        </div>
-        <div className="border-y border-border-subtle bg-surface-translucent p-4 text-left opacity-65">
-          <div className="flex items-center justify-between gap-3">
-            <MusicUiIcon name="library" className="h-5 w-5 text-content-muted" />
-            <span className="text-xs font-black text-content-subtle">Later</span>
-          </div>
-          <p className="mt-3 text-sm font-black text-content">Update library</p>
-          <p className="mt-1 text-xs leading-5 font-semibold text-content-muted">Add tracks without removing existing entries.</p>
-        </div>
-      </div>
-
-      <div className="mt-4 overflow-hidden border-y border-border-subtle">
-        <ToggleRow title="Keep song order" detail="Preserve source playlist order in Cantaro." enabled={keepOrder} onToggle={onToggleKeepOrder} />
-        <ToggleRow title="Keep playlist metadata" detail="Sync title, description, and artwork where available." enabled={keepMetadata} onToggle={onToggleKeepMetadata} />
-        <ToggleRow title="Hide unavailable tracks" detail="Exclude missing or region-blocked songs from previews." enabled={hideUnavailable} onToggle={onToggleHideUnavailable} />
-        <ToggleRow title="Scheduled sync" detail="Keep this sync ready for automatic runs later." enabled={scheduledSync} onToggle={onToggleScheduledSync} />
-      </div>
-    </GlassCard>
-  );
-}
-
-function PreviewTargets({ targetPlatformIds }: { targetPlatformIds: PlatformId[] }) {
-  if (targetPlatformIds.length === 0) {
-    return <span className="border-l border-warning-border pl-3 text-warning-content">Connect another platform for cross-platform sync</span>;
-  }
-
-  return targetPlatformIds.map((platformId) => (
-    <span key={platformId} className="inline-flex items-center gap-2 border-l border-border-subtle pl-3 text-content first:border-0 first:pl-0">
-      <MusicPlatformIcon platformId={platformId} className="h-4 w-4" />
-      {platformById.get(platformId)?.name}
-    </span>
-  ));
-}
-
 function PreviewPlaylistList({ selectedPlaylists }: { selectedPlaylists: PlatformPlaylist[] }) {
   if (selectedPlaylists.length === 0) {
-    return <div className="border-y border-border-subtle p-4 text-sm font-semibold text-content-muted">Pick at least one playlist to preview the sync.</div>;
+    return <div className="border-y border-border-subtle p-4 text-sm font-semibold text-content-muted">Pick at least one playlist to preview the import.</div>;
   }
 
   return (
@@ -412,7 +307,7 @@ function PreviewPlaylistList({ selectedPlaylists }: { selectedPlaylists: Platfor
             <span className="block truncate text-sm font-black text-content">{playlist.title}</span>
             <span className="block text-xs font-semibold text-content-muted">{playlist.itemCount.toLocaleString()} songs</span>
           </span>
-          <span className="text-xs font-black text-success-content">Add</span>
+          <span className="text-xs font-black text-success-content">Import</span>
         </div>
       ))}
       {selectedPlaylists.length > 4 ? (
@@ -425,13 +320,11 @@ function PreviewPlaylistList({ selectedPlaylists }: { selectedPlaylists: Platfor
 function SyncPreview({
   sourcePlatformId,
   selectedPlaylists,
-  targetPlatformIds,
   syncStatus,
   syncResult,
 }: {
   sourcePlatformId: PlatformId;
   selectedPlaylists: PlatformPlaylist[];
-  targetPlatformIds: PlatformId[];
   syncStatus: SyncStatusResponse | null;
   syncResult: MusicSyncJobResponse | null;
 }) {
@@ -441,8 +334,7 @@ function SyncPreview({
     <GlassCard className="p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-black text-content">3. Sync preview</h2>
-          <p className="mt-1 text-sm font-semibold text-content-muted">Review what Cantaro will import now and which connected platforms can receive this playlist later.</p>
+          <h2 className="text-lg font-black text-content">Import preview</h2>
         </div>
         <MusicUiIcon name="cloudSync" className="h-5 w-5 text-personal-accent-strong" />
       </div>
@@ -456,10 +348,6 @@ function SyncPreview({
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-black text-content-muted">
-          <span>Cantaro can map to</span>
-          <PreviewTargets targetPlatformIds={targetPlatformIds} />
-        </div>
       </div>
 
       <div className="mt-4 grid gap-2">
@@ -472,29 +360,11 @@ function SyncPreview({
 
       {syncResult ? (
         <div className="mt-4 border-y border-success-border bg-success-surface px-4 py-3 text-sm font-semibold text-success-content">
-          Sync queued for {syncResult.playlistCount} playlist(s). Follow progress in Recent sync activity.
+          Import queued for {syncResult.playlistCount} playlist(s). Follow progress in Recent sync activity.
         </div>
       ) : null}
     </GlassCard>
   );
-}
-
-interface SyncRuleDefaults {
-  keepPlaylistOrder?: boolean;
-  keepPlaylistMetadata?: boolean;
-  hideUnavailableTracks?: boolean;
-  scheduledSync?: boolean;
-}
-
-const defaultSyncRuleDefaults: Required<SyncRuleDefaults> = {
-  keepPlaylistOrder: true,
-  keepPlaylistMetadata: true,
-  hideUnavailableTracks: true,
-  scheduledSync: true,
-};
-
-function syncRuleDefaults(syncDefaults: SyncRuleDefaults | undefined) {
-  return { ...defaultSyncRuleDefaults, ...syncDefaults };
 }
 
 function useSourcePlatformSelection(
@@ -513,16 +383,6 @@ function useSourcePlatformSelection(
   }, [isCheckingConnectedAccounts, preferredSource]);
 
   return { sourcePlatformId, setSourcePlatformId };
-}
-
-function useSyncRules(syncDefaults: SyncRuleDefaults | undefined) {
-  const defaults = syncRuleDefaults(syncDefaults);
-  const [keepOrder, setKeepOrder] = useState(defaults.keepPlaylistOrder);
-  const [keepMetadata, setKeepMetadata] = useState(defaults.keepPlaylistMetadata);
-  const [hideUnavailable, setHideUnavailable] = useState(defaults.hideUnavailableTracks);
-  const [scheduledSync, setScheduledSync] = useState(defaults.scheduledSync);
-
-  return { keepOrder, keepMetadata, hideUnavailable, scheduledSync, setKeepOrder, setKeepMetadata, setHideUnavailable, setScheduledSync };
 }
 
 function useSyncSetupData(sourcePlatformId: PlatformId) {
@@ -550,11 +410,12 @@ function useSyncSetupData(sourcePlatformId: PlatformId) {
 
         if (!isMounted) return;
         setSyncStatus(status);
-        setPlaylists(platformPlaylists);
+        const outboundPlaylistIds = new Set(status?.playlists.filter((playlist) => playlist.syncMode === 'from_cantaro').map((playlist) => playlist.servicePlaylistId));
+        setPlaylists(platformPlaylists.filter((playlist) => !outboundPlaylistIds.has(playlist.id)));
       } catch (loadError) {
         if (!isMounted) return;
         setPlaylists([]);
-        setError(getSyncErrorMessage(loadError, 'Failed to load playlists'));
+      setError(getSyncErrorMessage(loadError, 'Failed to load playlists'));
       } finally {
         if (isMounted) setIsLoadingPlaylists(false);
       }
@@ -613,7 +474,7 @@ function useSyncJob({
       writePlaylistSyncActivityFocus(job.id);
       void navigate({ to: '/music/platforms' });
     } catch (syncError) {
-      const errorMessage = getSyncErrorMessage(syncError, 'Failed to sync playlists');
+      const errorMessage = getSyncErrorMessage(syncError, 'Failed to import playlists');
       setError(errorMessage);
     } finally {
       setIsSyncing(false);
@@ -622,17 +483,14 @@ function useSyncJob({
 }
 
 function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
-  const { user } = useAuth();
   const { connectedPlatformIds, isCheckingConnectedAccounts } = useConnectedMusicPlatforms();
   const sourceSelection = useSourcePlatformSelection(initialSourcePlatformId, connectedPlatformIds, isCheckingConnectedAccounts);
   const setupData = useSyncSetupData(sourceSelection.sourcePlatformId);
-  const rules = useSyncRules(user?.preferences);
   const [isSyncing, setIsSyncing] = useState(false);
   const selectedPlaylists = useMemo(
     () => setupData.playlists.filter((playlist) => setupData.selectedPlaylistIds.has(playlist.id)),
     [setupData.playlists, setupData.selectedPlaylistIds],
   );
-  const targetPlatformIds = connectedPlatformIds.filter((platformId) => platformId !== sourceSelection.sourcePlatformId);
   const canSync = setupData.selectedPlaylistIds.size > 0 && !isSyncing && Boolean(setupData.syncStatus?.overall.canSyncNow);
   const handleSelectAll = useCallback(() => {
     setupData.setSelectedPlaylistIds((previous) => previous.size === setupData.playlists.length ? new Set() : new Set(setupData.playlists.map((playlist) => playlist.id)));
@@ -653,12 +511,10 @@ function useSyncSetupController(initialSourcePlatformId?: PlatformId) {
     ...sourceSelection,
     ...setupData,
     selectedPlaylists,
-    targetPlatformIds,
     isSyncing,
     canSync,
     handleSelectAll,
     handleSync,
-    ...rules,
   };
 }
 
@@ -680,10 +536,7 @@ function SyncSetupHeader({
           <MusicUiIcon name="arrowRight" className="h-5 w-5 rotate-180" />
           Back to sync overview
         </Link>
-        <h1 className="mt-3 text-4xl font-black text-content">Create playlist sync</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 font-semibold text-content-muted">
-          Pick a source platform and the playlists Cantaro should import into the canonical archive. Other connected platforms become available as mapped destinations after Cantaro knows the songs.
-        </p>
+        <h1 className="mt-3 text-4xl font-black text-content">Import playlists</h1>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -693,7 +546,7 @@ function SyncSetupHeader({
           className="inline-flex h-12 items-center gap-2 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-content-muted"
         >
           <MusicUiIcon name={isSyncing ? 'loader' : 'refresh'} className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
-          {isSyncing ? 'Syncing' : 'Sync playlists'}
+          {isSyncing ? 'Queuing import' : 'Import playlists'}
         </button>
       </div>
     </header>
@@ -702,7 +555,7 @@ function SyncSetupHeader({
 
 function SyncSetupGrid({ controller }: { controller: SyncSetupController }) {
   return (
-    <main className="grid gap-5 2xl:grid-cols-[minmax(420px,1.15fr)_minmax(320px,0.75fr)_minmax(420px,1fr)]">
+    <main className="grid gap-5 xl:grid-cols-2">
       <PlaylistPicker
         sourcePlatformId={controller.sourcePlatformId}
         playlists={controller.playlists}
@@ -711,20 +564,9 @@ function SyncSetupGrid({ controller }: { controller: SyncSetupController }) {
         onTogglePlaylist={(playlistId) => controller.setSelectedPlaylistIds((previous) => toggleSetValue(previous, playlistId))}
         onSelectAll={controller.handleSelectAll}
       />
-      <RulesPanel
-        keepOrder={controller.keepOrder}
-        keepMetadata={controller.keepMetadata}
-        hideUnavailable={controller.hideUnavailable}
-        scheduledSync={controller.scheduledSync}
-        onToggleKeepOrder={() => controller.setKeepOrder((previous) => !previous)}
-        onToggleKeepMetadata={() => controller.setKeepMetadata((previous) => !previous)}
-        onToggleHideUnavailable={() => controller.setHideUnavailable((previous) => !previous)}
-        onToggleScheduledSync={() => controller.setScheduledSync((previous) => !previous)}
-      />
       <SyncPreview
         sourcePlatformId={controller.sourcePlatformId}
         selectedPlaylists={controller.selectedPlaylists}
-        targetPlatformIds={controller.targetPlatformIds}
         syncStatus={controller.syncStatus}
         syncResult={controller.syncResult}
       />
@@ -763,7 +605,6 @@ function SyncSetupSurface({ library, controller }: { library: MusicLibraryRespon
           sourcePlatformId={controller.sourcePlatformId}
           connectedPlatformIds={controller.connectedPlatformIds}
           selectedPlaylists={controller.selectedPlaylists}
-          targetPlatformIds={controller.targetPlatformIds}
           onChange={controller.setSourcePlatformId}
         />
         {controller.error ? (

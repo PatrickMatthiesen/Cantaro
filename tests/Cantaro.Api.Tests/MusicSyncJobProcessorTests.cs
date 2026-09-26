@@ -46,7 +46,7 @@ public sealed class MusicSyncJobProcessorTests
             dbContext,
             new PlatformRegistry([platform]),
             throttle,
-            NullLogger<MusicSyncJobProcessor>.Instance);
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(dbContext, []));
 
         Assert.True(await processor.ProcessNextAsync(CancellationToken.None));
 
@@ -90,7 +90,7 @@ public sealed class MusicSyncJobProcessorTests
             dbContext,
             new PlatformRegistry([platform]),
             new MusicSyncThrottleService(),
-            NullLogger<MusicSyncJobProcessor>.Instance);
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(dbContext, []));
 
         Assert.True(await processor.ProcessNextAsync(CancellationToken.None));
 
@@ -132,7 +132,7 @@ public sealed class MusicSyncJobProcessorTests
             dbContext,
             new PlatformRegistry([platform]),
             new MusicSyncThrottleService(),
-            NullLogger<MusicSyncJobProcessor>.Instance);
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(dbContext, []));
 
         var processing = processor.ProcessNextAsync(CancellationToken.None);
         await platform.ProgressPersisted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -202,7 +202,7 @@ public sealed class MusicSyncJobProcessorTests
             dbContext,
             new PlatformRegistry([platform]),
             new MusicSyncThrottleService(),
-            NullLogger<MusicSyncJobProcessor>.Instance);
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(dbContext, []));
 
         Assert.True(await processor.ProcessNextAsync(CancellationToken.None));
 

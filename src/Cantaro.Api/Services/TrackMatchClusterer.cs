@@ -65,7 +65,8 @@ internal static class TrackMatchClusterer
         int clusterDurationToleranceSeconds,
         out string clusterReason)
     {
-        if (HaveSharedStrongIdentifier(candidate.Candidate, representative.Candidate))
+        if (HaveSharedStrongIdentifier(candidate.Candidate, representative.Candidate)
+            && HaveEquivalentTitleSemantics(candidate.CandidateMetadata, representative.CandidateMetadata))
         {
             clusterReason = "shared-strong-identifier";
             return true;
@@ -128,8 +129,8 @@ internal static class TrackMatchClusterer
             return true;
         }
 
-        return !string.IsNullOrWhiteSpace(left.Isrc)
-            && string.Equals(left.Isrc, right.Isrc, StringComparison.OrdinalIgnoreCase);
+        var isrc = TrackIdentityResolver.NormalizeIsrc(left.Isrc);
+        return isrc is not null && isrc == TrackIdentityResolver.NormalizeIsrc(right.Isrc);
     }
 
     internal static bool HaveEquivalentTitleSemantics(ParsedTrackMetadata left, ParsedTrackMetadata right)

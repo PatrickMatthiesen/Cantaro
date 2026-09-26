@@ -87,11 +87,7 @@ builder.Services.AddScoped<YouTubeService>();
 builder.Services.AddScoped<YouTubePlaylistSyncService>();
 builder.Services.AddScoped<PlaylistCanonicalReconciliationService>();
 builder.Services.AddScoped<IPlatformService, YouTubePlatformService>();
-builder.Services.AddHttpClient<SpotifyApiClient>(client =>
-{
-    client.BaseAddress = new Uri("https://api.spotify.com");
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
-});
+builder.Services.AddSpotifyApiClient();
 builder.Services.AddSingleton<ISpotifyRetryDelay, SpotifyRetryDelay>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SpotifyTokenManager>();
@@ -158,6 +154,15 @@ builder.Services.AddScoped<SongGroupingSuggestionService>();
 builder.Services.AddScoped<TrackMatchQueue>();
 builder.Services.AddSingleton<MusicSyncThrottleService>();
 builder.Services.AddScoped<MusicSyncJobProcessor>();
+builder.Services.AddScoped<OutboundPlaylistSyncService>();
+builder.Services.AddScoped<PlaylistSyncCoordinator>();
+builder.Services.AddScoped<PlaylistLinkLifecycleService>();
+builder.Services.AddScoped<PlaylistUnmatchedReviewService>();
+builder.Services.AddScoped<IPlaylistSyncProvider, YouTubePlaylistSyncProvider>();
+builder.Services.AddScoped<IPlaylistSyncProvider, SpotifyPlaylistSyncProvider>();
+builder.Services.AddHostedService<PlaylistSyncScheduler>();
+builder.Services.AddScoped<IPlaylistWriter, YouTubePlaylistWriter>();
+builder.Services.AddScoped<IPlaylistWriter, SpotifyPlaylistWriter>();
 builder.Services.AddHostedService<MusicSyncJobWorker>();
 builder.Services.AddHostedService<TrackMatchingWorker>();
 builder.Services.AddHostedService<MediaProviderOperationWorker>();

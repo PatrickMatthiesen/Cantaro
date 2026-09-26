@@ -18,8 +18,14 @@ internal sealed class TrackMatchScoredCandidate
     public bool HasEquivalentArtistCredits { get; init; }
     public bool HasCompatibleSemantics { get; init; }
     public bool IsAutoMatchEligible { get; init; }
+    public bool HasConfirmedRecordingIdentity { get; init; }
     public required string AutoMatchEligibilityReason { get; init; }
 }
+
+internal sealed record TrackMatchAssessment(
+    IReadOnlyList<TrackMatchScoredCandidate> Ranked,
+    IReadOnlyList<TrackMatchCluster> Clusters,
+    TrackMatchDecision Decision);
 
 internal sealed class TrackMatchIdentityFamily
 {
@@ -53,6 +59,20 @@ public sealed class TrackMatchCandidateStoredMetadata
     public string? ArtistMusicBrainzId { get; set; }
     public string? ArtistSortName { get; set; }
     public TrackMatchCandidateDiagnostics? Matching { get; set; }
+
+    internal static string? ReadProviderMetadata(string? rawMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(rawMetadata)) return rawMetadata;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<TrackMatchCandidateStoredMetadata>(rawMetadata)
+                ?.ProviderRawMetadata ?? rawMetadata;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return rawMetadata;
+        }
+    }
 }
 
 public sealed class TrackMatchCandidateDiagnostics
@@ -61,6 +81,8 @@ public sealed class TrackMatchCandidateDiagnostics
     public string? ObservationSearchArtist { get; set; }
     public string? CandidateSearchTitle { get; set; }
     public string? CandidateSearchArtist { get; set; }
+    public string? ObservationArtistEvidenceLine { get; set; }
+    public string? CandidateArtistEvidenceLine { get; set; }
     public List<string> ObservationVersionMarkers { get; set; } = [];
     public List<string> ObservationPlaybackModifiers { get; set; } = [];
     public List<string> CandidateVersionMarkers { get; set; } = [];
