@@ -12,6 +12,34 @@ namespace Cantaro.Api.Tests;
 public sealed class PlaylistSyncCoordinatorIntegrationTests
 {
     [Fact]
+    public async Task UnchangedPlaylistDoesNotReadAgainAfterFreshnessCheck()
+    {
+        await using var scenario = await Scenario.CreateAsync(["A", "B"]);
+        scenario.Link("spotify", ["A", "B"]);
+        await scenario.SaveAsync();
+
+        await scenario.Coordinator.RunAsync(42, scenario.Playlist.Id, "spotify", default);
+
+        Assert.Equal("success", scenario.Mapping("spotify").LastSyncStatus);
+        Assert.Equal(0, scenario.Writer("spotify").ReconcileCount);
+        Assert.Equal(2, scenario.Provider("spotify").ReadCount);
+    }
+
+    [Fact]
+    public async Task ChangedPlaylistStillReadsAfterWritingToVerifyResult()
+    {
+        await using var scenario = await Scenario.CreateAsync(["A", "B"]);
+        scenario.Link("spotify", ["A"]);
+        await scenario.SaveAsync();
+
+        await scenario.Coordinator.RunAsync(42, scenario.Playlist.Id, "spotify", default);
+
+        Assert.Equal("success", scenario.Mapping("spotify").LastSyncStatus);
+        Assert.Equal(1, scenario.Writer("spotify").ReconcileCount);
+        Assert.Equal(3, scenario.Provider("spotify").ReadCount);
+    }
+
+    [Fact]
     public async Task ActiveReadMatchAndWrite_ReportRunningUntilSyncCompletes()
     {
         await using var scenario = await Scenario.CreateAsync(["A", "B"]);

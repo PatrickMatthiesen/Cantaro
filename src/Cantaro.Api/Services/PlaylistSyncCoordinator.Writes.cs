@@ -201,11 +201,16 @@ public sealed partial class PlaylistSyncCoordinator
         var unavailableIds = fresh.Tracks.Where(item => !item.IsAvailable)
             .Select(item => item.ExternalId).ToHashSet(StringComparer.Ordinal);
         var writableIds = ids.Where(id => !unavailableIds.Contains(id)).ToList();
-        if (!writableIds.SequenceEqual(fresh.Tracks.Where(item => item.IsAvailable).Select(item => item.ExternalId)))
+        var changesTracks = !writableIds.SequenceEqual(fresh.Tracks.Where(item => item.IsAvailable).Select(item => item.ExternalId));
+        var changesName = link.DesiredName is { } && link.DesiredName != fresh.Name;
+        if (changesTracks)
             await Writer(link.Service).ReconcileAsync(read.Account, link.ServicePlaylistId, ids, ct);
-        if (link.DesiredName is { } desiredName && desiredName != fresh.Name)
-            await provider.RenameAsync(read.Account, link.ServicePlaylistId, desiredName, ct);
-        var verified = await provider.ReadAsync(read.Account, link.ServicePlaylistId, ct);
+        if (changesName)
+            await provider.RenameAsync(read.Account, link.ServicePlaylistId, link.DesiredName!, ct);
+        // The fresh read already verifies an unchanged playlist. Only mutations
+        // need another full paginated read to confirm what the provider retained.
+        var verified = changesTracks || changesName
+            ? await provider.ReadAsync(read.Account, link.ServicePlaylistId, ct) : fresh;
         RequireComplete(verified);
         if (!writableIds.SequenceEqual(verified.Tracks.Where(item => item.IsAvailable).Select(item => item.ExternalId))
             || !fresh.Tracks.Where(item => !item.IsAvailable).Select(item => item.ExternalId)

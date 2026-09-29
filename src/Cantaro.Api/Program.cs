@@ -93,6 +93,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SpotifyTokenManager>();
 builder.Services.AddSingleton<SpotifyCatalogTokenCache>();
 builder.Services.AddScoped<SpotifyCatalogTokenProvider>();
+builder.Services.AddSingleton<SpotifySearchCache>();
 builder.Services.AddScoped<SpotifyService>();
 builder.Services.AddScoped<SpotifyPlaylistSyncService>();
 builder.Services.AddScoped<TrackIdentityResolver>();

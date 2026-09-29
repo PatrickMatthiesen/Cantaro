@@ -31,6 +31,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
     public DbSet<SpotifyApiGateState> SpotifyApiGateStates => Set<SpotifyApiGateState>();
+    public DbSet<SpotifySearchCacheEntry> SpotifySearchCacheEntries => Set<SpotifySearchCacheEntry>();
     public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
     public DbSet<MediaTitle> MediaTitles => Set<MediaTitle>();
     public DbSet<MediaTitleRelation> MediaTitleRelations => Set<MediaTitleRelation>();
@@ -461,6 +462,13 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(a => a.ServicePlaylistMappings)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SpotifySearchCacheEntry>(entity =>
+        {
+            entity.HasKey(item => item.Key);
+            entity.Property(item => item.Key).HasMaxLength(64);
+            entity.HasIndex(item => item.ExpiresAt);
         });
 
         modelBuilder.Entity<SpotifyApiGateState>(entity =>

@@ -1,7 +1,9 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Cantaro.Api.Services.Spotify;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
@@ -16,6 +18,38 @@ namespace Cantaro.Api.Tests;
 public sealed class PlaylistSyncCoordinatorPostgresTests
 {
     private const int UserId = 420042;
+
+    [PostgresFact]
+    public async Task SpotifySearchCache_PersistsAndRefreshesEvenIfExpiryCleanupRemovedItsRow()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        var services = new ServiceCollection();
+        services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(schema.Db.Database.GetConnectionString()));
+        await using var provider = services.BuildServiceProvider();
+        SpotifySearchCache Cache() => new(provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System);
+        IReadOnlyList<SpotifyTrackSnapshot> tracks = [new("id", "Song", "Artist", ["Artist"], null, null,
+            "https://open.spotify.com/track/id", null, null, 180, null, 0)];
+        var requests = 0;
+        Task<IReadOnlyList<SpotifyTrackSnapshot>> Search(CancellationToken _) { requests++; return Task.FromResult(tracks); }
+
+        await Cache().GetOrSearchAsync("query", 10, Search, default);
+        var reused = await Cache().GetOrSearchAsync("query", 10, Search, default);
+        Assert.Equal("id", Assert.Single(reused).Id);
+        Assert.Equal(1, requests);
+        await schema.Db.SpotifySearchCacheEntries.ExecuteUpdateAsync(setters =>
+            setters.SetProperty(item => item.ExpiresAt, DateTimeOffset.UtcNow.AddDays(-1)));
+
+        await Cache().GetOrSearchAsync("query", 10, async ct =>
+        {
+            // Another process prunes the expired row while this query refreshes.
+            await schema.Db.SpotifySearchCacheEntries.ExecuteDeleteAsync(ct);
+            return await Search(ct);
+        }, default);
+        Assert.Equal(2, requests);
+        Assert.Equal(1, await schema.Db.SpotifySearchCacheEntries.CountAsync());
+        await Cache().GetOrSearchAsync("query", 10, Search, default);
+        Assert.Equal(2, requests);
+    }
 
     [PostgresFact]
     public async Task RunAsync_WorksWithRetryingExecutionStrategy()

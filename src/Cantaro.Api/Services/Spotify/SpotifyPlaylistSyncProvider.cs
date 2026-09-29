@@ -17,21 +17,23 @@ public sealed class SpotifyPlaylistSyncProvider(
     PlaylistCanonicalReconciliationService playlistReconciler,
     IOptions<TrackMatchingOptions> matchingOptions) : IPlaylistSyncProvider
 {
+    private ValidatedAccount? _validatedAccount;
+
     public string PlatformId => SpotifyService.ServiceName;
 
     public async Task<IReadOnlyList<PlaylistRemoteCatalogItem>> ListPlaylistsAsync(
         PlatformAccountContext account, CancellationToken cancellationToken)
     {
-        var accessToken = await GetPinnedTokenAsync(account, cancellationToken);
-        return (await apiClient.GetPlaylistsAsync(accessToken, cancellationToken))
+        var validated = await GetValidatedAccountAsync(account, cancellationToken);
+        return (await apiClient.GetPlaylistsAsync(validated.AccessToken, cancellationToken))
             .Select(item => new PlaylistRemoteCatalogItem(item.Id, item.Name)).ToList();
     }
 
     public async Task<PlaylistRemoteSnapshot> ReadAsync(
         PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
     {
-        var accessToken = await GetPinnedTokenAsync(account, cancellationToken);
-        var raw = await apiClient.GetPlaylistSyncReadSnapshotAsync(accessToken, playlistId, cancellationToken);
+        var validated = await GetValidatedAccountAsync(account, cancellationToken);
+        var raw = await apiClient.GetPlaylistSyncReadSnapshotAsync(validated.AccessToken, playlistId, cancellationToken);
         var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
         var cache = new Dictionary<string, (Guid TrackId, Guid ObservationId)>(StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
@@ -97,7 +99,7 @@ public sealed class SpotifyPlaylistSyncProvider(
             (observationId, trackId, ct) => playlistReconciler.ReconcileObservationAsync(observationId, trackId, ct),
             account, PlatformId, entry, async (observation, ct) =>
             {
-                _ = await GetPinnedTokenAsync(account, ct);
+                _ = await RequireAccountAsync(account, ct);
                 return await searchProvider.SearchAsync(observation, ct);
             }, cancellationToken);
     }
@@ -106,37 +108,54 @@ public sealed class SpotifyPlaylistSyncProvider(
         PlatformAccountContext account, string playlistId, string name, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        var accessToken = await GetPinnedTokenAsync(account, cancellationToken);
-        var linkedAccount = await RequireAccountAsync(account, cancellationToken);
-        var profile = await apiClient.GetProfileAsync(accessToken, cancellationToken);
-        var playlist = await apiClient.GetPlaylistSyncReadSnapshotAsync(accessToken, playlistId, cancellationToken);
-        if (profile.AccountId != linkedAccount.ExternalAccountId && profile.Id != linkedAccount.ExternalAccountId)
-            throw new PlatformApiException("spotify_account_changed", "The connected Spotify account changed.", 409);
-        if (string.IsNullOrWhiteSpace(profile.Id) || playlist.OwnerId != profile.Id)
+        var validated = await GetValidatedAccountAsync(account, cancellationToken);
+        var playlist = await apiClient.GetPlaylistSyncReadSnapshotAsync(validated.AccessToken, playlistId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(validated.Profile.Id) || playlist.OwnerId != validated.Profile.Id)
             throw new PlatformApiException("spotify_playlist_not_owned", "Only the playlist owner can rename it.", 403);
         if (!playlist.IsComplete)
             throw new PlatformApiException("spotify_playlist_incomplete_response",
                 "Spotify playlist changed while Cantaro refreshed it. Retry the rename.", 409);
         var requiredScope = playlist.IsPublic == true ? "playlist-modify-public" : "playlist-modify-private";
-        if (!(linkedAccount.Scopes ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        if (!(validated.Scopes ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Contains(requiredScope, StringComparer.Ordinal))
             throw new PlatformApiException("spotify_write_scope_required", "Reconnect Spotify with playlist write access.", 409);
-        await apiClient.RenamePlaylistAsync(accessToken, playlistId, name, cancellationToken);
+        await apiClient.RenamePlaylistAsync(validated.AccessToken, playlistId, name, cancellationToken);
     }
 
     public Task DeleteAsync(PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
         => throw new PlatformApiException("spotify_remote_delete_unsupported",
             "Spotify does not provide a playlist deletion API. Delete this playlist in Spotify, then confirm unlinking in Cantaro.", 409);
 
-    private async Task<string> GetPinnedTokenAsync(PlatformAccountContext account, CancellationToken cancellationToken)
+    private async Task<ValidatedAccount> GetValidatedAccountAsync(
+        PlatformAccountContext account, CancellationToken cancellationToken)
     {
         var linkedAccount = await RequireAccountAsync(account, cancellationToken);
+        // The token manager uses a tracked account. Reload it when another request
+        // changed this connection in the same scope.
+        var tracked = dbContext.ConnectedServiceAccounts.Local.FirstOrDefault(candidate =>
+            candidate.Id == linkedAccount.Id);
+        if (tracked is not null)
+            await dbContext.Entry(tracked).ReloadAsync(cancellationToken);
         var token = await tokenManager.GetAccessTokenSnapshotAsync(account, false, cancellationToken);
+        linkedAccount = await RequireAccountAsync(account, cancellationToken);
+        if (linkedAccount.TokenVersion != token.Version)
+            throw new PlatformApiException("spotify_account_changed",
+                "The connected Spotify account changed. Reconnect the original account before syncing.", 409);
+        if (_validatedAccount is { } cached
+            && cached.UserId == account.UserId
+            && cached.AccountId == linkedAccount.Id
+            && cached.ExternalAccountId == linkedAccount.ExternalAccountId
+            && cached.TokenVersion == token.Version
+            && cached.AccessToken == token.Value)
+            return _validatedAccount = cached with { Scopes = linkedAccount.Scopes };
+
+        _validatedAccount = null;
         var profile = await apiClient.GetProfileAsync(token.Value, cancellationToken);
         if (!string.Equals(profile.AccountId ?? profile.Id, linkedAccount.ExternalAccountId, StringComparison.Ordinal))
             throw new PlatformApiException("spotify_account_changed",
                 "The connected Spotify account changed. Reconnect the original account before syncing.", 409);
-        return token.Value;
+        return _validatedAccount = new ValidatedAccount(account.UserId, linkedAccount.Id,
+            linkedAccount.ExternalAccountId, token.Version, token.Value, linkedAccount.Scopes, profile);
     }
 
     private async Task<ConnectedServiceAccount> RequireAccountAsync(
@@ -147,7 +166,12 @@ public sealed class SpotifyPlaylistSyncProvider(
             && candidate.Service == PlatformId && candidate.ConnectionState == "connected"
             && (context.ExpectedExternalAccountId == null
                 || candidate.ExternalAccountId == context.ExpectedExternalAccountId), cancellationToken);
-        return linked ?? throw new PlatformApiException("spotify_account_changed",
+        if (linked is not null) return linked;
+        _validatedAccount = null;
+        throw new PlatformApiException("spotify_account_changed",
             "Reconnect the original Spotify account before syncing this playlist.", 409);
     }
+
+    private sealed record ValidatedAccount(int UserId, int AccountId, string ExternalAccountId,
+        long TokenVersion, string AccessToken, string? Scopes, SpotifyProfileResponse Profile);
 }

@@ -18,8 +18,7 @@ public sealed class SpotifySearchProviderTests
         var handler = new QueueHandler(
         [
             Json("""{ "access_token": "app-token", "expires_in": 3600, "token_type": "Bearer" }"""),
-            Json("""{ "tracks": { "items": [{ "type": "track", "id": "track-1", "name": "Beautiful Now", "duration_ms": 225000, "artists": [{ "name": "Zedd" }, { "name": "Jon Bellion" }], "external_ids": { "isrc": "USUM71504549" } }] } }"""),
-            Json("""{ "tracks": { "items": [] } }""")
+            Json("""{ "tracks": { "items": [{ "type": "track", "id": "track-1", "name": "Beautiful Now", "duration_ms": 225000, "artists": [{ "name": "Zedd" }, { "name": "Jon Bellion" }], "external_ids": { "isrc": "USUM71504549" } }] } }""")
         ]);
         var options = Options.Create(new SpotifyOptions { ClientId = "client", ClientSecret = "secret" });
         using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://api.spotify.com") };
@@ -40,7 +39,7 @@ public sealed class SpotifySearchProviderTests
         Assert.Equal("track-1", candidate.ExternalId);
         Assert.Equal("USUM71504549", candidate.Isrc);
         Assert.Equal(["Zedd", "Jon Bellion"], candidate.ArtistCredits);
-        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(2, handler.Requests.Count);
         Assert.Equal("/api/token", handler.Requests[0].PathAndQuery);
         Assert.Contains("/v1/search?type=track&limit=10&q=", handler.Requests[1].PathAndQuery, StringComparison.Ordinal);
         Assert.Contains("artist%3A%22Zedd%22", handler.Requests[1].PathAndQuery, StringComparison.OrdinalIgnoreCase);
@@ -169,6 +168,76 @@ public sealed class SpotifySearchProviderTests
     }
 
     [Fact]
+    public async Task SearchAsync_AmbiguousRecordingIdentitiesContinueToNextHypothesis()
+    {
+        var handler = new QueueHandler([
+            Json("""{ "access_token": "app-token", "expires_in": 3600, "token_type": "Bearer" }"""),
+            Json("""{ "tracks": { "items": [{ "type": "track", "id": "recording-a", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }], "external_ids": { "isrc": "USABC2400001" } }, { "type": "track", "id": "recording-b", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }], "external_ids": { "isrc": "USABC2400002" } }] } }"""),
+            Json("""{ "tracks": { "items": [] } }""")
+        ]);
+        var observation = new TrackObservation
+        {
+            SourceType = "youtube", ExternalId = "video", Title = "Porter Robinson | Star Guardian 2022",
+            Artist = "Everything Goes On", DurationSeconds = 160, MatchStatus = "pending",
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" })
+        };
+
+        var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
+
+        Assert.Equal(2, candidates.Count);
+        Assert.Null(TrackMatchDecisionEngine.Evaluate(observation, candidates, new()).Decision.AcceptedCandidate);
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task SearchAsync_ReversedTitleAndArtistInterpretationsBothRemainForReview()
+    {
+        var handler = new QueueHandler([
+            Json("""{ "access_token": "app-token", "expires_in": 3600, "token_type": "Bearer" }"""),
+            Json("""{ "tracks": { "items": [{ "type": "track", "id": "alpha-artist", "name": "Beta", "duration_ms": 180000, "artists": [{ "name": "Alpha" }] }] } }"""),
+            Json("""{ "tracks": { "items": [{ "type": "track", "id": "beta-artist", "name": "Alpha", "duration_ms": 180000, "artists": [{ "name": "Beta" }] }] } }""")
+        ]);
+        var observation = new TrackObservation
+        {
+            SourceType = "youtube", ExternalId = "video", Title = "Alpha - Beta",
+            DurationSeconds = 180, MatchStatus = "pending"
+        };
+
+        var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
+
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(["alpha-artist", "beta-artist"], candidates.Select(candidate => candidate.ExternalId));
+        Assert.All(candidates, candidate => Assert.NotNull(TrackMatchDecisionEngine.Evaluate(
+            observation, [candidate], new()).Decision.AcceptedCandidate));
+        Assert.Null(TrackMatchDecisionEngine.Evaluate(observation, candidates, new()).Decision.AcceptedCandidate);
+    }
+
+    [Fact]
+    public async Task SearchAsync_DifferentVersionContinuesUntilCompatibleRecordingIsFound()
+    {
+        var handler = new QueueHandler([
+            Json("""{ "access_token": "app-token", "expires_in": 3600, "token_type": "Bearer" }"""),
+            Json("""{ "tracks": { "items": [{ "type": "track", "id": "live", "name": "Everything Goes On (Live)", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }] }] } }"""),
+            Json("""{ "tracks": { "items": [{ "type": "track", "id": "studio", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }] }] } }""")
+        ]);
+        var observation = new TrackObservation
+        {
+            SourceType = "youtube", ExternalId = "video", Title = "Porter Robinson | Star Guardian 2022",
+            Artist = "Everything Goes On", DurationSeconds = 160, MatchStatus = "pending",
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" })
+        };
+
+        var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
+
+        Assert.Equal(2, candidates.Count);
+        Assert.Equal("studio", TrackMatchDecisionEngine.Evaluate(observation, candidates, new())
+            .Decision.AcceptedCandidate?.Candidate.ExternalId);
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task SearchAsync_WeakPrimaryResultsDoNotPreventAnAlternateSearch()
     {
         var handler = new QueueHandler([
@@ -210,6 +279,7 @@ public sealed class SpotifySearchProviderTests
         Assert.NotNull(accepted);
         Assert.Equal("mortals-normal", accepted.Candidate.ExternalId);
         Assert.Equal(1m, accepted.Score);
+        Assert.Equal(2, handler.Requests.Count);
     }
 
     private static SpotifySearchProvider CreateProvider(QueueHandler handler)

@@ -54,6 +54,29 @@ OAuth token requests use `accounts.spotify.com`, separately from the Web API. Th
 bounded token retries with exponential fallback and honor seconds or HTTP-date retry
 headers. A Web API cooldown does not prevent reconnecting an account.
 
+## Avoiding repeated requests
+
+- Destination matching validates the linked account locally. It no longer requests
+  `/me` for every track. Playlist operations reuse a profile validation within their
+  service scope only while the user, account, external identity and token stay the same.
+- Catalogue search evaluates candidates after each query and stops once the shared
+  matching engine accepts a recording and the source interpretation is unambiguous.
+  Conflicting artist/title interpretations still require their alternative searches.
+- Successful application-token catalogue queries are stored in the database by exact
+  query and result limit. Workers and playlists reuse those results for seven days,
+  or one day for an empty result. Known accepted track identities remain durable and
+  are checked before searching. User-token searches are excluded because their results
+  can depend on the user's market.
+- Cache hits need neither a token request nor a Spotify Web API request. Failed HTTP
+  requests and quota responses are never stored as empty results. Each successful query
+  is saved separately, including when a later query fails or the job is cancelled after
+  its response. Expired cache rows are pruned on cache misses at most hourly per process.
+- Concurrent identical queries are coalesced within an API process. Completed results
+  are shared through the database across processes; simultaneous first requests from
+  separate processes can still both reach Spotify. The global request gate still applies.
+- Unchanged playlists reuse their final freshness read. A write or rename still requires
+  a separate verification read.
+
 The settings bind from `Spotify:RequestGate`. The defaults are:
 
 ```json
