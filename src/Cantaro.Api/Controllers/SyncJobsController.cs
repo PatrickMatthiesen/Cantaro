@@ -18,6 +18,8 @@ public sealed class MusicSyncJobResponse
     public Guid Id { get; init; }
     public required string Status { get; init; }
     public required string Service { get; init; }
+    public string Direction { get; init; } = "import";
+    public string? CantaroPlaylistId { get; init; }
     public int PlaylistCount { get; init; }
     public int SongCount { get; init; }
     public int ProcessedPlaylistCount { get; init; }
@@ -52,6 +54,8 @@ public sealed class MusicSyncJobPageResponse
     public string? NextCursor { get; init; }
 }
 
+public sealed record OutboundSyncRequest(string Service, Guid CantaroPlaylistId, string? ServicePlaylistId = null);
+
 [ApiController]
 [Route("api/sync/jobs")]
 [Authorize]
@@ -60,7 +64,8 @@ public sealed class SyncJobsController(
     UserManager<User> userManager,
     IPlatformRegistry platformRegistry,
     MusicSyncThrottleService throttleService,
-    IServiceScopeFactory serviceScopeFactory) : ControllerBase
+    IServiceScopeFactory serviceScopeFactory,
+    OutboundPlaylistSyncService outboundSync) : ControllerBase
 {
     private sealed record JobCursor(DateTimeOffset CreatedAt, Guid Id);
 
@@ -133,6 +138,17 @@ public sealed class SyncJobsController(
                     : (int?)null
             });
         }
+        var outboundIds = await _dbContext.ServicePlaylistMappings.AsNoTracking()
+            .Where(mapping => mapping.ConnectedServiceAccountId == connectedAccount.Id
+                && mapping.Service == service && mapping.SyncMode == "from_cantaro"
+                && mapping.State != "unlinked"
+                && mapping.ExternalAccountId == connectedAccount.ExternalAccountId)
+            .Select(mapping => mapping.ServicePlaylistId).ToListAsync(cancellationToken);
+        if (request.ServicePlaylistIds?.Any(outboundIds.Contains) == true)
+        {
+            return Conflict(new { error = "A selected playlist is an outbound destination. Sync it from the Cantaro playlist." });
+        }
+        available = available.Where(item => !outboundIds.Contains(item.Id)).ToList();
         var requestedIds = request.ServicePlaylistIds is { Count: > 0 }
             ? request.ServicePlaylistIds.Distinct(StringComparer.Ordinal).ToList()
             : available.Select(item => item.Id).ToList();
@@ -146,6 +162,8 @@ public sealed class SyncJobsController(
         var existingMappings = await _dbContext.ServicePlaylistMappings
             .Where(mapping => mapping.Service == service
                 && mapping.ConnectedServiceAccountId == connectedAccount.Id
+                && mapping.ExternalAccountId == connectedAccount.ExternalAccountId
+                && mapping.State != "unlinked"
                 && mapping.Playlist!.UserId == userId
                 && requestedIdSet.Contains(mapping.ServicePlaylistId))
             .Select(mapping => new { mapping.ServicePlaylistId, mapping.PlaylistId })
@@ -220,6 +238,83 @@ public sealed class SyncJobsController(
 
         return AcceptedAtAction(nameof(Get), new { id = job.Id }, ToResponse(job));
     }
+
+    [HttpPost("outbound")]
+    public async Task<ActionResult<MusicSyncJobResponse>> CreateOutbound(
+        [FromBody] OutboundSyncRequest request, CancellationToken cancellationToken)
+    {
+        var userId = await GetCurrentUserIdAsync();
+        var service = request.Service?.Trim().ToLowerInvariant();
+        if (service is not ("youtube" or "spotify"))
+        {
+            return BadRequest(new { error = "Select YouTube or Spotify for this playlist." });
+        }
+        var platform = _platformRegistry.GetRequired(service);
+        if (!string.IsNullOrWhiteSpace(request.ServicePlaylistId)
+            && !platform.TryValidatePlaylistId(request.ServicePlaylistId, out var validationError))
+        {
+            return BadRequest(new { error = validationError });
+        }
+        var playlist = await _dbContext.Playlists.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == request.CantaroPlaylistId && item.UserId == userId, cancellationToken);
+        if (playlist is null) return NotFound();
+        var connectedAccount = await platform.GetConnectedAccountAsync(userId, cancellationToken);
+        if (connectedAccount is null || connectedAccount.ConnectionState != "connected")
+        {
+            return BadRequest(new { error = $"Connect {service} before starting a sync." });
+        }
+        var activeJobId = await FindActiveJobIdAsync(userId, service, cancellationToken);
+        if (activeJobId is not null)
+        {
+            return Conflict(new { error = "A sync is already running for this platform.", jobId = activeJobId });
+        }
+        string? destinationId;
+        try
+        {
+            destinationId = await outboundSync.ValidateAsync(new PlatformAccountContext(userId, connectedAccount.Id, connectedAccount.ExternalAccountId),
+                service, playlist.Id, request.ServicePlaylistId, cancellationToken);
+        }
+        catch (PlatformApiException ex)
+        {
+            if (ex.RetryAfter is { } delay)
+                Response.Headers.RetryAfter = Math.Max(0, (int)Math.Ceiling(delay.TotalSeconds)).ToString();
+            return StatusCode(ex.StatusCode, new { code = ex.Code, error = ex.Message });
+        }
+        var songCount = await _dbContext.PlaylistEntries.CountAsync(item => item.PlaylistId == playlist.Id, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var job = new MusicSyncJob
+        {
+            Id = Guid.NewGuid(), UserId = userId, ConnectedServiceAccountId = connectedAccount.Id,
+            Service = service, Status = MusicSyncJobStatuses.Queued,
+            PlaylistsJson = JsonSerializer.Serialize(new[]
+            {
+                new MusicSyncJobPlaylist(destinationId ?? string.Empty, playlist.Name, songCount, playlist.Id, connectedAccount.ExternalAccountId)
+            }),
+            PlaylistCount = 1, SongCount = songCount, CreatedAt = now, UpdatedAt = now
+        };
+        _dbContext.MusicSyncJobs.Add(job);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_MusicSyncJobs_UserId_Service" })
+        {
+            _dbContext.Entry(job).State = EntityState.Detached;
+            return Conflict(new
+            {
+                error = "A sync is already running for this platform.",
+                jobId = await FindActiveJobIdAsync(userId, service, cancellationToken)
+            });
+        }
+        return AcceptedAtAction(nameof(Get), new { id = job.Id }, ToResponse(job));
+    }
+
+    private Task<Guid?> FindActiveJobIdAsync(int userId, string service, CancellationToken cancellationToken)
+        => _dbContext.MusicSyncJobs.AsNoTracking()
+            .Where(item => item.UserId == userId && item.Service == service
+                && (item.Status == MusicSyncJobStatuses.Queued || item.Status == MusicSyncJobStatuses.Running))
+            .Select(item => (Guid?)item.Id).FirstOrDefaultAsync(cancellationToken);
 
     [HttpGet]
     public async Task<ActionResult<MusicSyncJobPageResponse>> List(
@@ -337,6 +432,8 @@ public sealed class SyncJobsController(
             Id = job.Id,
             Status = job.Status,
             Service = job.Service,
+            Direction = playlists.Any(item => item.CantaroPlaylistId.HasValue) ? "export" : "import",
+            CantaroPlaylistId = playlists.FirstOrDefault()?.CantaroPlaylistId?.ToString(),
             PlaylistCount = job.PlaylistCount,
             SongCount = job.SongCount,
             ProcessedPlaylistCount = job.ProcessedPlaylistCount,

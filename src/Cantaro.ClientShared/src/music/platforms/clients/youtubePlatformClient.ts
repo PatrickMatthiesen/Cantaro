@@ -8,6 +8,7 @@ import type {
     PlatformPlaylist,
     PlatformSong,
 } from '../types';
+import { createPlatformApiError, isPlatformReconnectRequiredError, type PlatformReconnectRequiredError } from './platformApiError';
 
 interface PlatformPlaylistDto {
     id: string;
@@ -28,25 +29,8 @@ interface PlatformSongDto {
     publishedAt?: string;
 }
 
-interface ApiErrorResponse {
-    code?: string;
-    error?: string;
-}
-
-const reconnectRequiredCode = 'youtube_reconnect_required';
-const reconnectRequiredMessage = 'Your YouTube connection expired. Reconnect YouTube to continue browsing playlists.';
-
-class YouTubeReconnectRequiredError extends Error {
-    public readonly code = reconnectRequiredCode;
-
-    public constructor(message = reconnectRequiredMessage) {
-        super(message);
-        this.name = 'YouTubeReconnectRequiredError';
-    }
-}
-
-export function isYouTubeReconnectRequiredError(error: unknown): error is YouTubeReconnectRequiredError {
-    return error instanceof YouTubeReconnectRequiredError;
+export function isYouTubeReconnectRequiredError(error: unknown): error is PlatformReconnectRequiredError {
+    return isPlatformReconnectRequiredError(error) && error.platformId === 'youtube';
 }
 
 class YouTubePlatformClient implements PlatformManagement {
@@ -63,23 +47,7 @@ class YouTubePlatformClient implements PlatformManagement {
     }
 
     private async createFetchError(response: Response, fallbackMessage: string): Promise<Error> {
-        if (response.status === 401) {
-            return new Error('Not authenticated. Please log in again.');
-        }
-
-        if (response.status === 403) {
-            return new Error('YouTube account not connected or access denied.');
-        }
-
-        const error = await response.json().catch((): ApiErrorResponse => ({
-            error: `${fallbackMessage} (HTTP ${response.status})`,
-        }));
-
-        if (response.status === 409 && error.code === reconnectRequiredCode) {
-            return new YouTubeReconnectRequiredError(error.error);
-        }
-
-        return new Error(error.error || fallbackMessage);
+        return createPlatformApiError('youtube', response, fallbackMessage);
     }
 
     private sanitizeRoute(route: string): string {

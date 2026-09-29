@@ -34,6 +34,13 @@ public class Playlist
     
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    public bool SyncEnabled { get; set; }
+    public bool AllowDuplicateTracks { get; set; }
+    public long SyncRevision { get; set; }
+    public DateTimeOffset? NextSyncAt { get; set; }
+    public Guid? SyncLeaseId { get; set; }
+    public DateTimeOffset? SyncLeaseExpiresAt { get; set; }
     
     /// <summary>
     /// Navigation property to User

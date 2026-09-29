@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useYouTubePlaylistsState, type PlatformPlaylist, type PlatformSong } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
+import { MusicPlatformHeader, MusicPlatformPlaylistGrid } from './MusicPlatformBrowser';
+import { MusicPlatformDisconnectReview } from './MusicPlatformDisconnectReview';
 
 type PlaylistRouteSyncAction =
   | { type: 'clear' }
@@ -112,184 +114,6 @@ function isMissingPlaylistRoute({
   );
 }
 
-function YouTubePageHeader({
-  accountName,
-  isConnected,
-  needsReconnect,
-  playlistCount,
-  onConnect,
-  onRefresh,
-  onDisconnect,
-}: {
-  accountName?: string | null;
-  isConnected: boolean;
-  needsReconnect: boolean;
-  playlistCount: number;
-  onConnect: () => void;
-  onRefresh: () => void;
-  onDisconnect: () => void;
-}) {
-  const description = getYouTubeHeaderDescription({ accountName, isConnected, needsReconnect, playlistCount });
-
-  return (
-    <section className="relative overflow-hidden border-y border-[#ef4444]/45 bg-[#ef4444] p-6 text-content-inverse">
-      <div className="absolute inset-0 bg-linear-to-r from-[#3b0b16]/92 via-[#dc2626]/78 to-[#f9a8d4]/35" />
-      <div className="relative flex flex-wrap items-end justify-between gap-5">
-        <div>
-          <p className="text-xs font-black tracking-[0.22em] text-content-inverse/75 uppercase">Music platform</p>
-          <h1 className="mt-2 text-4xl leading-tight font-black sm:text-5xl">YouTube</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 font-semibold text-content-inverse/82">{description}</p>
-        </div>
-        <YouTubeHeaderActions
-          isConnected={isConnected}
-          needsReconnect={needsReconnect}
-          onConnect={onConnect}
-          onRefresh={onRefresh}
-          onDisconnect={onDisconnect}
-        />
-      </div>
-    </section>
-  );
-}
-
-function getYouTubeHeaderDescription({
-  accountName,
-  isConnected,
-  needsReconnect,
-  playlistCount,
-}: {
-  accountName?: string | null;
-  isConnected: boolean;
-  needsReconnect: boolean;
-  playlistCount: number;
-}) {
-  if (needsReconnect) {
-    return `Connected as ${accountName ?? 'YouTube account'}, but Cantaro needs permission again before it can browse playlists.`;
-  }
-
-  if (isConnected) {
-    return `Connected as ${accountName ?? 'YouTube account'} with ${playlistCount.toLocaleString()} playlists ready to browse.`;
-  }
-
-  return 'Connect YouTube to bring playlists into your Cantaro music page.';
-}
-
-function YouTubeHeaderActions({
-  isConnected,
-  needsReconnect,
-  onConnect,
-  onRefresh,
-  onDisconnect,
-}: {
-  isConnected: boolean;
-  needsReconnect: boolean;
-  onConnect: () => void;
-  onRefresh: () => void;
-  onDisconnect: () => void;
-}) {
-  if (!isConnected) return null;
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {needsReconnect ? (
-        <button type="button" className="min-h-11 bg-surface px-5 text-sm font-black text-content transition hover:bg-rose-50" onClick={onConnect}>
-          Reconnect
-        </button>
-      ) : (
-        <button type="button" className="min-h-11 border border-white/30 bg-surface/18 px-5 text-sm font-black transition hover:bg-surface/25" onClick={onRefresh}>
-          Refresh
-        </button>
-      )}
-      <button type="button" className="min-h-11 border border-white/30 px-5 text-sm font-black text-white transition hover:bg-white/15" onClick={onDisconnect}>
-        Disconnect
-      </button>
-    </div>
-  );
-}
-
-function YouTubeReconnectPanel({ accountName, onConnect }: { accountName?: string | null; onConnect: () => void }) {
-  return (
-    <section className="border-y border-warning-border bg-warning-surface p-6 text-warning-content">
-      <p className="text-xs font-black tracking-[0.18em] uppercase">Connection expired</p>
-      <h2 className="mt-2 text-2xl font-black text-content">Reconnect YouTube</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 font-semibold text-amber-900">
-        Google no longer accepts the saved token for {accountName ?? 'this YouTube account'}. Reconnect once and Cantaro will store a fresh permission grant.
-      </p>
-      <button
-        type="button"
-        className="mt-5 min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover"
-        onClick={onConnect}
-      >
-        Reconnect YouTube
-      </button>
-    </section>
-  );
-}
-
-function YouTubeDisconnectedPanel({ onConnect }: { onConnect: () => void }) {
-  return (
-    <section className="border-y border-border-subtle py-6">
-      <p className="text-xs font-black tracking-[0.22em] text-rose-600 uppercase">Not connected</p>
-      <h2 className="mt-2 text-2xl font-black text-content">Connect YouTube to begin</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 font-medium text-content-muted">
-        Once connected, your YouTube playlists show up here as part of the same music browsing surface as the rest of your library.
-      </p>
-      <button
-        type="button"
-        className="mt-5 min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover"
-        onClick={onConnect}
-      >
-        Connect YouTube
-      </button>
-    </section>
-  );
-}
-
-function YouTubePlaylistCard({ playlist, onSelect }: { playlist: PlatformPlaylist; onSelect: (playlist: PlatformPlaylist) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onSelect(playlist)}
-      className="group overflow-hidden bg-surface-subtle text-left transition hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus"
-    >
-      {playlist.thumbnailUrl ? (
-        <img src={playlist.thumbnailUrl} alt="" className="h-44 w-full object-cover transition group-hover:scale-105" />
-      ) : (
-        <div className="flex h-44 w-full items-center justify-center bg-rose-50 text-sm font-black text-rose-600">YouTube</div>
-      )}
-      <div className="p-4">
-        <h3 className="line-clamp-2 text-base font-black text-content">{playlist.title}</h3>
-        {playlist.description ? <p className="mt-2 line-clamp-2 text-sm font-medium text-content-muted">{playlist.description}</p> : null}
-      </div>
-    </button>
-  );
-}
-
-function YouTubePlaylistGrid({
-  playlists,
-  onSelectPlaylist,
-}: {
-  playlists: PlatformPlaylist[];
-  onSelectPlaylist: (playlist: PlatformPlaylist) => void;
-}) {
-  if (playlists.length === 0) {
-    return (
-      <section className="border-y border-border-subtle py-6">
-        <p className="font-black text-content">No playlists found</p>
-        <p className="mt-1 text-sm font-medium text-content-muted">This account has no YouTube playlists available to Cantaro.</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-      {playlists.map((playlist) => (
-        <YouTubePlaylistCard key={playlist.id} playlist={playlist} onSelect={onSelectPlaylist} />
-      ))}
-    </section>
-  );
-}
-
 function mapPlatformSongToTrack(item: PlatformSong): MusicCollectionTrack {
   return {
     id: item.id,
@@ -380,7 +204,7 @@ function YouTubeError({ error }: { error: string | null }) {
   if (!error) return null;
 
   return (
-    <section className="border-y border-danger-border bg-danger-surface p-4 text-sm font-semibold text-danger-content">
+    <section role="alert" className="border-y border-danger-border bg-danger-surface p-4 text-sm font-semibold text-danger-content">
       {error}
     </section>
   );
@@ -409,7 +233,7 @@ function getMissingPlaylistId({
 }
 
 function YouTubePlatformContent({
-  accountName,
+  error,
   isConnected,
   isLoading,
   isLoadingItems,
@@ -419,11 +243,10 @@ function YouTubePlatformContent({
   playlists,
   selectedPlaylist,
   onBackToPlaylists,
-  onConnect,
   onRefresh,
   onSelectPlaylist,
 }: {
-  accountName?: string | null;
+  error: string | null;
   isConnected: boolean;
   isLoading: boolean;
   isLoadingItems: boolean;
@@ -433,13 +256,11 @@ function YouTubePlatformContent({
   playlists: PlatformPlaylist[];
   selectedPlaylist: PlatformPlaylist | null;
   onBackToPlaylists: () => void;
-  onConnect: () => void;
   onRefresh: () => void;
   onSelectPlaylist: (playlist: PlatformPlaylist) => void;
 }) {
   if (isLoading) return <YouTubeLoadingState />;
-  if (needsReconnect) return <YouTubeReconnectPanel accountName={accountName} onConnect={onConnect} />;
-  if (!isConnected) return <YouTubeDisconnectedPanel onConnect={onConnect} />;
+  if (needsReconnect || !isConnected || error) return null;
 
   return (
     <YouTubePlaylistContent
@@ -495,11 +316,16 @@ function YouTubePlaylistContent({
     );
   }
 
-  return <YouTubePlaylistGrid playlists={playlists} onSelectPlaylist={onSelectPlaylist} />;
+  return <MusicPlatformPlaylistGrid platformId="youtube" playlists={playlists} onSelect={onSelectPlaylist} />;
+}
+
+function hasPlaylistDetail(selectedPlaylist: PlatformPlaylist | null, missingPlaylistId: string | null, needsReconnect: boolean, error: string | null) {
+  return !needsReconnect && !error && Boolean(selectedPlaylist || missingPlaylistId);
 }
 
 export function YouTubeMusicPlatformPage({ playlistId = null }: { playlistId?: string | null }) {
   const navigate = useNavigate();
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const {
     status,
     playlists,
@@ -510,7 +336,6 @@ export function YouTubeMusicPlatformPage({ playlistId = null }: { playlistId?: s
     error,
     needsReconnect,
     connect,
-    disconnect,
     selectPlaylist,
     clearSelectedPlaylist,
     refreshPlaylists,
@@ -541,27 +366,30 @@ export function YouTubeMusicPlatformPage({ playlistId = null }: { playlistId?: s
   };
 
   const missingPlaylistId = getMissingPlaylistId({ isConnected, isLoading, playlistId, playlists });
-  const isPlaylistDetail = Boolean(selectedPlaylist || missingPlaylistId);
+  const isPlaylistDetail = hasPlaylistDetail(selectedPlaylist, missingPlaylistId, needsReconnect, error);
 
   return (
     <MusicPageShell>
       <div className="space-y-6">
         {!isPlaylistDetail ? (
-          <YouTubePageHeader
+          <MusicPlatformHeader
+            platformId="youtube"
+            isLoading={isLoading}
             accountName={status?.displayName}
             isConnected={isConnected}
             needsReconnect={needsReconnect}
-            playlistCount={playlists.length}
             onConnect={() => void connect()}
             onRefresh={() => void refreshPlaylists()}
-            onDisconnect={() => void disconnect()}
+            onDisconnect={() => setDisconnectOpen(true)}
           />
         ) : null}
 
-        <YouTubeError error={error} />
+        <MusicPlatformDisconnectReview service="youtube" open={disconnectOpen} onClose={() => setDisconnectOpen(false)} onDisconnected={() => void navigate({ to: '/music/platforms' })} />
+
+        <YouTubeError error={needsReconnect ? null : error} />
 
         <YouTubePlatformContent
-          accountName={status?.displayName}
+          error={error}
           isConnected={isConnected}
           isLoading={isLoading}
           isLoadingItems={isLoadingItems}
@@ -571,7 +399,6 @@ export function YouTubeMusicPlatformPage({ playlistId = null }: { playlistId?: s
           playlists={playlists}
           selectedPlaylist={selectedPlaylist}
           onBackToPlaylists={handleBackToPlaylists}
-          onConnect={() => void connect()}
           onRefresh={() => void refreshPlaylists()}
           onSelectPlaylist={handleSelectPlaylist}
         />

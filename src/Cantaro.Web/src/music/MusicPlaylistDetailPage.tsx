@@ -1,22 +1,24 @@
-import { type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
+import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrarySong } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { platformName, playlistArtwork, playlistLastSyncedAt, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
+import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
+import { MusicPlaylistOutboundSync } from './MusicPlaylistOutboundSync';
+import { MusicPlaylistRename } from './MusicPlaylistRename';
+import { usePlaylistSyncDetails } from './usePlaylistSyncDetails';
 
 function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
   return library.songs
-    .map((song) => {
-      const playlistEntry = song.playlists.find((entry) => entry.playlistId === playlistId);
-      return playlistEntry ? { song, position: playlistEntry.position } : null;
-    })
-    .filter((entry): entry is { song: MusicLibrarySong; position: number } => Boolean(entry))
+    .flatMap((song) => song.playlists
+      .filter((entry) => entry.playlistId === playlistId)
+      .map((entry) => ({ song, position: entry.position, entryId: entry.entryId })))
     .sort((left, right) => left.position - right.position);
 }
 
-function mapSongToCollectionTrack(song: MusicLibrarySong, index: number): MusicCollectionTrack {
+function mapSongToCollectionTrack(song: MusicLibrarySong, index: number, entryId: string): MusicCollectionTrack {
   return {
     id: song.id,
+    entryId,
     detailSongId: song.id,
     title: song.title,
     artist: songArtist(song),
@@ -41,6 +43,11 @@ function getSuggestions(library: MusicLibraryResponse, currentPlaylistId: string
     }));
 }
 
+function PlaylistRenameAction({ playlist, sync }: { playlist: MusicLibraryPlaylist; sync: ReturnType<typeof usePlaylistSyncDetails> }) {
+  const busy = !sync.details || sync.busy !== null;
+  return <MusicPlaylistRename playlistId={playlist.id} currentName={sync.details?.name ?? playlist.name} busy={busy} onAction={sync.perform} />;
+}
+
 export function MusicPlaylistDetailPage({
   library,
   playlistId,
@@ -49,8 +56,9 @@ export function MusicPlaylistDetailPage({
   playlistId: string;
 }) {
   const playlist = library.playlists.find((item) => item.id === playlistId);
+  const sync = usePlaylistSyncDetails(playlistId);
   const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
-  const baseTracks = playlistSongEntries.map(({ song }, index) => mapSongToCollectionTrack(song, index));
+  const baseTracks = playlistSongEntries.map(({ song, entryId }, index) => mapSongToCollectionTrack(song, index, entryId));
 
   if (!playlist) {
     return (
@@ -60,23 +68,19 @@ export function MusicPlaylistDetailPage({
     );
   }
 
-  const chips = playlist.services.length > 0 ? playlist.services.map((service) => platformName(service.service)) : ['Cantaro'];
-
   return (
     <MusicPageShell library={library}>
       <MusicCollectionDetailPage
-        eyebrow="Playlist"
         title={playlist.name}
         description={playlist.description}
         artworkUrl={playlistArtwork(playlist)}
         backTo="/music/playlists"
         backLabel="Back to playlists"
-        ownerLabel="Created by you"
-        updatedAt={playlistLastSyncedAt(playlist) ?? undefined}
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}
-        chips={chips}
         tracks={baseTracks}
         emptyTrackLabel="This playlist has no songs yet"
+        actionSlot={<PlaylistRenameAction playlist={playlist} sync={sync} />}
+        afterHeroSlot={<MusicPlaylistOutboundSync state={sync} />}
         suggestions={getSuggestions(library, playlist.id)}
       />
     </MusicPageShell>

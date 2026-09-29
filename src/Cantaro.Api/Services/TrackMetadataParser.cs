@@ -13,6 +13,9 @@ public sealed class ParsedTrackMetadata
     public IReadOnlyList<string> VersionMarkers { get; init; } = [];
     public IReadOnlyList<string> PlaybackModifiers { get; init; } = [];
     public IReadOnlyList<string> PresentationMarkers { get; init; } = [];
+    public bool HasConflictingArtistEvidence { get; init; }
+    public bool IsDescriptionArtistEvidence { get; init; }
+    public string? ArtistEvidenceLine { get; init; }
 }
 
 internal sealed class ParsedTitleSemantics
@@ -26,22 +29,28 @@ public static partial class TrackMetadataParser
 {
     private static readonly string[] ArtistTitleSeparators = [" - ", " \u2013 ", " \u2014 "];
 
-    public static ParsedTrackMetadata Parse(string? rawTitle, string? rawArtist)
+    public static ParsedTrackMetadata Parse(
+        string? rawTitle,
+        string? rawArtist,
+        bool parseArtistFromTitle = true)
     {
         var titleSemantics = ExtractTitleSemantics(rawTitle);
+        var embeddedContextTitle = StripEmbeddedWorkContext(rawTitle);
         var cleanedTitle = StripTrailingSoundtrackContext(
-            StripTrailingContextSegments(CleanupTitle(rawTitle)));
+            StripTrailingContextSegments(CleanupTitle(embeddedContextTitle ?? rawTitle)));
         cleanedTitle = StripTrailingDashVersionContext(cleanedTitle, rawArtist);
         var isTopicChannel = IsTopicChannel(rawArtist);
         var cleanedArtist = CleanupArtist(rawArtist);
-        var decoratedAttribution = ExtractDecoratedArtistTitle(cleanedTitle, cleanedArtist);
+        var decoratedAttribution = parseArtistFromTitle
+            ? ExtractDecoratedArtistTitle(cleanedTitle, cleanedArtist)
+            : (Title: cleanedTitle, Artist: (string?)null);
         cleanedTitle = decoratedAttribution.Title;
 
         var displayTitle = cleanedTitle;
         string? parsedArtist = decoratedAttribution.Artist;
         var featuredArtists = ExtractFeaturedArtistNames(rawTitle);
 
-        foreach (var separator in ArtistTitleSeparators)
+        foreach (var separator in parseArtistFromTitle ? ArtistTitleSeparators : [])
         {
             var separatorIndex = cleanedTitle.IndexOf(separator, StringComparison.Ordinal);
             if (separatorIndex <= 0)
@@ -76,6 +85,10 @@ public static partial class TrackMetadataParser
         var baseDisplayArtist = parsedArtist ?? cleanedArtist;
         var displayArtist = AppendFeaturedArtists(baseDisplayArtist, featuredArtists);
         var searchTitle = CleanupWhitespace(StripFeaturedArtists(displayTitle) ?? displayTitle);
+        if (embeddedContextTitle is not null)
+        {
+            searchTitle = NormalizeEmbeddedContextTitleForSearch(searchTitle);
+        }
         if (string.IsNullOrWhiteSpace(searchTitle))
         {
             searchTitle = displayTitle;
@@ -132,7 +145,8 @@ public static partial class TrackMetadataParser
     {
         return credits
             .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => TrackTextNormalizer.Normalize(value))
+            .Select(value => Regex.Replace(value!, @"\(([\p{L}\p{Nd}])\)(?=[\p{L}\p{Nd}])", "$1 "))
+            .Select(TrackTextNormalizer.Normalize)
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(value => value, StringComparer.Ordinal)
@@ -145,6 +159,11 @@ public static partial class TrackMetadataParser
         IEnumerable<string?> candidateCredits)
     {
         var normalizedCandidateCredits = NormalizeArtistCredits(candidateCredits);
+        if (normalizedCandidateCredits.Count > 0)
+        {
+            return observation.ArtistCredits.Count > 0
+                && observation.ArtistCredits.SequenceEqual(normalizedCandidateCredits, StringComparer.Ordinal);
+        }
         if (normalizedCandidateCredits.Count == 0)
         {
             normalizedCandidateCredits = candidate.ArtistCredits;
@@ -187,21 +206,88 @@ public static partial class TrackMetadataParser
             .ToArray();
     }
 
-    private static IReadOnlyList<string> ExtractFeaturedArtistNames(string? title)
+    internal static IReadOnlyList<string> ExtractFeaturedArtistNames(string? title)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
             return [];
         }
 
-        return FeaturedArtistCaptureRegex().Matches(title)
+        var balancedParentheticalMatches = FindFeaturedParentheticalCredits(title);
+        var titleWithoutParentheticalFeatures = StripFeaturedParentheticalSegments(title);
+        var regexMatches = FeaturedArtistCaptureRegex().Matches(titleWithoutParentheticalFeatures)
             .SelectMany(match => match.Groups["artists"].Value
                 .Split([",", " & ", " and "], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .ToArray();
+
+        return regexMatches.Concat(balancedParentheticalMatches)
             .Select(CleanupArtist)
             .Where(artist => !string.IsNullOrWhiteSpace(artist))
             .Select(artist => artist!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static IReadOnlyList<string> FindFeaturedParentheticalCredits(string title)
+    {
+        var credits = new List<string>();
+        for (var index = 0; index < title.Length; index++)
+        {
+            if (title[index] is not ('(' or '['))
+            {
+                continue;
+            }
+
+            var end = FindMatchingBracket(title, index);
+            if (end <= index + 1)
+            {
+                continue;
+            }
+
+            var content = title[(index + 1)..end].Trim();
+            var prefix = FeaturedPrefixRegex().Match(content);
+            if (!prefix.Success)
+            {
+                continue;
+            }
+
+            credits.AddRange(content[prefix.Length..]
+                .Split([",", " & ", " and "], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+            index = end;
+        }
+
+        return credits;
+    }
+
+    private static int FindMatchingBracket(string value, int start)
+    {
+        var expectedClosers = new Stack<char>();
+        for (var index = start; index < value.Length; index++)
+        {
+            switch (value[index])
+            {
+                case '(':
+                    expectedClosers.Push(')');
+                    break;
+                case '[':
+                    expectedClosers.Push(']');
+                    break;
+                case ')' or ']':
+                    if (expectedClosers.Count == 0 || expectedClosers.Pop() != value[index])
+                    {
+                        return -1;
+                    }
+
+                    if (expectedClosers.Count == 0)
+                    {
+                        return index;
+                    }
+
+                    break;
+            }
+        }
+
+        return -1;
     }
 
     private static string? AppendFeaturedArtists(string? artist, IReadOnlyList<string> featuredArtists)
@@ -337,6 +423,55 @@ public static partial class TrackMetadataParser
             : value;
     }
 
+    /// <summary>
+    /// Removes a trailing work or franchise name from title forms such as
+    /// "Song | Cover Description - Series: Subtitle". The context is only
+    /// recognized when a pipe-delimited title precedes the dash and the suffix
+    /// has a clear work-title marker, so ordinary "Artist - Song" titles remain intact.
+    /// </summary>
+    internal static string? StripEmbeddedWorkContext(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = NormalizeDashes(value);
+        var pipeIndex = normalized.IndexOf('|');
+        var separatorIndex = normalized.LastIndexOf(" - ", StringComparison.Ordinal);
+        if (pipeIndex <= 0 || separatorIndex <= pipeIndex)
+        {
+            return null;
+        }
+
+        var suffix = normalized[(separatorIndex + 3)..].Trim();
+        var descriptor = normalized[(pipeIndex + 1)..separatorIndex].Trim();
+        if (!HasRecordingDescriptor(descriptor) || !HasClearWorkTitleMarker(suffix))
+        {
+            return null;
+        }
+
+        var title = normalized[..separatorIndex].Trim();
+        return string.IsNullOrWhiteSpace(title) ? null : title;
+    }
+
+    private static string NormalizeEmbeddedContextTitleForSearch(string value)
+    {
+        return CleanupWhitespace(Regex.Replace(value, @"\s*\|\s*", " - "));
+    }
+
+    private static bool HasClearWorkTitleMarker(string value)
+    {
+        return value.Contains(':')
+            || value.Any(character => character is >= '\u3040' and <= '\u30ff'
+                or >= '\u3400' and <= '\u9fff');
+    }
+
+    private static bool HasRecordingDescriptor(string value)
+    {
+        return RecordingDescriptorRegex().IsMatch(value);
+    }
+
     internal static string StripTrailingSoundtrackContext(string value)
     {
         var cleaned = value;
@@ -418,10 +553,33 @@ public static partial class TrackMetadataParser
             return value;
         }
 
-        var cleaned = FeaturedParentheticalRegex().Replace(value, " ");
+        var cleaned = StripFeaturedParentheticalSegments(value);
         cleaned = FeaturedInlineRegex().Replace(cleaned, " ");
         cleaned = CleanupWhitespace(cleaned);
         return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+    }
+
+    private static string StripFeaturedParentheticalSegments(string value)
+    {
+        var builder = new System.Text.StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] is '(' or '[')
+            {
+                var end = FindMatchingBracket(value, index);
+                if (end > index + 1
+                    && FeaturedPrefixRegex().IsMatch(value[(index + 1)..end].Trim()))
+                {
+                    builder.Append(' ');
+                    index = end;
+                    continue;
+                }
+            }
+
+            builder.Append(value[index]);
+        }
+
+        return builder.ToString();
     }
 
     private static bool IsLikelyArtistSegment(string? value)
@@ -487,7 +645,7 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"\b(speed\s*up|sped\s*up|nightcore|slowed(?:\s*\+\s*reverb)?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex PlaybackModifierRegex();
 
-    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|remix(?:ed)?|remaster(?:ed)?|instrumental|karaoke|demo|dirty|clean|intro|outro|radio(?:\s+(?:edit|version))?|vip\s+mix|extended(?:\s+mix)?|club\s+mix|original\s+mix|acapella|stripped|cover|edit)\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(intro\s+dirty|acoustic|remix(?:ed)?|remaster(?:ed)?|instrumental|karaoke|demo|dirty|clean|intro|outro|radio(?:\s+(?:edit|version))?|vip\s+mix|extended(?:\s+mix)?|club\s+mix|original\s+mix|acapella|stripped|cover|mashup|edit)\b", RegexOptions.IgnoreCase)]
     private static partial Regex VersionMarkerRegex();
 
     [GeneratedRegex(@"(?:[\[(]\s*live(?:\s+(?:version|recording|at|from|in)\b[^\])]*)?\s*[\])]|(?:^|\s[-|]\s)live(?:\s+(?:version|recording))?\s*$|\blive\s+(?:version|recording)\b)", RegexOptions.IgnoreCase)]
@@ -496,7 +654,7 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"^live(?:\s+(?:version|recording))?$", RegexOptions.IgnoreCase)]
     private static partial Regex LiveVersionSuffixRegex();
 
-    [GeneratedRegex(@"[\[(]\s*from\s+[^\])]+[\])]", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"[\[(]\s*from\s+[^\])]+[\])]|(?:\s[-|]\sfrom\s+.+$)|〈[^〉]*(?:アニメMV|主題歌)[^〉]*〉", RegexOptions.IgnoreCase)]
     private static partial Regex SourceVersionContextRegex();
 
     [GeneratedRegex(@"\b(official\s+(?:music\s+)?video|lyric(?:s)?\s+video|visualizer)\b", RegexOptions.IgnoreCase)]
@@ -508,14 +666,17 @@ public static partial class TrackMetadataParser
     [GeneratedRegex(@"\s*(?:,|&|\band\b)\s*|\s+[x×]\s+", RegexOptions.IgnoreCase)]
     private static partial Regex ArtistCollaboratorSeparatorRegex();
 
-    [GeneratedRegex(@"[\[(]\s*(feat|ft|featuring)\.?\s+[^\])]*[\])]", RegexOptions.IgnoreCase)]
-    private static partial Regex FeaturedParentheticalRegex();
+    [GeneratedRegex(@"^(?:feat|ft|featuring)\.?\s+", RegexOptions.IgnoreCase)]
+    private static partial Regex FeaturedPrefixRegex();
 
     [GeneratedRegex(@"\s+\b(feat|ft|featuring)\.?\s+.+$", RegexOptions.IgnoreCase)]
     private static partial Regex FeaturedInlineRegex();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRegex();
+
+    [GeneratedRegex(@"\b(cover|remix|arrangement|arranged|instrumental|acoustic|version|edit|mix)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex RecordingDescriptorRegex();
 
     [GeneratedRegex(@"\s*-\s*topic$", RegexOptions.IgnoreCase)]
     private static partial Regex TopicSuffixRegex();

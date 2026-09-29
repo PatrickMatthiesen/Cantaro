@@ -11,7 +11,8 @@ public sealed class SpotifyPlaylistSyncService(
     SpotifyTrackResolver trackResolver,
     PlaylistCanonicalReconciliationService playlistReconciler,
     TimeProvider timeProvider,
-    ILogger<SpotifyPlaylistSyncService> logger)
+    ILogger<SpotifyPlaylistSyncService> logger,
+    PlaylistSyncCoordinator? coordinator = null)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly SpotifyService _spotifyService = spotifyService;
@@ -25,6 +26,21 @@ public sealed class SpotifyPlaylistSyncService(
         string spotifyPlaylistId,
         CancellationToken cancellationToken)
     {
+        if (coordinator is not null)
+            return await coordinator.ImportAsync(account, SpotifyService.ServiceName, spotifyPlaylistId, cancellationToken);
+        if (await _dbContext.ServicePlaylistMappings.AsNoTracking().AnyAsync(
+                candidate => candidate.Service == SpotifyService.ServiceName
+                    && candidate.ConnectedServiceAccountId == account.ConnectedServiceAccountId
+                    && candidate.ServicePlaylistId == spotifyPlaylistId
+                    && candidate.SyncMode == "from_cantaro",
+                cancellationToken))
+        {
+            throw new PlatformApiException(
+                "outbound_mapping",
+                "This playlist is an outbound destination. Sync it from the Cantaro playlist.",
+                StatusCodes.Status409Conflict);
+        }
+
         // Spotify network calls complete before any database transaction starts.
         var snapshot = await _spotifyService.GetPlaylistImportSnapshotAsync(
             account,
@@ -46,6 +62,14 @@ public sealed class SpotifyPlaylistSyncService(
                             && candidate.ServicePlaylistId == spotifyPlaylistId,
                         cancellationToken);
 
+                if (mapping?.SyncMode == "from_cantaro")
+                {
+                    throw new PlatformApiException(
+                        "outbound_mapping",
+                        "This playlist is an outbound destination. Sync it from the Cantaro playlist.",
+                        StatusCodes.Status409Conflict);
+                }
+
                 Playlist playlist;
                 if (mapping is null)
                 {
@@ -64,6 +88,9 @@ public sealed class SpotifyPlaylistSyncService(
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
                         ConnectedServiceAccountId = account.ConnectedServiceAccountId,
+                        UserId = account.UserId,
+                        ExternalAccountId = await _dbContext.ConnectedServiceAccounts.Where(item => item.Id == account.ConnectedServiceAccountId)
+                            .Select(item => item.ExternalAccountId).SingleAsync(cancellationToken),
                         Service = SpotifyService.ServiceName,
                         ServicePlaylistId = spotifyPlaylistId,
                         SyncMode = "import_only",

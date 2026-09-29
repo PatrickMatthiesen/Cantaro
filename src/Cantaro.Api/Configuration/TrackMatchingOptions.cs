@@ -54,27 +54,6 @@ public sealed class TrackMatchingOptions
     [Range(typeof(double), "0.1", "120", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
     public double DurationShorterHalfLifeSeconds { get; set; } = 8d;
 
-    [Range(0, 120)]
-    public int YouTubeDurationPaddingGraceSeconds { get; set; } = 20;
-
-    [Range(typeof(double), "0.1", "120", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
-    public double YouTubeDurationPaddingHalfLifeSeconds { get; set; } = 35d;
-
-    [Range(0, 300)]
-    public int YouTubeUnmarkedPaddingMaxSeconds { get; set; } = 60;
-
-    [Range(typeof(decimal), "1", "10", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
-    public decimal YouTubeUnmarkedPaddingMaxRatio { get; set; } = 1.35m;
-
-    [Range(0, 600)]
-    public int OfficialVideoPaddingMinSeconds { get; set; } = 30;
-
-    [Range(0, 600)]
-    public int OfficialVideoPaddingMaxSeconds { get; set; } = 300;
-
-    [Range(typeof(decimal), "0", "10", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
-    public decimal OfficialVideoPaddingMaxRatio { get; set; } = 2.0m;
-
     [Range(typeof(decimal), "-1", "1", ParseLimitsInInvariantCulture = true, ConvertValueInInvariantCulture = true)]
     public decimal PlaybackModifierMismatchPenalty { get; set; } = -0.20m;
 

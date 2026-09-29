@@ -1248,6 +1248,9 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AllowDuplicateTracks")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -1267,6 +1270,22 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset?>("NextSyncAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("SyncEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("SyncLeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SyncLeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("SyncRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -1276,6 +1295,8 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("NextSyncAt");
 
                     b.HasIndex("UserId");
 
@@ -1316,7 +1337,6 @@ namespace Cantaro.Api.Migrations
                         .IsUnique();
 
                     b.HasIndex("PlaylistId", "TrackId")
-                        .IsUnique()
                         .HasFilter("\"TrackId\" IS NOT NULL");
 
                     b.ToTable("PlaylistEntries");
@@ -1328,8 +1348,33 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BaselineJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BaselineName")
+                        .HasColumnType("text");
+
+                    b.Property<long>("CanonicalRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<int>("ConnectedServiceAccountId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("DesiredName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalAccountId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("InitialMode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text");
 
                     b.Property<string>("LastSyncStatus")
                         .HasColumnType("text");
@@ -1337,8 +1382,29 @@ namespace Cantaro.Api.Migrations
                     b.Property<DateTimeOffset?>("LastSyncedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("MatchingProcessedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MatchingProgressJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MatchingTotalCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PendingName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PendingWriteJson")
+                        .HasColumnType("text");
+
                     b.Property<Guid>("PlaylistId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("RejectedName")
+                        .HasColumnType("text");
 
                     b.Property<string>("Service")
                         .IsRequired()
@@ -1348,17 +1414,33 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("SyncMode")
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("UnresolvedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectedServiceAccountId", "ServicePlaylistId")
-                        .IsUnique();
+                    b.HasIndex("ConnectedServiceAccountId");
 
-                    b.HasIndex("PlaylistId", "ConnectedServiceAccountId", "Service")
-                        .IsUnique();
+                    b.HasIndex("NextAttemptAt");
+
+                    b.HasIndex("PlaylistId", "Service", "ExternalAccountId")
+                        .IsUnique()
+                        .HasFilter("\"State\" <> 'unlinked'");
+
+                    b.HasIndex("UserId", "Service", "ExternalAccountId", "ServicePlaylistId")
+                        .IsUnique()
+                        .HasFilter("\"State\" <> 'unlinked'");
 
                     b.ToTable("ServicePlaylistMappings");
                 });
@@ -1498,6 +1580,80 @@ namespace Cantaro.Api.Migrations
                     b.HasIndex("TrackId", "SongId");
 
                     b.ToTable("SongTracks");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.SpotifyApiGateState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("NextRequestAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("NormalLastRateLimitAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("NormalMissingRetryAfterCount")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("NotBefore")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("NotBeforeIsQuotaExceeded")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("QuotaLastRateLimitAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("QuotaMissingRetryAfterCount")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SpotifyApiGateStates");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            NextRequestAt = 0L,
+                            NormalMissingRetryAfterCount = 0,
+                            NotBefore = 0L,
+                            NotBeforeIsQuotaExceeded = false,
+                            QuotaMissingRetryAfterCount = 0,
+                            UpdatedAt = 0L,
+                            Version = 0L
+                        });
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.SpotifySearchCacheEntry", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ResultsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("SpotifySearchCacheEntries");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.Track", b =>
@@ -2438,7 +2594,7 @@ namespace Cantaro.Api.Migrations
                     b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
                         .WithMany("ServicePlaylistMappings")
                         .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Cantaro.Api.Models.Playlist", "Playlist")

@@ -14,7 +14,8 @@
     "./ui": "./src/ui/index.ts"
   },
   "scripts": {
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && bun run test",
+    "test": "bun test tests",
     "check:fallow": "bunx fallow"
   },
   "dependencies": {

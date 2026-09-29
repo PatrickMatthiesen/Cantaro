@@ -167,6 +167,38 @@ public class FrontendUrlResolverTests
     }
 
     [Fact]
+    public void YouTubeOAuth_UsesSameRedirectForDevHostAndLocalhostCallback()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["Frontend:TrustLoopbackOrigins"] = "true",
+            ["Frontend:TrustedHostSuffixes:0"] = ".dev.localhost",
+            ["services:web:https:0"] = "https://cantaro.dev.localhost:5173"
+        };
+        var connectResolver = CreateResolver(context =>
+        {
+            context.Request.Scheme = "https";
+            context.Request.Host = new HostString("cantaro.dev.localhost", 5173);
+            context.Request.Headers.Referer = "https://cantaro.dev.localhost:5173/music/platforms/youtube";
+        }, settings);
+        var callbackResolver = CreateResolver(context =>
+        {
+            context.Request.Scheme = "https";
+            context.Request.Host = new HostString("localhost", 5173);
+            context.Request.Headers.Referer = "https://accounts.google.com/";
+        }, settings);
+
+        var authorizationRedirect = YouTubeService.ResolveRedirectUri(
+            connectResolver.GetCallbackUrls("api/platforms/youtube/callback"));
+        var exchangeRedirect = YouTubeService.ResolveRedirectUri(
+            callbackResolver.GetCallbackUrls("api/platforms/youtube/callback"));
+
+        Assert.Equal("https://localhost:5173/api/platforms/youtube/callback", authorizationRedirect);
+        Assert.Equal(authorizationRedirect, exchangeRedirect);
+        Assert.Equal("https://cantaro.dev.localhost:5173", connectResolver.GetFrontendUrl());
+    }
+
+    [Fact]
     public void GetFrontendUrl_DoesNotTrustLoopbackOriginUnlessConfigured()
     {
         var resolver = CreateResolver(

@@ -30,6 +30,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<Playlist> Playlists => Set<Playlist>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
+    public DbSet<SpotifyApiGateState> SpotifyApiGateStates => Set<SpotifyApiGateState>();
+    public DbSet<SpotifySearchCacheEntry> SpotifySearchCacheEntries => Set<SpotifySearchCacheEntry>();
     public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
     public DbSet<MediaTitle> MediaTitles => Set<MediaTitle>();
     public DbSet<MediaTitleRelation> MediaTitleRelations => Set<MediaTitleRelation>();
@@ -406,6 +408,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.ImportedFromService).HasMaxLength(64);
+            entity.HasIndex(e => e.NextSyncAt);
+            entity.Property(e => e.SyncRevision).IsConcurrencyToken();
 
             entity.HasOne(e => e.User)
                 .WithMany()
@@ -421,7 +425,6 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => new { e.PlaylistId, e.Position })
                 .IsUnique();
             entity.HasIndex(e => new { e.PlaylistId, e.TrackId })
-                .IsUnique()
                 .HasFilter("\"TrackId\" IS NOT NULL");
 
             entity.HasOne(e => e.Playlist)
@@ -444,10 +447,11 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
-            entity.HasIndex(e => new { e.ConnectedServiceAccountId, e.ServicePlaylistId })
-                .IsUnique();
-            entity.HasIndex(e => new { e.PlaylistId, e.ConnectedServiceAccountId, e.Service })
-                .IsUnique();
+            entity.HasIndex(e => new { e.UserId, e.Service, e.ExternalAccountId, e.ServicePlaylistId })
+                .IsUnique().HasFilter("\"State\" <> 'unlinked'");
+            entity.HasIndex(e => new { e.PlaylistId, e.Service, e.ExternalAccountId })
+                .IsUnique().HasFilter("\"State\" <> 'unlinked'");
+            entity.HasIndex(e => e.NextAttemptAt);
 
             entity.HasOne(e => e.Playlist)
                 .WithMany(p => p.ServiceMappings)
@@ -457,7 +461,42 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasOne(e => e.ConnectedServiceAccount)
                 .WithMany(a => a.ServicePlaylistMappings)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SpotifySearchCacheEntry>(entity =>
+        {
+            entity.HasKey(item => item.Key);
+            entity.Property(item => item.Key).HasMaxLength(64);
+            entity.HasIndex(item => item.ExpiresAt);
+        });
+
+        modelBuilder.Entity<SpotifyApiGateState>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            // Store times as UTC ticks so deadline comparisons remain translatable
+            // by SQLite as well as PostgreSQL.
+            entity.Property(e => e.NotBefore)
+                .HasConversion(value => value.UtcTicks, value => new DateTimeOffset(value, TimeSpan.Zero));
+            entity.Property(e => e.NextRequestAt)
+                .HasConversion(value => value.UtcTicks, value => new DateTimeOffset(value, TimeSpan.Zero));
+            entity.Property(e => e.NormalLastRateLimitAt)
+                .HasConversion(value => value.HasValue ? value.Value.UtcTicks : (long?)null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+            entity.Property(e => e.QuotaLastRateLimitAt)
+                .HasConversion(value => value.HasValue ? value.Value.UtcTicks : (long?)null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+            entity.Property(e => e.UpdatedAt)
+                .HasConversion(value => value.UtcTicks, value => new DateTimeOffset(value, TimeSpan.Zero));
+            entity.Property(e => e.Version).IsConcurrencyToken();
+            entity.HasData(new SpotifyApiGateState
+            {
+                Id = 1,
+                NotBefore = DateTimeOffset.MinValue,
+                NextRequestAt = DateTimeOffset.MinValue,
+                UpdatedAt = DateTimeOffset.MinValue,
+                Version = 0
+            });
         });
 
         modelBuilder.Entity<MusicSyncJob>(entity =>

@@ -54,6 +54,7 @@ public sealed class MusicLibrarySongPlatformLinkDto
 
 public sealed class MusicLibrarySongPlaylistDto
 {
+    public required string EntryId { get; set; }
     public required string PlaylistId { get; set; }
     public required string PlaylistName { get; set; }
     public int Position { get; set; }
@@ -65,6 +66,7 @@ public sealed class MusicLibraryPlaylistDto
     public required string Name { get; set; }
     public string? Description { get; set; }
     public int EntryCount { get; set; }
+    public bool AllowDuplicateTracks { get; set; }
     public required List<MusicLibraryPlaylistServiceDto> Services { get; set; }
 }
 

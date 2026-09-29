@@ -92,6 +92,12 @@ internal sealed class SpotifyPlaylistResponse
     [JsonPropertyName("owner")]
     public SpotifyOwnerResponse? Owner { get; init; }
 
+    [JsonPropertyName("public")]
+    public bool? IsPublic { get; init; }
+
+    [JsonPropertyName("collaborative")]
+    public bool IsCollaborative { get; init; }
+
     [JsonPropertyName("images")]
     public List<SpotifyImageResponse> Images { get; init; } = [];
 
@@ -107,8 +113,37 @@ internal sealed class SpotifyPlaylistResponse
 
 internal sealed class SpotifyOwnerResponse
 {
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
     [JsonPropertyName("display_name")]
     public string? DisplayName { get; init; }
+}
+
+internal sealed record SpotifyPlaylistWriteSnapshot(
+    string Id,
+    string? OwnerId,
+    bool? IsPublic,
+    bool IsCollaborative,
+    IReadOnlyList<string> TrackIds);
+
+internal sealed record SpotifyCreatedPlaylist(string? Id, string? OwnerId, bool? IsPublic);
+
+internal sealed record SpotifySyncReadItem(int Position, SpotifyTrackSnapshot? Track);
+internal sealed record SpotifySyncReadSnapshot(
+    string Id, string Name, string? SnapshotId, string? OwnerId,
+    bool? IsPublic, bool IsCollaborative, IReadOnlyList<SpotifySyncReadItem> Items, bool IsComplete);
+
+internal sealed class SpotifyPlaylistWritePage
+{
+    [JsonPropertyName("items")]
+    public List<SpotifyPlaylistItemResponse?>? Items { get; init; }
+
+    [JsonPropertyName("next")]
+    public string? Next { get; init; }
+
+    [JsonPropertyName("total")]
+    public int? Total { get; init; }
 }
 
 internal sealed class SpotifyItemsReferenceResponse

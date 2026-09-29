@@ -58,7 +58,9 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             Name = playlist.Name,
             Description = playlist.Description,
             EntryCount = playlist.Entries.Count(IsMusicEntry),
+            AllowDuplicateTracks = playlist.AllowDuplicateTracks,
             Services = playlist.ServiceMappings
+                .Where(mapping => mapping.State != "unlinked" && !mapping.ServicePlaylistId.StartsWith("pending:", StringComparison.Ordinal))
                 .OrderBy(mapping => mapping.Service)
                 .Select(mapping => new MusicLibraryPlaylistServiceDto
                 {
@@ -111,6 +113,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 .ThenBy(item => item.Entry.Position)
                 .Select(item => new MusicLibrarySongPlaylistDto
                 {
+                    EntryId = item.Entry.Id.ToString(),
                     PlaylistId = item.Playlist.Id.ToString(),
                     PlaylistName = item.Playlist.Name,
                     Position = item.Entry.Position
@@ -133,7 +136,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var metadata = ParseJson<TrackCanonicalMetadata>(track.CanonicalMetadata);
         var memberships = await _dbContext.PlaylistEntries.AsNoTracking()
             .Where(x => x.TrackId == trackId && x.Playlist != null && x.Playlist.UserId == userId)
-            .Select(x => new MusicLibrarySongPlaylistDto { PlaylistId = x.PlaylistId.ToString(), PlaylistName = x.Playlist!.Name, Position = x.Position })
+            .Select(x => new MusicLibrarySongPlaylistDto { EntryId = x.Id.ToString(), PlaylistId = x.PlaylistId.ToString(), PlaylistName = x.Playlist!.Name, Position = x.Position })
             .OrderBy(x => x.PlaylistName).ToListAsync(cancellationToken);
         var identities = track.SourceIds.Select(x => Identity(x.SourceType, x.ExternalId)).ToList();
         if (!string.IsNullOrWhiteSpace(track.Isrc)) identities.Add(Identity("isrc", track.Isrc));
@@ -153,29 +156,37 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var playlist = await _dbContext.Playlists.Include(x => x.Entries)
             .FirstOrDefaultAsync(x => x.Id == playlistId && x.UserId == userId, cancellationToken);
         if (playlist is null || !await _dbContext.Tracks.AnyAsync(x => x.Id == trackId, cancellationToken)) return false;
-        if (playlist.Entries.Any(x => x.TrackId == trackId)) return true;
+        if (!playlist.AllowDuplicateTracks && playlist.Entries.Any(x => x.TrackId == trackId)) return true;
         _dbContext.PlaylistEntries.Add(new PlaylistEntry
         {
             Id = Guid.NewGuid(), PlaylistId = playlistId, TrackId = trackId,
             Position = playlist.Entries.Count == 0 ? 0 : playlist.Entries.Max(x => x.Position) + 1,
             AddedAt = DateTimeOffset.UtcNow, SourceService = "cantaro"
         });
-        playlist.UpdatedAt = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        playlist.UpdatedAt = now;
+        playlist.SyncRevision++;
+        if (playlist.SyncEnabled) playlist.NextSyncAt ??= now.AddDays(1);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return true;
     }
 
-    public async Task<bool> RemoveCanonicalSongFromPlaylistAsync(Guid trackId, Guid playlistId, int userId, CancellationToken cancellationToken)
+    public async Task<bool> RemoveCanonicalSongFromPlaylistAsync(Guid trackId, Guid playlistId, int userId,
+        CancellationToken cancellationToken, Guid? entryId = null)
     {
         var playlist = await _dbContext.Playlists.Include(x => x.Entries)
             .FirstOrDefaultAsync(x => x.Id == playlistId && x.UserId == userId, cancellationToken);
         if (playlist is null) return false;
-        var entries = playlist.Entries.Where(x => x.TrackId == trackId).ToList();
-        if (entries.Count == 0) return true;
+        var entries = playlist.Entries.Where(x => x.TrackId == trackId
+            && (entryId is null || x.Id == entryId.Value)).ToList();
+        if (entries.Count == 0) return entryId is null;
         _dbContext.PlaylistEntries.RemoveRange(entries);
         var remaining = playlist.Entries.Except(entries).OrderBy(x => x.Position).ToList();
         for (var index = 0; index < remaining.Count; index++) remaining[index].Position = index;
-        playlist.UpdatedAt = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        playlist.UpdatedAt = now;
+        playlist.SyncRevision++;
+        if (playlist.SyncEnabled) playlist.NextSyncAt ??= now.AddDays(1);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return true;
     }

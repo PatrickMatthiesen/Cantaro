@@ -10,6 +10,7 @@ export interface PlaylistSyncProgress {
   jobId: string;
   phase: PlaylistSyncProgressPhase;
   sourcePlatformId: PlatformId;
+  direction: 'import' | 'export';
   playlistCount: number;
   songCount: number;
   targetCount: number;
@@ -45,6 +46,7 @@ export function progressFromSyncJob(job: MusicSyncJobResponse): PlaylistSyncProg
     jobId: job.id,
     phase: progressPhase(job.status),
     sourcePlatformId: job.service as PlatformId,
+    direction: job.direction ?? 'import',
     playlistCount: job.playlistCount,
     songCount: job.songCount,
     targetCount: 0,

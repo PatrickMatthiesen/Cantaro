@@ -124,7 +124,7 @@ function MembershipList({ controller }: { controller: PlaylistController }) {
   return (
     <div className="divide-y divide-border-subtle border-y border-border-subtle">
       {controller.memberships.map((membership) => (
-        <MembershipRow key={membership.playlistId} membership={membership} controller={controller} />
+        <MembershipRow key={membership.entryId} membership={membership} controller={controller} />
       ))}
     </div>
   );
@@ -134,14 +134,14 @@ function MembershipRow({ membership, controller }: {
   membership: PlaylistMembership;
   controller: PlaylistController;
 }) {
-  const confirming = controller.confirmingRemoval === membership.playlistId;
+  const confirming = controller.confirmingRemoval === membership.entryId;
   return (
     <div className="group flex min-h-10 items-center gap-2 px-2 text-sm text-content hover:bg-danger-surface">
       <span className="min-w-0 flex-1 truncate">{membership.playlistName} <span className="text-xs text-content-subtle">#{membership.position + 1}</span></span>
       {confirming ? <RemovalConfirmation membership={membership} controller={controller} /> : (
         <button
           type="button"
-          onClick={() => controller.setConfirmingRemoval(membership.playlistId)}
+          onClick={() => controller.setConfirmingRemoval(membership.entryId)}
           className="flex size-7 items-center justify-center text-danger-content opacity-0 transition-opacity hover:bg-danger-surface group-hover:opacity-100 focus:opacity-100"
           aria-label={`Remove from ${membership.playlistName}`}
         >×</button>
@@ -157,7 +157,7 @@ function RemovalConfirmation({ membership, controller }: {
   return (
     <div className="flex items-center gap-1">
       <span className="text-[11px] font-semibold text-danger-content">Remove?</span>
-      <button type="button" disabled={controller.busy !== null} onClick={() => void controller.removeFromPlaylist(membership.playlistId)} className="bg-danger-action px-2 py-1 text-[11px] font-bold text-danger-action-content hover:bg-danger-action-hover">Confirm</button>
+      <button type="button" disabled={controller.busy !== null} onClick={() => void controller.removeFromPlaylist(membership)} className="bg-danger-action px-2 py-1 text-[11px] font-bold text-danger-action-content hover:bg-danger-action-hover">Confirm</button>
       <button type="button" onClick={() => controller.setConfirmingRemoval(null)} className="px-2 py-1 text-[11px] font-bold text-content-muted">Cancel</button>
     </div>
   );

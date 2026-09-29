@@ -37,4 +37,5 @@ public sealed class MusicSyncJob
     public ConnectedServiceAccount? ConnectedServiceAccount { get; set; }
 }
 
-public sealed record MusicSyncJobPlaylist(string Id, string Name, int SongCount);
+public sealed record MusicSyncJobPlaylist(
+    string Id, string Name, int SongCount, Guid? CantaroPlaylistId = null, string? ExternalAccountId = null);

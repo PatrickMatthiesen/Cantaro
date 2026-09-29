@@ -20,6 +20,73 @@ public sealed class SpotifyPlaylistSyncServiceTests
     private static readonly DateTimeOffset Now = new(2026, 7, 26, 13, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public async Task SyncPlaylistAsync_RejectsOutboundMappingBeforeProviderRead()
+    {
+        var connectionString = $"Data Source=spotify-outbound-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        const int userId = 74;
+        dbContext.Users.Add(new User
+        {
+            Id = userId,
+            UserName = "spotify-outbound-test",
+            CreatedAt = Now.UtcDateTime,
+            UpdatedAt = Now.UtcDateTime
+        });
+        var account = new ConnectedServiceAccount
+        {
+            UserId = userId,
+            Service = SpotifyService.ServiceName,
+            ExternalAccountId = "spotify-account",
+            ConnectionState = "connected",
+            CreatedAt = Now.UtcDateTime,
+            UpdatedAt = Now.UtcDateTime
+        };
+        dbContext.ConnectedServiceAccounts.Add(account);
+        var playlist = new Playlist
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Name = "Cantaro source",
+            CreatedAt = Now,
+            UpdatedAt = Now
+        };
+        dbContext.Playlists.Add(playlist);
+        await dbContext.SaveChangesAsync();
+        dbContext.ServicePlaylistMappings.Add(new ServicePlaylistMapping
+        {
+            Id = Guid.NewGuid(),
+            PlaylistId = playlist.Id,
+            ConnectedServiceAccountId = account.Id,
+            Service = SpotifyService.ServiceName,
+            ServicePlaylistId = "playlist1",
+            SyncMode = "from_cantaro"
+        });
+        await dbContext.SaveChangesAsync();
+
+        var service = new SpotifyPlaylistSyncService(
+            dbContext,
+            null!,
+            null!,
+            null!,
+            TimeProvider.System,
+            NullLogger<SpotifyPlaylistSyncService>.Instance);
+        var error = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            service.SyncPlaylistAsync(
+                new PlatformAccountContext(userId, account.Id),
+                "playlist1",
+                CancellationToken.None));
+
+        Assert.Equal("outbound_mapping", error.Code);
+        Assert.Equal("Cantaro source", (await dbContext.Playlists.SingleAsync()).Name);
+    }
+
+    [Fact]
     public async Task SyncPlaylistAsync_FetchesBeforeTransactionAndRefreshesProviderObservation()
     {
         var connectionString = $"Data Source=spotify-sync-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";

@@ -17,6 +17,9 @@ public sealed class YouTubePlatformService : IPlatformService
 
     public string PlatformId => "youtube";
 
+    public string ResolveRedirectUri(CallbackUrlCandidates callbackUrls)
+        => YouTubeService.ResolveRedirectUri(callbackUrls);
+
     public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId)
     {
         return _youtubeService.GetConnectedAccountAsync(userId);

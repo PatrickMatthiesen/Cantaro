@@ -16,6 +16,7 @@ public class YouTubePlaylistSyncService
     private readonly TrackMatchQueue _trackMatchQueue;
     private readonly PlaylistCanonicalReconciliationService _playlistReconciler;
     private readonly ILogger<YouTubePlaylistSyncService> _logger;
+    private readonly PlaylistSyncCoordinator? _coordinator;
 
     private const string ServiceName = "youtube";
 
@@ -24,13 +25,15 @@ public class YouTubePlaylistSyncService
         YouTubeService youtubeService,
         TrackMatchQueue trackMatchQueue,
         PlaylistCanonicalReconciliationService playlistReconciler,
-        ILogger<YouTubePlaylistSyncService> logger)
+        ILogger<YouTubePlaylistSyncService> logger,
+        PlaylistSyncCoordinator? coordinator = null)
     {
         _dbContext = dbContext;
         _youtubeService = youtubeService;
         _trackMatchQueue = trackMatchQueue;
         _playlistReconciler = playlistReconciler;
         _logger = logger;
+        _coordinator = coordinator;
     }
 
     /// <summary>
@@ -58,6 +61,17 @@ public class YouTubePlaylistSyncService
         Func<PlatformSyncProgress, CancellationToken, Task>? reportProgressAsync,
         CancellationToken cancellationToken)
     {
+        if (_coordinator is not null)
+            return await _coordinator.ImportAsync(account, ServiceName, youtubePlaylistId, cancellationToken);
+        if (await _dbContext.ServicePlaylistMappings.AnyAsync(
+                mapping => mapping.ConnectedServiceAccountId == account.ConnectedServiceAccountId
+                    && mapping.Service == ServiceName
+                    && mapping.ServicePlaylistId == youtubePlaylistId
+                    && mapping.SyncMode == "from_cantaro",
+                cancellationToken))
+            throw new PlatformApiException("outbound_mapping",
+                "This playlist is an outbound destination. Sync it from the Cantaro playlist.", 409);
+
         _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId} account {AccountId}", youtubePlaylistId, account.UserId, account.ConnectedServiceAccountId);
 
         // Use execution strategy to handle retries with transactions
@@ -86,6 +100,10 @@ public class YouTubePlaylistSyncService
                             && m.Service == ServiceName
                             && m.ServicePlaylistId == youtubePlaylistId,
                         cancellationToken);
+
+                if (existingMapping?.SyncMode == "from_cantaro")
+                    throw new PlatformApiException("outbound_mapping",
+                        "This playlist is an outbound destination. Sync it from the Cantaro playlist.", 409);
 
                 Playlist playlist;
 
@@ -116,6 +134,7 @@ public class YouTubePlaylistSyncService
                         UserId = account.UserId,
                         Name = youtubePlaylist.Title,
                         Description = youtubePlaylist.Description,
+                        ImportedFromService = ServiceName,
                         CreatedAt = DateTimeOffset.UtcNow,
                         UpdatedAt = DateTimeOffset.UtcNow
                     };
@@ -193,6 +212,9 @@ public class YouTubePlaylistSyncService
                         Id = Guid.NewGuid(),
                         PlaylistId = playlist.Id,
                         ConnectedServiceAccountId = account.ConnectedServiceAccountId,
+                        UserId = account.UserId,
+                        ExternalAccountId = await _dbContext.ConnectedServiceAccounts.Where(item => item.Id == account.ConnectedServiceAccountId)
+                            .Select(item => item.ExternalAccountId).SingleAsync(cancellationToken),
                         Service = ServiceName,
                         ServicePlaylistId = youtubePlaylistId,
                         SyncMode = "import_only",
@@ -332,7 +354,7 @@ public class YouTubePlaylistSyncService
         observation.Title = parsedMetadata.DisplayTitle;
         observation.Artist = effectiveArtist;
         observation.ThumbnailUrl = video.ThumbnailUrl;
-        observation.RawMetadata = rawMetadata;
+        observation.RawMetadata = PreserveExistingDescription(rawMetadata, observation.RawMetadata);
         observation.NormalizedTitle = TrackTextNormalizer.Normalize(parsedMetadata.DisplayTitle);
         observation.NormalizedArtist = TrackTextNormalizer.Normalize(effectiveArtist);
         observation.DurationSeconds = video.DurationSeconds;
@@ -344,6 +366,24 @@ public class YouTubePlaylistSyncService
             observation.MatchStatus = TrackMatchingStatuses.Pending;
             observation.ResolutionNotes = null;
             observation.AcceptedCandidateId = null;
+        }
+    }
+
+    internal static string PreserveExistingDescription(string currentRawMetadata, string? previousRawMetadata)
+    {
+        try
+        {
+            var current = JsonSerializer.Deserialize<TrackObservationMetadata>(currentRawMetadata);
+            if (current is null || !string.IsNullOrWhiteSpace(current.Description)
+                || string.IsNullOrWhiteSpace(previousRawMetadata))
+                return currentRawMetadata;
+
+            current.Description = JsonSerializer.Deserialize<TrackObservationMetadata>(previousRawMetadata)?.Description;
+            return JsonSerializer.Serialize(current);
+        }
+        catch (JsonException)
+        {
+            return currentRawMetadata;
         }
     }
 

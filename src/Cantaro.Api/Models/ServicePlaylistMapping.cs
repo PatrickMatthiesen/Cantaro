@@ -16,6 +16,25 @@ public class ServicePlaylistMapping
     /// Connected account that supplied this provider-derived mapping.
     /// </summary>
     public int ConnectedServiceAccountId { get; set; }
+
+    public int UserId { get; set; }
+    public string ExternalAccountId { get; set; } = "";
+    public string State { get; set; } = "active";
+    public string? BaselineJson { get; set; }
+    public string? PendingWriteJson { get; set; }
+    public string? MatchingProgressJson { get; set; }
+    public int MatchingProcessedCount { get; set; }
+    public int MatchingTotalCount { get; set; }
+    public string? BaselineName { get; set; }
+    public string? PendingName { get; set; }
+    public string? RejectedName { get; set; }
+    public string? DesiredName { get; set; }
+    public int UnresolvedCount { get; set; }
+    public long CanonicalRevision { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public int AttemptCount { get; set; }
+    public string? LastError { get; set; }
+    public string? InitialMode { get; set; }
     
     /// <summary>
     /// Service name (e.g., "youtube", "spotify")

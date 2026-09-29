@@ -43,7 +43,7 @@ public sealed class SyncJobsControllerTests
             userManager,
             new PlatformRegistry([]),
             new MusicSyncThrottleService(),
-            services.GetRequiredService<IServiceScopeFactory>())
+            services.GetRequiredService<IServiceScopeFactory>(), new OutboundPlaylistSyncService(db, []))
         {
             ControllerContext = new ControllerContext
             {
@@ -85,7 +85,7 @@ public sealed class SyncJobsControllerTests
         var result = Assert.Single(SyncJobsController.ToResponse(job).Results);
 
         Assert.Equal("sync_failed", result.ErrorCode);
-        Assert.Equal("Playlist could not be imported. Check the server logs for details.", result.ErrorMessage);
+        Assert.Equal("Playlist could not be synced. Check the server logs for details.", result.ErrorMessage);
         Assert.DoesNotContain("Postgres", result.ErrorMessage, StringComparison.Ordinal);
     }
 

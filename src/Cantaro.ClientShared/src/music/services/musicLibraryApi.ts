@@ -4,6 +4,7 @@ export interface MusicLibrarySummary {
 }
 
 export interface MusicLibrarySongPlaylist {
+  entryId: string;
   playlistId: string;
   playlistName: string;
   position: number;
@@ -56,6 +57,7 @@ export interface MusicLibraryPlaylist {
   name: string;
   description?: string;
   entryCount: number;
+  allowDuplicateTracks: boolean;
   services: MusicLibraryPlaylistService[];
 }
 
@@ -83,8 +85,11 @@ function canonicalTrackId(songId: string): string {
   return songId.startsWith('track:') ? songId.slice(6) : songId;
 }
 
-function youtubeVideoQuery(youtubeVideoId?: string): string {
-  return youtubeVideoId ? `?youtubeVideoId=${encodeURIComponent(youtubeVideoId)}` : '';
+function playlistMutationQuery(youtubeVideoId?: string, entryId?: string): string {
+  const query = new URLSearchParams();
+  if (youtubeVideoId) query.set('youtubeVideoId', youtubeVideoId);
+  if (entryId) query.set('entryId', entryId);
+  return query.size > 0 ? `?${query.toString()}` : '';
 }
 
 function playlistMutationError(method: 'POST' | 'DELETE', body: { error?: string } | null): Error {
@@ -132,13 +137,13 @@ class MusicLibraryApiClient {
     await this.mutatePlaylistSong('POST', songId, playlistId, youtubeVideoId);
   }
 
-  async removeSongFromPlaylist(songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {
-    await this.mutatePlaylistSong('DELETE', songId, playlistId, youtubeVideoId);
+  async removeSongFromPlaylist(songId: string, playlistId: string, youtubeVideoId?: string, entryId?: string): Promise<void> {
+    await this.mutatePlaylistSong('DELETE', songId, playlistId, youtubeVideoId, entryId);
   }
 
-  private async mutatePlaylistSong(method: 'POST' | 'DELETE', songId: string, playlistId: string, youtubeVideoId?: string): Promise<void> {
+  private async mutatePlaylistSong(method: 'POST' | 'DELETE', songId: string, playlistId: string, youtubeVideoId?: string, entryId?: string): Promise<void> {
     const trackId = canonicalTrackId(songId);
-    const query = youtubeVideoQuery(youtubeVideoId);
+    const query = playlistMutationQuery(youtubeVideoId, entryId);
     const response = await fetch(`/api/music/library/playlists/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(trackId)}${query}`, {
       method,
       credentials: 'include',

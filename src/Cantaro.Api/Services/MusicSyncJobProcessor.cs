@@ -10,7 +10,8 @@ public sealed class MusicSyncJobProcessor(
     ApplicationDbContext dbContext,
     IPlatformRegistry platformRegistry,
     MusicSyncThrottleService throttleService,
-    ILogger<MusicSyncJobProcessor> logger)
+    ILogger<MusicSyncJobProcessor> logger,
+    OutboundPlaylistSyncService outboundSync)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly IPlatformRegistry _platformRegistry = platformRegistry;
@@ -65,43 +66,65 @@ public sealed class MusicSyncJobProcessor(
                 BatchSyncResult result;
                 try
                 {
-                    var cantaroPlaylistId = await platform.SyncPlaylistAsync(
-                        account,
-                        playlist.Id,
-                        async (progress, progressCancellationToken) =>
-                        {
-                            var boundedCount = Math.Clamp(progress.ProcessedSongCount, 0, playlist.SongCount);
-                            if (boundedCount == lastPersistedSongCount
-                                && string.Equals(
-                                    progress.CurrentSongName,
-                                    lastPersistedSongName,
-                                    StringComparison.Ordinal))
+                    Guid cantaroPlaylistId;
+                    var servicePlaylistId = playlist.Id;
+                    if (playlist.CantaroPlaylistId is { } sourcePlaylistId)
+                    {
+                        cantaroPlaylistId = await outboundSync.SyncAsync(
+                            account with { ExpectedExternalAccountId = playlist.ExternalAccountId },
+                            job.Service,
+                            sourcePlaylistId,
+                            string.IsNullOrWhiteSpace(playlist.Id) ? null : playlist.Id,
+                            cancellationToken);
+                        servicePlaylistId = await _dbContext.ServicePlaylistMappings.AsNoTracking()
+                            .Where(mapping => mapping.PlaylistId == sourcePlaylistId
+                                && mapping.ConnectedServiceAccountId == connectedServiceAccountId
+                                && mapping.Service == job.Service && mapping.State == "active"
+                                && mapping.ExternalAccountId == playlist.ExternalAccountId
+                                && mapping.SyncMode != "import_only")
+                            .Select(mapping => mapping.ServicePlaylistId)
+                            .SingleAsync(cancellationToken);
+                    }
+                    else
+                    {
+                        cantaroPlaylistId = await platform.SyncPlaylistAsync(
+                            account,
+                            playlist.Id,
+                            async (progress, progressCancellationToken) =>
                             {
-                                return;
-                            }
+                                var boundedCount = Math.Clamp(progress.ProcessedSongCount, 0, playlist.SongCount);
+                                if (boundedCount == lastPersistedSongCount
+                                    && string.Equals(
+                                        progress.CurrentSongName,
+                                        lastPersistedSongName,
+                                        StringComparison.Ordinal))
+                                {
+                                    return;
+                                }
 
-                            var now = DateTimeOffset.UtcNow;
-                            var isFinalUpdate = boundedCount == playlist.SongCount
-                                && progress.CurrentSongName == null;
-                            if (!isFinalUpdate && now - lastProgressWriteAt < TimeSpan.FromSeconds(1))
-                            {
-                                return;
-                            }
+                                var now = DateTimeOffset.UtcNow;
+                                var isFinalUpdate = boundedCount == playlist.SongCount
+                                    && progress.CurrentSongName == null;
+                                if (!isFinalUpdate && now - lastProgressWriteAt < TimeSpan.FromSeconds(1))
+                                {
+                                    return;
+                                }
 
-                            job.ProcessedSongCount = Math.Min(
-                                job.SongCount,
-                                processedBeforePlaylist + boundedCount);
-                            job.CurrentSongName = progress.CurrentSongName;
-                            job.UpdatedAt = now;
-                            lastPersistedSongCount = boundedCount;
-                            lastPersistedSongName = progress.CurrentSongName;
-                            lastProgressWriteAt = now;
-                            await _dbContext.SaveChangesAsync(progressCancellationToken);
-                        },
-                        cancellationToken);
+                                job.ProcessedSongCount = Math.Min(
+                                    job.SongCount,
+                                    processedBeforePlaylist + boundedCount);
+                                job.CurrentSongName = progress.CurrentSongName;
+                                job.UpdatedAt = now;
+                                lastPersistedSongCount = boundedCount;
+                                lastPersistedSongName = progress.CurrentSongName;
+                                lastProgressWriteAt = now;
+                                await _dbContext.SaveChangesAsync(progressCancellationToken);
+                            },
+                            cancellationToken);
+                    }
                     result = new BatchSyncResult
                     {
-                        ServicePlaylistId = playlist.Id,
+                        ServicePlaylistId = servicePlaylistId,
                         PlaylistName = playlist.Name,
                         Success = true,
                         CantaroPlaylistId = cantaroPlaylistId.ToString()
@@ -120,9 +143,12 @@ public sealed class MusicSyncJobProcessor(
                         ServicePlaylistId = playlist.Id,
                         PlaylistName = playlist.Name,
                         Success = false,
-                        Error = failure.Message,
+                        Error = playlist.CantaroPlaylistId.HasValue && failure.Code == "sync_failed"
+                            ? "Playlist could not be exported. Check the server logs for details."
+                            : failure.Message,
                         ErrorCode = failure.Code,
-                        Retryable = failure.Retryable
+                        Retryable = failure.Retryable,
+                        CantaroPlaylistId = playlist.CantaroPlaylistId?.ToString()
                     };
                 }
 

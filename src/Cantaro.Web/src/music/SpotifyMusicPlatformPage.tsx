@@ -10,6 +10,8 @@ import {
 } from '@cantaro/client-shared/music';
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicPageShell } from './MusicPageShell';
+import { MusicPlatformHeader, MusicPlatformPlaylistGrid } from './MusicPlatformBrowser';
+import { MusicPlatformDisconnectReview } from './MusicPlatformDisconnectReview';
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -96,10 +98,7 @@ function useSpotifyPlaylistBrowser() {
   };
 }
 
-function useSpotifyConnection(
-  loadPlaylists: (forceRefresh?: boolean) => Promise<void>,
-  clearPlaylists: () => void,
-) {
+function useSpotifyConnection(loadPlaylists: (forceRefresh?: boolean) => Promise<void>) {
   const [status, setStatus] = useState<PlatformAccountStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,23 +132,12 @@ function useSpotifyConnection(
     route: '/music/platforms/spotify',
     trigger: needsReconnect ? 'spotify-page-reconnect' : 'spotify-page-connect',
   }), [needsReconnect]);
-  const disconnect = useCallback(async () => {
-    try {
-      await platformManager.disconnect('spotify');
-      setStatus({ platformId: 'spotify', isConnected: false, connectionState: 'disconnected' });
-      clearPlaylists();
-      setError(null);
-    } catch (disconnectError) {
-      setError(errorMessage(disconnectError, 'Could not disconnect Spotify. Try again.'));
-    }
-  }, [clearPlaylists]);
-
-  return { status, isLoading, error, needsReconnect, connect, disconnect };
+  return { status, isLoading, error, needsReconnect, connect };
 }
 
 function useSpotifyBrowser() {
   const playlists = useSpotifyPlaylistBrowser();
-  const connection = useSpotifyConnection(playlists.loadPlaylists, playlists.clearPlaylists);
+  const connection = useSpotifyConnection(playlists.loadPlaylists);
   return {
     ...playlists,
     ...connection,
@@ -172,146 +160,6 @@ function SpotifyAttribution({ compact = false }: { compact?: boolean }) {
       <MusicPlatformIcon platformId="spotify" className="h-8 w-8 text-[#1ed760]" />
       Spotify
     </a>
-  );
-}
-
-function SpotifyHeader({
-  accountName,
-  isConnected,
-  needsReconnect,
-  playlistCount,
-  onConnect,
-  onDisconnect,
-  onRefresh,
-}: {
-  accountName?: string;
-  isConnected: boolean;
-  needsReconnect: boolean;
-  playlistCount: number;
-  onConnect: () => void;
-  onDisconnect: () => void;
-  onRefresh: () => void;
-}) {
-  const description = getSpotifyHeaderDescription({ accountName, isConnected, needsReconnect, playlistCount });
-
-  return (
-    <section className="border-y border-border-subtle bg-surface-subtle p-6">
-      <div className="flex flex-wrap items-end justify-between gap-5">
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-3">
-            <MusicPlatformIcon platformId="spotify" className="h-12 w-12 shrink-0 text-[#1ed760]" title="Spotify" />
-            <h1 className="text-4xl leading-tight font-black text-content sm:text-5xl">Spotify</h1>
-          </div>
-          <p className="mt-3 text-sm leading-6 font-semibold text-content-muted">{description}</p>
-          <p className="mt-2 text-xs font-semibold text-content-muted">Spotify content is shown with links back to Spotify.</p>
-        </div>
-        <SpotifyHeaderActions
-          isConnected={isConnected}
-          needsReconnect={needsReconnect}
-          onConnect={onConnect}
-          onDisconnect={onDisconnect}
-          onRefresh={onRefresh}
-        />
-      </div>
-    </section>
-  );
-}
-
-function getSpotifyHeaderDescription({
-  accountName,
-  isConnected,
-  needsReconnect,
-  playlistCount,
-}: {
-  accountName?: string;
-  isConnected: boolean;
-  needsReconnect: boolean;
-  playlistCount: number;
-}) {
-  if (needsReconnect) {
-    return `Reconnect ${accountName ?? 'your Spotify account'} before Cantaro can refresh its playlists.`;
-  }
-  if (isConnected) {
-    return `${playlistCount.toLocaleString()} playlists from ${accountName ?? 'your Spotify account'} are ready to browse.`;
-  }
-  return 'Connect Spotify to browse playlists and choose what belongs in your Cantaro archive.';
-}
-
-function SpotifyHeaderActions({
-  isConnected,
-  needsReconnect,
-  onConnect,
-  onDisconnect,
-  onRefresh,
-}: {
-  isConnected: boolean;
-  needsReconnect: boolean;
-  onConnect: () => void;
-  onDisconnect: () => void;
-  onRefresh: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {isConnected && !needsReconnect ? (
-        <button type="button" className="min-h-11 border border-border-strong bg-surface px-5 text-sm font-black text-content transition hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus" onClick={onRefresh}>
-          Refresh
-        </button>
-      ) : (
-        <button type="button" className="min-h-11 bg-personal-accent px-5 text-sm font-black text-personal-accent-content transition hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-focus" onClick={onConnect}>
-          {needsReconnect ? 'Reconnect Spotify' : 'Connect Spotify'}
-        </button>
-      )}
-      {isConnected ? (
-        <button type="button" className="min-h-11 border border-danger-border bg-surface px-5 text-sm font-black text-danger-content transition hover:bg-danger-surface focus-visible:outline-2 focus-visible:outline-focus" onClick={onDisconnect}>
-          Disconnect
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function SpotifyPlaylistCard({
-  playlist,
-  onSelect,
-}: {
-  playlist: PlatformPlaylist;
-  onSelect: (playlist: PlatformPlaylist) => void;
-}) {
-  return (
-    <article className="overflow-hidden bg-surface-subtle">
-      <button
-        type="button"
-        onClick={() => onSelect(playlist)}
-        className="group block w-full text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
-      >
-        {playlist.thumbnailUrl ? (
-          <img src={playlist.thumbnailUrl} alt="" className="aspect-square w-full bg-surface object-contain" />
-        ) : (
-          <span className="flex aspect-square w-full items-center justify-center bg-surface-subtle text-content-muted">
-            <MusicPlatformIcon platformId="spotify" className="h-10 w-10" />
-          </span>
-        )}
-        <span className="block p-4">
-          <span className="block truncate font-black text-content">{playlist.title}</span>
-          <span className="mt-1 block text-xs font-semibold text-content-muted">
-            {playlist.itemCount.toLocaleString()} tracks{playlist.ownerName ? ` · ${playlist.ownerName}` : ''}
-          </span>
-        </span>
-      </button>
-      <div className="flex items-center justify-between gap-3 border-t border-border-subtle px-4 py-3">
-        <SpotifyAttribution compact />
-        {playlist.externalUrl ? (
-          <a
-            href={playlist.externalUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex min-h-9 items-center bg-personal-accent px-3 text-xs font-black text-personal-accent-content transition-colors hover:bg-personal-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-          >
-            Open playlist
-          </a>
-        ) : null}
-      </div>
-    </article>
   );
 }
 
@@ -389,31 +237,6 @@ function SpotifyPlaylistDetail({
   );
 }
 
-function SpotifyPlaylistGrid({
-  playlists,
-  onSelect,
-}: {
-  playlists: PlatformPlaylist[];
-  onSelect: (playlist: PlatformPlaylist) => void;
-}) {
-  if (playlists.length === 0) {
-    return (
-      <section className="border-y border-border-subtle py-6">
-        <h2 className="text-xl font-black text-content">No playlists available</h2>
-        <p className="mt-2 text-sm font-semibold text-content-muted">Spotify did not return any playlists for this account.</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-      {playlists.map((playlist) => (
-        <SpotifyPlaylistCard key={playlist.id} playlist={playlist} onSelect={onSelect} />
-      ))}
-    </section>
-  );
-}
-
 function SpotifyPageBody({
   browser,
   isConnected,
@@ -438,8 +261,8 @@ function SpotifyPageBody({
     );
   }
 
-  if (isConnected && !browser.needsReconnect) {
-    return <SpotifyPlaylistGrid playlists={browser.playlists} onSelect={onSelectPlaylist} />;
+  if (isConnected && !browser.needsReconnect && !browser.error) {
+    return <MusicPlatformPlaylistGrid platformId="spotify" playlists={browser.playlists} onSelect={onSelectPlaylist} />;
   }
 
   return null;
@@ -462,6 +285,7 @@ function requestedSpotifyPlaylist({
 
 export function SpotifyMusicPlatformPage({ playlistId = null }: { playlistId?: string | null }) {
   const navigate = useNavigate();
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const browser = useSpotifyBrowser();
   const isConnected = Boolean(browser.status?.isConnected);
   const {
@@ -494,17 +318,20 @@ export function SpotifyMusicPlatformPage({ playlistId = null }: { playlistId?: s
   return (
     <MusicPageShell>
       <div className="space-y-6">
-        {!browser.selectedPlaylist ? (
-          <SpotifyHeader
+        {(!browser.selectedPlaylist || browser.needsReconnect) ? (
+          <MusicPlatformHeader
+            platformId="spotify"
+            isLoading={isLoading}
             accountName={browser.status?.displayName}
             isConnected={isConnected}
             needsReconnect={browser.needsReconnect}
-            playlistCount={browser.playlists.length}
             onConnect={() => void browser.connect()}
-            onDisconnect={() => void browser.disconnect()}
+            onDisconnect={() => setDisconnectOpen(true)}
             onRefresh={() => void browser.refresh()}
           />
         ) : null}
+
+        <MusicPlatformDisconnectReview service="spotify" open={disconnectOpen} onClose={() => setDisconnectOpen(false)} onDisconnected={() => void navigate({ to: '/music/platforms' })} />
 
         {browser.error ? (
           <section className="border-y border-danger-border bg-danger-surface p-4 text-sm font-semibold text-danger-content" role="alert">

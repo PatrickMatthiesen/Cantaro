@@ -5,12 +5,77 @@ using Cantaro.Api.Configuration;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Spotify;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
 
 public sealed class SpotifyApiClientTests
 {
+    [Fact]
+    public async Task SyncReadSnapshot_PreservesUnavailablePositionsAndMarksIncomplete()
+    {
+        const string details = """{"id":"playlist1","name":"Road songs","snapshot_id":"rev1","owner":{"id":"owner1"}}""";
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.OK, details),
+            Json(HttpStatusCode.OK, """
+                {"items":[
+                  {"is_local":false,"item":{"type":"track","id":"track1","name":"Song one","duration_ms":180000,"artists":[{"name":"Artist"}]}},
+                  {"is_local":false,"item":null},
+                  {"is_local":false,"item":{"type":"track","id":"track1","name":"Song one","duration_ms":180000,"artists":[{"name":"Artist"}]}}
+                ],"total":3,"next":null}
+                """),
+            Json(HttpStatusCode.OK, details)
+        ]);
+        using var client = CreateClient(handler);
+
+        var result = await client.Api.GetPlaylistSyncReadSnapshotAsync(
+            "access-token", "playlist1", CancellationToken.None);
+
+        Assert.False(result.IsComplete);
+        Assert.Equal("rev1", result.SnapshotId);
+        Assert.Equal([0, 1, 2], result.Items.Select(item => item.Position));
+        Assert.Equal("track1", result.Items[0].Track?.Id);
+        Assert.Null(result.Items[1].Track);
+        Assert.Equal("track1", result.Items[2].Track?.Id);
+    }
+
+    [Fact]
+    public async Task SyncReadSnapshot_ChangingRevisionIsIncomplete()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.OK, """{"id":"playlist1","name":"Road songs","snapshot_id":"rev1"}"""),
+            Json(HttpStatusCode.OK, """{"items":[],"total":0,"next":null}"""),
+            Json(HttpStatusCode.OK, """{"id":"playlist1","name":"Road songs","snapshot_id":"rev2"}""")
+        ]);
+        using var client = CreateClient(handler);
+
+        var result = await client.Api.GetPlaylistSyncReadSnapshotAsync(
+            "access-token", "playlist1", CancellationToken.None);
+
+        Assert.False(result.IsComplete);
+    }
+
+    [Fact]
+    public async Task RenamePlaylistAsync_UsesOneAuthorizedMutationWithoutImplicitRetry()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.ServiceUnavailable, """{"error":{"status":503,"message":"Unavailable"}}"""),
+            Json(HttpStatusCode.OK, "{}")
+        ]);
+        using var client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.RenamePlaylistAsync("access-token", "playlist1", "New name", CancellationToken.None));
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Put, request.Method);
+        Assert.Equal("/v1/playlists/playlist1", request.PathAndQuery);
+        Assert.Contains("New name", request.Body);
+    }
     [Fact]
     public async Task GetClientCredentialsTokenAsync_UsesApplicationCredentialsGrant()
     {
@@ -93,6 +158,33 @@ public sealed class SpotifyApiClientTests
     }
 
     [Fact]
+    public async Task GetPlaylistsAsync_AcceptsNullImagesForPlaylistWithoutArtwork()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.OK, """
+                {
+                  "items": [{
+                    "id": "empty-playlist",
+                    "name": "New playlist",
+                    "images": null,
+                    "items": { "total": 0 }
+                  }],
+                  "next": null
+                }
+                """)
+        ]);
+        using var client = CreateClient(handler);
+
+        var playlists = await client.Api.GetPlaylistsAsync("access-token", CancellationToken.None);
+
+        var playlist = Assert.Single(playlists);
+        Assert.Equal("empty-playlist", playlist.Id);
+        Assert.Null(playlist.ImageUrl);
+        Assert.Equal(0, playlist.ItemCount);
+    }
+
+    [Fact]
     public async Task GetPlaylistItemsAsync_UsesCurrentItemsPathAndPaginatesOnlySupportedTracks()
     {
         var handler = new StubHandler(
@@ -158,34 +250,58 @@ public sealed class SpotifyApiClientTests
     }
 
     [Fact]
-    public async Task GetProfileAsync_RetriesRateLimitsWithRetryAfterAndExponentialBackoffWithoutSleeping()
+    public async Task GetProfileAsync_RateLimitIsSharedAndBlocksReadsAndWritesUntilExpiry()
     {
-        var handler = new StubHandler(
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero));
+        var cooldown = new SpotifyCooldown(time);
+        var firstHandler = new StubHandler(
         [
-            Json(HttpStatusCode.TooManyRequests, """{ "error": { "status": 429, "message": "Slow down" } }""", retryAfterSeconds: 5),
-            Json(HttpStatusCode.TooManyRequests, """{ "error": { "status": 429, "message": "Slow down" } }"""),
-            Json(HttpStatusCode.OK, """{ "account_id": "account-1", "id": "user-1", "display_name": "Test user" }""")
+            Json(HttpStatusCode.TooManyRequests, """{ "error": { "status": 429, "message": "Slow down" } }""", retryAfterSeconds: 5)
         ]);
         var delay = new RecordingDelay();
-        using var client = CreateClient(handler, delay);
+        using var firstClient = CreateClient(firstHandler, delay, cooldown);
 
-        var profile = await client.Api.GetProfileAsync("access-token", CancellationToken.None);
+        var first = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            firstClient.Api.GetProfileAsync("access-token", CancellationToken.None));
+        Assert.Equal("spotify_rate_limited", first.Code);
+        Assert.Equal(429, first.StatusCode);
+        Assert.Equal("Slow down", first.Message);
+        Assert.Equal(TimeSpan.FromSeconds(5), first.RetryAfter);
+        Assert.Single(firstHandler.Requests);
+        Assert.Empty(delay.Delays);
+
+        var secondHandler = new StubHandler(
+        [
+            Json(HttpStatusCode.OK, """{ "account_id": "account-1", "id": "user-1", "display_name": "Test user" }"""),
+            Json(HttpStatusCode.OK, "{}")
+        ]);
+        using var secondClient = CreateClient(secondHandler, cooldown: cooldown);
+        time.Advance(TimeSpan.FromSeconds(2));
+        var blockedRead = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            secondClient.Api.GetProfileAsync("access-token", CancellationToken.None));
+        var blockedWrite = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            secondClient.Api.RenamePlaylistAsync("access-token", "playlist1", "New name", CancellationToken.None));
+        Assert.Equal(TimeSpan.FromSeconds(3), blockedRead.RetryAfter);
+        Assert.Equal(TimeSpan.FromSeconds(3), blockedWrite.RetryAfter);
+        Assert.Empty(secondHandler.Requests);
+
+        time.Advance(TimeSpan.FromSeconds(3));
+        var profile = await secondClient.Api.GetProfileAsync("access-token", CancellationToken.None);
+        await secondClient.Api.RenamePlaylistAsync("access-token", "playlist1", "New name", CancellationToken.None);
 
         Assert.Equal("account-1", profile.AccountId);
-        Assert.Equal(3, handler.Requests.Count);
-        Assert.Equal([TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2)], delay.Delays);
+        Assert.Equal(2, secondHandler.Requests.Count);
     }
 
     [Fact]
-    public async Task GetProfileAsync_SurfacesQuotaExceededAfterBoundedRetries()
+    public async Task GetProfileAsync_QuotaExceededPreservesReasonAndUsesQuotaFallback()
     {
         var handler = new StubHandler(
-        Enumerable.Range(0, 4)
-            .Select(_ => Json(
+        [
+            Json(
                 HttpStatusCode.TooManyRequests,
-                """{ "error": { "status": 429, "message": "Too many requests", "reason": "QUOTA_EXCEEDED" } }""",
-                retryAfterSeconds: 7))
-            .ToArray());
+                """{ "error": { "status": 429, "message": "Too many requests", "reason": "QUOTA_EXCEEDED" } }""")
+        ]);
         var delay = new RecordingDelay();
         using var client = CreateClient(handler, delay);
 
@@ -195,9 +311,129 @@ public sealed class SpotifyApiClientTests
         Assert.Equal("spotify_quota_exceeded", exception.Code);
         Assert.Equal(429, exception.StatusCode);
         Assert.Equal("Too many requests", exception.Message);
-        Assert.Equal(TimeSpan.FromSeconds(8), exception.RetryAfter);
-        Assert.Equal(4, handler.Requests.Count);
-        Assert.Equal(3, delay.Delays.Count);
+        Assert.Equal(TimeSpan.FromMinutes(5), exception.RetryAfter);
+        Assert.Single(handler.Requests);
+        Assert.Empty(delay.Delays);
+    }
+
+    [Fact]
+    public async Task GetProfileAsync_HonorsHttpDateRetryAfter()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero));
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.TooManyRequests, """{ "error": { "status": 429 } }""",
+                retryAfterDate: time.GetUtcNow().AddMinutes(12))
+        ]);
+        using var client = CreateClient(handler, cooldown: new SpotifyCooldown(time));
+
+        var exception = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.GetProfileAsync("access-token", CancellationToken.None));
+
+        Assert.Equal(TimeSpan.FromMinutes(12), exception.RetryAfter);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GetProfileAsync_PreservesThreeHourQuotaWaitAndLogsEvidenceWithoutCredentials()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero));
+        var cooldown = new SpotifyCooldown(time);
+        var handler = new StubHandler(
+        [Json(HttpStatusCode.TooManyRequests,
+            """{"error":{"status":429,"reason":"QUOTA_EXCEEDED"}}""", retryAfterSeconds: 10800)]);
+        var logger = new RecordingLogger();
+        using var client = CreateClient(handler, cooldown: cooldown, logger: logger);
+
+        var failure = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.GetProfileAsync("secret-access-token", CancellationToken.None));
+        time.Advance(TimeSpan.FromHours(1));
+        var blocked = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.SearchTracksAsync("secret-access-token", "private query", 10, CancellationToken.None));
+
+        Assert.Equal("spotify_quota_exceeded", failure.Code);
+        Assert.Equal(TimeSpan.FromHours(3), failure.RetryAfter);
+        Assert.Equal("spotify_quota_exceeded", blocked.Code);
+        Assert.Equal(TimeSpan.FromHours(2), blocked.RetryAfter);
+        Assert.Single(handler.Requests);
+        var log = Assert.Single(logger.Messages);
+        Assert.Contains("QUOTA_EXCEEDED", log);
+        Assert.Contains("RetryAfterHeader=10800", log);
+        Assert.Contains("RetryAt=", log);
+        Assert.DoesNotContain("secret-access-token", log);
+        Assert.DoesNotContain("private query", log);
+    }
+
+    [Fact]
+    public async Task GetProfileAsync_MalformedRateLimitBodyStillBlocksLaterRequests()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero));
+        var handler = new StubHandler([Json(HttpStatusCode.TooManyRequests, "not json", retryAfterSeconds: 7200)]);
+        using var client = CreateClient(handler, cooldown: new SpotifyCooldown(time));
+
+        var failure = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.GetProfileAsync("access-token", CancellationToken.None));
+        var blocked = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.GetProfileAsync("access-token", CancellationToken.None));
+
+        Assert.Equal(TimeSpan.FromHours(2), failure.RetryAfter);
+        Assert.Equal(TimeSpan.FromHours(2), blocked.RetryAfter);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task CreatePlaylistAsync_CancelledRateLimitBodyRemainsADefiniteRejection()
+    {
+        var response = Json(HttpStatusCode.TooManyRequests, "", retryAfterSeconds: 10800);
+        response.Content = new CancelledContent();
+        var handler = new StubHandler([response]);
+        using var client = CreateClient(handler);
+
+        var failure = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.CreateUnlistedPlaylistAsync("access-token", "Road songs", CancellationToken.None));
+        var blocked = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.GetProfileAsync("access-token", CancellationToken.None));
+
+        Assert.Equal("spotify_rate_limited", failure.Code);
+        Assert.Equal(429, failure.StatusCode);
+        Assert.Equal(TimeSpan.FromHours(3), failure.RetryAfter);
+        Assert.True(blocked.RetryAfter > TimeSpan.FromHours(2));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RenamePlaylistAsync_RateLimitBlocksFollowingRead()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero));
+        var cooldown = new SpotifyCooldown(time);
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.TooManyRequests, """{ "error": { "status": 429 } }""", retryAfterSeconds: 90)
+        ]);
+        using var client = CreateClient(handler, cooldown: cooldown);
+
+        var writeFailure = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.RenamePlaylistAsync("access-token", "playlist1", "New name", CancellationToken.None));
+        var readFailure = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            client.Api.GetProfileAsync("access-token", CancellationToken.None));
+
+        Assert.Equal("spotify_rate_limited", writeFailure.Code);
+        Assert.Equal(TimeSpan.FromSeconds(90), writeFailure.RetryAfter);
+        Assert.Equal(TimeSpan.FromSeconds(90), readFailure.RetryAfter);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public void SpotifyCooldown_KeepsTheLatestRetryTime()
+    {
+        var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 26, 10, 0, 0, TimeSpan.Zero));
+        var cooldown = new SpotifyCooldown(time);
+
+        Assert.Equal(TimeSpan.FromMinutes(10), cooldown.Record(new RetryConditionHeaderValue(TimeSpan.FromMinutes(10))));
+        time.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(TimeSpan.FromMinutes(9), cooldown.Record(new RetryConditionHeaderValue(TimeSpan.FromSeconds(3))));
+        Assert.Equal(TimeSpan.FromMinutes(14), cooldown.Record(new RetryConditionHeaderValue(time.GetUtcNow().AddMinutes(14))));
+        Assert.Equal(time.GetUtcNow().AddMinutes(14), cooldown.NotBefore);
     }
 
     [Fact]
@@ -280,6 +516,24 @@ public sealed class SpotifyApiClientTests
     }
 
     [Fact]
+    public async Task RefreshTokenAsync_HonorsHttpDateRetryHeader()
+    {
+        var handler = new StubHandler(
+        [
+            Json(HttpStatusCode.TooManyRequests, """{"error":"rate_limited"}""",
+                retryAfterDate: DateTimeOffset.UtcNow.AddHours(3)),
+            Json(HttpStatusCode.OK, """{"access_token":"refreshed-token","expires_in":3600}""")
+        ]);
+        var delay = new RecordingDelay();
+        using var client = CreateClient(handler, delay);
+
+        await client.Api.RefreshTokenAsync("refresh-token", CancellationToken.None);
+
+        Assert.InRange(Assert.Single(delay.Delays), TimeSpan.FromHours(3) - TimeSpan.FromMinutes(1), TimeSpan.FromHours(3));
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task RefreshTokenAsync_SurfacesActionableErrorAfterBoundedRateLimitRetries()
     {
         var handler = new StubHandler(
@@ -321,7 +575,11 @@ public sealed class SpotifyApiClientTests
         Assert.Single(handler.Requests);
     }
 
-    private static ClientScope CreateClient(StubHandler handler, ISpotifyRetryDelay? retryDelay = null)
+    private static ClientScope CreateClient(
+        StubHandler handler,
+        ISpotifyRetryDelay? retryDelay = null,
+        SpotifyCooldown? cooldown = null,
+        ILogger<SpotifyApiClient>? logger = null)
     {
         var httpClient = new HttpClient(handler)
         {
@@ -332,10 +590,15 @@ public sealed class SpotifyApiClientTests
             ClientId = "test-client",
             ClientSecret = "test-secret"
         });
-        return new ClientScope(new SpotifyApiClient(httpClient, options, retryDelay ?? new RecordingDelay()), httpClient);
+        return new ClientScope(new SpotifyApiClient(httpClient, options, retryDelay ?? new RecordingDelay(),
+            cooldown ?? new SpotifyCooldown(TimeProvider.System), logger), httpClient);
     }
 
-    private static HttpResponseMessage Json(HttpStatusCode statusCode, string body, int? retryAfterSeconds = null)
+    private static HttpResponseMessage Json(
+        HttpStatusCode statusCode,
+        string body,
+        int? retryAfterSeconds = null,
+        DateTimeOffset? retryAfterDate = null)
     {
         var response = new HttpResponseMessage(statusCode)
         {
@@ -344,6 +607,10 @@ public sealed class SpotifyApiClientTests
         if (retryAfterSeconds is { } seconds)
         {
             response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(seconds));
+        }
+        if (retryAfterDate is { } date)
+        {
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(date);
         }
 
         return response;
@@ -388,6 +655,27 @@ public sealed class SpotifyApiClientTests
         }
     }
 
+    private sealed class RecordingLogger : ILogger<SpotifyApiClient>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+    }
+
+    private sealed class CancelledContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => Task.FromCanceled(new CancellationToken(canceled: true));
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
     private sealed class CancellingDelay(CancellationTokenSource cancellation) : ISpotifyRetryDelay
     {
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
@@ -395,6 +683,15 @@ public sealed class SpotifyApiClientTests
             cancellation.Cancel();
             return Task.FromCanceled(cancellationToken);
         }
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan duration) => _now += duration;
     }
 
     private sealed class ClientScope(SpotifyApiClient api, HttpClient httpClient) : IDisposable
