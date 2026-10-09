@@ -356,6 +356,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseForwardedHeaders();
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseCors();
 app.UseHttpsRedirection();
 var hasWebRoot = Directory.Exists(app.Environment.WebRootPath);
