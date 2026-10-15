@@ -292,6 +292,43 @@ public sealed class CantaroSearchServiceTests
     }
 
     [Fact]
+    public async Task SearchAsync_PreservesFirstProviderDiscoveryOrderForCanonicalizedTiesBeforeApplyingLimit()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var owner = TestUserFactory.Create(826, "search-discovery-order@example.com");
+        db.Users.Add(owner);
+        db.ConnectedServiceAccounts.AddRange(
+            MakeConnectedAccount(owner.Id, "anilist"),
+            MakeConnectedAccount(owner.Id, "simkl"));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var anilist = new FakeMediaProvider("anilist", [
+            MakeCrossProviderResult("anilist", "first", "Zulu Work", "myanimelist", "anime:shared"),
+            MakeProviderResult("anilist", "second", "Alpha Work")
+        ]);
+        var simkl = new FakeMediaProvider("simkl", [
+            MakeCrossProviderResult("simkl", "anime:duplicate", "Zulu Work Alias", "myanimelist", "anime:shared")
+        ]);
+        using var cache = new MediaProviderSearchCache();
+        var service = CreateService(db, cache, anilist, simkl);
+
+        var response = await service.SearchAsync(owner.Id, "work", 1, true, default);
+        db.ChangeTracker.Clear();
+        var repeatedResponse = await service.SearchAsync(owner.Id, "work", 1, true, default);
+
+        var item = Assert.Single(response.Groups.Media.Items);
+        var repeatedItem = Assert.Single(repeatedResponse.Groups.Media.Items);
+        Assert.Equal("Zulu Work", item.Title);
+        Assert.Equal(item.Id, repeatedItem.Id);
+        Assert.Equal("Zulu Work", repeatedItem.Title);
+        Assert.True(response.Groups.Media.HasMore);
+        Assert.Equal(2, await db.MediaTitles.CountAsync());
+    }
+
+    [Fact]
     public async Task SearchAsync_SearchesPersistedDiscoveryLocallyByProviderAliasAndSynonym()
     {
         var (db, connection) = await CreateDbAsync();

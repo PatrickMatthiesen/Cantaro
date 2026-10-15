@@ -236,11 +236,6 @@ public sealed class CantaroSearchService(
             limit,
             connectedProviderIds,
             cancellationToken);
-        var mergedCandidates = new List<SearchResultDto>(items);
-        var seenCanonicalIds = items
-            .Select(item => item.Id)
-            .Where(id => id.StartsWith("media-title:", StringComparison.Ordinal))
-            .ToHashSet(StringComparer.Ordinal);
 
         IReadOnlyDictionary<MediaCatalogIdentity, Guid> canonicalIds;
         try
@@ -262,6 +257,26 @@ public sealed class CantaroSearchService(
         }
 
         var linkedTitleIds = canonicalIds.Values.Distinct().ToList();
+        var firstDiscoveryPositionByCanonicalId = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var position = 0; position < discovery.Results.Count; position++)
+        {
+            var discovered = discovery.Results[position];
+            var identity = MediaCatalogIdentity.Create(discovered.ProviderId, discovered.Result.ProviderMediaId);
+            if (canonicalIds.TryGetValue(identity, out var titleId))
+            {
+                firstDiscoveryPositionByCanonicalId.TryAdd($"media-title:{titleId}", position);
+            }
+        }
+
+        var prioritizedItems = items
+            .Where(item => item.IsInLibrary == true || !firstDiscoveryPositionByCanonicalId.ContainsKey(item.Id))
+            .ToList();
+        var mergedCandidates = new List<SearchResultDto>(prioritizedItems);
+        var seenCanonicalIds = prioritizedItems
+            .Select(item => item.Id)
+            .Where(id => id.StartsWith("media-title:", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+
         var linkedTitles = linkedTitleIds.Count == 0
             ? []
             : await _dbContext.MediaTitles
@@ -283,8 +298,7 @@ public sealed class CantaroSearchService(
             .OrderBy(item => item.Title.ToLowerInvariant() == query ? 0 :
                 item.Title.ToLowerInvariant().StartsWith(query, StringComparison.Ordinal) ? 1 :
                 item.Title.ToLowerInvariant().Contains(query, StringComparison.Ordinal) ? 2 : 5)
-            .ThenBy(item => item.Title, StringComparer.Ordinal)
-            .ThenBy(item => item.Id, StringComparer.Ordinal))
+            .ThenBy(item => firstDiscoveryPositionByCanonicalId.GetValueOrDefault(item.Id, int.MaxValue)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (seenCanonicalIds.Add(linkedItem.Id)) mergedCandidates.Add(linkedItem);
