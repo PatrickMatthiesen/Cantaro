@@ -127,6 +127,8 @@ public class MediaProviderSearchResult
 
 public class MediaProviderTitleDetails
 {
+    public string? ExternalUrl { get; set; }
+
     public required string ProviderId { get; set; }
 
     public required string ProviderMediaId { get; set; }

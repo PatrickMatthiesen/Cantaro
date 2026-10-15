@@ -13,7 +13,17 @@ public readonly record struct MediaCatalogIdentity(string ProviderId, string Pro
 
 public sealed record MediaCatalogSearchCandidate(string ProviderId, CachedMediaProviderSearchResult Result);
 
-/// <summary>Persists public discovery summaries without importing anyone's library.</summary>
+public sealed record MediaCatalogCandidate(
+    MediaProviderTitleDetails Details,
+    bool IsSummary = false,
+    string LinkSource = MediaMappingSources.Imported,
+    int? LinkedByUserId = null);
+
+public sealed record MediaCatalogResolution(
+    IReadOnlyDictionary<MediaCatalogIdentity, MediaProviderLink> Links,
+    int CreatedTitles);
+
+/// <summary>Resolves catalog identities for discovery, details, observations, and imports.</summary>
 public sealed class MediaCatalogCanonicalizationService(
     DbContextOptions<ApplicationDbContext> options,
     ILogger<MediaCatalogCanonicalizationService> logger)
@@ -31,7 +41,10 @@ public sealed class MediaCatalogCanonicalizationService(
             await using var db = new CatalogWriteContext(options);
             try
             {
-                return await PersistAsync(db, candidates, cancellationToken);
+                var resolved = await ResolveAsync(db, candidates.Select(ToCatalogCandidate).ToArray(),
+                    DateTimeOffset.UtcNow, cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+                return resolved.Links.ToDictionary(pair => pair.Key, pair => pair.Value.MediaTitleId);
             }
             catch (DbUpdateException exception) when (attempt < 2 && IsIdentityRace(exception))
             {
@@ -72,22 +85,23 @@ public sealed class MediaCatalogCanonicalizationService(
         }
     }
 
-    private static async Task<IReadOnlyDictionary<MediaCatalogIdentity, Guid>> PersistAsync(
+    public async Task<MediaCatalogResolution> ResolveAsync(
         ApplicationDbContext db,
-        IReadOnlyList<MediaCatalogSearchCandidate> candidates,
+        IReadOnlyList<MediaCatalogCandidate> candidates,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var graph = new Dictionary<MediaCatalogIdentity, HashSet<MediaCatalogIdentity>>();
         var validCandidates = candidates.Where(candidate =>
-            !string.IsNullOrWhiteSpace(candidate.ProviderId)
-            && !string.IsNullOrWhiteSpace(candidate.Result.ProviderMediaId)
-            && !string.IsNullOrWhiteSpace(candidate.Result.Title)).ToArray();
+            !string.IsNullOrWhiteSpace(candidate.Details.ProviderId)
+            && !string.IsNullOrWhiteSpace(candidate.Details.ProviderMediaId)
+            && !string.IsNullOrWhiteSpace(candidate.Details.Title)).ToArray();
         foreach (var candidate in validCandidates)
         {
             var primary = Identity(candidate);
             Connect(graph, primary, primary);
-            foreach (var reference in candidate.Result.CrossReferences)
+            foreach (var reference in candidate.Details.CrossReferences)
             {
                 if (string.IsNullOrWhiteSpace(reference.ProviderId)
                     || string.IsNullOrWhiteSpace(reference.ProviderMediaId)) continue;
@@ -101,7 +115,7 @@ public sealed class MediaCatalogCanonicalizationService(
             .Include(link => link.MediaTitle)!.ThenInclude(title => title!.ProviderLinks)
             .Where(link => providers.Contains(link.Provider) && externalIds.Contains(link.ExternalId))
             .ToListAsync(cancellationToken);
-        var anchors = matches.Where(link => graph.ContainsKey(Identity(link)))
+        var anchors = matches.Concat(db.MediaProviderLinks.Local).Where(link => graph.ContainsKey(Identity(link)))
             .Select(link => link.MediaTitle!).DistinctBy(title => title.Id).ToArray();
         var knownLinks = anchors.SelectMany(title => title.ProviderLinks)
             .ToDictionary(Identity);
@@ -114,8 +128,8 @@ public sealed class MediaCatalogCanonicalizationService(
             foreach (var identity in identities) Connect(graph, identities[0], identity);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var result = new Dictionary<MediaCatalogIdentity, Guid>();
+        var createdTitles = 0;
+        var result = new Dictionary<MediaCatalogIdentity, MediaProviderLink>();
         var remaining = graph.Keys.ToHashSet();
         foreach (var seed in graph.Keys)
         {
@@ -134,14 +148,14 @@ public sealed class MediaCatalogCanonicalizationService(
             }
 
             var entries = validCandidates.Where(candidate => component.Contains(Identity(candidate)))
-                .OrderBy(candidate => ProviderPriority(candidate.ProviderId))
+                .OrderBy(candidate => ProviderPriority(candidate.Details.ProviderId))
                 .ThenBy(candidate => Identity(candidate).ProviderId, StringComparer.Ordinal)
                 .ThenBy(candidate => Identity(candidate).ProviderMediaId, StringComparer.Ordinal)
-                .ThenBy(candidate => candidate.Result.Title, StringComparer.Ordinal).ToArray();
+                .ThenBy(candidate => candidate.Details.Title, StringComparer.Ordinal).ToArray();
             if (entries.Length == 0) continue;
             var titles = component.Where(knownLinks.ContainsKey)
                 .Select(identity => knownLinks[identity].MediaTitle!).DistinctBy(title => title.Id).ToArray();
-            var kinds = entries.Select(entry => entry.Result.MediaKind)
+            var kinds = entries.Select(entry => entry.Details.MediaKind)
                 .Concat(titles.Select(title => title.MediaKind)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var compatible = titles.Length <= 1 && kinds.Length == 1
                 && component.GroupBy(identity => identity.ProviderId).All(group => group.Count() == 1)
@@ -155,13 +169,27 @@ public sealed class MediaCatalogCanonicalizationService(
                     var primary = Identity(entry);
                     if (knownLinks.TryGetValue(primary, out var exact))
                     {
-                        result[primary] = exact.MediaTitleId;
+                        ApplyMetadata(exact.MediaTitle!, entry, now);
+                        RefreshLink(exact, entry, entry.Details.ExternalUrl, now);
+                        foreach (var reference in entry.Details.CrossReferences)
+                        {
+                            var referenceId = MediaCatalogIdentity.Create(reference.ProviderId, reference.ProviderMediaId);
+                            if (knownLinks.TryGetValue(referenceId, out var linkedReference)
+                                && linkedReference.MediaTitleId == exact.MediaTitleId)
+                            {
+                                RefreshLink(linkedReference, entry, reference.ExternalUrl, now);
+                            }
+                        }
+                        result[primary] = exact;
                         continue;
                     }
-                    var separate = CreateTitle(entry.Result, now);
+                    var separate = CreateTitle(entry.Details, now);
                     db.MediaTitles.Add(separate);
-                    AddLink(db, separate, primary, entry.Result.ExternalUrl, now);
-                    result[primary] = separate.Id;
+                    var separateLink = AddLink(db, separate, primary, entry.Details.ExternalUrl, now, entry);
+                    ApplyMetadata(separate, entry, now);
+                    knownLinks[primary] = separateLink;
+                    result[primary] = separateLink;
+                    createdTitles++;
                 }
                 continue;
             }
@@ -169,32 +197,42 @@ public sealed class MediaCatalogCanonicalizationService(
             var title = titles.SingleOrDefault();
             if (title is null)
             {
-                title = CreateTitle(entries[0].Result, now);
+                title = CreateTitle(entries[0].Details, now);
                 db.MediaTitles.Add(title);
+                createdTitles++;
             }
-            foreach (var entry in entries) FillMissingMetadata(title, entry.Result);
+            foreach (var entry in entries) ApplyMetadata(title, entry, now, component.Select(identity => identity.ProviderId));
             foreach (var identity in component)
             {
-                if (knownLinks.ContainsKey(identity)) continue;
                 var primary = entries.FirstOrDefault(entry => Identity(entry) == identity);
-                var url = primary?.Result.ExternalUrl ?? entries.SelectMany(entry => entry.Result.CrossReferences)
-                    .FirstOrDefault(reference => MediaCatalogIdentity.Create(reference.ProviderId, reference.ProviderMediaId) == identity)?.ExternalUrl;
-                AddLink(db, title, identity, url, now);
+                var referenceSource = entries.FirstOrDefault(entry => !entry.IsSummary && FindReference(entry, identity) is not null)
+                    ?? entries.FirstOrDefault(entry => FindReference(entry, identity) is not null);
+                var source = primary is { IsSummary: false } ? primary : referenceSource ?? primary;
+                var url = source == primary ? primary?.Details.ExternalUrl : FindReference(source!, identity)?.ExternalUrl;
+                if (knownLinks.TryGetValue(identity, out var stored))
+                {
+                    if (source is not null) RefreshLink(stored, source, url, now);
+                    continue;
+                }
+                knownLinks[identity] = AddLink(db, title, identity, url, now, primary ?? referenceSource, primary is null);
             }
-            foreach (var entry in entries) result[Identity(entry)] = title.Id;
+            foreach (var entry in entries) result[Identity(entry)] = knownLinks[Identity(entry)];
         }
 
-        // EF's relational SaveChanges is atomic across its INSERT/UPDATE commands.
-        // There are no provider requests or user-state writes in this service.
-        await db.SaveChangesAsync(cancellationToken);
-        return result;
+        // The caller owns SaveChanges so imports and observation resolutions keep
+        // catalog and personal-state changes in the same transaction.
+        return new MediaCatalogResolution(result, createdTitles);
     }
 
-    private static MediaCatalogIdentity Identity(MediaCatalogSearchCandidate candidate) =>
-        MediaCatalogIdentity.Create(candidate.ProviderId, candidate.Result.ProviderMediaId);
+    private static MediaCatalogIdentity Identity(MediaCatalogCandidate candidate) =>
+        MediaCatalogIdentity.Create(candidate.Details.ProviderId, candidate.Details.ProviderMediaId);
 
     private static MediaCatalogIdentity Identity(MediaProviderLink link) =>
         MediaCatalogIdentity.Create(link.Provider, link.ExternalId);
+
+    private static MediaProviderCrossReference? FindReference(MediaCatalogCandidate candidate, MediaCatalogIdentity identity) =>
+        candidate.Details.CrossReferences.FirstOrDefault(reference =>
+            MediaCatalogIdentity.Create(reference.ProviderId, reference.ProviderMediaId) == identity);
 
     private static void Connect(
         Dictionary<MediaCatalogIdentity, HashSet<MediaCatalogIdentity>> graph,
@@ -234,69 +272,103 @@ public sealed class MediaCatalogCanonicalizationService(
         _ => 3
     };
 
-    private static MediaTitle CreateTitle(CachedMediaProviderSearchResult summary, DateTimeOffset now) => new()
+    private static MediaTitle CreateTitle(MediaProviderTitleDetails details, DateTimeOffset now)
     {
-        Id = Guid.NewGuid(),
-        CanonicalTitle = summary.Title,
-        SortTitle = summary.Title,
-        MediaKind = summary.MediaKind,
-        PrimaryProgressDimension = summary.PrimaryProgressDimension ?? DefaultDimension(summary.MediaKind),
-        ReleaseStatusDimension = summary.ReleaseStatusDimension ?? DefaultDimension(summary.MediaKind),
-        SupportsEpisodeProgress = (summary.PrimaryProgressDimension ?? DefaultDimension(summary.MediaKind)) == MediaProgressDimensions.Episode,
-        SupportsChapterProgress = (summary.PrimaryProgressDimension ?? DefaultDimension(summary.MediaKind)) == MediaProgressDimensions.Chapter,
-        SupportsVolumeProgress = (summary.PrimaryProgressDimension ?? DefaultDimension(summary.MediaKind)) == MediaProgressDimensions.Volume,
-        IsCompletionOnly = (summary.PrimaryProgressDimension ?? DefaultDimension(summary.MediaKind)) == MediaProgressDimensions.CompletionOnly,
-        CreatedAt = now,
-        UpdatedAt = now,
-        OriginalTitle = summary.NativeTitle,
-        Synopsis = summary.Synopsis,
-        Format = summary.Format,
-        PosterUrl = summary.PosterUrl,
-        BackgroundUrl = summary.BackgroundUrl,
-        StartYear = summary.StartYear,
-        EpisodeCount = summary.EpisodeCount,
-        ChapterCount = summary.ChapterCount,
-        VolumeCount = summary.VolumeCount,
-        Synonyms = summary.Synonyms.Append(summary.Title).Append(summary.NativeTitle ?? "").Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToList()
-    };
-
-    private static string DefaultDimension(string kind) => kind switch
-    {
-        MediaKinds.Manga => MediaProgressDimensions.Chapter,
-        MediaKinds.Movie => MediaProgressDimensions.CompletionOnly,
-        _ => MediaProgressDimensions.Episode
-    };
-
-    private static void FillMissingMetadata(MediaTitle title, CachedMediaProviderSearchResult summary)
-    {
-        title.OriginalTitle ??= summary.NativeTitle;
-        title.Synopsis ??= summary.Synopsis;
-        title.Format ??= summary.Format;
-        title.PosterUrl ??= summary.PosterUrl;
-        title.BackgroundUrl ??= summary.BackgroundUrl;
-        title.StartYear ??= summary.StartYear;
-        title.EpisodeCount ??= summary.EpisodeCount;
-        title.ChapterCount ??= summary.ChapterCount;
-        title.VolumeCount ??= summary.VolumeCount;
-        var synonyms = title.Synonyms.Concat(summary.Synonyms).Append(summary.Title).Append(summary.NativeTitle ?? "")
-            .Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
-        if (!title.Synonyms.SequenceEqual(synonyms)) title.Synonyms = [.. synonyms];
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = details.Title,
+            MediaKind = details.MediaKind,
+            PrimaryProgressDimension = details.PrimaryProgressDimension,
+            ReleaseStatusDimension = details.ReleaseStatusDimension,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        MediaCanonicalMetadataPolicy.Apply(title, details, now);
+        return title;
     }
 
-    private static void AddLink(ApplicationDbContext db, MediaTitle title,
-        MediaCatalogIdentity identity, string? url, DateTimeOffset now) => db.MediaProviderLinks.Add(new MediaProviderLink
+    private static void ApplyMetadata(MediaTitle title, MediaCatalogCandidate candidate, DateTimeOffset now,
+        IEnumerable<string>? providers = null)
     {
-        Id = Guid.NewGuid(),
-        MediaTitleId = title.Id,
-        MediaTitle = title,
-        Provider = identity.ProviderId,
-        ExternalId = identity.ProviderMediaId,
-        ExternalUrl = url,
-        LinkSource = MediaMappingSources.Automatic,
-        LastVerifiedAt = now,
-        CreatedAt = now,
-        UpdatedAt = now
-    });
+        if (title.MediaKind != candidate.Details.MediaKind) return;
+        if (!candidate.IsSummary && MediaCanonicalMetadataPolicy.ShouldApply(candidate.Details.ProviderId,
+                providers ?? title.ProviderLinks.Select(link => link.Provider)))
+        {
+            MediaCanonicalMetadataPolicy.Apply(title, candidate.Details, now);
+        }
+        else
+        {
+            MediaCanonicalMetadataPolicy.FillMissing(title, candidate.Details, now, candidate.IsSummary);
+        }
+    }
+
+    private static void RefreshLink(MediaProviderLink link, MediaCatalogCandidate candidate, string? url, DateTimeOffset now)
+    {
+        if (candidate.IsSummary) return;
+        link.ExternalUrl = url ?? link.ExternalUrl;
+        link.LastVerifiedAt = now;
+        link.UpdatedAt = now;
+    }
+
+    private static MediaProviderLink AddLink(ApplicationDbContext db, MediaTitle title,
+        MediaCatalogIdentity identity, string? url, DateTimeOffset now, MediaCatalogCandidate? source, bool isReference = false)
+    {
+        var link = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = title.Id,
+            MediaTitle = title,
+            Provider = identity.ProviderId,
+            ExternalId = identity.ProviderMediaId,
+            ExternalUrl = url,
+            LinkSource = source is { IsSummary: true } ? MediaMappingSources.Automatic
+                : isReference ? MediaMappingSources.Imported : source!.LinkSource,
+            LinkedByUserId = isReference ? null : source?.LinkedByUserId,
+            Confidence = isReference && source is { IsSummary: false } ? 1m : null,
+            LastVerifiedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.MediaProviderLinks.Add(link);
+        return link;
+    }
+
+    private static MediaCatalogCandidate ToCatalogCandidate(MediaCatalogSearchCandidate candidate)
+    {
+        var summary = candidate.Result;
+        var dimension = summary.MediaKind switch
+        {
+            MediaKinds.Manga => MediaProgressDimensions.Chapter,
+            MediaKinds.Movie => MediaProgressDimensions.CompletionOnly,
+            _ => MediaProgressDimensions.Episode
+        };
+        return new(new MediaProviderTitleDetails
+        {
+            ProviderId = candidate.ProviderId,
+            ProviderMediaId = summary.ProviderMediaId,
+            Title = summary.Title,
+            NativeTitle = summary.NativeTitle,
+            Synonyms = summary.Synonyms,
+            MediaKind = summary.MediaKind,
+            Format = summary.Format,
+            Synopsis = summary.Synopsis,
+            PosterUrl = summary.PosterUrl,
+            BackgroundUrl = summary.BackgroundUrl,
+            ExternalUrl = summary.ExternalUrl,
+            StartYear = summary.StartYear,
+            EpisodeCount = summary.EpisodeCount,
+            ChapterCount = summary.ChapterCount,
+            VolumeCount = summary.VolumeCount,
+            PrimaryProgressDimension = summary.PrimaryProgressDimension ?? dimension,
+            ReleaseStatusDimension = summary.ReleaseStatusDimension ?? dimension,
+            CrossReferences = summary.CrossReferences.Select(reference => new MediaProviderCrossReference
+            {
+                ProviderId = reference.ProviderId,
+                ProviderMediaId = reference.ProviderMediaId,
+                ExternalUrl = reference.ExternalUrl
+            }).ToArray(),
+            AvailabilityRefreshSucceeded = false
+        }, IsSummary: true, LinkSource: MediaMappingSources.Automatic);
+    }
 }

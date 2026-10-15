@@ -7,8 +7,6 @@ public sealed class MediaProviderSearchCache : IDisposable
     public const int MaximumEntries = 256;
     public static readonly TimeSpan EntryLifetime = TimeSpan.FromMinutes(10);
     private readonly MemoryCache _memoryCache = new(new MemoryCacheOptions { SizeLimit = MaximumEntries });
-    private readonly object _gateLock = new();
-    private readonly Dictionary<string, GateEntry> _gates = new(StringComparer.Ordinal);
 
     public bool TryGet(int userId, string providerId, string query, int limit, out IReadOnlyList<CachedMediaProviderSearchResult> results)
     {
@@ -23,33 +21,6 @@ public sealed class MediaProviderSearchCache : IDisposable
     {
         _memoryCache.Set(BuildKey(userId, providerId, query), new CacheEntry(limit, Snapshot(results)), new MemoryCacheEntryOptions
         { AbsoluteExpirationRelativeToNow = EntryLifetime, Size = 1 });
-    }
-
-    public async Task<IReadOnlyList<CachedMediaProviderSearchResult>> GetOrCreateAsync(
-        int userId, string providerId, string query, int limit,
-        Func<CancellationToken, Task<IReadOnlyList<MediaProviderSearchResult>>> fetch,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(fetch);
-        if (TryGet(userId, providerId, query, limit, out var cached)) return cached;
-        var key = BuildKey(userId, providerId, query);
-        var gate = AddGateReference(key);
-        var acquired = false;
-        try
-        {
-            await gate.Semaphore.WaitAsync(cancellationToken);
-            acquired = true;
-            if (TryGet(userId, providerId, query, limit, out cached)) return cached;
-            var fetched = await fetch(cancellationToken);
-            var projection = CreatePublicProjection(fetched);
-            Set(userId, providerId, query, limit, projection);
-            return projection;
-        }
-        finally
-        {
-            if (acquired) gate.Semaphore.Release();
-            RemoveGateReference(key, gate);
-        }
     }
 
     public static IReadOnlyList<CachedMediaProviderSearchResult> CreatePublicProjection(IEnumerable<MediaProviderSearchResult> results)
@@ -82,35 +53,6 @@ public sealed class MediaProviderSearchCache : IDisposable
         => $"media-provider-search:{userId}:{providerId.Trim().ToLowerInvariant()}:{query.Trim().ToLowerInvariant()}";
 
     private sealed record CacheEntry(int Limit, IReadOnlyList<CachedMediaProviderSearchResult> Results);
-
-    private GateEntry AddGateReference(string key)
-    {
-        lock (_gateLock)
-        {
-            if (!_gates.TryGetValue(key, out var entry)) _gates[key] = entry = new GateEntry();
-            entry.ReferenceCount++;
-            return entry;
-        }
-    }
-
-    private void RemoveGateReference(string key, GateEntry entry)
-    {
-        lock (_gateLock)
-        {
-            entry.ReferenceCount--;
-            if (entry.ReferenceCount == 0 && _gates.TryGetValue(key, out var current) && ReferenceEquals(entry, current))
-            {
-                _gates.Remove(key);
-                entry.Semaphore.Dispose();
-            }
-        }
-    }
-
-    private sealed class GateEntry
-    {
-        public SemaphoreSlim Semaphore { get; } = new(1, 1);
-        public int ReferenceCount { get; set; }
-    }
 
     public void Dispose() => _memoryCache.Dispose();
 }

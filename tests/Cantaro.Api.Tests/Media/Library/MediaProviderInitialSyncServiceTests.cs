@@ -4,6 +4,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -736,6 +737,9 @@ public sealed class MediaProviderInitialSyncServiceTests
             var importService = new MediaLibraryImportService(
                 db,
                 new MediaLibraryEventHub(),
+                new MediaCatalogCanonicalizationService(
+                    (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+                    NullLogger<MediaCatalogCanonicalizationService>.Instance),
                 NullLogger<MediaLibraryImportService>.Instance);
             var service = new MediaProviderInitialSyncService(
                 db,

@@ -3,6 +3,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -211,7 +212,7 @@ public class MediaLibraryImportServiceTests
         var simklImport = MakeImport(now, progress: 5, remoteUpdatedAt: now);
         simklImport.ProviderId = "simkl";
         var simklItem = simklImport.Items[0];
-        simklItem.ProviderMediaId = "show-42";
+        simklItem.ProviderMediaId = "anime:42";
         simklItem.Status = MediaLibraryStatuses.Current;
         simklItem.Score = 20m;
         simklItem.CrossReferences = [new MediaProviderCrossReference
@@ -335,7 +336,9 @@ public class MediaLibraryImportServiceTests
     }
 
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
-        new(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance);
+        new(db, new MediaLibraryEventHub(), new MediaCatalogCanonicalizationService(
+            (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+            NullLogger<MediaCatalogCanonicalizationService>.Instance), NullLogger<MediaLibraryImportService>.Instance);
 
     private static MediaProviderLibraryImportResult MakeImport(
         DateTimeOffset importedAt,

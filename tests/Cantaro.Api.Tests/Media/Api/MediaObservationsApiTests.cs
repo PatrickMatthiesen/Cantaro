@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -1121,7 +1122,10 @@ public class MediaObservationsApiTests
                 seasonMappingService,
                 registry ?? new EmptyMediaProviderRegistry(),
                 eventHub,
-                NullLogger<MediaObservationsController>.Instance);
+                NullLogger<MediaObservationsController>.Instance,
+                new MediaCatalogCanonicalizationService(
+                    (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+                    NullLogger<MediaCatalogCanonicalizationService>.Instance));
 
             controller.ControllerContext = new ControllerContext
             {

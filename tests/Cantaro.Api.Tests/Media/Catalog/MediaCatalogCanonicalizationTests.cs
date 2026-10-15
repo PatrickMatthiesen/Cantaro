@@ -13,6 +13,68 @@ namespace Cantaro.Api.Tests.Media.Catalog;
 public sealed class MediaCatalogCanonicalizationTests
 {
     [Fact]
+    public async Task ResolveAsync_LeavesNewCatalogRowsForCallerToSave()
+    {
+        var (db, connection, options) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var details = new MediaProviderTitleDetails
+        {
+            ProviderId = "anilist", ProviderMediaId = "211778", Title = "New title", MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode, ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        var resolved = await Canonicalizer(options).ResolveAsync(db, [new(details)], DateTimeOffset.UtcNow, default);
+
+        Assert.Equal(1, resolved.CreatedTitles);
+        Assert.Empty(await db.MediaTitles.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.MediaProviderLinks.AsNoTracking().ToListAsync());
+        await db.SaveChangesAsync();
+        Assert.Equal(Assert.Single(resolved.Links.Values).MediaTitleId, (await db.MediaTitles.SingleAsync()).Id);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_FullDetailsReuseDiscoveryAndRefreshExistingReferencesWithoutChangingTheirProvenance()
+    {
+        var (db, connection, options) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var catalog = Canonicalizer(options);
+        var summary = new MediaCatalogSearchCandidate("anilist", new CachedMediaProviderSearchResult(
+            "211778", "Summary title", MediaKinds.Anime, null, 2026)
+        {
+            CrossReferences = [new("myanimelist", "anime:10", "https://example.test/old")]
+        });
+        var discovered = await catalog.CanonicalizeAsync([summary], default);
+        var originalReference = await db.MediaProviderLinks.AsNoTracking().SingleAsync(link => link.Provider == "myanimelist");
+        Assert.Equal(MediaMappingSources.Automatic, originalReference.LinkSource);
+        Assert.Null(originalReference.Confidence);
+
+        var later = DateTimeOffset.UtcNow.AddMinutes(1);
+        var details = new MediaProviderTitleDetails
+        {
+            ProviderId = "anilist", ProviderMediaId = "211778", Title = "Detailed title", MediaKind = MediaKinds.Anime,
+            Synopsis = "Full synopsis", PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CrossReferences = [new() { ProviderId = "myanimelist", ProviderMediaId = "anime:10", ExternalUrl = "https://example.test/current" }]
+        };
+        var resolved = await catalog.ResolveAsync(db, [new(details)], later, default);
+        Assert.Equal(0, resolved.CreatedTitles);
+        Assert.Equal(Assert.Single(discovered.Values), Assert.Single(resolved.Links.Values).MediaTitleId);
+        Assert.Equal("Summary title", (await db.MediaTitles.AsNoTracking().SingleAsync()).CanonicalTitle);
+        await db.SaveChangesAsync();
+
+        var title = await db.MediaTitles.AsNoTracking().SingleAsync();
+        Assert.Equal("Detailed title", title.CanonicalTitle);
+        Assert.Equal("Full synopsis", title.Synopsis);
+        var reference = await db.MediaProviderLinks.AsNoTracking().SingleAsync(link => link.Provider == "myanimelist");
+        Assert.Equal("https://example.test/current", reference.ExternalUrl);
+        Assert.Equal(later, reference.LastVerifiedAt);
+        Assert.Equal(later, reference.UpdatedAt);
+        Assert.Equal(MediaMappingSources.Automatic, reference.LinkSource);
+        Assert.Null(reference.Confidence);
+    }
+
+    [Fact]
     public void Identity_NormalizesProviderButPreservesExternalIdCase()
     {
         var identity = MediaCatalogIdentity.Create(" AniList ", "  AbC-42  ");

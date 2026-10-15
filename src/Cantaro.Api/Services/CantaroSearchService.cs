@@ -391,20 +391,24 @@ public sealed class CantaroSearchService(
 
             try
             {
-                var providerResults = await _mediaProviderSearchCache.GetOrCreateAsync(
+                if (!_mediaProviderSearchCache.TryGet(
                     userId,
                     providerId,
                     query,
                     providerLimit,
-                    token => _mediaProviderRegistry.GetRequired(providerId).SearchAsync(
+                    out var providerResults))
+                {
+                    var resultsFromProvider = await _mediaProviderRegistry.GetRequired(providerId).SearchAsync(
                         userId,
                         new MediaCatalogSearchRequest
                         {
                             Query = query,
                             Limit = providerLimit
                         },
-                        token),
-                    cancellationToken);
+                        cancellationToken);
+                    providerResults = MediaProviderSearchCache.CreatePublicProjection(resultsFromProvider);
+                    _mediaProviderSearchCache.Set(userId, providerId, query, providerLimit, providerResults);
+                }
 
                 hasMore |= providerResults.Count > limit;
                 results.AddRange(providerResults.Select(result =>
