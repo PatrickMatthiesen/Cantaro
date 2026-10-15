@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   getProviderTitleDetails,
   isAvailabilityStale,
@@ -324,15 +324,16 @@ export function useProviderAvailability(
   const [seasonCatalogHydrationRevision, setSeasonCatalogHydrationRevision] = useState(0);
   const forceRefreshRef = useRef(false);
   const refreshTitleMetadataRef = useRef(refreshTitleMetadata);
+  const providerLinksRef = useRef(entry?.providerLinks ?? []);
   const titleId = entry?.mediaTitleId;
   const providerLinksSignature = JSON.stringify((entry?.providerLinks ?? [])
     .map(({ provider, externalId }) => [provider.toLowerCase(), externalId])
     .sort(([providerA, idA], [providerB, idB]) =>
       String(providerA).localeCompare(String(providerB)) || String(idA).localeCompare(String(idB))));
-  const providerLinks = useMemo(
-    () => entry?.providerLinks ?? [],
-    [providerLinksSignature],
-  );
+
+  useEffect(() => {
+    providerLinksRef.current = entry?.providerLinks ?? [];
+  }, [entry?.providerLinks]);
 
   useEffect(() => {
     refreshTitleMetadataRef.current = refreshTitleMetadata;
@@ -344,6 +345,7 @@ export function useProviderAvailability(
   }, []);
 
   useEffect(() => {
+    const providerLinks = providerLinksRef.current;
     if (!titleId || providerLinks.length === 0) {
       setAvailabilityByProviderLink({});
       return;
