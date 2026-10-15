@@ -1,13 +1,21 @@
 using Cantaro.Api.Data;
+using Cantaro.Api.Controllers;
 using Cantaro.Api.Models;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Security.Claims;
 using Cantaro.Api.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Xunit;
 using Xunit.Abstractions;
@@ -135,6 +143,101 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
     }
 
     [PostgresFact]
+    public async Task Resolve_AddToLibrary_RetriesProviderIdentityRaceWithoutRepeatingRemoteCalls()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        const int userId = 47812;
+        const string providerId = "anilist";
+        const string providerMediaId = "observation-race-1";
+        var user = TestUserFactory.Create(userId, "observation-add-race@example.test");
+        var account = new ConnectedServiceAccount
+        {
+            UserId = user.Id,
+            Service = providerId,
+            ExternalAccountId = "observation-race-account",
+            ConnectionState = "connected",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
+            ObservedUrl = "https://www.crunchyroll.com/watch/RACE/episode-3",
+            SiteMediaId = "RACE",
+            ObservedTitle = "Observation race title episode 3",
+            ProgressHint = "3",
+            ObservedAt = DateTimeOffset.UtcNow,
+            MatchStatus = MediaObservationStatuses.NoMatch,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        schema.Db.AddRange(user, account, observation);
+        await schema.Db.SaveChangesAsync();
+
+        var details = new MediaProviderTitleDetails
+        {
+            ProviderId = providerId,
+            ProviderMediaId = providerMediaId,
+            Title = "Observation race title",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            EpisodeCount = 12,
+            CrossReferences = []
+        };
+        var provider = new ObservationRaceMediaProvider(account, details);
+        var interleaved = new ProviderIdentityClaimBeforeSave(() => MakeService(schema.Options)
+            .CanonicalizeAsync(
+            [new MediaCatalogSearchCandidate(providerId, new CachedMediaProviderSearchResult(
+                providerMediaId, details.Title, details.MediaKind, details.PosterUrl, details.StartYear)
+            {
+                PrimaryProgressDimension = details.PrimaryProgressDimension,
+                ReleaseStatusDimension = details.ReleaseStatusDimension,
+                EpisodeCount = details.EpisodeCount
+            })], default));
+        var controllerOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+        await using var controllerDb = new ApplicationDbContext(controllerOptions);
+        var controllerObservation = await controllerDb.MediaObservations.SingleAsync(item => item.Id == observation.Id);
+        var controller = CreateObservationsController(controllerDb, new MediaProviderRegistry([provider]), userId,
+            "observation-add-race@example.test");
+
+        var result = await controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            ProviderId = providerId,
+            ProviderMediaId = providerMediaId,
+            AddToLibraryConfirmed = true
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<MediaObservationDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Equal("3", response.ProgressHint);
+        Assert.Equal(3, response.ResolvedProgress);
+        Assert.Equal(1, interleaved.ClaimCount);
+        Assert.Equal(1, interleaved.UniqueViolationCount);
+        Assert.Equal(1, provider.DetailsCalls);
+        Assert.Equal(1, provider.StatusCalls);
+        Assert.Equal(1, await schema.Db.MediaTitles.CountAsync());
+        Assert.Equal(1, await schema.Db.MediaProviderLinks.CountAsync());
+        var entry = await schema.Db.MediaLibraryEntries.SingleAsync();
+        Assert.Equal(user.Id, entry.UserId);
+        Assert.Equal(3, entry.ProgressEpisodes);
+        var binding = await schema.Db.MediaLibraryProviderBindings
+            .Include(item => item.MediaProviderLink).SingleAsync();
+        Assert.Equal(account.Id, binding.ConnectedServiceAccountId);
+        Assert.Equal(providerMediaId, binding.MediaProviderLink!.ExternalId);
+        Assert.Equal(entry.MediaTitleId, binding.MediaProviderLink.MediaTitleId);
+        Assert.False(await schema.Db.MediaObservations.AsNoTracking()
+            .AnyAsync(item => item.Id == observation.Id));
+        Assert.Equal(EntityState.Detached, controllerDb.Entry(controllerObservation).State);
+        Assert.DoesNotContain(controllerDb.ChangeTracker.Entries(), entry => entry.State == EntityState.Added
+            && entry.Entity is MediaTitle or MediaProviderLink or MediaLibraryEntry or MediaLibraryProviderBinding);
+    }
+
+    [PostgresFact]
     public async Task CanonicalizeAsync_BatchesWritesReusesStoredMetadataAndSupportsSynonymSearch()
     {
         var counter = new CommandCounter();
@@ -229,6 +332,60 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
 
     private static MediaCatalogCanonicalizationService MakeService(DbContextOptions<ApplicationDbContext> options)
         => new(options, NullLogger<MediaCatalogCanonicalizationService>.Instance);
+
+    private static MediaObservationsController CreateObservationsController(
+        ApplicationDbContext db,
+        IMediaProviderRegistry registry,
+        int userId,
+        string email)
+    {
+        var seasonMappingService = new MediaProviderSeasonMappingService(
+            db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var matchingService = new MediaObservationMatchingService(
+            db, seasonMappingService, new MediaRelationGraphRefreshQueue(),
+            NullLogger<MediaObservationMatchingService>.Instance);
+        var eventHub = new MediaLibraryEventHub();
+        var operationProcessor = new MediaProviderOperationProcessor(
+            db, new MediaProviderRegistry([]), NullLogger<MediaProviderOperationProcessor>.Instance);
+        var progressService = new MediaObservationProgressService(
+            db, operationProcessor, eventHub, NullLogger<MediaObservationProgressService>.Instance);
+        var episodeIdentityService = new MediaEpisodeIdentityService(
+            db, seasonMappingService, NullLogger<MediaEpisodeIdentityService>.Instance);
+        var controller = new MediaObservationsController(
+            db,
+            CreateUserManager(db),
+            matchingService,
+            progressService,
+            episodeIdentityService,
+            seasonMappingService,
+            registry,
+            eventHub,
+            NullLogger<MediaObservationsController>.Instance,
+            new MediaCatalogCanonicalizationService(
+                (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+                NullLogger<MediaCatalogCanonicalizationService>.Instance));
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                    new Claim(ClaimTypes.Name, email),
+                    new Claim(ClaimTypes.Email, email)
+                ], "Test"))
+            }
+        };
+        return controller;
+    }
+
+    private static UserManager<User> CreateUserManager(ApplicationDbContext db)
+    {
+        var store = new UserStore<User, IdentityRole<int>, ApplicationDbContext, int>(db);
+        return new UserManager<User>(store, Options.Create(new IdentityOptions()), new PasswordHasher<User>(),
+            [], [], new UpperInvariantLookupNormalizer(), new IdentityErrorDescriber(),
+            new ServiceCollection().BuildServiceProvider(), NullLogger<UserManager<User>>.Instance);
+    }
 
     private static MediaCatalogSearchCandidate Candidate(string provider, string id, string title, string malId)
         => new(provider, new CachedMediaProviderSearchResult(provider == "simkl" ? $"anime:{id.Replace("sim-", "")}" : id, title, "anime", null, 2026)
@@ -352,6 +509,79 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
             }
             return result;
         }
+    }
+
+    private sealed class ProviderIdentityClaimBeforeSave(Func<Task> claimIdentity) : SaveChangesInterceptor
+    {
+        private bool _claimed;
+        public int ClaimCount { get; private set; }
+        public int UniqueViolationCount { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!_claimed && eventData.Context?.ChangeTracker.Entries<MediaProviderLink>()
+                    .Any(entry => entry.State == EntityState.Added) == true)
+            {
+                _claimed = true;
+                ClaimCount++;
+                await claimIdentity();
+            }
+            return result;
+        }
+
+        public override Task SaveChangesFailedAsync(DbContextErrorEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Exception is DbUpdateException
+                {
+                    InnerException: PostgresException
+                    {
+                        SqlState: PostgresErrorCodes.UniqueViolation,
+                        ConstraintName: "IX_MediaProviderLinks_Provider_ExternalId"
+                    }
+                })
+            {
+                UniqueViolationCount++;
+            }
+            return base.SaveChangesFailedAsync(eventData, cancellationToken);
+        }
+    }
+
+    private sealed class ObservationRaceMediaProvider(
+        ConnectedServiceAccount account,
+        MediaProviderTitleDetails details) : IMediaProvider
+    {
+        public string ProviderId => account.Service;
+        public int DetailsCalls { get; private set; }
+        public int StatusCalls { get; private set; }
+        public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
+            => Task.FromResult<ConnectedServiceAccount?>(account);
+        public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
+        {
+            DetailsCalls++;
+            return Task.FromResult<MediaProviderTitleDetails?>(details);
+        }
+        public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
+        {
+            StatusCalls++;
+            return Task.FromResult(new MediaProviderMutationResult
+            {
+                ProviderId = ProviderId,
+                ProviderMediaId = request.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow,
+                LastRemoteUpdateAt = DateTimeOffset.UtcNow
+            });
+        }
+        public bool SupportsMediaKind(string mediaKind) => true;
+        public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge) => throw new NotSupportedException();
+        public Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(int userId, string authorizationCode, string redirectUri, string codeVerifier, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task DisconnectAsync(int userId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderLibraryImportResult> ImportLibraryAsync(int userId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private sealed class PostgresFactAttribute : FactAttribute

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Cantaro.Api.Controllers;
 
@@ -941,15 +942,45 @@ public class MediaObservationsController(
         var now = DateTimeOffset.UtcNow;
         details.ProviderId = provider.ProviderId;
         details.ProviderMediaId = providerMediaId;
+        var options = (DbContextOptions<ApplicationDbContext>)_dbContext.GetService<IDbContextOptions>();
+        // Only retry local persistence. The provider mutation above must run once,
+        // and failed catalog inserts must not enter the observation's tracker.
+        for (var attempt = 0; ; attempt++)
+        {
+            await using var db = new ApplicationDbContext(options);
+            try
+            {
+                var result = await PersistProviderTitleAddAsync(
+                    db, userId, account, details, mutationResult, now, cancellationToken);
+                _mediaLibraryEventHub.Publish(userId);
+                return result;
+            }
+            catch (DbUpdateException exception) when (attempt < 2
+                && MediaCatalogCanonicalizationService.IsIdentityRace(exception))
+            {
+                _logger.LogDebug(exception, "Retrying observation library add after a catalog identity race, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private async Task<AddProviderTitleResult> PersistProviderTitleAddAsync(
+        ApplicationDbContext db,
+        int userId,
+        ConnectedServiceAccount account,
+        MediaProviderTitleDetails details,
+        MediaProviderMutationResult mutationResult,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         var resolution = await _catalogService.ResolveAsync(
-            _dbContext,
+            db,
             [new MediaCatalogCandidate(
                 details,
                 LinkSource: MediaMappingSources.UserConfirmed,
                 LinkedByUserId: userId)],
             now,
             cancellationToken);
-        var providerLink = resolution.Links[MediaCatalogIdentity.Create(provider.ProviderId, providerMediaId)];
+        var providerLink = resolution.Links[MediaCatalogIdentity.Create(details.ProviderId, details.ProviderMediaId)];
         var title = providerLink.MediaTitle!;
         if (details.AvailabilityRefreshSucceeded)
         {
@@ -971,8 +1002,8 @@ public class MediaObservationsController(
             UpdatedAt = now
         };
 
-        _dbContext.MediaLibraryEntries.Add(entry);
-        _dbContext.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
+        db.MediaLibraryEntries.Add(entry);
+        db.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
         {
             Id = Guid.NewGuid(),
             MediaLibraryEntryId = entry.Id,
@@ -984,8 +1015,7 @@ public class MediaObservationsController(
             CreatedAt = now,
             UpdatedAt = now
         });
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        _mediaLibraryEventHub.Publish(userId);
+        await db.SaveChangesAsync(cancellationToken);
         return new AddProviderTitleResult(entry.Id, title.Id, title.CanonicalTitle, null);
     }
 
