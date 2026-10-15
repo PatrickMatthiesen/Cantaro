@@ -98,6 +98,12 @@ public class MediaProviderSearchResult
 
     public IReadOnlyList<string> Synonyms { get; set; } = [];
 
+    public string? Format { get; set; }
+
+    public string? ExternalUrl { get; set; }
+
+    public IReadOnlyList<MediaProviderCrossReference> CrossReferences { get; set; } = [];
+
     public required string MediaKind { get; set; }
 
     public string? Synopsis { get; set; }
@@ -121,6 +127,8 @@ public class MediaProviderSearchResult
 
 public class MediaProviderTitleDetails
 {
+    public string? ExternalUrl { get; set; }
+
     public required string ProviderId { get; set; }
 
     public required string ProviderMediaId { get; set; }

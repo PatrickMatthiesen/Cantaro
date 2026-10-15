@@ -55,6 +55,7 @@ export function MediaEntryDetailPage({
     error,
     loadEntry,
     reloadEntry,
+    refreshTitleMetadata,
     progressEpisodes,
     setProgressEpisodes,
     progressChapters,
@@ -68,7 +69,7 @@ export function MediaEntryDetailPage({
     availabilityByProviderLink,
     seasonCatalogHydrationRevision,
     reload: reloadProviderAvailability,
-  } = useProviderAvailability(entry);
+  } = useProviderAvailability(entry, refreshTitleMetadata);
   const { state: episodeCatalog, reload: reloadEpisodes } = useEpisodeCatalog(entry);
   const { state: loadedFranchiseGraph, reload: reloadFranchise } = useFranchiseGraph(
     entry,

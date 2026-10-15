@@ -1,9 +1,34 @@
-import type { MediaEntryDetailModel } from "../../services/mediaApi";
+import type { MediaEntryDetailModel, MediaTitleDetailDto } from "../../services/mediaApi";
 import { mediaFormatLabel } from "../../services/mediaFormatting";
 import type {
   MediaEntryDetailContentProps,
   ProgressSummary,
 } from "./mediaEntryDetailTypes";
+
+export function mergeTitleMetadata(
+  current: MediaEntryDetailModel | null,
+  requestedMediaTitleId: string,
+  currentRequestedMediaTitleId: string,
+  title: MediaTitleDetailDto,
+): MediaEntryDetailModel | null {
+  if (
+    !current
+    || current.mediaTitleId !== requestedMediaTitleId
+    || currentRequestedMediaTitleId !== requestedMediaTitleId
+  ) return current;
+
+  const titleProvider = title.providerLinks[0];
+  return {
+    ...current,
+    title,
+    nextReleaseAt: title.nextReleaseAt,
+    nextReleaseLabel: title.nextReleaseLabel,
+    providerLinks: title.providerLinks,
+    ...(!current.isInLibrary && titleProvider
+      ? { provider: titleProvider.provider, providerMediaId: titleProvider.externalId }
+      : {}),
+  };
+}
 
 export function releaseStatusLabel(dimension: string): string {
   if (["episode", "chapter", "volume"].includes(dimension.toLowerCase())) {

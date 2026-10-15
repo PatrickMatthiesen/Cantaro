@@ -130,7 +130,9 @@ internal static class SimklJson
             NativeTitle = String(media, "title_romaji"),
             Synonyms = Array(Property(media, "all_titles")).Where(x => x.ValueKind == JsonValueKind.String)
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),
-            MediaKind = kind, PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
+            MediaKind = kind, Format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie, _ => MapAnimeFormat(String(media, "anime_type")) },
+            ExternalUrl = ExternalUrl(type, id.Value), CrossReferences = CrossReferences(type, ids),
+            PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             StartYear = Int(media, "year"), EpisodeCount = Int(media, "ep_count"),
             PrimaryProgressDimension = ProgressDimension(type), ReleaseStatusDimension = ProgressDimension(type)
         };
@@ -152,6 +154,7 @@ internal static class SimklJson
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),
             MediaKind = MediaKind(type), Synopsis = String(media, "overview"),
             Format = format,
+            ExternalUrl = ExternalUrl(type, id),
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
             CrossReferences = CrossReferences(type, ids), StartYear = Int(media, "year"),

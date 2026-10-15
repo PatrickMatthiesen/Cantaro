@@ -561,6 +561,9 @@ public class AniListMediaProvider(
             Title = SelectCanonicalTitle(media.Title),
             NativeTitle = media.Title?.Native,
             Synonyms = NormalizeSynonyms(media.Synonyms),
+            Format = MapMediaFormat(media.Format),
+            ExternalUrl = media.SiteUrl,
+            CrossReferences = BuildCrossReferences(media, mediaKind),
             MediaKind = mediaKind,
             Synopsis = media.Description,
             PosterUrl = SelectPosterUrl(media.CoverImage),
@@ -590,6 +593,7 @@ public class AniListMediaProvider(
             MediaKind = mediaKind,
             Synopsis = media.Description,
             Format = media.Format,
+            ExternalUrl = media.SiteUrl,
             PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
             CrossReferences = BuildCrossReferences(media, mediaKind),
@@ -1066,6 +1070,7 @@ public class AniListMediaProvider(
           Page(page: 1, perPage: $perPage) {
             media(search: $search, type: $type) {
               id
+              idMal
               type
               format
               status

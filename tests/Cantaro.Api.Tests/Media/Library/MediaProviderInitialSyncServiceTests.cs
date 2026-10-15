@@ -4,6 +4,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -261,6 +262,8 @@ public sealed class MediaProviderInitialSyncServiceTests
             progressEpisodes: 28,
             remoteUpdatedAt: newerRemoteAt));
 
+        // Preview runs in a new request scope after the seed writes.
+        fixture.Db.ChangeTracker.Clear();
         var preview = await fixture.Service.PreviewAsync(
             fixture.User.Id,
             fixture.Provider.ProviderId,
@@ -272,10 +275,10 @@ public sealed class MediaProviderInitialSyncServiceTests
             [InitialSyncFixture.ExistingProviderId, InitialSyncFixture.TargetProviderId],
             fixture.ImportCallOrder);
         Assert.Equal(1, preview.AlreadyAligned);
-        await fixture.Db.Entry(entry).ReloadAsync();
-        Assert.Equal(MediaLibraryStatuses.Completed, entry.Status);
-        Assert.Equal(90m, entry.Score);
-        Assert.Equal(28, entry.ProgressEpisodes);
+        var persistedEntry = await fixture.Db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.Status);
+        Assert.Equal(90m, persistedEntry.Score);
+        Assert.Equal(28, persistedEntry.ProgressEpisodes);
         Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
     }
 
@@ -714,7 +717,7 @@ public sealed class MediaProviderInitialSyncServiceTests
             await db.SaveChangesAsync();
 
             var importCallOrder = new List<string>();
-            var provider = new FakeMediaProvider(account, TargetProviderId, importCallOrder)
+            var provider = new FakeMediaProvider(db, account.Id, TargetProviderId, importCallOrder)
             {
                 Snapshot = Snapshot()
             };
@@ -722,7 +725,8 @@ public sealed class MediaProviderInitialSyncServiceTests
             if (existingAccount is not null)
             {
                 existingProvider = new FakeMediaProvider(
-                    existingAccount,
+                    db,
+                    existingAccount.Id,
                     ExistingProviderId,
                     importCallOrder)
                 {
@@ -736,6 +740,9 @@ public sealed class MediaProviderInitialSyncServiceTests
             var importService = new MediaLibraryImportService(
                 db,
                 new MediaLibraryEventHub(),
+                new MediaCatalogCanonicalizationService(
+                    (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+                    NullLogger<MediaCatalogCanonicalizationService>.Instance),
                 NullLogger<MediaLibraryImportService>.Instance);
             var service = new MediaProviderInitialSyncService(
                 db,
@@ -874,11 +881,11 @@ public sealed class MediaProviderInitialSyncServiceTests
     }
 
     private sealed class FakeMediaProvider(
-        ConnectedServiceAccount account,
+        ApplicationDbContext db,
+        int accountId,
         string providerId,
         List<string> importCallOrder) : IMediaProvider
     {
-        private readonly ConnectedServiceAccount _account = account;
         private readonly string _providerId = providerId;
         private readonly List<string> _importCallOrder = importCallOrder;
 
@@ -893,7 +900,8 @@ public sealed class MediaProviderInitialSyncServiceTests
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(
             int userId,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<ConnectedServiceAccount?>(userId == _account.UserId ? _account : null);
+            => db.ConnectedServiceAccounts.SingleOrDefaultAsync(
+                account => account.Id == accountId && account.UserId == userId, cancellationToken);
 
         public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge)
             => throw new NotSupportedException();

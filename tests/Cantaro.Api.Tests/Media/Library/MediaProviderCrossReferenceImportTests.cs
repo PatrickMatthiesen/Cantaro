@@ -4,6 +4,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -35,6 +36,63 @@ public sealed class MediaProviderCrossReferenceImportTests
             link => link.Provider == "anilist" && link.ExternalId == "154587");
         Assert.Contains(await fixture.Db.MediaProviderLinks.ToListAsync(),
             link => link.Provider == "myanimelist" && link.ExternalId == "anime:52991");
+        AssertAniListMetadata(await fixture.Db.MediaTitles.SingleAsync());
+    }
+
+    [Fact]
+    public async Task DiscoveryCanonicalization_IsReusedByImportsWithoutCreatingLibraryState()
+    {
+        await using var fixture = await ImportFixture.CreateAsync();
+        var details = Assert.Single(fixture.AniListImport.Items);
+        var catalog = new MediaCatalogCanonicalizationService(
+            (DbContextOptions<ApplicationDbContext>)fixture.Db.GetService<IDbContextOptions>(),
+            NullLogger<MediaCatalogCanonicalizationService>.Instance);
+        var discoveredTitleIds = await catalog.CanonicalizeAsync(
+        [
+            new MediaCatalogSearchCandidate("anilist", new CachedMediaProviderSearchResult(
+                details.ProviderMediaId,
+                details.Title,
+                details.MediaKind,
+                details.PosterUrl,
+                details.StartYear)
+            {
+                NativeTitle = details.NativeTitle,
+                Synonyms = details.Synonyms,
+                Synopsis = details.Synopsis,
+                Format = details.Format,
+                BackgroundUrl = details.BackgroundUrl,
+                EpisodeCount = details.EpisodeCount,
+                PrimaryProgressDimension = details.PrimaryProgressDimension,
+                ReleaseStatusDimension = details.ReleaseStatusDimension,
+                CrossReferences = details.CrossReferences.Select(reference => new CachedMediaProviderCrossReference(
+                    reference.ProviderId,
+                    reference.ProviderMediaId,
+                    reference.ExternalUrl)).ToArray()
+            })
+        ], CancellationToken.None);
+
+        Assert.Equal(1, await fixture.Db.MediaTitles.CountAsync());
+        Assert.Equal(2, await fixture.Db.MediaProviderLinks.CountAsync());
+        Assert.Empty(await fixture.Db.MediaLibraryEntries.ToListAsync());
+        Assert.Empty(await fixture.Db.MediaLibraryProviderBindings.ToListAsync());
+
+        var discoveredTitleId = discoveredTitleIds[MediaCatalogIdentity.Create("anilist", "154587")];
+        var aniListResult = await fixture.Service.ImportAsync(
+            fixture.User.Id, fixture.AniListAccount, fixture.AniListImport, CancellationToken.None);
+        Assert.Equal(0, aniListResult.CreatedTitles);
+        Assert.Equal(discoveredTitleId, (await fixture.Db.MediaLibraryEntries.SingleAsync()).MediaTitleId);
+        Assert.Equal(4, (await fixture.Db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
+        AssertAniListMetadata(await fixture.Db.MediaTitles.SingleAsync());
+
+        var malResult = await fixture.Service.ImportAsync(
+            fixture.User.Id, fixture.MalAccount, fixture.MalImport, CancellationToken.None);
+        Assert.Equal(0, malResult.CreatedTitles);
+        Assert.Equal(1, await fixture.Db.MediaTitles.CountAsync());
+        Assert.Equal(1, await fixture.Db.MediaLibraryEntries.CountAsync());
+        Assert.Equal(2, await fixture.Db.MediaProviderLinks.CountAsync());
+        Assert.Equal(2, await fixture.Db.MediaLibraryProviderBindings.CountAsync());
+        Assert.Equal(discoveredTitleId, (await fixture.Db.MediaLibraryEntries.SingleAsync()).MediaTitleId);
+        Assert.Equal(4, (await fixture.Db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
         AssertAniListMetadata(await fixture.Db.MediaTitles.SingleAsync());
     }
 
@@ -380,7 +438,13 @@ public sealed class MediaProviderCrossReferenceImportTests
             return new ImportFixture(
                 connection,
                 db,
-                new MediaLibraryImportService(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance),
+                new MediaLibraryImportService(
+                    db,
+                    new MediaLibraryEventHub(),
+                    new MediaCatalogCanonicalizationService(
+                        (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+                        NullLogger<MediaCatalogCanonicalizationService>.Instance),
+                    NullLogger<MediaLibraryImportService>.Instance),
                 user,
                 aniListAccount,
                 malAccount);

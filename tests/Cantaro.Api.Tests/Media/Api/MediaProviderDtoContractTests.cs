@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -884,6 +885,9 @@ public class MediaProviderDtoContractTests
                 eventHub,
                 episodeIdentityService,
                 aioStreamsAnimeEnricher ?? new StubAioStreamsAnimeEnricher(),
+                new MediaCatalogCanonicalizationService(
+                    (DbContextOptions<ApplicationDbContext>)dbContext.GetService<IDbContextOptions>(),
+                    NullLogger<MediaCatalogCanonicalizationService>.Instance),
                 CreateUserManager(dbContext),
                 NullLogger<MediaProvidersController>.Instance,
                 new PassthroughDataProtectionProvider(),

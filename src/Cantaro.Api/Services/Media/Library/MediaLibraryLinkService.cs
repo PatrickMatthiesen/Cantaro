@@ -1,6 +1,7 @@
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Cantaro.Api.Services;
 
@@ -59,7 +60,33 @@ public class MediaLibraryLinkService(
         bool confirmReplacement,
         CancellationToken cancellationToken)
     {
-        var canEdit = await _dbContext.MediaLibraryEntries
+        var options = (DbContextOptions<ApplicationDbContext>)_dbContext.GetService<IDbContextOptions>();
+        for (var attempt = 0; ; attempt++)
+        {
+            await using var db = new ApplicationDbContext(options);
+            try
+            {
+                return await LinkProviderCoreAsync(db, userId, mediaTitleId, providerId,
+                    providerMediaId, confirmReplacement, cancellationToken);
+            }
+            catch (DbUpdateException exception) when (attempt < 2
+                && MediaCatalogCanonicalizationService.IsIdentityRace(exception))
+            {
+                _logger.LogDebug(exception, "Retrying manual provider link after a catalog identity race, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private async Task<MediaLinkResult> LinkProviderCoreAsync(
+        ApplicationDbContext db,
+        int userId,
+        Guid mediaTitleId,
+        string providerId,
+        string providerMediaId,
+        bool confirmReplacement,
+        CancellationToken cancellationToken)
+    {
+        var canEdit = await db.MediaLibraryEntries
             .AsNoTracking()
             .AnyAsync(entry => entry.UserId == userId && entry.MediaTitleId == mediaTitleId, cancellationToken);
         if (!canEdit)
@@ -69,7 +96,7 @@ public class MediaLibraryLinkService(
 
         var normalizedProvider = providerId.Trim().ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
-        var externalIdentity = await _dbContext.MediaProviderLinks
+        var externalIdentity = await db.MediaProviderLinks
             .Include(link => link.MediaTitle)
             .FirstOrDefaultAsync(
                 link => link.Provider == normalizedProvider && link.ExternalId == providerMediaId,
@@ -86,11 +113,11 @@ public class MediaLibraryLinkService(
 
             externalIdentity.LastVerifiedAt = now;
             externalIdentity.UpdatedAt = now;
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
             return MediaLinkResult.AlreadyLinked();
         }
 
-        var currentLink = await _dbContext.MediaProviderLinks
+        var currentLink = await db.MediaProviderLinks
             .FirstOrDefaultAsync(
                 link => link.MediaTitleId == mediaTitleId && link.Provider == normalizedProvider,
                 cancellationToken);
@@ -101,7 +128,7 @@ public class MediaLibraryLinkService(
                 return MediaLinkResult.ReplacementRequired(currentLink.ExternalId);
             }
 
-            var isBound = await _dbContext.MediaLibraryProviderBindings
+            var isBound = await db.MediaLibraryProviderBindings
                 .AsNoTracking()
                 .AnyAsync(binding => binding.MediaProviderLinkId == currentLink.Id, cancellationToken);
             if (isBound)
@@ -117,7 +144,7 @@ public class MediaLibraryLinkService(
         }
         else
         {
-            _dbContext.MediaProviderLinks.Add(new MediaProviderLink
+            db.MediaProviderLinks.Add(new MediaProviderLink
             {
                 Id = Guid.NewGuid(),
                 MediaTitleId = mediaTitleId,
@@ -131,7 +158,7 @@ public class MediaLibraryLinkService(
             });
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation(
             "User {UserId} linked MediaTitle {TitleId} to {Provider}/{ExternalId}.",
             userId,

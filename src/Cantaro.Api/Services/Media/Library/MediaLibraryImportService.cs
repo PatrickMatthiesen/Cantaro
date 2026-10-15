@@ -2,17 +2,21 @@ using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Cantaro.Api.Services;
 
 public class MediaLibraryImportService(
     ApplicationDbContext dbContext,
     MediaLibraryEventHub eventHub,
+    MediaCatalogCanonicalizationService catalogCanonicalizationService,
     ILogger<MediaLibraryImportService> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly DbContextOptions<ApplicationDbContext> _options =
+        (DbContextOptions<ApplicationDbContext>)dbContext.GetService<IDbContextOptions>();
     private readonly MediaLibraryEventHub _eventHub = eventHub;
+    private readonly MediaCatalogCanonicalizationService _catalogCanonicalizationService = catalogCanonicalizationService;
     private readonly ILogger<MediaLibraryImportService> _logger = logger;
 
     public async Task<MediaLibraryImportPersistenceResult> ImportAsync(
@@ -22,40 +26,69 @@ public class MediaLibraryImportService(
         CancellationToken cancellationToken,
         bool fanOutChanges = true)
     {
+        // Import owns its atomic write. A fresh context on every attempt keeps
+        // failed inserts out of the caller's tracker and preserves its pending work.
+        for (var attempt = 0; ; attempt++)
+        {
+            await using var db = new ApplicationDbContext(_options);
+            try
+            {
+                return await ImportCoreAsync(db, userId, account, importResult, cancellationToken, fanOutChanges);
+            }
+            catch (DbUpdateException exception) when (attempt < 2
+                && MediaCatalogCanonicalizationService.IsIdentityRace(exception))
+            {
+                _logger.LogDebug(exception, "Retrying media library import after a catalog identity race, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private async Task<MediaLibraryImportPersistenceResult> ImportCoreAsync(
+        ApplicationDbContext db,
+        int userId,
+        ConnectedServiceAccount account,
+        MediaProviderLibraryImportResult importResult,
+        CancellationToken cancellationToken,
+        bool fanOutChanges)
+    {
         var mediaIds = importResult.Items
             .Select(item => item.ProviderMediaId)
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        var existingLinks = await _dbContext.MediaProviderLinks
-            .Include(link => link.MediaTitle)
-            .Where(link => link.Provider == importResult.ProviderId && mediaIds.Contains(link.ExternalId))
-            .ToDictionaryAsync(link => link.ExternalId, StringComparer.Ordinal, cancellationToken);
-
-        var crossReferenceProviders = importResult.Items
-            .SelectMany(item => item.CrossReferences)
-            .Select(reference => NormalizeProviderId(reference.ProviderId))
-            .Where(provider => provider.Length > 0)
-            .Distinct(StringComparer.Ordinal)
+        var candidates = importResult.Items.Select(item => new MediaCatalogCandidate(
+            new MediaProviderTitleDetails
+            {
+                ProviderId = importResult.ProviderId,
+                ProviderMediaId = item.ProviderMediaId,
+                Title = item.Title,
+                ExternalUrl = item.ExternalUrl,
+                NativeTitle = item.OriginalTitle ?? item.NativeTitle,
+                Synonyms = item.Synonyms,
+                MediaKind = item.MediaKind,
+                Synopsis = item.Synopsis,
+                Format = item.Format,
+                PosterUrl = item.PosterUrl,
+                BackgroundUrl = item.BackgroundUrl,
+                CrossReferences = item.CrossReferences,
+                StartYear = item.StartYear,
+                EpisodeCount = item.EpisodeCount,
+                ChapterCount = item.ChapterCount,
+                VolumeCount = item.VolumeCount,
+                ReleasedCount = item.ReleasedCount,
+                TotalKnownCount = item.TotalKnownCount,
+                NextReleaseAt = item.NextReleaseAt,
+                NextReleaseLabel = item.NextReleaseLabel,
+                PrimaryProgressDimension = item.PrimaryProgressDimension,
+                ReleaseStatusDimension = item.ReleaseStatusDimension,
+                AvailabilityRefreshSucceeded = false
+            }))
             .ToList();
-        var crossReferenceMediaIds = importResult.Items
-            .SelectMany(item => item.CrossReferences)
-            .Select(reference => reference.ProviderMediaId.Trim())
-            .Where(mediaId => mediaId.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-        var crossReferenceLinks = crossReferenceProviders.Count == 0 || crossReferenceMediaIds.Count == 0
-            ? new Dictionary<string, MediaProviderLink>(StringComparer.Ordinal)
-            : (await _dbContext.MediaProviderLinks
-                .Include(link => link.MediaTitle)
-                .Where(link => crossReferenceProviders.Contains(link.Provider)
-                    && crossReferenceMediaIds.Contains(link.ExternalId))
-                .ToListAsync(cancellationToken))
-                .ToDictionary(
-                    link => BuildCrossReferenceKey(link.Provider, link.ExternalId),
-                    StringComparer.Ordinal);
+        var catalogResolution = await _catalogCanonicalizationService.ResolveAsync(
+            db, candidates, importResult.ImportedAt, cancellationToken);
+        var resolvedLinks = catalogResolution.Links;
 
-        var existingBindings = await _dbContext.MediaLibraryProviderBindings
+        var existingBindings = await db.MediaLibraryProviderBindings
             .Include(binding => binding.MediaLibraryEntry)
             .Include(binding => binding.MediaProviderLink)
             .Include(binding => binding.ProviderListMemberships)
@@ -68,27 +101,17 @@ public class MediaLibraryImportService(
                 StringComparer.Ordinal,
                 cancellationToken);
 
-        var knownTitleIds = existingLinks.Values
-            .Concat(crossReferenceLinks.Values)
+        var knownTitleIds = resolvedLinks.Values
             .Select(link => link.MediaTitleId)
             .Distinct()
             .ToList();
-        var titleProviderLinks = knownTitleIds.Count == 0
-            ? new Dictionary<string, MediaProviderLink>(StringComparer.Ordinal)
-            : (await _dbContext.MediaProviderLinks
-                .Include(link => link.MediaTitle)
-                .Where(link => knownTitleIds.Contains(link.MediaTitleId))
-                .ToListAsync(cancellationToken))
-                .ToDictionary(
-                    link => BuildTitleProviderKey(link.MediaTitleId, link.Provider),
-                    StringComparer.Ordinal);
-        var entriesByTitleId = await _dbContext.MediaLibraryEntries
+        var entriesByTitleId = await db.MediaLibraryEntries
             .Include(entry => entry.ProviderBindings)
                 .ThenInclude(binding => binding.MediaProviderLink)
             .Where(entry => entry.UserId == userId && knownTitleIds.Contains(entry.MediaTitleId))
             .ToDictionaryAsync(entry => entry.MediaTitleId, cancellationToken);
 
-        var createdTitles = 0;
+        var createdTitles = catalogResolution.CreatedTitles;
         var createdEntries = 0;
         var updatedEntries = 0;
         var createdBindings = 0;
@@ -96,26 +119,14 @@ public class MediaLibraryImportService(
 
         foreach (var item in importResult.Items)
         {
-            var link = GetOrCreateProviderLink(
-                item,
-                importResult,
-                existingLinks,
-                crossReferenceLinks,
-                titleProviderLinks,
-                ref createdTitles);
-            PersistCrossReferences(
-                link,
-                item.CrossReferences,
-                importResult.ImportedAt,
-                crossReferenceLinks,
-                titleProviderLinks);
+            var link = resolvedLinks[MediaCatalogIdentity.Create(importResult.ProviderId, item.ProviderMediaId)];
 
             entriesByTitleId.TryGetValue(link.MediaTitleId, out var entry);
             var entryWasCreated = entry is null;
             if (entry is null)
             {
                 entry = CreateLibraryEntry(userId, link.MediaTitleId, item, importResult.ImportedAt);
-                _dbContext.MediaLibraryEntries.Add(entry);
+                db.MediaLibraryEntries.Add(entry);
                 entriesByTitleId[link.MediaTitleId] = entry;
                 createdEntries++;
             }
@@ -127,7 +138,7 @@ public class MediaLibraryImportService(
             if (binding is null)
             {
                 binding = CreateProviderBinding(entry, link, account, item, importResult.ImportedAt);
-                _dbContext.MediaLibraryProviderBindings.Add(binding);
+                db.MediaLibraryProviderBindings.Add(binding);
                 existingBindings[item.ProviderMediaId] = binding;
                 createdBindings++;
             }
@@ -172,12 +183,12 @@ public class MediaLibraryImportService(
             binding.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
             binding.UpdatedAt = importResult.ImportedAt;
 
-            ReplaceProviderListMemberships(binding, item.ProviderListNames);
+            ReplaceProviderListMemberships(db, binding, item.ProviderListNames);
         }
 
-        _dbContext.MediaProviderOperations.AddRange(fanOutOperations);
+        db.MediaProviderOperations.AddRange(fanOutOperations);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         _eventHub.Publish(userId);
 
         _logger.LogInformation(
@@ -199,191 +210,6 @@ public class MediaLibraryImportService(
             UpdatedEntries = updatedEntries,
             ImportedAt = importResult.ImportedAt
         };
-    }
-
-    private void PersistCrossReferences(
-        MediaProviderLink primaryLink,
-        IReadOnlyList<MediaProviderCrossReference> crossReferences,
-        DateTimeOffset timestamp,
-        IDictionary<string, MediaProviderLink> existingCrossReferences,
-        IDictionary<string, MediaProviderLink> titleProviderLinks)
-    {
-        foreach (var reference in crossReferences)
-        {
-            var providerId = NormalizeProviderId(reference.ProviderId);
-            var providerMediaId = reference.ProviderMediaId.Trim();
-            if (providerId.Length == 0 || providerMediaId.Length == 0
-                || providerId == primaryLink.Provider && providerMediaId == primaryLink.ExternalId)
-            {
-                continue;
-            }
-
-            var key = BuildCrossReferenceKey(providerId, providerMediaId);
-            if (existingCrossReferences.TryGetValue(key, out var existing))
-            {
-                if (existing.MediaTitleId != primaryLink.MediaTitleId)
-                {
-                    _logger.LogWarning(
-                        "Provider cross-reference {Provider}/{ProviderMediaId} already belongs to MediaTitle {ExistingTitleId}; refusing to move it to {RequestedTitleId}.",
-                        providerId,
-                        providerMediaId,
-                        existing.MediaTitleId,
-                        primaryLink.MediaTitleId);
-                    continue;
-                }
-
-                existing.ExternalUrl = reference.ExternalUrl ?? existing.ExternalUrl;
-                existing.LastVerifiedAt = timestamp;
-                existing.UpdatedAt = timestamp;
-                continue;
-            }
-
-            var titleProviderKey = BuildTitleProviderKey(primaryLink.MediaTitleId, providerId);
-            if (titleProviderLinks.TryGetValue(titleProviderKey, out var conflictingProviderLink))
-            {
-                _logger.LogWarning(
-                    "MediaTitle {MediaTitleId} already has provider link {Provider}/{ExistingProviderMediaId}; refusing cross-reference {RequestedProviderMediaId}.",
-                    primaryLink.MediaTitleId,
-                    providerId,
-                    conflictingProviderLink.ExternalId,
-                    providerMediaId);
-                continue;
-            }
-
-            var link = new MediaProviderLink
-            {
-                Id = Guid.NewGuid(),
-                MediaTitleId = primaryLink.MediaTitleId,
-                Provider = providerId,
-                ExternalId = providerMediaId,
-                ExternalUrl = reference.ExternalUrl,
-                Confidence = 1m,
-                LinkSource = MediaMappingSources.Imported,
-                LastVerifiedAt = timestamp,
-                CreatedAt = timestamp,
-                UpdatedAt = timestamp,
-                MediaTitle = primaryLink.MediaTitle
-            };
-            _dbContext.MediaProviderLinks.Add(link);
-            existingCrossReferences[key] = link;
-            titleProviderLinks[titleProviderKey] = link;
-        }
-    }
-
-    private static string NormalizeProviderId(string providerId)
-        => providerId.Trim().ToLowerInvariant();
-
-    private static string BuildCrossReferenceKey(string providerId, string providerMediaId)
-        => $"{NormalizeProviderId(providerId)}\u001f{providerMediaId.Trim()}";
-
-    private static string BuildTitleProviderKey(Guid mediaTitleId, string providerId)
-        => $"{mediaTitleId:N}\u001f{NormalizeProviderId(providerId)}";
-
-    private static bool ShouldApplyCanonicalMetadata(
-        Guid mediaTitleId,
-        string incomingProviderId,
-        IDictionary<string, MediaProviderLink> titleProviderLinks)
-        => MediaCanonicalMetadataPolicy.ShouldApply(
-            incomingProviderId,
-            titleProviderLinks.Values
-                .Where(link => link.MediaTitleId == mediaTitleId)
-                .Select(link => link.Provider));
-
-    private MediaProviderLink GetOrCreateProviderLink(
-        MediaProviderLibraryItem item,
-        MediaProviderLibraryImportResult importResult,
-        IDictionary<string, MediaProviderLink> existingLinks,
-        IReadOnlyDictionary<string, MediaProviderLink> existingCrossReferences,
-        IDictionary<string, MediaProviderLink> titleProviderLinks,
-        ref int createdTitles)
-    {
-        if (existingLinks.TryGetValue(item.ProviderMediaId, out var existingLink))
-        {
-            if (existingLink.MediaTitle is not null
-                && ShouldApplyCanonicalMetadata(
-                    existingLink.MediaTitleId,
-                    importResult.ProviderId,
-                    titleProviderLinks))
-            {
-                ApplyToMediaTitle(existingLink.MediaTitle, item, importResult.ImportedAt);
-            }
-
-            existingLink.ExternalUrl = item.ExternalUrl ?? existingLink.ExternalUrl;
-            existingLink.LastVerifiedAt = importResult.ImportedAt;
-            existingLink.UpdatedAt = importResult.ImportedAt;
-            return existingLink;
-        }
-
-        var crossReferenceAnchors = item.CrossReferences
-            .Select(reference => BuildCrossReferenceKey(reference.ProviderId, reference.ProviderMediaId))
-            .Where(existingCrossReferences.ContainsKey)
-            .Select(key => existingCrossReferences[key])
-            .GroupBy(link => link.MediaTitleId)
-            .Select(group => group.First())
-            .Where(anchor =>
-            {
-                var titleProviderKey = BuildTitleProviderKey(anchor.MediaTitleId, importResult.ProviderId);
-                if (!titleProviderLinks.TryGetValue(titleProviderKey, out var providerLink)
-                    || providerLink.ExternalId == item.ProviderMediaId)
-                {
-                    return true;
-                }
-
-                _logger.LogWarning(
-                    "Cross-reference anchor MediaTitle {MediaTitleId} already has provider link {Provider}/{ExistingProviderMediaId}; refusing requested {RequestedProviderMediaId}.",
-                    anchor.MediaTitleId,
-                    importResult.ProviderId,
-                    providerLink.ExternalId,
-                    item.ProviderMediaId);
-                return false;
-            })
-            .ToList();
-        MediaTitle title;
-        if (crossReferenceAnchors.Count == 1
-            && crossReferenceAnchors[0].MediaTitle is { } anchoredTitle)
-        {
-            title = anchoredTitle;
-            if (ShouldApplyCanonicalMetadata(
-                    title.Id,
-                    importResult.ProviderId,
-                    titleProviderLinks))
-            {
-                ApplyToMediaTitle(title, item, importResult.ImportedAt);
-            }
-        }
-        else
-        {
-            if (crossReferenceAnchors.Count > 1)
-            {
-                _logger.LogWarning(
-                    "Provider item {Provider}/{ProviderMediaId} has cross-references attached to multiple MediaTitles; creating a separate title instead of guessing.",
-                    importResult.ProviderId,
-                    item.ProviderMediaId);
-            }
-
-            title = CreateMediaTitle(item, importResult.ImportedAt);
-            _dbContext.MediaTitles.Add(title);
-            createdTitles++;
-        }
-
-        var link = new MediaProviderLink
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = title.Id,
-            Provider = importResult.ProviderId,
-            ExternalId = item.ProviderMediaId,
-            ExternalUrl = item.ExternalUrl,
-            LinkSource = MediaMappingSources.Imported,
-            LastVerifiedAt = importResult.ImportedAt,
-            CreatedAt = importResult.ImportedAt,
-            UpdatedAt = importResult.ImportedAt,
-            MediaTitle = title
-        };
-
-        _dbContext.MediaProviderLinks.Add(link);
-        existingLinks[item.ProviderMediaId] = link;
-        titleProviderLinks[BuildTitleProviderKey(title.Id, importResult.ProviderId)] = link;
-        return link;
     }
 
     private static MediaLibraryEntry CreateLibraryEntry(
@@ -432,7 +258,8 @@ public class MediaLibraryImportService(
         };
     }
 
-    private void ReplaceProviderListMemberships(
+    private static void ReplaceProviderListMemberships(
+        ApplicationDbContext db,
         MediaLibraryProviderBinding binding,
         IReadOnlyList<string> providerListNames)
     {
@@ -445,7 +272,7 @@ public class MediaLibraryImportService(
         var removedMemberships = binding.ProviderListMemberships
             .Where(membership => !desiredNames.Contains(membership.Name))
             .ToList();
-        _dbContext.MediaProviderListMemberships.RemoveRange(removedMemberships);
+        db.MediaProviderListMemberships.RemoveRange(removedMemberships);
 
         var existingNames = binding.ProviderListMemberships
             .Except(removedMemberships)
@@ -462,53 +289,6 @@ public class MediaLibraryImportService(
                 });
             }
         }
-    }
-
-    private static MediaTitle CreateMediaTitle(MediaProviderLibraryItem item, DateTimeOffset timestamp)
-    {
-        var title = new MediaTitle
-        {
-            Id = Guid.NewGuid(),
-            CanonicalTitle = item.Title,
-            SortTitle = item.Title,
-            OriginalTitle = item.OriginalTitle ?? item.NativeTitle,
-            Synonyms = [.. item.Synonyms],
-            MediaKind = item.MediaKind,
-            PrimaryProgressDimension = item.PrimaryProgressDimension,
-            ReleaseStatusDimension = item.ReleaseStatusDimension,
-            CreatedAt = timestamp,
-            UpdatedAt = timestamp
-        };
-        ApplyToMediaTitle(title, item, timestamp);
-        return title;
-    }
-
-    private static void ApplyToMediaTitle(MediaTitle title, MediaProviderLibraryItem item, DateTimeOffset timestamp)
-    {
-        title.CanonicalTitle = item.Title;
-        title.SortTitle = item.Title;
-        title.OriginalTitle = item.OriginalTitle ?? item.NativeTitle ?? title.OriginalTitle;
-        title.Synonyms = [.. item.Synonyms];
-        title.MediaKind = item.MediaKind;
-        title.Synopsis = item.Synopsis ?? title.Synopsis;
-        title.Format = item.Format ?? title.Format;
-        title.PosterUrl = item.PosterUrl ?? title.PosterUrl;
-        title.BackgroundUrl = item.BackgroundUrl ?? title.BackgroundUrl;
-        title.StartYear = item.StartYear ?? title.StartYear;
-        title.EpisodeCount = item.EpisodeCount ?? title.EpisodeCount;
-        title.ChapterCount = item.ChapterCount ?? title.ChapterCount;
-        title.VolumeCount = item.VolumeCount ?? title.VolumeCount;
-        title.ReleasedCount = item.ReleasedCount ?? title.ReleasedCount;
-        title.TotalKnownCount = item.TotalKnownCount ?? title.TotalKnownCount;
-        title.NextReleaseAt = item.NextReleaseAt;
-        title.NextReleaseLabel = item.NextReleaseLabel;
-        title.SupportsEpisodeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Episode;
-        title.SupportsChapterProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Chapter;
-        title.SupportsVolumeProgress = item.PrimaryProgressDimension == MediaProgressDimensions.Volume;
-        title.IsCompletionOnly = item.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly;
-        title.PrimaryProgressDimension = item.PrimaryProgressDimension;
-        title.ReleaseStatusDimension = item.ReleaseStatusDimension;
-        title.UpdatedAt = timestamp;
     }
 
     private static bool ShouldApplyRemoteLibraryState(

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Cantaro.Api.Controllers;
 
@@ -26,6 +27,7 @@ public class MediaObservationsController(
     IMediaProviderRegistry mediaProviderRegistry,
     MediaLibraryEventHub mediaLibraryEventHub,
     ILogger<MediaObservationsController> logger,
+    MediaCatalogCanonicalizationService catalogService,
     MediaObservationLifecycleService? lifecycleService = null) : ControllerBase
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
@@ -39,6 +41,7 @@ public class MediaObservationsController(
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly MediaLibraryEventHub _mediaLibraryEventHub = mediaLibraryEventHub;
     private readonly ILogger<MediaObservationsController> _logger = logger;
+    private readonly MediaCatalogCanonicalizationService _catalogService = catalogService;
     private static readonly JsonSerializerOptions PayloadJsonOptions = new(JsonSerializerDefaults.Web);
 
     // -----------------------------------------------------------------------
@@ -937,7 +940,53 @@ public class MediaObservationsController(
             cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
-        var title = await FindOrCreateMediaTitleAsync(userId, provider.ProviderId, providerMediaId, details, now, cancellationToken);
+        details.ProviderId = provider.ProviderId;
+        details.ProviderMediaId = providerMediaId;
+        var options = (DbContextOptions<ApplicationDbContext>)_dbContext.GetService<IDbContextOptions>();
+        // Only retry local persistence. The provider mutation above must run once,
+        // and failed catalog inserts must not enter the observation's tracker.
+        for (var attempt = 0; ; attempt++)
+        {
+            await using var db = new ApplicationDbContext(options);
+            try
+            {
+                var result = await PersistProviderTitleAddAsync(
+                    db, userId, account, details, mutationResult, now, cancellationToken);
+                _mediaLibraryEventHub.Publish(userId);
+                return result;
+            }
+            catch (DbUpdateException exception) when (attempt < 2
+                && MediaCatalogCanonicalizationService.IsIdentityRace(exception))
+            {
+                _logger.LogDebug(exception, "Retrying observation library add after a catalog identity race, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private async Task<AddProviderTitleResult> PersistProviderTitleAddAsync(
+        ApplicationDbContext db,
+        int userId,
+        ConnectedServiceAccount account,
+        MediaProviderTitleDetails details,
+        MediaProviderMutationResult mutationResult,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var resolution = await _catalogService.ResolveAsync(
+            db,
+            [new MediaCatalogCandidate(
+                details,
+                LinkSource: MediaMappingSources.UserConfirmed,
+                LinkedByUserId: userId)],
+            now,
+            cancellationToken);
+        var providerLink = resolution.Links[MediaCatalogIdentity.Create(details.ProviderId, details.ProviderMediaId)];
+        var title = providerLink.MediaTitle!;
+        if (details.AvailabilityRefreshSucceeded)
+        {
+            providerLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
+            providerLink.AvailabilityLastVerifiedAt = now;
+        }
         var entry = new MediaLibraryEntry
         {
             Id = Guid.NewGuid(),
@@ -953,13 +1002,8 @@ public class MediaObservationsController(
             UpdatedAt = now
         };
 
-        _dbContext.MediaLibraryEntries.Add(entry);
-        var providerLink = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
-                link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId)
-            ?? await _dbContext.MediaProviderLinks.SingleAsync(
-                link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId,
-                cancellationToken);
-        _dbContext.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
+        db.MediaLibraryEntries.Add(entry);
+        db.MediaLibraryProviderBindings.Add(new MediaLibraryProviderBinding
         {
             Id = Guid.NewGuid(),
             MediaLibraryEntryId = entry.Id,
@@ -971,238 +1015,8 @@ public class MediaObservationsController(
             CreatedAt = now,
             UpdatedAt = now
         });
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        _mediaLibraryEventHub.Publish(userId);
+        await db.SaveChangesAsync(cancellationToken);
         return new AddProviderTitleResult(entry.Id, title.Id, title.CanonicalTitle, null);
-    }
-
-    private async Task<MediaTitle> FindOrCreateMediaTitleAsync(
-        int userId,
-        string providerId,
-        string providerMediaId,
-        MediaProviderTitleDetails details,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        var existingLink = await _dbContext.MediaProviderLinks
-            .Include(link => link.MediaTitle)
-                .ThenInclude(title => title!.ProviderLinks)
-            .FirstOrDefaultAsync(link => link.Provider == providerId && link.ExternalId == providerMediaId, cancellationToken);
-
-        if (existingLink?.MediaTitle is { } linkedTitle)
-        {
-            if (MediaCanonicalMetadataPolicy.ShouldApply(
-                    providerId,
-                    linkedTitle.ProviderLinks.Select(link => link.Provider)))
-            {
-                ApplyProviderDetails(linkedTitle, details, now);
-            }
-            await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
-            existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
-            existingLink.AvailabilityLastVerifiedAt = now;
-            existingLink.LastVerifiedAt = now;
-            existingLink.UpdatedAt = now;
-            return linkedTitle;
-        }
-
-        var crossReferenceAnchors = new List<MediaProviderLink>();
-        foreach (var reference in details.CrossReferences)
-        {
-            var provider = reference.ProviderId.Trim().ToLowerInvariant();
-            var mediaId = reference.ProviderMediaId.Trim();
-            var crossReference = await _dbContext.MediaProviderLinks
-                .Include(link => link.MediaTitle)
-                    .ThenInclude(title => title!.ProviderLinks)
-                .FirstOrDefaultAsync(
-                    link => link.Provider == provider && link.ExternalId == mediaId,
-                    cancellationToken);
-            if (crossReference is not null)
-            {
-                var conflictingPrimary = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
-                        link => link.MediaTitleId == crossReference.MediaTitleId && link.Provider == providerId)
-                    ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(
-                        link => link.MediaTitleId == crossReference.MediaTitleId && link.Provider == providerId,
-                        cancellationToken);
-                if (conflictingPrimary is not null && conflictingPrimary.ExternalId != providerMediaId)
-                {
-                    _logger.LogWarning(
-                        "Cross-reference anchor MediaTitle {MediaTitleId} already has provider link {Provider}/{ExistingProviderMediaId}; refusing requested {RequestedProviderMediaId}.",
-                        crossReference.MediaTitleId,
-                        providerId,
-                        conflictingPrimary.ExternalId,
-                        providerMediaId);
-                    continue;
-                }
-            }
-            if (crossReference is not null
-                && crossReferenceAnchors.All(anchor => anchor.MediaTitleId != crossReference.MediaTitleId))
-            {
-                crossReferenceAnchors.Add(crossReference);
-            }
-        }
-
-        MediaTitle title;
-        if (crossReferenceAnchors.Count == 1 && crossReferenceAnchors[0].MediaTitle is { } anchoredTitle)
-        {
-            title = anchoredTitle;
-            if (MediaCanonicalMetadataPolicy.ShouldApply(
-                    providerId,
-                    title.ProviderLinks.Select(link => link.Provider)))
-            {
-                ApplyProviderDetails(title, details, now);
-            }
-        }
-        else
-        {
-            title = new MediaTitle
-            {
-                Id = Guid.NewGuid(),
-                CanonicalTitle = details.Title,
-                SortTitle = details.Title,
-                OriginalTitle = details.NativeTitle,
-                Synonyms = [.. details.Synonyms],
-                MediaKind = details.MediaKind,
-                Synopsis = details.Synopsis,
-                Format = details.Format,
-                PosterUrl = details.PosterUrl,
-                BackgroundUrl = details.BackgroundUrl,
-                StartYear = details.StartYear,
-                EpisodeCount = details.EpisodeCount,
-                ChapterCount = details.ChapterCount,
-                VolumeCount = details.VolumeCount,
-                ReleasedCount = details.ReleasedCount,
-                TotalKnownCount = details.TotalKnownCount,
-                NextReleaseAt = details.NextReleaseAt,
-                NextReleaseLabel = details.NextReleaseLabel,
-                SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode,
-                SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter,
-                SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume,
-                IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly,
-                PrimaryProgressDimension = details.PrimaryProgressDimension,
-                ReleaseStatusDimension = details.ReleaseStatusDimension,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            _dbContext.MediaTitles.Add(title);
-        }
-
-        _dbContext.MediaProviderLinks.Add(new MediaProviderLink
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = title.Id,
-            Provider = providerId,
-            ExternalId = providerMediaId,
-            LinkSource = MediaMappingSources.UserConfirmed,
-            LinkedByUserId = userId,
-            LastVerifiedAt = now,
-            AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks),
-            AvailabilityLastVerifiedAt = now,
-            CreatedAt = now,
-            UpdatedAt = now
-        });
-        await PersistProviderCrossReferencesAsync(title, details.CrossReferences, now, cancellationToken);
-
-        return title;
-    }
-
-    private async Task PersistProviderCrossReferencesAsync(
-        MediaTitle title,
-        IReadOnlyList<MediaProviderCrossReference> crossReferences,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        foreach (var reference in crossReferences)
-        {
-            var provider = reference.ProviderId.Trim().ToLowerInvariant();
-            var mediaId = reference.ProviderMediaId.Trim();
-            if (provider.Length == 0 || mediaId.Length == 0)
-            {
-                continue;
-            }
-
-            var link = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
-                    candidate => candidate.Provider == provider && candidate.ExternalId == mediaId)
-                ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(
-                    candidate => candidate.Provider == provider && candidate.ExternalId == mediaId,
-                    cancellationToken);
-            if (link is null)
-            {
-                var conflictingProviderLink = _dbContext.MediaProviderLinks.Local.FirstOrDefault(
-                        candidate => candidate.MediaTitleId == title.Id && candidate.Provider == provider)
-                    ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(
-                        candidate => candidate.MediaTitleId == title.Id && candidate.Provider == provider,
-                        cancellationToken);
-                if (conflictingProviderLink is not null)
-                {
-                    _logger.LogWarning(
-                        "MediaTitle {MediaTitleId} already has provider link {Provider}/{ExistingProviderMediaId}; refusing cross-reference {RequestedProviderMediaId}.",
-                        title.Id,
-                        provider,
-                        conflictingProviderLink.ExternalId,
-                        mediaId);
-                    continue;
-                }
-
-                _dbContext.MediaProviderLinks.Add(new MediaProviderLink
-                {
-                    Id = Guid.NewGuid(),
-                    MediaTitleId = title.Id,
-                    Provider = provider,
-                    ExternalId = mediaId,
-                    ExternalUrl = reference.ExternalUrl,
-                    Confidence = 1m,
-                    LinkSource = MediaMappingSources.Imported,
-                    LastVerifiedAt = now,
-                    CreatedAt = now,
-                    UpdatedAt = now,
-                    MediaTitle = title
-                });
-                continue;
-            }
-
-            if (link.MediaTitleId != title.Id)
-            {
-                _logger.LogWarning(
-                    "Provider cross-reference {Provider}/{ProviderMediaId} already belongs to MediaTitle {ExistingTitleId}; refusing to move it to {RequestedTitleId}.",
-                    provider,
-                    mediaId,
-                    link.MediaTitleId,
-                    title.Id);
-                continue;
-            }
-
-            link.ExternalUrl = reference.ExternalUrl ?? link.ExternalUrl;
-            link.LastVerifiedAt = now;
-            link.UpdatedAt = now;
-        }
-    }
-
-    private static void ApplyProviderDetails(MediaTitle title, MediaProviderTitleDetails details, DateTimeOffset now)
-    {
-        title.CanonicalTitle = details.Title;
-        title.SortTitle = details.Title;
-        title.OriginalTitle = details.NativeTitle ?? title.OriginalTitle;
-        title.Synonyms = [.. details.Synonyms];
-        title.MediaKind = details.MediaKind;
-        title.Synopsis = details.Synopsis ?? title.Synopsis;
-        title.Format = details.Format ?? title.Format;
-        title.PosterUrl = details.PosterUrl ?? title.PosterUrl;
-        title.BackgroundUrl = details.BackgroundUrl ?? title.BackgroundUrl;
-        title.StartYear = details.StartYear ?? title.StartYear;
-        title.EpisodeCount = details.EpisodeCount ?? title.EpisodeCount;
-        title.ChapterCount = details.ChapterCount ?? title.ChapterCount;
-        title.VolumeCount = details.VolumeCount ?? title.VolumeCount;
-        title.ReleasedCount = details.ReleasedCount ?? title.ReleasedCount;
-        title.TotalKnownCount = details.TotalKnownCount ?? title.TotalKnownCount;
-        title.NextReleaseAt = details.NextReleaseAt;
-        title.NextReleaseLabel = details.NextReleaseLabel;
-        title.SupportsEpisodeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Episode;
-        title.SupportsChapterProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Chapter;
-        title.SupportsVolumeProgress = details.PrimaryProgressDimension == MediaProgressDimensions.Volume;
-        title.IsCompletionOnly = details.PrimaryProgressDimension == MediaProgressDimensions.CompletionOnly;
-        title.PrimaryProgressDimension = details.PrimaryProgressDimension;
-        title.ReleaseStatusDimension = details.ReleaseStatusDimension;
-        title.UpdatedAt = now;
     }
 
     private async Task ApplyStoredOffsetAsync(MediaObservation observation, CancellationToken cancellationToken)

@@ -3,6 +3,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -176,7 +177,7 @@ public class MediaLibraryImportServiceTests
                 hasNonContiguousProgress: true),
             CancellationToken.None);
 
-        Assert.Equal(15, (await db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
+        Assert.Equal(15, (await db.MediaLibraryEntries.AsNoTracking().SingleAsync()).ProgressEpisodes);
         Assert.Empty(await db.MediaProviderOperations.ToListAsync());
     }
 
@@ -211,7 +212,7 @@ public class MediaLibraryImportServiceTests
         var simklImport = MakeImport(now, progress: 5, remoteUpdatedAt: now);
         simklImport.ProviderId = "simkl";
         var simklItem = simklImport.Items[0];
-        simklItem.ProviderMediaId = "show-42";
+        simklItem.ProviderMediaId = "anime:42";
         simklItem.Status = MediaLibraryStatuses.Current;
         simklItem.Score = 20m;
         simklItem.CrossReferences = [new MediaProviderCrossReference
@@ -238,7 +239,7 @@ public class MediaLibraryImportServiceTests
         simklItem.Score = 95m;
         await service.ImportAsync(user.Id, simklAccount, simklImport, CancellationToken.None);
 
-        Assert.Equal(95m, (await db.MediaLibraryEntries.SingleAsync()).Score);
+        Assert.Equal(95m, (await db.MediaLibraryEntries.AsNoTracking().SingleAsync()).Score);
         var fanOut = await db.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationTypes.ImportFanOutScore, fanOut.OperationType);
     }
@@ -297,7 +298,7 @@ public class MediaLibraryImportServiceTests
         import.Items[0].Status = MediaLibraryStatuses.Current;
         await service.ImportAsync(user.Id, account, import, CancellationToken.None);
 
-        var persistedEntry = await db.MediaLibraryEntries.SingleAsync();
+        var persistedEntry = await db.MediaLibraryEntries.AsNoTracking().SingleAsync();
         Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.Status);
         Assert.Equal(90m, persistedEntry.Score);
         var operations = await db.MediaProviderOperations.ToListAsync();
@@ -327,15 +328,17 @@ public class MediaLibraryImportServiceTests
         import.Items[0].Status = MediaLibraryStatuses.Paused;
         await service.ImportAsync(user.Id, account, import, CancellationToken.None);
 
-        var persistedEntry = await db.MediaLibraryEntries.SingleAsync();
-        var persistedBinding = await db.MediaLibraryProviderBindings.SingleAsync();
+        var persistedEntry = await db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        var persistedBinding = await db.MediaLibraryProviderBindings.AsNoTracking().SingleAsync();
         Assert.Equal(MediaLibraryStatuses.Paused, persistedEntry.Status);
         Assert.Null(persistedBinding.LastRequestedStatus);
         Assert.Null(persistedBinding.LastAppliedStatus);
     }
 
     private static MediaLibraryImportService MakeService(ApplicationDbContext db) =>
-        new(db, new MediaLibraryEventHub(), NullLogger<MediaLibraryImportService>.Instance);
+        new(db, new MediaLibraryEventHub(), new MediaCatalogCanonicalizationService(
+            (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+            NullLogger<MediaCatalogCanonicalizationService>.Instance), NullLogger<MediaLibraryImportService>.Instance);
 
     private static MediaProviderLibraryImportResult MakeImport(
         DateTimeOffset importedAt,

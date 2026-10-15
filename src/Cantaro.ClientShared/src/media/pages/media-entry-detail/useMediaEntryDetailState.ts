@@ -26,6 +26,7 @@ import type {
   MediaViewerStateDto,
 } from '../../services/mediaApi';
 import type { ContinueWatchingState, EpisodeCatalogState, StatusDraft } from './mediaEntryDetailTypes';
+import { mergeTitleMetadata } from './mediaEntryDetailModel';
 
 function getErrorMessage(error: unknown, fallbackMessage: string): string {
   return error instanceof Error ? error.message : fallbackMessage;
@@ -56,9 +57,9 @@ async function loadAvailabilityStates(
 
     try {
       const details = await getProviderTitleDetails(link, forceRefresh);
-      return { key, state: buildLoadedAvailabilityState(details) };
+      return { key, state: buildLoadedAvailabilityState(details), hydrated: true };
     } catch (error) {
-      return { key, state: buildFailedAvailabilityState(link, error) };
+      return { key, state: buildFailedAvailabilityState(link, error), hydrated: false };
     }
   }));
 }
@@ -207,6 +208,8 @@ export function useEntryDetailState(mediaTitleId: string) {
   const [progressVolumes, setProgressVolumes] = useState<number | undefined>();
   const [selectedStatus, setSelectedStatus] = useState('');
   const entryRef = useRef<MediaEntryDetailModel | null>(null);
+  const mediaTitleIdRef = useRef(mediaTitleId);
+  mediaTitleIdRef.current = mediaTitleId;
   const draftRef = useRef<StatusDraft>({
     selectedStatus: '',
     progressEpisodes: undefined,
@@ -279,6 +282,16 @@ export function useEntryDetailState(mediaTitleId: string) {
     return data;
   }, [applyEntryData, mediaTitleId]);
 
+  const refreshTitleMetadata = useCallback(async () => {
+    const title = await mediaApi.getMediaTitle(mediaTitleId);
+    setEntry((current) => mergeTitleMetadata(
+      current,
+      mediaTitleId,
+      mediaTitleIdRef.current,
+      title,
+    ));
+  }, [mediaTitleId]);
+
   useEffect(() => {
     void loadEntry();
   }, [loadEntry]);
@@ -290,6 +303,7 @@ export function useEntryDetailState(mediaTitleId: string) {
     error,
     loadEntry,
     reloadEntry,
+    refreshTitleMetadata,
     progressEpisodes,
     setProgressEpisodes,
     progressChapters,
@@ -301,11 +315,29 @@ export function useEntryDetailState(mediaTitleId: string) {
   };
 }
 
-export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
+export function useProviderAvailability(
+  entry: MediaEntryDetailModel | null,
+  refreshTitleMetadata?: () => Promise<void>,
+) {
   const [availabilityByProviderLink, setAvailabilityByProviderLink] = useState<ProviderAvailabilityMap>({});
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [seasonCatalogHydrationRevision, setSeasonCatalogHydrationRevision] = useState(0);
   const forceRefreshRef = useRef(false);
+  const refreshTitleMetadataRef = useRef(refreshTitleMetadata);
+  const providerLinksRef = useRef(entry?.providerLinks ?? []);
+  const titleId = entry?.mediaTitleId;
+  const providerLinksSignature = JSON.stringify((entry?.providerLinks ?? [])
+    .map(({ provider, externalId }) => [provider.toLowerCase(), externalId])
+    .sort(([providerA, idA], [providerB, idB]) =>
+      String(providerA).localeCompare(String(providerB)) || String(idA).localeCompare(String(idB))));
+
+  useEffect(() => {
+    providerLinksRef.current = entry?.providerLinks ?? [];
+  }, [entry?.providerLinks]);
+
+  useEffect(() => {
+    refreshTitleMetadataRef.current = refreshTitleMetadata;
+  }, [refreshTitleMetadata]);
 
   const reload = useCallback(() => {
     forceRefreshRef.current = true;
@@ -313,7 +345,8 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
   }, []);
 
   useEffect(() => {
-    if (!entry || entry.providerLinks.length === 0) {
+    const providerLinks = providerLinksRef.current;
+    if (!titleId || providerLinks.length === 0) {
       setAvailabilityByProviderLink({});
       return;
     }
@@ -321,12 +354,12 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     let isCancelled = false;
     const forceRefresh = forceRefreshRef.current;
     forceRefreshRef.current = false;
-    setAvailabilityByProviderLink((current) => buildAvailabilityMap(entry.providerLinks, current));
+    setAvailabilityByProviderLink((current) => buildAvailabilityMap(providerLinks, current));
 
     const loadAvailability = async () => {
-      await Promise.all(entry.providerLinks.map(async (link) => {
+      const results = await Promise.all(providerLinks.map(async (link) => {
         const [result] = await loadAvailabilityStates([link], forceRefresh);
-        if (isCancelled || !result) return;
+        if (isCancelled || !result) return false;
 
         setAvailabilityByProviderLink((current) => ({
           ...current,
@@ -335,7 +368,11 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
         if (link.provider.toLowerCase() === 'simkl') {
           setSeasonCatalogHydrationRevision((revision) => revision + 1);
         }
+        return result.hydrated;
       }));
+      if (!isCancelled && results.some(Boolean)) {
+        void refreshTitleMetadataRef.current?.().catch(() => undefined);
+      }
     };
 
     void loadAvailability();
@@ -343,7 +380,7 @@ export function useProviderAvailability(entry: MediaEntryDetailModel | null) {
     return () => {
       isCancelled = true;
     };
-  }, [entry, refreshRevision]);
+  }, [providerLinksSignature, refreshRevision, titleId]);
 
   return { availabilityByProviderLink, seasonCatalogHydrationRevision, reload };
 }
