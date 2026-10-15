@@ -154,6 +154,7 @@ internal static class SimklJson
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),
             MediaKind = MediaKind(type), Synopsis = String(media, "overview"),
             Format = format,
+            ExternalUrl = ExternalUrl(type, id),
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
             CrossReferences = CrossReferences(type, ids), StartYear = Int(media, "year"),

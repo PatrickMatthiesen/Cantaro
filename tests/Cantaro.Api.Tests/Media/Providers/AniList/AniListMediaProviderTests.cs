@@ -238,6 +238,7 @@ public class AniListMediaProviderTests
         var details = await provider.GetTitleDetailsAsync(user.Id, "140960", CancellationToken.None);
 
         Assert.NotNull(details);
+        Assert.Equal("https://anilist.co/anime/140960/Spy-x-Family", details.ExternalUrl);
         Assert.Equal(["SPY×FAMILY", "Spy Family"], details.Synonyms);
         Assert.Contains("synonyms", handler.LastRequestBody, StringComparison.Ordinal);
         Assert.Equal("https://example.test/poster-extra-large.jpg", details.PosterUrl);

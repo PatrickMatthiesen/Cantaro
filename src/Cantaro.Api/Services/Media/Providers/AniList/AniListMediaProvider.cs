@@ -593,6 +593,7 @@ public class AniListMediaProvider(
             MediaKind = mediaKind,
             Synopsis = media.Description,
             Format = media.Format,
+            ExternalUrl = media.SiteUrl,
             PosterUrl = SelectPosterUrl(media.CoverImage),
             BackgroundUrl = media.BannerImage,
             CrossReferences = BuildCrossReferences(media, mediaKind),

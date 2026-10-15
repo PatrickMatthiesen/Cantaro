@@ -168,6 +168,7 @@ public sealed class SimklMediaProviderTests
         });
         var details = await fixture.Provider.GetTitleDetailsAsync(1, "tv:123", CancellationToken.None);
         Assert.Equal("Show", details?.Title);
+        Assert.Equal("https://simkl.com/tv/123/", details?.ExternalUrl);
         Assert.Equal([(1, 1), (2, 1)], details?.EpisodeCatalog?.Select(item => (item.SeasonNumber, item.EpisodeNumber)));
         Assert.Equal(["Pilot", "Premiere"], details?.EpisodeCatalog?.Select(item => item.Title));
         var catalogRequest = Assert.Single(fixture.Handler.Uris, uri => uri.AbsolutePath == "/tv/episodes/123");
@@ -219,6 +220,7 @@ public sealed class SimklMediaProviderTests
         var details = await fixture.Provider.GetTitleDetailsAsync(1, "anime:123", CancellationToken.None);
 
         var availability = Assert.Single(details!.AvailabilityLinks);
+        Assert.Equal("https://simkl.com/anime/123/", details.ExternalUrl);
         Assert.Equal("netflix", availability.ServiceId);
         Assert.True(details.AvailabilityRefreshSucceeded);
         Assert.Equal(1, enricher.CallCount);
