@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Cantaro.Api.Services;
 
@@ -12,7 +13,8 @@ public class MediaLibraryImportService(
     ILogger<MediaLibraryImportService> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-    private readonly ApplicationDbContext _dbContext = dbContext;
+    private readonly DbContextOptions<ApplicationDbContext> _options =
+        (DbContextOptions<ApplicationDbContext>)dbContext.GetService<IDbContextOptions>();
     private readonly MediaLibraryEventHub _eventHub = eventHub;
     private readonly MediaCatalogCanonicalizationService _catalogCanonicalizationService = catalogCanonicalizationService;
     private readonly ILogger<MediaLibraryImportService> _logger = logger;
@@ -23,6 +25,31 @@ public class MediaLibraryImportService(
         MediaProviderLibraryImportResult importResult,
         CancellationToken cancellationToken,
         bool fanOutChanges = true)
+    {
+        // Import owns its atomic write. A fresh context on every attempt keeps
+        // failed inserts out of the caller's tracker and preserves its pending work.
+        for (var attempt = 0; ; attempt++)
+        {
+            await using var db = new ApplicationDbContext(_options);
+            try
+            {
+                return await ImportCoreAsync(db, userId, account, importResult, cancellationToken, fanOutChanges);
+            }
+            catch (DbUpdateException exception) when (attempt < 2
+                && MediaCatalogCanonicalizationService.IsIdentityRace(exception))
+            {
+                _logger.LogDebug(exception, "Retrying media library import after a catalog identity race, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private async Task<MediaLibraryImportPersistenceResult> ImportCoreAsync(
+        ApplicationDbContext db,
+        int userId,
+        ConnectedServiceAccount account,
+        MediaProviderLibraryImportResult importResult,
+        CancellationToken cancellationToken,
+        bool fanOutChanges)
     {
         var mediaIds = importResult.Items
             .Select(item => item.ProviderMediaId)
@@ -58,10 +85,10 @@ public class MediaLibraryImportService(
             }))
             .ToList();
         var catalogResolution = await _catalogCanonicalizationService.ResolveAsync(
-            _dbContext, candidates, importResult.ImportedAt, cancellationToken);
+            db, candidates, importResult.ImportedAt, cancellationToken);
         var resolvedLinks = catalogResolution.Links;
 
-        var existingBindings = await _dbContext.MediaLibraryProviderBindings
+        var existingBindings = await db.MediaLibraryProviderBindings
             .Include(binding => binding.MediaLibraryEntry)
             .Include(binding => binding.MediaProviderLink)
             .Include(binding => binding.ProviderListMemberships)
@@ -78,7 +105,7 @@ public class MediaLibraryImportService(
             .Select(link => link.MediaTitleId)
             .Distinct()
             .ToList();
-        var entriesByTitleId = await _dbContext.MediaLibraryEntries
+        var entriesByTitleId = await db.MediaLibraryEntries
             .Include(entry => entry.ProviderBindings)
                 .ThenInclude(binding => binding.MediaProviderLink)
             .Where(entry => entry.UserId == userId && knownTitleIds.Contains(entry.MediaTitleId))
@@ -99,7 +126,7 @@ public class MediaLibraryImportService(
             if (entry is null)
             {
                 entry = CreateLibraryEntry(userId, link.MediaTitleId, item, importResult.ImportedAt);
-                _dbContext.MediaLibraryEntries.Add(entry);
+                db.MediaLibraryEntries.Add(entry);
                 entriesByTitleId[link.MediaTitleId] = entry;
                 createdEntries++;
             }
@@ -111,7 +138,7 @@ public class MediaLibraryImportService(
             if (binding is null)
             {
                 binding = CreateProviderBinding(entry, link, account, item, importResult.ImportedAt);
-                _dbContext.MediaLibraryProviderBindings.Add(binding);
+                db.MediaLibraryProviderBindings.Add(binding);
                 existingBindings[item.ProviderMediaId] = binding;
                 createdBindings++;
             }
@@ -156,12 +183,12 @@ public class MediaLibraryImportService(
             binding.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
             binding.UpdatedAt = importResult.ImportedAt;
 
-            ReplaceProviderListMemberships(binding, item.ProviderListNames);
+            ReplaceProviderListMemberships(db, binding, item.ProviderListNames);
         }
 
-        _dbContext.MediaProviderOperations.AddRange(fanOutOperations);
+        db.MediaProviderOperations.AddRange(fanOutOperations);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         _eventHub.Publish(userId);
 
         _logger.LogInformation(
@@ -231,7 +258,8 @@ public class MediaLibraryImportService(
         };
     }
 
-    private void ReplaceProviderListMemberships(
+    private static void ReplaceProviderListMemberships(
+        ApplicationDbContext db,
         MediaLibraryProviderBinding binding,
         IReadOnlyList<string> providerListNames)
     {
@@ -244,7 +272,7 @@ public class MediaLibraryImportService(
         var removedMemberships = binding.ProviderListMemberships
             .Where(membership => !desiredNames.Contains(membership.Name))
             .ToList();
-        _dbContext.MediaProviderListMemberships.RemoveRange(removedMemberships);
+        db.MediaProviderListMemberships.RemoveRange(removedMemberships);
 
         var existingNames = binding.ProviderListMemberships
             .Except(removedMemberships)

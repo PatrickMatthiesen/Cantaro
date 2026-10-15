@@ -177,7 +177,7 @@ public class MediaLibraryImportServiceTests
                 hasNonContiguousProgress: true),
             CancellationToken.None);
 
-        Assert.Equal(15, (await db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
+        Assert.Equal(15, (await db.MediaLibraryEntries.AsNoTracking().SingleAsync()).ProgressEpisodes);
         Assert.Empty(await db.MediaProviderOperations.ToListAsync());
     }
 
@@ -239,7 +239,7 @@ public class MediaLibraryImportServiceTests
         simklItem.Score = 95m;
         await service.ImportAsync(user.Id, simklAccount, simklImport, CancellationToken.None);
 
-        Assert.Equal(95m, (await db.MediaLibraryEntries.SingleAsync()).Score);
+        Assert.Equal(95m, (await db.MediaLibraryEntries.AsNoTracking().SingleAsync()).Score);
         var fanOut = await db.MediaProviderOperations.SingleAsync();
         Assert.Equal(MediaProviderOperationTypes.ImportFanOutScore, fanOut.OperationType);
     }
@@ -298,7 +298,7 @@ public class MediaLibraryImportServiceTests
         import.Items[0].Status = MediaLibraryStatuses.Current;
         await service.ImportAsync(user.Id, account, import, CancellationToken.None);
 
-        var persistedEntry = await db.MediaLibraryEntries.SingleAsync();
+        var persistedEntry = await db.MediaLibraryEntries.AsNoTracking().SingleAsync();
         Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.Status);
         Assert.Equal(90m, persistedEntry.Score);
         var operations = await db.MediaProviderOperations.ToListAsync();
@@ -328,8 +328,8 @@ public class MediaLibraryImportServiceTests
         import.Items[0].Status = MediaLibraryStatuses.Paused;
         await service.ImportAsync(user.Id, account, import, CancellationToken.None);
 
-        var persistedEntry = await db.MediaLibraryEntries.SingleAsync();
-        var persistedBinding = await db.MediaLibraryProviderBindings.SingleAsync();
+        var persistedEntry = await db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        var persistedBinding = await db.MediaLibraryProviderBindings.AsNoTracking().SingleAsync();
         Assert.Equal(MediaLibraryStatuses.Paused, persistedEntry.Status);
         Assert.Null(persistedBinding.LastRequestedStatus);
         Assert.Null(persistedBinding.LastAppliedStatus);

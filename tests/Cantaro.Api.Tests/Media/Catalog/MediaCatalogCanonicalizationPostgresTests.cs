@@ -50,6 +50,91 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
     }
 
     [PostgresFact]
+    public async Task ImportAsync_RetriesIdentityRaceAtomicallyWithoutSavingCallerContextChanges()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        var user = TestUserFactory.Create(47811, "catalog-import-race@example.test");
+        var account = new ConnectedServiceAccount
+        {
+            UserId = user.Id,
+            Service = "anilist",
+            ExternalAccountId = "catalog-import-race-account",
+            ConnectionState = "connected",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        schema.Db.AddRange(user, account);
+        await schema.Db.SaveChangesAsync();
+
+        var candidateResult = Candidate("anilist", "211778", "The World's Strongest Witch", "10").Result
+            with { CrossReferences = [] };
+        var candidate = new MediaCatalogSearchCandidate("anilist", candidateResult);
+        var interleaved = new ImportIdentityClaimBeforeSave(() => MakeService(schema.Options)
+            .CanonicalizeAsync([candidate], default));
+        var importOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+        await using var callerContext = new ApplicationDbContext(importOptions);
+        var pendingChange = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Unrelated caller change",
+            MediaKind = "anime",
+            PrimaryProgressDimension = "episode",
+            ReleaseStatusDimension = "episode",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        callerContext.MediaTitles.Add(pendingChange);
+        var importService = new MediaLibraryImportService(callerContext, new MediaLibraryEventHub(),
+            MakeService(importOptions), NullLogger<MediaLibraryImportService>.Instance);
+        var importedAt = DateTimeOffset.UtcNow;
+        var import = new MediaProviderLibraryImportResult
+        {
+            ProviderId = "anilist",
+            ImportedAt = importedAt,
+            Items =
+            [
+                new MediaProviderLibraryItem
+                {
+                    ProviderMediaId = "211778",
+                    Title = "The World's Strongest Witch",
+                    MediaKind = "anime",
+                    Status = MediaLibraryStatuses.Planned,
+                    ProgressEpisodes = 3,
+                    EpisodeCount = 12,
+                    PrimaryProgressDimension = "episode",
+                    ReleaseStatusDimension = "episode",
+                    CrossReferences = []
+                }
+            ]
+        };
+
+        var result = await importService.ImportAsync(user.Id, account, import, default);
+
+        Assert.Equal(1, interleaved.ClaimCount);
+        Assert.Equal(2, interleaved.SaveAttempts);
+        Assert.Equal(0, result.CreatedTitles);
+        Assert.Equal(1, result.CreatedEntries);
+        Assert.Equal(1, await schema.Db.MediaTitles.CountAsync());
+        Assert.Equal(1, await schema.Db.MediaProviderLinks.CountAsync());
+        var entry = await schema.Db.MediaLibraryEntries.SingleAsync();
+        Assert.Equal(user.Id, entry.UserId);
+        Assert.Equal(3, entry.ProgressEpisodes);
+        var binding = await schema.Db.MediaLibraryProviderBindings.Include(item => item.MediaProviderLink).SingleAsync();
+        Assert.Equal(account.Id, binding.ConnectedServiceAccountId);
+        Assert.Equal("211778", binding.MediaProviderLink!.ExternalId);
+        Assert.Equal(entry.MediaTitleId, binding.MediaProviderLink.MediaTitleId);
+        Assert.Equal(EntityState.Added, callerContext.Entry(pendingChange).State);
+        Assert.False(await schema.Db.MediaTitles.AnyAsync(title => title.Id == pendingChange.Id));
+
+        pendingChange.Synopsis = "Caller context still works";
+        await callerContext.SaveChangesAsync();
+        Assert.Equal("Caller context still works", await schema.Db.MediaTitles.AsNoTracking()
+            .Where(title => title.Id == pendingChange.Id).Select(title => title.Synopsis).SingleAsync());
+        Assert.Equal(1, await schema.Db.MediaLibraryEntries.CountAsync());
+    }
+
+    [PostgresFact]
     public async Task CanonicalizeAsync_BatchesWritesReusesStoredMetadataAndSupportsSynonymSearch()
     {
         var counter = new CommandCounter();
@@ -244,6 +329,26 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
             {
                 DetailWrites++;
                 await writeDetails(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class ImportIdentityClaimBeforeSave(Func<Task> claimIdentity) : SaveChangesInterceptor
+    {
+        private bool _claimed;
+        public int ClaimCount { get; private set; }
+        public int SaveAttempts { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            SaveAttempts++;
+            if (!_claimed)
+            {
+                _claimed = true;
+                ClaimCount++;
+                await claimIdentity();
             }
             return result;
         }

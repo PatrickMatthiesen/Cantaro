@@ -57,7 +57,7 @@ public sealed class MediaCatalogCanonicalizationService(
         }
     }
 
-    private static bool IsIdentityRace(DbUpdateException exception) =>
+    internal static bool IsIdentityRace(DbUpdateException exception) =>
         exception.InnerException is PostgresException
         {
             SqlState: PostgresErrorCodes.UniqueViolation,
