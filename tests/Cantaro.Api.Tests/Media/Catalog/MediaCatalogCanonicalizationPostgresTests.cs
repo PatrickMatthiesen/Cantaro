@@ -427,6 +427,137 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
             .SingleAsync(link => link.Provider == "myanimelist")).MediaTitleId);
     }
 
+    [PostgresFact]
+    public async Task LinkProviderAsync_RetriesDiscoveryIdentityRaceAndReturnsWinningTitleConflict()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        const int userId = 47814;
+        const string providerId = "anilist";
+        const string providerMediaId = "manual-link-discovery-conflict";
+        var user = TestUserFactory.Create(userId, "manual-link-discovery-conflict@example.test");
+        var target = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "User's chosen title",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var libraryEntry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            MediaTitleId = target.Id,
+            Status = MediaLibraryStatuses.Current,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        schema.Db.AddRange(user, target, libraryEntry);
+        await schema.Db.SaveChangesAsync();
+
+        var interleaved = new ProviderIdentityClaimBeforeSave(() => MakeService(schema.Options)
+            .CanonicalizeAsync(
+            [new MediaCatalogSearchCandidate(providerId, new CachedMediaProviderSearchResult(
+                providerMediaId, "Discovery's different title", MediaKinds.Anime, null, 2024)
+            {
+                PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode
+            })], default));
+        var callerOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+        await using var callerDb = new ApplicationDbContext(callerOptions);
+
+        var result = await new MediaLibraryLinkService(
+            callerDb, NullLogger<MediaLibraryLinkService>.Instance)
+            .LinkProviderAsync(user.Id, target.Id, providerId, providerMediaId, false, default);
+
+        Assert.Equal(MediaLinkResultKind.ConflictingTitle, result.Kind);
+        var winner = await schema.Db.MediaProviderLinks.AsNoTracking()
+            .Include(link => link.MediaTitle)
+            .SingleAsync(link => link.Provider == providerId && link.ExternalId == providerMediaId);
+        Assert.Equal(1, interleaved.ClaimCount);
+        Assert.Equal(1, interleaved.UniqueViolationCount);
+        Assert.NotEqual(target.Id, winner.MediaTitleId);
+        Assert.Equal("Discovery's different title", winner.MediaTitle!.CanonicalTitle);
+        Assert.Equal(winner.MediaTitleId, result.ConflictingMediaTitleId);
+        Assert.Equal(winner.MediaTitle.CanonicalTitle, result.ConflictingCanonicalTitle);
+        Assert.Equal("User's chosen title", (await schema.Db.MediaTitles.AsNoTracking()
+            .SingleAsync(title => title.Id == target.Id)).CanonicalTitle);
+        Assert.Equal(target.Id, (await schema.Db.MediaLibraryEntries.AsNoTracking()
+            .SingleAsync(entry => entry.Id == libraryEntry.Id)).MediaTitleId);
+        Assert.DoesNotContain(callerDb.ChangeTracker.Entries<MediaProviderLink>(),
+            entry => entry.State == EntityState.Added);
+        Assert.Equal(2, await schema.Db.MediaTitles.CountAsync());
+    }
+
+    [PostgresFact]
+    public async Task LinkProviderAsync_RetriesDiscoveryIdentityRaceAsAlreadyLinkedToOwnedTitle()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        const int userId = 47815;
+        const string providerId = "anilist";
+        const string providerMediaId = "manual-link-discovery-same-title";
+        var user = TestUserFactory.Create(userId, "manual-link-discovery-same-title@example.test");
+        var target = new MediaTitle
+        {
+            Id = Guid.NewGuid(),
+            CanonicalTitle = "Existing canonical title",
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            MediaTitleId = target.Id,
+            Status = MediaLibraryStatuses.Current,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var knownIdentity = new MediaProviderLink
+        {
+            Id = Guid.NewGuid(),
+            MediaTitleId = target.Id,
+            Provider = "myanimelist",
+            ExternalId = "anime:10",
+            LinkSource = MediaMappingSources.Imported,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        schema.Db.AddRange(user, target, entry, knownIdentity);
+        await schema.Db.SaveChangesAsync();
+
+        var interleaved = new ProviderIdentityClaimBeforeSave(() => MakeService(schema.Options)
+            .CanonicalizeAsync(
+            [Candidate(providerId, providerMediaId, "Provider title", "mal-10")], default));
+        var callerOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+        await using var callerDb = new ApplicationDbContext(callerOptions);
+
+        var result = await new MediaLibraryLinkService(
+            callerDb, NullLogger<MediaLibraryLinkService>.Instance)
+            .LinkProviderAsync(user.Id, target.Id, providerId, providerMediaId, false, default);
+
+        Assert.Equal(MediaLinkResultKind.AlreadyLinked, result.Kind);
+        Assert.Equal(1, interleaved.ClaimCount);
+        Assert.Equal(1, interleaved.UniqueViolationCount);
+        Assert.Equal(1, await schema.Db.MediaTitles.CountAsync());
+        var links = await schema.Db.MediaProviderLinks.AsNoTracking().OrderBy(link => link.Provider).ToListAsync();
+        Assert.Equal(2, links.Count);
+        Assert.All(links, link => Assert.Equal(target.Id, link.MediaTitleId));
+        Assert.Contains(links, link => link.Provider == "myanimelist" && link.ExternalId == "anime:10");
+        Assert.Contains(links, link => link.Provider == providerId && link.ExternalId == providerMediaId);
+        Assert.Equal(target.Id, (await schema.Db.MediaLibraryEntries.AsNoTracking()
+            .SingleAsync(item => item.Id == entry.Id)).MediaTitleId);
+        Assert.DoesNotContain(callerDb.ChangeTracker.Entries<MediaProviderLink>(),
+            link => link.State == EntityState.Added);
+    }
+
     private static MediaCatalogCanonicalizationService MakeService(DbContextOptions<ApplicationDbContext> options)
         => new(options, NullLogger<MediaCatalogCanonicalizationService>.Instance);
 
@@ -690,7 +821,7 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
                     InnerException: PostgresException
                     {
                         SqlState: PostgresErrorCodes.UniqueViolation,
-                        ConstraintName: "IX_MediaProviderLinks_Provider_ExternalId"
+                        ConstraintName: "IX_MediaProviderLinks_Provider_ExternalId" or "IX_MediaProviderLinks_MediaTitleId_Provider"
                     }
                 })
             {
