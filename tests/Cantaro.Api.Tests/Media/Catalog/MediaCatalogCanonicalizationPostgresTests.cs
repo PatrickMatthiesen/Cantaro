@@ -59,6 +59,37 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
     }
 
     [PostgresFact]
+    public async Task CanonicalizeAsync_RetriesSortTitleFillWhenOnlyDetailedNamesChangeAfterPreload()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        var candidate = Candidate("anilist", "sort-title-race", "Summary title", "10");
+        var ids = await MakeService(schema.Options).CanonicalizeAsync([candidate], default);
+        var titleId = Assert.Single(ids.Values);
+        var title = await schema.Db.MediaTitles.SingleAsync(item => item.Id == titleId);
+        title.SortTitle = null;
+        await schema.Db.SaveChangesAsync();
+        var originalSynonyms = title.Synonyms.ToArray();
+        var interleaved = new DetailUpdateBeforeSave(async cancellationToken =>
+        {
+            // Hydration can correct just the name without changing any other metadata.
+            title.CanonicalTitle = "Detailed canonical title";
+            title.SortTitle = "Detailed canonical title";
+            await schema.Db.SaveChangesAsync(cancellationToken);
+        });
+        var racingOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+
+        await MakeService(racingOptions).CanonicalizeAsync([candidate], default);
+
+        var persisted = await schema.Db.MediaTitles.AsNoTracking().SingleAsync(item => item.Id == titleId);
+        Assert.Equal("Detailed canonical title", persisted.CanonicalTitle);
+        Assert.Equal(persisted.CanonicalTitle, persisted.SortTitle);
+        Assert.Equal(originalSynonyms, persisted.Synonyms);
+        Assert.Equal(1, interleaved.DetailWrites);
+        Assert.Equal(2, interleaved.SaveAttempts);
+    }
+
+    [PostgresFact]
     public async Task ImportAsync_RetriesIdentityRaceAtomicallyWithoutSavingCallerContextChanges()
     {
         await using var schema = await SchemaContext.CreateAsync();

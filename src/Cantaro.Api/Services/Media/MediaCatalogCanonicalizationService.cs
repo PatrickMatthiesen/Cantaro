@@ -77,7 +77,7 @@ public sealed class MediaCatalogCanonicalizationService(
             var title = builder.Entity<MediaTitle>();
             foreach (var property in new[]
             {
-                nameof(MediaTitle.OriginalTitle), nameof(MediaTitle.Synopsis), nameof(MediaTitle.Format),
+                nameof(MediaTitle.SortTitle), nameof(MediaTitle.OriginalTitle), nameof(MediaTitle.Synopsis), nameof(MediaTitle.Format),
                 nameof(MediaTitle.PosterUrl), nameof(MediaTitle.BackgroundUrl), nameof(MediaTitle.StartYear),
                 nameof(MediaTitle.EpisodeCount), nameof(MediaTitle.ChapterCount), nameof(MediaTitle.VolumeCount),
                 nameof(MediaTitle.Synonyms)
