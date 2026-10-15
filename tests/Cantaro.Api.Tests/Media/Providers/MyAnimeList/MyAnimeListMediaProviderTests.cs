@@ -29,8 +29,10 @@ public sealed class MyAnimeListMediaProviderTests
             CancellationToken.None);
 
         Assert.Equal(2, results.Count);
-        Assert.Contains(results, result => result.ProviderMediaId == "anime:42" && result.MediaKind == MediaKinds.Anime);
-        Assert.Contains(results, result => result.ProviderMediaId == "manga:42" && result.MediaKind == MediaKinds.Manga);
+        var anime = Assert.Single(results, result => result.ProviderMediaId == "anime:42" && result.MediaKind == MediaKinds.Anime);
+        Assert.Equal("https://myanimelist.net/anime/42", anime.ExternalUrl);
+        var manga = Assert.Single(results, result => result.ProviderMediaId == "manga:42" && result.MediaKind == MediaKinds.Manga);
+        Assert.Equal("https://myanimelist.net/manga/42", manga.ExternalUrl);
     }
 
     [Fact]
@@ -174,6 +176,7 @@ public sealed class MyAnimeListMediaProviderTests
 
         Assert.NotNull(details);
         Assert.Equal("anime:52991", details.ProviderMediaId);
+        Assert.Equal("https://myanimelist.net/anime/52991", details.ExternalUrl);
         Assert.Equal(28, details.ReleasedCount);
         Assert.Equal(28, details.TotalKnownCount);
         Assert.Null(details.NextReleaseAt);
