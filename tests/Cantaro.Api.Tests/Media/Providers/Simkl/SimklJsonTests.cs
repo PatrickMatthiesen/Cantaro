@@ -8,6 +8,20 @@ namespace Cantaro.Api.Tests;
 public sealed class SimklJsonTests
 {
     [Fact]
+    public void SearchMapping_PreservesCrossProviderIdsWithoutDetailLookup()
+    {
+        using var json = JsonDocument.Parse("""{"title":"Example","title_en":"Example","title_romaji":"Example JP","anime_type":"tv","year":2026,"ids":{"simkl":3103152,"mal":"1234","anilist":"211778"},"all_titles":["Example","Alias"]}""");
+        var result = SimklJson.MapSearchResult(json.RootElement, MediaKinds.Anime)!;
+
+        Assert.Equal("anime:3103152", result.ProviderMediaId);
+        Assert.Equal("tv", result.Format);
+        Assert.Equal("https://simkl.com/anime/3103152/", result.ExternalUrl);
+        Assert.Contains(result.CrossReferences, x => x.ProviderId == "anilist" && x.ProviderMediaId == "211778");
+        Assert.Contains(result.CrossReferences, x => x.ProviderId == "myanimelist" && x.ProviderMediaId == "anime:1234");
+        Assert.Contains("Alias", result.Synonyms);
+    }
+
+    [Fact]
     public void LibraryMapping_PreservesSkippedEpisodeAndSpecial()
     {
         using var json = JsonDocument.Parse("""

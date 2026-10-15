@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -239,13 +240,14 @@ public sealed class CantaroSearchServiceTests
         Assert.True(first.Groups.Media.HasMore);
         Assert.All(first.Groups.Media.Items, item =>
         {
-            Assert.StartsWith("provider:anilist:", item.Id);
-            Assert.StartsWith("/media/catalog/anilist/", item.CanonicalRoute);
+            Assert.StartsWith("media-title:", item.Id);
+            Assert.StartsWith("/media/", item.CanonicalRoute);
             Assert.Equal(MediaKinds.Anime, item.MediaKind);
             Assert.False(item.IsInLibrary);
         });
         Assert.Equal(first.Groups.Media.Items.Select(item => item.Id), second.Groups.Media.Items.Select(item => item.Id));
-        Assert.Empty(await db.MediaTitles.ToListAsync());
+        Assert.Equal(3, await db.MediaTitles.CountAsync());
+        Assert.Empty(await db.MediaLibraryEntries.ToListAsync());
 
         db.ConnectedServiceAccounts.Add(MakeConnectedAccount(other.Id, "anilist"));
         await db.SaveChangesAsync();
@@ -255,6 +257,155 @@ public sealed class CantaroSearchServiceTests
 
         await service.SearchAsync(owner.Id, "echo", 3, true, default);
         Assert.Equal(3, provider.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task SearchAsync_CanonicalizesAniListAndSimklFromSharedMalReferenceWithoutLibraryState()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var owner = TestUserFactory.Create(821, "search-cross-provider@example.com");
+        db.Users.Add(owner);
+        db.ConnectedServiceAccounts.AddRange(MakeConnectedAccount(owner.Id, "anilist"), MakeConnectedAccount(owner.Id, "simkl"));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var anilist = new FakeMediaProvider("anilist", [MakeCrossProviderResult("anilist", "211778", "A Work", "myanimelist", "anime:123")]);
+        var simkl = new FakeMediaProvider("simkl", [MakeCrossProviderResult("simkl", "anime:3103152", "A Work", "myanimelist", "anime:123")]);
+        using var cache = new MediaProviderSearchCache();
+
+        var response = await CreateService(db, cache, anilist, simkl).SearchAsync(owner.Id, "a work", 10, true, default);
+
+        var item = Assert.Single(response.Groups.Media.Items);
+        Assert.StartsWith("media-title:", item.Id);
+        Assert.StartsWith("/media/", item.CanonicalRoute);
+        Assert.Equal(1, await db.MediaTitles.CountAsync());
+        var links = await db.MediaProviderLinks.OrderBy(link => link.Provider).ToListAsync();
+        Assert.Equal(3, links.Count);
+        Assert.Contains(links, link => link.Provider == "anilist" && link.ExternalId == "211778");
+        Assert.Contains(links, link => link.Provider == "simkl" && link.ExternalId == "anime:3103152");
+        Assert.Contains(links, link => link.Provider == "myanimelist" && link.ExternalId == "anime:123");
+        Assert.Empty(await db.MediaLibraryEntries.ToListAsync());
+        Assert.Empty(await db.MediaLibraryProviderBindings.ToListAsync());
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task SearchAsync_SearchesPersistedDiscoveryLocallyByProviderAliasAndSynonym()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var owner = TestUserFactory.Create(822, "search-discovery-local@example.com");
+        db.Users.Add(owner);
+        var account = MakeConnectedAccount(owner.Id, "anilist");
+        db.ConnectedServiceAccounts.Add(account);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var aliased = MakeProviderResult("anilist", "local-1", "Canonical Name");
+        aliased.Synonyms = ["Provider Alias"];
+        var provider = new FakeMediaProvider("anilist", [aliased]);
+        using var cache = new MediaProviderSearchCache();
+        var service = CreateService(db, cache, provider);
+        await service.SearchAsync(owner.Id, "canonical", 5, true, default);
+        db.ChangeTracker.Clear();
+
+        var alias = await service.SearchAsync(owner.Id, "provider alias", 5, false, default);
+        var canonical = await service.SearchAsync(owner.Id, "canonical name", 5, false, default);
+
+        Assert.Single(alias.Groups.Media.Items);
+        Assert.Single(canonical.Groups.Media.Items);
+        Assert.Equal(1, provider.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task SearchAsync_PersistsFullProviderBatchEvenWhenDisplayLimitIsFilledLocally()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(823, "search-discovery-limit@example.com");
+        db.Users.Add(owner);
+        db.ConnectedServiceAccounts.Add(MakeConnectedAccount(owner.Id, "anilist"));
+        var local = MakeMediaTitle("A Work Local", "anime", 2024, now);
+        db.MediaTitles.Add(local);
+        await db.SaveChangesAsync();
+        db.MediaProviderLinks.Add(new MediaProviderLink
+        {
+            Id = Guid.NewGuid(), MediaTitleId = local.Id, Provider = "anilist", ExternalId = "known",
+            LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var provider = new FakeMediaProvider("anilist", [
+            MakeProviderResult("anilist", "known", "A Work Local"),
+            MakeProviderResult("anilist", "discovered-1", "A Work Extra One")
+        ]);
+        using var cache = new MediaProviderSearchCache();
+
+        var response = await CreateService(db, cache, provider).SearchAsync(owner.Id, "a work", 1, true, default);
+
+        Assert.Single(response.Groups.Media.Items);
+        Assert.Equal(2, await db.MediaTitles.CountAsync());
+        Assert.Contains(await db.MediaProviderLinks.Select(link => link.ExternalId).ToListAsync(), id => id == "discovered-1");
+        Assert.Equal(1, provider.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task SearchAsync_PreservesSeparateExistingCanonicalAnchorsWithConflictingSharedReference()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(824, "search-conflicting-anchors@example.com");
+        db.Users.Add(owner);
+        db.ConnectedServiceAccounts.AddRange(MakeConnectedAccount(owner.Id, "anilist"), MakeConnectedAccount(owner.Id, "simkl"));
+        var first = MakeMediaTitle("Work One", "anime", 2024, now);
+        var second = MakeMediaTitle("Work Two", "anime", 2024, now);
+        db.MediaTitles.AddRange(first, second);
+        await db.SaveChangesAsync();
+        db.MediaProviderLinks.AddRange(
+            MakeProviderLink(first.Id, "anilist", "211778", now),
+            MakeProviderLink(second.Id, "simkl", "anime:3103152", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var anilist = new FakeMediaProvider("anilist", [MakeCrossProviderResult("anilist", "211778", "Work One", "myanimelist", "anime:123")]);
+        var simkl = new FakeMediaProvider("simkl", [MakeCrossProviderResult("simkl", "anime:3103152", "Work Two", "myanimelist", "anime:123")]);
+        using var cache = new MediaProviderSearchCache();
+
+        var response = await CreateService(db, cache, anilist, simkl).SearchAsync(owner.Id, "work", 10, true, default);
+
+        Assert.Equal(2, response.Groups.Media.Items.Count);
+        Assert.Contains(response.Groups.Media.Items, item => item.Id == $"media-title:{first.Id}");
+        Assert.Contains(response.Groups.Media.Items, item => item.Id == $"media-title:{second.Id}");
+        Assert.Equal(2, await db.MediaTitles.CountAsync());
+    }
+
+    [Fact]
+    public async Task SearchAsync_CanonicalizesSuccessfulProviderResultsWhenAnotherProviderFails()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var owner = TestUserFactory.Create(825, "search-partial-discovery@example.com");
+        db.Users.Add(owner);
+        db.ConnectedServiceAccounts.AddRange(MakeConnectedAccount(owner.Id, "anilist"), MakeConnectedAccount(owner.Id, "simkl"));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var healthy = new FakeMediaProvider("anilist", [MakeProviderResult("anilist", "healthy", "Healthy Work")]);
+        var failing = new FakeMediaProvider("simkl", [], new HttpRequestException("unavailable"));
+        using var cache = new MediaProviderSearchCache();
+
+        var response = await CreateService(db, cache, healthy, failing).SearchAsync(owner.Id, "healthy", 5, true, default);
+
+        Assert.Single(response.Groups.Media.Items);
+        Assert.Equal(SearchGroupStatuses.Ok, response.Groups.Media.Status);
+        Assert.Equal("One connected media provider could not be searched.", response.Groups.Media.Message);
+        Assert.Equal(1, await db.MediaTitles.CountAsync());
+        Assert.Contains(await db.MediaProviderLinks.Select(link => link.ExternalId).ToListAsync(), id => id == "healthy");
     }
 
     [Fact]
@@ -365,8 +516,10 @@ public sealed class CantaroSearchServiceTests
         Assert.Equal("watching", canonical.LibraryStatus);
         Assert.Equal("watching", canonical.Detail);
         Assert.DoesNotContain(result.Groups.Media.Items, item => item.Id.Contains("linked-1", StringComparison.Ordinal));
-        Assert.Contains(result.Groups.Media.Items, item => item.Id == "provider:anilist:LINKED-1");
-        Assert.Contains(result.Groups.Media.Items, item => item.Id == "provider:anilist:unlinked-2");
+        var caseDistinct = await db.MediaProviderLinks.SingleAsync(link => link.ExternalId == "LINKED-1");
+        var sameTitle = await db.MediaProviderLinks.SingleAsync(link => link.ExternalId == "unlinked-2");
+        Assert.Contains(result.Groups.Media.Items, item => item.Id == $"media-title:{caseDistinct.MediaTitleId}");
+        Assert.Contains(result.Groups.Media.Items, item => item.Id == $"media-title:{sameTitle.MediaTitleId}");
         Assert.DoesNotContain(result.Groups.Media.Items, item => item.Detail == "dropped");
     }
 
@@ -527,6 +680,10 @@ public sealed class CantaroSearchServiceTests
             db,
             new MediaProviderRegistry(providers),
             cache,
+            new MediaCatalogCanonicalizationService(
+                db.GetService<Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions>() as DbContextOptions<ApplicationDbContext>
+                    ?? throw new InvalidOperationException("Expected application context options."),
+                NullLogger<MediaCatalogCanonicalizationService>.Instance),
             NullLogger<CantaroSearchService>.Instance);
 
     private static Track MakeTrack(
@@ -637,7 +794,30 @@ public sealed class CantaroSearchServiceTests
             ReleaseStatusDimension = MediaProgressDimensions.Episode
         };
 
-    private sealed class FakeMediaProvider(
+    private static MediaProviderSearchResult MakeCrossProviderResult(
+        string providerId,
+        string providerMediaId,
+        string title,
+        string referenceProviderId,
+        string referenceMediaId)
+    {
+        var result = MakeProviderResult(providerId, providerMediaId, title);
+        result.CrossReferences = [new MediaProviderCrossReference
+        {
+            ProviderId = referenceProviderId,
+            ProviderMediaId = referenceMediaId,
+            ExternalUrl = $"https://example.test/{referenceMediaId}"
+        }];
+        return result;
+    }
+
+    private static MediaProviderLink MakeProviderLink(Guid titleId, string providerId, string externalId, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid(), MediaTitleId = titleId, Provider = providerId, ExternalId = externalId,
+        LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
+    };
+
+    internal sealed class FakeMediaProvider(
         string providerId,
         IReadOnlyList<MediaProviderSearchResult> searchResults,
         Exception? searchException = null) : IMediaProvider

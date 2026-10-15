@@ -997,6 +997,10 @@ public class MediaObservationsController(
             {
                 ApplyProviderDetails(linkedTitle, details, now);
             }
+            else
+            {
+                MediaCanonicalMetadataPolicy.FillMissing(linkedTitle, details, now);
+            }
             await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
             existingLink.AvailabilitySnapshot = MediaProviderAvailabilitySnapshotCodec.Serialize(details.AvailabilityLinks);
             existingLink.AvailabilityLastVerifiedAt = now;
@@ -1050,6 +1054,10 @@ public class MediaObservationsController(
                     title.ProviderLinks.Select(link => link.Provider)))
             {
                 ApplyProviderDetails(title, details, now);
+            }
+            else
+            {
+                MediaCanonicalMetadataPolicy.FillMissing(title, details, now);
             }
         }
         else

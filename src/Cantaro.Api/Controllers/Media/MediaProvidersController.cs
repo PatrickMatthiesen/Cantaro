@@ -826,6 +826,10 @@ public class MediaProvidersController(
             {
                 ApplyProviderDetails(linkedTitle, details, now);
             }
+            else
+            {
+                MediaCanonicalMetadataPolicy.FillMissing(linkedTitle, details, now);
+            }
             await PersistProviderCrossReferencesAsync(linkedTitle, details.CrossReferences, now, cancellationToken);
             if (details.AvailabilityRefreshSucceeded)
             {
@@ -882,6 +886,10 @@ public class MediaProvidersController(
                     title.ProviderLinks.Select(link => link.Provider)))
             {
                 ApplyProviderDetails(title, details, now);
+            }
+            else
+            {
+                MediaCanonicalMetadataPolicy.FillMissing(title, details, now);
             }
         }
         else
