@@ -5,6 +5,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Security.Claims;
 using Cantaro.Api.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -238,6 +239,102 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
     }
 
     [PostgresFact]
+    public async Task GetTitleDetails_RetriesDiscoveryIdentityRaceAndPersistsHydrationAtomically()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        const int userId = 47813;
+        const string providerId = "anilist";
+        const string providerMediaId = "details-discovery-race";
+        const string titleName = "Details discovered during identity race";
+        schema.Db.Users.Add(TestUserFactory.Create(userId, "details-discovery-race@example.test"));
+        await schema.Db.SaveChangesAsync();
+        var details = new MediaProviderTitleDetails
+        {
+            ProviderId = providerId,
+            ProviderMediaId = providerMediaId,
+            ExternalUrl = "https://anilist.co/anime/12345",
+            Title = titleName,
+            MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            EpisodeCount = 2,
+            AvailabilityLinks =
+            [
+                new MediaProviderAvailabilityLink
+                {
+                    ServiceId = "crunchyroll",
+                    DisplayName = "Crunchyroll",
+                    Url = "https://www.crunchyroll.com/series/example",
+                    AvailabilityKind = "subscription"
+                }
+            ],
+            EpisodeCatalog =
+            [
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "episode-1", Title = "First" },
+                new MediaProviderWatchedEpisode { SeasonNumber = 1, EpisodeNumber = 2, ProviderEpisodeId = "episode-2", Title = "Second" }
+            ],
+            SpecialEpisodeCatalog =
+            [
+                new MediaProviderWatchedEpisode { SeasonNumber = 0, EpisodeNumber = 1, ProviderEpisodeId = "special-1", Title = "Special" }
+            ]
+        };
+        var account = new ConnectedServiceAccount
+        {
+            UserId = userId,
+            Service = providerId,
+            ExternalAccountId = "details-discovery-race-account",
+            ConnectionState = "connected",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var provider = new ObservationRaceMediaProvider(account, details);
+        var candidate = new MediaCatalogSearchCandidate(providerId, new CachedMediaProviderSearchResult(
+            providerMediaId, titleName, MediaKinds.Anime, null, null)
+        {
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            EpisodeCount = 2,
+            CrossReferences = []
+        });
+        var interleaved = new ProviderIdentityClaimBeforeSave(() => MakeService(schema.Options)
+            .CanonicalizeAsync([candidate], default));
+        var controllerOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+        await using var controllerDb = new ApplicationDbContext(controllerOptions);
+        var registry = new MediaProviderRegistry([provider]);
+        var controller = CreateMediaProvidersController(controllerDb, registry, userId,
+            "details-discovery-race@example.test");
+
+        var result = await controller.GetTitleDetails(providerId, providerMediaId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<MediaProviderTitleDetailsDto>(ok.Value);
+        var canonicalLink = await schema.Db.MediaProviderLinks.AsNoTracking().SingleAsync();
+        Assert.Equal(canonicalLink.MediaTitleId, response.MediaTitleId);
+        Assert.Equal(titleName, (await schema.Db.MediaTitles.AsNoTracking().SingleAsync()).CanonicalTitle);
+        Assert.Equal(1, await schema.Db.MediaTitles.CountAsync());
+        Assert.Equal(1, await schema.Db.MediaProviderLinks.CountAsync());
+        Assert.Equal("https://anilist.co/anime/12345", canonicalLink.ExternalUrl);
+        Assert.Equal("fresh", response.AvailabilityStatus);
+        Assert.NotNull(response.AvailabilityLastVerifiedAt);
+        Assert.Equal("https://www.crunchyroll.com/series/example",
+            Assert.Single(MediaProviderAvailabilitySnapshotCodec.Deserialize(canonicalLink.AvailabilitySnapshot)).Url);
+        Assert.NotNull(canonicalLink.SpecialEpisodeCatalogSnapshot);
+        Assert.Contains("Special", canonicalLink.SpecialEpisodeCatalogSnapshot);
+        Assert.NotNull(canonicalLink.EpisodeCatalogLastVerifiedAt);
+        Assert.Equal(2, await schema.Db.MediaEpisodes.CountAsync());
+        Assert.Equal(2, await schema.Db.MediaEpisodeProviderContents.CountAsync());
+        Assert.Equal(["First", "Second"], await schema.Db.MediaEpisodes.AsNoTracking()
+            .OrderBy(episode => episode.EpisodeNumber).Select(episode => episode.Title).ToListAsync());
+        Assert.Equal(0, await schema.Db.MediaLibraryEntries.CountAsync());
+        Assert.Equal(1, interleaved.ClaimCount);
+        Assert.Equal(1, interleaved.UniqueViolationCount);
+        Assert.Equal(1, provider.DetailsCalls);
+        Assert.DoesNotContain(controllerDb.ChangeTracker.Entries(), entry => entry.State == EntityState.Added
+            && entry.Entity is MediaTitle or MediaProviderLink or MediaEpisode or MediaEpisodeProviderContent);
+    }
+
+    [PostgresFact]
     public async Task CanonicalizeAsync_BatchesWritesReusesStoredMetadataAndSupportsSynonymSearch()
     {
         var counter = new CommandCounter();
@@ -379,12 +476,67 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
         return controller;
     }
 
+    private static MediaProvidersController CreateMediaProvidersController(
+        ApplicationDbContext db,
+        IMediaProviderRegistry registry,
+        int userId,
+        string email)
+    {
+        var seasonMappingService = new MediaProviderSeasonMappingService(
+            db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var episodeIdentityService = new MediaEpisodeIdentityService(
+            db, seasonMappingService, NullLogger<MediaEpisodeIdentityService>.Instance);
+        var eventHub = new MediaLibraryEventHub();
+        var controller = new MediaProvidersController(
+            db,
+            registry,
+            new MediaLibraryImportQueue(),
+            new MediaProviderOperationProcessor(db, registry,
+                NullLogger<MediaProviderOperationProcessor>.Instance),
+            eventHub,
+            episodeIdentityService,
+            new NoOpAioStreamsAnimeEnricher(),
+            new MediaCatalogCanonicalizationService(
+                (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
+                NullLogger<MediaCatalogCanonicalizationService>.Instance),
+            CreateUserManager(db),
+            NullLogger<MediaProvidersController>.Instance,
+            new EphemeralDataProtectionProvider(),
+            new StubFrontendUrlResolver());
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                    new Claim(ClaimTypes.Name, email),
+                    new Claim(ClaimTypes.Email, email)
+                ], "Test"))
+            }
+        };
+        return controller;
+    }
+
     private static UserManager<User> CreateUserManager(ApplicationDbContext db)
     {
         var store = new UserStore<User, IdentityRole<int>, ApplicationDbContext, int>(db);
         return new UserManager<User>(store, Options.Create(new IdentityOptions()), new PasswordHasher<User>(),
             [], [], new UpperInvariantLookupNormalizer(), new IdentityErrorDescriber(),
             new ServiceCollection().BuildServiceProvider(), NullLogger<UserManager<User>>.Instance);
+    }
+
+    private sealed class NoOpAioStreamsAnimeEnricher : IAioStreamsAnimeEnricher
+    {
+        public Task EnrichAsync(MediaProviderTitleDetails details, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+    }
+
+    private sealed class StubFrontendUrlResolver : IFrontendUrlResolver
+    {
+        public string GetFrontendUrl() => "https://frontend.test";
+        public string GetCurrentRequestBaseUrl() => "https://api.test";
+        public string GetCallbackUrl(string relativePath) => $"https://api.test/{relativePath.TrimStart('/')}";
     }
 
     private static MediaCatalogSearchCandidate Candidate(string provider, string id, string title, string malId)

@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace Cantaro.Api.Controllers;
 
@@ -323,6 +324,7 @@ public class MediaProvidersController(
         var userId = await GetCurrentUserIdAsync();
         var provider = _mediaProviderRegistry.GetRequired(providerId);
         var cachedLink = await _dbContext.MediaProviderLinks
+            .AsNoTracking()
             .Include(link => link.MediaTitle)
             .FirstOrDefaultAsync(
                 link => link.Provider == provider.ProviderId && link.ExternalId == providerMediaId,
@@ -355,12 +357,56 @@ public class MediaProvidersController(
         var now = DateTimeOffset.UtcNow;
         details.ProviderId = provider.ProviderId;
         details.ProviderMediaId = providerMediaId;
+        var titleId = await PersistTitleDetailsAsync(details, now, cancellationToken);
+
+        var libraryState = await GetLibraryStateAsync(userId, titleId, cancellationToken);
+        var availabilityStatus = details.AvailabilityRefreshSucceeded
+            ? "fresh"
+            : cachedLink?.AvailabilitySnapshot is not null ? "stale" : "unavailable";
+        var availabilityLastVerifiedAt = details.AvailabilityRefreshSucceeded
+            ? now
+            : cachedLink?.AvailabilityLastVerifiedAt;
+        return Ok(MapTitleDetails(
+            details,
+            titleId,
+            libraryState,
+            availabilityStatus,
+            availabilityLastVerifiedAt));
+    }
+
+    private async Task<Guid> PersistTitleDetailsAsync(
+        MediaProviderTitleDetails details,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var options = (DbContextOptions<ApplicationDbContext>)_dbContext.GetService<IDbContextOptions>();
+        for (var attempt = 0; ; attempt++)
+        {
+            await using var db = new ApplicationDbContext(options);
+            try
+            {
+                return await PersistTitleDetailsCoreAsync(db, details, now, cancellationToken);
+            }
+            catch (DbUpdateException exception) when (attempt < 2
+                && MediaCatalogCanonicalizationService.IsIdentityRace(exception))
+            {
+                _logger.LogDebug(exception, "Retrying provider detail hydration after a catalog identity race, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private async Task<Guid> PersistTitleDetailsCoreAsync(
+        ApplicationDbContext db,
+        MediaProviderTitleDetails details,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         var resolution = await _catalogService.ResolveAsync(
-            _dbContext,
+            db,
             [new MediaCatalogCandidate(details, LinkSource: MediaMappingSources.Imported)],
             now,
             cancellationToken);
-        var identity = MediaCatalogIdentity.Create(provider.ProviderId, providerMediaId);
+        var identity = MediaCatalogIdentity.Create(details.ProviderId, details.ProviderMediaId);
         var providerLink = resolution.Links[identity];
         var title = providerLink.MediaTitle!;
         if (details.AvailabilityRefreshSucceeded)
@@ -371,29 +417,17 @@ public class MediaProvidersController(
         if (details.EpisodeCatalog is { } episodeCatalog)
         {
             await _mediaEpisodeIdentityService.CacheProviderEpisodeCatalogAsync(
+                db,
                 title.Id,
-                provider.ProviderId,
-                providerMediaId,
+                details.ProviderId,
+                details.ProviderMediaId,
                 episodeCatalog,
                 details.SpecialEpisodeCatalog ?? [],
                 details.EpisodeCount,
                 cancellationToken);
         }
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        var libraryState = await GetLibraryStateAsync(userId, title.Id, cancellationToken);
-        var availabilityStatus = details.AvailabilityRefreshSucceeded
-            ? "fresh"
-            : cachedLink?.AvailabilitySnapshot is not null ? "stale" : "unavailable";
-        var availabilityLastVerifiedAt = details.AvailabilityRefreshSucceeded
-            ? now
-            : cachedLink?.AvailabilityLastVerifiedAt;
-        return Ok(MapTitleDetails(
-            details,
-            title.Id,
-            libraryState,
-            availabilityStatus,
-            availabilityLastVerifiedAt));
+        await db.SaveChangesAsync(cancellationToken);
+        return title.Id;
     }
 
     [HttpGet("providers/{providerId}/titles/{providerMediaId}/release")]

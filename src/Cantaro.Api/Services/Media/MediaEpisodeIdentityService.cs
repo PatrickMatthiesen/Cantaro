@@ -391,7 +391,19 @@ public class MediaEpisodeIdentityService(
         };
     }
 
-    public async Task CacheProviderEpisodeCatalogAsync(
+    public Task CacheProviderEpisodeCatalogAsync(
+        Guid mediaTitleId,
+        string provider,
+        string providerSeriesId,
+        IReadOnlyList<MediaProviderWatchedEpisode> catalog,
+        IReadOnlyList<MediaProviderWatchedEpisode> specials,
+        int? expectedEpisodeCount,
+        CancellationToken cancellationToken) =>
+        CacheProviderEpisodeCatalogAsync(_dbContext, mediaTitleId, provider, providerSeriesId,
+            catalog, specials, expectedEpisodeCount, cancellationToken);
+
+    internal async Task CacheProviderEpisodeCatalogAsync(
+        ApplicationDbContext db,
         Guid mediaTitleId,
         string provider,
         string providerSeriesId,
@@ -416,11 +428,11 @@ public class MediaEpisodeIdentityService(
         var contiguousEpisodes = TakeContiguousCatalogPrefix(orderedRegularEpisodes);
 
         var now = DateTimeOffset.UtcNow;
-        var providerLink = _dbContext.MediaProviderLinks.Local.FirstOrDefault(link =>
+        var providerLink = db.MediaProviderLinks.Local.FirstOrDefault(link =>
                 link.MediaTitleId == mediaTitleId
                 && link.Provider == normalizedProvider
                 && link.ExternalId == normalizedSeriesId)
-            ?? await _dbContext.MediaProviderLinks.FirstOrDefaultAsync(link =>
+            ?? await db.MediaProviderLinks.FirstOrDefaultAsync(link =>
                 link.MediaTitleId == mediaTitleId
                 && link.Provider == normalizedProvider
                 && link.ExternalId == normalizedSeriesId,
@@ -440,7 +452,7 @@ public class MediaEpisodeIdentityService(
             providerLink.UpdatedAt = now;
         }
 
-        var episodes = await _dbContext.MediaEpisodes
+        var episodes = await db.MediaEpisodes
             .Where(episode => episode.MediaTitleId == mediaTitleId)
             .Include(episode => episode.ProviderContents)
                 .ThenInclude(content => content.Variants)
@@ -506,7 +518,7 @@ public class MediaEpisodeIdentityService(
                     UpdatedAt = now
                 };
                 episodesByNumber[canonicalEpisodeNumber] = episode;
-                _dbContext.MediaEpisodes.Add(episode);
+                db.MediaEpisodes.Add(episode);
             }
 
             // SIMKL supplies episode titles with the extended catalog response.
@@ -529,7 +541,7 @@ public class MediaEpisodeIdentityService(
                     Provider = normalizedProvider,
                     ProviderContentKey = contentKey
                 };
-                _dbContext.MediaEpisodeProviderContents.Add(content);
+                db.MediaEpisodeProviderContents.Add(content);
                 existingByKey[contentKey] = content;
             }
 
@@ -547,7 +559,7 @@ public class MediaEpisodeIdentityService(
                 && !retainedContentIds.Contains(content.Id)
                 && content.Variants.Count == 0)
             .ToList();
-        _dbContext.MediaEpisodeProviderContents.RemoveRange(staleContents);
+        db.MediaEpisodeProviderContents.RemoveRange(staleContents);
     }
 
     private static string GetProviderContentKey(
