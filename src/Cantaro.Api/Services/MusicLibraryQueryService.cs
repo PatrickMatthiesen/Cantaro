@@ -187,9 +187,16 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .Distinct().ToList();
         if (relatedIds.Count == 0) return [];
 
-        var ownedIds = await _dbContext.PlaylistEntries.AsNoTracking()
-            .Where(entry => entry.TrackId != null && entry.Playlist != null && entry.Playlist.UserId == userId)
-            .Select(entry => entry.TrackId!.Value).Distinct().ToListAsync(cancellationToken);
+        var ownedEntries = await _dbContext.PlaylistEntries.AsNoTracking()
+            .Include(entry => entry.TrackObservation)
+            .Where(entry => entry.TrackId != null && relatedIds.Contains(entry.TrackId.Value)
+                && entry.Playlist != null && entry.Playlist.UserId == userId)
+            .OrderBy(entry => entry.Position)
+            .ThenBy(entry => entry.Playlist!.Name)
+            .ThenBy(entry => entry.PlaylistId)
+            .ThenBy(entry => entry.Id)
+            .ToListAsync(cancellationToken);
+        var entriesByTrack = ownedEntries.ToLookup(entry => entry.TrackId!.Value);
         var tracks = await _dbContext.Tracks.AsNoTracking()
             .Where(candidate => relatedIds.Contains(candidate.Id) && accessibleTrackIds.Contains(candidate.Id))
             .Include(candidate => candidate.ArtistCredits).ThenInclude(credit => credit.Artist)
@@ -198,6 +205,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         return tracks.Select(candidate =>
         {
             var metadata = ParseJson<TrackCanonicalMetadata>(candidate.CanonicalMetadata);
+            var entries = entriesByTrack[candidate.Id];
+            var displayMetadata = entries
+                .Where(entry => entry.TrackObservation is not null)
+                .Select(entry => BuildSongMetadata(candidate, entry.TrackObservation))
+                .ToList();
             var labels = relations
                 .Where(relation => relation.FromTrackId == candidate.Id || relation.ToTrackId == candidate.Id)
                 .Select(relation => DescribeRelation(relation, trackId))
@@ -208,11 +220,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 Id = $"track:{candidate.Id}",
                 Title = FirstNonEmpty(metadata?.Title, candidate.SearchTitle, "Unknown song")!,
                 Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(candidate), candidate.SearchArtist),
-                ThumbnailUrl = metadata?.ThumbnailUrl,
-                DurationSeconds = metadata?.DurationSeconds,
+                ThumbnailUrl = FirstNonEmpty(metadata?.ThumbnailUrl, displayMetadata.FirstOrDefault(item => item.ThumbnailUrl is not null)?.ThumbnailUrl),
+                DurationSeconds = metadata?.DurationSeconds ?? displayMetadata.FirstOrDefault(item => item.DurationSeconds is not null)?.DurationSeconds,
                 RelationshipLabels = labels,
                 VersionLabels = GetVersionLabels(candidate.VersionFlags),
-                InLibrary = ownedIds.Contains(candidate.Id)
+                InLibrary = entries.Any()
             };
         }).OrderBy(candidate => candidate.Title).ThenBy(candidate => candidate.Id).ToList();
     }
