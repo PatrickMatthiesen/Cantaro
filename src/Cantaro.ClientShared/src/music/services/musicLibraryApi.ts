@@ -31,7 +31,7 @@ export interface MusicLibrarySongArtistCredit {
   artistId: string;
   name: string;
   creditedName: string;
-  role: 'primary' | 'featured' | 'composer' | 'remixer';
+  role: 'primary' | 'featured' | 'producer' | 'remixer';
   position: number;
   musicBrainzArtistId?: string;
 }

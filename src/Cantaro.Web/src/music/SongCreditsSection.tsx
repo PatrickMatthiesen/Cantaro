@@ -5,7 +5,7 @@ import { platformName } from './musicPresentation';
 const creditRoles: Record<MusicLibrarySongArtistCredit['role'], string> = {
   primary: 'Artist',
   featured: 'Featured artist',
-  composer: 'Composer',
+  producer: 'Producer',
   remixer: 'Remixer',
 };
 
