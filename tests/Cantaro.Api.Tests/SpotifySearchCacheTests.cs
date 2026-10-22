@@ -40,6 +40,7 @@ public sealed class SpotifySearchCacheTests
         Assert.Equal("spotify-id", await SearchWithFreshWorker(true));
         Assert.Equal(1, handler.SearchRequests);
         Assert.Equal(1, handler.TokenRequests);
+        Assert.Equal(1, handler.ArtistRequests);
     }
 
     [Fact]
@@ -173,6 +174,7 @@ public sealed class SpotifySearchCacheTests
     {
         public int SearchRequests { get; private set; }
         public int TokenRequests { get; private set; }
+        public int ArtistRequests { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             string json;
@@ -181,11 +183,16 @@ public sealed class SpotifySearchCacheTests
                 TokenRequests++;
                 json = """{"access_token":"app-token","expires_in":3600,"token_type":"Bearer"}""";
             }
+            else if (request.RequestUri.AbsolutePath == "/v1/artists/rival")
+            {
+                ArtistRequests++;
+                json = """{"id":"rival","name":"Rival","images":[{"url":"https://images/rival"}]}""";
+            }
             else
             {
                 Assert.Equal("/v1/search", request.RequestUri.AbsolutePath);
                 SearchRequests++;
-                json = """{"tracks":{"items":[{"type":"track","id":"spotify-id","name":"Heaven","duration_ms":253000,"artists":[{"name":"Rival"}]}]}}""";
+                json = """{"tracks":{"items":[{"type":"track","id":"spotify-id","name":"Heaven","duration_ms":253000,"artists":[{"id":"rival","name":"Rival"}]}]}}""";
             }
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             { Content = new StringContent(json, Encoding.UTF8, "application/json") });

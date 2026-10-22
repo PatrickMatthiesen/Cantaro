@@ -102,11 +102,13 @@ public sealed class SpotifyApiClientTests
             Json(HttpStatusCode.OK, """
                 { "tracks": { "items": [{
                   "type": "track", "id": "spotify-track", "name": "Desire", "duration_ms": 179500,
-                  "artists": [{ "id": "calvin", "name": "Calvin Harris", "external_urls": { "spotify": "https://open.spotify.com/artist/calvin" }, "images": [{ "url": "https://images/calvin" }] }, { "id": "sam", "name": "Sam Smith" }],
+                  "artists": [{ "id": "calvin", "name": "Calvin Harris", "external_urls": { "spotify": "https://open.spotify.com/artist/calvin" } }, { "id": "sam", "name": "Sam Smith" }],
                   "external_urls": { "spotify": "https://open.spotify.com/track/spotify-track" },
                   "external_ids": { "isrc": "GBARL2300987" }
                 }] } }
-                """)
+                """),
+            Json(HttpStatusCode.OK, """{"id":"calvin","name":"Calvin Harris","images":[{"url":"https://images/calvin"}]}"""),
+            Json(HttpStatusCode.OK, """{"id":"sam","name":"Sam Smith","images":[]}""")
         ]);
         using var client = CreateClient(handler);
 
@@ -122,7 +124,8 @@ public sealed class SpotifyApiClientTests
         Assert.Contains("calvin", track.ArtistIdentities[0].RawMetadata);
         Assert.Equal("GBARL2300987", track.Isrc);
         Assert.Equal(179, track.DurationSeconds);
-        var request = Assert.Single(handler.Requests);
+        Assert.Equal(["/v1/artists/calvin", "/v1/artists/sam"], handler.Requests.Skip(1).Select(request => request.PathAndQuery));
+        var request = handler.Requests[0];
         Assert.StartsWith("/v1/search?type=track&limit=10&q=", request.PathAndQuery, StringComparison.Ordinal);
         Assert.Equal("Bearer catalog-token", request.Authorization?.ToString());
     }

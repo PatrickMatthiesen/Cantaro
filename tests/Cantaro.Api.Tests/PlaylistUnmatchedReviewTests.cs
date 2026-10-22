@@ -412,8 +412,15 @@ public sealed class PlaylistUnmatchedReviewTests
         {
             Assert.Equal(HttpMethod.Get, request.Method);
             var path = request.RequestUri!.AbsolutePath;
-            Assert.Contains(path, new[] { "/v1/me", "/v1/search" });
-            var body = path == "/v1/me" ? "{\"id\":\"account\"}" : JsonSerializer.Serialize(new
+            Assert.Contains(path, new[] { "/v1/me", "/v1/search", "/v1/artists/artist-one", "/v1/artists/artist-two" });
+            var body = path == "/v1/me" ? "{\"id\":\"account\"}"
+                : path.StartsWith("/v1/artists/", StringComparison.Ordinal) ? JsonSerializer.Serialize(new
+                {
+                    id = path.Split('/').Last(),
+                    name = path.EndsWith("artist-one", StringComparison.Ordinal) ? "Porter Robinson" : "Guest",
+                    images = new[] { new { url = $"https://images.example/{path.Split('/').Last()}.jpg" } }
+                })
+                : JsonSerializer.Serialize(new
             {
                 tracks = new { items = new[] { new
                 {
@@ -423,8 +430,7 @@ public sealed class PlaylistUnmatchedReviewTests
                         .Select((name, index) => new
                         {
                             id = index == 0 ? "artist-one" : "artist-two", name,
-                            external_urls = new { spotify = $"https://open.spotify.com/artist/artist-{(index == 0 ? "one" : "two")}" },
-                            images = new[] { new { url = $"https://images.example/artist-{(index == 0 ? "one" : "two")}.jpg" } }
+                            external_urls = new { spotify = $"https://open.spotify.com/artist/artist-{(index == 0 ? "one" : "two")}" }
                         })
                 } } }
             });

@@ -35,7 +35,7 @@ public sealed class SpotifySearchProvider(
                 .ToArray();
             if (isrcMatches.Length > 0)
             {
-                return ToCandidates(isrcMatches);
+                return await ToEnrichedCandidatesAsync(isrcMatches, cancellationToken);
             }
         }
 
@@ -62,7 +62,7 @@ public sealed class SpotifySearchProvider(
             if (accepted is not null && CanStopBeforeRemainingQueries(
                 observation, metadata, isrc, searchHypotheses, index, accepted))
             {
-                return candidates;
+                return await ToEnrichedCandidatesAsync(tracks.DistinctBy(track => track.Id).ToArray(), cancellationToken);
             }
         }
 
@@ -75,7 +75,7 @@ public sealed class SpotifySearchProvider(
             }
         }
 
-        return ToCandidates(tracks.DistinctBy(track => track.Id));
+        return await ToEnrichedCandidatesAsync(tracks.DistinctBy(track => track.Id).ToArray(), cancellationToken);
     }
 
     private static bool CanStopBeforeRemainingQueries(
@@ -113,12 +113,37 @@ public sealed class SpotifySearchProvider(
         {
             var token = await tokenProvider.GetAccessTokenAsync(ct)
                 ?? throw new InvalidOperationException("Spotify catalog token is unavailable.");
-            return await apiClient.SearchTracksAsync(token, query, ResultLimit, ct);
+            return await apiClient.SearchTrackCreditsAsync(token, query, ResultLimit, ct);
         }
 
         return searchCache is null
             ? await SearchCatalogAsync(cancellationToken)
             : await searchCache.GetOrSearchAsync(query, ResultLimit, SearchCatalogAsync, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<TrackMatchSearchCandidate>> ToEnrichedCandidatesAsync(
+        IReadOnlyList<SpotifyTrackSnapshot> tracks, CancellationToken cancellationToken)
+    {
+        if (tracks.Any(track => track.ArtistIdentities.Any(credit =>
+            credit.Provider == SpotifyService.ServiceName && !string.IsNullOrWhiteSpace(credit.ExternalId))))
+        {
+            try
+            {
+                if (!await apiClient.IsCoolingDownAsync(cancellationToken))
+                {
+                    var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
+                    if (token is not null)
+                        tracks = await apiClient.EnrichArtistMetadataAsync(token, tracks, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (SpotifyApiClient.IsOptionalArtistFailure(ex, cancellationToken))
+            {
+                // A cached track search remains useful if optional enrichment
+                // cannot obtain a catalog token.
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return ToCandidates(tracks);
     }
 
     private static IReadOnlyList<TrackMatchSearchCandidate> ToCandidates(

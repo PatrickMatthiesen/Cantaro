@@ -182,7 +182,7 @@ internal sealed class SpotifyItemResponse
     public int DurationMs { get; init; }
 
     [JsonPropertyName("artists")]
-    public List<SpotifyArtistResponse> Artists { get; init; } = [];
+    public List<SpotifySimplifiedArtistResponse> Artists { get; init; } = [];
 
     [JsonPropertyName("album")]
     public SpotifyAlbumResponse? Album { get; init; }
@@ -194,7 +194,7 @@ internal sealed class SpotifyItemResponse
     public SpotifyExternalIdsResponse? ExternalIds { get; init; }
 }
 
-internal sealed class SpotifyArtistResponse
+internal class SpotifySimplifiedArtistResponse
 {
     [JsonPropertyName("id")]
     public string? Id { get; init; }
@@ -202,11 +202,14 @@ internal sealed class SpotifyArtistResponse
     [JsonPropertyName("external_urls")]
     public SpotifyExternalUrlsResponse? ExternalUrls { get; init; }
 
-    [JsonPropertyName("images")]
-    public List<SpotifyImageResponse> Images { get; init; } = [];
-
     [JsonPropertyName("name")]
     public string? Name { get; init; }
+}
+
+internal sealed class SpotifyArtistResponse : SpotifySimplifiedArtistResponse
+{
+    [JsonPropertyName("images")]
+    public List<SpotifyImageResponse>? Images { get; init; } = [];
 }
 
 internal sealed class SpotifyAlbumResponse
