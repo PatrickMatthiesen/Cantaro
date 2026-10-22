@@ -16,6 +16,7 @@ import { lyricsForDisplay } from './musicLyrics';
 import { formatDuration, isPlatformId, platformName, songArtist } from './musicPresentation';
 import { requestPlaylistSyncDataRefresh } from './playlistSyncProgress';
 import { canAddSongToPlaylist, withoutPlaylistEntry } from './musicPlaylistMemberships';
+import { SongCreditsSection } from './SongCreditsSection';
 
 interface SongDerivedMetadata {
   platformIds: PlatformId[];
@@ -175,7 +176,7 @@ function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: 
       <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
         <SongArtwork song={song} className="hidden w-56 shrink-0 bg-surface md:block xl:w-64" />
         <div className="min-w-0 max-w-4xl">
-          <SongIdentityStatus metadata={metadata} />
+          {metadata.isObservation ? <SongIdentityStatus metadata={metadata} /> : null}
           <h1 className="mt-4 max-w-[22ch] text-3xl leading-[1.06] font-black tracking-[-0.03em] text-balance sm:text-4xl xl:text-5xl">
             {song.title}
           </h1>
@@ -195,22 +196,17 @@ function PlatformAvailabilitySection({ song }: { song: MusicLibrarySong }) {
 
   return (
     <section className="border-b border-border-subtle py-9">
-      <SectionHeader title="Platforms and references" />
+      <SectionHeader title="Listen on" />
       {song.platformLinks.length > 0 ? (
-        <ul className="mt-5 grid gap-x-10 sm:grid-cols-2">
+        <ul className="mt-5 flex flex-wrap gap-3">
           {song.platformLinks.map((link) => {
             const platformId = link.platform === 'youtube-music' ? 'youtube' : link.platform;
             return (
-              <li key={link.url} className="border-t border-border-subtle first:border-t-0 sm:[&:nth-child(2)]:border-t-0">
-                <a href={link.url} target="_blank" rel="noreferrer" className="group flex min-h-18 items-center gap-3 py-4 focus-visible:outline-2 focus-visible:outline-focus">
-                  <span className="inline-flex size-11 shrink-0 items-center justify-center text-content">
-                    {isPlatformId(platformId) ? <MusicPlatformIcon platformId={platformId} className="h-8 w-8" /> : <MusicUiIcon name="externalLink" className="h-6 w-6" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <strong className="block truncate text-content">{link.label}</strong>
-                    <span className="mt-0.5 block break-all text-sm text-content-muted">{platformName(link.source)} · {link.externalId}</span>
-                  </span>
-                  <MusicUiIcon name="externalLink" className="h-4 w-4 text-content-subtle transition-colors group-hover:text-personal-accent-strong" />
+              <li key={link.url}>
+                <a href={link.url} target="_blank" rel="noreferrer" className={actionClassName({ tone: 'secondary' })}>
+                  {isPlatformId(platformId) ? <MusicPlatformIcon platformId={platformId} className="size-5 shrink-0" /> : null}
+                  {link.label}
+                  <MusicUiIcon name="externalLink" className="size-4 shrink-0" />
                 </a>
               </li>
             );
@@ -465,29 +461,6 @@ function PlaylistMembershipRow({ playlist, confirming, busy, onConfirm, onRemove
   );
 }
 
-function ArchiveMetadataSection({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
-  const rows = [
-    { label: metadata.isObservation ? 'Observation ID' : 'Cantaro recording', value: song.id.replace(/^(track|observation):/, '') },
-    ...(song.albums.length > 0 ? [{ label: 'Albums', value: song.albums.join(', ') }] : []),
-    ...(song.artistCredits.length > 0 ? [{ label: 'Artists', value: song.artistCredits.map((credit) => `${credit.creditedName || credit.name} · ${credit.role}`).join(', ') }] : []),
-    ...song.sourceIdentities.map((identity) => ({ label: identity.source === 'musicbrainz' ? 'MusicBrainz recording' : identity.source === 'isrc' ? 'ISRC' : `${platformName(identity.source)} ID`, value: identity.externalId })),
-  ];
-
-  return (
-    <section className="border-b border-border-subtle py-9 xl:border-b-0">
-      <SectionHeader title="Recording metadata" />
-      <dl className="mt-5 divide-y divide-border-subtle border-t border-border-subtle">
-        {rows.map((row) => (
-          <div key={`${row.label}:${row.value}`} className="grid gap-1 py-4 text-sm sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
-            <dt className="text-content-subtle">{row.label}</dt>
-            <dd className="min-w-0 break-words font-semibold text-content">{row.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
-}
-
 function RelatedArtwork({ recording }: { recording: MusicLibraryRelatedRecording }) {
   return recording.thumbnailUrl
     ? <img src={recording.thumbnailUrl} alt="" className="size-12 shrink-0 object-cover" />
@@ -577,7 +550,7 @@ export function MusicSongDetailPage({ library, songId }: { library: MusicLibrary
               <PlaylistAppearancesSection song={song} library={library} />
             </main>
             <aside className="min-w-0">
-              <ArchiveMetadataSection song={song} metadata={metadata} />
+              <SongCreditsSection song={song} />
               <RelatedSongsSection song={song} loading={!metadata.isObservation && !loadedCanonicalSong && canonicalState !== 'error'} error={!metadata.isObservation && canonicalState === 'error'} />
             </aside>
           </div>
