@@ -101,6 +101,9 @@ jobs:
       - name: Check shared package
         run: bun run check:shared
 
+      - name: Test music playback
+        run: cd src/Cantaro.Web && bun run test:playback
+
       - name: Lint frontend
         run: cd src/Cantaro.Web && bun run lint
 
