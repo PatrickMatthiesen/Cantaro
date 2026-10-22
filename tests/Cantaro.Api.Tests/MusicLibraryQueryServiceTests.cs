@@ -345,6 +345,57 @@ public class MusicLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetCanonicalSongAsync_PreservesUserScopedObservationMetadataFallbacks()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var firstUser = TestUserFactory.Create(722, "first-observation@example.com");
+        var secondUser = TestUserFactory.Create(723, "second-observation@example.com");
+        var firstPlaylist = MakePlaylist(firstUser.Id, "First library", now);
+        var secondPlaylist = MakePlaylist(secondUser.Id, "Second library", now);
+        var track = new Track
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = "Canonical song" }),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        TrackObservation MakeObservation(string externalId, string artwork, int duration) => new()
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = externalId,
+            Title = "Observed song", MatchStatus = TrackMatchingStatuses.Matched, TrackId = track.Id,
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            {
+                ThumbnailUrl = artwork, DurationSeconds = duration
+            }),
+            CreatedAt = now, UpdatedAt = now
+        };
+        var firstObservation = MakeObservation("first-video", "https://img.example/first.jpg", 189);
+        var secondObservation = MakeObservation("second-video", "https://img.example/second.jpg", 205);
+        db.AddRange(firstUser, secondUser, firstPlaylist, secondPlaylist, track, firstObservation, secondObservation);
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.AddRange(
+            MakeEntry(firstPlaylist.Id, track.Id, firstObservation.Id, 0, "youtube", now),
+            MakeEntry(secondPlaylist.Id, track.Id, secondObservation.Id, 0, "youtube", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var service = new MusicLibraryQueryService(db);
+        var firstLibrarySong = Assert.Single((await service.GetLibraryAsync(firstUser.Id, default)).Songs);
+        var firstDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(track.Id, firstUser.Id, default));
+        var secondDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(track.Id, secondUser.Id, default));
+
+        Assert.Equal(189, firstLibrarySong.DurationSeconds);
+        Assert.Equal(firstLibrarySong.DurationSeconds, firstDetail.DurationSeconds);
+        Assert.Equal(firstLibrarySong.ThumbnailUrl, firstDetail.ThumbnailUrl);
+        Assert.Equal("https://img.example/first.jpg", firstDetail.ThumbnailUrl);
+        Assert.Equal(205, secondDetail.DurationSeconds);
+        Assert.Equal("https://img.example/second.jpg", secondDetail.ThumbnailUrl);
+    }
+
+    [Fact]
     public async Task GetCanonicalSongAsync_UsesStoredRecordingRelationshipsAndKeepsRelatedPagesReachable()
     {
         var (db, connection) = await CreateDbAsync();

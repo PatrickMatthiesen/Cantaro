@@ -82,7 +82,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .OrderBy(item => item.Entry.Position)
             .First()
             .Entry;
-        var metadata = BuildSongMetadata(representative);
+        var metadata = BuildSongMetadata(representative.Track, representative.TrackObservation);
         var identities = group
             .SelectMany(item => GetSourceIdentities(item.Entry))
             .DistinctBy(identity => $"{identity.Source}\0{identity.ExternalId}", StringComparer.OrdinalIgnoreCase)
@@ -132,6 +132,13 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .FirstOrDefaultAsync(x => x.Id == trackId && accessibleTrackIds.Contains(x.Id), cancellationToken);
         if (track is null) return null;
         var metadata = ParseJson<TrackCanonicalMetadata>(track.CanonicalMetadata);
+        var observation = await _dbContext.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackId == trackId && entry.Playlist != null && entry.Playlist.UserId == userId)
+            .OrderBy(entry => entry.Position)
+            .ThenBy(entry => entry.Playlist!.Name)
+            .Select(entry => entry.TrackObservation)
+            .FirstOrDefaultAsync(cancellationToken);
+        var displayMetadata = BuildSongMetadata(track, observation);
         var memberships = await _dbContext.PlaylistEntries.AsNoTracking()
             .Where(x => x.TrackId == trackId && x.Playlist != null && x.Playlist.UserId == userId)
             .Select(x => new MusicLibrarySongPlaylistDto { EntryId = x.Id.ToString(), PlaylistId = x.PlaylistId.ToString(), PlaylistName = x.Playlist!.Name, Position = x.Position })
@@ -145,7 +152,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, "Unknown song")!,
             Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track), track.SearchArtist),
             ArtistCredits = BuildArtistCredits(track),
-            Albums = metadata?.Albums ?? [], ThumbnailUrl = metadata?.ThumbnailUrl, DurationSeconds = metadata?.DurationSeconds,
+            Albums = metadata?.Albums ?? [], ThumbnailUrl = displayMetadata.ThumbnailUrl, DurationSeconds = displayMetadata.DurationSeconds,
             MatchStatus = null, SourcePlatforms = identities.Select(x => x.Source).Distinct().Order().ToList(),
             SourceIdentities = identities, PlatformLinks = BuildPlatformLinks(identities), Playlists = memberships,
             VersionLabels = GetVersionLabels(track.VersionFlags),
@@ -388,11 +395,10 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         return creditedNames.Count == 0 ? null : string.Join(" ", creditedNames);
     }
 
-    private static SongMetadata BuildSongMetadata(PlaylistEntry entry)
+    private static SongMetadata BuildSongMetadata(Track? track, TrackObservation? observation)
     {
-        var canonicalMetadata = ParseJson<TrackCanonicalMetadata>(entry.Track?.CanonicalMetadata);
-        var observationMetadata = ParseJson<TrackObservationMetadata>(entry.TrackObservation?.RawMetadata);
-        var observation = entry.TrackObservation;
+        var canonicalMetadata = ParseJson<TrackCanonicalMetadata>(track?.CanonicalMetadata);
+        var observationMetadata = ParseJson<TrackObservationMetadata>(observation?.RawMetadata);
 
         var title = FirstNonEmpty(
             canonicalMetadata?.Title,
@@ -401,7 +407,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             "Unknown song")!;
         var artist = FirstNonEmpty(
             canonicalMetadata?.Artist,
-            BuildArtistDisplay(entry.Track),
+            BuildArtistDisplay(track),
             observation is null ? null : TrackObservationDisplayFormatter.GetQueueArtist(observation, observationMetadata));
 
         return new SongMetadata(
@@ -414,7 +420,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 .ToList(),
             FirstNonEmpty(canonicalMetadata?.ThumbnailUrl, observation?.ThumbnailUrl, observationMetadata?.ThumbnailUrl),
             canonicalMetadata?.DurationSeconds ?? observation?.DurationSeconds ?? observationMetadata?.DurationSeconds,
-            observation?.MatchStatus ?? (entry.TrackId is not null ? TrackMatchingStatuses.Matched : null));
+            observation?.MatchStatus ?? (track is not null ? TrackMatchingStatuses.Matched : null));
     }
 
     private static string GetSongStableId(PlaylistEntry entry)
