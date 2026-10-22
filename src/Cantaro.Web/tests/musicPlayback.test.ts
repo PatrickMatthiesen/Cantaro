@@ -77,6 +77,44 @@ describe('playback session', () => {
     expect(playbackReducer(started, { type: 'previous' })).toEqual(started);
   });
 
+  test('moving directly between embeddable tracks preserves play intent in both directions', () => {
+    const nextTrack: PlaybackTrack = {
+      id: 'another-embed', title: 'Another embed', sources: [{
+        id: 'youtube:another', providerId: 'youtube', label: 'YouTube',
+        capability: { kind: 'embed', mediaId: 'another' },
+      }],
+    };
+    const started = apply(
+      { type: 'replaceQueue', tracks: [youtube, nextTrack] },
+      { type: 'select', index: 0, play: true },
+    );
+
+    const next = playbackReducer(started, { type: 'next' });
+    expect(currentPlaybackTrack(next)?.id).toBe('another-embed');
+    expect(selectedPlaybackSource(next)?.id).toBe('youtube:another');
+    expect(next.status).toBe('playing');
+
+    const previous = playbackReducer(next, { type: 'previous' });
+    expect(currentPlaybackTrack(previous)?.id).toBe('first');
+    expect(selectedPlaybackSource(previous)?.id).toBe('youtube:one');
+    expect(previous.status).toBe('playing');
+  });
+
+  test('enqueueing retains the current track, source, and status', () => {
+    const started = apply(
+      { type: 'replaceQueue', tracks: [spotify, youtube] },
+      { type: 'select', index: 1, play: true },
+    );
+
+    const enqueued = playbackReducer(started, { type: 'enqueue', track: unavailable });
+    expect(enqueued.queue.map((track) => track.id)).toEqual(['second', 'first', 'third']);
+    expect(enqueued.currentIndex).toBe(started.currentIndex);
+    expect(currentPlaybackTrack(enqueued)).toBe(youtube);
+    expect(enqueued.selectedSourceId).toBe(started.selectedSourceId);
+    expect(selectedPlaybackSource(enqueued)).toBe(youtube.sources[0]);
+    expect(enqueued.status).toBe('playing');
+  });
+
   test('pause, stop, source selection, and queue replacement are deterministic', () => {
     const both: PlaybackTrack = { ...youtube, sources: [...youtube.sources, ...spotify.sources] };
     const playing = apply(
