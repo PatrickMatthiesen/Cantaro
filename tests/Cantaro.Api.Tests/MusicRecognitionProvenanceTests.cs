@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -31,16 +32,23 @@ public sealed class MusicRecognitionProvenanceTests
         var other = TestUserFactory.Create(736, "recognition-other@example.com");
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = requester.Id, Name = "Saved" };
         var privatePlaylist = new Playlist { Id = Guid.NewGuid(), UserId = other.Id, Name = "Private" };
-        var track = new Track { Id = Guid.NewGuid(), Isrc = "PUBLICISRC" };
+        var track = new Track
+        {
+            Id = Guid.NewGuid(), Isrc = "PUBLICISRC",
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                ThumbnailUrl = "https://i.ytimg.com/vi/privateVid1/mqdefault.jpg"
+            })
+        };
         var privateObservation = new TrackObservation
         {
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "privateVid1",
-            Title = "Private video", MatchStatus = TrackMatchingStatuses.Matched
+            Title = "Private video", ThumbnailUrl = "https://i.ytimg.com/vi/privateVid1/mqdefault.jpg", MatchStatus = TrackMatchingStatuses.Matched
         };
         var ownedObservation = new TrackObservation
         {
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "ownedVideo1",
-            Title = "Owned video", MatchStatus = TrackMatchingStatuses.Matched
+            Title = "Owned video", ThumbnailUrl = "https://i.ytimg.com/vi/ownedVideo1/mqdefault.jpg", MatchStatus = TrackMatchingStatuses.Matched
         };
         if (useGlobalLookup)
             track.SourceIds.Add(new TrackSourceId
@@ -80,6 +88,7 @@ public sealed class MusicRecognitionProvenanceTests
         var request = new RecognizeYouTubeRequest(privateObservation.ExternalId, "youtube", null);
 
         var canonicalOnly = await RecognizeSongAsync();
+        Assert.Null(canonicalOnly.ThumbnailUrl);
         Assert.Equal(new[] { ("isrc", track.Isrc!) },
             canonicalOnly.SourceIdentities.Select(identity => (identity.Source, identity.ExternalId)));
         Assert.Equal(["isrc"], canonicalOnly.SourcePlatforms);
@@ -94,6 +103,7 @@ public sealed class MusicRecognitionProvenanceTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var withObservation = await RecognizeSongAsync();
+        Assert.Equal(ownedObservation.ThumbnailUrl, withObservation.ThumbnailUrl);
         Assert.Equal(new[] { ("isrc", track.Isrc!), ("youtube", ownedObservation.ExternalId) },
             withObservation.SourceIdentities.Select(identity => (identity.Source, identity.ExternalId)));
         Assert.Equal(["isrc", "youtube"], withObservation.SourcePlatforms);
@@ -103,6 +113,7 @@ public sealed class MusicRecognitionProvenanceTests
         Assert.True(await library.RemoveCanonicalSongFromPlaylistAsync(track.Id, playlist.Id, requester.Id, default, ownedEntry.Id));
         db.ChangeTracker.Clear();
         var afterRemove = await RecognizeSongAsync();
+        Assert.Null(afterRemove.ThumbnailUrl);
         Assert.Equal(new[] { ("isrc", track.Isrc!) },
             afterRemove.SourceIdentities.Select(identity => (identity.Source, identity.ExternalId)));
         Assert.Empty(afterRemove.PlatformLinks);

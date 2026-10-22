@@ -4,6 +4,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -539,6 +540,11 @@ public class MusicLibraryQueryServiceTests
         var later = Observation("later");
         later.DurationSeconds = 300;
         later.ThumbnailUrl = "https://img.example/later.jpg";
+        // Canonical precedence requires artwork provenance on an attached owned observation.
+        later.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        {
+            ThumbnailUrl = hasCanonicalMetadata ? "https://img.example/canonical.jpg" : null
+        });
         var privateObservation = Observation("private");
         privateObservation.DurationSeconds = 400;
         privateObservation.ThumbnailUrl = "https://img.example/private.jpg";
@@ -556,8 +562,11 @@ public class MusicLibraryQueryServiceTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
-        var detail = Assert.IsType<MusicLibrarySongDto>(
-            await new MusicLibraryQueryService(db).GetCanonicalSongAsync(track.Id, owner.Id, default));
+        var service = new MusicLibraryQueryService(db);
+        var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(track.Id, owner.Id, default));
+        var librarySong = Assert.Single((await service.GetLibraryAsync(owner.Id, default)).Songs);
+        Assert.Equal(detail.ThumbnailUrl, librarySong.ThumbnailUrl);
+        Assert.Equal(detail.DurationSeconds, librarySong.DurationSeconds);
 
         Assert.Equal(hasCanonicalMetadata ? 250 : 189, detail.DurationSeconds);
         Assert.Equal(hasCanonicalMetadata ? "https://img.example/canonical.jpg" : "https://img.example/owned.jpg", detail.ThumbnailUrl);
@@ -581,12 +590,13 @@ public class MusicLibraryQueryServiceTests
         var other = TestUserFactory.Create(729, "related-fallback-other@example.com");
         var firstPlaylist = MakePlaylist(owner.Id, "A canonical only", now);
         var observedPlaylist = MakePlaylist(owner.Id, "B observations", now);
-        observedPlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        observedPlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000100");
         var sameNamePlaylist = MakePlaylist(owner.Id, observedPlaylist.Name, now);
-        sameNamePlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        sameNamePlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000200");
         var laterSameNamePlaylist = MakePlaylist(owner.Id, observedPlaylist.Name, now);
-        laterSameNamePlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        laterSameNamePlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000300");
         var lastPlaylist = MakePlaylist(owner.Id, "C observations", now);
+        lastPlaylist.Id = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var privatePlaylist = MakePlaylist(other.Id, "A private", now);
         var original = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
         var related = new Track
@@ -610,7 +620,10 @@ public class MusicLibraryQueryServiceTests
         artwork.ThumbnailUrl = "https://img.example/owned.jpg";
         var later = Observation("later");
         later.DurationSeconds = 300;
-        later.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { ThumbnailUrl = "https://img.example/later.jpg" });
+        later.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        {
+            ThumbnailUrl = hasCanonicalArtwork ? "https://img.example/canonical.jpg" : "https://img.example/later.jpg"
+        });
         var privateObservation = Observation("private");
         privateObservation.DurationSeconds = 400;
         privateObservation.ThumbnailUrl = "https://img.example/private.jpg";
@@ -644,6 +657,9 @@ public class MusicLibraryQueryServiceTests
         var relatedDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, owner.Id, default));
         Assert.Equal(relatedDetail.DurationSeconds, card.DurationSeconds);
         Assert.Equal(relatedDetail.ThumbnailUrl, card.ThumbnailUrl);
+        var librarySong = Assert.Single((await service.GetLibraryAsync(owner.Id, default)).Songs, song => song.Id == relatedDetail.Id);
+        Assert.Equal(relatedDetail.ThumbnailUrl, librarySong.ThumbnailUrl);
+        Assert.Equal(relatedDetail.DurationSeconds, librarySong.DurationSeconds);
         var originalCard = Assert.Single(relatedDetail.RelatedRecordings);
         Assert.True(originalCard.InLibrary);
         Assert.Null(originalCard.DurationSeconds);
@@ -707,7 +723,7 @@ public class MusicLibraryQueryServiceTests
         var canonicalCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{canonicalRelated.Id}");
         Assert.False(canonicalCard.InLibrary);
         Assert.Equal(250, canonicalCard.DurationSeconds);
-        Assert.Equal("https://img.example/canonical.jpg", canonicalCard.ThumbnailUrl);
+        Assert.Null(canonicalCard.ThumbnailUrl);
         var relatedDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, owner.Id, default));
         Assert.Empty(relatedDetail.Playlists);
         Assert.Equal(privateCard.DurationSeconds, relatedDetail.DurationSeconds);
@@ -959,6 +975,137 @@ public class MusicLibraryQueryServiceTests
         Assert.Empty(song.SourceIdentities);
         Assert.Empty(song.PlatformLinks);
         Assert.Empty(song.SourcePlatforms);
+    }
+
+    [Theory]
+    [InlineData("incoming", "before")]
+    [InlineData("outgoing", "before")]
+    [InlineData("composition", "before")]
+    [InlineData("incoming", "canonical")]
+    [InlineData("outgoing", "canonical")]
+    [InlineData("composition", "canonical")]
+    [InlineData("incoming", "owned")]
+    [InlineData("outgoing", "owned")]
+    [InlineData("composition", "owned")]
+    [InlineData("incoming", "removed")]
+    [InlineData("outgoing", "removed")]
+    [InlineData("composition", "removed")]
+    public async Task ReadSongs_ArtworkRequiresOwnedObservationProvenance(string accessKind, string phase)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var requester = TestUserFactory.Create(737, "artwork-requester@example.com");
+        var originalOwner = TestUserFactory.Create(738, "artwork-owner@example.com");
+        var playlist = MakePlaylist(requester.Id, "Saved", now);
+        var privatePlaylist = MakePlaylist(originalOwner.Id, "Private", now);
+        var importedPlaylist = MakePlaylist(requester.Id, "Imported", now);
+        var anchor = new Track { Id = Guid.NewGuid(), SearchTitle = "Anchor", CreatedAt = now, UpdatedAt = now };
+        const string privateArtwork = "https://i.ytimg.com/vi/privateVid1/mqdefault.jpg";
+        const string ownedArtwork = "https://i.ytimg.com/vi/ownedVideo1/mqdefault.jpg";
+        var privateObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "privateVid1",
+            Title = "Song", Artist = "Artist", ThumbnailUrl = privateArtwork, DurationSeconds = 200,
+            MatchStatus = TrackMatchingStatuses.Pending, CreatedAt = now, UpdatedAt = now
+        };
+        db.AddRange(requester, originalOwner, playlist, importedPlaylist, privatePlaylist, anchor, privateObservation);
+        db.PlaylistEntries.Add(MakeEntry(privatePlaylist.Id, null, privateObservation.Id, 0, "youtube", now));
+        db.PlaylistEntries.Add(MakeEntry(playlist.Id, anchor.Id, null, 0, "cantaro", now));
+        await db.SaveChangesAsync();
+        // Exercise production matching and reconciliation, which copy private artwork into shared canonical JSON.
+        var matching = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
+        var matched = await matching.CreateTrackFromMatchAsync(privateObservation.Id, new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify", ExternalId = "catalog-song", Title = "Song", Artist = "Artist",
+            ArtistCredits = ["Artist"], Isrc = "USABC2400001", DurationSeconds = 210
+        }, default);
+        var trackId = Assert.IsType<Guid>(matched.TrackId);
+        var stored = await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == trackId);
+        Assert.Equal(privateArtwork, JsonSerializer.Deserialize<TrackCanonicalMetadata>(stored.CanonicalMetadata!)!.ThumbnailUrl);
+        if (accessKind == "composition")
+        {
+            var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+            db.Songs.Add(composition);
+            db.SongTracks.AddRange(new SongTrack { SongId = composition.Id, TrackId = anchor.Id },
+                new SongTrack { SongId = composition.Id, TrackId = trackId });
+        }
+        else db.TrackRelations.Add(new TrackRelation
+        {
+            FromTrackId = accessKind == "incoming" ? trackId : anchor.Id,
+            ToTrackId = accessKind == "incoming" ? anchor.Id : trackId,
+            RelationType = TrackRelationType.RemixOf
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var service = new MusicLibraryQueryService(db);
+        if (phase != "before")
+            Assert.True(await service.AddCanonicalSongToPlaylistAsync(trackId, playlist.Id, requester.Id, default));
+        if (phase is "owned" or "removed")
+        {
+            // A different imported observation resolves to the same canonical track, with its own artwork.
+            var ownObservation = new TrackObservation
+            {
+                Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "ownedVideo1", Title = "Song", Artist = "Artist",
+                RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { ThumbnailUrl = ownedArtwork }),
+                MatchStatus = TrackMatchingStatuses.Pending, CreatedAt = now, UpdatedAt = now
+            };
+            db.TrackObservations.Add(ownObservation);
+            var ownEntry = MakeEntry(importedPlaylist.Id, null, ownObservation.Id, 2, "youtube", now);
+            db.PlaylistEntries.Add(ownEntry);
+            await db.SaveChangesAsync();
+            var ownMatch = await matching.CreateTrackFromMatchAsync(ownObservation.Id, new TrackMatchSearchCandidate
+            {
+                CandidateSource = "spotify", ExternalId = "catalog-song", Title = "Song", Artist = "Artist",
+                ArtistCredits = ["Artist"], Isrc = "USABC2400001", DurationSeconds = 210
+            }, default);
+            Assert.Equal(trackId, ownMatch.TrackId);
+            if (phase == "removed")
+                Assert.True(await service.RemoveCanonicalSongFromPlaylistAsync(trackId, importedPlaylist.Id, requester.Id, default, ownEntry.Id));
+        }
+        db.ChangeTracker.Clear();
+        var expectedArtwork = phase == "owned" ? ownedArtwork : null;
+        var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(trackId, requester.Id, default));
+        Assert.Equal(expectedArtwork, detail.ThumbnailUrl);
+        Assert.Equal("Song", detail.Title);
+        Assert.Equal(210, detail.DurationSeconds);
+        Assert.Contains(detail.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "USABC2400001");
+        Assert.DoesNotContain("privateVid1", JsonSerializer.Serialize(detail));
+        var anchorDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(anchor.Id, requester.Id, default));
+        var card = Assert.Single(anchorDetail.RelatedRecordings);
+        Assert.Equal(expectedArtwork, card.ThumbnailUrl);
+        Assert.Equal(phase != "before", card.InLibrary);
+        Assert.DoesNotContain("privateVid1", JsonSerializer.Serialize(anchorDetail));
+        var library = await service.GetLibraryAsync(requester.Id, default);
+        Assert.DoesNotContain("privateVid1", JsonSerializer.Serialize(library));
+        if (phase != "before")
+        {
+            var librarySong = Assert.Single(library.Songs, song => song.Id == detail.Id);
+            Assert.Equal(expectedArtwork, librarySong.ThumbnailUrl);
+            AssertSameIdentitiesAndLinks(detail, librarySong);
+        }
+        if (phase == "removed")
+        {
+            // Removing the remaining canonical-only membership still allows related detail access,
+            // but neither the detached observation nor the persisted canonical URL authorizes artwork.
+            Assert.True(await service.RemoveCanonicalSongFromPlaylistAsync(trackId, playlist.Id, requester.Id, default));
+            db.ChangeTracker.Clear();
+            var afterCanonicalRemoval = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(trackId, requester.Id, default));
+            Assert.Empty(afterCanonicalRemoval.Playlists);
+            Assert.Null(afterCanonicalRemoval.ThumbnailUrl);
+            Assert.DoesNotContain("privateVid1", JsonSerializer.Serialize(afterCanonicalRemoval));
+            var afterRemovalAnchor = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(anchor.Id, requester.Id, default));
+            var afterRemovalCard = Assert.Single(afterRemovalAnchor.RelatedRecordings);
+            Assert.False(afterRemovalCard.InLibrary);
+            Assert.Null(afterRemovalCard.ThumbnailUrl);
+            Assert.DoesNotContain((await service.GetLibraryAsync(requester.Id, default)).Songs, song => song.Id == detail.Id);
+            Assert.Equal(2, await db.TrackObservations.CountAsync());
+        }
+        var ownerDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(trackId, originalOwner.Id, default));
+        Assert.Equal(privateArtwork, ownerDetail.ThumbnailUrl);
+        Assert.Equal(privateArtwork, Assert.Single((await service.GetLibraryAsync(originalOwner.Id, default)).Songs).ThumbnailUrl);
+        Assert.Equal(stored.CanonicalMetadata, (await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == trackId)).CanonicalMetadata);
     }
 
     private static void AssertSameIdentitiesAndLinks(MusicLibrarySongDto expected, MusicLibrarySongDto actual)
