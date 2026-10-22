@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -180,6 +181,92 @@ public sealed class ArtistReconciliationServiceTests
         await fixture.Import(track, [Spotify("Artist", "a")]);
         await fixture.Db.SaveChangesAsync();
         Assert.Equal(TrackArtistRole.Remixer, track.ArtistCredits.Single().Role);
+    }
+
+    [Theory]
+    [InlineData("Alpha feat. Beta", true)]
+    [InlineData("Alpha & Beta", true)]
+    [InlineData("Unknown collaboration", false)]
+    public async Task SpotifyImport_LegacyCollaborationFormattingNeverCreatesPartialCredits(string legacyName, bool equivalent)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var track = fixture.AddTrack();
+        await fixture.Import(track, [new() { Name = legacyName }]);
+        fixture.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = track.Id,
+            SourceType = "spotify", ExternalId = "collaboration" });
+        await fixture.Db.SaveChangesAsync();
+        var snapshot = Snapshot("collaboration", "Alpha, Beta", "alpha") with {
+            ArtistIdentities = [Spotify("Alpha", "alpha"), Spotify("Beta", "beta")] };
+        var resolver = new SpotifyTrackResolver(fixture.Db);
+
+        await resolver.ResolveAsync(snapshot, Now, default);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        await resolver.ResolveAsync(snapshot, Now, default);
+        await fixture.Db.SaveChangesAsync();
+
+        var credits = await fixture.Db.TrackArtistCredits.OrderBy(c => c.Position).ToArrayAsync();
+        Assert.Equal(equivalent ? ["Alpha", "Beta"] : new[] { legacyName }, credits.Select(c => c.CreditedName));
+        Assert.Equal(equivalent ? 2 : 0, await fixture.Db.ArtistProviderLinks.CountAsync());
+        Assert.Equal(equivalent ? 0 : 2, await fixture.Db.ArtistReconciliationConflicts.CountAsync());
+        if (!equivalent)
+        {
+            var evidence = await fixture.Db.ArtistReconciliationConflicts.Select(c => c.Evidence).ToArrayAsync();
+            Assert.Contains(evidence, e => e.Contains("\"ExternalId\":\"alpha\""));
+            Assert.Contains(evidence, e => e.Contains("\"ExternalId\":\"beta\""));
+        }
+    }
+
+    [Fact]
+    public async Task ExistingSingleAnonymousArtist_CanGainIdentityAndAnotherCollaborator()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var track = fixture.AddTrack();
+        await fixture.Import(track, [new() { Name = "Alpha" }]);
+        await fixture.Db.SaveChangesAsync();
+        var originalArtistId = track.ArtistCredits.Single().ArtistId;
+        await fixture.Import(track, [Spotify("Alpha", "alpha"), Spotify("Beta", "beta")]);
+        await fixture.Db.SaveChangesAsync();
+
+        var credits = track.ArtistCredits.OrderBy(c => c.Position).ToArray();
+        Assert.Equal(["Alpha", "Beta"], credits.Select(c => c.CreditedName));
+        Assert.Equal(originalArtistId, credits[0].ArtistId);
+        Assert.Equal(2, await fixture.Db.Artists.CountAsync());
+        Assert.Equal(2, await fixture.Db.ArtistProviderLinks.CountAsync());
+        Assert.Empty(await fixture.Db.ArtistReconciliationConflicts.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task ReorderedIdentities_RetainCanonicalOrderAndJoinPhrases_AndDeduplicateOrderingEvidence()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var track = fixture.AddTrack();
+        await fixture.Import(track, [Spotify("Alpha", "a") with { JoinPhrase = " feat. " },
+            Spotify("Beta", "b") with { JoinPhrase = "" }]);
+        await fixture.Db.SaveChangesAsync();
+        var reordered = new[] { Spotify("Beta", "b") with { JoinPhrase = " & " },
+            Spotify("Alpha", "a") with { JoinPhrase = "" } };
+        await fixture.Import(track, reordered);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        track = await fixture.Db.Tracks.SingleAsync(t => t.Id == track.Id);
+        await fixture.Import(track, reordered);
+        await fixture.Db.SaveChangesAsync();
+
+        var credits = track.ArtistCredits.OrderBy(c => c.Position).ToArray();
+        Assert.Equal(["Alpha", "Beta"], credits.Select(c => c.CreditedName));
+        Assert.Equal([" feat. ", ""], credits.Select(c => c.JoinPhrase));
+        Assert.Equal(2, await fixture.Db.Artists.CountAsync());
+        var conflicts = await fixture.Db.ArtistReconciliationConflicts.ToArrayAsync();
+        Assert.Equal(2, conflicts.Length);
+        foreach (var conflict in conflicts)
+        {
+            Assert.Contains("order", conflict.Reason);
+            using var json = JsonDocument.Parse(conflict.Evidence);
+            var position = json.RootElement.GetProperty("position").GetInt32();
+            Assert.Equal(position == 0 ? "b" : "a", json.RootElement.GetProperty("incoming").GetProperty("ExternalId").GetString());
+            Assert.Equal(position == 0 ? " & " : "", json.RootElement.GetProperty("incoming").GetProperty("JoinPhrase").GetString());
+        }
     }
 
     private static ArtistCreditMetadata Spotify(string name, string id) => new() {

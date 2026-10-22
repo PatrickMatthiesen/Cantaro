@@ -331,6 +331,60 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Empty(await db.TrackSourceIds.ToListAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_ExistingCanonicalTrackGainsAcceptedArtistMetadataAndReusesItAfterRestart(bool mappingAppearsDuringSearch)
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        Guid entryId;
+        Guid trackId;
+        await using (var db = new ApplicationDbContext(options))
+        {
+            var entry = await SeedCanonicalAsync(db);
+            entryId = entry.Id;
+            trackId = entry.TrackId!.Value;
+            await new ArtistReconciliationService(db).ReconcileAsync(entry.Track!,
+                [new ArtistCreditMetadata { Name = "Artist" }], "observation", DateTimeOffset.UtcNow, default);
+            await db.SaveChangesAsync();
+            var artistId = (await db.Artists.SingleAsync()).Id;
+            var candidate = new TrackMatchSearchCandidate {
+                CandidateSource = "spotify", ExternalId = "accepted", Title = "Song", Artist = "Artist",
+                ArtistCredits = ["Artist"], DurationSeconds = 180,
+                ArtistIdentities = [new ArtistCreditMetadata { Name = "Artist", Provider = "spotify", ExternalId = "artist-id",
+                    ProfileUrl = "https://open.spotify.com/artist/artist-id", ArtworkUrl = "https://images/artist",
+                    RawMetadata = "{\"provider\":true}" }] };
+
+            Assert.Equal("accepted", await ResolveCanonicalAsync(db, entry, "spotify",
+                async (_, ct) =>
+                {
+                    if (mappingAppearsDuringSearch)
+                    {
+                        db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
+                            SourceType = "spotify", ExternalId = "accepted" });
+                        await db.SaveChangesAsync(ct);
+                    }
+                    return [candidate];
+                }));
+            Assert.Equal(artistId, (await db.Artists.SingleAsync()).Id);
+        }
+        await using var restarted = new ApplicationDbContext(options);
+        var storedEntry = await restarted.PlaylistEntries.SingleAsync(e => e.Id == entryId);
+        Assert.Equal("accepted", await ResolveCanonicalAsync(restarted, storedEntry, "spotify",
+            (_, _) => throw new InvalidOperationException("Known mapping must not search again.")));
+        Assert.Single(await restarted.Tracks.ToArrayAsync());
+        Assert.Equal(trackId, (await restarted.TrackSourceIds.SingleAsync()).TrackId);
+        var link = await restarted.ArtistProviderLinks.SingleAsync();
+        Assert.Equal("artist-id", link.ExternalId);
+        Assert.Equal("https://open.spotify.com/artist/artist-id", link.ProfileUrl);
+        Assert.Equal("https://images/artist", link.ArtworkUrl);
+        Assert.Equal("{\"provider\":true}", link.RawMetadata);
+        var credit = await restarted.TrackArtistCredits.SingleAsync();
+        using var provenance = JsonDocument.Parse(credit.Provenance!);
+        Assert.Equal("artist-id", provenance.RootElement.GetProperty("spotify").GetProperty("ExternalId").GetString());
+    }
+
     private static TrackMatchSearchCandidate Candidate(string id, string service,
         string? isrc = null, string title = "Song", int duration = 180) => new()
     {
