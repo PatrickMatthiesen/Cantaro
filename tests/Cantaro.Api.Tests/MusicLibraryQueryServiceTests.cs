@@ -396,6 +396,136 @@ public class MusicLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetCanonicalSongAsync_PreservesAllOwnedObservationIdentitiesAndPlatformLinks()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(724, "identity-owner@example.com");
+        var other = TestUserFactory.Create(725, "identity-other@example.com");
+        var firstPlaylist = MakePlaylist(owner.Id, "First", now);
+        var secondPlaylist = MakePlaylist(owner.Id, "Second", now);
+        var privatePlaylist = MakePlaylist(other.Id, "Private", now);
+        var track = new Track
+        {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now,
+            Isrc = "USABC1234567", MbidRecording = "recording-id",
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = "Song" })
+        };
+        track.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "video-one"
+        });
+        TrackObservation Observation(string source, string externalId) => new()
+        {
+            Id = Guid.NewGuid(), SourceType = source, ExternalId = externalId, Title = "Observed song",
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+        };
+        var duplicate = Observation(" YouTube ", " video-one ");
+        var alternate = Observation("youtube", "video-two");
+        var spotify = Observation("spotify", "spotify-id");
+        var privateObservation = Observation("youtube", "private-video");
+        db.AddRange(owner, other, firstPlaylist, secondPlaylist, privatePlaylist, track,
+            duplicate, alternate, spotify, privateObservation);
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.AddRange(
+            MakeEntry(firstPlaylist.Id, track.Id, duplicate.Id, 0, "youtube", now),
+            MakeEntry(secondPlaylist.Id, track.Id, alternate.Id, 0, "youtube", now),
+            MakeEntry(secondPlaylist.Id, track.Id, alternate.Id, 1, "youtube", now),
+            MakeEntry(secondPlaylist.Id, track.Id, spotify.Id, 2, "spotify", now),
+            MakeEntry(privatePlaylist.Id, track.Id, privateObservation.Id, 0, "youtube", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var service = new MusicLibraryQueryService(db);
+        var librarySong = Assert.Single((await service.GetLibraryAsync(owner.Id, default)).Songs);
+        var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(track.Id, owner.Id, default));
+
+        Assert.Equal(librarySong.SourceIdentities.Select(item => (item.Source, item.ExternalId)),
+            detail.SourceIdentities.Select(item => (item.Source, item.ExternalId)));
+        Assert.Equal(5, detail.SourceIdentities.Count);
+        Assert.Equal(new[] { "video-one", "video-two" },
+            detail.SourceIdentities.Where(item => item.Source == "youtube").Select(item => item.ExternalId));
+        Assert.Equal(new[] { "https://www.youtube.com/watch?v=video-one", "https://www.youtube.com/watch?v=video-two" },
+            detail.PlatformLinks.Where(item => item.Platform == "youtube").Select(item => item.Url));
+        Assert.Equal(new[] { "video-one", "video-two" },
+            detail.PlatformLinks.Where(item => item.Platform == "youtube-music").Select(item => item.ExternalId));
+        Assert.Contains(detail.PlatformLinks, item => item.Platform == "spotify"
+            && item.Source == "spotify" && item.ExternalId == "spotify-id"
+            && item.Url == "https://open.spotify.com/track/spotify-id");
+        Assert.DoesNotContain(detail.SourceIdentities, item => item.ExternalId == "private-video");
+        Assert.DoesNotContain(detail.PlatformLinks, item => item.ExternalId == "private-video");
+        Assert.Equal(4, detail.Playlists.Count);
+
+        var privateDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(track.Id, other.Id, default));
+        Assert.Contains(privateDetail.SourceIdentities, item => item.ExternalId == "private-video");
+        Assert.DoesNotContain(privateDetail.SourceIdentities, item => item.ExternalId is "video-two" or "spotify-id");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetCanonicalSongAsync_FillsEachMissingFieldFromOrderedOwnedObservations(bool hasCanonicalMetadata)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(726, "fallback-owner@example.com");
+        var other = TestUserFactory.Create(727, "fallback-other@example.com");
+        var canonicalOnlyPlaylist = MakePlaylist(owner.Id, "A canonical only", now);
+        var observedPlaylist = MakePlaylist(owner.Id, "B observations", now);
+        var privatePlaylist = MakePlaylist(other.Id, "A private", now);
+        var track = new Track
+        {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now,
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                Title = "Canonical song", DurationSeconds = hasCanonicalMetadata ? 250 : null,
+                ThumbnailUrl = hasCanonicalMetadata ? "https://img.example/canonical.jpg" : null
+            })
+        };
+        TrackObservation Observation(string externalId) => new()
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = externalId, Title = "Observed song",
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+        };
+        var empty = Observation("empty");
+        var duration = Observation("duration");
+        duration.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { DurationSeconds = 189 });
+        var artwork = Observation("artwork");
+        artwork.ThumbnailUrl = "https://img.example/owned.jpg";
+        var later = Observation("later");
+        later.DurationSeconds = 300;
+        later.ThumbnailUrl = "https://img.example/later.jpg";
+        var privateObservation = Observation("private");
+        privateObservation.DurationSeconds = 400;
+        privateObservation.ThumbnailUrl = "https://img.example/private.jpg";
+        db.AddRange(owner, other, canonicalOnlyPlaylist, observedPlaylist, privatePlaylist,
+            track, empty, duration, artwork, later, privateObservation);
+        await db.SaveChangesAsync();
+        // Insert in reverse display order to check deterministic fallback selection.
+        db.PlaylistEntries.AddRange(
+            MakeEntry(observedPlaylist.Id, track.Id, later.Id, 4, "youtube", now),
+            MakeEntry(observedPlaylist.Id, track.Id, artwork.Id, 3, "youtube", now),
+            MakeEntry(observedPlaylist.Id, track.Id, duration.Id, 2, "youtube", now),
+            MakeEntry(observedPlaylist.Id, track.Id, empty.Id, 1, "youtube", now),
+            MakeEntry(canonicalOnlyPlaylist.Id, track.Id, null, 0, "cantaro", now),
+            MakeEntry(privatePlaylist.Id, track.Id, privateObservation.Id, 0, "youtube", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var detail = Assert.IsType<MusicLibrarySongDto>(
+            await new MusicLibraryQueryService(db).GetCanonicalSongAsync(track.Id, owner.Id, default));
+
+        Assert.Equal(hasCanonicalMetadata ? 250 : 189, detail.DurationSeconds);
+        Assert.Equal(hasCanonicalMetadata ? "https://img.example/canonical.jpg" : "https://img.example/owned.jpg", detail.ThumbnailUrl);
+        var stored = await db.Tracks.AsNoTracking().SingleAsync(item => item.Id == track.Id);
+        Assert.Equal(track.CanonicalMetadata, stored.CanonicalMetadata);
+    }
+
+    [Fact]
     public async Task GetCanonicalSongAsync_UsesStoredRecordingRelationshipsAndKeepsRelatedPagesReachable()
     {
         var (db, connection) = await CreateDbAsync();
