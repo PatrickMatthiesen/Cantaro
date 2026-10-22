@@ -192,6 +192,15 @@ public sealed class PlaylistUnmatchedReviewService(
         }
         else throw StaleChoice();
 
+        // Confirmation accepts the artist evidence too, including when the
+        // recording already exists and no materialization callback runs.
+        if (proof.Candidate.ArtistIdentities.Count > 0)
+        {
+            var track = await db.Tracks.SingleAsync(item => item.Id == trackId, ct);
+            await new ArtistReconciliationService(db).ReconcileAsync(track,
+                proof.Candidate.ArtistIdentities, link.Service, DateTimeOffset.UtcNow, ct, proof.Candidate.Artist);
+        }
+
         if (existing is null)
         {
             db.TrackSourceIds.Add(new TrackSourceId
@@ -240,6 +249,7 @@ public sealed class PlaylistUnmatchedReviewService(
             CandidateSource = "spotify", ExternalId = track.Id,
             Title = track.Name, Artist = track.Artist,
             ArtistCredits = track.ArtistNames, Isrc = track.Isrc,
+            ArtistIdentities = track.ArtistIdentities,
             DurationSeconds = track.DurationSeconds
         }).ToArray();
     }
