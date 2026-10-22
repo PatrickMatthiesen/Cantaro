@@ -148,10 +148,17 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var memberships = entries
             .Select(x => new MusicLibrarySongPlaylistDto { EntryId = x.Id.ToString(), PlaylistId = x.PlaylistId.ToString(), PlaylistName = x.Playlist!.Name, Position = x.Position })
             .OrderBy(x => x.PlaylistName).ToList();
-        var identities = track.SourceIds.Select(x => Identity(x.SourceType, x.ExternalId)).ToList();
+        var identities = new List<MusicLibrarySongSourceIdentityDto>();
+        // Relation-only access does not grant access to global provider mappings,
+        // which can contain private identifiers imported from another user's observations.
+        if (entries.Count > 0)
+        {
+            identities.AddRange(track.SourceIds.Select(x => Identity(x.SourceType, x.ExternalId)));
+            identities.AddRange(entries.SelectMany(GetSourceIdentities));
+        }
         if (!string.IsNullOrWhiteSpace(track.Isrc)) identities.Add(Identity("isrc", track.Isrc));
         if (!string.IsNullOrWhiteSpace(track.MbidRecording)) identities.Add(Identity("musicbrainz", track.MbidRecording));
-        identities = DistinctIdentities(identities.Concat(entries.SelectMany(GetSourceIdentities)));
+        identities = DistinctIdentities(identities);
         return new MusicLibrarySongDto
         {
             Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, "Unknown song")!,

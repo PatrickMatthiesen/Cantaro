@@ -119,6 +119,11 @@ public sealed class LyricsServiceTests
             Title = "Private observation", DurationSeconds = 999, ThumbnailUrl = "https://img.example/private.jpg",
             MatchStatus = TrackMatchingStatuses.Matched
         };
+        remix.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = remix.Id,
+            SourceType = privateObservation.SourceType, ExternalId = privateObservation.ExternalId
+        });
         db.AddRange(owner, other, outsider, playlist, privatePlaylist, original, sibling, remix, source,
             secondHop, unrelated, composition, privateObservation);
         db.SongTracks.AddRange(
@@ -146,6 +151,7 @@ public sealed class LyricsServiceTests
             Assert.Empty(detail.Playlists);
             Assert.Empty(detail.SourceIdentities);
             Assert.Empty(detail.PlatformLinks);
+            Assert.Empty(detail.SourcePlatforms);
             Assert.Null(detail.DurationSeconds);
             Assert.Null(detail.ThumbnailUrl);
             var provider = new CapturingProvider();
