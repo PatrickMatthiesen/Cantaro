@@ -8,7 +8,7 @@ namespace Cantaro.Api.Services;
 
 /// <summary>
 /// Retains only artist reconciliation's edits until the caller saves its import.
-/// After a database identity race, replay those edits against the winning identity
+/// After an identity or evidence race, replay those edits against committed rows
 /// without discarding playlist, observation, or track changes in the same unit of work.
 /// </summary>
 internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
@@ -26,6 +26,7 @@ internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
             SqlState: PostgresErrorCodes.UniqueViolation,
             ConstraintName: "IX_ArtistProviderLinks_Provider_ExternalId"
                 or "IX_ArtistProviderLinks_ArtistId_Provider" or "IX_Artists_MusicBrainzArtistId"
+                or "IX_ArtistReconciliationConflicts_TrackId_EvidenceKey"
         };
 
     public void Record(Track track, IReadOnlyList<ArtistCreditMetadata> credits, string source,
@@ -72,6 +73,8 @@ internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
         db.ChangeTracker.AutoDetectChangesEnabled = false;
         try
         {
+            // Detach tentative conflicts too. Replay checks their evidence keys
+            // against the winning rows without replacing the caller's other edits.
             foreach (var (entity, snapshot) in _before)
                 if (snapshot.State == EntityState.Detached && entity is not Artist)
                     db.Entry(entity).State = EntityState.Detached;

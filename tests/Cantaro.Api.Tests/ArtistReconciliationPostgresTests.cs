@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Cantaro.Api.Tests;
 
+[Collection("Artist reconciliation PostgreSQL")]
 public sealed class ArtistReconciliationPostgresTests
 {
     private const string Mbid = "0d5f4b04-3be8-427a-8c24-23b1454b2f31";
@@ -239,13 +240,172 @@ public sealed class ArtistReconciliationPostgresTests
         Assert.Empty(await verify.ArtistReconciliationConflicts.ToArrayAsync());
     }
 
+    [PostgresTheory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ConcurrentConflictEvidence_DeduplicatesWithoutLosingPendingImport(bool reordered, bool explicitTransaction)
+    {
+        await using var schema = await Schema.CreateAsync();
+        var alpha = Identity() with { Name = "Alpha", ExternalId = "alpha" };
+        var beta = Identity() with { Name = "Beta", ExternalId = "beta" };
+        var original = Snapshot("existing") with {
+            Artist = "Alpha, Beta", ArtistNames = ["Alpha", "Beta"], ArtistIdentities = [alpha, beta] };
+        Guid trackId;
+        Guid observationId;
+        Guid[] canonicalArtists;
+        await using (var setup = new ApplicationDbContext(schema.Options))
+        {
+            var track = await new SpotifyTrackResolver(setup).ResolveAsync(original, DateTimeOffset.UtcNow, default);
+            var observation = Observation("existing", track.Id);
+            setup.TrackObservations.Add(observation);
+            await setup.SaveChangesAsync();
+            trackId = track.Id;
+            observationId = observation.Id;
+            canonicalArtists = track.ArtistCredits.OrderBy(c => c.Position).Select(c => c.ArtistId).ToArray();
+        }
+
+        var failures = new IdentityFailures();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options).AddInterceptors(failures).Options;
+        await using var winner = new ApplicationDbContext(schema.Options);
+        await using var loser = new ApplicationDbContext(options);
+        await using var transaction = explicitTransaction ? await loser.Database.BeginTransactionAsync() : null;
+        TrackObservation? precedingObservation = null;
+        if (explicitTransaction)
+        {
+            precedingObservation = Observation("before-import", trackId);
+            loser.TrackObservations.Add(precedingObservation);
+            await loser.SaveChangesAsync();
+        }
+        var previousAttempts = failures.Attempts;
+        var updatedObservation = await loser.TrackObservations.SingleAsync(o => o.Id == observationId);
+        updatedObservation.Title = "Refreshed observation";
+        var incoming = reordered ? original with {
+            Artist = "Beta, Alpha", ArtistNames = ["Beta", "Alpha"], ArtistIdentities = [beta, alpha] }
+            : original with { ArtistIdentities = [alpha with { ExternalId = "different-alpha" }, beta] };
+        var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        // Both playlist refreshes stage the same evidence before either commits it.
+        await new SpotifyTrackResolver(winner).ResolveAsync(incoming, now, default);
+        await new SpotifyTrackResolver(loser).ResolveAsync(incoming, now.AddSeconds(1), default);
+        var evidence = loser.ArtistReconciliationConflicts.Local.Select(c => c.Evidence).Order().ToArray();
+        Assert.Equal(reordered ? 2 : 1, evidence.Length);
+        var pendingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("pending"), now, default);
+        var pendingObservation = Observation("pending", pendingTrack.Id);
+        loser.TrackObservations.Add(pendingObservation);
+        await winner.SaveChangesAsync();
+        var winningConflictIds = winner.ArtistReconciliationConflicts.Local.Select(c => c.Id).Order().ToArray();
+
+        await loser.SaveChangesAsync();
+        if (transaction != null) await transaction.CommitAsync();
+
+        await using var verify = new ApplicationDbContext(schema.Options);
+        var conflicts = await verify.ArtistReconciliationConflicts.ToArrayAsync();
+        Assert.Equal(winningConflictIds, conflicts.Select(c => c.Id).Order());
+        Assert.Equal(evidence, conflicts.Select(c => c.Evidence).Order());
+        Assert.Equal(previousAttempts + 2, failures.Attempts);
+        Assert.Equal(["IX_ArtistReconciliationConflicts_TrackId_EvidenceKey"], failures.Constraints);
+        var canonical = await verify.TrackArtistCredits.Where(c => c.TrackId == trackId).OrderBy(c => c.Position).ToArrayAsync();
+        Assert.Equal(canonicalArtists, canonical.Select(c => c.ArtistId));
+        Assert.Equal([0, 1], canonical.Select(c => c.Position));
+        Assert.Equal("Refreshed observation", (await verify.TrackObservations.SingleAsync(o => o.Id == observationId)).Title);
+        Assert.Equal(pendingTrack.Id, (await verify.TrackObservations.SingleAsync(o => o.Id == pendingObservation.Id)).TrackId);
+        if (precedingObservation != null)
+            Assert.True(await verify.TrackObservations.AnyAsync(o => o.Id == precedingObservation.Id));
+        Assert.Equal(2, await verify.Tracks.CountAsync());
+        Assert.Equal(2, await verify.Songs.CountAsync());
+        Assert.Equal(2, await verify.SongTracks.CountAsync());
+        Assert.Equal(2, await verify.TrackSourceIds.CountAsync());
+        Assert.Equal(now.AddSeconds(1), (await verify.TrackSourceIds.SingleAsync(s => s.TrackId == trackId)).LastVerifiedAt);
+        Assert.Equal(3, await verify.ArtistProviderLinks.CountAsync());
+        Assert.DoesNotContain(loser.ChangeTracker.Entries<ArtistReconciliationConflict>(), e => e.State == EntityState.Added);
+
+        // Successful retry clears the replay state and leaves the caller usable.
+        updatedObservation.Title = "Updated after retry";
+        await loser.SaveChangesAsync();
+        Assert.Equal("Updated after retry", (await verify.TrackObservations.AsNoTracking().SingleAsync(o => o.Id == observationId)).Title);
+        Assert.Equal(winningConflictIds, (await verify.ArtistReconciliationConflicts.ToArrayAsync()).Select(c => c.Id).Order());
+    }
+
+    [PostgresTheory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task EvidenceAndIdentityCollisions_InEitherOrderPreservePendingImport(bool identityFirst, bool explicitTransaction)
+    {
+        await using var schema = await Schema.CreateAsync();
+        var original = Snapshot("existing");
+        Guid trackId;
+        await using (var setup = new ApplicationDbContext(schema.Options))
+        {
+            var track = await new SpotifyTrackResolver(setup).ResolveAsync(original, DateTimeOffset.UtcNow, default);
+            await setup.SaveChangesAsync();
+            trackId = track.Id;
+        }
+        var now = DateTimeOffset.UtcNow;
+        var conflicting = original with { ArtistIdentities = [Identity() with { ExternalId = "conflicting" }] };
+        var pending = Snapshot("pending") with { Artist = "New artist", ArtistNames = ["New artist"],
+            ArtistIdentities = [Identity() with { Name = "New artist", ExternalId = "new-artist" }] };
+        await using var evidenceWinner = new ApplicationDbContext(schema.Options);
+        await using var identityWinner = new ApplicationDbContext(schema.Options);
+        await new SpotifyTrackResolver(evidenceWinner).ResolveAsync(conflicting, now, default);
+        var winningTrack = await new SpotifyTrackResolver(identityWinner).ResolveAsync(pending with {
+            Id = "winner", Name = "Another song" }, now, default);
+        var winningConflictId = evidenceWinner.ArtistReconciliationConflicts.Local.Single().Id;
+        var failures = new IdentityFailures(beforeSecondSave: async () =>
+        {
+            // The second writer commits after replay, forcing a different real
+            // uniqueness failure on the next attempt of the same caller save.
+            if (identityFirst) await evidenceWinner.SaveChangesAsync();
+            else await identityWinner.SaveChangesAsync();
+        });
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options).AddInterceptors(failures).Options;
+        await using var loser = new ApplicationDbContext(options);
+        await using var transaction = explicitTransaction ? await loser.Database.BeginTransactionAsync() : null;
+        await new SpotifyTrackResolver(loser).ResolveAsync(conflicting, now, default);
+        var pendingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(pending, now, default);
+        var observation = Observation("pending", pendingTrack.Id);
+        loser.TrackObservations.Add(observation);
+        if (identityFirst) await identityWinner.SaveChangesAsync();
+        else await evidenceWinner.SaveChangesAsync();
+
+        await loser.SaveChangesAsync();
+        if (transaction != null) await transaction.CommitAsync();
+
+        await using var verify = new ApplicationDbContext(schema.Options);
+        Assert.Equal(3, failures.Attempts);
+        string evidenceConstraint = "IX_ArtistReconciliationConflicts_TrackId_EvidenceKey";
+        string identityConstraint = "IX_ArtistProviderLinks_Provider_ExternalId";
+        Assert.Equal(identityFirst ? [identityConstraint, evidenceConstraint] : new[] { evidenceConstraint, identityConstraint }, failures.Constraints);
+        var conflict = await verify.ArtistReconciliationConflicts.SingleAsync();
+        Assert.Equal(winningConflictId, conflict.Id);
+        Assert.Equal(trackId, conflict.TrackId);
+        Assert.Contains("conflicting", conflict.Evidence);
+        Assert.Equal(2, await verify.Artists.CountAsync());
+        Assert.Equal(2, await verify.ArtistProviderLinks.CountAsync());
+        var artistId = (await verify.ArtistProviderLinks.SingleAsync(l => l.ExternalId == "new-artist")).ArtistId;
+        Assert.Equal(artistId, (await verify.TrackArtistCredits.SingleAsync(c => c.TrackId == pendingTrack.Id)).ArtistId);
+        Assert.Equal(artistId, (await verify.TrackArtistCredits.SingleAsync(c => c.TrackId == winningTrack.Id)).ArtistId);
+        Assert.Equal(pendingTrack.Id, (await verify.TrackObservations.SingleAsync()).TrackId);
+        Assert.Equal(3, await verify.Tracks.CountAsync());
+        Assert.Equal(3, await verify.Songs.CountAsync());
+        Assert.Equal(3, await verify.SongTracks.CountAsync());
+        Assert.Equal(3, await verify.TrackSourceIds.CountAsync());
+        Assert.DoesNotContain(loser.ChangeTracker.Entries(), e => e.State == EntityState.Added);
+    }
+
+    private static TrackObservation Observation(string externalId, Guid trackId) => new() {
+        Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = externalId, Title = $"Observation {externalId}",
+        Artist = "Shared artist", TrackId = trackId, MatchStatus = TrackMatchingStatuses.Matched };
+
     private static ArtistCreditMetadata Identity() => new() { Name = "Shared artist", Provider = "spotify",
         ExternalId = "shared", ProfileUrl = "https://open.spotify.com/artist/shared" };
     private static SpotifyTrackSnapshot Snapshot(string id) =>
         new(id, $"Song {id}", "Shared artist", ["Shared artist"], null, null, $"https://open.spotify.com/track/{id}", null, null, 180, null, 0)
         { ArtistIdentities = [Identity()] };
 
-    private sealed class IdentityFailures(Func<Task>? beforeFirstSave = null) : SaveChangesInterceptor
+    private sealed class IdentityFailures(Func<Task>? beforeFirstSave = null, Func<Task>? beforeSecondSave = null) : SaveChangesInterceptor
     {
         public int Attempts { get; private set; }
         public List<string?> Constraints { get; } = [];
@@ -254,6 +414,7 @@ public sealed class ArtistReconciliationPostgresTests
         {
             Attempts++;
             if (Attempts == 1 && beforeFirstSave != null) await beforeFirstSave();
+            if (Attempts == 2 && beforeSecondSave != null) await beforeSecondSave();
             return result;
         }
         public override Task SaveChangesFailedAsync(DbContextErrorEventData eventData, CancellationToken cancellationToken = default)
@@ -316,3 +477,8 @@ public sealed class ArtistReconciliationPostgresTests
         }
     }
 }
+
+// Other PostgreSQL fixtures use database-wide EnsureCreated checks. Avoid
+// overlapping their setup while these tests create temporary schemas.
+[CollectionDefinition("Artist reconciliation PostgreSQL", DisableParallelization = true)]
+public sealed class ArtistReconciliationPostgresCollection;
