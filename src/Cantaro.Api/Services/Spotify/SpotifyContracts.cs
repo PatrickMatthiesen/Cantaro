@@ -24,7 +24,10 @@ public sealed record SpotifyTrackSnapshot(
     string? Isrc,
     int DurationSeconds,
     DateTimeOffset? AddedAt,
-    int Position);
+    int Position)
+{
+    public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
+}
 
 public sealed record SpotifyPlaylistImportSnapshot(
     SpotifyPlaylistSnapshot Playlist,
@@ -193,6 +196,15 @@ internal sealed class SpotifyItemResponse
 
 internal sealed class SpotifyArtistResponse
 {
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("external_urls")]
+    public SpotifyExternalUrlsResponse? ExternalUrls { get; init; }
+
+    [JsonPropertyName("images")]
+    public List<SpotifyImageResponse> Images { get; init; } = [];
+
     [JsonPropertyName("name")]
     public string? Name { get; init; }
 }

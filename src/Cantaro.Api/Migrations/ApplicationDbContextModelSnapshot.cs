@@ -59,6 +59,81 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("Artists");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistProviderLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ArtworkUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProfileUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("RawMetadata")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtistId", "Provider")
+                        .IsUnique();
+
+                    b.HasIndex("Provider", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("ArtistProviderLinks");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistReconciliationConflict", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Evidence")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EvidenceKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TrackId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrackId", "EvidenceKey")
+                        .IsUnique();
+
+                    b.ToTable("ArtistReconciliationConflicts");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.ConnectedServiceAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -1717,8 +1792,14 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("JoinPhrase")
+                        .HasColumnType("text");
+
                     b.Property<int>("Position")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Provenance")
+                        .HasColumnType("text");
 
                     b.Property<short>("Role")
                         .HasColumnType("smallint");
@@ -2274,6 +2355,28 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistProviderLink", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.Artist", "Artist")
+                        .WithMany("ProviderLinks")
+                        .HasForeignKey("ArtistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Artist");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistReconciliationConflict", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.Track", "Track")
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Track");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.ConnectedServiceAccount", b =>
@@ -2833,6 +2936,8 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.Artist", b =>
                 {
+                    b.Navigation("ProviderLinks");
+
                     b.Navigation("SongCredits");
 
                     b.Navigation("TrackCredits");

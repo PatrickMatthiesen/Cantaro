@@ -13,6 +13,8 @@ public sealed class Artist
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
+    public ICollection<ArtistProviderLink> ProviderLinks { get; set; } = [];
+
     public ICollection<TrackArtistCredit> TrackCredits { get; set; } = [];
     public ICollection<SongCredit> SongCredits { get; set; } = [];
 }

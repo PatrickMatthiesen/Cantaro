@@ -54,7 +54,11 @@ public sealed class SpotifyTrackResolver
             UpdateExistingTrack(track, snapshot, now);
         }
 
-        EnsureArtistCredits(track, snapshot, now);
+        await new ArtistReconciliationService(_dbContext).ReconcileAsync(
+            track, snapshot.ArtistIdentities.Count > 0 ? snapshot.ArtistIdentities
+                : (snapshot.ArtistNames.Count > 0 ? snapshot.ArtistNames : [snapshot.Artist])
+                    .Select(name => new ArtistCreditMetadata { Name = name }).ToArray(),
+            SpotifyService.ServiceName, now, cancellationToken, snapshot.Artist);
         EnsureSourceMapping(track, sourceId, snapshot, now);
         return track;
     }
@@ -109,53 +113,6 @@ public sealed class SpotifyTrackResolver
         }
 
         track.UpdatedAt = now;
-    }
-
-    private void EnsureArtistCredits(
-        Track track,
-        SpotifyTrackSnapshot snapshot,
-        DateTimeOffset now)
-    {
-        if (track.ArtistCredits.Count > 0)
-        {
-            return;
-        }
-
-        var artistNames = snapshot.ArtistNames.Count > 0
-            ? snapshot.ArtistNames
-            : [snapshot.Artist];
-
-        for (var position = 0; position < artistNames.Count; position++)
-        {
-            var creditedName = artistNames[position].Trim();
-            if (creditedName.Length == 0)
-            {
-                continue;
-            }
-
-            // Names are not stable artist identities, so a provider ID is
-            // required before separate artist rows may be reconciled.
-            var artist = new Artist
-            {
-                Id = Guid.NewGuid(),
-                Name = creditedName,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            var credit = new TrackArtistCredit
-            {
-                Id = Guid.NewGuid(),
-                TrackId = track.Id,
-                ArtistId = artist.Id,
-                Artist = artist,
-                Role = TrackArtistRole.Primary,
-                Position = position,
-                CreditedName = creditedName
-            };
-
-            track.ArtistCredits.Add(credit);
-            _dbContext.AddRange(artist, credit);
-        }
     }
 
     private void EnsureSourceMapping(

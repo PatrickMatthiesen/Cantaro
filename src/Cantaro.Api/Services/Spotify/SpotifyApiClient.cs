@@ -410,7 +410,16 @@ public sealed class SpotifyApiClient
             item.Album?.Name, item.Album?.Images.FirstOrDefault()?.Url,
             item.ExternalUrls?.Spotify ?? $"https://open.spotify.com/track/{id}",
             item.Album?.ExternalUrls?.Spotify, item.ExternalIds?.Isrc,
-            Math.Max(0, item.DurationMs / 1000), addedAt, position);
+            Math.Max(0, item.DurationMs / 1000), addedAt, position)
+        {
+            ArtistIdentities = item.Artists.Where(a => !string.IsNullOrWhiteSpace(a.Name))
+                .Select(a => new ArtistCreditMetadata
+                {
+                    Name = a.Name!, Provider = SpotifyService.ServiceName, ExternalId = a.Id,
+                    ProfileUrl = a.ExternalUrls?.Spotify, ArtworkUrl = a.Images.FirstOrDefault()?.Url,
+                    RawMetadata = JsonSerializer.Serialize(a, JsonOptions)
+                }).ToArray()
+        };
     }
 
     private async Task<T> GetAsync<T>(string requestUri, string accessToken, CancellationToken cancellationToken)

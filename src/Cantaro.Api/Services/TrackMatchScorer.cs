@@ -50,6 +50,7 @@ internal static class TrackMatchScorer
                 ArtistCredits = parsedCandidate.ArtistCredits, DurationSeconds = candidate.DurationSeconds,
                 Isrc = candidate.Isrc, MbidRecording = candidate.MbidRecording,
                 ArtistMusicBrainzId = candidate.ArtistMusicBrainzId, ArtistSortName = candidate.ArtistSortName,
+                ArtistIdentities = candidate.ArtistIdentities,
                 Explanation = candidate.Explanation, RawMetadata = candidate.RawMetadata
             };
         }

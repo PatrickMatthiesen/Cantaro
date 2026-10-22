@@ -70,7 +70,7 @@ public sealed class SpotifyPlaylistSyncProvider(
                 {
                     SourceType = PlatformId, ExternalId = snapshot.Id, SourceUrl = snapshot.ExternalUrl,
                     Title = snapshot.Name, Artist = snapshot.Artist, Album = snapshot.AlbumName,
-                    Isrc = snapshot.Isrc, OriginalTitle = snapshot.Name, OriginalArtist = snapshot.Artist,
+                    ArtistIdentities = snapshot.ArtistIdentities, Isrc = snapshot.Isrc, OriginalTitle = snapshot.Name, OriginalArtist = snapshot.Artist,
                     SearchTitle = snapshot.Name, SearchArtist = snapshot.Artist,
                     ThumbnailUrl = snapshot.ImageUrl, DurationSeconds = snapshot.DurationSeconds
                 });

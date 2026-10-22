@@ -129,6 +129,7 @@ public sealed class SpotifySearchProvider(
         Title = track.Name,
         Artist = track.Artist,
         ArtistCredits = track.ArtistNames,
+        ArtistIdentities = track.ArtistIdentities,
         Isrc = track.Isrc,
         DurationSeconds = track.DurationSeconds,
         Explanation = "Suggested by Spotify catalog search."
