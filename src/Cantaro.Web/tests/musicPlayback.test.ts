@@ -115,6 +115,49 @@ describe('playback session', () => {
     expect(enqueued.status).toBe('playing');
   });
 
+  test('clearing up next keeps the active track, selected source, and session intent', () => {
+    const active: PlaybackTrack = {
+      ...youtube,
+      sources: [
+        ...youtube.sources,
+        {
+          id: 'youtube:alternate', providerId: 'youtube', label: 'Alternate video',
+          capability: { kind: 'embed', mediaId: 'alternate' },
+        },
+      ],
+    };
+    const selected = apply(
+      { type: 'replaceQueue', tracks: [spotify, active, unavailable, youtube] },
+      { type: 'select', index: 1 },
+      { type: 'selectSource', sourceId: 'youtube:alternate' },
+      { type: 'play' },
+    );
+
+    for (const session of [
+      selected,
+      playbackReducer(selected, { type: 'pause' }),
+      playbackReducer(selected, { type: 'stop' }),
+    ]) {
+      const cleared = playbackReducer(session, { type: 'clearQueue' });
+      expect(cleared).toEqual({ ...session, queue: [spotify, active] });
+      expect(currentPlaybackTrack(cleared)).toBe(active);
+      expect(selectedPlaybackSource(cleared)?.id).toBe('youtube:alternate');
+      expect(isPlayerVisible(cleared)).toBe(true);
+      expect(playbackReducer(cleared, { type: 'next' })).toEqual(cleared);
+      expect(currentPlaybackTrack(playbackReducer(cleared, { type: 'previous' }))).toBe(spotify);
+    }
+  });
+
+  test('clearing an unselected queue empties it; replacing with an empty queue resets the session', () => {
+    const queued = apply({ type: 'replaceQueue', tracks: [youtube, spotify] });
+    expect(playbackReducer(queued, { type: 'clearQueue' })).toEqual(initialPlaybackState);
+
+    const playing = playbackReducer(queued, { type: 'select', index: 0, play: true });
+    const reset = playbackReducer(playing, { type: 'replaceQueue', tracks: [] });
+    expect(reset).toEqual(initialPlaybackState);
+    expect(isPlayerVisible(reset)).toBe(false);
+  });
+
   test('pause, stop, source selection, and queue replacement are deterministic', () => {
     const both: PlaybackTrack = { ...youtube, sources: [...youtube.sources, ...spotify.sources] };
     const playing = apply(
@@ -132,7 +175,7 @@ describe('playback session', () => {
     expect(playbackReducer(paused, { type: 'stop' }).status).toBe('stopped');
     expect(isPlayerVisible(paused)).toBe(true);
     expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [spotify] }).currentIndex).toBeNull();
-    expect(playbackReducer(paused, { type: 'clearQueue' })).toEqual(initialPlaybackState);
+    expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [] })).toEqual(initialPlaybackState);
     expect(playbackReducer(paused, { type: 'select', index: -1 })).toEqual(paused);
   });
 });

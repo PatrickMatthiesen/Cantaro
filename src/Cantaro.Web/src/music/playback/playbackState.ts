@@ -35,6 +35,7 @@ export type PlaybackAction =
   | { type: 'next' }
   | { type: 'previous' }
   | { type: 'selectSource'; sourceId: string }
+  // Clears pending tracks. replaceQueue with [] resets the whole session.
   | { type: 'clearQueue' };
 
 export const initialPlaybackState: PlaybackState = {
@@ -123,6 +124,12 @@ function stop(state: PlaybackState): PlaybackState {
   return state.currentIndex === null ? state : { ...state, status: 'stopped' };
 }
 
+function clearQueue(state: PlaybackState): PlaybackState {
+  if (state.currentIndex === null) return initialPlaybackState;
+  if (state.currentIndex === state.queue.length - 1) return state;
+  return { ...state, queue: state.queue.slice(0, state.currentIndex + 1) };
+}
+
 export function playbackReducer(state: PlaybackState, action: PlaybackAction): PlaybackState {
   switch (action.type) {
     case 'replaceQueue':
@@ -144,6 +151,6 @@ export function playbackReducer(state: PlaybackState, action: PlaybackAction): P
     case 'selectSource':
       return selectSource(state, action.sourceId);
     case 'clearQueue':
-      return initialPlaybackState;
+      return clearQueue(state);
   }
 }
