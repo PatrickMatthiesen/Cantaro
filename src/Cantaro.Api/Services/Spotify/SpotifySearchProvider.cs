@@ -8,7 +8,8 @@ public sealed class SpotifySearchProvider(
     SpotifyApiClient apiClient,
     SpotifyCatalogTokenProvider tokenProvider,
     IOptions<TrackMatchingOptions>? matchingOptions = null,
-    SpotifySearchCache? searchCache = null) : ITrackMetadataSearchProvider
+    SpotifySearchCache? searchCache = null,
+    TimeProvider? timeProvider = null) : ITrackMetadataSearchProvider
 {
     private const int ResultLimit = 10;
     private readonly TrackMatchingOptions _matchingOptions = matchingOptions?.Value ?? new();
@@ -129,9 +130,13 @@ public sealed class SpotifySearchProvider(
         {
             try
             {
-                if (!await apiClient.IsCoolingDownAsync(cancellationToken))
+                // Bound optional preparation too: token refresh can wait on its
+                // semaphore or a long Retry-After even when tracks are cached.
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5), timeProvider ?? TimeProvider.System);
+                using var optional = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+                if (!await apiClient.IsCoolingDownAsync(optional.Token))
                 {
-                    var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
+                    var token = await tokenProvider.GetAccessTokenAsync(optional.Token);
                     if (token is not null)
                         tracks = await apiClient.EnrichArtistMetadataAsync(token, tracks, cancellationToken);
                 }
