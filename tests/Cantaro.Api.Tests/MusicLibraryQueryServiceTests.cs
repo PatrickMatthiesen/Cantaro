@@ -344,6 +344,70 @@ public class MusicLibraryQueryServiceTests
         Assert.NotNull(await service.GetCanonicalSongAsync(track.Id, owner.Id, default));
     }
 
+    [Fact]
+    public async Task GetCanonicalSongAsync_UsesStoredRecordingRelationshipsAndKeepsRelatedPagesReachable()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(720, "versions-owner@example.com");
+        var other = TestUserFactory.Create(721, "versions-other@example.com");
+        var playlist = MakePlaylist(owner.Id, "Saved", now);
+        Track MakeTrack(string title, TrackVersionFlags flags = TrackVersionFlags.None) => new()
+        {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now, VersionFlags = flags,
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = title, Artist = "Shared artist" })
+        };
+        var original = MakeTrack("Original");
+        original.MbidRecording = "musicbrainz-original";
+        original.Isrc = "USABC1234567";
+        original.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = original.Id, SourceType = "spotify", ExternalId = "spotify-original"
+        });
+        var acoustic = MakeTrack("Acoustic take", TrackVersionFlags.Acoustic);
+        var remix = MakeTrack("Remix", TrackVersionFlags.Remix);
+        var unrelated = MakeTrack("Another song by the artist");
+        var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        db.AddRange(owner, other, playlist, original, acoustic, remix, unrelated, composition);
+        db.SongTracks.AddRange(
+            new SongTrack { SongId = composition.Id, TrackId = original.Id },
+            new SongTrack { SongId = composition.Id, TrackId = acoustic.Id });
+        db.TrackRelations.Add(new TrackRelation
+        {
+            FromTrackId = remix.Id, ToTrackId = original.Id, RelationType = TrackRelationType.RemixOf
+        });
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.Add(MakeEntry(playlist.Id, original.Id, null, 0, "spotify", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var service = new MusicLibraryQueryService(db);
+        var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(original.Id, owner.Id, default));
+        Assert.Equal(2, detail.RelatedRecordings.Count);
+        var acousticVersion = Assert.Single(detail.RelatedRecordings, item => item.Id == $"track:{acoustic.Id}");
+        Assert.Equal(["Another recording of this composition"], acousticVersion.RelationshipLabels);
+        Assert.Equal(["Acoustic"], acousticVersion.VersionLabels);
+        Assert.False(acousticVersion.InLibrary);
+        var remixVersion = Assert.Single(detail.RelatedRecordings, item => item.Id == $"track:{remix.Id}");
+        Assert.Equal(["Remix of this recording"], remixVersion.RelationshipLabels);
+        Assert.Equal(["Remix"], remixVersion.VersionLabels);
+        Assert.DoesNotContain(detail.RelatedRecordings, item => item.Id == $"track:{unrelated.Id}");
+        Assert.Contains(detail.SourceIdentities, identity => identity.Source == "musicbrainz" && identity.ExternalId == "musicbrainz-original");
+        Assert.Contains(detail.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "USABC1234567");
+        var spotifyLink = Assert.Single(detail.PlatformLinks, link => link.Platform == "spotify");
+        Assert.Equal("spotify", spotifyLink.Source);
+        Assert.Equal("spotify-original", spotifyLink.ExternalId);
+
+        var remixDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(remix.Id, owner.Id, default));
+        Assert.Empty(remixDetail.Playlists);
+        Assert.Equal(["Source of this remix"], Assert.Single(remixDetail.RelatedRecordings).RelationshipLabels);
+        Assert.Null(await service.GetCanonicalSongAsync(unrelated.Id, owner.Id, default));
+        Assert.Null(await service.GetCanonicalSongAsync(original.Id, other.Id, default));
+        Assert.Null(await service.GetCanonicalSongAsync(remix.Id, other.Id, default));
+    }
+
     private static Playlist MakePlaylist(int userId, string name, DateTimeOffset now)
     {
         return new Playlist

@@ -27,6 +27,8 @@ public sealed class MusicLibrarySongDto
     public required List<MusicLibrarySongSourceIdentityDto> SourceIdentities { get; set; }
     public required List<MusicLibrarySongPlatformLinkDto> PlatformLinks { get; set; }
     public required List<MusicLibrarySongPlaylistDto> Playlists { get; set; }
+    public List<string> VersionLabels { get; set; } = [];
+    public List<MusicLibraryRelatedRecordingDto> RelatedRecordings { get; set; } = [];
 }
 
 public sealed class MusicLibrarySongArtistCreditDto
@@ -50,6 +52,20 @@ public sealed class MusicLibrarySongPlatformLinkDto
     public required string Platform { get; set; }
     public required string Label { get; set; }
     public required string Url { get; set; }
+    public required string Source { get; set; }
+    public required string ExternalId { get; set; }
+}
+
+public sealed class MusicLibraryRelatedRecordingDto
+{
+    public required string Id { get; set; }
+    public required string Title { get; set; }
+    public string? Artist { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public int? DurationSeconds { get; set; }
+    public required List<string> RelationshipLabels { get; set; }
+    public required List<string> VersionLabels { get; set; }
+    public bool InLibrary { get; set; }
 }
 
 public sealed class MusicLibrarySongPlaylistDto

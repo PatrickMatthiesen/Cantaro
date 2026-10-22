@@ -23,6 +23,8 @@ export interface MusicLibrarySong {
   sourceIdentities: MusicLibrarySongSourceIdentity[];
   platformLinks: MusicLibrarySongPlatformLink[];
   playlists: MusicLibrarySongPlaylist[];
+  versionLabels?: string[];
+  relatedRecordings?: MusicLibraryRelatedRecording[];
 }
 
 export interface MusicLibrarySongArtistCredit {
@@ -43,6 +45,19 @@ export interface MusicLibrarySongPlatformLink {
   platform: string;
   label: string;
   url: string;
+  source: string;
+  externalId: string;
+}
+
+export interface MusicLibraryRelatedRecording {
+  id: string;
+  title: string;
+  artist?: string;
+  thumbnailUrl?: string;
+  durationSeconds?: number;
+  relationshipLabels: string[];
+  versionLabels: string[];
+  inLibrary: boolean;
 }
 
 export interface MusicLibraryPlaylistService {

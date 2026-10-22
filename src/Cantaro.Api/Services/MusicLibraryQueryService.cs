@@ -108,6 +108,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 .ToList(),
             SourceIdentities = identities,
             PlatformLinks = BuildPlatformLinks(identities),
+            VersionLabels = representative.Track is null ? [] : GetVersionLabels(representative.Track.VersionFlags),
             Playlists = group
                 .OrderBy(item => item.Playlist.Name)
                 .ThenBy(item => item.Entry.Position)
@@ -124,14 +125,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
 
     public async Task<MusicLibrarySongDto?> GetCanonicalSongAsync(Guid trackId, int userId, CancellationToken cancellationToken)
     {
+        var accessibleTrackIds = GetAccessibleTrackIds(userId);
         var track = await _dbContext.Tracks.AsNoTracking()
             .Include(x => x.SourceIds)
             .Include(x => x.ArtistCredits).ThenInclude(x => x.Artist)
-            .FirstOrDefaultAsync(
-                x => x.Id == trackId
-                    && x.PlaylistEntries.Any(entry =>
-                        entry.Playlist != null && entry.Playlist.UserId == userId),
-                cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == trackId && accessibleTrackIds.Contains(x.Id), cancellationToken);
         if (track is null) return null;
         var metadata = ParseJson<TrackCanonicalMetadata>(track.CanonicalMetadata);
         var memberships = await _dbContext.PlaylistEntries.AsNoTracking()
@@ -140,16 +138,119 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .OrderBy(x => x.PlaylistName).ToListAsync(cancellationToken);
         var identities = track.SourceIds.Select(x => Identity(x.SourceType, x.ExternalId)).ToList();
         if (!string.IsNullOrWhiteSpace(track.Isrc)) identities.Add(Identity("isrc", track.Isrc));
+        if (!string.IsNullOrWhiteSpace(track.MbidRecording)) identities.Add(Identity("musicbrainz", track.MbidRecording));
+        identities = DistinctIdentities(identities);
         return new MusicLibrarySongDto
         {
-            Id = $"track:{track.Id}", Title = metadata?.Title ?? "Unknown song",
-            Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track)),
+            Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, "Unknown song")!,
+            Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track), track.SearchArtist),
             ArtistCredits = BuildArtistCredits(track),
             Albums = metadata?.Albums ?? [], ThumbnailUrl = metadata?.ThumbnailUrl, DurationSeconds = metadata?.DurationSeconds,
             MatchStatus = null, SourcePlatforms = identities.Select(x => x.Source).Distinct().Order().ToList(),
-            SourceIdentities = identities, PlatformLinks = BuildPlatformLinks(identities), Playlists = memberships
+            SourceIdentities = identities, PlatformLinks = BuildPlatformLinks(identities), Playlists = memberships,
+            VersionLabels = GetVersionLabels(track.VersionFlags),
+            RelatedRecordings = await GetRelatedRecordingsAsync(trackId, accessibleTrackIds, userId, cancellationToken)
         };
     }
+
+    private IQueryable<Guid> GetAccessibleTrackIds(int userId)
+    {
+        var owned = _dbContext.PlaylistEntries
+            .Where(entry => entry.TrackId != null && entry.Playlist != null && entry.Playlist.UserId == userId)
+            .Select(entry => entry.TrackId!.Value);
+        var sameComposition = _dbContext.SongTracks
+            .Where(member => _dbContext.SongTracks.Any(ownedMember =>
+                ownedMember.SongId == member.SongId && owned.Contains(ownedMember.TrackId)))
+            .Select(member => member.TrackId);
+        var relationTargets = _dbContext.TrackRelations
+            .Where(relation => owned.Contains(relation.FromTrackId))
+            .Select(relation => relation.ToTrackId);
+        var relationSources = _dbContext.TrackRelations
+            .Where(relation => owned.Contains(relation.ToTrackId))
+            .Select(relation => relation.FromTrackId);
+        return owned.Union(sameComposition).Union(relationTargets).Union(relationSources);
+    }
+
+    private async Task<List<MusicLibraryRelatedRecordingDto>> GetRelatedRecordingsAsync(
+        Guid trackId, IQueryable<Guid> accessibleTrackIds, int userId, CancellationToken cancellationToken)
+    {
+        var compositionIds = await _dbContext.SongTracks.AsNoTracking()
+            .Where(member => member.TrackId == trackId)
+            .Select(member => member.SongId)
+            .ToListAsync(cancellationToken);
+        var sameCompositionIds = await _dbContext.SongTracks.AsNoTracking()
+            .Where(member => member.TrackId != trackId && compositionIds.Contains(member.SongId))
+            .Select(member => member.TrackId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var relations = await _dbContext.TrackRelations.AsNoTracking()
+            .Where(relation => relation.FromTrackId == trackId || relation.ToTrackId == trackId)
+            .ToListAsync(cancellationToken);
+        var relatedIds = sameCompositionIds
+            .Concat(relations.Select(relation => relation.FromTrackId == trackId ? relation.ToTrackId : relation.FromTrackId))
+            .Distinct().ToList();
+        if (relatedIds.Count == 0) return [];
+
+        var ownedIds = await _dbContext.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackId != null && entry.Playlist != null && entry.Playlist.UserId == userId)
+            .Select(entry => entry.TrackId!.Value).Distinct().ToListAsync(cancellationToken);
+        var tracks = await _dbContext.Tracks.AsNoTracking()
+            .Where(candidate => relatedIds.Contains(candidate.Id) && accessibleTrackIds.Contains(candidate.Id))
+            .Include(candidate => candidate.ArtistCredits).ThenInclude(credit => credit.Artist)
+            .ToListAsync(cancellationToken);
+
+        return tracks.Select(candidate =>
+        {
+            var metadata = ParseJson<TrackCanonicalMetadata>(candidate.CanonicalMetadata);
+            var labels = relations
+                .Where(relation => relation.FromTrackId == candidate.Id || relation.ToTrackId == candidate.Id)
+                .Select(relation => DescribeRelation(relation, trackId))
+                .Distinct().ToList();
+            if (labels.Count == 0 && sameCompositionIds.Contains(candidate.Id)) labels.Add("Another recording of this composition");
+            return new MusicLibraryRelatedRecordingDto
+            {
+                Id = $"track:{candidate.Id}",
+                Title = FirstNonEmpty(metadata?.Title, candidate.SearchTitle, "Unknown song")!,
+                Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(candidate), candidate.SearchArtist),
+                ThumbnailUrl = metadata?.ThumbnailUrl,
+                DurationSeconds = metadata?.DurationSeconds,
+                RelationshipLabels = labels,
+                VersionLabels = GetVersionLabels(candidate.VersionFlags),
+                InLibrary = ownedIds.Contains(candidate.Id)
+            };
+        }).OrderBy(candidate => candidate.Title).ThenBy(candidate => candidate.Id).ToList();
+    }
+
+    private static string DescribeRelation(TrackRelation relation, Guid currentTrackId)
+    {
+        var kind = relation.RelationType switch
+        {
+            TrackRelationType.RemixOf => "remix",
+            TrackRelationType.EditOf => "edit",
+            TrackRelationType.RemasterOf => "remaster",
+            TrackRelationType.ReRecordingOf => "re-recording",
+            TrackRelationType.DerivedFrom => "derived recording",
+            TrackRelationType.Samples => "sample",
+            _ => "related recording"
+        };
+        return relation.FromTrackId == currentTrackId
+            ? $"Source of this {kind}"
+            : $"{char.ToUpperInvariant(kind[0])}{kind[1..]} of this recording";
+    }
+
+    private static List<string> GetVersionLabels(TrackVersionFlags flags) =>
+        Enum.GetValues<TrackVersionFlags>()
+            .Where(flag => flag != TrackVersionFlags.None && flags.HasFlag(flag))
+            .Select(flag => flag switch
+            {
+                TrackVersionFlags.ACappella => "A cappella",
+                TrackVersionFlags.RadioEdit => "Radio edit",
+                TrackVersionFlags.ReRecorded => "Re-recorded",
+                TrackVersionFlags.AlternateTake => "Alternate take",
+                TrackVersionFlags.SpedUp => "Sped up",
+                _ => flag.ToString()
+            })
+            .ToList();
 
     public async Task<bool> AddCanonicalSongToPlaylistAsync(Guid trackId, Guid playlistId, int userId, CancellationToken cancellationToken)
     {
@@ -198,6 +299,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             yield return Identity("isrc", isrc);
         }
 
+        if (entry.Track is { MbidRecording: { } mbid } && !string.IsNullOrWhiteSpace(mbid))
+        {
+            yield return Identity("musicbrainz", mbid);
+        }
+
         foreach (var sourceId in entry.Track?.SourceIds ?? [])
         {
             if (!string.IsNullOrWhiteSpace(sourceId.SourceType) && !string.IsNullOrWhiteSpace(sourceId.ExternalId))
@@ -219,21 +325,25 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         ExternalId = externalId.Trim()
     };
 
+    private static List<MusicLibrarySongSourceIdentityDto> DistinctIdentities(IEnumerable<MusicLibrarySongSourceIdentityDto> identities) =>
+        identities.DistinctBy(identity => $"{identity.Source}\0{identity.ExternalId}", StringComparer.OrdinalIgnoreCase)
+            .OrderBy(identity => identity.Source).ThenBy(identity => identity.ExternalId).ToList();
+
     private static List<MusicLibrarySongPlatformLinkDto> BuildPlatformLinks(
         IEnumerable<MusicLibrarySongSourceIdentityDto> identities)
     {
         var links = identities.SelectMany(identity => identity.Source switch
             {
-                "musicbrainz" => new[] { Link("musicbrainz", "View on MusicBrainz", $"https://musicbrainz.org/recording/{Uri.EscapeDataString(identity.ExternalId)}") },
+                "musicbrainz" => new[] { Link("musicbrainz", "View on MusicBrainz", $"https://musicbrainz.org/recording/{Uri.EscapeDataString(identity.ExternalId)}", identity) },
                 "youtube" =>
                 new[]
                 {
-                    Link("youtube", "Watch on YouTube", $"https://www.youtube.com/watch?v={Uri.EscapeDataString(identity.ExternalId)}"),
-                    Link("youtube-music", "Open in YouTube Music", $"https://music.youtube.com/watch?v={Uri.EscapeDataString(identity.ExternalId)}")
+                    Link("youtube", "Watch on YouTube", $"https://www.youtube.com/watch?v={Uri.EscapeDataString(identity.ExternalId)}", identity),
+                    Link("youtube-music", "Open in YouTube Music", $"https://music.youtube.com/watch?v={Uri.EscapeDataString(identity.ExternalId)}", identity)
                 },
                 "spotify" => new[]
                 {
-                    Link("spotify", "Listen on Spotify", $"https://open.spotify.com/track/{Uri.EscapeDataString(identity.ExternalId)}")
+                    Link("spotify", "Listen on Spotify", $"https://open.spotify.com/track/{Uri.EscapeDataString(identity.ExternalId)}", identity)
                 },
                 _ => Array.Empty<MusicLibrarySongPlatformLinkDto>()
             })
@@ -244,11 +354,13 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         return links;
     }
 
-    private static MusicLibrarySongPlatformLinkDto Link(string platform, string label, string url) => new()
+    private static MusicLibrarySongPlatformLinkDto Link(string platform, string label, string url, MusicLibrarySongSourceIdentityDto identity) => new()
     {
         Platform = platform,
         Label = label,
-        Url = url
+        Url = url,
+        Source = identity.Source,
+        ExternalId = identity.ExternalId
     };
 
     private static List<MusicLibrarySongArtistCreditDto> BuildArtistCredits(Track? track) =>
