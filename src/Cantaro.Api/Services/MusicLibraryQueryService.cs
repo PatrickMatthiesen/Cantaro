@@ -16,9 +16,6 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .Include(playlist => playlist.ServiceMappings)
             .Include(playlist => playlist.Entries)
                 .ThenInclude(entry => entry.Track)
-                    .ThenInclude(track => track!.SourceIds)
-            .Include(playlist => playlist.Entries)
-                .ThenInclude(entry => entry.Track)
                     .ThenInclude(track => track!.ArtistCredits)
                         .ThenInclude(credit => credit.Artist)
             .Include(playlist => playlist.Entries)
@@ -83,12 +80,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .First()
             .Entry;
         var metadata = BuildSongMetadata(representative.Track, representative.TrackObservation);
-        var identities = group
-            .SelectMany(item => GetSourceIdentities(item.Entry))
-            .DistinctBy(identity => $"{identity.Source}\0{identity.ExternalId}", StringComparer.OrdinalIgnoreCase)
-            .OrderBy(identity => identity.Source)
-            .ThenBy(identity => identity.ExternalId)
-            .ToList();
+        var identities = DistinctIdentities(GetSourceIdentities(representative.Track, group.Select(item => item.Entry)));
 
         return new MusicLibrarySongDto
         {
@@ -100,12 +92,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             ThumbnailUrl = metadata.ThumbnailUrl,
             DurationSeconds = metadata.DurationSeconds,
             MatchStatus = metadata.MatchStatus == TrackMatchingStatuses.Matched ? null : metadata.MatchStatus,
-            SourcePlatforms = group
-                .SelectMany(item => GetSourcePlatforms(item.Entry))
-                .Select(source => source.Trim().ToLowerInvariant())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(source => source)
-                .ToList(),
+            SourcePlatforms = identities.Select(identity => identity.Source).Distinct().Order().ToList(),
             SourceIdentities = identities,
             PlatformLinks = BuildPlatformLinks(identities),
             VersionLabels = representative.Track is null ? [] : GetVersionLabels(representative.Track.VersionFlags),
@@ -127,7 +114,6 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
     {
         var accessibleTrackIds = CanonicalTrackAccess.GetAccessibleTrackIds(_dbContext, userId);
         var track = await _dbContext.Tracks.AsNoTracking()
-            .Include(x => x.SourceIds)
             .Include(x => x.ArtistCredits).ThenInclude(x => x.Artist)
             .FirstOrDefaultAsync(x => x.Id == trackId && accessibleTrackIds.Contains(x.Id), cancellationToken);
         if (track is null) return null;
@@ -148,17 +134,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var memberships = entries
             .Select(x => new MusicLibrarySongPlaylistDto { EntryId = x.Id.ToString(), PlaylistId = x.PlaylistId.ToString(), PlaylistName = x.Playlist!.Name, Position = x.Position })
             .OrderBy(x => x.PlaylistName).ToList();
-        var identities = new List<MusicLibrarySongSourceIdentityDto>();
-        // Relation-only access does not grant access to global provider mappings,
-        // which can contain private identifiers imported from another user's observations.
-        if (entries.Count > 0)
-        {
-            identities.AddRange(track.SourceIds.Select(x => Identity(x.SourceType, x.ExternalId)));
-            identities.AddRange(entries.SelectMany(GetSourceIdentities));
-        }
-        if (!string.IsNullOrWhiteSpace(track.Isrc)) identities.Add(Identity("isrc", track.Isrc));
-        if (!string.IsNullOrWhiteSpace(track.MbidRecording)) identities.Add(Identity("musicbrainz", track.MbidRecording));
-        identities = DistinctIdentities(identities);
+        var identities = DistinctIdentities(GetSourceIdentities(track, entries));
         return new MusicLibrarySongDto
         {
             Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, "Unknown song")!,
@@ -307,30 +283,28 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         return true;
     }
 
-    private static IEnumerable<MusicLibrarySongSourceIdentityDto> GetSourceIdentities(PlaylistEntry entry)
+    // Both callers supply only entries from the requester's playlists. Global source mappings
+    // support matching and sync, but only attached observations authorize provider identities here.
+    private static IEnumerable<MusicLibrarySongSourceIdentityDto> GetSourceIdentities(
+        Track? track, IEnumerable<PlaylistEntry> ownedEntries)
     {
-        if (entry.Track is { Isrc: { } isrc } && !string.IsNullOrWhiteSpace(isrc))
+        if (!string.IsNullOrWhiteSpace(track?.Isrc))
         {
-            yield return Identity("isrc", isrc);
+            yield return Identity("isrc", track.Isrc);
         }
 
-        if (entry.Track is { MbidRecording: { } mbid } && !string.IsNullOrWhiteSpace(mbid))
+        if (!string.IsNullOrWhiteSpace(track?.MbidRecording))
         {
-            yield return Identity("musicbrainz", mbid);
+            yield return Identity("musicbrainz", track.MbidRecording);
         }
 
-        foreach (var sourceId in entry.Track?.SourceIds ?? [])
+        foreach (var entry in ownedEntries)
         {
-            if (!string.IsNullOrWhiteSpace(sourceId.SourceType) && !string.IsNullOrWhiteSpace(sourceId.ExternalId))
+            if (entry.TrackObservation is { SourceType: { } source, ExternalId: { } externalId }
+                && !string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(externalId))
             {
-                yield return Identity(sourceId.SourceType, sourceId.ExternalId);
+                yield return Identity(source, externalId);
             }
-        }
-
-        if (entry.TrackObservation is { SourceType: { } source, ExternalId: { } externalId }
-            && !string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(externalId))
-        {
-            yield return Identity(source, externalId);
         }
     }
 
@@ -444,27 +418,6 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         }
 
         return $"entry:{entry.Id}";
-    }
-
-    private static IEnumerable<string> GetSourcePlatforms(PlaylistEntry entry)
-    {
-        if (!string.IsNullOrWhiteSpace(entry.SourceService))
-        {
-            yield return entry.SourceService;
-        }
-
-        if (!string.IsNullOrWhiteSpace(entry.TrackObservation?.SourceType))
-        {
-            yield return entry.TrackObservation.SourceType;
-        }
-
-        foreach (var sourceId in entry.Track?.SourceIds ?? [])
-        {
-            if (!string.IsNullOrWhiteSpace(sourceId.SourceType))
-            {
-                yield return sourceId.SourceType;
-            }
-        }
     }
 
     private static T? ParseJson<T>(string? json)
