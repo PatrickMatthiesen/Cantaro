@@ -18,6 +18,124 @@ public sealed class ArtistReconciliationPostgresTests
     private const string Mbid = "0d5f4b04-3be8-427a-8c24-23b1454b2f31";
 
     [PostgresTheory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ExistingCreditlessTrackRace_ReloadsWinningCreditWithoutLosingPendingImport(
+        bool distinctIdentity, bool explicitTransaction)
+    {
+        await using var schema = await Schema.CreateAsync();
+        Guid trackId;
+        Guid observationId;
+        Guid artistId;
+        var incoming = Identity() with { Role = TrackArtistRole.Featured, JoinPhrase = " feat. " };
+        var alternative = incoming with { ExternalId = "different", ProfileUrl = "https://open.spotify.com/artist/different" };
+        await using (var setup = new ApplicationDbContext(schema.Options))
+        {
+            var track = await new SpotifyTrackResolver(setup).ResolveAsync(Snapshot("existing") with {
+                ArtistIdentities = [incoming] }, DateTimeOffset.UtcNow, default);
+            // Simulate a legacy track whose provider identity exists but credits have not been populated.
+            artistId = track.ArtistCredits.Single().ArtistId;
+            setup.TrackArtistCredits.RemoveRange(track.ArtistCredits.ToArray());
+            var otherArtist = new Artist { Id = Guid.NewGuid(), Name = incoming.Name };
+            setup.Artists.Add(otherArtist);
+            setup.ArtistProviderLinks.Add(new ArtistProviderLink { Id = Guid.NewGuid(), Artist = otherArtist,
+                Provider = "spotify", ExternalId = alternative.ExternalId! });
+            var observation = Observation("existing", track.Id);
+            setup.TrackObservations.Add(observation);
+            await setup.SaveChangesAsync();
+            trackId = track.Id;
+            observationId = observation.Id;
+        }
+
+        var failures = new IdentityFailures();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options).AddInterceptors(failures).Options;
+        await using var winner = new ApplicationDbContext(schema.Options);
+        await using var loser = new ApplicationDbContext(options);
+        await using var transaction = explicitTransaction ? await loser.Database.BeginTransactionAsync() : null;
+        TrackObservation? precedingObservation = null;
+        if (transaction != null)
+        {
+            precedingObservation = Observation("before-import", trackId);
+            loser.TrackObservations.Add(precedingObservation);
+            await loser.SaveChangesAsync();
+        }
+        var previousAttempts = failures.Attempts;
+        var updatedObservation = await loser.TrackObservations.SingleAsync(o => o.Id == observationId);
+        updatedObservation.Title = "Refreshed observation";
+        var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var winningTrack = await new SpotifyTrackResolver(winner).ResolveAsync(Snapshot("existing") with {
+            ArtistIdentities = [incoming] }, now, default);
+        var losingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("existing") with {
+            ArtistIdentities = [distinctIdentity ? alternative : incoming] }, now.AddSeconds(1), default);
+        Assert.Equal(trackId, winningTrack.Id);
+        Assert.Equal(trackId, losingTrack.Id);
+        var tentativeCreditId = losingTrack.ArtistCredits.Single().Id;
+        var winningCreditId = winningTrack.ArtistCredits.Single().Id;
+        var pendingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("pending"), now, default);
+        var pendingObservation = Observation("pending", pendingTrack.Id);
+        loser.TrackObservations.Add(pendingObservation);
+        await winner.SaveChangesAsync();
+
+        await loser.SaveChangesAsync();
+        if (transaction != null)
+        {
+            // Retry must roll back only its savepoint, retain the earlier save,
+            // and leave the outer transaction active and uncommitted.
+            Assert.Same(transaction, loser.Database.CurrentTransaction);
+            Assert.True(await loser.TrackObservations.AnyAsync(o => o.Id == precedingObservation!.Id));
+            await using var outside = new ApplicationDbContext(schema.Options);
+            Assert.False(await outside.TrackObservations.AnyAsync(o => o.Id == precedingObservation!.Id));
+            await transaction.CommitAsync();
+        }
+
+        await using var verify = new ApplicationDbContext(schema.Options);
+        var credit = await verify.TrackArtistCredits.SingleAsync(c => c.TrackId == trackId);
+        Assert.Equal(winningCreditId, credit.Id);
+        Assert.NotEqual(tentativeCreditId, credit.Id);
+        Assert.Equal(artistId, credit.ArtistId);
+        Assert.Equal(0, credit.Position);
+        Assert.Equal(TrackArtistRole.Featured, credit.Role);
+        Assert.Equal(incoming.JoinPhrase, credit.JoinPhrase);
+        Assert.Contains("shared", credit.Provenance!);
+        Assert.Equal(winningCreditId, losingTrack.ArtistCredits.Single().Id);
+        Assert.Equal(previousAttempts + 2, failures.Attempts);
+        Assert.Equal([distinctIdentity ? "IX_TrackArtistCredits_TrackId_Position"
+            : "IX_TrackArtistCredits_TrackId_ArtistId_Role"], failures.Constraints);
+        var conflicts = await verify.ArtistReconciliationConflicts.ToArrayAsync();
+        if (distinctIdentity)
+        {
+            var conflict = Assert.Single(conflicts);
+            Assert.Equal(trackId, conflict.TrackId);
+            Assert.Contains("different", conflict.Evidence);
+            Assert.Contains(artistId.ToString(), conflict.Evidence);
+        }
+        else Assert.Empty(conflicts);
+        Assert.Equal(2, await verify.Artists.CountAsync());
+        Assert.Equal(2, await verify.ArtistProviderLinks.CountAsync());
+        Assert.Equal("Refreshed observation", (await verify.TrackObservations.SingleAsync(o => o.Id == observationId)).Title);
+        Assert.Equal(pendingTrack.Id, (await verify.TrackObservations.SingleAsync(o => o.Id == pendingObservation.Id)).TrackId);
+        if (precedingObservation != null)
+            Assert.True(await verify.TrackObservations.AnyAsync(o => o.Id == precedingObservation.Id));
+        Assert.Equal(2, await verify.Tracks.CountAsync());
+        Assert.Equal(2, await verify.Songs.CountAsync());
+        Assert.Equal(2, await verify.SongTracks.CountAsync());
+        Assert.Equal(2, await verify.TrackSourceIds.CountAsync());
+        Assert.Equal(now.AddSeconds(1), (await verify.TrackSourceIds.SingleAsync(s => s.TrackId == trackId)).LastVerifiedAt);
+        Assert.DoesNotContain(loser.ChangeTracker.Entries(), e => e.State == EntityState.Added);
+
+        // Repeated import on the same context must reuse the winner and deduplicate conflicts.
+        await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("existing") with {
+            ArtistIdentities = [distinctIdentity ? alternative : incoming] }, now.AddSeconds(2), default);
+        updatedObservation.Title = "Updated after retry";
+        await loser.SaveChangesAsync();
+        Assert.Equal(winningCreditId, (await verify.TrackArtistCredits.AsNoTracking().SingleAsync(c => c.TrackId == trackId)).Id);
+        Assert.Equal(distinctIdentity ? 1 : 0, await verify.ArtistReconciliationConflicts.CountAsync());
+        Assert.Equal("Updated after retry", (await verify.TrackObservations.AsNoTracking().SingleAsync(o => o.Id == observationId)).Title);
+    }
+
+    [PostgresTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task SpotifyImports_SeparateContextsRetryRealIdentityCollisionWithoutLosingPendingImport(bool explicitTransaction)

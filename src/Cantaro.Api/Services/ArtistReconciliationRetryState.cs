@@ -8,7 +8,7 @@ namespace Cantaro.Api.Services;
 
 /// <summary>
 /// Retains only artist reconciliation's edits until the caller saves its import.
-/// After an identity or evidence race, replay those edits against committed rows
+/// After an identity, credit, or evidence race, replay those edits against committed rows
 /// without discarding playlist, observation, or track changes in the same unit of work.
 /// </summary>
 internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
@@ -27,6 +27,8 @@ internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
             ConstraintName: "IX_ArtistProviderLinks_Provider_ExternalId"
                 or "IX_ArtistProviderLinks_ArtistId_Provider" or "IX_Artists_MusicBrainzArtistId"
                 or "IX_ArtistReconciliationConflicts_TrackId_EvidenceKey"
+                or "IX_TrackArtistCredits_TrackId_Position"
+                or "IX_TrackArtistCredits_TrackId_ArtistId_Role"
         };
 
     public void Record(Track track, IReadOnlyList<ArtistCreditMetadata> credits, string source,
