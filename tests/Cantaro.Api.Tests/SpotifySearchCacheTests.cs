@@ -40,7 +40,138 @@ public sealed class SpotifySearchCacheTests
         Assert.Equal("spotify-id", await SearchWithFreshWorker(true));
         Assert.Equal(1, handler.SearchRequests);
         Assert.Equal(1, handler.TokenRequests);
+        Assert.Equal(1, handler.ArtistRequests);
     }
+
+    [Theory]
+    [InlineData("missing", false)]
+    [InlineData("expired", false)]
+    [InlineData("locked", false)]
+    [InlineData("missing", true)]
+    [InlineData("expired", true)]
+    [InlineData("locked", true)]
+    public async Task CachedSearch_BoundsPendingOptionalTokenWorkButPropagatesCallerCancellation(
+        string tokenState, bool cancelCaller)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var tracks = new[] { Tracks[0] with
+        {
+            ArtistIdentities = [new()
+            {
+                Provider = "spotify", ExternalId = "rival", Name = "Rival",
+                ProfileUrl = "https://open.spotify.com/artist/rival"
+            }]
+        } };
+        await fixture.Cache().GetOrSearchAsync("track:\"Heaven\" artist:\"Rival\"", 10,
+            _ => Task.FromResult<IReadOnlyList<SpotifyTrackSnapshot>>(tracks), default);
+
+        var handler = new RateLimitedTokenHandler();
+        using var http = new HttpClient(handler);
+        var retry = new PendingRetryDelay();
+        var options = Options.Create(new SpotifyOptions { ClientId = "client", ClientSecret = "secret" });
+        var api = new SpotifyApiClient(http, options, retry, new SpotifyCooldown(TimeProvider.System));
+        var tokenCache = new SpotifyCatalogTokenCache();
+        if (tokenState == "expired")
+        {
+            tokenCache.AccessToken = "expired-token";
+            tokenCache.ExpiresAt = fixture.Clock.Now.AddMinutes(-1);
+        }
+        var tokens = new SpotifyCatalogTokenProvider(api, options, fixture.Clock, tokenCache);
+        var deadline = new ManualDeadlineTimeProvider();
+        var provider = new SpotifySearchProvider(api, tokens, searchCache: fixture.Cache(), timeProvider: deadline);
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var refreshOwner = new CancellationTokenSource();
+        Task<string?>? otherRefresh = null;
+        try
+        {
+            if (tokenState == "locked")
+            {
+                // Another worker holds the refresh semaphore throughout its retry delay.
+                otherRefresh = tokens.GetAccessTokenAsync(refreshOwner.Token);
+                Assert.Equal(TimeSpan.FromHours(1), await retry.Started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+
+            var search = provider.SearchAsync(CachedObservation(), caller.Token);
+            await deadline.Scheduled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(TimeSpan.FromHours(1), await retry.Started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(search.IsCompleted);
+            Assert.Equal(0, tokenCache.RefreshGate.CurrentCount);
+            Assert.False(retry.Pending!.IsCompleted);
+
+            if (cancelCaller)
+            {
+                caller.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => search.WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+            else
+            {
+                // Fire the actual configured optional deadline, without advancing
+                // the caller's deadline or waiting an hour for Retry-After.
+                deadline.Expire();
+                var candidate = Assert.Single(await search.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.False(caller.IsCancellationRequested);
+                Assert.Equal("spotify-id", candidate.ExternalId);
+                Assert.Equal(["Rival"], candidate.ArtistCredits);
+                var credit = Assert.Single(candidate.ArtistIdentities);
+                Assert.Equal("rival", credit.ExternalId);
+                Assert.Equal("https://open.spotify.com/artist/rival", credit.ProfileUrl);
+                Assert.Null(credit.ArtworkUrl);
+            }
+
+            Assert.Equal(1, handler.Requests);
+            if (otherRefresh is not null)
+            {
+                Assert.False(otherRefresh.IsCompleted);
+                Assert.False(retry.Pending.IsCompleted);
+                Assert.Equal(0, tokenCache.RefreshGate.CurrentCount);
+            }
+            else
+            {
+                Assert.True(retry.Pending.IsCanceled);
+                Assert.Equal(1, tokenCache.RefreshGate.CurrentCount);
+            }
+        }
+        finally
+        {
+            caller.Cancel();
+            refreshOwner.Cancel();
+            if (otherRefresh is not null)
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => otherRefresh);
+        }
+        Assert.Equal(1, tokenCache.RefreshGate.CurrentCount);
+    }
+
+    [Fact]
+    public async Task UncachedSearch_RequiredTokenStillWaitsForCallerCancellation()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var handler = new RateLimitedTokenHandler();
+        using var http = new HttpClient(handler);
+        var retry = new PendingRetryDelay();
+        var options = Options.Create(new SpotifyOptions { ClientId = "client", ClientSecret = "secret" });
+        var api = new SpotifyApiClient(http, options, retry, new SpotifyCooldown(TimeProvider.System));
+        var tokens = new SpotifyCatalogTokenProvider(api, options, fixture.Clock, new SpotifyCatalogTokenCache());
+        var deadline = new ManualDeadlineTimeProvider();
+        var provider = new SpotifySearchProvider(api, tokens, searchCache: fixture.Cache(), timeProvider: deadline);
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            var search = provider.SearchAsync(CachedObservation(), caller.Token);
+            Assert.Equal(TimeSpan.FromHours(1), await retry.Started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(search.IsCompleted);
+            Assert.False(deadline.Scheduled.Task.IsCompleted);
+            caller.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => search.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(1, handler.Requests);
+        }
+        finally { caller.Cancel(); }
+    }
+
+    private static TrackObservation CachedObservation() => new()
+    {
+        SourceType = "youtube", ExternalId = "video", Title = "Heaven", Artist = "Rival",
+        DurationSeconds = 253, MatchStatus = "pending"
+    };
 
     [Fact]
     public async Task CompletedQueriesSurviveServiceRestartAndAreSharedAcrossWorkers()
@@ -173,6 +304,7 @@ public sealed class SpotifySearchCacheTests
     {
         public int SearchRequests { get; private set; }
         public int TokenRequests { get; private set; }
+        public int ArtistRequests { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             string json;
@@ -181,11 +313,16 @@ public sealed class SpotifySearchCacheTests
                 TokenRequests++;
                 json = """{"access_token":"app-token","expires_in":3600,"token_type":"Bearer"}""";
             }
+            else if (request.RequestUri.AbsolutePath == "/v1/artists/rival")
+            {
+                ArtistRequests++;
+                json = """{"id":"rival","name":"Rival","images":[{"url":"https://images/rival"}]}""";
+            }
             else
             {
                 Assert.Equal("/v1/search", request.RequestUri.AbsolutePath);
                 SearchRequests++;
-                json = """{"tracks":{"items":[{"type":"track","id":"spotify-id","name":"Heaven","duration_ms":253000,"artists":[{"name":"Rival"}]}]}}""";
+                json = """{"tracks":{"items":[{"type":"track","id":"spotify-id","name":"Heaven","duration_ms":253000,"artists":[{"id":"rival","name":"Rival"}]}]}}""";
             }
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             { Content = new StringContent(json, Encoding.UTF8, "application/json") });
@@ -196,6 +333,55 @@ public sealed class SpotifySearchCacheTests
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
         public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private sealed class RateLimitedTokenHandler : HttpMessageHandler
+    {
+        public int Requests { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Assert.Equal("https://accounts.spotify.com/api/token", request.RequestUri!.AbsoluteUri);
+            Requests++;
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromHours(1));
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class PendingRetryDelay : ISpotifyRetryDelay
+    {
+        public TaskCompletionSource<TimeSpan> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task? Pending { get; private set; }
+        public Task DelayAsync(TimeSpan delay, CancellationToken ct)
+        {
+            Pending = Task.Delay(delay, ct);
+            Started.TrySetResult(delay);
+            return Pending;
+        }
+    }
+
+    // Only the optional deadline uses this clock. Fire its timer once the real
+    // token retry or semaphore wait is pending, independently of the caller.
+    private sealed class ManualDeadlineTimeProvider : TimeProvider
+    {
+        public TaskCompletionSource Scheduled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Action? _expire;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Assert.Equal(TimeSpan.FromSeconds(5), dueTime);
+            Assert.Equal(Timeout.InfiniteTimeSpan, period);
+            _expire = () => callback(state);
+            Scheduled.SetResult();
+            return new DeadlineTimer(() => _expire = null);
+        }
+        public void Expire() => Assert.IsType<Action>(_expire)();
+
+        private sealed class DeadlineTimer(Action dispose) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException();
+            public void Dispose() => dispose();
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
 
     private sealed class Fixture(string path, ServiceProvider services) : IAsyncDisposable

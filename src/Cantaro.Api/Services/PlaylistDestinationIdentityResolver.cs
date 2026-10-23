@@ -134,6 +134,8 @@ internal static class PlaylistDestinationIdentityResolver
         metadata.Isrc = TrackIdentityResolver.NormalizeIsrc(track?.Isrc)
             ?? TrackIdentityResolver.NormalizeIsrc(metadata.Isrc);
         evidence.RawMetadata = JsonSerializer.Serialize(metadata);
+        var recordingEvidence = track is null ? null
+            : await PlaylistArtistEvidenceGuard.CaptureAsync(dbContext, track, cancellationToken);
         var candidates = await searchAsync(evidence, cancellationToken);
         var assessment = Assess(evidence,
             candidates.Where(candidate => candidate.CandidateSource == service).ToArray(), options);
@@ -142,9 +144,13 @@ internal static class PlaylistDestinationIdentityResolver
         var existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
             source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
             cancellationToken);
-        if (existing is not null && trackId is not null)
-            return existing.TrackId == trackId ? existing.ExternalId : null;
+        if (existing is not null && trackId is not null && existing.TrackId != trackId)
+            return null;
 
+        // Only the copied pre-search evidence can authorize artist enrichment.
+        // The fresh mapping lookup above still rejects conflicting ownership.
+        var canReconcileArtists = trackId is null
+            || recordingEvidence?.CorroboratesRecording(top.Candidate) == true;
         if (trackId is null)
         {
             if (exactObservation is null) return null;
@@ -164,19 +170,27 @@ internal static class PlaylistDestinationIdentityResolver
                     });
                 await reconcileObservationAsync(trackedObservation.Id,
                     existing.TrackId, cancellationToken);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                return existing.ExternalId;
+                trackId = existing.TrackId;
             }
-            trackId = await materializeObservationAsync(exactObservation.Id, top.Candidate, cancellationToken);
-            // Materialization saves all accepted identities together. Re-read after it
-            // rather than inserting a duplicate mapping with the same provider key.
-            existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
-                source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
-                cancellationToken);
+            else
+            {
+                trackId = await materializeObservationAsync(exactObservation.Id, top.Candidate, cancellationToken);
+                // Materialization saves all accepted identities together. Re-read after it
+                // rather than inserting a duplicate mapping with the same provider key.
+                existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
+                    source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
+                    cancellationToken);
+            }
         }
 
-        if (existing is not null) return existing.TrackId == trackId ? existing.ExternalId : null;
-        dbContext.TrackSourceIds.Add(new TrackSourceId
+        if (existing is not null && existing.TrackId != trackId) return null;
+        if (canReconcileArtists && top.Candidate.ArtistIdentities.Count > 0)
+        {
+            var destinationTrack = await dbContext.Tracks.SingleAsync(t => t.Id == trackId.Value, cancellationToken);
+            await new ArtistReconciliationService(dbContext).ReconcileAsync(destinationTrack,
+                top.Candidate.ArtistIdentities, service, DateTimeOffset.UtcNow, cancellationToken, top.Candidate.Artist);
+        }
+        if (existing is null) dbContext.TrackSourceIds.Add(new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = trackId.Value, SourceType = service,
             ExternalId = top.Candidate.ExternalId, Confidence = top.Score,

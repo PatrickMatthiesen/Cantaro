@@ -64,6 +64,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
                         Title = match.Title,
                         Artist = match.Artist,
                         ArtistCredits = match.ArtistCredits,
+                        ArtistIdentities = match.ArtistIdentities,
                         ArtistMusicBrainzId = match.ArtistMusicBrainzId,
                         ArtistSortName = match.ArtistSortName,
                         MbidRecording = match.MbidRecording,

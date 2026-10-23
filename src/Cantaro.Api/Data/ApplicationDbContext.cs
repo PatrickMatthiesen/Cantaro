@@ -1,4 +1,5 @@
 using Cantaro.Api.Models;
+using Cantaro.Api.Services;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -12,7 +13,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : base(options)
     {
+        ArtistReconciliationRetry = new(this);
     }
+
+    internal ArtistReconciliationRetryState ArtistReconciliationRetry { get; }
 
     public DbSet<ConnectedServiceAccount> ConnectedServiceAccounts => Set<ConnectedServiceAccount>();
     public DbSet<Song> Songs => Set<Song>();
@@ -51,30 +55,39 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<ExtensionAuthorizationCode> ExtensionAuthorizationCodes => Set<ExtensionAuthorizationCode>();
     public DbSet<ExtensionRefreshToken> ExtensionRefreshTokens => Set<ExtensionRefreshToken>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+    public DbSet<ArtistProviderLink> ArtistProviderLinks => Set<ArtistProviderLink>();
+    public DbSet<ArtistReconciliationConflict> ArtistReconciliationConflicts => Set<ArtistReconciliationConflict>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
 
-    public override int SaveChanges()
-    {
-        PrepareChanges();
-        return base.SaveChanges();
-    }
+    public override int SaveChanges() => SaveChanges(true);
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         PrepareChanges();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var count = base.SaveChanges(acceptAllChangesOnSuccess);
+        ArtistReconciliationRetry.Clear();
+        return count;
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        PrepareChanges();
-        return base.SaveChangesAsync(cancellationToken);
-    }
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        SaveChangesAsync(true, cancellationToken);
 
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        PrepareChanges();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        for (var attempt = 0; ; attempt++)
+        {
+            PrepareChanges();
+            try
+            {
+                var count = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+                ArtistReconciliationRetry.Clear();
+                return count;
+            }
+            catch (DbUpdateException exception) when (attempt < 2 && ArtistReconciliationRetry.CanRetry(exception))
+            {
+                await ArtistReconciliationRetry.ReplayAsync(cancellationToken);
+            }
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -274,6 +287,26 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => e.MusicBrainzArtistId)
                 .IsUnique()
                 .HasFilter("\"MusicBrainzArtistId\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<ArtistProviderLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Provider).HasMaxLength(50);
+            entity.Property(e => e.ExternalId).HasMaxLength(200);
+            entity.HasIndex(e => new { e.Provider, e.ExternalId }).IsUnique();
+            entity.HasIndex(e => new { e.ArtistId, e.Provider }).IsUnique();
+            entity.HasOne(e => e.Artist).WithMany(e => e.ProviderLinks)
+                .HasForeignKey(e => e.ArtistId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ArtistReconciliationConflict>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EvidenceKey).HasMaxLength(64);
+            entity.HasIndex(e => new { e.TrackId, e.EvidenceKey }).IsUnique();
+            entity.HasOne(e => e.Track).WithMany().HasForeignKey(e => e.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<TrackArtistCredit>(entity =>

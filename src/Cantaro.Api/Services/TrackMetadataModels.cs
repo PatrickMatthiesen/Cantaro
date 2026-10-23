@@ -23,6 +23,7 @@ public class TrackObservationMetadata
     public string? SourceUrl { get; set; }
     public string? Title { get; set; }
     public string? Artist { get; set; }
+    public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
     public string? Album { get; set; }
     public string? Isrc { get; set; }
     public string? OriginalTitle { get; set; }

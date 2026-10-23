@@ -24,6 +24,7 @@ public sealed class SpotifyApiClient
 {
     private const int PageSize = 50;
     private const int MaxRateLimitRetries = 3;
+    private const int MaxArtistMetadataRequests = 50;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
@@ -121,6 +122,13 @@ public sealed class SpotifyApiClient
         string query,
         int limit,
         CancellationToken cancellationToken)
+        => await EnrichArtistMetadataAsync(accessToken,
+            await SearchTrackCreditsAsync(accessToken, query, limit, cancellationToken), cancellationToken);
+
+    // Matching can issue several queries. Finish those required reads before any
+    // optional artist lookup can establish a shared Spotify cooldown.
+    internal async Task<IReadOnlyList<SpotifyTrackSnapshot>> SearchTrackCreditsAsync(
+        string accessToken, string query, int limit, CancellationToken cancellationToken)
     {
         var boundedLimit = Math.Clamp(limit, 1, 50);
         var response = await GetAsync<SpotifySearchResponse>(
@@ -208,7 +216,7 @@ public sealed class SpotifyApiClient
 
             if (string.IsNullOrWhiteSpace(page.Next))
             {
-                return tracks;
+                return await EnrichArtistMetadataAsync(accessToken, tracks, cancellationToken);
             }
 
             offset += PageSize;
@@ -325,8 +333,13 @@ public sealed class SpotifyApiClient
                 var stable = after.Id == playlist.Id && after.Name == playlist.Name
                     && !string.IsNullOrWhiteSpace(playlist.SnapshotId)
                     && after.SnapshotId == playlist.SnapshotId;
+                var enriched = await EnrichArtistMetadataAsync(accessToken,
+                    items.Where(item => item.Track is not null).Select(item => item.Track!).ToArray(), cancellationToken);
+                var trackIndex = 0;
+                var enrichedItems = items.Select(item => item.Track is null ? item
+                    : item with { Track = enriched[trackIndex++] }).ToArray();
                 return new SpotifySyncReadSnapshot(playlistId, playlist.Name, playlist.SnapshotId,
-                    playlist.Owner?.Id, playlist.IsPublic, playlist.IsCollaborative, items, !incomplete && stable);
+                    playlist.Owner?.Id, playlist.IsPublic, playlist.IsCollaborative, enrichedItems, !incomplete && stable);
             }
             offset += PageSize;
         }
@@ -410,8 +423,82 @@ public sealed class SpotifyApiClient
             item.Album?.Name, item.Album?.Images.FirstOrDefault()?.Url,
             item.ExternalUrls?.Spotify ?? $"https://open.spotify.com/track/{id}",
             item.Album?.ExternalUrls?.Spotify, item.ExternalIds?.Isrc,
-            Math.Max(0, item.DurationMs / 1000), addedAt, position);
+            Math.Max(0, item.DurationMs / 1000), addedAt, position)
+        {
+            ArtistIdentities = item.Artists.Where(a => !string.IsNullOrWhiteSpace(a.Name))
+                .Select(a => new ArtistCreditMetadata
+                {
+                    Name = a.Name!, Provider = SpotifyService.ServiceName, ExternalId = a.Id,
+                    ProfileUrl = a.ExternalUrls?.Spotify,
+                    RawMetadata = JsonSerializer.Serialize(a, JsonOptions)
+                }).ToArray()
+        };
     }
+
+    internal async Task<IReadOnlyList<SpotifyTrackSnapshot>> EnrichArtistMetadataAsync(
+        string accessToken, IReadOnlyList<SpotifyTrackSnapshot> tracks, CancellationToken cancellationToken)
+    {
+        // Operation-local successes and misses must not carry an account's
+        // authorization failures into another user's import.
+        var artists = new Dictionary<string, SpotifyArtistResponse?>(StringComparer.Ordinal);
+        var stopLookups = false;
+        var enriched = new List<SpotifyTrackSnapshot>(tracks.Count);
+        foreach (var track in tracks)
+        {
+            var credits = new List<ArtistCreditMetadata>(track.ArtistIdentities.Count);
+            foreach (var credit in track.ArtistIdentities)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var id = credit.ExternalId;
+                SpotifyArtistResponse? artist = null;
+                if (!string.IsNullOrWhiteSpace(id) && credit.Provider == SpotifyService.ServiceName)
+                {
+                    if (!artists.TryGetValue(id, out artist) && !stopLookups
+                        && artists.Count < MaxArtistMetadataRequests)
+                    {
+                        artists[id] = null;
+                        try
+                        {
+                            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                            var response = await GetAsync<SpotifyArtistResponse>(
+                                $"/v1/artists/{Uri.EscapeDataString(id)}", accessToken, timeout.Token);
+                            if (response.Id == id) artists[id] = artist = response;
+                        }
+                        catch (Exception ex) when (IsOptionalArtistFailure(ex, cancellationToken))
+                        {
+                            // Keep a missing artist local to its ID. Access errors,
+                            // cooldowns and outages stop all optional work in this operation.
+                            stopLookups = ex is not PlatformApiException { StatusCode: StatusCodes.Status404NotFound };
+                        }
+                    }
+                }
+
+                credits.Add(artist is null ? credit : credit with
+                {
+                    ProfileUrl = string.IsNullOrWhiteSpace(artist.ExternalUrls?.Spotify)
+                        ? credit.ProfileUrl : artist.ExternalUrls.Spotify,
+                    ArtworkUrl = artist.Images?.FirstOrDefault(image => !string.IsNullOrWhiteSpace(image?.Url))?.Url
+                        ?? credit.ArtworkUrl,
+                    RawMetadata = JsonSerializer.Serialize(new
+                    {
+                        credit = credit.RawMetadata,
+                        artist
+                    }, JsonOptions)
+                });
+            }
+            enriched.Add(track with { ArtistIdentities = credits });
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return enriched;
+    }
+
+    internal async Task<bool> IsCoolingDownAsync(CancellationToken cancellationToken)
+        => await _cooldown.GetNotBeforeAsync(cancellationToken) is not null;
+
+    internal static bool IsOptionalArtistFailure(Exception exception, CancellationToken cancellationToken)
+        => !cancellationToken.IsCancellationRequested
+            && exception is PlatformApiException or HttpRequestException or IOException or JsonException or OperationCanceledException;
 
     private async Task<T> GetAsync<T>(string requestUri, string accessToken, CancellationToken cancellationToken)
     {

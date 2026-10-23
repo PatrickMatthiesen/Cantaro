@@ -7,6 +7,7 @@ public class TrackMatchSearchCandidate
     public required string Title { get; init; }
     public string? Artist { get; init; }
     public IReadOnlyList<string> ArtistCredits { get; init; } = [];
+    public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
     public string? ArtistMusicBrainzId { get; init; }
     public string? ArtistSortName { get; init; }
     public string? MbidRecording { get; init; }

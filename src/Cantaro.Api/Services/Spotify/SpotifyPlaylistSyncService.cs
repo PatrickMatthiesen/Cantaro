@@ -192,7 +192,7 @@ public sealed class SpotifyPlaylistSyncService(
             Title = track.Name,
             Artist = track.Artist,
             Album = track.AlbumName,
-            Isrc = track.Isrc,
+            ArtistIdentities = track.ArtistIdentities, Isrc = track.Isrc,
             OriginalTitle = track.Name,
             OriginalArtist = track.Artist,
             SearchTitle = track.Name,

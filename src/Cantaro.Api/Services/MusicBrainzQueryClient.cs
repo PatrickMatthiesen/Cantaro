@@ -92,6 +92,16 @@ public class MusicBrainzQueryClient : IMusicBrainzQueryClient
             // MusicBrainz artist.
             ArtistMusicBrainzId = singleArtist?.Id.ToString(),
             ArtistSortName = singleArtist?.SortName,
+            ArtistIdentities = recording.ArtistCredit.Select(credit => new ArtistCreditMetadata
+            {
+                Name = credit.Name ?? credit.Artist?.Name ?? string.Empty,
+                CanonicalName = credit.Artist?.Name, SortName = credit.Artist?.SortName,
+                MusicBrainzArtistId = credit.Artist?.Id.ToString(), Provider = "musicbrainz",
+                ExternalId = credit.Artist?.Id.ToString(), JoinPhrase = credit.JoinPhrase,
+                ProfileUrl = credit.Artist == null ? null : $"https://musicbrainz.org/artist/{credit.Artist.Id}",
+                RawMetadata = JsonSerializer.Serialize(new { credit.Name, credit.JoinPhrase,
+                    MusicBrainzArtistId = credit.Artist?.Id, SortName = credit.Artist?.SortName })
+            }).ToArray(),
             MbidRecording = recording.Id.ToString(),
             Isrc = recording.Isrcs?.FirstOrDefault(),
             DurationSeconds = durationSeconds,

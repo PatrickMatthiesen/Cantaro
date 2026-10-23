@@ -151,6 +151,12 @@ public sealed class PlaylistUnmatchedReviewService(
         if (sourceIdentity is not null && sourceIdentity.TrackId != entry.TrackId)
             throw StaleChoice();
 
+        // Capture this before unresolved-source materialization can add a mapping
+        // or copy the selected recording's identifiers onto a canonical track.
+        var recordingEvidence = entry.Track is null ? null
+            : await PlaylistArtistEvidenceGuard.CaptureAsync(db, entry.Track, ct);
+        var canReconcileArtists = entry.TrackId is null
+            || recordingEvidence?.CorroboratesRecording(proof.Candidate) == true;
         Guid trackId;
         if (entry.TrackId is { } knownTrackId)
         {
@@ -191,6 +197,14 @@ public sealed class PlaylistUnmatchedReviewService(
             }
         }
         else throw StaleChoice();
+
+        // A destination choice alone cannot change shared canonical artists.
+        if (canReconcileArtists && proof.Candidate.ArtistIdentities.Count > 0)
+        {
+            var track = await db.Tracks.SingleAsync(item => item.Id == trackId, ct);
+            await new ArtistReconciliationService(db).ReconcileAsync(track,
+                proof.Candidate.ArtistIdentities, link.Service, DateTimeOffset.UtcNow, ct, proof.Candidate.Artist);
+        }
 
         if (existing is null)
         {
@@ -240,6 +254,7 @@ public sealed class PlaylistUnmatchedReviewService(
             CandidateSource = "spotify", ExternalId = track.Id,
             Title = track.Name, Artist = track.Artist,
             ArtistCredits = track.ArtistNames, Isrc = track.Isrc,
+            ArtistIdentities = track.ArtistIdentities,
             DurationSeconds = track.DurationSeconds
         }).ToArray();
     }

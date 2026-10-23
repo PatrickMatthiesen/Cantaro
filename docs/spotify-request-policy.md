@@ -67,8 +67,9 @@ headers. A Web API cooldown does not prevent reconnecting an account.
   or one day for an empty result. Known accepted track identities remain durable and
   are checked before searching. User-token searches are excluded because their results
   can depend on the user's market.
-- Cache hits need neither a token request nor a Spotify Web API request. Failed HTTP
-  requests and quota responses are never stored as empty results. Each successful query
+- Cached track-search results need neither a token request nor a Spotify search request.
+  Optional artist enrichment follows the policy below. Failed track-search requests
+  and quota responses are never stored as empty results. Each successful query
   is saved separately, including when a later query fails or the job is cancelled after
   its response. Expired cache rows are pruned on cache misses at most hourly per process.
 - Concurrent identical queries are coalesced within an API process. Completed results
@@ -88,6 +89,34 @@ The settings bind from `Spotify:RequestGate`. The defaults are:
   "BackoffResetQuietPeriod": "1.00:00:00"
 }
 ```
+
+## Optional artist metadata
+
+Track and playlist responses contain
+[SimplifiedArtistObject credits](https://developer.spotify.com/documentation/web-api/reference/get-playlists-items),
+which omit artist images. Search and playlist reads enrich those credits using
+[Get Artist](https://developer.spotify.com/documentation/web-api/reference/get-an-artist)
+(`GET /v1/artists/{id}`). Spotify's
+[February 2026 changes](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)
+removed the several-artists endpoint for affected development-mode apps.
+
+- Required track queries, playlist pages and sync consistency reads finish before
+  optional lookups. Enrichment preserves credited names, order, roles and the
+  original credit metadata. Full-artist data applies only when its ID matches.
+- Each read or matching operation looks up at most 50 distinct artist IDs. Each
+  lookup has a five-second timeout and uses the existing request gate. Duplicate
+  IDs reuse successes and misses within that operation, including across pages
+  and matching queries. No account-specific lookup failure is cached across operations.
+- Missing artists or images leave artwork absent. Access errors, malformed responses,
+  transport problems and timeouts stop further optional requests in the operation.
+  Caller cancellation still propagates. Album images never become artist artwork.
+- A lookup's 429 records the normal shared cooldown. Enrichment then stops and returns
+  the completed track reads. Cached matching results skip enrichment and token
+  acquisition during an active cooldown. Subsequent required Spotify calls still
+  obey that cooldown.
+- The catalogue cache stores track credits before enrichment. Artist metadata is
+  fetched again on a later operation when the gate permits it; no new persistent
+  artist cache or negative cache is introduced.
 
 ## Deployment boundary
 
