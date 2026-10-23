@@ -134,6 +134,8 @@ internal static class PlaylistDestinationIdentityResolver
         metadata.Isrc = TrackIdentityResolver.NormalizeIsrc(track?.Isrc)
             ?? TrackIdentityResolver.NormalizeIsrc(metadata.Isrc);
         evidence.RawMetadata = JsonSerializer.Serialize(metadata);
+        var recordingEvidence = track is null ? null
+            : await PlaylistArtistEvidenceGuard.CaptureAsync(dbContext, track, cancellationToken);
         var candidates = await searchAsync(evidence, cancellationToken);
         var assessment = Assess(evidence,
             candidates.Where(candidate => candidate.CandidateSource == service).ToArray(), options);
@@ -145,13 +147,10 @@ internal static class PlaylistDestinationIdentityResolver
         if (existing is not null && trackId is not null && existing.TrackId != trackId)
             return null;
 
-        // SourceIds came from the canonical snapshot before search and before
-        // this operation can insert a destination mapping. A new map must not
-        // turn the choice itself into corroborating recording evidence.
+        // Only the copied pre-search evidence can authorize artist enrichment.
+        // The fresh mapping lookup above still rejects conflicting ownership.
         var canReconcileArtists = trackId is null
-            || track is not null && PlaylistArtistEvidenceGuard.CorroboratesRecording(track, top.Candidate,
-                track.SourceIds.SingleOrDefault(source => source.SourceType == service
-                    && source.ExternalId == top.Candidate.ExternalId));
+            || recordingEvidence?.CorroboratesRecording(top.Candidate) == true;
         if (trackId is null)
         {
             if (exactObservation is null) return null;

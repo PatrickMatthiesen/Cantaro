@@ -478,6 +478,108 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Equal(track.Id, (await db.TrackArtistCredits.SingleAsync()).TrackId);
     }
 
+    [Theory]
+    [InlineData("empty", false, "mapping")]
+    [InlineData("empty", true, "mapping")]
+    [InlineData("anonymous", false, "mapping")]
+    [InlineData("anonymous", true, "mapping")]
+    [InlineData("stable", false, "mapping")]
+    [InlineData("stable", true, "mapping")]
+    [InlineData("anonymous", false, "isrc")]
+    [InlineData("anonymous", false, "musicbrainz")]
+    public async Task ResolveAsync_LocalTrackedFallbackDoesNotUseRecordingEvidenceAddedDuringSearch(
+        string credits, bool separateContext, string lateEvidence)
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        Guid entryId;
+        Guid trackId;
+        await using (var setup = new ApplicationDbContext(options))
+        {
+            var entry = await SeedUnresolvedAsync(setup);
+            entryId = entry.Id;
+            var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Song", SearchArtist = "Artist" };
+            trackId = track.Id;
+            setup.Tracks.Add(track);
+            // The entry and observation stay unresolved. Production ResolveExistingAsync
+            // must discover this global source mapping and return a tracked Track.
+            setup.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
+                SourceType = "youtube", ExternalId = "video1" });
+            if (credits != "empty")
+                await new ArtistReconciliationService(setup).ReconcileAsync(track,
+                    [new ArtistCreditMetadata { Name = "Artist", Provider = credits == "stable" ? "spotify" : null,
+                        ExternalId = credits == "stable" ? "canonical-artist" : null,
+                        Role = TrackArtistRole.Featured, JoinPhrase = " feat. ",
+                        ArtworkUrl = "https://images/canonical-artist" }],
+                    "observation", DateTimeOffset.UtcNow, default);
+            setup.ArtistReconciliationConflicts.Add(new ArtistReconciliationConflict {
+                Id = Guid.NewGuid(), TrackId = trackId, EvidenceKey = "retained-conflict",
+                Evidence = "{\"retained\":true}", Reason = "Retained import conflict", CreatedAt = DateTimeOffset.UtcNow });
+            await setup.SaveChangesAsync();
+        }
+
+        await using var db = new ApplicationDbContext(options);
+        var storedEntry = await db.PlaylistEntries.SingleAsync(e => e.Id == entryId);
+        Assert.Null(storedEntry.TrackId);
+        Assert.Empty(db.Tracks.Local);
+        var candidate = new TrackMatchSearchCandidate {
+            CandidateSource = "spotify", ExternalId = "destination-B", Title = "Song", Artist = "Artist",
+            ArtistCredits = ["Artist"], DurationSeconds = 180,
+            Isrc = lateEvidence == "isrc" ? "USABC2400001" : null,
+            MbidRecording = lateEvidence == "musicbrainz" ? "recording-b" : null,
+            ArtistIdentities = [new ArtistCreditMetadata { Name = "Artist", Provider = "spotify", ExternalId = "artist-B",
+                ArtworkUrl = "https://images/artist-B", RawMetadata = "{\"destination\":true}" }] };
+        var before = await ArtistEvidenceSnapshot.ReadAsync(db);
+        var reconciler = new PlaylistCanonicalReconciliationService(db);
+        var searches = 0;
+
+        var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
+            (_, _, _) => throw new InvalidOperationException("Must reuse the locally resolved Track."),
+            (observation, id, ct) => reconciler.ReconcileObservationAsync(observation, id, ct),
+            new PlatformAccountContext(42, 7), "spotify", storedEntry,
+            async (_, ct) =>
+            {
+                searches++;
+                var trackedTrack = Assert.Single(db.Tracks.Local);
+                Assert.Equal(trackId, trackedTrack.Id);
+                Assert.Equal(EntityState.Unchanged, db.Entry(trackedTrack).State);
+                Assert.Null(trackedTrack.Isrc);
+                Assert.Null(trackedTrack.MbidRecording);
+                Assert.DoesNotContain(trackedTrack.SourceIds, s => s.SourceType == "spotify");
+                if (separateContext)
+                {
+                    await using var writer = new ApplicationDbContext(options);
+                    writer.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
+                        SourceType = "spotify", ExternalId = candidate.ExternalId });
+                    await writer.SaveChangesAsync(ct);
+                    // Fixup happens later, when the production post-search lookup reads it.
+                    Assert.DoesNotContain(trackedTrack.SourceIds, s => s.SourceType == "spotify");
+                }
+                else
+                {
+                    if (lateEvidence == "mapping")
+                        db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
+                            SourceType = "spotify", ExternalId = candidate.ExternalId });
+                    else if (lateEvidence == "isrc") trackedTrack.Isrc = candidate.Isrc;
+                    else trackedTrack.MbidRecording = candidate.MbidRecording;
+                    await db.SaveChangesAsync(ct);
+                }
+                // Include deliberate scalar changes in the baseline, but no artist mutation.
+                if (lateEvidence == "mapping")
+                    Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(db));
+                before = await ArtistEvidenceSnapshot.ReadAsync(db);
+                return [candidate];
+            }, default);
+
+        Assert.Equal("destination-B", result);
+        Assert.Equal(1, searches);
+        Assert.Equal(trackId, (await db.PlaylistEntries.AsNoTracking().SingleAsync(e => e.Id == entryId)).TrackId);
+        Assert.Contains(Assert.Single(db.Tracks.Local).SourceIds,
+            s => s.SourceType == "spotify" && s.ExternalId == candidate.ExternalId);
+        Assert.Equal("artist-B", Assert.Single(candidate.ArtistIdentities).ExternalId);
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(db));
+    }
+
     private static TrackMatchSearchCandidate Candidate(string id, string service,
         string? isrc = null, string title = "Song", int duration = 180) => new()
     {

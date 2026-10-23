@@ -153,9 +153,10 @@ public sealed class PlaylistUnmatchedReviewService(
 
         // Capture this before unresolved-source materialization can add a mapping
         // or copy the selected recording's identifiers onto a canonical track.
+        var recordingEvidence = entry.Track is null ? null
+            : await PlaylistArtistEvidenceGuard.CaptureAsync(db, entry.Track, ct);
         var canReconcileArtists = entry.TrackId is null
-            || entry.Track is { } canonicalTrack
-                && PlaylistArtistEvidenceGuard.CorroboratesRecording(canonicalTrack, proof.Candidate, existing);
+            || recordingEvidence?.CorroboratesRecording(proof.Candidate) == true;
         Guid trackId;
         if (entry.TrackId is { } knownTrackId)
         {
