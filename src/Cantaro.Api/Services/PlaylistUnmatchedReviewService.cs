@@ -37,7 +37,8 @@ public sealed class PlaylistUnmatchedReviewService(
     TrackMatchingService matching,
     PlaylistCanonicalReconciliationService reconciler,
     IOptions<TrackMatchingOptions> matchingOptions,
-    IDataProtectionProvider protectionProvider)
+    IDataProtectionProvider protectionProvider,
+    PlaylistSyncCoordinator coordinator)
 {
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("Cantaro.PlaylistSync.MatchReview.v1");
     private readonly TrackMatchingOptions _options = matchingOptions.Value;
@@ -126,7 +127,15 @@ public sealed class PlaylistUnmatchedReviewService(
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task ConfirmAsync(int userId, Guid playlistId, Guid mappingId,
+    public Task ConfirmAsync(int userId, Guid playlistId, Guid mappingId,
+        Guid entryId, string candidateToken, CancellationToken ct)
+        // Confirmation and sync both replace MatchingProgressJson. Take the same
+        // lease before loading mutable evidence or starting the transaction.
+        => coordinator.WithPlaylistLeaseAsync(userId, playlistId,
+            token => new PlaylistSyncCoordinator.PlaylistTransactionStrategy(db).ExecuteAsync(
+                () => ConfirmCoreAsync(userId, playlistId, mappingId, entryId, candidateToken, token)), ct);
+
+    private async Task ConfirmCoreAsync(int userId, Guid playlistId, Guid mappingId,
         Guid entryId, string candidateToken, CancellationToken ct)
     {
         try

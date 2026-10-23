@@ -427,6 +427,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
     {
         public string PlatformId => "spotify";
         public int Searches { get; private set; }
+        public bool PauseSearch { get; init; }
+        public TaskCompletionSource SearchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ContinueSearch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Resolutions { get; private set; }
         public List<string> RemoteIds { get; set; } = [];
         public Task<IReadOnlyList<PlaylistRemoteCatalogItem>> ListPlaylistsAsync(PlatformAccountContext account, CancellationToken ct)
@@ -450,7 +453,16 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 (_, _, _) => throw new InvalidOperationException("Already canonical."),
                 (observation, track, token) => new PlaylistCanonicalReconciliationService(db)
                     .ReconcileObservationAsync(observation, track, token), account, PlatformId, entry,
-                (_, _) => { Searches++; return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([]); }, ct);
+                async (_, token) =>
+                {
+                    Searches++;
+                    if (PauseSearch && Searches == 1)
+                    {
+                        SearchStarted.TrySetResult();
+                        await ContinueSearch.Task.WaitAsync(token);
+                    }
+                    return [];
+                }, ct);
         }
         public Task RenameAsync(PlatformAccountContext account, string id, string title, CancellationToken ct) => Task.CompletedTask;
         public Task DeleteAsync(PlatformAccountContext account, string id, CancellationToken ct) => Task.CompletedTask;

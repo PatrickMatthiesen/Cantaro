@@ -19,7 +19,8 @@ public sealed partial class PlaylistSyncCoordinator
     // would reuse tracked entities from a rolled-back attempt. Suppress command-level
     // retries for this transaction; a later sync retries with a fresh context and read.
     // Provider calls stay outside this scope so database retries cannot replay them.
-    private sealed class PlaylistTransactionStrategy(DbContext context)
+    // Manual confirmation also saves materialization in stages and uses this policy.
+    internal sealed class PlaylistTransactionStrategy(DbContext context)
         : ExecutionStrategy(context, 0, TimeSpan.Zero)
     {
         protected override bool ShouldRetryOn(Exception exception) => false;
