@@ -11,6 +11,9 @@ internal static class PlaylistDestinationIdentityEvidence
     public static async Task<string?> FindAsync(ApplicationDbContext db, PlatformAccountContext account,
         string service, PlaylistEntry entry, CancellationToken ct, ServicePlaylistMapping? link = null)
     {
+        var confirmed = await FindSavedAsync(db, account, service, entry, ct, link, manualConfirmation: true);
+        if (confirmed is not null) return confirmed;
+
         var observation = entry.TrackObservation;
         var trackId = entry.TrackId ?? observation?.TrackId;
         if (observation?.SourceType == service && (trackId is null || observation.TrackId == trackId))
@@ -26,6 +29,13 @@ internal static class PlaylistDestinationIdentityEvidence
             if (owned is not null) return owned;
         }
 
+        return await FindSavedAsync(db, account, service, entry, ct, link, manualConfirmation: false);
+    }
+
+    private static async Task<string?> FindSavedAsync(ApplicationDbContext db, PlatformAccountContext account,
+        string service, PlaylistEntry entry, CancellationToken ct, ServicePlaylistMapping? link, bool manualConfirmation)
+    {
+        var trackId = entry.TrackId ?? entry.TrackObservation?.TrackId;
         var links = link is null
             ? await db.ServicePlaylistMappings.AsNoTracking().Include(item => item.ConnectedServiceAccount)
                 .Where(item => item.PlaylistId == entry.PlaylistId && item.UserId == account.UserId
@@ -35,6 +45,10 @@ internal static class PlaylistDestinationIdentityEvidence
             : [link];
         foreach (var candidate in links)
         {
+            var progress = PlaylistMatchingProgress.Read(candidate.MatchingProgressJson);
+            if (!progress.TryGetValue(entry.Id, out var saved) || saved.ManualConfirmation != manualConfirmation
+                || string.IsNullOrWhiteSpace(saved.ExternalId)
+                || !PlaylistMatchingProgress.CanReuse(saved, entry, candidate)) continue;
             var connected = candidate.ConnectedServiceAccount;
             if (candidate.UserId != account.UserId || candidate.PlaylistId != entry.PlaylistId
                 || candidate.Service != service || candidate.State != "active"
@@ -43,9 +57,6 @@ internal static class PlaylistDestinationIdentityEvidence
                 || connected.ConnectionState != "connected" || connected.ExternalAccountId != candidate.ExternalAccountId
                 || account.ExpectedExternalAccountId is { } expected && expected != candidate.ExternalAccountId)
                 continue;
-            var progress = PlaylistMatchingProgress.Read(candidate.MatchingProgressJson);
-            if (!progress.TryGetValue(entry.Id, out var saved) || string.IsNullOrWhiteSpace(saved.ExternalId)
-                || !PlaylistMatchingProgress.CanReuse(saved, entry, candidate)) continue;
             // Preserve the canonical identity conflict guard if a provider key was reassigned.
             if (await db.TrackSourceIds.AsNoTracking().AnyAsync(source => source.SourceType == service
                 && source.ExternalId == saved.ExternalId && source.TrackId != trackId, ct)) continue;

@@ -135,16 +135,25 @@ public sealed partial class PlaylistSyncCoordinator
             try
             {
                 var identity = PlaylistSyncItem.From(entry).Identity;
+                // Revalidate durable choices through the resolver before any read/attached
+                // shortcut. An automatic search checkpoint has no such precedence.
+                var manualChoice = progress.TryGetValue(entry.Id, out var confirmed)
+                    && confirmed.ManualConfirmation && PlaylistMatchingProgress.CanReuse(confirmed, entry, link);
+                var confirmedId = manualChoice ? await provider.ResolveAsync(read.Account, entry, ct) : null;
+                // A different ID's occurrence belongs to a later duplicate entry.
+                // Consume a matching occurrence when the manual choice is already present.
                 var occurrence = available.FirstOrDefault(item => item.Identity == identity
-                    && item.ObservationId == entry.TrackObservationId)
-                    ?? available.FirstOrDefault(item => item.Identity == identity);
+                    && item.ObservationId == entry.TrackObservationId
+                    && (!manualChoice || item.ExternalId == confirmedId))
+                    ?? available.FirstOrDefault(item => item.Identity == identity
+                        && (!manualChoice || item.ExternalId == confirmedId));
                 if (occurrence is not null) available.Remove(occurrence);
-                if (occurrence is not null) id = occurrence.ExternalId;
+                if (manualChoice) id = confirmedId;
+                else if (occurrence is not null) id = occurrence.ExternalId;
                 else if (AttachedDestinationId(entry, link.Service) is { } knownId) id = knownId;
                 else if (progress.TryGetValue(entry.Id, out var saved)
                     && PlaylistMatchingProgress.CanReuse(saved, entry, link))
-                    id = saved.ManualConfirmation
-                        ? await provider.ResolveAsync(read.Account, entry, ct) : saved.ExternalId;
+                    id = saved.ExternalId;
                 else
                 {
                     // Return to the scheduler between batches. Do not write a partially

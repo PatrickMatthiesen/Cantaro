@@ -431,11 +431,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
         public TaskCompletionSource SearchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ContinueSearch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Resolutions { get; private set; }
+        public int Reads { get; private set; }
         public List<string> RemoteIds { get; set; } = [];
         public Task<IReadOnlyList<PlaylistRemoteCatalogItem>> ListPlaylistsAsync(PlatformAccountContext account, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<PlaylistRemoteCatalogItem>>([]);
         public async Task<PlaylistRemoteSnapshot> ReadAsync(PlatformAccountContext account, string playlistId, CancellationToken ct)
         {
+            Reads++;
             var items = new List<PlaylistRemoteTrack>();
             for (var i = 0; i < RemoteIds.Count; i++)
             {
