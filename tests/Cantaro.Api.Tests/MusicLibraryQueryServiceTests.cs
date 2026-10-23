@@ -668,12 +668,15 @@ public class MusicLibraryQueryServiceTests
     }
 
     [Theory]
-    [InlineData(null, null, false, false)]
-    [InlineData("", "", true, false)]
-    [InlineData("{}", " ", false, true)]
-    [InlineData("{\"Title\":\" \",\"Artist\":\"\"}", "", true, true)]
+    [InlineData(null, null, null, "plain", false, true)]
+    [InlineData("", "", "", "plain", true, false)]
+    [InlineData("{}", " ", " \t ", "formatted", false, true)]
+    [InlineData("{\"Title\":\" \",\"Artist\":\"\"}", "", null, "formatted", true, false)]
+    [InlineData(null, "", "", "blank-formatted", false, true)]
+    [InlineData("{}", null, " \t ", "blank-formatted", true, false)]
     public async Task ReadSongs_MissingTitleArtistProjectionsUseOnlyOrderedOwnedDisplayMetadata(
-        string? canonicalMetadata, string? searchValue, bool useRawMetadata, bool sameComposition)
+        string? canonicalMetadata, string? searchValue, string? emptyValue, string format,
+        bool sameComposition, bool titleFirst)
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -693,19 +696,38 @@ public class MusicLibraryQueryServiceTests
         TrackObservation Observation(string name) => new()
         {
             Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = name,
-            Title = useRawMetadata ? "Unformatted upload" : $"{name} song",
-            Artist = useRawMetadata ? null : $"{name} artist",
-            RawMetadata = useRawMetadata ? JsonSerializer.Serialize(new TrackObservationMetadata
+            Title = format != "plain" ? "Unformatted upload" : $"{name} song",
+            Artist = format != "plain" ? null : $"{name} artist",
+            RawMetadata = format != "plain" ? JsonSerializer.Serialize(new TrackObservationMetadata
             {
                 OriginalTitle = $"{name} artist - {name} song", SearchArtist = $"{name} artist"
             }) : null,
             MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
-        var firstObservation = Observation("First");
+        var emptyObservation = Observation("Empty");
+        // Title is required in SQLite; missing nullable artist/raw metadata use null.
+        emptyObservation.Title = emptyValue ?? "";
+        emptyObservation.Artist = emptyValue;
+        emptyObservation.RawMetadata = null;
+        emptyObservation.MatchStatus = TrackMatchingStatuses.Pending;
+        var titleObservation = Observation("Title");
+        titleObservation.Title = format == "formatted" ? "Unformatted upload" : "  First song  ";
+        titleObservation.Artist = null;
+        titleObservation.RawMetadata = format == "plain" ? null : JsonSerializer.Serialize(new TrackObservationMetadata
+        {
+            OriginalTitle = format == "blank-formatted" ? "(OST)" : "  First song - OST  "
+        });
+        var artistObservation = Observation("Artist");
+        artistObservation.Title = " ";
+        artistObservation.Artist = format == "plain" ? "  First artist  " : null;
+        artistObservation.RawMetadata = format == "plain" ? null : JsonSerializer.Serialize(new TrackObservationMetadata
+        {
+            Artist = "Other raw artist", SearchArtist = "  First artist  "
+        });
         var laterObservation = Observation("Later");
         var privateObservation = Observation("Private");
         db.AddRange(firstUser, secondUser, firstPlaylist, observedPlaylist, secondPlaylist, anchor, related,
-            firstObservation, laterObservation, privateObservation);
+            emptyObservation, titleObservation, artistObservation, laterObservation, privateObservation);
         if (sameComposition)
         {
             var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
@@ -722,11 +744,13 @@ public class MusicLibraryQueryServiceTests
             });
         }
         await db.SaveChangesAsync();
-        // A canonical-only entry sorts before the usable observation. Insert competing
-        // observations in reverse order so database insertion order cannot pick the title.
+        // A canonical-only entry and an empty observation precede independent title/artist
+        // evidence. Insert conflicting evidence first to catch dependence on insertion order.
         db.PlaylistEntries.AddRange(
-            MakeEntry(observedPlaylist.Id, related.Id, laterObservation.Id, 2, "youtube", now),
-            MakeEntry(observedPlaylist.Id, related.Id, firstObservation.Id, 1, "youtube", now),
+            MakeEntry(observedPlaylist.Id, related.Id, laterObservation.Id, 4, "youtube", now),
+            MakeEntry(observedPlaylist.Id, related.Id, artistObservation.Id, titleFirst ? 3 : 2, "youtube", now),
+            MakeEntry(observedPlaylist.Id, related.Id, titleObservation.Id, titleFirst ? 2 : 3, "youtube", now),
+            MakeEntry(observedPlaylist.Id, related.Id, emptyObservation.Id, 1, "youtube", now),
             MakeEntry(firstPlaylist.Id, related.Id, null, 0, "cantaro", now),
             MakeEntry(firstPlaylist.Id, anchor.Id, null, 3, "cantaro", now),
             MakeEntry(secondPlaylist.Id, related.Id, privateObservation.Id, 0, "youtube", now),
@@ -752,6 +776,7 @@ public class MusicLibraryQueryServiceTests
             Assert.Equal(detail.Title, librarySong.Title);
             Assert.Equal(detail.Artist, librarySong.Artist);
             Assert.True(card.InLibrary);
+            Assert.Equal(userId == firstUser.Id ? TrackMatchingStatuses.Pending : null, librarySong.MatchStatus);
             Assert.Equal([sameComposition ? "Another recording of this composition" : "Remix of this recording"], card.RelationshipLabels);
         }
         var stored = await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == related.Id);
@@ -801,7 +826,18 @@ public class MusicLibraryQueryServiceTests
             Title = "Observed song", Artist = "Observed artist", MatchStatus = TrackMatchingStatuses.Matched,
             CreatedAt = now, UpdatedAt = now
         };
-        db.AddRange(user, playlist, anchor, related, observation);
+        var emptyObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "empty-precedence",
+            Title = " ", Artist = "", MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+        };
+        var laterObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "later-precedence",
+            Title = "Conflicting later song", Artist = "Conflicting later artist",
+            MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+        };
+        db.AddRange(user, playlist, anchor, related, observation, emptyObservation, laterObservation);
         db.TrackRelations.Add(new TrackRelation
         {
             FromTrackId = related.Id, ToTrackId = anchor.Id, RelationType = TrackRelationType.RemixOf
@@ -809,7 +845,9 @@ public class MusicLibraryQueryServiceTests
         await db.SaveChangesAsync();
         db.PlaylistEntries.AddRange(
             MakeEntry(playlist.Id, anchor.Id, null, 0, "cantaro", now),
-            MakeEntry(playlist.Id, related.Id, observation.Id, 1, "youtube", now));
+            MakeEntry(playlist.Id, related.Id, laterObservation.Id, 3, "youtube", now),
+            MakeEntry(playlist.Id, related.Id, observation.Id, 2, "youtube", now),
+            MakeEntry(playlist.Id, related.Id, emptyObservation.Id, 1, "youtube", now));
         await db.SaveChangesAsync();
         // Model independently persisted search projections, bypassing write-time rebuilding.
         await db.Tracks.Where(track => track.Id == related.Id).ExecuteUpdateAsync(setters => setters
@@ -867,8 +905,14 @@ public class MusicLibraryQueryServiceTests
                 DurationSeconds = 400, ThumbnailUrl = "https://img.example/private.jpg"
             })
         };
+        var emptyPrivateObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "empty-private-related",
+            Title = " ", Artist = null, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+        };
         var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
-        db.AddRange(owner, other, playlist, privatePlaylist, original, related, canonicalRelated, searchRelated, privateObservation, composition);
+        db.AddRange(owner, other, playlist, privatePlaylist, original, related, canonicalRelated, searchRelated,
+            emptyPrivateObservation, privateObservation, composition);
         db.SongTracks.AddRange(
             new SongTrack { SongId = composition.Id, TrackId = original.Id },
             new SongTrack { SongId = composition.Id, TrackId = canonicalRelated.Id },
@@ -880,7 +924,8 @@ public class MusicLibraryQueryServiceTests
         await db.SaveChangesAsync();
         db.PlaylistEntries.AddRange(
             MakeEntry(playlist.Id, original.Id, null, 0, "cantaro", now),
-            MakeEntry(privatePlaylist.Id, related.Id, privateObservation.Id, 0, "youtube", now));
+            MakeEntry(privatePlaylist.Id, related.Id, emptyPrivateObservation.Id, 0, "youtube", now),
+            MakeEntry(privatePlaylist.Id, related.Id, privateObservation.Id, 1, "youtube", now));
         await db.SaveChangesAsync();
         await db.Tracks.Where(track => track.Id == searchRelated.Id).ExecuteUpdateAsync(setters => setters
             .SetProperty(track => track.SearchTitle, "Search related")

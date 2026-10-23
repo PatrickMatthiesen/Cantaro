@@ -388,7 +388,6 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 Metadata: ParseJson<TrackObservationMetadata>(entry.TrackObservation!.RawMetadata)))
             .ToList();
         var observation = observations.FirstOrDefault().Observation;
-        var observationMetadata = observations.FirstOrDefault().Metadata;
         var canonicalArtwork = FirstNonEmpty(canonicalMetadata?.ThumbnailUrl);
         var thumbnailUrl = canonicalArtwork is not null && observations.Any(item =>
             string.Equals(canonicalArtwork, FirstNonEmpty(item.Observation.ThumbnailUrl), StringComparison.Ordinal)
@@ -402,13 +401,17 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
 
         var title = FirstNonEmpty(
             canonicalMetadata?.Title,
-            observation is null ? null : TrackObservationDisplayFormatter.GetQueueTitle(observation, observationMetadata),
-            observation?.Title,
+            observations.Select(item => FirstNonEmpty(
+                    TrackObservationDisplayFormatter.GetQueueTitle(item.Observation, item.Metadata),
+                    item.Observation.Title))
+                .FirstOrDefault(value => value is not null),
             "Unknown song")!;
         var artist = FirstNonEmpty(
             canonicalMetadata?.Artist,
             BuildArtistDisplay(track),
-            observation is null ? null : TrackObservationDisplayFormatter.GetQueueArtist(observation, observationMetadata));
+            observations.Select(item => FirstNonEmpty(
+                    TrackObservationDisplayFormatter.GetQueueArtist(item.Observation, item.Metadata)))
+                .FirstOrDefault(value => value is not null));
 
         return new SongMetadata(
             title,
