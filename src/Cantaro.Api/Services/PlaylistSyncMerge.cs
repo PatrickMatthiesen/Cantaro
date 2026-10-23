@@ -3,7 +3,25 @@ using Cantaro.Api.Models;
 
 namespace Cantaro.Api.Services;
 
-public sealed record PlaylistSyncItem(Guid? TrackId, Guid? ObservationId, string? ExternalId, string? Service)
+// Transient evidence that a provider read has already excluded our own export
+// from ingestion. It grants no entry membership or permission for another write.
+public sealed record PlaylistReadScope(int UserId, int ConnectedServiceAccountId,
+    string ExternalAccountId, string Service, string ServicePlaylistId, Guid? ObservationTrackId);
+
+// A verified occurrence is membership evidence on this account/link, independent
+// of the mutable metadata used to authorize a new destination match.
+public sealed record PlaylistDestinationBinding(int UserId, Guid PlaylistId, Guid MappingId,
+    int ConnectedServiceAccountId, string ExternalAccountId, string Service,
+    string ServicePlaylistId, Guid EntryId, Guid? ObservationTrackId)
+{
+    internal static PlaylistDestinationBinding From(ServicePlaylistMapping link, PlaylistEntry entry)
+        => new(link.UserId, link.PlaylistId, link.Id, link.ConnectedServiceAccountId,
+            link.ExternalAccountId, link.Service, link.ServicePlaylistId, entry.Id, entry.TrackObservation?.TrackId);
+}
+
+public sealed record PlaylistSyncItem(Guid? TrackId, Guid? ObservationId, string? ExternalId, string? Service,
+    PlaylistDestinationBinding? DestinationBinding = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] PlaylistReadScope? ReadScope = null)
 {
     public string Identity => TrackId is { } track ? $"track:{track}" : ObservationId is { } observation
         ? $"observation:{observation}" : $"{Service}:{ExternalId}";
@@ -11,7 +29,7 @@ public sealed record PlaylistSyncItem(Guid? TrackId, Guid? ObservationId, string
         entry.TrackId, entry.TrackObservationId, entry.TrackObservation?.ExternalId,
         entry.TrackObservation?.SourceType ?? entry.SourceService);
     public static PlaylistSyncItem From(PlaylistRemoteTrack track, string service) => new(
-        track.TrackId, track.ObservationId, track.ExternalId, service);
+        track.TrackId, track.ObservationId, track.ExternalId, service, track.DestinationBinding, track.ReadScope);
 }
 
 public sealed record PlaylistSyncBaseline(List<PlaylistSyncItem> Items, string? ProviderRevision = null)

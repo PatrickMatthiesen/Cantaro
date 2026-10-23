@@ -10,6 +10,8 @@ public sealed record ClaimedTrackMatch(Guid ObservationId, Guid LeaseId, int Ret
 
 public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider timeProvider)
 {
+    internal TrackMatchQueue ForContext(ApplicationDbContext context) => new(context, timeProvider);
+
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(10);
 
     public async Task EnqueueAsync(

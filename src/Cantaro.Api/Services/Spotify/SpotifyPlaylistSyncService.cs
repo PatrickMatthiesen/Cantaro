@@ -28,24 +28,27 @@ public sealed class SpotifyPlaylistSyncService(
     {
         if (coordinator is not null)
             return await coordinator.ImportAsync(account, SpotifyService.ServiceName, spotifyPlaylistId, cancellationToken);
-        if (await _dbContext.ServicePlaylistMappings.AsNoTracking().AnyAsync(
-                candidate => candidate.Service == SpotifyService.ServiceName
-                    && candidate.ConnectedServiceAccountId == account.ConnectedServiceAccountId
-                    && candidate.ServicePlaylistId == spotifyPlaylistId
-                    && candidate.SyncMode == "from_cantaro",
-                cancellationToken))
-        {
-            throw new PlatformApiException(
-                "outbound_mapping",
-                "This playlist is an outbound destination. Sync it from the Cantaro playlist.",
-                StatusCodes.Status409Conflict);
-        }
+        var accountSnapshot = await PlaylistReadAccount.CaptureAsync(_dbContext, account, SpotifyService.ServiceName, cancellationToken);
+        await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, accountSnapshot, spotifyPlaylistId, cancellationToken);
+        // The fallback has no scoped membership binder. Reject retained export
+        // scopes and isolate any materialization rolled back by the final guard.
+        await using var readDb = PlaylistReadIngestion.CreateContext(_dbContext);
+        var importer = new SpotifyPlaylistSyncService(readDb, _spotifyService, new SpotifyTrackResolver(readDb),
+            new PlaylistCanonicalReconciliationService(readDb), _timeProvider, _logger);
+        return await importer.ImportLegacyAsync(account, spotifyPlaylistId, cancellationToken);
+    }
 
+    private async Task<Guid> ImportLegacyAsync(PlatformAccountContext account, string spotifyPlaylistId,
+        CancellationToken cancellationToken)
+    {
+        var readAccount = await PlaylistReadAccount.CaptureAsync(_dbContext, account, SpotifyService.ServiceName, cancellationToken);
+        await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, spotifyPlaylistId, cancellationToken);
         // Spotify network calls complete before any database transaction starts.
-        var snapshot = await _spotifyService.GetPlaylistImportSnapshotAsync(
-            account,
+        var (snapshot, acquiredAccount) = await _spotifyService.GetPlaylistImportReadSnapshotAsync(
+            readAccount,
             spotifyPlaylistId,
             cancellationToken);
+        readAccount = acquiredAccount;
         var strategy = _dbContext.Database.CreateExecutionStrategy();
 
         var importResult = await strategy.ExecuteAsync(async () =>
@@ -53,6 +56,8 @@ public sealed class SpotifyPlaylistSyncService(
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
             try
             {
+                await readAccount.ValidateAsync(_dbContext, cancellationToken);
+                await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, spotifyPlaylistId, cancellationToken);
                 var now = _timeProvider.GetUtcNow();
                 var mapping = await _dbContext.ServicePlaylistMappings
                     .Include(candidate => candidate.Playlist)
@@ -62,11 +67,12 @@ public sealed class SpotifyPlaylistSyncService(
                             && candidate.ServicePlaylistId == spotifyPlaylistId,
                         cancellationToken);
 
-                if (mapping?.SyncMode == "from_cantaro")
+                if (mapping is not null && (mapping.SyncMode == "from_cantaro" || mapping.BaselineJson is not null
+                    || mapping.PendingWriteJson is not null || mapping.MatchingProgressJson is not null))
                 {
                     throw new PlatformApiException(
                         "outbound_mapping",
-                        "This playlist is an outbound destination. Sync it from the Cantaro playlist.",
+                        "Sync this linked playlist from the Cantaro playlist.",
                         StatusCodes.Status409Conflict);
                 }
 
@@ -156,6 +162,8 @@ public sealed class SpotifyPlaylistSyncService(
                 var reconciledEntries = _playlistReconciler.ReconcileImportedEntries(entries);
                 _dbContext.PlaylistEntries.AddRange(reconciledEntries);
                 await _dbContext.SaveChangesAsync(cancellationToken);
+                await readAccount.ValidateAsync(_dbContext, cancellationToken, lockUntilCommit: true);
+                await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, spotifyPlaylistId, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
                 return (PlaylistId: playlist.Id, TrackCount: reconciledEntries.Count);
             }

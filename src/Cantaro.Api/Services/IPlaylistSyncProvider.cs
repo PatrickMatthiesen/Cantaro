@@ -8,7 +8,9 @@ public sealed record PlaylistRemoteTrack(
     Guid? ObservationId,
     string Title,
     int Position,
-    bool IsAvailable = true);
+    bool IsAvailable = true,
+    PlaylistDestinationBinding? DestinationBinding = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] PlaylistReadScope? ReadScope = null);
 
 public sealed record PlaylistRemoteSnapshot(
     string Id,

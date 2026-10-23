@@ -30,6 +30,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<Playlist> Playlists => Set<Playlist>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
+    public DbSet<PlaylistExportAttempt> PlaylistExportAttempts => Set<PlaylistExportAttempt>();
     public DbSet<SpotifyApiGateState> SpotifyApiGateStates => Set<SpotifyApiGateState>();
     public DbSet<SpotifySearchCacheEntry> SpotifySearchCacheEntries => Set<SpotifySearchCacheEntry>();
     public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
@@ -462,6 +463,16 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(a => a.ServicePlaylistMappings)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlaylistExportAttempt>(entity =>
+        {
+            entity.HasKey(item => new { item.UserId, item.Service, item.ExternalAccountId,
+                item.ServicePlaylistId, item.ExternalTrackId });
+            // Local playlist, entry, recording and connected-account deletion
+            // must not erase read suppression. Deleting the user can erase it.
+            entity.HasOne<User>().WithMany().HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SpotifySearchCacheEntry>(entity =>

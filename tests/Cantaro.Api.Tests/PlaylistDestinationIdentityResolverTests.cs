@@ -3,6 +3,7 @@ using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -11,7 +12,7 @@ namespace Cantaro.Api.Tests;
 public sealed class PlaylistDestinationIdentityResolverTests
 {
     [Fact]
-    public async Task ResolveAsync_ConcurrentPlaylistsSearchSharedObservationOnlyOnce()
+    public async Task ResolveAsync_ConcurrentUsersEachValidateSharedDestinationIdentity()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
@@ -68,7 +69,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
         var secondRun = Resolve(secondEntryId, 99);
         releaseSearch.SetResult();
         Assert.Equal(new[] { "shared-match", "shared-match" }, await Task.WhenAll(firstRun, secondRun));
-        Assert.Equal(1, searches);
+        Assert.Equal(2, searches);
         await using var verify = new ApplicationDbContext(options);
         Assert.Single(await verify.Tracks.ToListAsync());
         Assert.Equal(2, await verify.TrackSourceIds.CountAsync());
@@ -77,7 +78,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ResolveAsync_AnotherUsersPlaylistReusesSharedIdentityWithoutSearching(bool observationAlreadyResolved)
+    public async Task ResolveAsync_AnotherUsersPlaylistDoesNotReuseGlobalIdentityWithoutSearching(bool observationAlreadyResolved)
     {
         var databaseName = Guid.NewGuid().ToString();
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(databaseName).Options;
@@ -103,13 +104,19 @@ public sealed class PlaylistDestinationIdentityResolverTests
         await using var db = new ApplicationDbContext(options);
         var entry = await db.PlaylistEntries.SingleAsync(item => item.Id == entryId);
         var reconciler = new PlaylistCanonicalReconciliationService(db);
+        var searches = 0;
         var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
             (_, _, _) => throw new InvalidOperationException("Must not create another track."),
             (observation, track, ct) => reconciler.ReconcileObservationAsync(observation, track, ct),
             new PlatformAccountContext(99, 8), "spotify", entry,
-            (_, _) => throw new InvalidOperationException("Must not search a known provider identity."), CancellationToken.None);
+            (_, _) =>
+            {
+                searches++;
+                return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([]);
+            }, CancellationToken.None);
 
-        Assert.Equal("already-found", result);
+        Assert.Null(result);
+        Assert.Equal(1, searches);
         Assert.Equal(trackId, (await db.PlaylistEntries.AsNoTracking().SingleAsync(item => item.Id == entryId)).TrackId);
         Assert.Single(await db.Tracks.ToListAsync());
         Assert.Equal(2, await db.TrackSourceIds.CountAsync());
@@ -141,8 +148,10 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Equal(otherTrackId, (await db.TrackSourceIds.SingleAsync()).TrackId);
     }
 
-    [Fact]
-    public async Task ResolveAsync_ExistingCanonicalMetadataIsReusedForNewSourceObservation()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveAsync_LocallyResolvedSourceDoesNotGlobalizeNewDestination(bool existingDestination)
     {
         await using var db = CreateDb();
         var known = await SeedCanonicalAsync(db);
@@ -159,16 +168,24 @@ public sealed class PlaylistDestinationIdentityResolverTests
         await db.SaveChangesAsync();
         var reconciler = new PlaylistCanonicalReconciliationService(db);
 
+        var searches = 0;
+        var destination = existingDestination ? "existing-song" : "new-song";
         var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
             (_, _, _) => throw new InvalidOperationException("Must reuse the canonical song."),
             (observation, track, ct) => reconciler.ReconcileObservationAsync(observation, track, ct),
             new PlatformAccountContext(42, 7), "spotify", entry,
-            (_, _) => throw new InvalidOperationException("Stored evidence is sufficient."), CancellationToken.None);
+            (_, _) =>
+            {
+                searches++;
+                return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([Candidate(destination, "spotify")]);
+            }, CancellationToken.None);
 
-        Assert.Equal("existing-song", result);
+        Assert.Equal(destination, result);
+        Assert.Equal(1, searches);
         Assert.Equal(known.TrackId, source.TrackId);
         Assert.Contains(await db.TrackSourceIds.ToListAsync(), item => item.SourceType == "youtube"
             && item.ExternalId == "another-video" && item.TrackId == known.TrackId);
+        Assert.False(await db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "new-song"));
     }
 
     [Fact]
@@ -253,7 +270,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
     [Theory]
     [InlineData("spotify", "youtube")]
     [InlineData("youtube", "spotify")]
-    public async Task ResolveAsync_SearchesMissingProviderAndReusesSavedIdentity(string destination, string source)
+    public async Task ResolveAsync_KnownCanonicalDestinationSearchDoesNotAssertGlobalIdentity(string destination, string source)
     {
         await using var db = CreateDb();
         var entry = await SeedCanonicalAsync(db);
@@ -270,8 +287,45 @@ public sealed class PlaylistDestinationIdentityResolverTests
 
         Assert.Equal("found", await ResolveCanonicalAsync(db, entry, destination, Search));
         Assert.Equal("found", await ResolveCanonicalAsync(db, entry, destination, Search));
-        Assert.Equal(1, searches);
-        Assert.Equal(entry.TrackId, (await db.TrackSourceIds.SingleAsync()).TrackId);
+        Assert.Equal(2, searches);
+        Assert.Empty(await db.TrackSourceIds.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReusesRequesterOwnedProviderObservationWithoutSearching()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        db.Users.Add(TestUserFactory.Create(42, "resolver-owner@example.com"));
+        await db.SaveChangesAsync();
+        var entry = await SeedCanonicalAsync(db);
+        var ownedPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = 42, Name = "Imported" };
+        var ownedObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = entry.TrackId, SourceType = "spotify", ExternalId = "owned-spotify",
+            Title = "Song", Artist = "Artist", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Matched
+        };
+        db.PlaylistEntries.Add(new PlaylistEntry
+        {
+            Id = Guid.NewGuid(), Playlist = ownedPlaylist, PlaylistId = ownedPlaylist.Id,
+            TrackId = entry.TrackId, TrackObservation = ownedObservation,
+            TrackObservationId = ownedObservation.Id
+        });
+        db.TrackSourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = entry.TrackId!.Value,
+            SourceType = "spotify", ExternalId = "other-users-private-id"
+        });
+        await db.SaveChangesAsync();
+
+        var result = await ResolveCanonicalAsync(db, entry, "spotify",
+            (_, _) => throw new InvalidOperationException("Owned observation should avoid search."));
+
+        Assert.Equal("owned-spotify", result);
+        Assert.NotEqual("other-users-private-id", result);
     }
 
     [Theory]
@@ -290,7 +344,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
             (_, _) => Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([first, second]));
 
         Assert.Equal(expected, actual);
-        Assert.Equal(expected is null ? 0 : 1, await db.TrackSourceIds.CountAsync());
+        Assert.Empty(await db.TrackSourceIds.ToListAsync());
     }
 
     [Fact]

@@ -174,12 +174,8 @@ public sealed class PlaylistLinkLifecycleService(
                 && link.ServicePlaylistId == servicePlaylistId && link.State == "unlinked")
             .OrderBy(link => link.Id).FirstOrDefaultAsync(ct);
 
-        var obsoleteTombstones = await db.ServicePlaylistMappings.Where(link =>
-            link.UserId == userId && link.PlaylistId == playlistId && link.Service == service
-            && link.ExternalAccountId == prepared.Account.ExternalAccountId
-            && link.State == "unlinked" && link.ServicePlaylistId != servicePlaylistId).ToListAsync(ct);
-        db.ServicePlaylistMappings.RemoveRange(obsoleteTombstones);
-
+        // Unlinked rows retain read provenance for previous remote copies. The
+        // active-only unique indexes already allow a replacement alongside them.
         var link = existing ?? new ServicePlaylistMapping
         {
             Id = Guid.NewGuid(), UserId = userId, PlaylistId = playlistId,
@@ -191,20 +187,28 @@ public sealed class PlaylistLinkLifecycleService(
         };
         if (existing is { State: "unlinked" or "creation_uncertain" or "creation_failed" or "creating" })
         {
+            // Reattaching the same remote playlist must retain its export
+            // receipts until initialization has read and replaced the baseline.
+            var retainReadProvenance = existing.ServicePlaylistId == servicePlaylistId
+                && existing.ConnectedServiceAccountId == prepared.Account.Id
+                && existing.ExternalAccountId == prepared.Account.ExternalAccountId;
             link.ServicePlaylistId = servicePlaylistId;
             link.State = "paused";
             link.InitialMode = initialMode;
             link.SyncMode = syncMode;
             link.ConnectedServiceAccountId = prepared.Account.Id;
-            link.BaselineJson = null;
+            if (!retainReadProvenance) link.BaselineJson = null;
             link.BaselineName = null;
             link.PendingName = null;
             link.RejectedName = null;
             link.DesiredName = null;
             link.LastError = null;
             link.LastSyncStatus = "initializing";
-            link.PendingWriteJson = null;
-            link.MatchingProgressJson = null;
+            if (!retainReadProvenance)
+            {
+                link.PendingWriteJson = null;
+                link.MatchingProgressJson = null;
+            }
             link.MatchingProcessedCount = 0;
             link.MatchingTotalCount = 0;
             link.NextAttemptAt = null;

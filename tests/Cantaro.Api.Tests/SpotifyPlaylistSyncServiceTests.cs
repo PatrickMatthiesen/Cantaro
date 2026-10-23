@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Cantaro.Api.Tests;
 
-public sealed class SpotifyPlaylistSyncServiceTests
+public sealed partial class SpotifyPlaylistSyncServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 26, 13, 0, 0, TimeSpan.Zero);
 

@@ -23,13 +23,15 @@ export interface MusicLibrarySong {
   sourceIdentities: MusicLibrarySongSourceIdentity[];
   platformLinks: MusicLibrarySongPlatformLink[];
   playlists: MusicLibrarySongPlaylist[];
+  versionLabels?: string[];
+  relatedRecordings?: MusicLibraryRelatedRecording[];
 }
 
 export interface MusicLibrarySongArtistCredit {
   artistId: string;
   name: string;
   creditedName: string;
-  role: 'primary' | 'featured' | 'composer' | 'remixer';
+  role: 'primary' | 'featured' | 'producer' | 'remixer';
   position: number;
   musicBrainzArtistId?: string;
 }
@@ -43,6 +45,19 @@ export interface MusicLibrarySongPlatformLink {
   platform: string;
   label: string;
   url: string;
+  source: string;
+  externalId: string;
+}
+
+export interface MusicLibraryRelatedRecording {
+  id: string;
+  title: string;
+  artist?: string;
+  thumbnailUrl?: string;
+  durationSeconds?: number;
+  relationshipLabels: string[];
+  versionLabels: string[];
+  inLibrary: boolean;
 }
 
 export interface MusicLibraryPlaylistService {

@@ -85,14 +85,24 @@ public sealed partial class PlaylistSyncCoordinator
             await validateBeforeCreate(token);
             var tombstones = await db.ServicePlaylistMappings.Where(link => link.PlaylistId == playlistId && link.Service == service
                 && link.ExternalAccountId == connected.ExternalAccountId && (link.State == "unlinked" || link.State == "creation_failed")).ToListAsync(token);
-            db.ServicePlaylistMappings.RemoveRange(tombstones);
+            foreach (var tombstone in tombstones)
+            {
+                if (IsUnwrittenCreation(tombstone))
+                {
+                    db.ServicePlaylistMappings.Remove(tombstone);
+                    continue;
+                }
+                tombstone.State = "unlinked";
+                tombstone.NextAttemptAt = null;
+            }
             await db.SaveChangesAsync(token);
             var reads = new List<LinkRead>();
             await CreateMissingLinksAsync(playlist, reads, token, service,
-                skipDuplicateNameCheck: reviewedCreate);
+                skipDuplicateNameCheck: reviewedCreate, ignoreUnlinked: true);
             if (reads.Count == 0)
             {
-                var existing = await db.ServicePlaylistMappings.FirstOrDefaultAsync(link => link.PlaylistId == playlistId && link.Service == service, token);
+                var existing = await db.ServicePlaylistMappings.FirstOrDefaultAsync(link => link.PlaylistId == playlistId
+                    && link.Service == service && link.State != "unlinked", token);
                 throw new PlatformApiException("playlist_creation_unavailable", existing?.LastError
                     ?? "The platform playlist could not be created. Check the connection or attach an existing playlist.", 409);
             }

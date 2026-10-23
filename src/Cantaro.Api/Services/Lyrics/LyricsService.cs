@@ -27,10 +27,10 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
 
     public async Task<LyricsResult?> GetLyricsAsync(int userId, Guid trackId, CancellationToken cancellationToken)
     {
+        var accessibleTrackIds = CanonicalTrackAccess.GetAccessibleTrackIds(dbContext, userId);
         var track = await dbContext.Tracks
             .AsNoTracking()
-            .Where(item => item.Id == trackId
-                && item.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
+            .Where(item => item.Id == trackId && accessibleTrackIds.Contains(item.Id))
             .SingleOrDefaultAsync(cancellationToken);
         if (track is null)
         {

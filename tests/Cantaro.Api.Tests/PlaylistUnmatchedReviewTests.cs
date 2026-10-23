@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Cantaro.Api.Tests;
 
-public sealed class PlaylistUnmatchedReviewTests
+public sealed partial class PlaylistUnmatchedReviewTests
 {
     [Fact]
     public void AcceptedExpandedCatalogCreditsDoNotShowAConflictWarning()
@@ -103,11 +103,8 @@ public sealed class PlaylistUnmatchedReviewTests
     {
         await using var scope = await Scope.CreateAsync(service);
         var second = scope.AddEntry("Other", "video-other");
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = second.TrackId!.Value,
-            SourceType = service, ExternalId = "known-destination"
-        });
+        second.TrackObservation!.SourceType = service;
+        second.TrackObservation.ExternalId = "known-destination";
         await scope.Db.SaveChangesAsync();
 
         var unmatched = await scope.Review.ListAsync(scope.UserId,
@@ -180,7 +177,7 @@ public sealed class PlaylistUnmatchedReviewTests
     }
 
     [Fact]
-    public async Task ConfirmAsync_SavesIdentityWithoutWritingProviderPlaylist()
+    public async Task ConfirmAsync_SavesScopedChoiceWithoutChangingGlobalIdentity()
     {
         await using var scope = await Scope.CreateAsync("spotify");
         var token = scope.Token(Candidate("new-destination"));
@@ -188,10 +185,11 @@ public sealed class PlaylistUnmatchedReviewTests
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id,
             scope.Link.Id, scope.Entry.Id, token, CancellationToken.None);
 
-        var mapping = await scope.Db.TrackSourceIds.SingleAsync();
-        Assert.Equal(scope.Entry.TrackId, mapping.TrackId);
-        Assert.Equal("new-destination", mapping.ExternalId);
-        Assert.Contains("playlist_manual_review", mapping.OriginMetadata);
+        Assert.Empty(await scope.Db.TrackSourceIds.ToListAsync());
+        var saved = Assert.Single(PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)).Value;
+        Assert.Equal("new-destination", saved.ExternalId);
+        Assert.True(saved.ManualConfirmation);
+        Assert.True(PlaylistMatchingProgress.CanReuse(saved, scope.Entry, scope.Link));
         Assert.Empty(await scope.Review.ListAsync(scope.UserId,
             scope.Playlist.Id, scope.Link.Id, CancellationToken.None));
     }
@@ -328,19 +326,31 @@ public sealed class PlaylistUnmatchedReviewTests
         DurationSeconds = duration
     };
 
-    private sealed class Scope : IAsyncDisposable
+    private sealed class SqliteReviewDbContext(DbContextOptions<ApplicationDbContext> options) : ApplicationDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);
+            // SQLite cannot compare DateTimeOffset columns. This test-only UTC
+            // tick mapping lets the unmodified production lease query execute.
+            builder.Entity<Playlist>().Property(item => item.SyncLeaseExpiresAt)
+                .HasConversion(value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+        }
+    }
+
+    private sealed partial class Scope : IAsyncDisposable
     {
         private readonly IDataProtectionProvider _protector = new EphemeralDataProtectionProvider();
         private readonly SqliteConnection? _connection;
+        private readonly PostgresTestSchema? _schema;
         private Scope(ApplicationDbContext db, Playlist playlist,
-            ServicePlaylistMapping link, PlaylistEntry entry, int userId, SqliteConnection? connection)
+            ServicePlaylistMapping link, PlaylistEntry entry, int userId, SqliteConnection? connection, PostgresTestSchema? schema)
         {
             Db = db; Playlist = playlist; Link = link; Entry = entry; UserId = userId;
             _connection = connection;
-            Review = new PlaylistUnmatchedReviewService(db, null!, null!, [], null!,
-                new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance),
-                new PlaylistCanonicalReconciliationService(db),
-                Options.Create(new TrackMatchingOptions()), _protector);
+            _schema = schema;
+            Review = CreateReview(db);
         }
 
         public ApplicationDbContext Db { get; }
@@ -350,19 +360,21 @@ public sealed class PlaylistUnmatchedReviewTests
         public int UserId { get; }
         public PlaylistUnmatchedReviewService Review { get; }
 
-        public static async Task<Scope> CreateAsync(string service, bool relational = false)
+        public static async Task<Scope> CreateAsync(string service, bool relational = false, bool postgres = false)
         {
             const int userId = 5801;
             SqliteConnection? connection = null;
             var builder = new DbContextOptionsBuilder<ApplicationDbContext>();
             if (relational)
             {
-                connection = new SqliteConnection("Data Source=:memory:");
+                connection = new SqliteConnection($"Data Source=review-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
                 await connection.OpenAsync();
-                builder.UseSqlite(connection);
+                builder.UseSqlite(connection.ConnectionString);
             }
             else builder.UseInMemoryDatabase(Guid.NewGuid().ToString());
-            var db = new ApplicationDbContext(builder.Options);
+            var schema = postgres ? await PostgresTestSchema.CreateAsync() : null;
+            var db = schema?.Db ?? (relational
+                ? new SqliteReviewDbContext(builder.Options) : new ApplicationDbContext(builder.Options));
             if (relational) await db.Database.EnsureCreatedAsync();
             var now = DateTimeOffset.UtcNow;
             var playlist = new Playlist
@@ -373,7 +385,8 @@ public sealed class PlaylistUnmatchedReviewTests
             var account = new ConnectedServiceAccount
             {
                 Id = 51, UserId = userId, Service = service,
-                ExternalAccountId = "account", ConnectionState = "connected"
+                ExternalAccountId = "account", ConnectionState = "connected",
+                TokenExpiresAt = DateTime.UtcNow.AddHours(1)
             };
             var link = new ServicePlaylistMapping
             {
@@ -408,7 +421,25 @@ public sealed class PlaylistUnmatchedReviewTests
             var user = TestUserFactory.Create(userId, "playlist-review@example.com");
             db.AddRange(user, playlist, account, link, track, observation, entry);
             await db.SaveChangesAsync();
-            return new Scope(db, playlist, link, entry, userId, connection);
+            return new Scope(db, playlist, link, entry, userId, connection, schema);
+        }
+
+        public PlaylistUnmatchedReviewService CreateReview(ApplicationDbContext db)
+            => new(db, null!, null!, [], null!,
+                new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(db), Options.Create(new TrackMatchingOptions()), _protector,
+                new PlaylistSyncCoordinator(db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));
+
+        public ApplicationDbContext NewContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
+        {
+            if (_schema is not null)
+                return new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+                    .UseNpgsql(Db.Database.GetConnectionString(), options => options.EnableRetryOnFailure(maxRetryCount: 1))
+                    .AddInterceptors(interceptors).Options);
+            if (_connection is not null)
+                return new SqliteReviewDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+                    .UseSqlite(_connection.ConnectionString).AddInterceptors(interceptors).Options);
+            throw new InvalidOperationException("Separate contexts in these tests require a relational database.");
         }
 
         public PlaylistEntry AddEntry(string name, string sourceId)
@@ -428,18 +459,48 @@ public sealed class PlaylistUnmatchedReviewTests
             return entry;
         }
 
-        public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null)
+        public async Task<PlaylistUnmatchedReviewService> SearchReviewAsync(HttpClient http)
         {
-            var entry = Db.PlaylistEntries.Include(item => item.TrackObservation)
-                .Include(item => item.Track).Single(item => item.Id == Entry.Id);
+            var encryption = new TokenEncryptionService(_protector);
+            var account = await Db.ConnectedServiceAccounts.SingleAsync();
+            account.EncryptedAccessToken = encryption.Encrypt("test-token");
+            var source = Entry.TrackObservation;
+            if (source is not null)
+            {
+                var metadata = TrackObservationParser.ReadMetadata(source)!;
+                metadata.Description = "";
+                source.RawMetadata = JsonSerializer.Serialize(metadata);
+            }
+            await Db.SaveChangesAsync();
+            var options = Options.Create(new Cantaro.Api.Configuration.SpotifyOptions
+                { ClientId = "client", ClientSecret = "secret" });
+            var api = new Cantaro.Api.Services.Spotify.SpotifyApiClient(http, options, new NoDelay());
+            var tokens = new Cantaro.Api.Services.Spotify.SpotifyTokenManager(
+                Db, api, encryption, TimeProvider.System, null!);
+            var search = new Cantaro.Api.Services.Spotify.SpotifySearchProvider(api,
+                new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenProvider(api, options,
+                    TimeProvider.System, new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenCache()));
+            return new PlaylistUnmatchedReviewService(Db, api, tokens, [search], null!,
+                new TrackMatchingService(Db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(Db), Options.Create(new TrackMatchingOptions()), _protector,
+                new PlaylistSyncCoordinator(Db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));
+        }
+
+        public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null, Guid? entryId = null)
+        {
+            var targetId = entryId ?? Entry.Id;
+            var entry = Db.PlaylistEntries.AsNoTracking().Include(item => item.TrackObservation)
+                .Include(item => item.Track).Single(item => item.Id == targetId);
             var fingerprint = (string)typeof(PlaylistUnmatchedReviewService)
                 .GetMethod("Fingerprint", BindingFlags.NonPublic | BindingFlags.Static)!
                 .Invoke(null, [entry])!;
             var proof = new
             {
                 UserId, PlaylistId = Playlist.Id, MappingId = Link.Id,
-                EntryId = Entry.Id, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
+                EntryId = targetId, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
                 ExternalAccountId = Link.ExternalAccountId, Service = Link.Service,
+                ServicePlaylistId = Link.ServicePlaylistId,
+                TokenVersion = Db.ConnectedServiceAccounts.Single(account => account.Id == Link.ConnectedServiceAccountId).TokenVersion,
                 Fingerprint = fingerprint, Candidate = candidate,
                 IssuedAt = issuedAt ?? DateTimeOffset.UtcNow
             };
@@ -449,7 +510,8 @@ public sealed class PlaylistUnmatchedReviewTests
 
         public async ValueTask DisposeAsync()
         {
-            await Db.DisposeAsync();
+            if (_schema is not null) await _schema.DisposeAsync();
+            else await Db.DisposeAsync();
             if (_connection is not null) await _connection.DisposeAsync();
         }
     }

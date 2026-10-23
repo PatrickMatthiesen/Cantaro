@@ -237,6 +237,16 @@ public sealed class SpotifyTokenManager
         }
     }
 
+    internal async Task<SpotifyAccessToken> GetFreshAccessTokenSnapshotAsync(
+        PlatformAccountContext accountContext, bool forceRefresh, CancellationToken cancellationToken)
+    {
+        // Playlist reads must not acquire a token from the caller's stale tracker
+        // or reload away its pending account edits after a forced refresh.
+        await using var tokenDb = PlaylistReadIngestion.CreateContext(_dbContext);
+        var manager = new SpotifyTokenManager(tokenDb, _apiClient, _encryptionService, _timeProvider, _scopeFactory);
+        return await manager.GetAccessTokenSnapshotAsync(accountContext, forceRefresh, cancellationToken);
+    }
+
     public async Task<bool> MarkReconnectRequiredAsync(
         int userId,
         long expectedTokenVersion,

@@ -19,7 +19,8 @@ public sealed partial class PlaylistSyncCoordinator
     // would reuse tracked entities from a rolled-back attempt. Suppress command-level
     // retries for this transaction; a later sync retries with a fresh context and read.
     // Provider calls stay outside this scope so database retries cannot replay them.
-    private sealed class PlaylistTransactionStrategy(DbContext context)
+    // Manual confirmation also saves materialization in stages and uses this policy.
+    internal sealed class PlaylistTransactionStrategy(DbContext context)
         : ExecutionStrategy(context, 0, TimeSpan.Zero)
     {
         protected override bool ShouldRetryOn(Exception exception) => false;
@@ -42,6 +43,8 @@ public sealed partial class PlaylistSyncCoordinator
                     .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.SyncLeaseId, leaseId)
                         .SetProperty(item => item.SyncLeaseExpiresAt, now.AddMinutes(30)), ct);
                 if (count != 1) throw new PlatformApiException("sync_in_progress", "This playlist is already being synced.", 409);
+                // Record acquisition before the cancellable reload so finally can release it.
+                acquired = true;
                 await db.Entry(playlist).ReloadAsync(ct);
             }
             else
@@ -50,8 +53,8 @@ public sealed partial class PlaylistSyncCoordinator
                 playlist.SyncLeaseId = leaseId;
                 playlist.SyncLeaseExpiresAt = now.AddMinutes(30);
                 await db.SaveChangesAsync(ct);
+                acquired = true;
             }
-            acquired = true;
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromMinutes(10));
             await operation(playlist, deadline.Token);
@@ -113,18 +116,25 @@ public sealed partial class PlaylistSyncCoordinator
         return await NormalizeIdentitiesAsync(entries.Select(PlaylistSyncItem.From), ct);
     }
 
+    private Task<List<PlaylistSyncItem>> BindDestinationChoicesAsync(ServicePlaylistMapping link,
+        PlatformAccountContext account, List<PlaylistSyncItem> incoming, CancellationToken ct,
+        HashSet<Guid>? confirmedEntries = null, IReadOnlyList<PlaylistSyncItem>? acknowledged = null)
+        => PlaylistDestinationReadBindings.BindAsync(db, link, account, incoming, ct, confirmedEntries, acknowledged);
+
     private async Task<List<PlaylistSyncItem>> NormalizeIdentitiesAsync(IEnumerable<PlaylistSyncItem> source, CancellationToken ct)
     {
         var items = source.ToList();
         var ids = items.Where(item => item.ObservationId.HasValue).Select(item => item.ObservationId!.Value).Distinct().ToList();
         var observations = await db.TrackObservations.AsNoTracking().Where(item => ids.Contains(item.Id))
             .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId }).ToDictionaryAsync(item => item.Id, ct);
-        return items.Select(item => item.ObservationId is { } id && observations.TryGetValue(id, out var observation)
+        return items.Select(item => item.DestinationBinding is null && item.ReadScope is null
+            && item.ObservationId is { } id && observations.TryGetValue(id, out var observation)
             ? item with { TrackId = observation.TrackId ?? item.TrackId, ExternalId = observation.ExternalId, Service = observation.SourceType }
             : item).ToList();
     }
 
-    private async Task SaveItemsAsync(Playlist playlist, IReadOnlyList<PlaylistSyncItem> target, CancellationToken ct)
+    private async Task SaveItemsAsync(Playlist playlist, IReadOnlyList<PlaylistSyncItem> target, CancellationToken ct,
+        IReadOnlySet<Guid>? confirmedEntries = null)
     {
         var normalized = PlaylistSyncMerge.Normalize(target, playlist.AllowDuplicateTracks);
         var previous = await ReadItemsAsync(playlist.Id, ct);
@@ -155,6 +165,10 @@ public sealed partial class PlaylistSyncCoordinator
             var item = normalized[index];
             var entry = retained[index];
             if (entry is null) continue;
+            // Reading another occurrence of this canonical track must not replace
+            // the original source evidence bound to this entry's manual choice.
+            if (entry.TrackId == item.TrackId && confirmedEntries?.Contains(entry.Id) == true)
+                normalized[index] = item = item with { ObservationId = entry.TrackObservationId };
             positionsChanged |= entry.Position != index;
             changed |= entry.Position != index || entry.TrackId != item.TrackId
                 || entry.TrackObservationId != item.ObservationId;

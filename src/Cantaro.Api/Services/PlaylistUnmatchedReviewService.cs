@@ -37,7 +37,8 @@ public sealed class PlaylistUnmatchedReviewService(
     TrackMatchingService matching,
     PlaylistCanonicalReconciliationService reconciler,
     IOptions<TrackMatchingOptions> matchingOptions,
-    IDataProtectionProvider protectionProvider)
+    IDataProtectionProvider protectionProvider,
+    PlaylistSyncCoordinator coordinator)
 {
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("Cantaro.PlaylistSync.MatchReview.v1");
     private readonly TrackMatchingOptions _options = matchingOptions.Value;
@@ -47,15 +48,20 @@ public sealed class PlaylistUnmatchedReviewService(
     {
         var link = await RequireLinkAsync(userId, playlistId, mappingId, ct);
         var entries = await LoadEntriesAsync(playlistId, ct);
-        return entries.Where(entry => !HasDestinationIdentity(entry, link.Service))
-            .Select(ToDto).ToArray();
+        var identities = await PlaylistDestinationIdentityEvidence.FindManyAsync(db,
+            new PlatformAccountContext(link.UserId, link.ConnectedServiceAccountId, link.ExternalAccountId),
+            link.Service, entries, link, ct);
+        var unmatched = new List<PlaylistUnmatchedEntry>();
+        foreach (var entry in entries)
+            if (!identities.ContainsKey(entry.Id)) unmatched.Add(ToDto(entry));
+        return unmatched;
     }
 
     public async Task<PlaylistMatchSearch> SearchAsync(
         int userId, Guid playlistId, Guid mappingId, Guid entryId, string? query, CancellationToken ct)
     {
         var link = await RequireLinkAsync(userId, playlistId, mappingId, ct);
-        var entry = await RequireEntryAsync(playlistId, entryId, link.Service, ct);
+        var entry = await RequireEntryAsync(playlistId, entryId, link, ct);
         var searchText = query?.Trim();
         if (query is not null && (string.IsNullOrWhiteSpace(searchText) || searchText.Length > 200))
             throw new PlatformApiException("invalid_match_query", "Enter a search of up to 200 characters.", 400);
@@ -73,12 +79,20 @@ public sealed class PlaylistUnmatchedReviewService(
             MatchStatus = TrackMatchingStatuses.Pending
         };
         var account = new PlatformAccountContext(userId, link.ConnectedServiceAccountId, link.ExternalAccountId);
-        IReadOnlyList<TrackMatchSearchCandidate> candidates = link.Service switch
-        {
-            "spotify" => await SearchSpotifyAsync(account, searched, searchText, ct),
-            "youtube" => await youtube.SearchVideoCandidatesAsync(account, searched, ct),
-            _ => throw new PlatformApiException("unsupported_platform", "This platform cannot search for recordings.", 400)
-        };
+        IReadOnlyList<TrackMatchSearchCandidate> candidates;
+        long? searchedTokenVersion = null;
+        if (link.Service == "spotify")
+            (candidates, searchedTokenVersion) = await SearchSpotifyAsync(account, searched, searchText, ct);
+        else if (link.Service == "youtube")
+            candidates = await youtube.SearchVideoCandidatesAsync(account, searched, ct);
+        else throw new PlatformApiException("unsupported_platform", "This platform cannot search for recordings.", 400);
+        var currentLink = await RequireLinkAsync(userId, playlistId, mappingId, ct);
+        if (currentLink.ConnectedServiceAccountId != link.ConnectedServiceAccountId
+            || currentLink.ExternalAccountId != link.ExternalAccountId
+            || currentLink.ServicePlaylistId != link.ServicePlaylistId
+            || searchedTokenVersion is { } version && currentLink.ConnectedServiceAccount!.TokenVersion != version)
+            throw StaleChoice();
+        link = currentLink;
         var assessment = PlaylistDestinationIdentityResolver.Assess(evidence,
             candidates.Where(candidate => candidate.CandidateSource == link.Service).ToArray(), _options);
         var result = PlaylistDestinationIdentityResolver.DistinctReviewCandidates(
@@ -87,7 +101,8 @@ public sealed class PlaylistUnmatchedReviewService(
             var candidate = scored.Candidate;
             var proof = new MatchProof(userId, playlistId, mappingId, entry.Id,
                 link.ConnectedServiceAccountId, link.ExternalAccountId, link.Service,
-                Fingerprint(entry), candidate, DateTimeOffset.UtcNow);
+                Fingerprint(entry), candidate, DateTimeOffset.UtcNow,
+                link.ServicePlaylistId, link.ConnectedServiceAccount!.TokenVersion);
             return new PlaylistMatchCandidate(_protector.Protect(JsonSerializer.Serialize(proof)),
                 candidate.ExternalId, candidate.Title, candidate.Artist ?? "",
                 candidate.DurationSeconds, CandidateUrl(link.Service, candidate.ExternalId),
@@ -115,7 +130,15 @@ public sealed class PlaylistUnmatchedReviewService(
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task ConfirmAsync(int userId, Guid playlistId, Guid mappingId,
+    public Task ConfirmAsync(int userId, Guid playlistId, Guid mappingId,
+        Guid entryId, string candidateToken, CancellationToken ct)
+        // Confirmation and sync both replace MatchingProgressJson. Take the same
+        // lease before loading mutable evidence or starting the transaction.
+        => coordinator.WithPlaylistLeaseAsync(userId, playlistId,
+            token => new PlaylistSyncCoordinator.PlaylistTransactionStrategy(db).ExecuteAsync(
+                () => ConfirmCoreAsync(userId, playlistId, mappingId, entryId, candidateToken, token)), ct);
+
+    private async Task ConfirmCoreAsync(int userId, Guid playlistId, Guid mappingId,
         Guid entryId, string candidateToken, CancellationToken ct)
     {
         try
@@ -123,12 +146,13 @@ public sealed class PlaylistUnmatchedReviewService(
         await using var transaction = db.Database.IsRelational()
             ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var link = await RequireLinkAsync(userId, playlistId, mappingId, ct);
-        var entry = await RequireEntryAsync(playlistId, entryId, link.Service, ct);
+        var entry = await RequireEntryAsync(playlistId, entryId, link, ct, requireUnmatched: false);
         var proof = ReadProof(candidateToken);
         if (proof.UserId != userId || proof.PlaylistId != playlistId || proof.MappingId != mappingId
             || proof.EntryId != entryId || proof.ConnectedServiceAccountId != link.ConnectedServiceAccountId
             || proof.ExternalAccountId != link.ExternalAccountId || proof.Service != link.Service
-            || proof.Fingerprint != Fingerprint(entry)
+            || proof.ServicePlaylistId != link.ServicePlaylistId
+            || proof.TokenVersion != link.ConnectedServiceAccount!.TokenVersion
             || DateTimeOffset.UtcNow - proof.IssuedAt > TimeSpan.FromMinutes(10)
             || proof.IssuedAt > DateTimeOffset.UtcNow.AddMinutes(1)
             || proof.Candidate.CandidateSource != link.Service
@@ -136,13 +160,23 @@ public sealed class PlaylistUnmatchedReviewService(
             || string.IsNullOrWhiteSpace(proof.Candidate.Title))
             throw StaleChoice();
 
-        // The same provider ID must never be reassigned from a different canonical
-        // track. A user may attach an unresolved observation to its existing track.
+        // Keep canonical identity conflicts independent of destination eligibility,
+        // including retries whose scoped confirmation is already persisted.
         var existing = await db.TrackSourceIds.SingleOrDefaultAsync(source =>
             source.SourceType == link.Service && source.ExternalId == proof.Candidate.ExternalId, ct);
         if (existing is not null && entry.TrackId is { } currentTrackId && existing.TrackId != currentTrackId)
             throw new PlatformApiException("recording_already_linked",
                 "That recording is already linked to a different Cantaro track.", 409);
+
+        var progress = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
+        if (progress.TryGetValue(entry.Id, out var confirmed) && confirmed.ManualConfirmation
+            && PlaylistMatchingProgress.CanReuse(confirmed, entry, link)
+            && confirmed.ExternalId == proof.Candidate.ExternalId
+            && await HasDestinationIdentityAsync(entry, link, ct)) return;
+        if (proof.Fingerprint != Fingerprint(entry)) throw StaleChoice();
+        if (await HasDestinationIdentityAsync(entry, link, ct))
+            throw new PlatformApiException("unmatched_entry_not_found", "That playlist entry no longer needs a match.", 404);
+
         var sourceIdentity = entry.TrackObservation is { } savedObservation
             ? await db.TrackSourceIds.AsNoTracking().SingleOrDefaultAsync(source =>
                 source.SourceType == savedObservation.SourceType
@@ -186,28 +220,27 @@ public sealed class PlaylistUnmatchedReviewService(
                 var resolved = await matching.CreateTrackFromMatchAsync(observation.Id, proof.Candidate,
                     ct, manualReview: true);
                 trackId = resolved.TrackId ?? throw new InvalidOperationException("The recording was not created.");
-                existing = await db.TrackSourceIds.SingleOrDefaultAsync(source =>
-                    source.SourceType == link.Service && source.ExternalId == proof.Candidate.ExternalId, ct);
             }
         }
         else throw StaleChoice();
 
-        if (existing is null)
-        {
-            db.TrackSourceIds.Add(new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = trackId,
-                SourceType = link.Service, ExternalId = proof.Candidate.ExternalId,
-                LastVerifiedAt = DateTimeOffset.UtcNow,
-                OriginMetadata = JsonSerializer.Serialize(new
-                {
-                    method = "playlist_manual_review",
-                    title = proof.Candidate.Title,
-                    artist = proof.Candidate.Artist,
-                    durationSeconds = proof.Candidate.DurationSeconds
-                })
-            });
-        }
+        // An existing canonical entry needs a destination choice, not a new
+        // global identity assertion. Unresolved-source materialization above
+        // owns its canonical mappings; this choice is authorized by scoped proof.
+        await db.SaveChangesAsync(ct);
+        // Reconciliation can replace the original entry with an existing canonical
+        // entry. Authorize only the survivor in this requester's playlist and link.
+        var retained = await db.PlaylistEntries.AsNoTracking()
+            .Include(item => item.TrackObservation).Include(item => item.Track)
+            .Where(item => item.PlaylistId == playlistId && item.TrackId == trackId)
+            .OrderBy(item => item.Id == entryId ? 0 : 1).ThenBy(item => item.Position).FirstOrDefaultAsync(ct)
+            ?? throw StaleChoice();
+        var savedLink = await db.ServicePlaylistMappings.SingleAsync(item => item.Id == mappingId, ct);
+        progress = PlaylistMatchingProgress.Read(savedLink.MatchingProgressJson);
+        progress.Remove(entryId);
+        progress[retained.Id] = PlaylistMatchingProgress.Create(link, retained, proof.Candidate.ExternalId,
+            manualConfirmation: true);
+        savedLink.MatchingProgressJson = PlaylistMatchingProgress.Serialize(progress);
         await db.SaveChangesAsync(ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
         }
@@ -224,7 +257,7 @@ public sealed class PlaylistUnmatchedReviewService(
         }
     }
 
-    private async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchSpotifyAsync(
+    private async Task<(IReadOnlyList<TrackMatchSearchCandidate> Candidates, long TokenVersion)> SearchSpotifyAsync(
         PlatformAccountContext account, TrackObservation evidence, string? query, CancellationToken ct)
     {
         var token = await spotifyTokens.GetAccessTokenSnapshotAsync(account, false, ct);
@@ -232,16 +265,16 @@ public sealed class PlaylistUnmatchedReviewService(
         if (!string.Equals(profile.AccountId ?? profile.Id, account.ExpectedExternalAccountId, StringComparison.Ordinal))
             throw new PlatformApiException("spotify_account_changed", "Reconnect the linked Spotify account.", 409);
         if (query is null)
-            return await searchProviders.OfType<SpotifySearchProvider>().Single().SearchAsync(evidence, ct);
+            return (await searchProviders.OfType<SpotifySearchProvider>().Single().SearchAsync(evidence, ct), token.Version);
         var text = query;
         var tracks = await spotifyApi.SearchTracksAsync(token.Value, text, 10, ct);
-        return tracks.Select(track => new TrackMatchSearchCandidate
+        return (tracks.Select(track => new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify", ExternalId = track.Id,
             Title = track.Name, Artist = track.Artist,
             ArtistCredits = track.ArtistNames, Isrc = track.Isrc,
             DurationSeconds = track.DurationSeconds
-        }).ToArray();
+        }).ToArray(), token.Version);
     }
 
     private async Task<ServicePlaylistMapping> RequireLinkAsync(
@@ -260,13 +293,14 @@ public sealed class PlaylistUnmatchedReviewService(
         return link;
     }
 
-    private async Task<PlaylistEntry> RequireEntryAsync(Guid playlistId, Guid entryId, string service, CancellationToken ct)
+    private async Task<PlaylistEntry> RequireEntryAsync(Guid playlistId, Guid entryId,
+        ServicePlaylistMapping link, CancellationToken ct, bool requireUnmatched = true)
     {
         var entry = await db.PlaylistEntries
             .Include(item => item.TrackObservation)
             .Include(item => item.Track).ThenInclude(item => item!.SourceIds)
             .SingleOrDefaultAsync(item => item.PlaylistId == playlistId && item.Id == entryId, ct);
-        if (entry is null || HasDestinationIdentity(entry, service)
+        if (entry is null || requireUnmatched && await HasDestinationIdentityAsync(entry, link, ct)
             || (entry.TrackId is null && entry.TrackObservation is null))
             throw new PlatformApiException("unmatched_entry_not_found", "That playlist entry no longer needs a match.", 404);
         return entry;
@@ -278,10 +312,10 @@ public sealed class PlaylistUnmatchedReviewService(
             .Include(item => item.Track).ThenInclude(item => item!.SourceIds)
             .OrderBy(item => item.Position).ToListAsync(ct);
 
-    private static bool HasDestinationIdentity(PlaylistEntry entry, string service)
-        => entry.TrackObservation is { } observation && observation.SourceType == service
-            && (entry.TrackId is null || observation.TrackId == entry.TrackId)
-            || entry.Track?.SourceIds.Any(source => source.SourceType == service) == true;
+    private async Task<bool> HasDestinationIdentityAsync(PlaylistEntry entry, ServicePlaylistMapping link, CancellationToken ct)
+        => await PlaylistDestinationIdentityEvidence.FindAsync(db,
+            new PlatformAccountContext(link.UserId, link.ConnectedServiceAccountId, link.ExternalAccountId),
+            link.Service, entry, ct, link) is not null;
 
     private static PlaylistUnmatchedEntry ToDto(PlaylistEntry entry)
     {
@@ -334,7 +368,9 @@ public sealed class PlaylistUnmatchedReviewService(
             entry.Id, entry.PlaylistId, entry.TrackId, entry.TrackObservationId,
             entry.TrackObservation?.UpdatedAt, entry.TrackObservation?.Title,
             entry.TrackObservation?.Artist, entry.TrackObservation?.DurationSeconds,
-            entry.Track?.CanonicalMetadata
+            entry.TrackObservation?.RawMetadata, ObservationTrackId = entry.TrackObservation?.TrackId,
+            entry.Track?.CanonicalMetadata, entry.Track?.SearchTitle, entry.Track?.SearchArtist, entry.Track?.Isrc,
+            entry.Track?.MbidRecording, entry.Track?.VersionFlags
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
@@ -356,5 +392,6 @@ public sealed class PlaylistUnmatchedReviewService(
 
     private sealed record MatchProof(int UserId, Guid PlaylistId, Guid MappingId, Guid EntryId,
         int ConnectedServiceAccountId, string ExternalAccountId, string Service,
-        string Fingerprint, TrackMatchSearchCandidate Candidate, DateTimeOffset IssuedAt);
+        string Fingerprint, TrackMatchSearchCandidate Candidate, DateTimeOffset IssuedAt,
+        string ServicePlaylistId, long TokenVersion);
 }

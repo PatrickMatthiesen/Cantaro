@@ -90,6 +90,7 @@ public class YouTubeService : IYouTubePlaylistClient
     private readonly ApplicationDbContext _dbContext;
     private readonly TokenEncryptionService _tokenEncryption;
     private readonly ILogger<YouTubeService> _logger;
+    private readonly Func<ConnectedServiceAccount, CancellationToken, Task<Google.Apis.YouTube.v3.YouTubeService>>? _serviceFactory;
 
     private const string ServiceName = "youtube";
 
@@ -103,6 +104,14 @@ public class YouTubeService : IYouTubePlaylistClient
         _dbContext = dbContext;
         _tokenEncryption = tokenEncryption;
         _logger = logger;
+    }
+
+    internal YouTubeService(IConfiguration configuration, ApplicationDbContext dbContext,
+        TokenEncryptionService tokenEncryption, ILogger<YouTubeService> logger,
+        Func<ConnectedServiceAccount, CancellationToken, Task<Google.Apis.YouTube.v3.YouTubeService>> serviceFactory)
+        : this(configuration, dbContext, tokenEncryption, logger)
+    {
+        _serviceFactory = serviceFactory;
     }
 
     private static DateTimeOffset? ParsePublishedAtRaw(string? publishedAtRaw)
@@ -308,7 +317,7 @@ public class YouTubeService : IYouTubePlaylistClient
         string? ThumbnailUrl, int? DurationSeconds, int Position, bool IsAvailable,
         string? Description = null);
     internal sealed record SyncReadSnapshot(string Id, string Name, string? Revision,
-        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount);
+        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount, PlaylistReadAccount Account);
 
     internal async Task ValidateSyncAccountAsync(
         PlatformAccountContext accountContext, CancellationToken cancellationToken)
@@ -317,6 +326,7 @@ public class YouTubeService : IYouTubePlaylistClient
     internal async Task<SyncReadSnapshot> GetSyncReadSnapshotAsync(
         PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
     {
+        var readAccount = await PlaylistReadAccount.CaptureAsync(_dbContext, accountContext, ServiceName, cancellationToken);
         var account = await RequireAccountAsync(accountContext, cancellationToken);
         using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
         var metadataRequest = service.Playlists.List("snippet,contentDetails");
@@ -395,7 +405,7 @@ public class YouTubeService : IYouTubePlaylistClient
             || after.ContentDetails?.ItemCount != before.ContentDetails?.ItemCount)
             complete = false;
         return new SyncReadSnapshot(playlistId, before.Snippet.Title, before.ETag, items, complete,
-            unavailableItemCount);
+            unavailableItemCount, readAccount);
     }
 
     internal static bool IsPlaylistItemUnavailable(
@@ -1167,6 +1177,7 @@ public class YouTubeService : IYouTubePlaylistClient
         ConnectedServiceAccount account, CancellationToken cancellationToken = default,
         bool disableAutomaticRetries = false)
     {
+        if (_serviceFactory is not null) return await _serviceFactory(account, cancellationToken);
         if (string.IsNullOrEmpty(account.EncryptedRefreshToken))
             throw new InvalidOperationException("No refresh token available");
 

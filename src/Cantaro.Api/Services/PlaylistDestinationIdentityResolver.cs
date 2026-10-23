@@ -97,17 +97,13 @@ internal static class PlaylistDestinationIdentityResolver
                 });
             await reconcileObservationAsync(observation.Id, trackId.Value, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+            stored.TrackId = trackId;
+            stored.Track = track;
+            exactObservation.TrackId = trackId;
         }
-        if (exactObservation?.SourceType == service
-            && (trackId is null || exactObservation.TrackId == trackId))
-            return exactObservation.ExternalId;
-
-        var known = trackId is null ? null : await dbContext.TrackSourceIds
-            .Where(source => source.TrackId == trackId && source.SourceType == service)
-            .OrderByDescending(source => source.Confidence)
-            .ThenByDescending(source => source.LastVerifiedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (known is not null) return known.ExternalId;
+        var authorizedId = await PlaylistDestinationIdentityEvidence.FindAsync(
+            dbContext, account, service, stored, cancellationToken);
+        if (authorizedId is not null) return authorizedId;
         if (trackId is null && exactObservation is null) return null;
 
         TrackCanonicalMetadata? canonical = null;
@@ -142,8 +138,10 @@ internal static class PlaylistDestinationIdentityResolver
         var existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
             source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
             cancellationToken);
-        if (existing is not null && trackId is not null)
-            return existing.TrackId == trackId ? existing.ExternalId : null;
+        // Searching a destination for a known canonical entry does not establish
+        // global identity. The coordinator checkpoints this choice on its link.
+        if (trackId is not null)
+            return existing is null || existing.TrackId == trackId ? top.Candidate.ExternalId : null;
 
         if (trackId is null)
         {

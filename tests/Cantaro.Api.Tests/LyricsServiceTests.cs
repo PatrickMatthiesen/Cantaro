@@ -3,6 +3,7 @@ using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Lyrics;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -85,6 +86,101 @@ public sealed class LyricsServiceTests
 
         Assert.Null(result);
         Assert.Null(provider.Lookup);
+    }
+
+    [Fact]
+    public async Task GetLyricsAsync_AllowsOnlyImmediateRelatedCanonicalRecordings()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var owner = TestUserFactory.Create(7, "lyrics-related-owner@example.com");
+        var other = TestUserFactory.Create(8, "lyrics-related-other@example.com");
+        var outsider = TestUserFactory.Create(9, "lyrics-related-outsider@example.com");
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = owner.Id, Name = "Saved" };
+        var privatePlaylist = new Playlist { Id = Guid.NewGuid(), UserId = other.Id, Name = "Private" };
+        Track Track(string title) => new()
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = title, Artist = "Artist" })
+        };
+        var original = Track("Original");
+        var sibling = Track("Composition sibling");
+        var remix = Track("Remix");
+        var source = Track("Sample source");
+        var secondHop = Track("Remix of remix");
+        var unrelated = Track("Unrelated");
+        var composition = new Song { Id = Guid.NewGuid() };
+        var privateObservation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = remix.Id, SourceType = "youtube", ExternalId = "private-video",
+            Title = "Private observation", DurationSeconds = 999, ThumbnailUrl = "https://img.example/private.jpg",
+            MatchStatus = TrackMatchingStatuses.Matched
+        };
+        remix.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = remix.Id,
+            SourceType = privateObservation.SourceType, ExternalId = privateObservation.ExternalId
+        });
+        db.AddRange(owner, other, outsider, playlist, privatePlaylist, original, sibling, remix, source,
+            secondHop, unrelated, composition, privateObservation);
+        db.SongTracks.AddRange(
+            new SongTrack { SongId = composition.Id, TrackId = original.Id },
+            new SongTrack { SongId = composition.Id, TrackId = sibling.Id });
+        db.TrackRelations.AddRange(
+            new TrackRelation { FromTrackId = remix.Id, ToTrackId = original.Id, RelationType = TrackRelationType.RemixOf },
+            new TrackRelation { FromTrackId = original.Id, ToTrackId = source.Id, RelationType = TrackRelationType.Samples },
+            new TrackRelation { FromTrackId = secondHop.Id, ToTrackId = remix.Id, RelationType = TrackRelationType.RemixOf });
+        db.PlaylistEntries.AddRange(
+            new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = playlist.Id, TrackId = original.Id, Position = 0 },
+            new PlaylistEntry
+            {
+                Id = Guid.NewGuid(), PlaylistId = privatePlaylist.Id, TrackId = remix.Id,
+                TrackObservationId = privateObservation.Id, Position = 0
+            },
+            new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = privatePlaylist.Id, TrackId = unrelated.Id, Position = 1 });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var details = new MusicLibraryQueryService(db);
+
+        foreach (var related in new[] { sibling, remix, source })
+        {
+            var detail = Assert.IsType<MusicLibrarySongDto>(await details.GetCanonicalSongAsync(related.Id, owner.Id, default));
+            Assert.Empty(detail.Playlists);
+            Assert.Empty(detail.SourceIdentities);
+            Assert.Empty(detail.PlatformLinks);
+            Assert.Empty(detail.SourcePlatforms);
+            Assert.Null(detail.DurationSeconds);
+            Assert.Null(detail.ThumbnailUrl);
+            var provider = new CapturingProvider();
+
+            var lyrics = await new LyricsService(db, provider).GetLyricsAsync(owner.Id, detail.Id, default);
+
+            Assert.Equal(LyricsStates.Available, lyrics?.State);
+            Assert.Equal(related.Id, provider.Lookup?.TrackId);
+            Assert.Equal(detail.Title, provider.Lookup?.Title);
+            Assert.Null(provider.Lookup?.DurationSeconds);
+
+            var outsiderProvider = new CapturingProvider();
+            Assert.Null(await details.GetCanonicalSongAsync(related.Id, outsider.Id, default));
+            Assert.Null(await new LyricsService(db, outsiderProvider).GetLyricsAsync(outsider.Id, detail.Id, default));
+            Assert.Null(outsiderProvider.Lookup);
+        }
+
+        foreach (var denied in new[] { secondHop, unrelated })
+        {
+            var provider = new CapturingProvider();
+            Assert.Null(await details.GetCanonicalSongAsync(denied.Id, owner.Id, default));
+            Assert.Null(await new LyricsService(db, provider).GetLyricsAsync(owner.Id, $"track:{denied.Id}", default));
+            Assert.Null(provider.Lookup);
+        }
+        var observationProvider = new CapturingProvider();
+        Assert.Null(await new LyricsService(db, observationProvider).GetLyricsAsync(
+            owner.Id, $"observation:{privateObservation.Id}", default));
+        Assert.Null(observationProvider.Lookup);
+        Assert.Equal(3, await db.PlaylistEntries.CountAsync());
     }
 
     [Fact]

@@ -63,11 +63,14 @@ public sealed partial class PlaylistSyncCoordinator(
         {
             if (initialMode is not ("combine" or "platform" or "cantaro"))
                 throw new PlatformApiException("invalid_initial_mode", "Choose how to initialize this playlist link.", 400);
-            var link = await db.ServicePlaylistMappings.SingleAsync(item => item.Id == mappingId && item.PlaylistId == playlistId, token);
+            var link = await db.ServicePlaylistMappings.Include(item => item.ConnectedServiceAccount)
+                .SingleAsync(item => item.Id == mappingId && item.PlaylistId == playlistId, token);
             var account = await RequireAccountAsync(playlist, link, token);
             var remote = await Provider(link.Service).ReadAsync(account, link.ServicePlaylistId, token);
             RequireComplete(remote);
+            var confirmedEntries = new HashSet<Guid>();
             var incoming = await NormalizeIdentitiesAsync(KnownTracks(remote).Select(item => PlaylistSyncItem.From(item, link.Service)), token);
+            incoming = await BindDestinationChoicesAsync(link, account, incoming, token, confirmedEntries);
             var current = await ReadItemsAsync(playlistId, token);
             var target = initialMode switch
             {
@@ -77,14 +80,18 @@ public sealed partial class PlaylistSyncCoordinator(
             };
             await PersistAtomicallyAsync(async () =>
             {
-                await SaveItemsAsync(playlist, target, token);
-                link.BaselineJson = new PlaylistSyncBaseline(incoming, remote.Revision).Serialize();
+                await SaveItemsAsync(playlist, target, token, confirmedEntries);
+                link.PendingWriteJson = null;
                 link.BaselineName = remote.Name;
                 link.InitialMode = null;
                 link.NextAttemptAt = clock.GetUtcNow();
                 link.State = "active";
                 link.UserId = userId;
                 link.ExternalAccountId = account.ExpectedExternalAccountId!;
+                // SaveItems may have created entries for a moved remote copy.
+                // Acknowledge only freshly validated membership in this mapping.
+                link.BaselineJson = new PlaylistSyncBaseline(
+                    await BindDestinationChoicesAsync(link, account, incoming, token), remote.Revision).Serialize();
                 playlist.SyncEnabled = true;
                 playlist.NextSyncAt ??= clock.GetUtcNow().AddDays(1);
                 await db.SaveChangesAsync(token);
@@ -93,11 +100,12 @@ public sealed partial class PlaylistSyncCoordinator(
 
     private async Task RunCoreAsync(Playlist playlist, string? service, bool readOnly, CancellationToken ct)
     {
-        var links = await db.ServicePlaylistMappings.Where(link => link.PlaylistId == playlist.Id
+        var links = await db.ServicePlaylistMappings.Include(link => link.ConnectedServiceAccount).Where(link => link.PlaylistId == playlist.Id
             && link.State == "active" && (service == null || link.Service == service)).OrderBy(link => link.Service).ToListAsync(ct);
         if (links.Any(link => IsProviderCooldown(link.LastSyncStatus) && link.NextAttemptAt > clock.GetUtcNow()))
             return;
         var reads = new List<LinkRead>();
+        var confirmedEntries = new HashSet<Guid>();
         foreach (var link in links)
         {
             var previousStatus = link.LastSyncStatus;
@@ -109,6 +117,7 @@ public sealed partial class PlaylistSyncCoordinator(
                 var snapshot = await Provider(link.Service).ReadAsync(account, link.ServicePlaylistId, ct);
                 RequireComplete(snapshot);
                 var incoming = await NormalizeIdentitiesAsync(KnownTracks(snapshot).Select(item => PlaylistSyncItem.From(item, link.Service)), ct);
+                incoming = await BindDestinationChoicesAsync(link, account, incoming, ct, confirmedEntries);
                 var baseline = PlaylistSyncBaseline.Parse(link.BaselineJson);
                 var previous = baseline is null ? null : await NormalizeIdentitiesAsync(baseline.Items, ct);
                 if (PlaylistSyncBaseline.Parse(link.PendingWriteJson) is { } interruptedWrite)
@@ -162,7 +171,7 @@ public sealed partial class PlaylistSyncCoordinator(
         }
         await PersistAtomicallyAsync(async () =>
         {
-            await SaveItemsAsync(playlist, current, ct);
+            await SaveItemsAsync(playlist, current, ct, confirmedEntries);
             foreach (var read in reads)
             {
                 // Persist accepted reads with canonical changes. An interrupted write restarts from this exact observed subset.

@@ -183,20 +183,30 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         Assert.Equal(evidenceChanged ? ["A", "B", "A", "B", "C"] : ["A", "B", "B", "C"], calls);
         Assert.Equal(["B", "C"], scenario.Provider("spotify").Items);
         Assert.Equal("partial", scenario.Mapping("spotify").LastSyncStatus);
-        Assert.Null(scenario.Mapping("spotify").MatchingProgressJson);
+        Assert.Equal(scenario.Provider("spotify").Items,
+            PlaylistMatchingProgress.Read(scenario.Mapping("spotify").MatchingProgressJson).Values
+                .Select(item => item.ExternalId).ToArray());
         Assert.Equal(["A", "B", "C"], await scenario.CanonicalIdsAsync());
     }
 
     [Fact]
-    public async Task MatchingProgress_CountsKnownIdentitiesBeforeAnEarlyRateLimit()
+    public async Task MatchingProgress_CountsOwnedObservedIdentitiesBeforeAnEarlyRateLimit()
     {
         await using var scenario = await Scenario.CreateAsync(["A", "B", "C"]);
         scenario.Link("spotify", []);
         foreach (var title in new[] { "B", "C" })
-            scenario.Db.TrackSourceIds.Add(new TrackSourceId
+        {
+            var trackId = scenario.TrackId(title);
+            var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), TrackId = scenario.TrackId(title), SourceType = "spotify", ExternalId = title
-            });
+                Id = Guid.NewGuid(), TrackId = trackId, SourceType = "spotify", ExternalId = title,
+                Title = title, MatchStatus = TrackMatchingStatuses.Matched
+            };
+            scenario.Db.TrackObservations.Add(observation);
+            var entry = await scenario.Db.PlaylistEntries.SingleAsync(item => item.TrackId == trackId);
+            entry.TrackObservation = observation;
+            entry.TrackObservationId = observation.Id;
+        }
         var calls = new List<Guid>();
         scenario.Provider("spotify").OnResolve = (entry, _) =>
         {
@@ -290,7 +300,9 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         Assert.Equal(titles, calls);
         Assert.Equal(titles, scenario.Provider("spotify").Items);
         Assert.Equal("success", scenario.Mapping("spotify").LastSyncStatus);
-        Assert.Null(scenario.Mapping("spotify").MatchingProgressJson);
+        Assert.Equal(scenario.Provider("spotify").Items,
+            PlaylistMatchingProgress.Read(scenario.Mapping("spotify").MatchingProgressJson).Values
+                .Select(item => item.ExternalId).ToArray());
     }
 
     [Theory]
