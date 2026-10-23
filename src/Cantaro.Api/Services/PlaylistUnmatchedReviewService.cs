@@ -48,9 +48,12 @@ public sealed class PlaylistUnmatchedReviewService(
     {
         var link = await RequireLinkAsync(userId, playlistId, mappingId, ct);
         var entries = await LoadEntriesAsync(playlistId, ct);
+        var identities = await PlaylistDestinationIdentityEvidence.FindManyAsync(db,
+            new PlatformAccountContext(link.UserId, link.ConnectedServiceAccountId, link.ExternalAccountId),
+            link.Service, entries, link, ct);
         var unmatched = new List<PlaylistUnmatchedEntry>();
         foreach (var entry in entries)
-            if (!await HasDestinationIdentityAsync(entry, link, ct)) unmatched.Add(ToDto(entry));
+            if (!identities.ContainsKey(entry.Id)) unmatched.Add(ToDto(entry));
         return unmatched;
     }
 
