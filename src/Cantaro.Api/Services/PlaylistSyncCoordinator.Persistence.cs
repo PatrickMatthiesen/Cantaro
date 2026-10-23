@@ -43,6 +43,8 @@ public sealed partial class PlaylistSyncCoordinator
                     .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.SyncLeaseId, leaseId)
                         .SetProperty(item => item.SyncLeaseExpiresAt, now.AddMinutes(30)), ct);
                 if (count != 1) throw new PlatformApiException("sync_in_progress", "This playlist is already being synced.", 409);
+                // Record acquisition before the cancellable reload so finally can release it.
+                acquired = true;
                 await db.Entry(playlist).ReloadAsync(ct);
             }
             else
@@ -51,8 +53,8 @@ public sealed partial class PlaylistSyncCoordinator
                 playlist.SyncLeaseId = leaseId;
                 playlist.SyncLeaseExpiresAt = now.AddMinutes(30);
                 await db.SaveChangesAsync(ct);
+                acquired = true;
             }
-            acquired = true;
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromMinutes(10));
             await operation(playlist, deadline.Token);

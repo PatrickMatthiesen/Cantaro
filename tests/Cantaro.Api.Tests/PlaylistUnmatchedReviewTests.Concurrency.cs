@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
@@ -116,6 +117,59 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await ReleasesLeaseAsync(true, false);
     }
 
+    [Fact]
+    public Task ConfirmationLease_CancellationAfterLeaseUpdateReleasesLease()
+        => CancellationAfterLeaseUpdateAsync(false);
+
+    [PostgresFact]
+    public Task ConfirmationLease_PostgresCancellationAfterLeaseUpdateReleasesLease()
+        => CancellationAfterLeaseUpdateAsync(true);
+
+    private static async Task CancellationAfterLeaseUpdateAsync(bool postgres)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: !postgres, postgres: postgres);
+        scope.Link.BaselineName = scope.Playlist.Name;
+        scope.Link.BaselineJson = new PlaylistSyncBaseline([]).Serialize();
+        await scope.Db.SaveChangesAsync();
+        var token = scope.Token(Candidate("chosen-id"));
+        using var cancellation = new CancellationTokenSource();
+        var boundary = new CancelAfterLeaseUpdate(cancellation);
+        await using (var confirmDb = scope.NewContext(boundary))
+        {
+            if (postgres) Assert.True(confirmDb.Database.CreateExecutionStrategy().RetriesOnFailure);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scope.CreateReview(confirmDb)
+                .ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, cancellation.Token));
+        }
+        Assert.True(boundary.Reached);
+        await using (var syncDb = scope.NewContext())
+        {
+            await AssertReleasedAsync(syncDb, scope.Playlist.Id);
+            Assert.False(await syncDb.TrackSourceIds.AnyAsync(source => source.ExternalId == "chosen-id"));
+            Assert.Empty(PlaylistMatchingProgress.Read((await syncDb.ServicePlaylistMappings.AsNoTracking()
+                .SingleAsync()).MatchingProgressJson));
+            var entry = await syncDb.PlaylistEntries.AsNoTracking().SingleAsync();
+            Assert.Equal(scope.Entry.TrackId, entry.TrackId);
+            Assert.Equal(scope.Entry.TrackObservationId, entry.TrackObservationId);
+            // A separate worker can sync immediately, before any successful confirmation.
+            var provider = new ReviewResolverProvider(syncDb, scope.Playlist.Name);
+            var writer = new ReviewWriter(provider);
+            await Coordinator(syncDb, provider, writer).RunAsync(scope.UserId, scope.Playlist.Id, "spotify", default);
+            Assert.Equal(1, provider.Searches);
+            Assert.Empty(writer.Writes);
+            await AssertReleasedAsync(syncDb, scope.Playlist.Id);
+        }
+        Assert.Equal(2, boundary.CleanupTokens.Count);
+        Assert.All(boundary.CleanupTokens, token => Assert.Equal(CancellationToken.None, token));
+        // Retry the original proof with another fresh context, then export it.
+        await using (var retryDb = scope.NewContext())
+        {
+            await scope.CreateReview(retryDb).ConfirmAsync(scope.UserId, scope.Playlist.Id,
+                scope.Link.Id, scope.Entry.Id, token, default);
+            await AssertReleasedAsync(retryDb, scope.Playlist.Id);
+        }
+        await AssertExportsConfirmationAsync(scope);
+    }
+
     private static async Task ReleasesLeaseAsync(bool postgres, bool cancel)
     {
         await using var scope = await Scope.CreateAsync("spotify", relational: !postgres, postgres: postgres);
@@ -204,6 +258,33 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.True(PlaylistMatchingProgress.Read((await db.ServicePlaylistMappings.AsNoTracking()
             .SingleAsync()).MatchingProgressJson)[scope.Entry.Id].ManualConfirmation);
         await AssertReleasedAsync(db, scope.Playlist.Id);
+    }
+
+    private sealed class CancelAfterLeaseUpdate(CancellationTokenSource cancellation) : DbCommandInterceptor
+    {
+        public bool Reached { get; private set; }
+        public List<CancellationToken> CleanupTokens { get; } = [];
+
+        public override ValueTask<int> NonQueryExecutedAsync(DbCommand command, CommandExecutedEventData eventData,
+            int result, CancellationToken cancellationToken = default)
+        {
+            // ExecuteUpdate has completed on the real database. Cancel before
+            // WithLeaseAsync can reload the tracked playlist, only on this first update.
+            if (!Reached && result == 1 && command.CommandText.StartsWith("UPDATE \"Playlists\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("SyncLeaseExpiresAt", StringComparison.Ordinal))
+            {
+                Reached = true;
+                cancellation.Cancel();
+            }
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Reached) CleanupTokens.Add(cancellationToken);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class PauseConfirmationSave : SaveChangesInterceptor
