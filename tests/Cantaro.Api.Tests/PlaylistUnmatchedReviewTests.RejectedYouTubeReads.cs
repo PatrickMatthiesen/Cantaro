@@ -84,7 +84,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await AssertYouTubeReadIsolationAsync(scope, verify);
     }
 
-    private static async Task InitializeYouTubeReadAsync(Scope scope, ProductionYouTubeReadHandler handler)
+    private static async Task InitializeYouTubeReadAsync(Scope scope, ProductionYouTubeReadHandler handler, bool export = true)
     {
         if (scope.Db.Database.IsNpgsql())
         {
@@ -100,6 +100,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         link.BaselineJson = new PlaylistSyncBaseline([]).Serialize();
         link.BaselineName = scope.Playlist.Name;
         await scope.Db.SaveChangesAsync();
+        if (!export) return;
         scope.Db.ChangeTracker.Clear();
         await new PlaylistSyncCoordinator(scope.Db, [CreateYouTubeReadProvider(scope.Db, handler)], [new ProductionYouTubeReadWriter(handler)],
             TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance).RunAsync(scope.UserId, scope.Playlist.Id, "youtube", default);

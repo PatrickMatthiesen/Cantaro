@@ -143,6 +143,8 @@ public sealed class OutboundPlaylistSyncService(
 
         try
         {
+            await PlaylistExportAttemptStore.RecordAsync(dbContext, account, service, mapping.ServicePlaylistId,
+                prepared.TrackIds, cancellationToken);
             await writer.ReconcileAsync(account, mapping.ServicePlaylistId, prepared.TrackIds, cancellationToken);
             mapping.LastSyncedAt = DateTimeOffset.UtcNow;
             mapping.LastSyncStatus = "success";

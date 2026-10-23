@@ -509,7 +509,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await Coordinator(db).RunAsync(Scope.UserId, playlistId, Service, default);
             await db.SaveChangesAsync();
         }
-        public static async Task<ReplacementReadFixture> CreateAsync(string service, bool postgres)
+        public static async Task<ReplacementReadFixture> CreateAsync(string service, bool postgres, bool exportYouTube = true)
         {
             if (service == "spotify")
             {
@@ -518,7 +518,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             }
             var scope = await Scope.CreateAsync(service, relational: !postgres, postgres: postgres);
             var handler = new ProductionYouTubeReadHandler(scope.Playlist.Name);
-            await InitializeYouTubeReadAsync(scope, handler);
+            await InitializeYouTubeReadAsync(scope, handler, exportYouTube);
             return new(scope, service, youtube: handler);
         }
         public async ValueTask DisposeAsync()

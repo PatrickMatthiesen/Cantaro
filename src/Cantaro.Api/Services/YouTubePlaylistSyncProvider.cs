@@ -29,11 +29,13 @@ public sealed class YouTubePlaylistSyncProvider(
         if (!raw.IsComplete)
             throw new PlatformApiException("incomplete_playlist", "The platform returned an incomplete playlist. Its missing items were not treated as removals.", 503);
         await youtubeService.ValidateSyncAccountAsync(account, cancellationToken);
+        Func<Task>? validateProvenance = null;
         return await PlaylistReadIngestion.RunAsync(dbContext, raw.Account, async readDb =>
         {
             var bound = await PlaylistDestinationReadBindings.BindReadAsync(readDb, account, PlatformId, playlistId,
                 raw.Items.Select(item => new PlaylistRemoteTrack(item.ExternalId, null, null, item.Title,
                     item.Position, item.IsAvailable)).ToArray(), cancellationToken);
+            validateProvenance = await PlaylistExportAttemptStore.GuardReadAsync(readDb, raw.Account, playlistId, bound, cancellationToken);
             var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
             var cache = new Dictionary<string, TrackObservation>(StringComparer.Ordinal);
             var unavailableIdentityCache = new Dictionary<string, (Guid? TrackId, Guid? ObservationId)>(StringComparer.Ordinal);
@@ -120,7 +122,7 @@ public sealed class YouTubePlaylistSyncProvider(
                 await readQueue.EnqueueAsync(observationId, cancellationToken);
             return new PlaylistRemoteSnapshot(raw.Id, raw.Name, tracks, raw.Revision, raw.IsComplete,
                 raw.UnavailableItemCount);
-        }, cancellationToken);
+        }, cancellationToken, () => validateProvenance!());
     }
 
     private async Task<(Guid? TrackId, Guid? ObservationId)> FindExistingUnavailableIdentityAsync(

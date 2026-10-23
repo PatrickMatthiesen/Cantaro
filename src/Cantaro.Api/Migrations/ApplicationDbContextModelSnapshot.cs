@@ -1342,6 +1342,28 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("PlaylistEntries");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.PlaylistExportAttempt", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Service")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalAccountId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ServicePlaylistId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalTrackId")
+                        .HasColumnType("text");
+
+                    b.HasKey("UserId", "Service", "ExternalAccountId", "ServicePlaylistId", "ExternalTrackId");
+
+                    b.ToTable("PlaylistExportAttempts");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.ServicePlaylistMapping", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2587,6 +2609,15 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("Track");
 
                     b.Navigation("TrackObservation");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.PlaylistExportAttempt", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.ServicePlaylistMapping", b =>

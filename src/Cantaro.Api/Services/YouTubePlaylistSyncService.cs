@@ -63,16 +63,19 @@ public class YouTubePlaylistSyncService
     {
         if (_coordinator is not null)
             return await _coordinator.ImportAsync(account, ServiceName, youtubePlaylistId, cancellationToken);
-        if (await _dbContext.ServicePlaylistMappings.AnyAsync(
-                mapping => mapping.ConnectedServiceAccountId == account.ConnectedServiceAccountId
-                    && mapping.Service == ServiceName
-                    && mapping.ServicePlaylistId == youtubePlaylistId
-                    && (mapping.SyncMode == "from_cantaro" || mapping.BaselineJson != null
-                        || mapping.PendingWriteJson != null || mapping.MatchingProgressJson != null),
-                cancellationToken))
-            throw new PlatformApiException("outbound_mapping",
-                "Sync this linked playlist from the Cantaro playlist.", 409);
+        var accountSnapshot = await PlaylistReadAccount.CaptureAsync(_dbContext, account, ServiceName, cancellationToken);
+        await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, accountSnapshot, youtubePlaylistId, cancellationToken);
+        await using var readDb = PlaylistReadIngestion.CreateContext(_dbContext);
+        var importer = new YouTubePlaylistSyncService(readDb, _youtubeService, _trackMatchQueue.ForContext(readDb),
+            new PlaylistCanonicalReconciliationService(readDb), _logger);
+        return await importer.ImportLegacyAsync(account, youtubePlaylistId, reportProgressAsync, cancellationToken);
+    }
 
+    private async Task<Guid> ImportLegacyAsync(PlatformAccountContext account, string youtubePlaylistId,
+        Func<PlatformSyncProgress, CancellationToken, Task>? reportProgressAsync, CancellationToken cancellationToken)
+    {
+        var readAccount = await PlaylistReadAccount.CaptureAsync(_dbContext, account, ServiceName, cancellationToken);
+        await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, youtubePlaylistId, cancellationToken);
         _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId} account {AccountId}", youtubePlaylistId, account.UserId, account.ConnectedServiceAccountId);
 
         // Use execution strategy to handle retries with transactions
@@ -84,6 +87,8 @@ public class YouTubePlaylistSyncService
 
             try
             {
+                await readAccount.ValidateAsync(_dbContext, cancellationToken);
+                await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, youtubePlaylistId, cancellationToken);
                 // Step 1: Fetch YouTube playlist metadata
                 var youtubePlaylists = await _youtubeService.GetPlaylistsAsync(account, cancellationToken);
                 var youtubePlaylist = youtubePlaylists.FirstOrDefault(p => p.Id == youtubePlaylistId)
@@ -228,6 +233,8 @@ public class YouTubePlaylistSyncService
 
                 // Save all changes
                 await _dbContext.SaveChangesAsync(cancellationToken);
+                await readAccount.ValidateAsync(_dbContext, cancellationToken, lockUntilCommit: true);
+                await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, youtubePlaylistId, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
 
                 return new YouTubePlaylistImportResult(

@@ -261,6 +261,9 @@ public sealed partial class PlaylistSyncCoordinator
         var writableIds = ids.Where(id => !unavailableIds.Contains(id)).ToList();
         var changesTracks = !writableIds.SequenceEqual(fresh.Tracks.Where(item => item.IsAvailable).Select(item => item.ExternalId));
         var changesName = link.DesiredName is { } && link.DesiredName != fresh.Name;
+        // Even an approved export requiring no HTTP mutation creates a scoped
+        // acknowledgement. Retain its suppression before that receipt can go away.
+        await PlaylistExportAttemptStore.RecordAsync(db, read.Account, link.Service, link.ServicePlaylistId, ids, ct);
         if (changesTracks)
             await Writer(link.Service).ReconcileAsync(read.Account, link.ServicePlaylistId, ids, ct);
         if (changesName)

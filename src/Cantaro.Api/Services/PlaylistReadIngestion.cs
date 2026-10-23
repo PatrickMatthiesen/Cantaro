@@ -9,13 +9,18 @@ namespace Cantaro.Api.Services;
 // coordinator's error save could commit. The caller keeps its own tracker.
 internal static class PlaylistReadIngestion
 {
-    public static async Task<T> RunAsync<T>(ApplicationDbContext caller, PlaylistReadAccount account,
-        Func<ApplicationDbContext, Task<T>> ingest, CancellationToken ct)
+    internal static ApplicationDbContext CreateContext(ApplicationDbContext caller)
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>(
             (DbContextOptions<ApplicationDbContext>)caller.GetService<IDbContextOptions>())
             .UseModel(caller.Model).Options;
-        await using var db = new ApplicationDbContext(options);
+        return new ApplicationDbContext(options);
+    }
+
+    public static async Task<T> RunAsync<T>(ApplicationDbContext caller, PlaylistReadAccount account,
+        Func<ApplicationDbContext, Task<T>> ingest, CancellationToken ct, Func<Task>? validateBeforeCommit = null)
+    {
+        await using var db = CreateContext(caller);
         // HTTP has already completed. Do not replay materialization with tracked
         // entities after a rollback, including resolver-internal staged saves.
         return await new PlaylistSyncCoordinator.PlaylistTransactionStrategy(db).ExecuteAsync(async () =>
@@ -35,6 +40,7 @@ internal static class PlaylistReadIngestion
                 var result = await ingest(db);
                 await db.SaveChangesAsync(ct);
                 await account.ValidateAsync(db, ct, lockUntilCommit: true);
+                if (validateBeforeCommit is not null) await validateBeforeCommit();
                 ct.ThrowIfCancellationRequested();
                 if (ambient is not null) await transaction!.ReleaseSavepointAsync(savepoint, ct);
                 else if (transaction is not null) await transaction.CommitAsync(ct);

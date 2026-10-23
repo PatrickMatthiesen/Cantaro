@@ -37,12 +37,14 @@ public sealed class SpotifyPlaylistSyncProvider(
             throw new PlatformApiException("incomplete_playlist", "The platform returned an incomplete playlist. Its missing items were not treated as removals.", 503);
         var readAccount = new PlaylistReadAccount(account, PlatformId, validated.ExternalAccountId, validated.TokenVersion);
         _ = await RequireAccountAsync(account, cancellationToken);
+        Func<Task>? validateProvenance = null;
         return await PlaylistReadIngestion.RunAsync(dbContext, readAccount, async readDb =>
         {
             var trackResolver = new SpotifyTrackResolver(readDb);
             var bound = await PlaylistDestinationReadBindings.BindReadAsync(readDb, account, PlatformId, playlistId,
                 raw.Items.Select(item => new PlaylistRemoteTrack(item.Track?.Id ?? $"!unavailable:{item.Position}",
                     null, null, item.Track?.Name ?? "Unavailable Spotify item", item.Position)).ToArray(), cancellationToken);
+            validateProvenance = await PlaylistExportAttemptStore.GuardReadAsync(readDb, readAccount, playlistId, bound, cancellationToken);
             var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
             var cache = new Dictionary<string, (Guid TrackId, Guid ObservationId)>(StringComparer.Ordinal);
             var now = DateTimeOffset.UtcNow;
@@ -100,7 +102,7 @@ public sealed class SpotifyPlaylistSyncProvider(
             }
             _ = await RequireAccountAsync(account, cancellationToken);
             return new PlaylistRemoteSnapshot(raw.Id, raw.Name, tracks, raw.SnapshotId, raw.IsComplete);
-        }, cancellationToken);
+        }, cancellationToken, () => validateProvenance!());
     }
 
     public async Task<string?> ResolveAsync(
