@@ -667,6 +667,170 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal(related.CanonicalMetadata, (await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == related.Id)).CanonicalMetadata);
     }
 
+    [Theory]
+    [InlineData(null, null, false, false)]
+    [InlineData("", "", true, false)]
+    [InlineData("{}", " ", false, true)]
+    [InlineData("{\"Title\":\" \",\"Artist\":\"\"}", "", true, true)]
+    public async Task ReadSongs_MissingTitleArtistProjectionsUseOnlyOrderedOwnedDisplayMetadata(
+        string? canonicalMetadata, string? searchValue, bool useRawMetadata, bool sameComposition)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var firstUser = TestUserFactory.Create(740, "display-first@example.com");
+        var secondUser = TestUserFactory.Create(741, "display-second@example.com");
+        var firstPlaylist = MakePlaylist(firstUser.Id, "A canonical only", now);
+        var observedPlaylist = MakePlaylist(firstUser.Id, "B observations", now);
+        var secondPlaylist = MakePlaylist(secondUser.Id, "Private observations", now);
+        var anchor = new Track { Id = Guid.NewGuid(), SearchTitle = "Anchor", CreatedAt = now, UpdatedAt = now };
+        var related = new Track
+        {
+            Id = Guid.NewGuid(), CanonicalMetadata = canonicalMetadata, SearchTitle = searchValue,
+            SearchArtist = searchValue, CreatedAt = now, UpdatedAt = now
+        };
+        TrackObservation Observation(string name) => new()
+        {
+            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = name,
+            Title = useRawMetadata ? "Unformatted upload" : $"{name} song",
+            Artist = useRawMetadata ? null : $"{name} artist",
+            RawMetadata = useRawMetadata ? JsonSerializer.Serialize(new TrackObservationMetadata
+            {
+                OriginalTitle = $"{name} artist - {name} song", SearchArtist = $"{name} artist"
+            }) : null,
+            MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+        };
+        var firstObservation = Observation("First");
+        var laterObservation = Observation("Later");
+        var privateObservation = Observation("Private");
+        db.AddRange(firstUser, secondUser, firstPlaylist, observedPlaylist, secondPlaylist, anchor, related,
+            firstObservation, laterObservation, privateObservation);
+        if (sameComposition)
+        {
+            var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+            db.Songs.Add(composition);
+            db.SongTracks.AddRange(
+                new SongTrack { SongId = composition.Id, TrackId = anchor.Id },
+                new SongTrack { SongId = composition.Id, TrackId = related.Id });
+        }
+        else
+        {
+            db.TrackRelations.Add(new TrackRelation
+            {
+                FromTrackId = related.Id, ToTrackId = anchor.Id, RelationType = TrackRelationType.RemixOf
+            });
+        }
+        await db.SaveChangesAsync();
+        // A canonical-only entry sorts before the usable observation. Insert competing
+        // observations in reverse order so database insertion order cannot pick the title.
+        db.PlaylistEntries.AddRange(
+            MakeEntry(observedPlaylist.Id, related.Id, laterObservation.Id, 2, "youtube", now),
+            MakeEntry(observedPlaylist.Id, related.Id, firstObservation.Id, 1, "youtube", now),
+            MakeEntry(firstPlaylist.Id, related.Id, null, 0, "cantaro", now),
+            MakeEntry(firstPlaylist.Id, anchor.Id, null, 3, "cantaro", now),
+            MakeEntry(secondPlaylist.Id, related.Id, privateObservation.Id, 0, "youtube", now),
+            MakeEntry(secondPlaylist.Id, anchor.Id, null, 1, "cantaro", now));
+        await db.SaveChangesAsync();
+        // Seed legacy projection gaps without SaveChanges rebuilding search fields from JSON.
+        await db.Tracks.Where(track => track.Id == related.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(track => track.SearchTitle, searchValue)
+            .SetProperty(track => track.SearchArtist, searchValue));
+        db.ChangeTracker.Clear();
+
+        var service = new MusicLibraryQueryService(db);
+        foreach (var (userId, name) in new[] { (firstUser.Id, "First"), (secondUser.Id, "Private") })
+        {
+            var anchorDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(anchor.Id, userId, default));
+            var card = Assert.Single(anchorDetail.RelatedRecordings);
+            var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, userId, default));
+            var librarySong = Assert.Single((await service.GetLibraryAsync(userId, default)).Songs, song => song.Id == detail.Id);
+            Assert.Equal($"{name} song", card.Title);
+            Assert.Equal($"{name} artist", card.Artist);
+            Assert.Equal(card.Title, detail.Title);
+            Assert.Equal(card.Artist, detail.Artist);
+            Assert.Equal(detail.Title, librarySong.Title);
+            Assert.Equal(detail.Artist, librarySong.Artist);
+            Assert.True(card.InLibrary);
+            Assert.Equal([sameComposition ? "Another recording of this composition" : "Remix of this recording"], card.RelationshipLabels);
+        }
+        var stored = await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == related.Id);
+        Assert.Equal(canonicalMetadata, stored.CanonicalMetadata);
+        Assert.Equal(searchValue, stored.SearchTitle);
+        Assert.Equal(searchValue, stored.SearchArtist);
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    public async Task ReadSongs_TitleArtistFallbackPreservesCanonicalCreditAndSearchPrecedence(
+        bool hasCanonicalValues, bool hasArtistCredit, bool hasSearchValues)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(742, "display-precedence@example.com");
+        var playlist = MakePlaylist(user.Id, "Saved", now);
+        var anchor = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        var related = new Track
+        {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now,
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            {
+                Title = hasCanonicalValues ? "Canonical song" : " ",
+                Artist = hasCanonicalValues ? "Canonical artist" : ""
+            }),
+            SearchTitle = hasSearchValues ? "Search song" : null,
+            SearchArtist = hasSearchValues ? "Search artist" : null
+        };
+        if (hasArtistCredit)
+        {
+            var artist = new Artist { Id = Guid.NewGuid(), Name = "Credit artist", CreatedAt = now, UpdatedAt = now };
+            related.ArtistCredits.Add(new TrackArtistCredit
+            {
+                Id = Guid.NewGuid(), TrackId = related.Id, ArtistId = artist.Id, Artist = artist,
+                Role = TrackArtistRole.Primary, Position = 0, CreditedName = "Credit artist"
+            });
+        }
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "owned-precedence",
+            Title = "Observed song", Artist = "Observed artist", MatchStatus = TrackMatchingStatuses.Matched,
+            CreatedAt = now, UpdatedAt = now
+        };
+        db.AddRange(user, playlist, anchor, related, observation);
+        db.TrackRelations.Add(new TrackRelation
+        {
+            FromTrackId = related.Id, ToTrackId = anchor.Id, RelationType = TrackRelationType.RemixOf
+        });
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.AddRange(
+            MakeEntry(playlist.Id, anchor.Id, null, 0, "cantaro", now),
+            MakeEntry(playlist.Id, related.Id, observation.Id, 1, "youtube", now));
+        await db.SaveChangesAsync();
+        // Model independently persisted search projections, bypassing write-time rebuilding.
+        await db.Tracks.Where(track => track.Id == related.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(track => track.SearchTitle, hasSearchValues ? "Search song" : null)
+            .SetProperty(track => track.SearchArtist, hasSearchValues ? "Search artist" : null));
+        db.ChangeTracker.Clear();
+
+        var service = new MusicLibraryQueryService(db);
+        var card = Assert.Single((await service.GetCanonicalSongAsync(anchor.Id, user.Id, default))!.RelatedRecordings);
+        var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, user.Id, default));
+        var librarySong = Assert.Single((await service.GetLibraryAsync(user.Id, default)).Songs, song => song.Id == detail.Id);
+        Assert.Equal(hasCanonicalValues ? "Canonical song" : "Search song", card.Title);
+        Assert.Equal(hasCanonicalValues ? "Canonical artist" : hasArtistCredit ? "Credit artist" : "Search artist", card.Artist);
+        Assert.Equal(card.Title, detail.Title);
+        Assert.Equal(card.Artist, detail.Artist);
+        Assert.Equal(hasArtistCredit ? "Credit artist" : null, detail.ArtistCredits.SingleOrDefault()?.CreditedName);
+        // Library display already prefers owned observations over search projections.
+        Assert.Equal(hasCanonicalValues ? "Canonical song" : "Observed song", librarySong.Title);
+        Assert.Equal(hasCanonicalValues ? "Canonical artist" : hasArtistCredit ? "Credit artist" : "Observed artist", librarySong.Artist);
+    }
+
     [Fact]
     public async Task GetCanonicalSongAsync_NonownedRelatedRecordingsNeverUseOtherUsersObservations()
     {
@@ -688,9 +852,15 @@ public class MusicLibraryQueryServiceTests
                 Title = "Canonical related", DurationSeconds = 250, ThumbnailUrl = "https://img.example/canonical.jpg"
             })
         };
+        var searchRelated = new Track
+        {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now,
+            CanonicalMetadata = "{\"Title\":\"\",\"Artist\":\" \"}",
+            SearchTitle = "Search related", SearchArtist = "Search artist"
+        };
         var privateObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "private-related", Title = "Private related",
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "private-related", Title = "Private related", Artist = "Private artist",
             TrackId = related.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now,
             RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
             {
@@ -698,10 +868,11 @@ public class MusicLibraryQueryServiceTests
             })
         };
         var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
-        db.AddRange(owner, other, playlist, privatePlaylist, original, related, canonicalRelated, privateObservation, composition);
+        db.AddRange(owner, other, playlist, privatePlaylist, original, related, canonicalRelated, searchRelated, privateObservation, composition);
         db.SongTracks.AddRange(
             new SongTrack { SongId = composition.Id, TrackId = original.Id },
-            new SongTrack { SongId = composition.Id, TrackId = canonicalRelated.Id });
+            new SongTrack { SongId = composition.Id, TrackId = canonicalRelated.Id },
+            new SongTrack { SongId = composition.Id, TrackId = searchRelated.Id });
         db.TrackRelations.Add(new TrackRelation
         {
             FromTrackId = related.Id, ToTrackId = original.Id, RelationType = TrackRelationType.RemixOf
@@ -711,24 +882,39 @@ public class MusicLibraryQueryServiceTests
             MakeEntry(playlist.Id, original.Id, null, 0, "cantaro", now),
             MakeEntry(privatePlaylist.Id, related.Id, privateObservation.Id, 0, "youtube", now));
         await db.SaveChangesAsync();
+        await db.Tracks.Where(track => track.Id == searchRelated.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(track => track.SearchTitle, "Search related")
+            .SetProperty(track => track.SearchArtist, "Search artist"));
         db.ChangeTracker.Clear();
 
         var service = new MusicLibraryQueryService(db);
         var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(original.Id, owner.Id, default));
-        Assert.Equal(2, detail.RelatedRecordings.Count);
+        Assert.Equal(["Canonical related", "Search related", "Unknown song"], detail.RelatedRecordings.Select(card => card.Title));
         var privateCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{related.Id}");
         Assert.False(privateCard.InLibrary);
+        Assert.Equal("Unknown song", privateCard.Title);
+        Assert.Null(privateCard.Artist);
         Assert.Null(privateCard.DurationSeconds);
         Assert.Null(privateCard.ThumbnailUrl);
         var canonicalCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{canonicalRelated.Id}");
         Assert.False(canonicalCard.InLibrary);
         Assert.Equal(250, canonicalCard.DurationSeconds);
         Assert.Null(canonicalCard.ThumbnailUrl);
+        var searchCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{searchRelated.Id}");
+        Assert.False(searchCard.InLibrary);
+        Assert.Equal("Search artist", searchCard.Artist);
+        var searchDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(searchRelated.Id, owner.Id, default));
+        Assert.Equal(searchCard.Title, searchDetail.Title);
+        Assert.Equal(searchCard.Artist, searchDetail.Artist);
         var relatedDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, owner.Id, default));
         Assert.Empty(relatedDetail.Playlists);
+        Assert.Equal(privateCard.Title, relatedDetail.Title);
+        Assert.Null(relatedDetail.Artist);
         Assert.Equal(privateCard.DurationSeconds, relatedDetail.DurationSeconds);
         Assert.Equal(privateCard.ThumbnailUrl, relatedDetail.ThumbnailUrl);
         var otherDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, other.Id, default));
+        Assert.Equal("Private related", otherDetail.Title);
+        Assert.Equal("Private artist", otherDetail.Artist);
         Assert.Equal(400, otherDetail.DurationSeconds);
         Assert.Equal("https://img.example/private.jpg", otherDetail.ThumbnailUrl);
     }

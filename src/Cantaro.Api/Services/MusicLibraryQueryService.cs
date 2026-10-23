@@ -132,8 +132,8 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var identities = DistinctIdentities(GetSourceIdentities(track, entries));
         return new MusicLibrarySongDto
         {
-            Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, "Unknown song")!,
-            Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track), track.SearchArtist),
+            Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, displayMetadata.Title)!,
+            Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track), track.SearchArtist, displayMetadata.Artist),
             ArtistCredits = BuildArtistCredits(track),
             Albums = metadata?.Albums ?? [],
             ThumbnailUrl = displayMetadata.ThumbnailUrl,
@@ -194,8 +194,8 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             return new MusicLibraryRelatedRecordingDto
             {
                 Id = $"track:{candidate.Id}",
-                Title = FirstNonEmpty(metadata?.Title, candidate.SearchTitle, "Unknown song")!,
-                Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(candidate), candidate.SearchArtist),
+                Title = FirstNonEmpty(metadata?.Title, candidate.SearchTitle, displayMetadata.Title)!,
+                Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(candidate), candidate.SearchArtist, displayMetadata.Artist),
                 ThumbnailUrl = displayMetadata.ThumbnailUrl,
                 DurationSeconds = displayMetadata.DurationSeconds,
                 RelationshipLabels = labels,
