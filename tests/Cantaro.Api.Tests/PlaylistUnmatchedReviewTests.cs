@@ -356,6 +356,64 @@ public sealed class PlaylistUnmatchedReviewTests
             s.SourceType == "spotify" && s.ExternalId == "new-destination" && s.TrackId == trackId);
     }
 
+    [Theory]
+    [InlineData("empty", true)]
+    [InlineData("anonymous", true)]
+    [InlineData("stable", true)]
+    [InlineData("empty", false)]
+    [InlineData("anonymous", false)]
+    [InlineData("stable", false)]
+    public async Task CustomSpotifyConfirmation_DestinationOnlyChoicePreservesSharedArtistEvidence(
+        string credits, bool canonicalHasRecordingId)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: true);
+        using var http = new HttpClient(new ReviewSpotifyHandler(collaboration: false));
+        var review = await scope.WithSpotifyAsync(http);
+        var track = scope.Entry.Track!;
+        track.Isrc = canonicalHasRecordingId ? "USABC2400002" : null;
+        if (credits != "empty")
+            await new ArtistReconciliationService(scope.Db).ReconcileAsync(track,
+                [new ArtistCreditMetadata { Name = "Porter Robinson", Provider = credits == "stable" ? "spotify" : null,
+                    ExternalId = credits == "stable" ? "canonical-artist" : null }],
+                "observation", DateTimeOffset.UtcNow, default);
+        await scope.Db.SaveChangesAsync();
+        var before = await ArtistEvidenceSnapshot.ReadAsync(scope.Db);
+
+        // The real search pipeline signs the candidate's artist identities. A user
+        // can select this credible recording even though its ISRC identifies B.
+        var search = await review.SearchAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, "Everything Goes On Porter Robinson", default);
+        var choice = Assert.Single(search.Candidates);
+        await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, choice.CandidateToken, default);
+
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmAsync_IndependentStableRecordingIdentityAcceptsArtistEvidence(bool musicBrainz)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: true);
+        var recordingId = Guid.NewGuid().ToString();
+        scope.Entry.Track!.Isrc = musicBrainz ? null : "us-abc-24-00001";
+        scope.Entry.Track.MbidRecording = musicBrainz ? $" {recordingId.ToUpperInvariant()} " : null;
+        await scope.Db.SaveChangesAsync();
+        var candidate = new TrackMatchSearchCandidate {
+            CandidateSource = "spotify", ExternalId = "corroborated", Title = "Everything Goes On",
+            Artist = "Porter Robinson", Isrc = musicBrainz ? null : "USABC2400001",
+            MbidRecording = musicBrainz ? recordingId : null,
+            ArtistIdentities = [new ArtistCreditMetadata { Name = "Porter Robinson", Provider = "spotify",
+                ExternalId = "artist-one", ArtworkUrl = "https://images/artist-one" }] };
+
+        await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, scope.Token(candidate), default);
+
+        Assert.Equal("artist-one", (await scope.Db.ArtistProviderLinks.SingleAsync()).ExternalId);
+        Assert.Equal(scope.Entry.TrackId, (await scope.Db.TrackArtistCredits.SingleAsync()).TrackId);
+    }
+
     private static async Task PrepareManualPathAsync(Scope scope, string path)
     {
         if (path != "existing")
@@ -372,7 +430,7 @@ public sealed class PlaylistUnmatchedReviewTests
             {
                 Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "spotify", ExternalId = "new-destination"
             });
-        if (path == "isrc-reuse") track.Isrc = "USABC2400001";
+        if (path is "isrc-reuse" or "existing") track.Isrc = "USABC2400001";
     }
 
     private static PlaylistEntry AddUnresolvedReviewEntry(Scope scope)

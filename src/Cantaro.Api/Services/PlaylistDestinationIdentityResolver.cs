@@ -145,6 +145,13 @@ internal static class PlaylistDestinationIdentityResolver
         if (existing is not null && trackId is not null && existing.TrackId != trackId)
             return null;
 
+        // SourceIds came from the canonical snapshot before search and before
+        // this operation can insert a destination mapping. A new map must not
+        // turn the choice itself into corroborating recording evidence.
+        var canReconcileArtists = trackId is null
+            || track is not null && PlaylistArtistEvidenceGuard.CorroboratesRecording(track, top.Candidate,
+                track.SourceIds.SingleOrDefault(source => source.SourceType == service
+                    && source.ExternalId == top.Candidate.ExternalId));
         if (trackId is null)
         {
             if (exactObservation is null) return null;
@@ -178,7 +185,7 @@ internal static class PlaylistDestinationIdentityResolver
         }
 
         if (existing is not null && existing.TrackId != trackId) return null;
-        if (top.Candidate.ArtistIdentities.Count > 0)
+        if (canReconcileArtists && top.Candidate.ArtistIdentities.Count > 0)
         {
             var destinationTrack = await dbContext.Tracks.SingleAsync(t => t.Id == trackId.Value, cancellationToken);
             await new ArtistReconciliationService(dbContext).ReconcileAsync(destinationTrack,

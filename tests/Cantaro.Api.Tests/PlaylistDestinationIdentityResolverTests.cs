@@ -345,12 +345,13 @@ public sealed class PlaylistDestinationIdentityResolverTests
             var entry = await SeedCanonicalAsync(db);
             entryId = entry.Id;
             trackId = entry.TrackId!.Value;
+            entry.Track!.Isrc = "us-abc-24-00001";
             await new ArtistReconciliationService(db).ReconcileAsync(entry.Track!,
                 [new ArtistCreditMetadata { Name = "Artist" }], "observation", DateTimeOffset.UtcNow, default);
             await db.SaveChangesAsync();
             var artistId = (await db.Artists.SingleAsync()).Id;
             var candidate = new TrackMatchSearchCandidate {
-                CandidateSource = "spotify", ExternalId = "accepted", Title = "Song", Artist = "Artist",
+                CandidateSource = "spotify", ExternalId = "accepted", Title = "Song", Artist = "Artist", Isrc = "USABC2400001",
                 ArtistCredits = ["Artist"], DurationSeconds = 180,
                 ArtistIdentities = [new ArtistCreditMetadata { Name = "Artist", Provider = "spotify", ExternalId = "artist-id",
                     ProfileUrl = "https://open.spotify.com/artist/artist-id", ArtworkUrl = "https://images/artist",
@@ -383,6 +384,98 @@ public sealed class PlaylistDestinationIdentityResolverTests
         var credit = await restarted.TrackArtistCredits.SingleAsync();
         using var provenance = JsonDocument.Parse(credit.Provenance!);
         Assert.Equal("artist-id", provenance.RootElement.GetProperty("spotify").GetProperty("ExternalId").GetString());
+    }
+
+    [Theory]
+    [InlineData("empty", true)]
+    [InlineData("anonymous", true)]
+    [InlineData("stable", true)]
+    [InlineData("empty", false)]
+    [InlineData("anonymous", false)]
+    [InlineData("stable", false)]
+    public async Task ResolveAsync_DestinationOnlyChoicePreservesSharedArtistEvidence(
+        string credits, bool canonicalHasRecordingId)
+    {
+        await using var db = CreateDb();
+        var entry = await SeedCanonicalAsync(db);
+        entry.Track!.Isrc = canonicalHasRecordingId ? "USABC2400002" : null;
+        if (credits != "empty")
+            await new ArtistReconciliationService(db).ReconcileAsync(entry.Track,
+                [new ArtistCreditMetadata { Name = "Artist", Provider = credits == "stable" ? "spotify" : null,
+                    ExternalId = credits == "stable" ? "canonical-artist" : null }],
+                "observation", DateTimeOffset.UtcNow, default);
+        await db.SaveChangesAsync();
+        var before = await ArtistEvidenceSnapshot.ReadAsync(db);
+        var candidate = new TrackMatchSearchCandidate {
+            CandidateSource = "spotify", ExternalId = "destination-B", Title = "Song", Artist = "Artist",
+            ArtistCredits = ["Artist"], DurationSeconds = 180, Isrc = "USABC2400001",
+            ArtistIdentities = [new ArtistCreditMetadata { Name = "Artist", Provider = "spotify",
+                ExternalId = "different-artist", ArtworkUrl = "https://images/other-artist" }] };
+
+        Assert.Equal("destination-B", await ResolveCanonicalAsync(db, entry, "spotify",
+            (_, _) => Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([candidate])));
+
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(db));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_MappingInsertedDuringSearchDoesNotCorroborateItsOwnArtistEvidence()
+    {
+        await using var db = CreateDb();
+        var entry = await SeedCanonicalAsync(db);
+        var before = await ArtistEvidenceSnapshot.ReadAsync(db);
+        var candidate = new TrackMatchSearchCandidate {
+            CandidateSource = "spotify", ExternalId = "destination-B", Title = "Song", Artist = "Artist",
+            ArtistCredits = ["Artist"], DurationSeconds = 180,
+            ArtistIdentities = [new ArtistCreditMetadata { Name = "Artist", Provider = "spotify", ExternalId = "artist-B" }] };
+
+        Assert.Equal("destination-B", await ResolveCanonicalAsync(db, entry, "spotify", async (_, ct) =>
+        {
+            db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = entry.TrackId!.Value,
+                SourceType = "spotify", ExternalId = candidate.ExternalId });
+            await db.SaveChangesAsync(ct);
+            return [candidate];
+        }));
+
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(db));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_UnresolvedSourceAcceptsArtistsForNewOrEstablishedRecording(bool established)
+    {
+        await using var db = CreateDb();
+        var entry = await SeedUnresolvedAsync(db);
+        var track = new Track { Id = Guid.NewGuid() };
+        if (established)
+        {
+            db.Tracks.Add(track);
+            db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = track.Id,
+                SourceType = "spotify", ExternalId = "accepted" });
+            await db.SaveChangesAsync();
+        }
+        var candidate = new TrackMatchSearchCandidate {
+            CandidateSource = "spotify", ExternalId = "accepted", Title = "Song", Artist = "Artist",
+            ArtistCredits = ["Artist"], DurationSeconds = 180,
+            ArtistIdentities = [new ArtistCreditMetadata { Name = "Artist", Provider = "spotify", ExternalId = "artist-id" }] };
+        var reconciler = new PlaylistCanonicalReconciliationService(db);
+
+        Assert.Equal("accepted", await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
+            async (observationId, _, ct) =>
+            {
+                Assert.False(established);
+                db.Tracks.Add(track);
+                (await db.TrackObservations.SingleAsync(x => x.Id == observationId, ct)).TrackId = track.Id;
+                await db.SaveChangesAsync(ct);
+                return track.Id;
+            },
+            (observation, id, ct) => reconciler.ReconcileObservationAsync(observation, id, ct),
+            new PlatformAccountContext(42, 7), "spotify", entry,
+            (_, _) => Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([candidate]), default));
+
+        Assert.Equal("artist-id", (await db.ArtistProviderLinks.SingleAsync()).ExternalId);
+        Assert.Equal(track.Id, (await db.TrackArtistCredits.SingleAsync()).TrackId);
     }
 
     private static TrackMatchSearchCandidate Candidate(string id, string service,

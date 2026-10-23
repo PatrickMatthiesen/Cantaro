@@ -151,6 +151,11 @@ public sealed class PlaylistUnmatchedReviewService(
         if (sourceIdentity is not null && sourceIdentity.TrackId != entry.TrackId)
             throw StaleChoice();
 
+        // Capture this before unresolved-source materialization can add a mapping
+        // or copy the selected recording's identifiers onto a canonical track.
+        var canReconcileArtists = entry.TrackId is null
+            || entry.Track is { } canonicalTrack
+                && PlaylistArtistEvidenceGuard.CorroboratesRecording(canonicalTrack, proof.Candidate, existing);
         Guid trackId;
         if (entry.TrackId is { } knownTrackId)
         {
@@ -192,9 +197,8 @@ public sealed class PlaylistUnmatchedReviewService(
         }
         else throw StaleChoice();
 
-        // Confirmation accepts the artist evidence too, including when the
-        // recording already exists and no materialization callback runs.
-        if (proof.Candidate.ArtistIdentities.Count > 0)
+        // A destination choice alone cannot change shared canonical artists.
+        if (canReconcileArtists && proof.Candidate.ArtistIdentities.Count > 0)
         {
             var track = await db.Tracks.SingleAsync(item => item.Id == trackId, ct);
             await new ArtistReconciliationService(db).ReconcileAsync(track,
