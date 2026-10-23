@@ -138,8 +138,10 @@ internal static class PlaylistDestinationIdentityResolver
         var existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
             source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
             cancellationToken);
-        if (existing is not null && trackId is not null)
-            return existing.TrackId == trackId ? existing.ExternalId : null;
+        // Searching a destination for a known canonical entry does not establish
+        // global identity. The coordinator checkpoints this choice on its link.
+        if (trackId is not null)
+            return existing is null || existing.TrackId == trackId ? top.Candidate.ExternalId : null;
 
         if (trackId is null)
         {

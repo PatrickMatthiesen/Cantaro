@@ -16,9 +16,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         bool currentOccurrence, bool sourceObservation)
     {
         await using var scope = await Scope.CreateAsync("spotify");
-        // Keep the canonical entry and its metadata unchanged by subsequent provider reads.
-        if (sourceObservation) scope.Link.SyncMode = "from_cantaro";
-        else
+        if (!sourceObservation)
         {
             scope.Entry.TrackObservationId = null;
             scope.Entry.TrackObservation = null;
@@ -49,6 +47,39 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Single(writer.Writes); // the next pass must retain B without rewriting A
         Assert.Equal(0, provider.Searches);
         Assert.Equal(5, provider.Reads); // initial, pre-write, verification; then two unchanged reads
+    }
+
+    [Fact]
+    public async Task Confirmation_PreservesAnotherDuplicateEntriesOwnedObservation()
+    {
+        await using var scope = await Scope.CreateAsync("spotify");
+        scope.Playlist.AllowDuplicateTracks = true;
+        scope.Entry.TrackObservationId = null;
+        scope.Entry.TrackObservation = null;
+        await scope.Db.SaveChangesAsync();
+        await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, scope.Token(Candidate("chosen-id")), default);
+        var proof = PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)[scope.Entry.Id];
+        var observation = new TrackObservation { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId,
+            SourceType = "spotify", ExternalId = "alternative-a", Title = "Everything Goes On",
+            Artist = "Porter Robinson", DurationSeconds = 160, MatchStatus = TrackMatchingStatuses.Matched };
+        var duplicate = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
+            TrackId = scope.Entry.TrackId, TrackObservation = observation, TrackObservationId = observation.Id, Position = 1 };
+        scope.Db.AddRange(duplicate, new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
+            SourceType = "spotify", ExternalId = observation.ExternalId });
+        await scope.Db.SaveChangesAsync();
+        var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name) { RemoteIds = ["alternative-a"] };
+        var writer = new ReviewWriter(provider);
+        scope.Db.ChangeTracker.Clear();
+
+        await RunReviewSyncAsync(scope, provider, writer);
+        await AssertManualChoiceAsync(scope, proof);
+        Assert.Equal(observation.Id, (await scope.Db.PlaylistEntries.SingleAsync(item => item.Id == duplicate.Id)).TrackObservationId);
+        Assert.Equal(scope.Entry.TrackId, (await scope.Db.TrackObservations.SingleAsync(item => item.Id == observation.Id)).TrackId);
+        Assert.Equal(2, Assert.Single(writer.Writes).Length);
+        Assert.Contains("chosen-id", provider.RemoteIds);
+        Assert.Contains("alternative-a", provider.RemoteIds);
+        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.ExternalId == "chosen-id"));
     }
 
     [Fact]
@@ -140,7 +171,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             case "conflict":
                 var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Other recording" };
                 scope.Db.Tracks.Add(other);
-                (await scope.Db.TrackSourceIds.SingleAsync()).TrackId = other.Id;
+                scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
+                    SourceType = "spotify", ExternalId = "chosen-id" });
                 break;
         }
         await AddOwnedAlternativeAsync(scope, "alternative-a");
@@ -170,7 +202,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
         Assert.Equal(["alternative-a"], provider.RemoteIds);
         Assert.Empty(writer.Writes);
-        Assert.Empty(PlaylistMatchingProgress.Read((await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson));
+        var replacement = Assert.Single(PlaylistMatchingProgress.Read((await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson)).Value;
+        Assert.Equal("alternative-a", replacement.ExternalId);
+        Assert.False(replacement.ManualConfirmation);
         Assert.Equal(0, provider.Searches);
     }
 
@@ -191,7 +225,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
     {
         var link = await scope.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync();
         Assert.Equal("success", link.LastSyncStatus);
-        Assert.Equal(expected, Assert.Single(PlaylistMatchingProgress.Read(link.MatchingProgressJson)).Value);
+        Assert.Equal(expected, Assert.Single(PlaylistMatchingProgress.Read(link.MatchingProgressJson),
+            item => item.Value.ManualConfirmation).Value);
         Assert.True(expected.ManualConfirmation);
     }
 }

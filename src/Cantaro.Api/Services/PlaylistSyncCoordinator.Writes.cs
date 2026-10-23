@@ -109,9 +109,9 @@ public sealed partial class PlaylistSyncCoordinator
         var progress = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
         var entryIds = entries.Select(entry => entry.Id).ToHashSet();
         foreach (var obsolete in progress.Keys.Where(id => !entryIds.Contains(id)).ToList()) progress.Remove(obsolete);
-        // A manual choice does not depend on unrelated global mappings, but a
-        // reassignment of its selected provider key remains an identity conflict.
-        foreach (var saved in progress.Where(item => item.Value.ManualConfirmation).ToArray())
+        // A selected provider key assigned to another canonical track invalidates
+        // the scoped choice, whether it came from search or manual confirmation.
+        foreach (var saved in progress.ToArray())
         {
             var trackId = entries.Single(entry => entry.Id == saved.Key).TrackId;
             if (await db.TrackSourceIds.AsNoTracking().AnyAsync(source => source.SourceType == link.Service
@@ -143,7 +143,7 @@ public sealed partial class PlaylistSyncCoordinator
                 // A different ID's occurrence belongs to a later duplicate entry.
                 // Consume a matching occurrence when the manual choice is already present.
                 var occurrence = available.FirstOrDefault(item => item.Identity == identity
-                    && item.ObservationId == entry.TrackObservationId
+                    && entry.TrackObservationId is { } observationId && item.ObservationId == observationId
                     && (!manualChoice || item.ExternalId == confirmedId))
                     ?? available.FirstOrDefault(item => item.Identity == identity
                         && (!manualChoice || item.ExternalId == confirmedId));
@@ -181,7 +181,7 @@ public sealed partial class PlaylistSyncCoordinator
             if (resolvedEntry is not null)
             {
                 // Keep the durable manual choice, including its metadata binding. Search
-                // checkpoints are replaced as usual and discarded after a completed pass.
+                // checkpoints retain successful destination choices on this link.
                 if (!progress.TryGetValue(entry.Id, out var confirmed) || !confirmed.ManualConfirmation
                     || !PlaylistMatchingProgress.CanReuse(confirmed, resolvedEntry, link)
                     || confirmed.ExternalId != id)
@@ -249,7 +249,8 @@ public sealed partial class PlaylistSyncCoordinator
         link.PendingWriteJson = null;
         link.BaselineName = verified.Name;
         link.BaselineJson = new PlaylistSyncBaseline(
-            await NormalizeIdentitiesAsync(KnownTracks(verified).Select(item => PlaylistSyncItem.From(item, link.Service)), ct),
+            await BindDestinationChoicesAsync(link, read.Account,
+                await NormalizeIdentitiesAsync(KnownTracks(verified).Select(item => PlaylistSyncItem.From(item, link.Service)), ct), ct),
             verified.Revision).Serialize();
         link.CanonicalRevision = playlist.SyncRevision;
         link.UnresolvedCount = unresolved;
@@ -259,7 +260,7 @@ public sealed partial class PlaylistSyncCoordinator
         link.AttemptCount = 0;
         link.LastError = null;
         link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(progress
-            .Where(item => item.Value.ManualConfirmation).ToDictionary());
+            .Where(item => item.Value.ExternalId is not null).ToDictionary());
         link.MatchingProcessedCount = 0;
         link.MatchingTotalCount = 0;
     }

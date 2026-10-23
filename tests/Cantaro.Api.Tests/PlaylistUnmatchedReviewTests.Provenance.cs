@@ -103,7 +103,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, default);
         // A retried HTTP confirmation must not create duplicate identities or proof.
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, default);
-        Assert.Single(await scope.Db.TrackSourceIds.ToListAsync(), source => source.SourceType == "spotify");
+        Assert.Equal(canonical == "existing" ? 0 : 1,
+            await scope.Db.TrackSourceIds.CountAsync(source => source.SourceType == "spotify"));
         var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name);
         var writer = new ReviewWriter(provider);
         scope.Db.ChangeTracker.Clear();
@@ -178,7 +179,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             case "selected-identity-conflict":
                 var conflicting = new Track { Id = Guid.NewGuid(), SearchTitle = "Other" };
                 scope.Db.Tracks.Add(conflicting);
-                (await scope.Db.TrackSourceIds.SingleAsync()).TrackId = conflicting.Id;
+                scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflicting.Id,
+                    SourceType = "spotify", ExternalId = "chosen-id" });
                 break;
         }
         await scope.Db.SaveChangesAsync();
@@ -423,9 +425,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         public Task DelayAsync(TimeSpan delay, CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class ReviewResolverProvider(ApplicationDbContext db, string name) : IPlaylistSyncProvider
+    private sealed class ReviewResolverProvider(ApplicationDbContext db, string name, string service = "spotify") : IPlaylistSyncProvider
     {
-        public string PlatformId => "spotify";
+        public string PlatformId => service;
         public int Searches { get; private set; }
         public bool PauseSearch { get; init; }
         public TaskCompletionSource SearchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -444,7 +446,16 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 var id = RemoteIds[i];
                 var trackId = await db.TrackSourceIds.Where(s => s.SourceType == PlatformId && s.ExternalId == id)
                     .Select(s => (Guid?)s.TrackId).SingleOrDefaultAsync(ct);
-                items.Add(new PlaylistRemoteTrack(id, trackId, null, id, i));
+                var observation = await db.TrackObservations.SingleOrDefaultAsync(item =>
+                    item.SourceType == PlatformId && item.ExternalId == id, ct);
+                if (observation is null && trackId is null)
+                {
+                    observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = PlatformId,
+                        ExternalId = id, Title = id, Artist = "Provider artist", MatchStatus = TrackMatchingStatuses.Pending };
+                    db.TrackObservations.Add(observation);
+                    await db.SaveChangesAsync(ct);
+                }
+                items.Add(new PlaylistRemoteTrack(id, trackId ?? observation?.TrackId, observation?.Id, id, i));
             }
             return new PlaylistRemoteSnapshot(playlistId, name, items, "test");
         }
@@ -472,7 +483,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
     private sealed class ReviewWriter(ReviewResolverProvider provider) : IPlaylistWriter
     {
-        public string PlatformId => "spotify";
+        public string PlatformId => provider.PlatformId;
         public List<string[]> Writes { get; } = [];
         public Task ValidateCreationAsync(PlatformAccountContext account, CancellationToken ct) => Task.CompletedTask;
         public Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken ct) => Task.FromResult("created");

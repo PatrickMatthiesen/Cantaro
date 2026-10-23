@@ -148,8 +148,10 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Equal(otherTrackId, (await db.TrackSourceIds.SingleAsync()).TrackId);
     }
 
-    [Fact]
-    public async Task ResolveAsync_FreshSearchMayConfirmAnExistingGlobalIdentity()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveAsync_LocallyResolvedSourceDoesNotGlobalizeNewDestination(bool existingDestination)
     {
         await using var db = CreateDb();
         var known = await SeedCanonicalAsync(db);
@@ -167,6 +169,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
         var reconciler = new PlaylistCanonicalReconciliationService(db);
 
         var searches = 0;
+        var destination = existingDestination ? "existing-song" : "new-song";
         var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
             (_, _, _) => throw new InvalidOperationException("Must reuse the canonical song."),
             (observation, track, ct) => reconciler.ReconcileObservationAsync(observation, track, ct),
@@ -174,14 +177,15 @@ public sealed class PlaylistDestinationIdentityResolverTests
             (_, _) =>
             {
                 searches++;
-                return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([Candidate("existing-song", "spotify")]);
+                return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([Candidate(destination, "spotify")]);
             }, CancellationToken.None);
 
-        Assert.Equal("existing-song", result);
+        Assert.Equal(destination, result);
         Assert.Equal(1, searches);
         Assert.Equal(known.TrackId, source.TrackId);
         Assert.Contains(await db.TrackSourceIds.ToListAsync(), item => item.SourceType == "youtube"
             && item.ExternalId == "another-video" && item.TrackId == known.TrackId);
+        Assert.False(await db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "new-song"));
     }
 
     [Fact]
@@ -266,7 +270,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
     [Theory]
     [InlineData("spotify", "youtube")]
     [InlineData("youtube", "spotify")]
-    public async Task ResolveAsync_SearchesMissingProviderBeforeEachGlobalIdentityReuse(string destination, string source)
+    public async Task ResolveAsync_KnownCanonicalDestinationSearchDoesNotAssertGlobalIdentity(string destination, string source)
     {
         await using var db = CreateDb();
         var entry = await SeedCanonicalAsync(db);
@@ -284,7 +288,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Equal("found", await ResolveCanonicalAsync(db, entry, destination, Search));
         Assert.Equal("found", await ResolveCanonicalAsync(db, entry, destination, Search));
         Assert.Equal(2, searches);
-        Assert.Equal(entry.TrackId, (await db.TrackSourceIds.SingleAsync()).TrackId);
+        Assert.Empty(await db.TrackSourceIds.ToListAsync());
     }
 
     [Fact]
@@ -340,7 +344,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
             (_, _) => Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([first, second]));
 
         Assert.Equal(expected, actual);
-        Assert.Equal(expected is null ? 0 : 1, await db.TrackSourceIds.CountAsync());
+        Assert.Empty(await db.TrackSourceIds.ToListAsync());
     }
 
     [Fact]

@@ -53,9 +53,15 @@ public sealed class PlaylistSyncDestinationProvenanceTests
         Assert.Equal(["safe-result"], Assert.Single(scenario.Writer.Writes));
         Assert.DoesNotContain(Scenario.PrivateId, scenario.Writer.Writes.SelectMany(ids => ids));
         Assert.Equal("success", scenario.Mapping.LastSyncStatus);
-        Assert.Contains(await scenario.Db.TrackSourceIds.ToListAsync(), source =>
-            source.TrackId == scenario.RelatedTrack.Id && source.SourceType == "spotify"
-            && source.ExternalId == "safe-result");
+        Assert.False(await scenario.Db.TrackSourceIds.AnyAsync(source => source.SourceType == "spotify"
+            && source.ExternalId == "safe-result"));
+        Assert.Equal("safe-result", Assert.Single(PlaylistMatchingProgress.Read(scenario.Mapping.MatchingProgressJson)).Value.ExternalId);
+        scenario.Provider.SearchResults = [];
+        scenario.Db.ChangeTracker.Clear();
+        await scenario.Coordinator.RunAsync(Scenario.RequesterId, scenario.SyncPlaylist.Id, "spotify", default);
+        Assert.Single(scenario.Writer.Writes);
+        Assert.Equal(1, scenario.Provider.SearchCount);
+        Assert.Equal(1, await scenario.Db.PlaylistEntries.CountAsync(entry => entry.PlaylistId == scenario.SyncPlaylist.Id));
     }
 
     [Fact]
@@ -263,6 +269,14 @@ public sealed class PlaylistSyncDestinationProvenanceTests
                 var trackId = observation?.TrackId ?? await db.TrackSourceIds.AsNoTracking()
                     .Where(item => item.SourceType == PlatformId && item.ExternalId == externalId)
                     .Select(item => (Guid?)item.TrackId).SingleOrDefaultAsync(cancellationToken);
+                if (observation is null && trackId is null)
+                {
+                    observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = PlatformId,
+                        ExternalId = externalId, Title = "Song", Artist = "Artist",
+                        MatchStatus = TrackMatchingStatuses.Pending };
+                    db.TrackObservations.Add(observation);
+                    await db.SaveChangesAsync(cancellationToken);
+                }
                 tracks.Add(new PlaylistRemoteTrack(externalId, trackId, observation?.Id, externalId, index));
             }
             return new PlaylistRemoteSnapshot(playlistId, "Synced", tracks, $"revision-{RemoteIds.Count}");

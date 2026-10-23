@@ -160,6 +160,14 @@ public sealed class PlaylistUnmatchedReviewService(
             || string.IsNullOrWhiteSpace(proof.Candidate.Title))
             throw StaleChoice();
 
+        // Keep canonical identity conflicts independent of destination eligibility,
+        // including retries whose scoped confirmation is already persisted.
+        var existing = await db.TrackSourceIds.SingleOrDefaultAsync(source =>
+            source.SourceType == link.Service && source.ExternalId == proof.Candidate.ExternalId, ct);
+        if (existing is not null && entry.TrackId is { } currentTrackId && existing.TrackId != currentTrackId)
+            throw new PlatformApiException("recording_already_linked",
+                "That recording is already linked to a different Cantaro track.", 409);
+
         var progress = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
         if (progress.TryGetValue(entry.Id, out var confirmed) && confirmed.ManualConfirmation
             && PlaylistMatchingProgress.CanReuse(confirmed, entry, link)
@@ -169,13 +177,6 @@ public sealed class PlaylistUnmatchedReviewService(
         if (await HasDestinationIdentityAsync(entry, link, ct))
             throw new PlatformApiException("unmatched_entry_not_found", "That playlist entry no longer needs a match.", 404);
 
-        // The same provider ID must never be reassigned from a different canonical
-        // track. A user may attach an unresolved observation to its existing track.
-        var existing = await db.TrackSourceIds.SingleOrDefaultAsync(source =>
-            source.SourceType == link.Service && source.ExternalId == proof.Candidate.ExternalId, ct);
-        if (existing is not null && entry.TrackId is { } currentTrackId && existing.TrackId != currentTrackId)
-            throw new PlatformApiException("recording_already_linked",
-                "That recording is already linked to a different Cantaro track.", 409);
         var sourceIdentity = entry.TrackObservation is { } savedObservation
             ? await db.TrackSourceIds.AsNoTracking().SingleOrDefaultAsync(source =>
                 source.SourceType == savedObservation.SourceType
@@ -219,28 +220,13 @@ public sealed class PlaylistUnmatchedReviewService(
                 var resolved = await matching.CreateTrackFromMatchAsync(observation.Id, proof.Candidate,
                     ct, manualReview: true);
                 trackId = resolved.TrackId ?? throw new InvalidOperationException("The recording was not created.");
-                existing = await db.TrackSourceIds.SingleOrDefaultAsync(source =>
-                    source.SourceType == link.Service && source.ExternalId == proof.Candidate.ExternalId, ct);
             }
         }
         else throw StaleChoice();
 
-        if (existing is null)
-        {
-            db.TrackSourceIds.Add(new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = trackId,
-                SourceType = link.Service, ExternalId = proof.Candidate.ExternalId,
-                LastVerifiedAt = DateTimeOffset.UtcNow,
-                OriginMetadata = JsonSerializer.Serialize(new
-                {
-                    method = "playlist_manual_review",
-                    title = proof.Candidate.Title,
-                    artist = proof.Candidate.Artist,
-                    durationSeconds = proof.Candidate.DurationSeconds
-                })
-            });
-        }
+        // An existing canonical entry needs a destination choice, not a new
+        // global identity assertion. Unresolved-source materialization above
+        // owns its canonical mappings; this choice is authorized by scoped proof.
         await db.SaveChangesAsync(ct);
         // Reconciliation can replace the original entry with an existing canonical
         // entry. Authorize only the survivor in this requester's playlist and link.

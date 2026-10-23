@@ -93,11 +93,12 @@ public sealed partial class PlaylistSyncCoordinator(
 
     private async Task RunCoreAsync(Playlist playlist, string? service, bool readOnly, CancellationToken ct)
     {
-        var links = await db.ServicePlaylistMappings.Where(link => link.PlaylistId == playlist.Id
+        var links = await db.ServicePlaylistMappings.Include(link => link.ConnectedServiceAccount).Where(link => link.PlaylistId == playlist.Id
             && link.State == "active" && (service == null || link.Service == service)).OrderBy(link => link.Service).ToListAsync(ct);
         if (links.Any(link => IsProviderCooldown(link.LastSyncStatus) && link.NextAttemptAt > clock.GetUtcNow()))
             return;
         var reads = new List<LinkRead>();
+        var confirmedEntries = new HashSet<Guid>();
         foreach (var link in links)
         {
             var previousStatus = link.LastSyncStatus;
@@ -109,6 +110,7 @@ public sealed partial class PlaylistSyncCoordinator(
                 var snapshot = await Provider(link.Service).ReadAsync(account, link.ServicePlaylistId, ct);
                 RequireComplete(snapshot);
                 var incoming = await NormalizeIdentitiesAsync(KnownTracks(snapshot).Select(item => PlaylistSyncItem.From(item, link.Service)), ct);
+                incoming = await BindDestinationChoicesAsync(link, account, incoming, ct, confirmedEntries);
                 var baseline = PlaylistSyncBaseline.Parse(link.BaselineJson);
                 var previous = baseline is null ? null : await NormalizeIdentitiesAsync(baseline.Items, ct);
                 if (PlaylistSyncBaseline.Parse(link.PendingWriteJson) is { } interruptedWrite)
@@ -162,7 +164,7 @@ public sealed partial class PlaylistSyncCoordinator(
         }
         await PersistAtomicallyAsync(async () =>
         {
-            await SaveItemsAsync(playlist, current, ct);
+            await SaveItemsAsync(playlist, current, ct, confirmedEntries);
             foreach (var read in reads)
             {
                 // Persist accepted reads with canonical changes. An interrupted write restarts from this exact observed subset.

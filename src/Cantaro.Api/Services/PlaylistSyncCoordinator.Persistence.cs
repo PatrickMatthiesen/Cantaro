@@ -116,6 +116,33 @@ public sealed partial class PlaylistSyncCoordinator
         return await NormalizeIdentitiesAsync(entries.Select(PlaylistSyncItem.From), ct);
     }
 
+    private async Task<List<PlaylistSyncItem>> BindDestinationChoicesAsync(ServicePlaylistMapping link,
+        PlatformAccountContext account, List<PlaylistSyncItem> incoming, CancellationToken ct,
+        HashSet<Guid>? confirmedEntries = null)
+    {
+        if (string.IsNullOrEmpty(link.MatchingProgressJson)) return incoming;
+        var entries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == link.PlaylistId)
+            .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
+            .Include(item => item.TrackObservation).OrderBy(item => item.Position).ToListAsync(ct);
+        var saved = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
+        var authorized = await PlaylistDestinationIdentityEvidence.FindManyAsync(db, account, link.Service, entries, link, ct);
+        var eligible = entries.Where(entry => entry.TrackId is not null
+                && saved.TryGetValue(entry.Id, out var proof) && PlaylistMatchingProgress.CanReuse(proof, entry, link)
+                && proof.ExternalId is not null && authorized.GetValueOrDefault(entry.Id) == proof.ExternalId)
+            .ToArray();
+        var choices = eligible.GroupBy(entry => saved[entry.Id].ExternalId!)
+            .ToDictionary(group => group.Key, group => new Queue<PlaylistEntry>(group), StringComparer.Ordinal);
+        foreach (var entry in eligible.Where(entry => saved[entry.Id].ManualConfirmation))
+            confirmedEntries?.Add(entry.Id);
+        // Bind only this playlist's observed destination occurrences. Keep the
+        // entry's original observation, and never change the shared observation
+        // or global identity of the destination recording.
+        return incoming.Select(item => item.ExternalId is { } id
+                && choices.TryGetValue(id, out var queue) && queue.TryDequeue(out var entry)
+            ? PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service }
+            : item).ToList();
+    }
+
     private async Task<List<PlaylistSyncItem>> NormalizeIdentitiesAsync(IEnumerable<PlaylistSyncItem> source, CancellationToken ct)
     {
         var items = source.ToList();
@@ -127,7 +154,8 @@ public sealed partial class PlaylistSyncCoordinator
             : item).ToList();
     }
 
-    private async Task SaveItemsAsync(Playlist playlist, IReadOnlyList<PlaylistSyncItem> target, CancellationToken ct)
+    private async Task SaveItemsAsync(Playlist playlist, IReadOnlyList<PlaylistSyncItem> target, CancellationToken ct,
+        IReadOnlySet<Guid>? confirmedEntries = null)
     {
         var normalized = PlaylistSyncMerge.Normalize(target, playlist.AllowDuplicateTracks);
         var previous = await ReadItemsAsync(playlist.Id, ct);
@@ -158,6 +186,10 @@ public sealed partial class PlaylistSyncCoordinator
             var item = normalized[index];
             var entry = retained[index];
             if (entry is null) continue;
+            // Reading another occurrence of this canonical track must not replace
+            // the original source evidence bound to this entry's manual choice.
+            if (entry.TrackId == item.TrackId && confirmedEntries?.Contains(entry.Id) == true)
+                normalized[index] = item = item with { ObservationId = entry.TrackObservationId };
             positionsChanged |= entry.Position != index;
             changed |= entry.Position != index || entry.TrackId != item.TrackId
                 || entry.TrackObservationId != item.ObservationId;

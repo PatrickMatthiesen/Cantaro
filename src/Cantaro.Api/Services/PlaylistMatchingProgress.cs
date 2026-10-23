@@ -5,8 +5,8 @@ using Cantaro.Api.Models;
 
 namespace Cantaro.Api.Services;
 
-// Search checkpoints last for one unfinished pass. Explicit confirmations remain on
-// the link after success, until the entry, its metadata, or the account binding changes.
+// Successful destination choices remain scoped to the link after export, until
+// the entry, its metadata, or the account binding changes. Manual choices take priority.
 internal sealed record PlaylistMatchingResult(string Fingerprint, string? ExternalId, int ProofVersion = 0,
     PlaylistMatchingScope? Scope = null, bool ManualConfirmation = false);
 

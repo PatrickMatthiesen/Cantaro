@@ -183,7 +183,9 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         Assert.Equal(evidenceChanged ? ["A", "B", "A", "B", "C"] : ["A", "B", "B", "C"], calls);
         Assert.Equal(["B", "C"], scenario.Provider("spotify").Items);
         Assert.Equal("partial", scenario.Mapping("spotify").LastSyncStatus);
-        Assert.Null(scenario.Mapping("spotify").MatchingProgressJson);
+        Assert.Equal(scenario.Provider("spotify").Items,
+            PlaylistMatchingProgress.Read(scenario.Mapping("spotify").MatchingProgressJson).Values
+                .Select(item => item.ExternalId).ToArray());
         Assert.Equal(["A", "B", "C"], await scenario.CanonicalIdsAsync());
     }
 
@@ -298,7 +300,9 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         Assert.Equal(titles, calls);
         Assert.Equal(titles, scenario.Provider("spotify").Items);
         Assert.Equal("success", scenario.Mapping("spotify").LastSyncStatus);
-        Assert.Null(scenario.Mapping("spotify").MatchingProgressJson);
+        Assert.Equal(scenario.Provider("spotify").Items,
+            PlaylistMatchingProgress.Read(scenario.Mapping("spotify").MatchingProgressJson).Values
+                .Select(item => item.ExternalId).ToArray());
     }
 
     [Theory]

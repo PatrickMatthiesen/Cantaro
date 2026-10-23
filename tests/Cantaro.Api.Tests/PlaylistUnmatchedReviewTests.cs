@@ -177,7 +177,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
     }
 
     [Fact]
-    public async Task ConfirmAsync_SavesIdentityWithoutWritingProviderPlaylist()
+    public async Task ConfirmAsync_SavesScopedChoiceWithoutChangingGlobalIdentity()
     {
         await using var scope = await Scope.CreateAsync("spotify");
         var token = scope.Token(Candidate("new-destination"));
@@ -185,10 +185,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id,
             scope.Link.Id, scope.Entry.Id, token, CancellationToken.None);
 
-        var mapping = await scope.Db.TrackSourceIds.SingleAsync();
-        Assert.Equal(scope.Entry.TrackId, mapping.TrackId);
-        Assert.Equal("new-destination", mapping.ExternalId);
-        Assert.Contains("playlist_manual_review", mapping.OriginMetadata);
+        Assert.Empty(await scope.Db.TrackSourceIds.ToListAsync());
+        var saved = Assert.Single(PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)).Value;
+        Assert.Equal("new-destination", saved.ExternalId);
+        Assert.True(saved.ManualConfirmation);
+        Assert.True(PlaylistMatchingProgress.CanReuse(saved, scope.Entry, scope.Link));
         Assert.Empty(await scope.Review.ListAsync(scope.UserId,
             scope.Playlist.Id, scope.Link.Id, CancellationToken.None));
     }
@@ -338,7 +339,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         }
     }
 
-    private sealed class Scope : IAsyncDisposable
+    private sealed partial class Scope : IAsyncDisposable
     {
         private readonly IDataProtectionProvider _protector = new EphemeralDataProtectionProvider();
         private readonly SqliteConnection? _connection;

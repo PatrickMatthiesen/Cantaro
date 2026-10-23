@@ -297,8 +297,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
             InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
             var db = eventData.Context!;
-            if (db.ChangeTracker.Entries<TrackSourceId>().Any(entry => entry.State == EntityState.Added
-                && entry.Entity.ExternalId == "chosen-id"))
+            if (db.ChangeTracker.Entries<ServicePlaylistMapping>().Any(entry => entry.State == EntityState.Modified
+                && PlaylistMatchingProgress.Read(entry.Entity.MatchingProgressJson).Values.Any(proof =>
+                    proof.ManualConfirmation && proof.ExternalId == "chosen-id")))
             {
                 Isolation = db.Database.CurrentTransaction!.GetDbTransaction().IsolationLevel;
                 Started.TrySetResult();
