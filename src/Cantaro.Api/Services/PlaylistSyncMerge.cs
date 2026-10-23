@@ -23,7 +23,7 @@ public sealed record PlaylistSyncItem(Guid? TrackId, Guid? ObservationId, string
         entry.TrackId, entry.TrackObservationId, entry.TrackObservation?.ExternalId,
         entry.TrackObservation?.SourceType ?? entry.SourceService);
     public static PlaylistSyncItem From(PlaylistRemoteTrack track, string service) => new(
-        track.TrackId, track.ObservationId, track.ExternalId, service);
+        track.TrackId, track.ObservationId, track.ExternalId, service, track.DestinationBinding);
 }
 
 public sealed record PlaylistSyncBaseline(List<PlaylistSyncItem> Items, string? ProviderRevision = null)

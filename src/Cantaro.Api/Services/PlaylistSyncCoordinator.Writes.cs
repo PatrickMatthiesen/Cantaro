@@ -50,6 +50,7 @@ public sealed partial class PlaylistSyncCoordinator
             {
                 db.ServicePlaylistMappings.Add(link);
                 await db.SaveChangesAsync(ct); // reserve before the non-idempotent provider POST
+                await db.Entry(link).Reference(item => item.ConnectedServiceAccount).LoadAsync(ct);
                 try { await writer.ValidateCreationAsync(context, ct); }
                 catch { link.State = "creation_failed"; throw; }
                 var pendingId = link.ServicePlaylistId;

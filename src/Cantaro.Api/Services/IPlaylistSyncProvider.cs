@@ -8,7 +8,8 @@ public sealed record PlaylistRemoteTrack(
     Guid? ObservationId,
     string Title,
     int Position,
-    bool IsAvailable = true);
+    bool IsAvailable = true,
+    PlaylistDestinationBinding? DestinationBinding = null);
 
 public sealed record PlaylistRemoteSnapshot(
     string Id,

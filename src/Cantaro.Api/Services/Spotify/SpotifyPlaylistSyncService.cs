@@ -32,12 +32,13 @@ public sealed class SpotifyPlaylistSyncService(
                 candidate => candidate.Service == SpotifyService.ServiceName
                     && candidate.ConnectedServiceAccountId == account.ConnectedServiceAccountId
                     && candidate.ServicePlaylistId == spotifyPlaylistId
-                    && candidate.SyncMode == "from_cantaro",
+                    && (candidate.SyncMode == "from_cantaro" || candidate.BaselineJson != null
+                        || candidate.PendingWriteJson != null || candidate.MatchingProgressJson != null),
                 cancellationToken))
         {
             throw new PlatformApiException(
                 "outbound_mapping",
-                "This playlist is an outbound destination. Sync it from the Cantaro playlist.",
+                "Sync this linked playlist from the Cantaro playlist.",
                 StatusCodes.Status409Conflict);
         }
 
@@ -62,11 +63,12 @@ public sealed class SpotifyPlaylistSyncService(
                             && candidate.ServicePlaylistId == spotifyPlaylistId,
                         cancellationToken);
 
-                if (mapping?.SyncMode == "from_cantaro")
+                if (mapping is not null && (mapping.SyncMode == "from_cantaro" || mapping.BaselineJson is not null
+                    || mapping.PendingWriteJson is not null || mapping.MatchingProgressJson is not null))
                 {
                     throw new PlatformApiException(
                         "outbound_mapping",
-                        "This playlist is an outbound destination. Sync it from the Cantaro playlist.",
+                        "Sync this linked playlist from the Cantaro playlist.",
                         StatusCodes.Status409Conflict);
                 }
 

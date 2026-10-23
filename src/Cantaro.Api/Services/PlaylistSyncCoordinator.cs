@@ -63,11 +63,14 @@ public sealed partial class PlaylistSyncCoordinator(
         {
             if (initialMode is not ("combine" or "platform" or "cantaro"))
                 throw new PlatformApiException("invalid_initial_mode", "Choose how to initialize this playlist link.", 400);
-            var link = await db.ServicePlaylistMappings.SingleAsync(item => item.Id == mappingId && item.PlaylistId == playlistId, token);
+            var link = await db.ServicePlaylistMappings.Include(item => item.ConnectedServiceAccount)
+                .SingleAsync(item => item.Id == mappingId && item.PlaylistId == playlistId, token);
             var account = await RequireAccountAsync(playlist, link, token);
             var remote = await Provider(link.Service).ReadAsync(account, link.ServicePlaylistId, token);
             RequireComplete(remote);
+            var confirmedEntries = new HashSet<Guid>();
             var incoming = await NormalizeIdentitiesAsync(KnownTracks(remote).Select(item => PlaylistSyncItem.From(item, link.Service)), token);
+            incoming = await BindDestinationChoicesAsync(link, account, incoming, token, confirmedEntries);
             var current = await ReadItemsAsync(playlistId, token);
             var target = initialMode switch
             {
@@ -77,7 +80,7 @@ public sealed partial class PlaylistSyncCoordinator(
             };
             await PersistAtomicallyAsync(async () =>
             {
-                await SaveItemsAsync(playlist, target, token);
+                await SaveItemsAsync(playlist, target, token, confirmedEntries);
                 link.BaselineJson = new PlaylistSyncBaseline(incoming, remote.Revision).Serialize();
                 link.BaselineName = remote.Name;
                 link.InitialMode = null;

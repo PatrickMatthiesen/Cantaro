@@ -67,10 +67,11 @@ public class YouTubePlaylistSyncService
                 mapping => mapping.ConnectedServiceAccountId == account.ConnectedServiceAccountId
                     && mapping.Service == ServiceName
                     && mapping.ServicePlaylistId == youtubePlaylistId
-                    && mapping.SyncMode == "from_cantaro",
+                    && (mapping.SyncMode == "from_cantaro" || mapping.BaselineJson != null
+                        || mapping.PendingWriteJson != null || mapping.MatchingProgressJson != null),
                 cancellationToken))
             throw new PlatformApiException("outbound_mapping",
-                "This playlist is an outbound destination. Sync it from the Cantaro playlist.", 409);
+                "Sync this linked playlist from the Cantaro playlist.", 409);
 
         _logger.LogInformation("Starting sync of YouTube playlist {PlaylistId} for user {UserId} account {AccountId}", youtubePlaylistId, account.UserId, account.ConnectedServiceAccountId);
 
@@ -101,9 +102,10 @@ public class YouTubePlaylistSyncService
                             && m.ServicePlaylistId == youtubePlaylistId,
                         cancellationToken);
 
-                if (existingMapping?.SyncMode == "from_cantaro")
+                if (existingMapping is not null && (existingMapping.SyncMode == "from_cantaro" || existingMapping.BaselineJson is not null
+                    || existingMapping.PendingWriteJson is not null || existingMapping.MatchingProgressJson is not null))
                     throw new PlatformApiException("outbound_mapping",
-                        "This playlist is an outbound destination. Sync it from the Cantaro playlist.", 409);
+                        "Sync this linked playlist from the Cantaro playlist.", 409);
 
                 Playlist playlist;
 

@@ -34,11 +34,19 @@ public sealed class SpotifyPlaylistSyncProvider(
     {
         var validated = await GetValidatedAccountAsync(account, cancellationToken);
         var raw = await apiClient.GetPlaylistSyncReadSnapshotAsync(validated.AccessToken, playlistId, cancellationToken);
+        var bound = await PlaylistDestinationReadBindings.BindReadAsync(dbContext, account, PlatformId, playlistId,
+            raw.Items.Select(item => new PlaylistRemoteTrack(item.Track?.Id ?? $"!unavailable:{item.Position}",
+                null, null, item.Track?.Name ?? "Unavailable Spotify item", item.Position)).ToArray(), cancellationToken);
         var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
         var cache = new Dictionary<string, (Guid TrackId, Guid ObservationId)>(StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
         foreach (var item in raw.Items)
         {
+            if (bound[item.Position].DestinationBinding is not null)
+            {
+                tracks.Add(bound[item.Position]);
+                continue;
+            }
             if (item.Track is not { } snapshot)
             {
                 tracks.Add(new PlaylistRemoteTrack($"!unavailable:{item.Position}", null, null,

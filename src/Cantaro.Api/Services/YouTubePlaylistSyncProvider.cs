@@ -26,6 +26,9 @@ public sealed class YouTubePlaylistSyncProvider(
         PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
     {
         var raw = await youtubeService.GetSyncReadSnapshotAsync(account, playlistId, cancellationToken);
+        var bound = await PlaylistDestinationReadBindings.BindReadAsync(dbContext, account, PlatformId, playlistId,
+            raw.Items.Select(item => new PlaylistRemoteTrack(item.ExternalId, null, null, item.Title,
+                item.Position, item.IsAvailable)).ToArray(), cancellationToken);
         var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
         var cache = new Dictionary<string, TrackObservation>(StringComparer.Ordinal);
         var unavailableIdentityCache = new Dictionary<string, (Guid? TrackId, Guid? ObservationId)>(StringComparer.Ordinal);
@@ -33,6 +36,11 @@ public sealed class YouTubePlaylistSyncProvider(
         var now = DateTimeOffset.UtcNow;
         foreach (var item in raw.Items)
         {
+            if (bound[item.Position].DestinationBinding is not null)
+            {
+                tracks.Add(bound[item.Position]);
+                continue;
+            }
             if (!item.IsAvailable)
             {
                 var existing = unavailableIdentityCache.GetValueOrDefault(item.ExternalId);
