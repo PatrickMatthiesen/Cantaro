@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Cantaro.Api.Tests;
 
-public sealed class PlaylistUnmatchedReviewTests
+public sealed partial class PlaylistUnmatchedReviewTests
 {
     [Fact]
     public void AcceptedExpandedCatalogCreditsDoNotShowAConflictWarning()
@@ -103,11 +103,8 @@ public sealed class PlaylistUnmatchedReviewTests
     {
         await using var scope = await Scope.CreateAsync(service);
         var second = scope.AddEntry("Other", "video-other");
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = second.TrackId!.Value,
-            SourceType = service, ExternalId = "known-destination"
-        });
+        second.TrackObservation!.SourceType = service;
+        second.TrackObservation.ExternalId = "known-destination";
         await scope.Db.SaveChangesAsync();
 
         var unmatched = await scope.Review.ListAsync(scope.UserId,
@@ -373,7 +370,8 @@ public sealed class PlaylistUnmatchedReviewTests
             var account = new ConnectedServiceAccount
             {
                 Id = 51, UserId = userId, Service = service,
-                ExternalAccountId = "account", ConnectionState = "connected"
+                ExternalAccountId = "account", ConnectionState = "connected",
+                TokenExpiresAt = DateTime.UtcNow.AddHours(1)
             };
             var link = new ServicePlaylistMapping
             {
@@ -428,6 +426,32 @@ public sealed class PlaylistUnmatchedReviewTests
             return entry;
         }
 
+        public async Task<PlaylistUnmatchedReviewService> SearchReviewAsync(HttpClient http)
+        {
+            var encryption = new TokenEncryptionService(_protector);
+            var account = await Db.ConnectedServiceAccounts.SingleAsync();
+            account.EncryptedAccessToken = encryption.Encrypt("test-token");
+            var source = Entry.TrackObservation;
+            if (source is not null)
+            {
+                var metadata = TrackObservationParser.ReadMetadata(source)!;
+                metadata.Description = "";
+                source.RawMetadata = JsonSerializer.Serialize(metadata);
+            }
+            await Db.SaveChangesAsync();
+            var options = Options.Create(new Cantaro.Api.Configuration.SpotifyOptions
+                { ClientId = "client", ClientSecret = "secret" });
+            var api = new Cantaro.Api.Services.Spotify.SpotifyApiClient(http, options, new NoDelay());
+            var tokens = new Cantaro.Api.Services.Spotify.SpotifyTokenManager(
+                Db, api, encryption, TimeProvider.System, null!);
+            var search = new Cantaro.Api.Services.Spotify.SpotifySearchProvider(api,
+                new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenProvider(api, options,
+                    TimeProvider.System, new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenCache()));
+            return new PlaylistUnmatchedReviewService(Db, api, tokens, [search], null!,
+                new TrackMatchingService(Db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(Db), Options.Create(new TrackMatchingOptions()), _protector);
+        }
+
         public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null)
         {
             var entry = Db.PlaylistEntries.Include(item => item.TrackObservation)
@@ -440,6 +464,8 @@ public sealed class PlaylistUnmatchedReviewTests
                 UserId, PlaylistId = Playlist.Id, MappingId = Link.Id,
                 EntryId = Entry.Id, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
                 ExternalAccountId = Link.ExternalAccountId, Service = Link.Service,
+                ServicePlaylistId = Link.ServicePlaylistId,
+                TokenVersion = Db.ConnectedServiceAccounts.Single(account => account.Id == Link.ConnectedServiceAccountId).TokenVersion,
                 Fingerprint = fingerprint, Candidate = candidate,
                 IssuedAt = issuedAt ?? DateTimeOffset.UtcNow
             };

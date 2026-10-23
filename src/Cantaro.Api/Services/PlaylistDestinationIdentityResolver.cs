@@ -97,28 +97,13 @@ internal static class PlaylistDestinationIdentityResolver
                 });
             await reconcileObservationAsync(observation.Id, trackId.Value, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+            stored.TrackId = trackId;
+            stored.Track = track;
+            exactObservation.TrackId = trackId;
         }
-        if (exactObservation?.SourceType == service
-            && (trackId is null || exactObservation.TrackId == trackId))
-            return exactObservation.ExternalId;
-
-        if (trackId is not null)
-        {
-            // A canonical provider mapping is shared matching data, not proof that this
-            // account may use the provider ID. Reuse only an observation attached to one
-            // of the requester's playlists and reconciled to this exact canonical track.
-            var ownedProviderId = await dbContext.PlaylistEntries.AsNoTracking()
-                .Where(item => item.Playlist!.UserId == account.UserId
-                    && item.TrackId == trackId
-                    && item.TrackObservation != null
-                    && item.TrackObservation.SourceType == service
-                    && item.TrackObservation.TrackId == trackId)
-                .OrderBy(item => item.Id == stored.Id ? 0 : 1)
-                .ThenBy(item => item.TrackObservation!.ExternalId)
-                .Select(item => item.TrackObservation!.ExternalId)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (ownedProviderId is not null) return ownedProviderId;
-        }
+        var authorizedId = await PlaylistDestinationIdentityEvidence.FindAsync(
+            dbContext, account, service, stored, cancellationToken);
+        if (authorizedId is not null) return authorizedId;
         if (trackId is null && exactObservation is null) return null;
 
         TrackCanonicalMetadata? canonical = null;

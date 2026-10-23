@@ -109,9 +109,20 @@ public sealed partial class PlaylistSyncCoordinator
         var progress = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
         var entryIds = entries.Select(entry => entry.Id).ToHashSet();
         foreach (var obsolete in progress.Keys.Where(id => !entryIds.Contains(id)).ToList()) progress.Remove(obsolete);
+        // A manual choice does not depend on unrelated global mappings, but a
+        // reassignment of its selected provider key remains an identity conflict.
+        foreach (var saved in progress.Where(item => item.Value.ManualConfirmation).ToArray())
+        {
+            var trackId = entries.Single(entry => entry.Id == saved.Key).TrackId;
+            if (await db.TrackSourceIds.AsNoTracking().AnyAsync(source => source.SourceType == link.Service
+                && source.ExternalId == saved.Value.ExternalId
+                && source.TrackId != trackId, ct))
+                progress.Remove(saved.Key);
+        }
+        link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(progress);
         var completed = entries.Where(entry => AttachedDestinationId(entry, link.Service) is not null
             || progress.TryGetValue(entry.Id, out var saved)
-                && PlaylistMatchingProgress.CanReuse(saved, PlaylistMatchingProgress.Fingerprint(entry)))
+                && PlaylistMatchingProgress.CanReuse(saved, entry, link))
             .Select(entry => entry.Id).ToHashSet();
         link.MatchingTotalCount = entries.Count;
         link.MatchingProcessedCount = completed.Count;
@@ -121,7 +132,6 @@ public sealed partial class PlaylistSyncCoordinator
         foreach (var entry in entries)
         {
             string? id;
-            var fingerprint = PlaylistMatchingProgress.Fingerprint(entry);
             try
             {
                 var identity = PlaylistSyncItem.From(entry).Identity;
@@ -132,8 +142,9 @@ public sealed partial class PlaylistSyncCoordinator
                 if (occurrence is not null) id = occurrence.ExternalId;
                 else if (AttachedDestinationId(entry, link.Service) is { } knownId) id = knownId;
                 else if (progress.TryGetValue(entry.Id, out var saved)
-                    && PlaylistMatchingProgress.CanReuse(saved, fingerprint))
-                    id = saved.ExternalId;
+                    && PlaylistMatchingProgress.CanReuse(saved, entry, link))
+                    id = saved.ManualConfirmation
+                        ? await provider.ResolveAsync(read.Account, entry, ct) : saved.ExternalId;
                 else
                 {
                     // Return to the scheduler between batches. Do not write a partially
@@ -160,8 +171,12 @@ public sealed partial class PlaylistSyncCoordinator
                 .Include(item => item.TrackObservation).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
             if (resolvedEntry is not null)
             {
-                progress[entry.Id] = new(PlaylistMatchingProgress.Fingerprint(resolvedEntry), id,
-                    PlaylistMatchingProgress.CurrentProofVersion);
+                // Keep the durable manual choice, including its metadata binding. Search
+                // checkpoints are replaced as usual and discarded after a completed pass.
+                if (!progress.TryGetValue(entry.Id, out var confirmed) || !confirmed.ManualConfirmation
+                    || !PlaylistMatchingProgress.CanReuse(confirmed, resolvedEntry, link)
+                    || confirmed.ExternalId != id)
+                    progress[entry.Id] = PlaylistMatchingProgress.Create(link, resolvedEntry, id);
                 completed.Add(entry.Id);
             }
             else
@@ -234,7 +249,8 @@ public sealed partial class PlaylistSyncCoordinator
         link.NextAttemptAt = null; // unresolved identities are looked up again on the next daily run
         link.AttemptCount = 0;
         link.LastError = null;
-        link.MatchingProgressJson = null;
+        link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(progress
+            .Where(item => item.Value.ManualConfirmation).ToDictionary());
         link.MatchingProcessedCount = 0;
         link.MatchingTotalCount = 0;
     }
