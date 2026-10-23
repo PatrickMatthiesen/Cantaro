@@ -44,10 +44,11 @@ public sealed class SpotifyPlaylistSyncService(
         var readAccount = await PlaylistReadAccount.CaptureAsync(_dbContext, account, SpotifyService.ServiceName, cancellationToken);
         await PlaylistExportAttemptStore.RejectLegacyReadAsync(_dbContext, readAccount, spotifyPlaylistId, cancellationToken);
         // Spotify network calls complete before any database transaction starts.
-        var snapshot = await _spotifyService.GetPlaylistImportSnapshotAsync(
-            account,
+        var (snapshot, acquiredAccount) = await _spotifyService.GetPlaylistImportReadSnapshotAsync(
+            readAccount,
             spotifyPlaylistId,
             cancellationToken);
+        readAccount = acquiredAccount;
         var strategy = _dbContext.Database.CreateExecutionStrategy();
 
         var importResult = await strategy.ExecuteAsync(async () =>
