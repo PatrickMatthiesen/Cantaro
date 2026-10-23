@@ -317,7 +317,7 @@ public class YouTubeService : IYouTubePlaylistClient
         string? ThumbnailUrl, int? DurationSeconds, int Position, bool IsAvailable,
         string? Description = null);
     internal sealed record SyncReadSnapshot(string Id, string Name, string? Revision,
-        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount);
+        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount, PlaylistReadAccount Account);
 
     internal async Task ValidateSyncAccountAsync(
         PlatformAccountContext accountContext, CancellationToken cancellationToken)
@@ -326,6 +326,7 @@ public class YouTubeService : IYouTubePlaylistClient
     internal async Task<SyncReadSnapshot> GetSyncReadSnapshotAsync(
         PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
     {
+        var readAccount = await PlaylistReadAccount.CaptureAsync(_dbContext, accountContext, ServiceName, cancellationToken);
         var account = await RequireAccountAsync(accountContext, cancellationToken);
         using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
         var metadataRequest = service.Playlists.List("snippet,contentDetails");
@@ -404,7 +405,7 @@ public class YouTubeService : IYouTubePlaylistClient
             || after.ContentDetails?.ItemCount != before.ContentDetails?.ItemCount)
             complete = false;
         return new SyncReadSnapshot(playlistId, before.Snippet.Title, before.ETag, items, complete,
-            unavailableItemCount);
+            unavailableItemCount, readAccount);
     }
 
     internal static bool IsPlaylistItemUnavailable(

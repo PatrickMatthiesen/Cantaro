@@ -116,9 +116,12 @@ internal static class PlaylistDestinationIdentityEvidence
     }
 
     internal static bool IsCurrentAccount(ServicePlaylistMapping candidate, PlatformAccountContext account, string service)
+        => candidate.State == "active" && IsReadAccount(candidate, account, service);
+
+    internal static bool IsReadAccount(ServicePlaylistMapping candidate, PlatformAccountContext account, string service)
     {
         var connected = candidate.ConnectedServiceAccount;
-        return candidate.UserId == account.UserId && candidate.Service == service && candidate.State == "active"
+        return candidate.UserId == account.UserId && candidate.Service == service
             && candidate.ConnectedServiceAccountId == account.ConnectedServiceAccountId
             && connected is not null && connected.UserId == account.UserId && connected.Service == service
             && connected.ConnectionState == "connected" && connected.ExternalAccountId == candidate.ExternalAccountId

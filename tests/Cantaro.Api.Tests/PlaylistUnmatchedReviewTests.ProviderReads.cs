@@ -263,10 +263,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
     private sealed class ProductionSpotifyReadScope : IAsyncDisposable
     {
         private readonly HttpClient _http;
+        private readonly TokenEncryptionService _encryption;
         private ProductionSpotifyReadScope(Scope scope, HttpClient http, ProductionSpotifyReadHandler handler,
-            SpotifyPlaylistSyncProvider provider, PlatformAccountContext account)
+            SpotifyPlaylistSyncProvider provider, PlatformAccountContext account, TokenEncryptionService encryption)
         {
-            Scope = scope; _http = http; Handler = handler; Provider = provider; Account = account;
+            Scope = scope; _http = http; Handler = handler; Provider = provider; Account = account; _encryption = encryption;
             Writer = new ProductionSpotifyReadWriter(handler);
         }
         public Scope Scope { get; }
@@ -275,6 +276,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         public SpotifyPlaylistSyncProvider Provider { get; }
         public ProductionSpotifyReadWriter Writer { get; }
         public PlatformAccountContext Account { get; }
+        public SpotifyPlaylistSyncProvider ProviderFor(ApplicationDbContext db) => CreateProvider(db, _http, _encryption);
         public PlaylistSyncCoordinator Coordinator() => new(Db, [Provider], [Writer], TimeProvider.System,
             NullLogger<PlaylistSyncCoordinator>.Instance);
         public async Task SyncAsync()
@@ -335,18 +337,22 @@ public sealed partial class PlaylistUnmatchedReviewTests
                     DurationSeconds = 160, Isrc = "USABC2400001" }), default);
             var handler = new ProductionSpotifyReadHandler(scope.Playlist.Name);
             var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.spotify.com") };
-            var options = Options.Create(new SpotifyOptions { ClientId = "test", ClientSecret = "test" });
-            var api = new SpotifyApiClient(http, options, new NoDelay());
-            var tokens = new SpotifyTokenManager(scope.Db, api, encryption, TimeProvider.System, null!);
-            var search = new SpotifySearchProvider(api, new SpotifyCatalogTokenProvider(api, options,
-                TimeProvider.System, new SpotifyCatalogTokenCache()));
-            var provider = new SpotifyPlaylistSyncProvider(scope.Db, api, tokens, new SpotifyTrackResolver(scope.Db),
-                [search], new TrackMatchingService(scope.Db, [], NullLogger<TrackMatchingService>.Instance),
-                new PlaylistCanonicalReconciliationService(scope.Db), Options.Create(new TrackMatchingOptions()));
+            var provider = CreateProvider(scope.Db, http, encryption);
             var fixture = new ProductionSpotifyReadScope(scope, http, handler, provider,
-                new(scope.UserId, account.Id, "account"));
+                new(scope.UserId, account.Id, "account"), encryption);
             await fixture.AssertNoDestinationIngestionAsync();
             return fixture;
+        }
+        private static SpotifyPlaylistSyncProvider CreateProvider(ApplicationDbContext db, HttpClient http, TokenEncryptionService encryption)
+        {
+            var options = Options.Create(new SpotifyOptions { ClientId = "test", ClientSecret = "test" });
+            var api = new SpotifyApiClient(http, options, new NoDelay());
+            var tokens = new SpotifyTokenManager(db, api, encryption, TimeProvider.System, null!);
+            var search = new SpotifySearchProvider(api, new SpotifyCatalogTokenProvider(api, options,
+                TimeProvider.System, new SpotifyCatalogTokenCache()));
+            return new SpotifyPlaylistSyncProvider(db, api, tokens,
+                [search], new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(db), Options.Create(new TrackMatchingOptions()));
         }
         public async ValueTask DisposeAsync() { _http.Dispose(); await Scope.DisposeAsync(); }
     }
@@ -356,12 +362,20 @@ public sealed partial class PlaylistUnmatchedReviewTests
         public List<string> RemoteIds { get; set; } = [];
         public int Reads { get; private set; }
         public bool FailNextRead { get; set; }
+        public bool MissingNextRead { get; set; }
+        public string ProfileId { get; set; } = "account";
         public Action<int>? OnRead { get; set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (MissingNextRead && path.StartsWith("/v1/playlists/", StringComparison.Ordinal))
+            {
+                MissingNextRead = false;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+                { Content = new StringContent("{\"error\":{\"status\":404,\"message\":\"Temporarily unavailable\"}}") });
+            }
             object response;
-            if (path == "/v1/me") response = new { id = "account" };
+            if (path == "/v1/me") response = new { id = ProfileId };
             else if (path == "/api/token") response = new { access_token = "catalog-token", expires_in = 3600, token_type = "Bearer" };
             else if (path == "/v1/search") response = new { tracks = new { items = Array.Empty<object>() } };
             else if (path.EndsWith("/items", StringComparison.Ordinal))

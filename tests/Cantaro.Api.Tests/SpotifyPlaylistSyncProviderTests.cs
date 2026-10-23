@@ -247,7 +247,7 @@ public sealed class SpotifyPlaylistSyncProviderTests
                 new SpotifyCatalogTokenProvider(apiClient, spotifyOptions, TimeProvider.System,
                     new SpotifyCatalogTokenCache()));
             var provider = new SpotifyPlaylistSyncProvider(dbContext, apiClient, tokenManager,
-                new SpotifyTrackResolver(dbContext), [searchProvider], null!, null!,
+                [searchProvider], null!, null!,
                 Options.Create(new TrackMatchingOptions()));
             return new TestScope(connection, httpClient, dbContext, encryption, handler, provider,
                 new PlatformAccountContext(userId, account.Id));

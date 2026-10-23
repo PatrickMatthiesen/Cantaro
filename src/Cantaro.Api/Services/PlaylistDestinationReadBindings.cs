@@ -12,15 +12,22 @@ internal static class PlaylistDestinationReadBindings
         PlatformAccountContext account, string service, string playlistId,
         IReadOnlyList<PlaylistRemoteTrack> incoming, CancellationToken ct)
     {
-        var link = await db.ServicePlaylistMappings.AsNoTracking().Include(item => item.ConnectedServiceAccount)
-            .SingleOrDefaultAsync(item => item.UserId == account.UserId && item.Playlist!.UserId == account.UserId
-                && item.Service == service && item.ServicePlaylistId == playlistId && item.State == "active"
-                && item.ConnectedServiceAccountId == account.ConnectedServiceAccountId
-                && item.ConnectedServiceAccount!.ExternalAccountId == item.ExternalAccountId
-                && (account.ExpectedExternalAccountId == null || item.ExternalAccountId == account.ExpectedExternalAccountId), ct);
-        if (link is null) return incoming;
-        var bound = await BindAsync(db, link, account,
-            incoming.Select(item => PlaylistSyncItem.From(item, service)).ToList(), ct, scopedOnly: true);
+        // Inactive links retain export provenance. Losing authority to write
+        // must not turn our previous exports into independent catalog evidence.
+        var links = await db.ServicePlaylistMappings.AsNoTracking().Include(item => item.ConnectedServiceAccount)
+            .Where(item => item.UserId == account.UserId && item.Playlist!.UserId == account.UserId
+                && item.Service == service && item.ServicePlaylistId == playlistId).ToListAsync(ct);
+        var bound = incoming.Select(item => PlaylistSyncItem.From(item, service)).ToList();
+        foreach (var link in links.OrderBy(item => item.Id))
+        {
+            if (!PlaylistDestinationIdentityEvidence.IsReadAccount(link, account, service))
+            {
+                var protectedIds = ProtectedIds(link);
+                if (incoming.Any(item => protectedIds.Contains(item.ExternalId))) throw ChangedBinding();
+                continue;
+            }
+            bound = await BindAsync(db, link, account, bound, ct, scopedOnly: true, retainedRead: true);
+        }
         return incoming.Select((item, index) => bound[index].DestinationBinding is { } binding
             ? item with { TrackId = bound[index].TrackId, ObservationId = bound[index].ObservationId,
                 DestinationBinding = binding }
@@ -29,9 +36,12 @@ internal static class PlaylistDestinationReadBindings
 
     public static async Task<List<PlaylistSyncItem>> BindAsync(ApplicationDbContext db, ServicePlaylistMapping link,
         PlatformAccountContext account, List<PlaylistSyncItem> incoming, CancellationToken ct,
-        HashSet<Guid>? confirmedEntries = null, IReadOnlyList<PlaylistSyncItem>? acknowledged = null, bool scopedOnly = false)
+        HashSet<Guid>? confirmedEntries = null, IReadOnlyList<PlaylistSyncItem>? acknowledged = null, bool scopedOnly = false,
+        bool retainedRead = false)
     {
-        if (!PlaylistDestinationIdentityEvidence.IsCurrentAccount(link, account, link.Service)) return incoming;
+        if (!(retainedRead ? PlaylistDestinationIdentityEvidence.IsReadAccount(link, account, link.Service)
+            : PlaylistDestinationIdentityEvidence.IsCurrentAccount(link, account, link.Service))) return incoming;
+        var protectedIds = scopedOnly ? ProtectedIds(link) : [];
         var entries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == link.PlaylistId)
             .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
             .Include(item => item.TrackObservation).OrderBy(item => item.Position).ToListAsync(ct);
@@ -79,7 +89,7 @@ internal static class PlaylistDestinationReadBindings
             choices.Add(item with { DestinationBinding = binding });
         }
         // Fresh choices can bind an observed occurrence before its first export.
-        foreach (var entry in entries.Where(entry => acknowledged is null && entry.TrackId is not null
+        foreach (var entry in entries.Where(entry => link.State == "active" && acknowledged is null && entry.TrackId is not null
             && saved.TryGetValue(entry.Id, out var proof) && PlaylistMatchingProgress.CanReuse(proof, entry, link)
             && proof.ExternalId is not null && authorized.GetValueOrDefault(entry.Id) == proof.ExternalId))
         {
@@ -90,13 +100,17 @@ internal static class PlaylistDestinationReadBindings
                     DestinationBinding = PlaylistDestinationBinding.From(link, entry) });
         }
 
-        var observationIds = choices.Select(item => item.ObservationId).OfType<Guid>().Distinct().ToArray();
+        var observationIds = choices.Concat(membership).Select(item => item.ObservationId).OfType<Guid>().Distinct().ToArray();
         var observations = await db.TrackObservations.AsNoTracking().Where(item => observationIds.Contains(item.Id))
             .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId }).ToDictionaryAsync(item => item.Id, ct);
         var trackIds = choices.Select(item => item.TrackId!.Value).Distinct().ToArray();
         var tracks = await db.Tracks.AsNoTracking().Where(item => trackIds.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct);
+        var independentIds = membership.Where(item => item.ObservationId is { } id
+            && observations.TryGetValue(id, out var observation) && observation.SourceType == link.Service
+            && observation.ExternalId == item.ExternalId && observation.TrackId == item.TrackId)
+            .Select(item => item.ExternalId!).ToHashSet(StringComparer.Ordinal);
         var assignments = new Dictionary<string, List<Guid>>(StringComparer.Ordinal);
-        foreach (var keys in choices.Select(item => item.ExternalId!).Distinct(StringComparer.Ordinal).Chunk(256))
+        foreach (var keys in choices.Select(item => item.ExternalId!).Concat(protectedIds).Distinct(StringComparer.Ordinal).Chunk(256))
         {
             var sources = await db.TrackSourceIds.AsNoTracking()
                 .Where(item => item.SourceType == link.Service && keys.Contains(item.ExternalId))
@@ -119,6 +133,9 @@ internal static class PlaylistDestinationReadBindings
             if (item.ExternalId is not { } id || !grouped.TryGetValue(id, out var candidates))
             {
                 if (item.DestinationBinding is not null) throw ChangedBinding();
+                if (item.ExternalId is { } unbound && protectedIds.Contains(unbound)
+                    && !assignments.ContainsKey(unbound) && !independentIds.Contains(unbound))
+                    throw ChangedBinding();
                 return item;
             }
             var index = occurrences.GetValueOrDefault(id);
@@ -129,6 +146,7 @@ internal static class PlaylistDestinationReadBindings
             if (item.TrackId is not null && item.TrackId != choice.TrackId)
             {
                 if (item.DestinationBinding is not null) throw ChangedBinding();
+                if (protectedIds.Contains(id) && !assignments.ContainsKey(id)) throw ChangedBinding();
                 return item;
             }
             // A real source observation or established recording mapping remains
@@ -141,6 +159,17 @@ internal static class PlaylistDestinationReadBindings
                 confirmedEntries?.Add(choice.DestinationBinding.EntryId);
             return choice;
         }).ToList();
+    }
+
+    private static HashSet<string> ProtectedIds(ServicePlaylistMapping link)
+    {
+        var saved = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
+        var proofs = saved.Values.Where(item => item.ProofVersion == PlaylistMatchingProgress.CurrentProofVersion
+            && item.ExternalId is not null).Select(item => item.ExternalId!).ToHashSet(StringComparer.Ordinal);
+        return (PlaylistSyncBaseline.Parse(link.BaselineJson)?.Items ?? [])
+            .Concat(PlaylistSyncBaseline.Parse(link.PendingWriteJson)?.Items ?? [])
+            .Where(item => item.ExternalId is not null && (item.DestinationBinding is not null || proofs.Contains(item.ExternalId)))
+            .Select(item => item.ExternalId!).Concat(proofs).ToHashSet(StringComparer.Ordinal);
     }
 
     private static PlatformApiException ChangedBinding()

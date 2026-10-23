@@ -55,7 +55,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
         Assert.False(await scope.Db.TrackObservations.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
         Assert.Empty(await scope.Db.TrackArtistCredits.ToArrayAsync());
-        Assert.Equal("success", (await scope.Db.ServicePlaylistMappings.SingleAsync()).LastSyncStatus);
+        var synced = await scope.Db.ServicePlaylistMappings.SingleAsync();
+        Assert.True(synced.LastSyncStatus == "success", synced.LastError);
         Assert.Equal(addNew ? new[] { "chosen-id", "fresh-id" } : ["chosen-id"], handler.RemoteIds);
         if (addNew)
         {
@@ -71,6 +72,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
     private sealed class ProductionYouTubeReadHandler(string name) : HttpMessageHandler, Google.Apis.Http.IHttpClientFactory
     {
         public List<string> RemoteIds { get; set; } = [];
+        public Action? OnItemsRead { get; set; }
+        public int ReportedItemCountDelta { get; set; }
         public ConfigurableHttpClient CreateHttpClient(CreateHttpClientArgs args) => new(new ConfigurableMessageHandler(this));
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -78,12 +81,15 @@ public sealed partial class PlaylistUnmatchedReviewTests
             object response;
             if (path.EndsWith("/playlists", StringComparison.Ordinal))
                 response = new { items = new[] { new { id = "playlist", etag = "snapshot-" + string.Join(',', RemoteIds),
-                    snippet = new { title = name }, contentDetails = new { itemCount = RemoteIds.Count } } } };
+                    snippet = new { title = name }, contentDetails = new { itemCount = RemoteIds.Count + ReportedItemCountDelta } } } };
             else if (path.EndsWith("/playlistItems", StringComparison.Ordinal))
+            {
+                OnItemsRead?.Invoke();
                 response = new { items = RemoteIds.Select((id, index) => new { id = "item-" + index,
                     snippet = new { title = id == "chosen-id" ? "Porter Robinson - Everything Goes On" : "New artist - New song",
                         position = index, videoOwnerChannelTitle = "Provider artist", resourceId = new { videoId = id } },
                     contentDetails = new { videoId = id }, status = new { privacyStatus = "public" } }) };
+            }
             else if (path.EndsWith("/videos", StringComparison.Ordinal))
                 response = new { items = RemoteIds.Distinct().Select(id => new { id,
                     snippet = new { title = "Provider song", channelTitle = "Provider artist", description = "Provider-only details" },

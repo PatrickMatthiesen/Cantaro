@@ -82,6 +82,7 @@ public sealed partial class PlaylistSyncCoordinator(
             {
                 await SaveItemsAsync(playlist, target, token, confirmedEntries);
                 link.BaselineJson = new PlaylistSyncBaseline(incoming, remote.Revision).Serialize();
+                link.PendingWriteJson = null;
                 link.BaselineName = remote.Name;
                 link.InitialMode = null;
                 link.NextAttemptAt = clock.GetUtcNow();
