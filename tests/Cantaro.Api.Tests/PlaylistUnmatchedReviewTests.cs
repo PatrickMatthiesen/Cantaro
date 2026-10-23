@@ -486,17 +486,18 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 new PlaylistSyncCoordinator(Db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));
         }
 
-        public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null)
+        public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null, Guid? entryId = null)
         {
+            var targetId = entryId ?? Entry.Id;
             var entry = Db.PlaylistEntries.AsNoTracking().Include(item => item.TrackObservation)
-                .Include(item => item.Track).Single(item => item.Id == Entry.Id);
+                .Include(item => item.Track).Single(item => item.Id == targetId);
             var fingerprint = (string)typeof(PlaylistUnmatchedReviewService)
                 .GetMethod("Fingerprint", BindingFlags.NonPublic | BindingFlags.Static)!
                 .Invoke(null, [entry])!;
             var proof = new
             {
                 UserId, PlaylistId = Playlist.Id, MappingId = Link.Id,
-                EntryId = Entry.Id, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
+                EntryId = targetId, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
                 ExternalAccountId = Link.ExternalAccountId, Service = Link.Service,
                 ServicePlaylistId = Link.ServicePlaylistId,
                 TokenVersion = Db.ConnectedServiceAccounts.Single(account => account.Id == Link.ConnectedServiceAccountId).TokenVersion,

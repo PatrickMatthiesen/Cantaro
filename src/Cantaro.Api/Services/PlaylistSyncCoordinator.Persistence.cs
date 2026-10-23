@@ -118,29 +118,100 @@ public sealed partial class PlaylistSyncCoordinator
 
     private async Task<List<PlaylistSyncItem>> BindDestinationChoicesAsync(ServicePlaylistMapping link,
         PlatformAccountContext account, List<PlaylistSyncItem> incoming, CancellationToken ct,
-        HashSet<Guid>? confirmedEntries = null)
+        HashSet<Guid>? confirmedEntries = null, IReadOnlyList<PlaylistSyncItem>? acknowledged = null)
     {
-        if (string.IsNullOrEmpty(link.MatchingProgressJson)) return incoming;
+        if (!PlaylistDestinationIdentityEvidence.IsCurrentAccount(link, account, link.Service)) return incoming;
         var entries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == link.PlaylistId)
             .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
             .Include(item => item.TrackObservation).OrderBy(item => item.Position).ToListAsync(ct);
+        var byId = entries.ToDictionary(entry => entry.Id);
         var saved = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
         var authorized = await PlaylistDestinationIdentityEvidence.FindManyAsync(db, account, link.Service, entries, link, ct);
-        var eligible = entries.Where(entry => entry.TrackId is not null
-                && saved.TryGetValue(entry.Id, out var proof) && PlaylistMatchingProgress.CanReuse(proof, entry, link)
-                && proof.ExternalId is not null && authorized.GetValueOrDefault(entry.Id) == proof.ExternalId)
-            .ToArray();
-        var choices = eligible.GroupBy(entry => saved[entry.Id].ExternalId!)
-            .ToDictionary(group => group.Key, group => new Queue<PlaylistEntry>(group), StringComparer.Ordinal);
-        foreach (var entry in eligible.Where(entry => saved[entry.Id].ManualConfirmation))
-            confirmedEntries?.Add(entry.Id);
-        // Bind only this playlist's observed destination occurrences. Keep the
-        // entry's original observation, and never change the shared observation
-        // or global identity of the destination recording.
-        return incoming.Select(item => item.ExternalId is { } id
-                && choices.TryGetValue(id, out var queue) && queue.TryDequeue(out var entry)
-            ? PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service }
-            : item).ToList();
+        var choices = new List<PlaylistSyncItem>();
+
+        // Baselines acknowledge membership, not permission for a new export. Keep
+        // them usable after metadata changes and local entry removal, so a remote
+        // occurrence does not become a spurious addition in the three-way merge.
+        foreach (var item in acknowledged ?? PlaylistSyncBaseline.Parse(link.BaselineJson)?.Items ?? [])
+        {
+            var binding = item.DestinationBinding;
+            if (binding is null && item.TrackId is not null && item.ExternalId is not null)
+            {
+                // Upgrade older acknowledged baselines only when a scoped proof
+                // identifies the occurrence and its canonical/source membership.
+                // The metadata fingerprint still gates new outbound matching.
+                var proofs = saved.Where(pair => pair.Value.ProofVersion == PlaylistMatchingProgress.CurrentProofVersion
+                    && pair.Value.ExternalId == item.ExternalId
+                    && pair.Value.Scope == PlaylistMatchingProgress.ScopeFor(link, new PlaylistEntry { Id = pair.Key })
+                    && (!byId.TryGetValue(pair.Key, out var member)
+                        || member.TrackId == item.TrackId && member.TrackObservationId == item.ObservationId)).ToArray();
+                if (proofs.Length == 1)
+                {
+                    var entryId = proofs[0].Key;
+                    binding = new(link.UserId, link.PlaylistId, link.Id, link.ConnectedServiceAccountId,
+                        link.ExternalAccountId, link.Service, link.ServicePlaylistId, entryId,
+                        item.ObservationId is null ? null : item.TrackId);
+                }
+            }
+            if (binding is null || item.TrackId is null || item.ExternalId is null
+                || binding.UserId != account.UserId || binding.PlaylistId != link.PlaylistId
+                || binding.MappingId != link.Id || binding.Service != link.Service
+                || binding.ConnectedServiceAccountId != account.ConnectedServiceAccountId
+                || binding.ExternalAccountId != link.ExternalAccountId
+                || binding.ServicePlaylistId != link.ServicePlaylistId) continue;
+            if (byId.TryGetValue(binding.EntryId, out var entry)
+                && (entry.TrackId != item.TrackId || entry.TrackObservationId != item.ObservationId)) continue;
+            choices.Add(item with { DestinationBinding = binding });
+        }
+        // Fresh choices can bind an observed occurrence before its first export.
+        foreach (var entry in entries.Where(entry => acknowledged is null && entry.TrackId is not null
+            && saved.TryGetValue(entry.Id, out var proof) && PlaylistMatchingProgress.CanReuse(proof, entry, link)
+            && proof.ExternalId is not null && authorized.GetValueOrDefault(entry.Id) == proof.ExternalId))
+        {
+            var id = saved[entry.Id].ExternalId!;
+            if (saved[entry.Id].ManualConfirmation) confirmedEntries?.Add(entry.Id);
+            if (!choices.Any(item => item.DestinationBinding!.EntryId == entry.Id && item.ExternalId == id))
+                choices.Add(PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service,
+                    DestinationBinding = PlaylistDestinationBinding.From(link, entry) });
+        }
+
+        var observationIds = choices.Select(item => item.ObservationId).OfType<Guid>().Distinct().ToArray();
+        var observations = await db.TrackObservations.AsNoTracking().Where(item => observationIds.Contains(item.Id))
+            .Select(item => new { item.Id, item.TrackId }).ToDictionaryAsync(item => item.Id, ct);
+        var trackIds = choices.Select(item => item.TrackId!.Value).Distinct().ToArray();
+        var tracks = await db.Tracks.AsNoTracking().Where(item => trackIds.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct);
+        var assignments = new Dictionary<string, List<Guid>>(StringComparer.Ordinal);
+        foreach (var keys in choices.Select(item => item.ExternalId!).Distinct(StringComparer.Ordinal).Chunk(256))
+        {
+            var sources = await db.TrackSourceIds.AsNoTracking()
+                .Where(item => item.SourceType == link.Service && keys.Contains(item.ExternalId))
+                .Select(item => new { item.ExternalId, item.TrackId }).ToListAsync(ct);
+            foreach (var source in sources)
+            {
+                if (!assignments.TryGetValue(source.ExternalId, out var ids)) assignments[source.ExternalId] = ids = [];
+                ids.Add(source.TrackId);
+            }
+        }
+        choices = choices.Where(item => tracks.Contains(item.TrackId!.Value)
+            && (item.ObservationId is null || observations.TryGetValue(item.ObservationId.Value, out var observation)
+                && observation.TrackId == item.DestinationBinding!.ObservationTrackId)
+            && (!assignments.TryGetValue(item.ExternalId!, out var ids) || ids.All(id => id == item.TrackId))).ToList();
+        var grouped = choices.DistinctBy(item => (item.ExternalId, item.DestinationBinding!.EntryId))
+            .GroupBy(item => item.ExternalId!).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        return incoming.Select(item =>
+        {
+            if (item.ExternalId is not { } id || !grouped.TryGetValue(id, out var candidates)) return item;
+            var index = occurrences.GetValueOrDefault(id);
+            occurrences[id] = index + 1;
+            // Consume each acknowledged choice in order, then consistently bind
+            // additional repeats before duplicate normalization. Never drop slots.
+            var choice = candidates[index % candidates.Length];
+            if (item.TrackId is not null && item.TrackId != choice.TrackId) return item;
+            if (byId.ContainsKey(choice.DestinationBinding!.EntryId))
+                confirmedEntries?.Add(choice.DestinationBinding.EntryId);
+            return choice;
+        }).ToList();
     }
 
     private async Task<List<PlaylistSyncItem>> NormalizeIdentitiesAsync(IEnumerable<PlaylistSyncItem> source, CancellationToken ct)

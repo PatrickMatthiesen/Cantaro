@@ -429,6 +429,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
     {
         public string PlatformId => service;
         public int Searches { get; private set; }
+        public IReadOnlyList<TrackMatchSearchCandidate> SearchResults { get; set; } = [];
         public bool PauseSearch { get; init; }
         public TaskCompletionSource SearchStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ContinueSearch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -474,7 +475,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
                         SearchStarted.TrySetResult();
                         await ContinueSearch.Task.WaitAsync(token);
                     }
-                    return [];
+                    return SearchResults;
                 }, ct);
         }
         public Task RenameAsync(PlatformAccountContext account, string id, string title, CancellationToken ct) => Task.CompletedTask;

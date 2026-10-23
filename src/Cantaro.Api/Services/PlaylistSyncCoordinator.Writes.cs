@@ -129,9 +129,12 @@ public sealed partial class PlaylistSyncCoordinator
         await db.SaveChangesAsync(ct);
         var batchStarted = clock.GetTimestamp();
         var searched = 0;
+        var remainingEntries = entries.Select(entry => entry.Id).ToHashSet();
         foreach (var entry in entries)
         {
+            remainingEntries.Remove(entry.Id);
             string? id;
+            var acknowledgedOnly = false;
             try
             {
                 var identity = PlaylistSyncItem.From(entry).Identity;
@@ -140,14 +143,23 @@ public sealed partial class PlaylistSyncCoordinator
                 var manualChoice = progress.TryGetValue(entry.Id, out var confirmed)
                     && confirmed.ManualConfirmation && PlaylistMatchingProgress.CanReuse(confirmed, entry, link);
                 var confirmedId = manualChoice ? await provider.ResolveAsync(read.Account, entry, ct) : null;
+                bool CanConsume(PlaylistSyncItem item) => item.DestinationBinding is not { } binding
+                    || binding.EntryId == entry.Id || !remainingEntries.Contains(binding.EntryId);
                 // A different ID's occurrence belongs to a later duplicate entry.
                 // Consume a matching occurrence when the manual choice is already present.
                 var occurrence = available.FirstOrDefault(item => item.Identity == identity
+                    && item.DestinationBinding?.EntryId == entry.Id
+                    && (!manualChoice || item.ExternalId == confirmedId))
+                    ?? available.FirstOrDefault(item => item.Identity == identity
+                    && CanConsume(item)
                     && entry.TrackObservationId is { } observationId && item.ObservationId == observationId
                     && (!manualChoice || item.ExternalId == confirmedId))
                     ?? available.FirstOrDefault(item => item.Identity == identity
+                        && CanConsume(item)
                         && (!manualChoice || item.ExternalId == confirmedId));
                 if (occurrence is not null) available.Remove(occurrence);
+                acknowledgedOnly = occurrence?.DestinationBinding is not null && !manualChoice
+                    && (!progress.TryGetValue(entry.Id, out var reusable) || !PlaylistMatchingProgress.CanReuse(reusable, entry, link));
                 if (manualChoice) id = confirmedId;
                 else if (occurrence is not null) id = occurrence.ExternalId;
                 else if (AttachedDestinationId(entry, link.Service) is { } knownId) id = knownId;
@@ -180,11 +192,11 @@ public sealed partial class PlaylistSyncCoordinator
                 .Include(item => item.TrackObservation).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
             if (resolvedEntry is not null)
             {
-                // Keep the durable manual choice, including its metadata binding. Search
-                // checkpoints retain successful destination choices on this link.
-                if (!progress.TryGetValue(entry.Id, out var confirmed) || !confirmed.ManualConfirmation
+                // An acknowledged read cannot refresh stale outbound permission.
+                // Keep its old proof until a fresh resolution authorizes a new export.
+                if (!acknowledgedOnly && (!progress.TryGetValue(entry.Id, out var confirmed) || !confirmed.ManualConfirmation
                     || !PlaylistMatchingProgress.CanReuse(confirmed, resolvedEntry, link)
-                    || confirmed.ExternalId != id)
+                    || confirmed.ExternalId != id))
                     progress[entry.Id] = PlaylistMatchingProgress.Create(link, resolvedEntry, id);
                 completed.Add(entry.Id);
             }
@@ -210,7 +222,8 @@ public sealed partial class PlaylistSyncCoordinator
                 throw new PlatformApiException("remote_changed", "The Cantaro playlist changed during matching. Cantaro will refresh before writing.", 409);
             if (string.IsNullOrWhiteSpace(id)) { unresolved++; continue; }
             ids.Add(id);
-            exported.Add(PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service });
+            exported.Add(PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service,
+                DestinationBinding = PlaylistDestinationBinding.From(link, entry) });
         }
 
         // Search and metadata resolution can take time. Refuse to overwrite an edit made since the read phase.
@@ -250,7 +263,8 @@ public sealed partial class PlaylistSyncCoordinator
         link.BaselineName = verified.Name;
         link.BaselineJson = new PlaylistSyncBaseline(
             await BindDestinationChoicesAsync(link, read.Account,
-                await NormalizeIdentitiesAsync(KnownTracks(verified).Select(item => PlaylistSyncItem.From(item, link.Service)), ct), ct),
+                await NormalizeIdentitiesAsync(KnownTracks(verified).Select(item => PlaylistSyncItem.From(item, link.Service)), ct), ct,
+                acknowledged: exported),
             verified.Revision).Serialize();
         link.CanonicalRevision = playlist.SyncRevision;
         link.UnresolvedCount = unresolved;

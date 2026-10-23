@@ -82,8 +82,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.ExternalId == "chosen-id"));
     }
 
-    [Fact]
-    public async Task Confirmation_DoesNotConsumeAnotherIdNeededByLaterCanonicalOccurrences()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Confirmation_DoesNotConsumeAnotherIdNeededByLaterCanonicalOccurrences(bool staleMetadata)
     {
         await using var scope = await Scope.CreateAsync("spotify");
         scope.Playlist.AllowDuplicateTracks = true;
@@ -114,6 +116,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await RunReviewSyncAsync(scope, provider, writer);
         Assert.Equal(["chosen-id", "alternative-a", "alternative-c"], Assert.Single(writer.Writes));
         await AssertManualChoiceAsync(scope, proof);
+        if (staleMetadata)
+        {
+            var track = await scope.Db.Tracks.SingleAsync(item => item.Id == scope.Entry.TrackId);
+            Assert.True(TrackArtworkUpdater.FillMissingCanonicalThumbnail(track, "https://example.invalid/art.jpg"));
+            await scope.Db.SaveChangesAsync();
+        }
         scope.Db.ChangeTracker.Clear();
         await RunReviewSyncAsync(scope, provider, writer);
         Assert.Single(writer.Writes);
@@ -122,6 +130,24 @@ public sealed partial class PlaylistUnmatchedReviewTests
             .OrderBy(entry => entry.Position).Select(entry => entry.Id).ToArrayAsync());
         Assert.Equal(0, provider.Searches);
         await AssertManualChoiceAsync(scope, proof);
+        if (staleMetadata)
+        {
+            provider.RemoteIds = ["alternative-a", "alternative-c"];
+            var resolutions = provider.Resolutions;
+            scope.Db.ChangeTracker.Clear();
+            await RunReviewSyncAsync(scope, provider, writer);
+            // A fresh resolver lookup can choose the owned A observation. It must
+            // leave the later entries' acknowledged A/C occurrences in place.
+            Assert.Equal(2, writer.Writes.Count);
+            Assert.Equal(["alternative-a", "alternative-a", "alternative-c"], provider.RemoteIds);
+            Assert.Equal(resolutions + 1, provider.Resolutions);
+            Assert.Equal(0, provider.Searches);
+            var link = await scope.Db.ServicePlaylistMappings.SingleAsync();
+            Assert.Equal("success", link.LastSyncStatus);
+            Assert.Equal(0, link.UnresolvedCount);
+            Assert.Equal(expectedEntries, await scope.Db.PlaylistEntries.Where(entry => entry.PlaylistId == scope.Playlist.Id)
+                .OrderBy(entry => entry.Position).Select(entry => entry.Id).ToArrayAsync());
+        }
     }
 
     [Fact]

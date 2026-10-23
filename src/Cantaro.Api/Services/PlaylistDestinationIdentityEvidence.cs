@@ -115,7 +115,7 @@ internal static class PlaylistDestinationIdentityEvidence
         return identities;
     }
 
-    private static bool IsCurrentAccount(ServicePlaylistMapping candidate, PlatformAccountContext account, string service)
+    internal static bool IsCurrentAccount(ServicePlaylistMapping candidate, PlatformAccountContext account, string service)
     {
         var connected = candidate.ConnectedServiceAccount;
         return candidate.UserId == account.UserId && candidate.Service == service && candidate.State == "active"
