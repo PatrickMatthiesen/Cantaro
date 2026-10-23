@@ -81,7 +81,6 @@ public sealed partial class PlaylistSyncCoordinator(
             await PersistAtomicallyAsync(async () =>
             {
                 await SaveItemsAsync(playlist, target, token, confirmedEntries);
-                link.BaselineJson = new PlaylistSyncBaseline(incoming, remote.Revision).Serialize();
                 link.PendingWriteJson = null;
                 link.BaselineName = remote.Name;
                 link.InitialMode = null;
@@ -89,6 +88,10 @@ public sealed partial class PlaylistSyncCoordinator(
                 link.State = "active";
                 link.UserId = userId;
                 link.ExternalAccountId = account.ExpectedExternalAccountId!;
+                // SaveItems may have created entries for a moved remote copy.
+                // Acknowledge only freshly validated membership in this mapping.
+                link.BaselineJson = new PlaylistSyncBaseline(
+                    await BindDestinationChoicesAsync(link, account, incoming, token), remote.Revision).Serialize();
                 playlist.SyncEnabled = true;
                 playlist.NextSyncAt ??= clock.GetUtcNow().AddDays(1);
                 await db.SaveChangesAsync(token);

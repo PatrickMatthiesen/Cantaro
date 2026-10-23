@@ -174,12 +174,8 @@ public sealed class PlaylistLinkLifecycleService(
                 && link.ServicePlaylistId == servicePlaylistId && link.State == "unlinked")
             .OrderBy(link => link.Id).FirstOrDefaultAsync(ct);
 
-        var obsoleteTombstones = await db.ServicePlaylistMappings.Where(link =>
-            link.UserId == userId && link.PlaylistId == playlistId && link.Service == service
-            && link.ExternalAccountId == prepared.Account.ExternalAccountId
-            && link.State == "unlinked" && link.ServicePlaylistId != servicePlaylistId).ToListAsync(ct);
-        db.ServicePlaylistMappings.RemoveRange(obsoleteTombstones);
-
+        // Unlinked rows retain read provenance for previous remote copies. The
+        // active-only unique indexes already allow a replacement alongside them.
         var link = existing ?? new ServicePlaylistMapping
         {
             Id = Guid.NewGuid(), UserId = userId, PlaylistId = playlistId,

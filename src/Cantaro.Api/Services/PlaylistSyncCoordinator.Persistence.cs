@@ -127,7 +127,7 @@ public sealed partial class PlaylistSyncCoordinator
         var ids = items.Where(item => item.ObservationId.HasValue).Select(item => item.ObservationId!.Value).Distinct().ToList();
         var observations = await db.TrackObservations.AsNoTracking().Where(item => ids.Contains(item.Id))
             .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId }).ToDictionaryAsync(item => item.Id, ct);
-        return items.Select(item => item.DestinationBinding is null
+        return items.Select(item => item.DestinationBinding is null && item.ReadScope is null
             && item.ObservationId is { } id && observations.TryGetValue(id, out var observation)
             ? item with { TrackId = observation.TrackId ?? item.TrackId, ExternalId = observation.ExternalId, Service = observation.SourceType }
             : item).ToList();

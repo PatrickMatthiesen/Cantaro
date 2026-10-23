@@ -9,7 +9,8 @@ public sealed record PlaylistRemoteTrack(
     string Title,
     int Position,
     bool IsAvailable = true,
-    PlaylistDestinationBinding? DestinationBinding = null);
+    PlaylistDestinationBinding? DestinationBinding = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] PlaylistReadScope? ReadScope = null);
 
 public sealed record PlaylistRemoteSnapshot(
     string Id,

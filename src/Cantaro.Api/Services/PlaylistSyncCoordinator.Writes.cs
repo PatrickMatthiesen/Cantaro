@@ -7,7 +7,7 @@ namespace Cantaro.Api.Services;
 public sealed partial class PlaylistSyncCoordinator
 {
     private async Task CreateMissingLinksAsync(Playlist playlist, List<LinkRead> reads,
-        CancellationToken ct, string? service = null, bool skipDuplicateNameCheck = false)
+        CancellationToken ct, string? service = null, bool skipDuplicateNameCheck = false, bool ignoreUnlinked = false)
     {
         var accounts = await db.ConnectedServiceAccounts.AsNoTracking().Where(account => account.UserId == playlist.UserId
             && account.ConnectionState == "connected" && (account.Service == "youtube" || account.Service == "spotify")
@@ -15,7 +15,8 @@ public sealed partial class PlaylistSyncCoordinator
         foreach (var account in accounts)
         {
             var existing = await db.ServicePlaylistMappings.Where(link => link.PlaylistId == playlist.Id && link.Service == account.Service
-                && (link.ExternalAccountId == account.ExternalAccountId || (link.ExternalAccountId == "" && link.ConnectedServiceAccountId == account.Id))).ToListAsync(ct);
+                && (link.ExternalAccountId == account.ExternalAccountId || (link.ExternalAccountId == "" && link.ConnectedServiceAccountId == account.Id))
+                && (!ignoreUnlinked || link.State != "unlinked")).ToListAsync(ct);
             if (existing.Any(link => link.State != "creation_failed" || link.AttemptCount >= 5 || link.NextAttemptAt > clock.GetUtcNow())) continue;
             if (!skipDuplicateNameCheck)
             {
@@ -36,7 +37,19 @@ public sealed partial class PlaylistSyncCoordinator
                 }
             }
             var attempt = existing.Select(link => link.AttemptCount).DefaultIfEmpty(0).Max();
-            db.ServicePlaylistMappings.RemoveRange(existing);
+            // Only a rejected, unwritten creation marker is disposable. Retain
+            // any real remote receipt while releasing its active unique indexes.
+            foreach (var failed in existing)
+            {
+                if (IsUnwrittenCreation(failed))
+                {
+                    db.ServicePlaylistMappings.Remove(failed);
+                    continue;
+                }
+                failed.State = "unlinked";
+                failed.NextAttemptAt = null;
+            }
+            await db.SaveChangesAsync(ct);
             var context = new PlatformAccountContext(playlist.UserId, account.Id, account.ExternalAccountId);
             var writer = Writer(account.Service);
             var link = new ServicePlaylistMapping
@@ -92,6 +105,10 @@ public sealed partial class PlaylistSyncCoordinator
             }
         }
     }
+
+    private static bool IsUnwrittenCreation(ServicePlaylistMapping link)
+        => link.State == "creation_failed" && link.ServicePlaylistId.StartsWith("pending:", StringComparison.Ordinal)
+            && link.BaselineJson is null && link.PendingWriteJson is null && link.MatchingProgressJson is null;
 
     private async Task WriteLinkAsync(Playlist playlist, LinkRead read, CancellationToken ct)
     {

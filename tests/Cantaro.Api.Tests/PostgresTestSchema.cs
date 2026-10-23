@@ -85,3 +85,12 @@ internal sealed class PostgresFactAttribute : FactAttribute
             Skip = "Set CANTARO_TEST_POSTGRES to a loopback database whose name contains 'test'.";
     }
 }
+
+internal sealed class PostgresTheoryAttribute : TheoryAttribute
+{
+    public PostgresTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CANTARO_TEST_POSTGRES")))
+            Skip = "Set CANTARO_TEST_POSTGRES to a loopback database whose name contains 'test'.";
+    }
+}

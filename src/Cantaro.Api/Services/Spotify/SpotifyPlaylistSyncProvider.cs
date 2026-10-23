@@ -48,7 +48,7 @@ public sealed class SpotifyPlaylistSyncProvider(
             var now = DateTimeOffset.UtcNow;
             foreach (var item in raw.Items)
             {
-                if (bound[item.Position].DestinationBinding is not null)
+                if (bound[item.Position].ReadScope is not null)
                 {
                     tracks.Add(bound[item.Position]);
                     continue;

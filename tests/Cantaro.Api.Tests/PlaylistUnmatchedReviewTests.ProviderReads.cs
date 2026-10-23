@@ -407,9 +407,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
         public string PlatformId => "spotify";
         public bool ThrowAfterWrite { get; set; }
         public bool FailVerificationRead { get; set; }
+        public string CreatedPlaylistId { get; set; } = "playlist";
         public List<string[]> Writes { get; } = [];
         public Task ValidateCreationAsync(PlatformAccountContext account, CancellationToken ct) => Task.CompletedTask;
-        public Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken ct) => Task.FromResult("playlist");
+        public Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken ct) => Task.FromResult(CreatedPlaylistId);
         public Task ValidateDestinationAsync(PlatformAccountContext account, string id, CancellationToken ct) => Task.CompletedTask;
         public Task ReconcileAsync(PlatformAccountContext account, string id, IReadOnlyList<string> ids, CancellationToken ct)
         {

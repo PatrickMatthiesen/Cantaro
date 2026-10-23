@@ -80,7 +80,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             var path = request.RequestUri!.AbsolutePath;
             object response;
             if (path.EndsWith("/playlists", StringComparison.Ordinal))
-                response = new { items = new[] { new { id = "playlist", etag = "snapshot-" + string.Join(',', RemoteIds),
+                response = new { items = new[] { new { id = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.RequestUri.Query)["id"].ToString(),
+                    etag = "snapshot-" + string.Join(',', RemoteIds),
                     snippet = new { title = name }, contentDetails = new { itemCount = RemoteIds.Count + ReportedItemCountDelta } } } };
             else if (path.EndsWith("/playlistItems", StringComparison.Ordinal))
             {
@@ -90,6 +91,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
                         position = index, videoOwnerChannelTitle = "Provider artist", resourceId = new { videoId = id } },
                     contentDetails = new { videoId = id }, status = new { privacyStatus = "public" } }) };
             }
+            else if (path.EndsWith("/search", StringComparison.Ordinal))
+                response = new { items = Array.Empty<object>() };
             else if (path.EndsWith("/videos", StringComparison.Ordinal))
                 response = new { items = RemoteIds.Distinct().Select(id => new { id,
                     snippet = new { title = "Provider song", channelTitle = "Provider artist", description = "Provider-only details" },
@@ -103,8 +106,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
     private sealed class ProductionYouTubeReadWriter(ProductionYouTubeReadHandler handler) : IPlaylistWriter
     {
         public string PlatformId => "youtube";
+        public string CreatedPlaylistId { get; set; } = "playlist";
         public Task ValidateCreationAsync(PlatformAccountContext account, CancellationToken ct) => Task.CompletedTask;
-        public Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken ct) => Task.FromResult("playlist");
+        public Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken ct) => Task.FromResult(CreatedPlaylistId);
         public Task ValidateDestinationAsync(PlatformAccountContext account, string id, CancellationToken ct) => Task.CompletedTask;
         public Task ReconcileAsync(PlatformAccountContext account, string id, IReadOnlyList<string> ids, CancellationToken ct)
         { handler.RemoteIds = ids.ToList(); return Task.CompletedTask; }
