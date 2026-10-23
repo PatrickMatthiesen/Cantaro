@@ -109,8 +109,9 @@ public sealed partial class PlaylistSyncCoordinator
         var progress = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
         var entryIds = entries.Select(entry => entry.Id).ToHashSet();
         foreach (var obsolete in progress.Keys.Where(id => !entryIds.Contains(id)).ToList()) progress.Remove(obsolete);
-        var completed = entries.Where(entry => KnownDestinationId(entry, link.Service) is not null
-            || progress.TryGetValue(entry.Id, out var saved) && saved.Fingerprint == PlaylistMatchingProgress.Fingerprint(entry))
+        var completed = entries.Where(entry => AttachedDestinationId(entry, link.Service) is not null
+            || progress.TryGetValue(entry.Id, out var saved)
+                && PlaylistMatchingProgress.CanReuse(saved, PlaylistMatchingProgress.Fingerprint(entry)))
             .Select(entry => entry.Id).ToHashSet();
         link.MatchingTotalCount = entries.Count;
         link.MatchingProcessedCount = completed.Count;
@@ -129,8 +130,9 @@ public sealed partial class PlaylistSyncCoordinator
                     ?? available.FirstOrDefault(item => item.Identity == identity);
                 if (occurrence is not null) available.Remove(occurrence);
                 if (occurrence is not null) id = occurrence.ExternalId;
-                else if (KnownDestinationId(entry, link.Service) is { } knownId) id = knownId;
-                else if (progress.TryGetValue(entry.Id, out var saved) && saved.Fingerprint == fingerprint)
+                else if (AttachedDestinationId(entry, link.Service) is { } knownId) id = knownId;
+                else if (progress.TryGetValue(entry.Id, out var saved)
+                    && PlaylistMatchingProgress.CanReuse(saved, fingerprint))
                     id = saved.ExternalId;
                 else
                 {
@@ -158,7 +160,8 @@ public sealed partial class PlaylistSyncCoordinator
                 .Include(item => item.TrackObservation).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
             if (resolvedEntry is not null)
             {
-                progress[entry.Id] = new(PlaylistMatchingProgress.Fingerprint(resolvedEntry), id);
+                progress[entry.Id] = new(PlaylistMatchingProgress.Fingerprint(resolvedEntry), id,
+                    PlaylistMatchingProgress.CurrentProofVersion);
                 completed.Add(entry.Id);
             }
             else
@@ -236,14 +239,12 @@ public sealed partial class PlaylistSyncCoordinator
         link.MatchingTotalCount = 0;
     }
 
-    private static string? KnownDestinationId(PlaylistEntry entry, string service)
+    private static string? AttachedDestinationId(PlaylistEntry entry, string service)
     {
         var observation = entry.TrackObservation;
         var track = entry.Track ?? observation?.Track;
         if (observation?.SourceType == service && (track is null || observation.TrackId == track.Id))
             return observation.ExternalId;
-        return track?.SourceIds.Where(source => source.SourceType == service)
-            .OrderByDescending(source => source.Confidence).ThenByDescending(source => source.LastVerifiedAt)
-            .FirstOrDefault()?.ExternalId;
+        return null;
     }
 }

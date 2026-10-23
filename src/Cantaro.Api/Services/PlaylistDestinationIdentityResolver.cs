@@ -102,12 +102,23 @@ internal static class PlaylistDestinationIdentityResolver
             && (trackId is null || exactObservation.TrackId == trackId))
             return exactObservation.ExternalId;
 
-        var known = trackId is null ? null : await dbContext.TrackSourceIds
-            .Where(source => source.TrackId == trackId && source.SourceType == service)
-            .OrderByDescending(source => source.Confidence)
-            .ThenByDescending(source => source.LastVerifiedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (known is not null) return known.ExternalId;
+        if (trackId is not null)
+        {
+            // A canonical provider mapping is shared matching data, not proof that this
+            // account may use the provider ID. Reuse only an observation attached to one
+            // of the requester's playlists and reconciled to this exact canonical track.
+            var ownedProviderId = await dbContext.PlaylistEntries.AsNoTracking()
+                .Where(item => item.Playlist!.UserId == account.UserId
+                    && item.TrackId == trackId
+                    && item.TrackObservation != null
+                    && item.TrackObservation.SourceType == service
+                    && item.TrackObservation.TrackId == trackId)
+                .OrderBy(item => item.Id == stored.Id ? 0 : 1)
+                .ThenBy(item => item.TrackObservation!.ExternalId)
+                .Select(item => item.TrackObservation!.ExternalId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (ownedProviderId is not null) return ownedProviderId;
+        }
         if (trackId is null && exactObservation is null) return null;
 
         TrackCanonicalMetadata? canonical = null;

@@ -117,6 +117,14 @@ public sealed class OutboundPlaylistSyncTests
         var playlist = await SeedAsync(db);
         AddTrack(db, playlist, 0, "current-track", "youtube");
         var entry = db.ChangeTracker.Entries<PlaylistEntry>().Single().Entity;
+        var currentObservation = entry.TrackObservation!;
+        var otherOwnedPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = 42, Name = "Imported" };
+        db.PlaylistEntries.Add(new PlaylistEntry
+        {
+            Id = Guid.NewGuid(), Playlist = otherOwnedPlaylist, PlaylistId = otherOwnedPlaylist.Id,
+            TrackId = entry.TrackId, TrackObservationId = currentObservation.Id,
+            TrackObservation = currentObservation
+        });
         entry.TrackObservation = new TrackObservation
         {
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "stale-track",
@@ -129,6 +137,34 @@ public sealed class OutboundPlaylistSyncTests
         await new OutboundPlaylistSyncService(db, [writer]).SyncAsync(new(42, 99), "youtube", playlist.Id, null, default);
 
         Assert.Equal(["current-track"], writer.Writes.Single());
+    }
+
+    [Fact]
+    public async Task Sync_GlobalCanonicalMappingWithoutOwnedObservationDoesNotReachLegacyWriter()
+    {
+        await using var db = CreateDb();
+        var playlist = await SeedAsync(db);
+        var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Private mapping" };
+        track.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube",
+            ExternalId = "other-users-private-id", Confidence = 1
+        });
+        db.PlaylistEntries.Add(new PlaylistEntry
+        {
+            Id = Guid.NewGuid(), PlaylistId = playlist.Id, Track = track,
+            TrackId = track.Id, Position = 0
+        });
+        await db.SaveChangesAsync();
+        var writer = new RecordingWriter();
+
+        var error = await Assert.ThrowsAsync<PlatformApiException>(() =>
+            new OutboundPlaylistSyncService(db, [writer]).SyncAsync(
+                new(42, 99), "youtube", playlist.Id, null, default));
+
+        Assert.Equal("unmatched_tracks", error.Code);
+        Assert.Empty(writer.Writes);
+        Assert.Equal(0, writer.Creations);
     }
 
     [Theory]
@@ -516,13 +552,19 @@ public sealed class OutboundPlaylistSyncTests
     private static void AddTrack(ApplicationDbContext db, Playlist playlist, int position, string id, string service)
     {
         var track = new Track { Id = Guid.NewGuid(), CanonicalMetadata = JsonSerializer.Serialize(new { Title = id }) };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = service,
+            ExternalId = id, Title = id, MatchStatus = TrackMatchingStatuses.Matched
+        };
         track.SourceIds.Add(new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = service, ExternalId = id, Confidence = 1
         });
         db.PlaylistEntries.Add(new PlaylistEntry
         {
-            Id = Guid.NewGuid(), PlaylistId = playlist.Id, Position = position, Track = track, TrackId = track.Id
+            Id = Guid.NewGuid(), PlaylistId = playlist.Id, Position = position, Track = track, TrackId = track.Id,
+            TrackObservation = observation, TrackObservationId = observation.Id
         });
     }
 
