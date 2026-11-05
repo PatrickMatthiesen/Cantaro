@@ -378,6 +378,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             if (path == "/v1/me") response = new { id = ProfileId };
             else if (path == "/api/token") response = new { access_token = "catalog-token", expires_in = 3600, token_type = "Bearer" };
             else if (path == "/v1/search") response = new { tracks = new { items = Array.Empty<object>() } };
+            else if (path == "/v1/artists/artist-one") response = Artist("artist-one", "Porter Robinson");
+            else if (path == "/v1/artists/new-artist") response = Artist("new-artist", "New artist");
             else if (path.EndsWith("/items", StringComparison.Ordinal))
             {
                 Reads++;
@@ -399,6 +401,19 @@ public sealed partial class PlaylistUnmatchedReviewTests
             artists = new[] { new { id = id == "chosen-id" ? "artist-one" : "new-artist", name = id == "chosen-id" ? "Porter Robinson" : "New artist" } },
             external_ids = new { isrc = id == "chosen-id" ? "USABC2400001" : "USNEW2400001" },
             album = new { name = "Provider album", images = new[] { new { url = "https://example.invalid/provider-art.jpg" } } }
+        };
+
+        private static object Artist(string id, string name) => new
+        {
+            id,
+            name,
+            external_urls = new { spotify = $"https://open.spotify.com/artist/{id}" },
+            followers = new { total = 125000 },
+            genres = new[] { "electronic" },
+            images = new[] { new { url = $"https://example.invalid/{id}.jpg", height = 640, width = 640 } },
+            popularity = 72,
+            type = "artist",
+            uri = $"spotify:artist:{id}"
         };
     }
 
