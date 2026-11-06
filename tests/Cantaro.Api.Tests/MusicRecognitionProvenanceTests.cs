@@ -1,9 +1,13 @@
 using System.Security.Claims;
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Google.Apis.Http;
+using Google.Apis.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -159,14 +163,72 @@ public sealed class MusicRecognitionProvenanceTests
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Recognize_SuccessfulProviderReadPersistsSnapshotAndSchedulesMatching(bool existingReference)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var user = TestUserFactory.Create(735, "recognition-requester@example.com");
+        var referenceId = Guid.NewGuid();
+        db.AddRange(user, new ConnectedServiceAccount
+        {
+            Id = 739, UserId = user.Id, Service = "youtube", ExternalAccountId = "channel",
+            ConnectionState = "connected"
+        });
+        if (existingReference)
+            db.TrackObservations.Add(new TrackObservation
+            {
+                Id = referenceId, OwnerUserId = user.Id, SourceType = "youtube", ExternalId = "sourceVid01",
+                Title = "", MatchStatus = TrackMatchingStatuses.Pending
+            });
+        await db.SaveChangesAsync();
+        using var handler = new RecognitionVideoHandler();
+        var youtube = new YouTubeService(new ConfigurationBuilder().Build(), db,
+            new TokenEncryptionService(new EphemeralDataProtectionProvider()), NullLogger<YouTubeService>.Instance,
+            (_, _) => Task.FromResult(new Google.Apis.YouTube.v3.YouTubeService(new BaseClientService.Initializer
+            { ApplicationName = "Recognition snapshot tests", HttpClientFactory = handler })));
+
+        var response = await RecognizeAsync(db, user, "sourceVid01", youtubeOverride: youtube);
+
+        Assert.Equal("pending", response.Status);
+        Assert.Equal("Refreshed song", response.Title);
+        await using var verify = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        var observation = await verify.TrackObservations.SingleAsync();
+        if (existingReference) Assert.Equal(referenceId, observation.Id);
+        Assert.True(ProviderCatalogPolicy.HasOwnedSnapshot(observation, user.Id));
+        Assert.NotNull(observation.RawMetadata);
+        Assert.Equal(observation.Id, (await verify.TrackMatchQueueItems.SingleAsync()).TrackObservationId);
+        var claimed = await new TrackMatchQueue(verify, TimeProvider.System).TryClaimNextAsync(default);
+        Assert.Equal(observation.Id, Assert.IsType<ClaimedTrackMatch>(claimed).ObservationId);
+    }
+
+    private sealed class RecognitionVideoHandler : HttpMessageHandler, Google.Apis.Http.IHttpClientFactory
+    {
+        public ConfigurableHttpClient CreateHttpClient(CreateHttpClientArgs args) => new(new ConfigurableMessageHandler(this));
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Assert.EndsWith("/videos", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"items":[{"id":"sourceVid01","snippet":{"title":"Artist - Refreshed song","channelTitle":"Artist","categoryId":"10"},"contentDetails":{"duration":"PT3M"}}]}
+                    """, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
     private static async Task<RecognizeYouTubeResponse> RecognizeAsync(
-        ApplicationDbContext db, User user, string videoId, string? pageTitle = null)
+        ApplicationDbContext db, User user, string videoId, string? pageTitle = null, YouTubeService? youtubeOverride = null)
     {
         using var manager = new UserManager<User>(
             new UserStore<User, IdentityRole<int>, ApplicationDbContext, int>(db),
             Options.Create(new IdentityOptions()), new PasswordHasher<User>(), [], [],
             new UpperInvariantLookupNormalizer(), new IdentityErrorDescriber(), null!, NullLogger<UserManager<User>>.Instance);
-        var youtube = new YouTubeService(new ConfigurationBuilder().Build(), db,
+        var youtube = youtubeOverride ?? new YouTubeService(new ConfigurationBuilder().Build(), db,
             new TokenEncryptionService(new EphemeralDataProtectionProvider()), NullLogger<YouTubeService>.Instance);
         var controller = new MusicRecognitionController(db, youtube, new TrackMatchQueue(db, TimeProvider.System),
             new MusicLibraryQueryService(db), manager)

@@ -104,6 +104,7 @@ public sealed class MusicRecognitionController(
             }
         }
 
+        await dbContext.SaveChangesAsync(cancellationToken);
         await trackMatchQueue.EnqueueAsync(observation.Id, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (observation.TrackId is { } refreshedTrackId)
