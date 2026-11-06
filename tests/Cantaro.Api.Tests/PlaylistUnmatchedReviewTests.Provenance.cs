@@ -93,17 +93,21 @@ public sealed partial class PlaylistUnmatchedReviewTests
         }
         if (canonical == "new") scope.Db.Tracks.Remove(await scope.Db.Tracks.SingleAsync());
         if (canonical == "reused")
-            scope.Db.TrackSourceIds.Add(new TrackSourceId
+        {
+            var mapping = new TrackSourceId
             {
                 Id = Guid.NewGuid(), TrackId = (await scope.Db.Tracks.SingleAsync()).Id,
                 SourceType = "spotify", ExternalId = "chosen-id"
-            });
+            };
+            scope.VerifyMapping(mapping);
+            scope.Db.TrackSourceIds.Add(mapping);
+        }
         await scope.Db.SaveChangesAsync();
         var token = scope.Token(Candidate("chosen-id"));
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, default);
         // A retried HTTP confirmation must not create duplicate identities or proof.
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, default);
-        Assert.Equal(canonical == "existing" ? 0 : 1,
+        Assert.Equal(canonical == "reused" ? 1 : 0,
             await scope.Db.TrackSourceIds.CountAsync(source => source.SourceType == "spotify"));
         var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name);
         var writer = new ReviewWriter(provider);
@@ -179,8 +183,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
             case "selected-identity-conflict":
                 var conflicting = new Track { Id = Guid.NewGuid(), SearchTitle = "Other" };
                 scope.Db.Tracks.Add(conflicting);
-                scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflicting.Id,
-                    SourceType = "spotify", ExternalId = "chosen-id" });
+                var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflicting.Id,
+                    SourceType = "spotify", ExternalId = "chosen-id" };
+                scope.VerifyMapping(mapping);
+                scope.Db.TrackSourceIds.Add(mapping);
                 break;
         }
         await scope.Db.SaveChangesAsync();
@@ -235,8 +241,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
         scope.Entry.Track = null;
         scope.Entry.TrackObservation!.TrackId = null;
         scope.Entry.TrackObservation.Track = null;
-        scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-            SourceType = "spotify", ExternalId = "chosen-id" });
+        var verified = new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
+            SourceType = "spotify", ExternalId = "chosen-id" };
+        scope.VerifyMapping(verified);
+        scope.Db.TrackSourceIds.Add(verified);
         var survivor = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
             TrackId = trackId, Position = -1 };
         var otherPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId + 1, Name = "Other" };
@@ -352,7 +360,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await coordinator.RunAsync(newOwner, scope.Playlist.Id, "spotify", default);
 
         Assert.Empty(writer.Writes);
-        Assert.Equal(1, provider.Searches);
+        Assert.Equal(0, provider.Searches);
         Assert.Single(await scope.Review.ListAsync(newOwner, scope.Playlist.Id, scope.Link.Id, default));
     }
 
@@ -448,10 +456,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 var trackId = await db.TrackSourceIds.Where(s => s.SourceType == PlatformId && s.ExternalId == id)
                     .Select(s => (Guid?)s.TrackId).SingleOrDefaultAsync(ct);
                 var observation = await db.TrackObservations.SingleOrDefaultAsync(item =>
-                    item.SourceType == PlatformId && item.ExternalId == id, ct);
+                    item.OwnerUserId == account.UserId && item.SourceType == PlatformId && item.ExternalId == id, ct);
                 if (observation is null && trackId is null)
                 {
-                    observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = PlatformId,
+                    observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId,
                         ExternalId = id, Title = id, Artist = "Provider artist", MatchStatus = TrackMatchingStatuses.Pending };
                     db.TrackObservations.Add(observation);
                     await db.SaveChangesAsync(ct);

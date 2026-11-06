@@ -47,7 +47,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using var verify = fixture.Scope.NewContext();
         Assert.True(await verify.Tracks.AnyAsync(t => t.Id == unrelated.Id));
         if (reject) await AssertRejectedReadIsolationAsync(fixture, verify);
-        else Assert.True(await verify.TrackSourceIds.AnyAsync(s => s.ExternalId == "chosen-id"));
+        else Assert.True(await verify.TrackObservations.AnyAsync(s => s.OwnerUserId == fixture.Account.UserId && s.ExternalId == "chosen-id"));
     }
 
     [Fact]
@@ -171,7 +171,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         {
             if (Failures != 0 || !command.CommandText.Contains("TrackObservations", StringComparison.Ordinal)
                 || !command.Parameters.Cast<DbParameter>().Any(p => Equals(p.Value, externalId))
-                || eventData.Context is not { } db || !db.ChangeTracker.Entries<TrackSourceId>().Any(e => e.State == EntityState.Added))
+                || eventData.Context is not { } db || !db.ChangeTracker.Entries<TrackObservation>().Any(e =>
+                    e.State == EntityState.Added && e.Entity.SourceType == "spotify" && e.Entity.ExternalId == externalId))
                 return result;
             Failures++;
             if (stagedSave) await db.SaveChangesAsync(ct);
@@ -186,7 +187,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
             InterceptionResult<int> result, CancellationToken ct = default)
         {
-            if (!Changed && eventData.Context!.ChangeTracker.Entries<TrackSourceId>().Any(e => e.State == EntityState.Added))
+            if (!Changed && eventData.Context!.ChangeTracker.Entries<TrackObservation>().Any(e => e.State == EntityState.Added))
             {
                 Changed = true;
                 await change();
@@ -253,7 +254,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await AssertRejectedReadIsolationAsync(fixture, verify);
         Assert.Equal("missing", (await verify.ServicePlaylistMappings.SingleAsync()).State);
         Assert.Single(fixture.Writer.Writes);
-        if (addNew) Assert.True(await verify.TrackSourceIds.AnyAsync(s => s.ExternalId == "fresh-id"));
+        if (addNew) Assert.True(await verify.TrackObservations.AnyAsync(s => s.OwnerUserId == fixture.Account.UserId && s.ExternalId == "fresh-id"));
     }
 
     [Fact]
@@ -323,6 +324,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.False(await verify.TrackObservations.AnyAsync(o => o.SourceType == "spotify"));
         Assert.False(await verify.TrackArtistCredits.AnyAsync());
         Assert.Null((await verify.Tracks.SingleAsync(t => t.Id == fixture.Scope.Entry.TrackId)).Isrc);
+        var entry = await verify.PlaylistEntries.SingleAsync(item => item.Id == fixture.Scope.Entry.Id);
+        var observation = await verify.TrackObservations.SingleAsync(item => item.Id == entry.TrackObservationId);
+        Assert.Equal(fixture.Account.UserId, observation.OwnerUserId);
+        Assert.Equal("youtube", observation.SourceType);
+        Assert.NotNull(TrackObservationParser.ReadMetadata(observation));
     }
 
     private static PlaylistLinkLifecycleService SpotifyReadLifecycle(ProductionSpotifyReadScope fixture)
@@ -339,7 +345,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.False(await verify.TrackArtistCredits.AnyAsync(c => c.TrackId == track.Id));
         var entry = await verify.PlaylistEntries.SingleAsync(e => e.Id == fixture.Scope.Entry.Id);
         Assert.Equal((fixture.Scope.Entry.TrackId, fixture.Scope.Entry.TrackObservationId), (entry.TrackId, entry.TrackObservationId));
-        Assert.Equal(track.Id, (await verify.TrackObservations.SingleAsync(o => o.Id == entry.TrackObservationId)).TrackId);
+        var observation = await verify.TrackObservations.SingleAsync(o => o.Id == entry.TrackObservationId);
+        Assert.Equal(track.Id, observation.TrackId);
+        Assert.Equal(fixture.Account.UserId, observation.OwnerUserId);
+        Assert.Equal("youtube", observation.SourceType);
+        Assert.NotNull(TrackObservationParser.ReadMetadata(observation));
     }
 
     private sealed class ReadTestPlatform(ApplicationDbContext db, string service) : IPlatformService

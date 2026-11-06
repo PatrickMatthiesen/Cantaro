@@ -199,7 +199,7 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
             var trackId = scenario.TrackId(title);
             var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), TrackId = trackId, SourceType = "spotify", ExternalId = title,
+                Id = Guid.NewGuid(), OwnerUserId = 42, TrackId = trackId, SourceType = "spotify", ExternalId = title,
                 Title = title, MatchStatus = TrackMatchingStatuses.Matched
             };
             scenario.Db.TrackObservations.Add(observation);

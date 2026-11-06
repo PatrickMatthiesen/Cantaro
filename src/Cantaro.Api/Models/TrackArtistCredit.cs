@@ -15,6 +15,8 @@ public enum TrackArtistRole : short
 /// </summary>
 public sealed class TrackArtistCredit
 {
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
     public Guid Id { get; set; }
     public Guid TrackId { get; set; }
     public Guid ArtistId { get; set; }

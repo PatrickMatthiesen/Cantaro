@@ -138,11 +138,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Other" };
         scope.Db.Tracks.Add(other);
         await scope.Db.SaveChangesAsync();
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
+        var conflict = new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = other.Id,
             SourceType = "spotify", ExternalId = "new-destination"
-        });
+        };
+        scope.VerifyMapping(conflict);
+        scope.Db.TrackSourceIds.Add(conflict);
         await scope.Db.SaveChangesAsync();
 
         var error = await Assert.ThrowsAsync<PlatformApiException>(() => scope.Review.ConfirmAsync(
@@ -198,7 +200,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
     }
 
     [Fact]
-    public async Task ConfirmAsync_ReusesExistingRecordingAndMapsOriginalSource()
+    public async Task ConfirmAsync_ReusesVerifiedRecordingWithoutPromotingOriginalSource()
     {
         await using var scope = await Scope.CreateAsync("spotify");
         var canonicalId = scope.Entry.TrackId!.Value;
@@ -206,11 +208,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var observation = await scope.Db.TrackObservations.SingleAsync();
         observation.TrackId = null;
         observation.MatchStatus = TrackMatchingStatuses.Pending;
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
+        var mapping = new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = canonicalId,
             SourceType = "spotify", ExternalId = "new-destination"
-        });
+        };
+        scope.VerifyMapping(mapping);
+        scope.Db.TrackSourceIds.Add(mapping);
         await scope.Db.SaveChangesAsync();
         var token = scope.Token(Candidate("new-destination"));
 
@@ -219,9 +223,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
         Assert.Equal(canonicalId, observation.TrackId);
         Assert.Equal(canonicalId, (await scope.Db.PlaylistEntries.SingleAsync()).TrackId);
-        Assert.Contains(await scope.Db.TrackSourceIds.ToListAsync(), source =>
-            source.SourceType == "youtube" && source.ExternalId == "source-video"
-            && source.TrackId == canonicalId);
+        Assert.Single(await scope.Db.TrackSourceIds.ToListAsync());
+        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(source => source.SourceType == "youtube"));
     }
 
     [Fact]
@@ -242,9 +245,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.NotNull(observation.TrackId);
         Assert.Equal(observation.TrackId, (await scope.Db.PlaylistEntries.SingleAsync()).TrackId);
         var sources = await scope.Db.TrackSourceIds.ToListAsync();
-        Assert.Equal(2, sources.Count);
-        Assert.Contains(sources, source => source.SourceType == "youtube" && source.ExternalId == "source-video");
-        Assert.Contains(sources, source => source.SourceType == "spotify" && source.ExternalId == "new-destination");
+        Assert.Empty(sources);
         var created = await scope.Db.Tracks.SingleAsync(track => track.Id == observation.TrackId);
         Assert.Contains("playlist-manual-review", created.VersionEvidence);
     }
@@ -254,104 +255,59 @@ public sealed partial class PlaylistUnmatchedReviewTests
     [InlineData("provider-reuse")]
     [InlineData("isrc-reuse")]
     [InlineData("new")]
-    public async Task CustomSpotifySearchAndConfirmation_PreserveOrderedIdentitiesAndRepeatSafely(string path)
+    public async Task CustomSpotifySearchAndConfirmation_StaysPrivateAndReusesTheOwnedChoice(string path)
     {
         await using var scope = await Scope.CreateAsync("spotify", relational: true);
         using var http = new HttpClient(new ReviewSpotifyHandler(collaboration: true));
         var review = await scope.WithSpotifyAsync(http);
         var originalTrackId = scope.Entry.TrackId!.Value;
         await PrepareManualPathAsync(scope, path);
-        // A same-name artist elsewhere in the library must not absorb this identity.
-        var other = new Artist { Id = Guid.NewGuid(), Name = "Porter Robinson" };
-        scope.Db.Artists.Add(other);
-        scope.Db.ArtistProviderLinks.Add(new ArtistProviderLink
-        {
-            Id = Guid.NewGuid(), Artist = other, ArtistId = other.Id,
-            Provider = "spotify", ExternalId = "unrelated-artist"
-        });
         await scope.Db.SaveChangesAsync();
+        var before = await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false);
+        var sourceCount = await scope.Db.TrackSourceIds.CountAsync();
 
         await SearchAndConfirmAsync(scope, review, scope.Entry);
-
         var trackId = (await scope.Db.PlaylistEntries.SingleAsync()).TrackId!.Value;
-        if (path == "new") Assert.NotEqual(originalTrackId, trackId);
-        else Assert.Equal(originalTrackId, trackId);
-        scope.Db.ChangeTracker.Clear();
-        var credits = await scope.Db.TrackArtistCredits.AsNoTracking()
-            .Where(c => c.TrackId == trackId).OrderBy(c => c.Position).ToArrayAsync();
-        Assert.Equal(["Porter Robinson", "Guest"], credits.Select(c => c.CreditedName));
-        Assert.Equal([0, 1], credits.Select(c => c.Position));
-        Assert.All(credits, c => Assert.NotEqual(other.Id, c.ArtistId));
-        var artistIds = new[] { "artist-one", "artist-two" };
-        for (var index = 0; index < credits.Length; index++)
-        {
-            var link = await scope.Db.ArtistProviderLinks.SingleAsync(l => l.ArtistId == credits[index].ArtistId);
-            Assert.Equal("spotify", link.Provider);
-            Assert.Equal(artistIds[index], link.ExternalId);
-            Assert.Equal($"https://open.spotify.com/artist/{artistIds[index]}", link.ProfileUrl);
-            Assert.Equal($"https://images.example/{artistIds[index]}.jpg", link.ArtworkUrl);
-            Assert.Contains(artistIds[index], link.RawMetadata);
-            var provenance = JsonSerializer.Deserialize<Dictionary<string, ArtistCreditMetadata>>(credits[index].Provenance!)!;
-            Assert.Equal(link.ExternalId, provenance["spotify"].ExternalId);
-            Assert.Equal(link.ProfileUrl, provenance["spotify"].ProfileUrl);
-        }
-        Assert.Empty(await scope.Db.ArtistReconciliationConflicts.ToArrayAsync());
-        var trackCount = await scope.Db.Tracks.CountAsync();
+        if (path == "existing") Assert.Equal(originalTrackId, trackId);
+        else Assert.NotEqual(originalTrackId, trackId);
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false));
+        Assert.Equal(sourceCount, await scope.Db.TrackSourceIds.CountAsync());
 
-        // A later unresolved entry can confirm the same recording without duplicating credits or identities.
+        var trackCount = await scope.Db.Tracks.CountAsync();
         var repeated = AddUnresolvedReviewEntry(scope);
         await scope.Db.SaveChangesAsync();
         await SearchAndConfirmAsync(scope, review, repeated);
-        Assert.Equal(trackId, (await scope.Db.TrackObservations.SingleAsync(o => o.Id == repeated.TrackObservationId)).TrackId);
-        Assert.Equal(trackId, (await scope.Db.PlaylistEntries.SingleAsync()).TrackId);
+        Assert.Equal(trackId, (await scope.Db.TrackObservations.SingleAsync(item => item.Id == repeated.TrackObservationId)).TrackId);
         Assert.Equal(trackCount, await scope.Db.Tracks.CountAsync());
-        Assert.Equal(3, await scope.Db.Artists.CountAsync());
-        Assert.Equal(3, await scope.Db.ArtistProviderLinks.CountAsync());
-        Assert.Equal(2, await scope.Db.TrackArtistCredits.CountAsync());
-        Assert.Empty(await scope.Db.ArtistReconciliationConflicts.ToArrayAsync());
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false));
+        Assert.Equal(sourceCount, await scope.Db.TrackSourceIds.CountAsync());
     }
 
     [Theory]
     [InlineData("existing")]
     [InlineData("provider-reuse")]
     [InlineData("isrc-reuse")]
-    public async Task CustomSpotifyConfirmation_KeepsConflictingStableIdentityReviewableAndDeduplicated(string path)
+    public async Task CustomSpotifyConfirmation_DoesNotPromoteSelectedArtistIdentity(string path)
     {
         await using var scope = await Scope.CreateAsync("spotify", relational: true);
         using var http = new HttpClient(new ReviewSpotifyHandler(collaboration: false));
         var review = await scope.WithSpotifyAsync(http);
-        var trackId = scope.Entry.TrackId!.Value;
+        var originalTrackId = scope.Entry.TrackId!.Value;
         await PrepareManualPathAsync(scope, path);
         var artist = new Artist { Id = Guid.NewGuid(), Name = "Porter Robinson" };
-        scope.Db.Artists.Add(artist);
-        scope.Db.ArtistProviderLinks.Add(new ArtistProviderLink
+        scope.Db.AddRange(artist, new ArtistProviderLink
         {
-            Id = Guid.NewGuid(), Artist = artist, ArtistId = artist.Id,
-            Provider = "spotify", ExternalId = "different-stable-artist"
-        });
-        scope.Db.TrackArtistCredits.Add(new TrackArtistCredit
+            Id = Guid.NewGuid(), ArtistId = artist.Id, Provider = "spotify", ExternalId = "different-stable-artist"
+        }, new TrackArtistCredit
         {
-            Id = Guid.NewGuid(), TrackId = trackId, Artist = artist, ArtistId = artist.Id,
+            Id = Guid.NewGuid(), TrackId = originalTrackId, ArtistId = artist.Id,
             CreditedName = artist.Name, Position = 0, Role = TrackArtistRole.Primary
         });
         await scope.Db.SaveChangesAsync();
-
+        var before = await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false);
         await SearchAndConfirmAsync(scope, review, scope.Entry);
-        var conflict = await scope.Db.ArtistReconciliationConflicts.AsNoTracking().SingleAsync();
-        Assert.Equal(trackId, conflict.TrackId);
-        Assert.Contains("artist-one", conflict.Evidence);
-        Assert.Contains("https://open.spotify.com/artist/artist-one", conflict.Evidence);
-
-        var repeated = AddUnresolvedReviewEntry(scope);
-        await scope.Db.SaveChangesAsync();
-        await SearchAndConfirmAsync(scope, review, repeated);
-        scope.Db.ChangeTracker.Clear();
-        Assert.Equal(conflict.Id, (await scope.Db.ArtistReconciliationConflicts.SingleAsync()).Id);
-        Assert.Equal(artist.Id, (await scope.Db.TrackArtistCredits.SingleAsync()).ArtistId);
-        Assert.Equal("different-stable-artist", (await scope.Db.ArtistProviderLinks.SingleAsync()).ExternalId);
-        Assert.Single(await scope.Db.Artists.ToArrayAsync());
-        Assert.Contains(await scope.Db.TrackSourceIds.ToArrayAsync(), s =>
-            s.SourceType == "spotify" && s.ExternalId == "new-destination" && s.TrackId == trackId);
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false));
+        Assert.Empty(await scope.Db.ArtistReconciliationConflicts.ToArrayAsync());
     }
 
     [Theory]
@@ -391,25 +347,28 @@ public sealed partial class PlaylistUnmatchedReviewTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ConfirmAsync_IndependentStableRecordingIdentityAcceptsArtistEvidence(bool musicBrainz)
+    public async Task ConfirmAsync_LegacyStableIdDoesNotAuthorizeArtistPromotion(bool musicBrainz)
     {
         await using var scope = await Scope.CreateAsync("spotify", relational: true);
         var recordingId = Guid.NewGuid().ToString();
         scope.Entry.Track!.Isrc = musicBrainz ? null : "us-abc-24-00001";
-        scope.Entry.Track.MbidRecording = musicBrainz ? $" {recordingId.ToUpperInvariant()} " : null;
+        scope.Entry.Track.MbidRecording = musicBrainz ? recordingId : null;
         await scope.Db.SaveChangesAsync();
-        var candidate = new TrackMatchSearchCandidate {
+        var candidate = new TrackMatchSearchCandidate
+        {
             CandidateSource = "spotify", ExternalId = "corroborated", Title = "Everything Goes On",
             Artist = "Porter Robinson", Isrc = musicBrainz ? null : "USABC2400001",
             MbidRecording = musicBrainz ? recordingId : null,
             ArtistIdentities = [new ArtistCreditMetadata { Name = "Porter Robinson", Provider = "spotify",
-                ExternalId = "artist-one", ArtworkUrl = "https://images/artist-one" }] };
-
+                ExternalId = "artist-one", ArtworkUrl = "https://images/artist-one" }]
+        };
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
             scope.Entry.Id, scope.Token(candidate), default);
-
-        Assert.Equal("artist-one", (await scope.Db.ArtistProviderLinks.SingleAsync()).ExternalId);
-        Assert.Equal(scope.Entry.TrackId, (await scope.Db.TrackArtistCredits.SingleAsync()).TrackId);
+        Assert.Empty(await scope.Db.ArtistProviderLinks.ToListAsync());
+        Assert.Empty(await scope.Db.TrackArtistCredits.ToListAsync());
+        Assert.Empty(await scope.Db.TrackSourceIds.ToListAsync());
+        Assert.Equal(candidate.ExternalId, Assert.Single(PlaylistMatchingProgress.Read(
+            (await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson)).Value.ExternalId);
     }
 
     private static async Task PrepareManualPathAsync(Scope scope, string path)
@@ -435,7 +394,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
     {
         var observation = new TrackObservation
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "second-source-video",
+            Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "youtube", ExternalId = "second-source-video",
             Title = "Everything Goes On", Artist = "Porter Robinson", DurationSeconds = 160,
             MatchStatus = TrackMatchingStatuses.Pending,
             RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Description = "" })
@@ -605,6 +564,19 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
     private sealed partial class Scope : IAsyncDisposable
     {
+        public void VerifyMapping(TrackSourceId mapping, string title = "Everything Goes On", string artist = "Porter Robinson")
+        {
+            var item = new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = mapping.SourceType, ExternalId = mapping.ExternalId,
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = title, Artist = artist, DurationSeconds = 160 }),
+                VerificationMethod = mapping.SourceType == "youtube" ? CatalogVerificationMethods.YouTubePublicVideo
+                    : mapping.SourceType == "spotify" ? CatalogVerificationMethods.SpotifyApplication : CatalogVerificationMethods.MusicBrainz,
+                VisibilityState = CatalogVisibility.Public, Revision = 1, VerifiedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                RevalidateAfter = DateTimeOffset.UtcNow.AddDays(1) };
+            mapping.ProviderCatalogItem = item;
+            mapping.ProviderCatalogItemId = item.Id;
+            mapping.CatalogRevision = 1;
+            mapping.AssociationState = RecordingAssociationState.Verified;
+        }
         private readonly IDataProtectionProvider _protector = new EphemeralDataProtectionProvider();
         private readonly SqliteConnection? _connection;
         private readonly PostgresTestSchema? _schema;
@@ -688,7 +660,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             };
             var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), SourceType = service == "youtube" ? "spotify" : "youtube",
+                Id = Guid.NewGuid(), OwnerUserId = userId, SourceType = service == "youtube" ? "spotify" : "youtube",
                 ExternalId = "source-video",
                 Title = "Everything Goes On", Artist = "Porter Robinson", DurationSeconds = 160,
                 MatchStatus = TrackMatchingStatuses.Matched, TrackId = track.Id,
@@ -730,7 +702,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             var track = new Track { Id = Guid.NewGuid(), SearchTitle = name };
             var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = sourceId,
+                Id = Guid.NewGuid(), OwnerUserId = UserId, SourceType = "youtube", ExternalId = sourceId,
                 Title = name, TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched
             };
             var entry = new PlaylistEntry

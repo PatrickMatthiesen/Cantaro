@@ -13,6 +13,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
     private readonly ILogger<MusicBrainzSearchProvider> _logger;
     private readonly TrackMatchingOptions _options;
     private readonly Func<CancellationToken, Task> _respectRateLimitAsync;
+    private readonly ProviderCatalogAcquisition? _catalogAcquisition;
 
     public MusicBrainzSearchProvider(
         IMusicBrainzQueryClient musicBrainzQueryClient,
@@ -25,12 +26,14 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         IMusicBrainzQueryClient musicBrainzQueryClient,
         ILogger<MusicBrainzSearchProvider> logger,
         IOptions<TrackMatchingOptions> options,
-        Func<CancellationToken, Task>? respectRateLimitAsync = null)
+        Func<CancellationToken, Task>? respectRateLimitAsync = null,
+        ProviderCatalogAcquisition? catalogAcquisition = null)
     {
         _musicBrainzQueryClient = musicBrainzQueryClient;
         _logger = logger;
         _options = options.Value;
         _respectRateLimitAsync = respectRateLimitAsync ?? RespectRateLimitAsync;
+        _catalogAcquisition = catalogAcquisition;
     }
 
     public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(TrackObservation observation, CancellationToken cancellationToken)
@@ -56,6 +59,9 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             for (var matchIndex = 0; matchIndex < matches.Count; matchIndex++)
             {
                 var match = matches[matchIndex];
+                var catalogItem = _catalogAcquisition is null
+                    ? null
+                    : await _catalogAcquisition.RecordMusicBrainzResponseAsync(match, cancellationToken);
                 var candidate = new RankedSearchCandidate(
                     new TrackMatchSearchCandidate
                     {
@@ -70,6 +76,8 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
                         MbidRecording = match.MbidRecording,
                         Isrc = match.Isrc,
                         DurationSeconds = match.DurationSeconds,
+                        ProviderCatalogItemId = catalogItem?.Id,
+                        ProviderCatalogRevision = catalogItem?.Revision,
                         Explanation = $"Suggested by MusicBrainz {queryPlan.Description} search (search score: {match.SearchScore}/100).",
                         RawMetadata = match.RawMetadata
                     },

@@ -53,7 +53,7 @@ public sealed class YouTubePlaylistSyncProvider(
                     var existing = unavailableIdentityCache.GetValueOrDefault(item.ExternalId);
                     if (!unavailableIdentityCache.ContainsKey(item.ExternalId))
                     {
-                        existing = await FindExistingUnavailableIdentityAsync(readDb, item.ExternalId, cancellationToken);
+                        existing = await FindExistingUnavailableIdentityAsync(readDb, account, item.ExternalId, cancellationToken);
                         unavailableIdentityCache.Add(item.ExternalId, existing);
                     }
                     tracks.Add(MapUnavailableItem(item, existing.TrackId, existing.ObservationId));
@@ -62,21 +62,22 @@ public sealed class YouTubePlaylistSyncProvider(
                 if (!cache.TryGetValue(item.ExternalId, out var observation))
                 {
                     observation = readDb.TrackObservations.Local.FirstOrDefault(existing =>
-                        existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId)
+                        existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId)
                         ?? await readDb.TrackObservations.SingleOrDefaultAsync(existing =>
-                            existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId,
+                            existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId,
                             cancellationToken);
                     var parsed = TrackMetadataParser.Parse(item.Title, item.Artist);
                     var displayArtist = parsed.DisplayArtist ?? item.Artist;
                     observation ??= new TrackObservation
                     {
-                        Id = Guid.NewGuid(), SourceType = PlatformId, ExternalId = item.ExternalId,
+                        Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId, ExternalId = item.ExternalId,
                         Title = parsed.DisplayTitle, MatchStatus = TrackMatchingStatuses.Pending,
                         CreatedAt = now
                     };
                     if (readDb.Entry(observation).State == EntityState.Detached)
                         readDb.TrackObservations.Add(observation);
-                    var preservedDescription = GetPreservedDescription(item.Description, observation.RawMetadata);
+                    var preservedDescription = GetPreservedDescription(item.Description,
+                        string.IsNullOrWhiteSpace(observation.Title) ? null : observation.RawMetadata);
                     observation.Title = parsed.DisplayTitle;
                     observation.Artist = displayArtist;
                     observation.ThumbnailUrl = item.ThumbnailUrl;
@@ -94,14 +95,20 @@ public sealed class YouTubePlaylistSyncProvider(
                         Description = preservedDescription
                     });
                     observation.UpdatedAt = now;
+                    observation.ProviderCatalogItemId = item.ProviderCatalogItemId;
+                    var associations = new ProviderRecordingAssociations(readDb);
+                    var knownTrackId = (await associations.FindUsableAsync(PlatformId, item.ExternalId, cancellationToken))?.TrackId;
+                    if (knownTrackId is null && item.ProviderCatalogItemId is { } catalogId)
+                    {
+                        var catalogItem = await readDb.ProviderCatalogItems.SingleAsync(row => row.Id == catalogId,
+                            cancellationToken);
+                        knownTrackId = (await associations.RevalidateExactAsync(catalogItem, cancellationToken))?.Id;
+                    }
                     if (observation.TrackId is null)
                     {
-                        var known = await readDb.TrackSourceIds.AsNoTracking().SingleOrDefaultAsync(source =>
-                            source.SourceType == PlatformId && source.ExternalId == item.ExternalId,
-                            cancellationToken);
-                        if (known is not null)
+                        if (knownTrackId is not null)
                         {
-                            observation.TrackId = known.TrackId;
+                            observation.TrackId = knownTrackId;
                             observation.MatchStatus = TrackMatchingStatuses.Matched;
                         }
                         else
@@ -126,18 +133,17 @@ public sealed class YouTubePlaylistSyncProvider(
     }
 
     private async Task<(Guid? TrackId, Guid? ObservationId)> FindExistingUnavailableIdentityAsync(
-        ApplicationDbContext readDb, string externalId, CancellationToken cancellationToken)
+        ApplicationDbContext readDb, PlatformAccountContext account, string externalId, CancellationToken cancellationToken)
     {
         if (externalId.StartsWith("!unavailable:", StringComparison.Ordinal)) return (null, null);
         var observation = readDb.TrackObservations.Local.FirstOrDefault(existing =>
-                existing.SourceType == PlatformId && existing.ExternalId == externalId)
+                existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == externalId)
             ?? await readDb.TrackObservations.AsNoTracking().SingleOrDefaultAsync(existing =>
-                existing.SourceType == PlatformId && existing.ExternalId == externalId,
+                existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == externalId,
                 cancellationToken);
         if (observation is not null) return (observation.TrackId, observation.Id);
 
-        var sourceId = await readDb.TrackSourceIds.AsNoTracking().SingleOrDefaultAsync(source =>
-            source.SourceType == PlatformId && source.ExternalId == externalId, cancellationToken);
+        var sourceId = await new ProviderRecordingAssociations(readDb).FindUsableAsync(PlatformId, externalId, cancellationToken);
         return (sourceId?.TrackId, null);
     }
 
@@ -166,6 +172,7 @@ public sealed class YouTubePlaylistSyncProvider(
     public async Task<string?> ResolveAsync(
         PlatformAccountContext account, PlaylistEntry entry, CancellationToken cancellationToken)
     {
+        await youtubeService.ValidateSyncAccountAsync(account, cancellationToken);
         return await PlaylistDestinationIdentityResolver.ResolveAsync(dbContext, matchingOptions.Value,
             async (observationId, candidate, ct) => (await matchingService.CreateTrackFromMatchAsync(observationId, candidate, ct)).TrackId
                 ?? throw new InvalidOperationException("Matching did not create a canonical track."),

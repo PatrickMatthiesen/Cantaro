@@ -43,7 +43,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
                 scope.Entry.Id, choice.CandidateToken, default);
             var playlist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId, Name = "Owned alternative" };
-            var observation = new TrackObservation { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId,
+            var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = scope.Entry.TrackId,
                 SourceType = "youtube", ExternalId = "alternative-a", Title = "Everything Goes On",
                 MatchStatus = TrackMatchingStatuses.Matched };
             scope.Db.PlaylistEntries.Add(new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist,
@@ -53,6 +53,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Shelter" };
         var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
             SourceType = "youtube", ExternalId = choice.ExternalId };
+        scope.VerifyMapping(mapping, "Shelter");
         scope.Db.AddRange(other, mapping);
         await scope.Db.SaveChangesAsync();
 
@@ -128,7 +129,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Null(await otherProvider.ResolveAsync(new(scope.UserId, 52, "other-account"), scope.Entry, default));
 
         // Later imports of B use ordinary identity resolution, not the confirming user's proof.
-        var imported = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = choice.ExternalId,
+        var imported = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "youtube", ExternalId = choice.ExternalId,
             Title = "Shelter", Artist = "Porter Robinson", DurationSeconds = 160,
             MatchStatus = TrackMatchingStatuses.Pending };
         scope.Db.PlaylistEntries.Add(new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = otherPlaylist.Id,

@@ -91,6 +91,15 @@ public sealed class SpotifyApiClient
     public Task<SpotifyProfileResponse> GetProfileAsync(string accessToken, CancellationToken cancellationToken)
         => GetAsync<SpotifyProfileResponse>("/v1/me", accessToken, cancellationToken);
 
+    public async Task<SpotifyTrackSnapshot?> GetTrackAsync(string accessToken, string trackId, CancellationToken cancellationToken)
+    {
+        var item = await GetAsync<SpotifyItemResponse>(
+            $"/v1/tracks/{Uri.EscapeDataString(trackId)}", accessToken, cancellationToken);
+        return item.Type == "track" && item.Id == trackId && !string.IsNullOrWhiteSpace(item.Name)
+            ? ToTrackSnapshot(item, addedAt: null, position: 0)
+            : null;
+    }
+
     internal async Task<SpotifyCreatedPlaylist> CreateUnlistedPlaylistAsync(
         string accessToken, string name, CancellationToken cancellationToken)
     {

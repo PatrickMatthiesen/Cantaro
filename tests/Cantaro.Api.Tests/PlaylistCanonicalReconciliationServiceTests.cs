@@ -178,6 +178,7 @@ public sealed class PlaylistCanonicalReconciliationServiceTests
         {
             var observation = new TrackObservation
             {
+                OwnerUserId = Playlist.UserId,
                 Id = Guid.NewGuid(),
                 SourceType = "youtube",
                 ExternalId = externalId,

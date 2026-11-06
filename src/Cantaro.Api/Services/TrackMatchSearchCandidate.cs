@@ -2,6 +2,9 @@ namespace Cantaro.Api.Services;
 
 public class TrackMatchSearchCandidate
 {
+    // A reference is not proof. Consumers reload and validate the catalog row and revision.
+    public Guid? ProviderCatalogItemId { get; init; }
+    public long? ProviderCatalogRevision { get; init; }
     public required string CandidateSource { get; init; }
     public required string ExternalId { get; init; }
     public required string Title { get; init; }

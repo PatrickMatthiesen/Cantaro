@@ -68,6 +68,10 @@ internal sealed class PostgresTestSchema : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        // Each fixture uses a different search-path connection pool. Close that
+        // fixture's idle connections when its schema is removed; keep the shared
+        // admin pool reusable across the suite.
+        NpgsqlConnection.ClearPool((NpgsqlConnection)Db.Database.GetDbConnection());
         await Db.DisposeAsync();
         await using var connection = new NpgsqlConnection(_adminConnectionString);
         await connection.OpenAsync();

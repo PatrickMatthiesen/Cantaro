@@ -59,12 +59,33 @@ public class MusicLibraryQueryServiceTests
             CreatedAt = now,
             UpdatedAt = now
         };
+        var publicCatalogItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = "recording-1", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Canonical Song", Artist = "Canonical Artist", Albums = ["Studio Album", "Anniversary Edition"],
+                ThumbnailUrl = "https://img.example/song.jpg", DurationSeconds = 214, Isrc = "US-ABC-12-34567",
+                MusicBrainzRecordingId = "recording-1",
+                ArtistCredits =
+                [
+                    new ArtistCreditMetadata { Name = "Canonical Artist", MusicBrainzArtistId = "0d5f4b04-3be8-427a-8c24-23b1454b2f31", Role = TrackArtistRole.Primary },
+                    new ArtistCreditMetadata { Name = "feat. Guest Artist", Role = TrackArtistRole.Featured }
+                ]
+            }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.MusicBrainz,
+            VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
         track.SourceIds.Add(new TrackSourceId
         {
             Id = Guid.NewGuid(),
             TrackId = track.Id,
             SourceType = "musicbrainz",
-            ExternalId = "recording-1"
+            ExternalId = "recording-1",
+            ProviderCatalogItemId = publicCatalogItem.Id,
+            ProviderCatalogItem = publicCatalogItem,
+            CatalogRevision = publicCatalogItem.Revision,
+            AssociationState = RecordingAssociationState.Verified
         });
         track.SourceIds.Add(new TrackSourceId
         {
@@ -103,7 +124,7 @@ public class MusicLibraryQueryServiceTests
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = " YouTube ", ExternalId = " video-1 ",
-            Title = "Imported song", MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
+            OwnerUserId = userA.Id, Title = "Imported song", MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         db.TrackObservations.Add(observation);
         db.Tracks.Add(track);
@@ -168,6 +189,7 @@ public class MusicLibraryQueryServiceTests
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
+            OwnerUserId = user.Id,
             SourceType = "youtube",
             ExternalId = "video-1",
             Title = "Channel - Raw Video Title",
@@ -206,6 +228,88 @@ public class MusicLibraryQueryServiceTests
     }
 
     [Fact]
+    public async Task GetLibraryAsync_ShowsVerifiedPublicFactsToOtherUsersAndHidesUnknownLegacyFacts()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var alice = TestUserFactory.Create(741, "catalog-alice@example.com");
+        var bob = TestUserFactory.Create(742, "catalog-bob@example.com");
+        var alicePlaylist = MakePlaylist(alice.Id, "Alice", now);
+        var bobPlaylist = MakePlaylist(bob.Id, "Bob", now);
+        var publicTrack = new Track
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = "Untrusted old title", Artist = "Old artist" }),
+            SearchTitle = "Untrusted old title", Isrc = "PRIVATE-ISRC", CreatedAt = now, UpdatedAt = now
+        };
+        var catalogItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "public-spotify-id", Revision = 7,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Public title", Artist = "Public artist", Albums = ["Public album"],
+                ThumbnailUrl = "https://img.example/public.jpg", DurationSeconds = 210,
+                Isrc = "PUBLIC-ISRC", ArtistCredits = [new ArtistCreditMetadata { Name = "Public artist", Role = TrackArtistRole.Primary }]
+            }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
+        publicTrack.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = publicTrack.Id, SourceType = "spotify", ExternalId = catalogItem.ExternalId,
+            ProviderCatalogItemId = catalogItem.Id, ProviderCatalogItem = catalogItem, CatalogRevision = catalogItem.Revision,
+            AssociationState = RecordingAssociationState.Verified
+        });
+        var unknownTrack = new Track
+        {
+            Id = Guid.NewGuid(),
+            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = "Secret legacy title", Artist = "Secret legacy artist", ThumbnailUrl = "https://img.example/private.jpg" }),
+            SearchTitle = "Secret stale title", Isrc = "SECRET-ISRC", CreatedAt = now, UpdatedAt = now
+        };
+        var expiredItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "expired-spotify-id", Revision = 2,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Secret stale title", Artist = "Secret stale artist", ThumbnailUrl = "https://img.example/stale.jpg", Isrc = "STALE-ISRC"
+            }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now.AddDays(-2), RevalidateAfter = now.AddDays(-1)
+        };
+        unknownTrack.PreferredCatalogItemId = expiredItem.Id;
+        unknownTrack.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = unknownTrack.Id, SourceType = "spotify", ExternalId = expiredItem.ExternalId,
+            ProviderCatalogItemId = expiredItem.Id, ProviderCatalogItem = expiredItem, CatalogRevision = expiredItem.Revision,
+            AssociationState = RecordingAssociationState.Verified
+        });
+        db.AddRange(alice, bob, alicePlaylist, bobPlaylist, publicTrack, unknownTrack);
+        await db.SaveChangesAsync();
+        db.PlaylistEntries.AddRange(
+            MakeEntry(alicePlaylist.Id, publicTrack.Id, null, 0, "spotify", now),
+            MakeEntry(bobPlaylist.Id, publicTrack.Id, null, 0, "cantaro", now),
+            MakeEntry(bobPlaylist.Id, unknownTrack.Id, null, 1, "cantaro", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var bobLibrary = await new MusicLibraryQueryService(db).GetLibraryAsync(bob.Id, default);
+        var publicSong = Assert.Single(bobLibrary.Songs, song => song.Id == $"track:{publicTrack.Id}");
+        Assert.Equal("Public title", publicSong.Title);
+        Assert.Equal("Public artist", publicSong.Artist);
+        Assert.Equal(["Public album"], publicSong.Albums);
+        Assert.Equal("https://img.example/public.jpg", publicSong.ThumbnailUrl);
+        Assert.Contains(publicSong.SourceIdentities, identity => identity.Source == "spotify" && identity.ExternalId == "public-spotify-id");
+        Assert.Contains(publicSong.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "PUBLIC-ISRC");
+        var unknownSong = Assert.Single(bobLibrary.Songs, song => song.Id == $"track:{unknownTrack.Id}");
+        Assert.Equal("Unknown song", unknownSong.Title);
+        Assert.Null(unknownSong.Artist);
+        Assert.Null(unknownSong.ThumbnailUrl);
+        Assert.Empty(unknownSong.SourceIdentities);
+    }
+
+    [Fact]
     public async Task GetLibraryAsync_ExcludesEntriesMarkedAsNotMusic()
     {
         var (db, connection) = await CreateDbAsync();
@@ -219,6 +323,7 @@ public class MusicLibraryQueryServiceTests
             Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "coding-talk",
+            OwnerUserId = user.Id,
             Title = "Deep dive on LINQ",
             MatchStatus = TrackMatchingStatuses.NotMusic,
             CreatedAt = now,
@@ -370,9 +475,9 @@ public class MusicLibraryQueryServiceTests
             CreatedAt = now,
             UpdatedAt = now
         };
-        TrackObservation MakeObservation(string externalId, string artwork, int duration) => new()
+        TrackObservation MakeObservation(int ownerId, string externalId, string artwork, int duration) => new()
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = externalId,
+            Id = Guid.NewGuid(), OwnerUserId = ownerId, SourceType = "youtube", ExternalId = externalId,
             Title = "Observed song", MatchStatus = TrackMatchingStatuses.Matched, TrackId = track.Id,
             RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
             {
@@ -380,8 +485,8 @@ public class MusicLibraryQueryServiceTests
             }),
             CreatedAt = now, UpdatedAt = now
         };
-        var firstObservation = MakeObservation("first-video", "https://img.example/first.jpg", 189);
-        var secondObservation = MakeObservation("second-video", "https://img.example/second.jpg", 205);
+        var firstObservation = MakeObservation(firstUser.Id, "first-video", "https://img.example/first.jpg", 189);
+        var secondObservation = MakeObservation(secondUser.Id, "second-video", "https://img.example/second.jpg", 205);
         db.AddRange(firstUser, secondUser, firstPlaylist, secondPlaylist, track, firstObservation, secondObservation);
         await db.SaveChangesAsync();
         db.PlaylistEntries.AddRange(
@@ -431,9 +536,13 @@ public class MusicLibraryQueryServiceTests
             TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         var duplicate = Observation(" YouTube ", " video-one ");
+        duplicate.OwnerUserId = owner.Id;
         var alternate = Observation("youtube", "video-two");
+        alternate.OwnerUserId = owner.Id;
         var spotify = Observation("spotify", "spotify-id");
+        spotify.OwnerUserId = owner.Id;
         var privateObservation = Observation("youtube", "private-video");
+        privateObservation.OwnerUserId = other.Id;
         track.SourceIds.Add(new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = privateObservation.ExternalId
@@ -460,10 +569,11 @@ public class MusicLibraryQueryServiceTests
 
         Assert.Equal(librarySong.SourceIdentities.Select(item => (item.Source, item.ExternalId)),
             detail.SourceIdentities.Select(item => (item.Source, item.ExternalId)));
-        Assert.Equal(5, librarySong.SourceIdentities.Count);
-        Assert.Equal(["isrc", "musicbrainz", "spotify", "youtube"], librarySong.SourcePlatforms);
+        Assert.Equal(3, librarySong.SourceIdentities.Count);
+        Assert.Equal(["spotify", "youtube"], librarySong.SourcePlatforms);
         Assert.Equal(librarySong.SourcePlatforms, detail.SourcePlatforms);
-        Assert.Equal(5, detail.SourceIdentities.Count);
+        Assert.Equal(3, detail.SourceIdentities.Count);
+        Assert.DoesNotContain(detail.SourceIdentities, item => item.Source is "isrc" or "musicbrainz");
         Assert.Equal(new[] { "video-one", "video-two" },
             detail.SourceIdentities.Where(item => item.Source == "youtube").Select(item => item.ExternalId));
         Assert.Equal(new[] { "https://www.youtube.com/watch?v=video-one", "https://www.youtube.com/watch?v=video-two" },
@@ -493,10 +603,10 @@ public class MusicLibraryQueryServiceTests
         db.ChangeTracker.Clear();
         var afterRemoval = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(track.Id, owner.Id, default));
         var libraryAfterRemoval = Assert.Single((await service.GetLibraryAsync(owner.Id, default)).Songs);
-        var expected = new[] { ("isrc", track.Isrc!), ("musicbrainz", track.MbidRecording!), ("spotify", spotify.ExternalId) };
+        var expected = new[] { ("spotify", spotify.ExternalId) };
         Assert.Equal(expected, afterRemoval.SourceIdentities.Select(item => (item.Source, item.ExternalId)));
         Assert.Equal(expected, libraryAfterRemoval.SourceIdentities.Select(item => (item.Source, item.ExternalId)));
-        Assert.Equal(["isrc", "musicbrainz", "spotify"], afterRemoval.SourcePlatforms);
+        Assert.Equal(["spotify"], afterRemoval.SourcePlatforms);
         Assert.Equal(afterRemoval.SourcePlatforms, libraryAfterRemoval.SourcePlatforms);
         Assert.DoesNotContain(afterRemoval.PlatformLinks, item => item.Platform is "youtube" or "youtube-music");
         Assert.DoesNotContain(libraryAfterRemoval.PlatformLinks, item => item.Platform is "youtube" or "youtube-music");
@@ -527,9 +637,15 @@ public class MusicLibraryQueryServiceTests
                 ThumbnailUrl = hasCanonicalMetadata ? "https://img.example/canonical.jpg" : null
             })
         };
+        if (hasCanonicalMetadata)
+            AttachPublicFacts(track, new ProviderCatalogFacts
+            {
+                Title = "Canonical song", Albums = [], DurationSeconds = 250,
+                ThumbnailUrl = "https://img.example/canonical.jpg"
+            }, now);
         TrackObservation Observation(string externalId) => new()
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = externalId, Title = "Observed song",
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = "youtube", ExternalId = externalId, Title = "Observed song",
             TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         var empty = Observation("empty");
@@ -540,12 +656,13 @@ public class MusicLibraryQueryServiceTests
         var later = Observation("later");
         later.DurationSeconds = 300;
         later.ThumbnailUrl = "https://img.example/later.jpg";
-        // Canonical precedence requires artwork provenance on an attached owned observation.
+        // A trusted public artwork fact is visible regardless of account-owned observation provenance.
         later.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
         {
             ThumbnailUrl = hasCanonicalMetadata ? "https://img.example/canonical.jpg" : null
         });
         var privateObservation = Observation("private");
+        privateObservation.OwnerUserId = other.Id;
         privateObservation.DurationSeconds = 400;
         privateObservation.ThumbnailUrl = "https://img.example/private.jpg";
         db.AddRange(owner, other, canonicalOnlyPlaylist, observedPlaylist, privatePlaylist,
@@ -608,9 +725,16 @@ public class MusicLibraryQueryServiceTests
                 ThumbnailUrl = hasCanonicalArtwork ? "https://img.example/canonical.jpg" : " "
             })
         };
+        if (hasCanonicalDuration || hasCanonicalArtwork)
+            AttachPublicFacts(related, new ProviderCatalogFacts
+            {
+                Title = "Related song",
+                DurationSeconds = hasCanonicalDuration ? 250 : null,
+                ThumbnailUrl = hasCanonicalArtwork ? "https://img.example/canonical.jpg" : null
+            }, now);
         TrackObservation Observation(string externalId) => new()
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = externalId, Title = "Observed song",
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = "youtube", ExternalId = externalId, Title = "Observed song",
             TrackId = related.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         var empty = Observation("empty");
@@ -625,6 +749,7 @@ public class MusicLibraryQueryServiceTests
             ThumbnailUrl = hasCanonicalArtwork ? "https://img.example/canonical.jpg" : "https://img.example/later.jpg"
         });
         var privateObservation = Observation("private");
+        privateObservation.OwnerUserId = other.Id;
         privateObservation.DurationSeconds = 400;
         privateObservation.ThumbnailUrl = "https://img.example/private.jpg";
         db.AddRange(owner, other, firstPlaylist, observedPlaylist, sameNamePlaylist, laterSameNamePlaylist, lastPlaylist,
@@ -674,7 +799,7 @@ public class MusicLibraryQueryServiceTests
     [InlineData("{\"Title\":\" \",\"Artist\":\"\"}", "", null, "formatted", true, false)]
     [InlineData(null, "", "", "blank-formatted", false, true)]
     [InlineData("{}", null, " \t ", "blank-formatted", true, false)]
-    public async Task ReadSongs_MissingTitleArtistProjectionsUseOnlyOrderedOwnedDisplayMetadata(
+    public async Task ReadSongs_MissingProjectionsUseOnlyOrderedOwnedSnapshots(
         string? canonicalMetadata, string? searchValue, string? emptyValue, string format,
         bool sameComposition, bool titleFirst)
     {
@@ -695,7 +820,8 @@ public class MusicLibraryQueryServiceTests
         };
         TrackObservation Observation(string name) => new()
         {
-            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = name,
+            Id = Guid.NewGuid(), OwnerUserId = name == "Private" ? secondUser.Id : firstUser.Id,
+            TrackId = related.Id, SourceType = "youtube", ExternalId = name,
             Title = format != "plain" ? "Unformatted upload" : $"{name} song",
             Artist = format != "plain" ? null : $"{name} artist",
             RawMetadata = format != "plain" ? JsonSerializer.Serialize(new TrackObservationMetadata
@@ -718,7 +844,7 @@ public class MusicLibraryQueryServiceTests
             OriginalTitle = format == "blank-formatted" ? "(OST)" : "  First song - OST  "
         });
         var artistObservation = Observation("Artist");
-        artistObservation.Title = " ";
+        artistObservation.Title = "First song";
         artistObservation.Artist = format == "plain" ? "  First artist  " : null;
         artistObservation.RawMetadata = format == "plain" ? null : JsonSerializer.Serialize(new TrackObservationMetadata
         {
@@ -776,7 +902,7 @@ public class MusicLibraryQueryServiceTests
             Assert.Equal(detail.Title, librarySong.Title);
             Assert.Equal(detail.Artist, librarySong.Artist);
             Assert.True(card.InLibrary);
-            Assert.Equal(userId == firstUser.Id ? TrackMatchingStatuses.Pending : null, librarySong.MatchStatus);
+            Assert.Null(librarySong.MatchStatus);
             Assert.Equal([sameComposition ? "Another recording of this composition" : "Remix of this recording"], card.RelationshipLabels);
         }
         var stored = await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == related.Id);
@@ -790,7 +916,7 @@ public class MusicLibraryQueryServiceTests
     [InlineData(false, true, true)]
     [InlineData(false, false, true)]
     [InlineData(true, false, false)]
-    public async Task ReadSongs_TitleArtistFallbackPreservesCanonicalCreditAndSearchPrecedence(
+    public async Task ReadSongs_UsesPublicFactsAndOwnedObservationsInsteadOfLegacyCreditsOrProjections(
         bool hasCanonicalValues, bool hasArtistCredit, bool hasSearchValues)
     {
         var (db, connection) = await CreateDbAsync();
@@ -811,6 +937,12 @@ public class MusicLibraryQueryServiceTests
             SearchTitle = hasSearchValues ? "Search song" : null,
             SearchArtist = hasSearchValues ? "Search artist" : null
         };
+        if (hasCanonicalValues)
+            AttachPublicFacts(related, new ProviderCatalogFacts
+            {
+                Title = "Canonical song", Artist = "Canonical artist",
+                ArtistCredits = [new ArtistCreditMetadata { Name = "Canonical artist", Role = TrackArtistRole.Primary }]
+            }, now);
         if (hasArtistCredit)
         {
             var artist = new Artist { Id = Guid.NewGuid(), Name = "Credit artist", CreatedAt = now, UpdatedAt = now };
@@ -822,18 +954,18 @@ public class MusicLibraryQueryServiceTests
         }
         var observation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "owned-precedence",
+            Id = Guid.NewGuid(), OwnerUserId = user.Id, TrackId = related.Id, SourceType = "youtube", ExternalId = "owned-precedence",
             Title = "Observed song", Artist = "Observed artist", MatchStatus = TrackMatchingStatuses.Matched,
             CreatedAt = now, UpdatedAt = now
         };
         var emptyObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "empty-precedence",
+            Id = Guid.NewGuid(), OwnerUserId = user.Id, TrackId = related.Id, SourceType = "youtube", ExternalId = "empty-precedence",
             Title = " ", Artist = "", MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         var laterObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "later-precedence",
+            Id = Guid.NewGuid(), OwnerUserId = user.Id, TrackId = related.Id, SourceType = "youtube", ExternalId = "later-precedence",
             Title = "Conflicting later song", Artist = "Conflicting later artist",
             MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
@@ -859,14 +991,14 @@ public class MusicLibraryQueryServiceTests
         var card = Assert.Single((await service.GetCanonicalSongAsync(anchor.Id, user.Id, default))!.RelatedRecordings);
         var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, user.Id, default));
         var librarySong = Assert.Single((await service.GetLibraryAsync(user.Id, default)).Songs, song => song.Id == detail.Id);
-        Assert.Equal(hasCanonicalValues ? "Canonical song" : "Search song", card.Title);
-        Assert.Equal(hasCanonicalValues ? "Canonical artist" : hasArtistCredit ? "Credit artist" : "Search artist", card.Artist);
+        Assert.Equal(hasCanonicalValues ? "Canonical song" : "Observed song", card.Title);
+        Assert.Equal(hasCanonicalValues ? "Canonical artist" : "Observed artist", card.Artist);
         Assert.Equal(card.Title, detail.Title);
         Assert.Equal(card.Artist, detail.Artist);
-        Assert.Equal(hasArtistCredit ? "Credit artist" : null, detail.ArtistCredits.SingleOrDefault()?.CreditedName);
-        // Library display already prefers owned observations over search projections.
+        Assert.Equal(hasCanonicalValues ? "Canonical artist" : null, detail.ArtistCredits.SingleOrDefault()?.CreditedName);
+        // The library uses trusted public facts and this user's observations, not legacy projections.
         Assert.Equal(hasCanonicalValues ? "Canonical song" : "Observed song", librarySong.Title);
-        Assert.Equal(hasCanonicalValues ? "Canonical artist" : hasArtistCredit ? "Credit artist" : "Observed artist", librarySong.Artist);
+        Assert.Equal(hasCanonicalValues ? "Canonical artist" : "Observed artist", librarySong.Artist);
     }
 
     [Fact]
@@ -898,7 +1030,7 @@ public class MusicLibraryQueryServiceTests
         };
         var privateObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "private-related", Title = "Private related", Artist = "Private artist",
+            Id = Guid.NewGuid(), OwnerUserId = other.Id, SourceType = "youtube", ExternalId = "private-related", Title = "Private related", Artist = "Private artist",
             TrackId = related.Id, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now,
             RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
             {
@@ -907,7 +1039,7 @@ public class MusicLibraryQueryServiceTests
         };
         var emptyPrivateObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "empty-private-related",
+            Id = Guid.NewGuid(), OwnerUserId = other.Id, TrackId = related.Id, SourceType = "youtube", ExternalId = "empty-private-related",
             Title = " ", Artist = null, MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
@@ -934,7 +1066,7 @@ public class MusicLibraryQueryServiceTests
 
         var service = new MusicLibraryQueryService(db);
         var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(original.Id, owner.Id, default));
-        Assert.Equal(["Canonical related", "Search related", "Unknown song"], detail.RelatedRecordings.Select(card => card.Title));
+        Assert.Equal(3, detail.RelatedRecordings.Count);
         var privateCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{related.Id}");
         Assert.False(privateCard.InLibrary);
         Assert.Equal("Unknown song", privateCard.Title);
@@ -943,14 +1075,16 @@ public class MusicLibraryQueryServiceTests
         Assert.Null(privateCard.ThumbnailUrl);
         var canonicalCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{canonicalRelated.Id}");
         Assert.False(canonicalCard.InLibrary);
-        Assert.Equal(250, canonicalCard.DurationSeconds);
+        Assert.Equal("Unknown song", canonicalCard.Title);
+        Assert.Null(canonicalCard.DurationSeconds);
         Assert.Null(canonicalCard.ThumbnailUrl);
         var searchCard = Assert.Single(detail.RelatedRecordings, card => card.Id == $"track:{searchRelated.Id}");
         Assert.False(searchCard.InLibrary);
-        Assert.Equal("Search artist", searchCard.Artist);
+        Assert.Equal("Unknown song", searchCard.Title);
+        Assert.Null(searchCard.Artist);
         var searchDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(searchRelated.Id, owner.Id, default));
-        Assert.Equal(searchCard.Title, searchDetail.Title);
-        Assert.Equal(searchCard.Artist, searchDetail.Artist);
+        Assert.Equal("Unknown song", searchDetail.Title);
+        Assert.Null(searchDetail.Artist);
         var relatedDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, owner.Id, default));
         Assert.Empty(relatedDetail.Playlists);
         Assert.Equal(privateCard.Title, relatedDetail.Title);
@@ -989,26 +1123,30 @@ public class MusicLibraryQueryServiceTests
         };
         var original = MakeTrack("Original");
         var related = MakeTrack("Related canonical title");
-        related.Isrc = hasPublicIdentifiers ? "USABC1234567" : null;
-        related.MbidRecording = hasPublicIdentifiers ? "public-recording" : null;
+        if (hasPublicIdentifiers)
+            AttachPublicFacts(related, new ProviderCatalogFacts
+            {
+                Title = "Related canonical title", Artist = "Artist", Isrc = "USABC1234567",
+                MusicBrainzRecordingId = "public-recording"
+            }, now, "musicbrainz", "public-recording");
         var secondHop = MakeTrack("Second hop");
         var unrelated = MakeTrack("Unrelated");
         // Matching persists observation identities globally, without a visibility classification.
         var observations = new[] { "youtube", "spotify", "musicbrainz", "isrc", "unclassified" }
             .Select(source => new TrackObservation
             {
-                Id = Guid.NewGuid(), TrackId = related.Id, SourceType = source, ExternalId = $"private-{source}",
+                Id = Guid.NewGuid(), OwnerUserId = owner.Id, TrackId = related.Id, SourceType = source, ExternalId = $"private-{source}",
                 Title = "Private observed title", MatchStatus = TrackMatchingStatuses.Matched,
                 CreatedAt = now, UpdatedAt = now
             }).ToList();
-        related.SourceIds = observations.Select(observation => new TrackSourceId
+        related.SourceIds = related.SourceIds.Concat(observations.Select(observation => new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = related.Id,
             SourceType = observation.SourceType, ExternalId = observation.ExternalId
-        }).ToList();
+        })).ToList();
         var alternate = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "youtube", ExternalId = "private-youtube-variant",
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, TrackId = related.Id, SourceType = "youtube", ExternalId = "private-youtube-variant",
             Title = "Private variant", MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         db.AddRange(requester, owner, saved, privatePlaylist, original, related, secondHop, unrelated, alternate);
@@ -1047,9 +1185,9 @@ public class MusicLibraryQueryServiceTests
         Assert.False(card.InLibrary);
         var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, requester.Id, default));
         Assert.Equal(card.Id, detail.Id);
-        Assert.Equal("Related canonical title", detail.Title);
+        Assert.Equal(hasPublicIdentifiers ? "Related canonical title" : "Unknown song", detail.Title);
         Assert.Equal(card.Title, detail.Title);
-        Assert.Equal("Artist", detail.Artist);
+        Assert.Equal(hasPublicIdentifiers ? "Artist" : null, detail.Artist);
         Assert.Empty(detail.Playlists);
         Assert.Equal(hasPublicIdentifiers ? new[] { ("isrc", related.Isrc!), ("musicbrainz", related.MbidRecording!) } : [],
             detail.SourceIdentities.Select(identity => (identity.Source, identity.ExternalId)));
@@ -1087,7 +1225,7 @@ public class MusicLibraryQueryServiceTests
         AssertSameIdentitiesAndLinks(detail, afterRemove);
         Assert.DoesNotContain((await service.GetLibraryAsync(requester.Id, default)).Songs, song => song.Id == detail.Id);
         Assert.Null(await service.GetCanonicalSongAsync(secondHop.Id, requester.Id, default));
-        Assert.Equal(observations.Count, await db.TrackSourceIds.CountAsync());
+        Assert.Equal(observations.Count + (hasPublicIdentifiers ? 1 : 0), await db.TrackSourceIds.CountAsync());
 
         var ownedDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(related.Id, owner.Id, default));
         var ownedLibrarySong = Assert.Single((await service.GetLibraryAsync(owner.Id, default)).Songs);
@@ -1118,14 +1256,23 @@ public class MusicLibraryQueryServiceTests
             CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = title, Artist = "Shared artist" })
         };
         var original = MakeTrack("Original");
-        original.MbidRecording = "musicbrainz-original";
-        original.Isrc = "USABC1234567";
-        original.SourceIds.Add(new TrackSourceId
+        var originalFacts = new ProviderCatalogFacts
         {
-            Id = Guid.NewGuid(), TrackId = original.Id, SourceType = "spotify", ExternalId = "spotify-original"
-        });
+            Title = "Original", Artist = "Shared artist", Isrc = "USABC1234567",
+            MusicBrainzRecordingId = "musicbrainz-original"
+        };
+        AttachPublicFacts(original, originalFacts, now, "musicbrainz", "musicbrainz-original");
+        AttachPublicFacts(original, originalFacts, now, "spotify", "spotify-original");
         var acoustic = MakeTrack("Acoustic take", TrackVersionFlags.Acoustic);
+        AttachPublicFacts(acoustic, new ProviderCatalogFacts
+        {
+            Title = "Acoustic take", Artist = "Shared artist", VersionFlags = TrackVersionFlags.Acoustic
+        }, now);
         var remix = MakeTrack("Remix", TrackVersionFlags.Remix);
+        AttachPublicFacts(remix, new ProviderCatalogFacts
+        {
+            Title = "Remix", Artist = "Shared artist", VersionFlags = TrackVersionFlags.Remix
+        }, now);
         var unrelated = MakeTrack("Another song by the artist");
         var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
         db.AddRange(owner, other, playlist, original, acoustic, remix, unrelated, composition);
@@ -1154,12 +1301,10 @@ public class MusicLibraryQueryServiceTests
         Assert.DoesNotContain(detail.RelatedRecordings, item => item.Id == $"track:{unrelated.Id}");
         Assert.Contains(detail.SourceIdentities, identity => identity.Source == "musicbrainz" && identity.ExternalId == "musicbrainz-original");
         Assert.Contains(detail.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "USABC1234567");
-        Assert.Equal(["isrc", "musicbrainz"], detail.SourcePlatforms);
-        Assert.Equal(2, detail.SourceIdentities.Count);
-        var publicLink = Assert.Single(detail.PlatformLinks);
-        Assert.Equal("musicbrainz", publicLink.Platform);
-        Assert.Equal("musicbrainz-original", publicLink.ExternalId);
-        Assert.DoesNotContain(detail.SourceIdentities, identity => identity.ExternalId == "spotify-original");
+        Assert.Equal(["isrc", "musicbrainz", "spotify"], detail.SourcePlatforms);
+        Assert.Equal(3, detail.SourceIdentities.Count);
+        Assert.Contains(detail.PlatformLinks, link => link.Platform == "musicbrainz" && link.ExternalId == "musicbrainz-original");
+        Assert.Contains(detail.PlatformLinks, link => link.Platform == "spotify" && link.ExternalId == "spotify-original");
 
         var remixDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(remix.Id, owner.Id, default));
         Assert.Empty(remixDetail.Playlists);
@@ -1183,7 +1328,7 @@ public class MusicLibraryQueryServiceTests
         var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Song", CreatedAt = now, UpdatedAt = now };
         var unattachedObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "unattached-video",
+            Id = Guid.NewGuid(), OwnerUserId = user.Id, TrackId = track.Id, SourceType = "youtube", ExternalId = "unattached-video",
             Title = "Unattached", MatchStatus = TrackMatchingStatuses.Matched, CreatedAt = now, UpdatedAt = now
         };
         track.SourceIds.Add(new TrackSourceId
@@ -1237,7 +1382,7 @@ public class MusicLibraryQueryServiceTests
         const string ownedArtwork = "https://i.ytimg.com/vi/ownedVideo1/mqdefault.jpg";
         var privateObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "privateVid1",
+            Id = Guid.NewGuid(), OwnerUserId = originalOwner.Id, SourceType = "youtube", ExternalId = "privateVid1",
             Title = "Song", Artist = "Artist", ThumbnailUrl = privateArtwork, DurationSeconds = 200,
             MatchStatus = TrackMatchingStatuses.Pending, CreatedAt = now, UpdatedAt = now
         };
@@ -1245,16 +1390,31 @@ public class MusicLibraryQueryServiceTests
         db.PlaylistEntries.Add(MakeEntry(privatePlaylist.Id, null, privateObservation.Id, 0, "youtube", now));
         db.PlaylistEntries.Add(MakeEntry(playlist.Id, anchor.Id, null, 0, "cantaro", now));
         await db.SaveChangesAsync();
-        // Exercise production matching and reconciliation, which copy private artwork into shared canonical JSON.
+        var catalogItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "catalog-song", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Song", Artist = "Artist", DurationSeconds = 210
+            }),
+            VisibilityState = CatalogVisibility.Public,
+            VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
+        db.ProviderCatalogItems.Add(catalogItem);
+        await db.SaveChangesAsync();
         var matching = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
         var matched = await matching.CreateTrackFromMatchAsync(privateObservation.Id, new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify", ExternalId = "catalog-song", Title = "Song", Artist = "Artist",
-            ArtistCredits = ["Artist"], Isrc = "USABC2400001", DurationSeconds = 210
+            ArtistCredits = ["Artist"], Isrc = "USABC2400001", DurationSeconds = 210,
+            ProviderCatalogItemId = catalogItem.Id, ProviderCatalogRevision = catalogItem.Revision
         }, default);
         var trackId = Assert.IsType<Guid>(matched.TrackId);
         var stored = await db.Tracks.AsNoTracking().SingleAsync(track => track.Id == trackId);
-        Assert.Equal(privateArtwork, JsonSerializer.Deserialize<TrackCanonicalMetadata>(stored.CanonicalMetadata!)!.ThumbnailUrl);
+        Assert.Null(stored.CanonicalMetadata);
+        Assert.Equal(catalogItem.Id, stored.PreferredCatalogItemId);
+        Assert.Equal("Song", JsonSerializer.Deserialize<ProviderCatalogFacts>(catalogItem.FactsJson)!.Title);
         if (accessKind == "composition")
         {
             var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
@@ -1278,8 +1438,9 @@ public class MusicLibraryQueryServiceTests
             // A different imported observation resolves to the same canonical track, with its own artwork.
             var ownObservation = new TrackObservation
             {
-                Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "ownedVideo1", Title = "Song", Artist = "Artist",
-                RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { ThumbnailUrl = ownedArtwork }),
+                Id = Guid.NewGuid(), OwnerUserId = requester.Id, SourceType = "youtube", ExternalId = "ownedVideo1", Title = "Song", Artist = "Artist",
+                DurationSeconds = 210,
+                RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { ThumbnailUrl = ownedArtwork, Isrc = "USABC2400001" }),
                 MatchStatus = TrackMatchingStatuses.Pending, CreatedAt = now, UpdatedAt = now
             };
             db.TrackObservations.Add(ownObservation);
@@ -1301,7 +1462,10 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal(expectedArtwork, detail.ThumbnailUrl);
         Assert.Equal("Song", detail.Title);
         Assert.Equal(210, detail.DurationSeconds);
-        Assert.Contains(detail.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "USABC2400001");
+        if (phase == "owned")
+            Assert.Contains(detail.SourceIdentities, identity => identity.Source == "isrc" && identity.ExternalId == "USABC2400001");
+        else
+            Assert.DoesNotContain(detail.SourceIdentities, identity => identity.Source == "isrc");
         Assert.DoesNotContain("privateVid1", JsonSerializer.Serialize(detail));
         var anchorDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(anchor.Id, requester.Id, default));
         var card = Assert.Single(anchorDetail.RelatedRecordings);
@@ -1346,6 +1510,47 @@ public class MusicLibraryQueryServiceTests
         Assert.Equal(expected.SourcePlatforms, actual.SourcePlatforms);
         Assert.Equal(expected.PlatformLinks.Select(link => (link.Platform, link.Source, link.ExternalId, link.Url)),
             actual.PlatformLinks.Select(link => (link.Platform, link.Source, link.ExternalId, link.Url)));
+    }
+
+    private static ProviderCatalogItem AttachPublicFacts(Track track, ProviderCatalogFacts facts,
+        DateTimeOffset now, string source = "spotify", string? externalId = null)
+    {
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = source, ExternalId = externalId ?? $"{source}-{Guid.NewGuid():N}",
+            Revision = 1, FactsJson = JsonSerializer.Serialize(facts), VisibilityState = CatalogVisibility.Public,
+            VerificationMethod = source switch
+            {
+                "spotify" => CatalogVerificationMethods.SpotifyApplication,
+                "youtube" => CatalogVerificationMethods.YouTubePublicVideo,
+                _ => CatalogVerificationMethods.MusicBrainz
+            },
+            VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
+        track.PreferredCatalogItem = item;
+        track.PreferredCatalogItemId = item.Id;
+        track.SearchTitle = facts.Title;
+        track.SearchArtist = facts.Artist;
+        track.Isrc = facts.Isrc;
+        track.MbidRecording = facts.MusicBrainzRecordingId;
+        track.VersionFlags = facts.VersionFlags;
+        var association = track.SourceIds.FirstOrDefault(sourceId =>
+            sourceId.SourceType == item.SourceType && sourceId.ExternalId == item.ExternalId);
+        if (association is null)
+        {
+            association = new TrackSourceId
+            {
+                Id = Guid.NewGuid(), TrackId = track.Id, SourceType = item.SourceType, ExternalId = item.ExternalId
+            };
+            track.SourceIds.Add(association);
+        }
+        association.ProviderCatalogItem = item;
+        association.ProviderCatalogItemId = item.Id;
+        association.CatalogRevision = item.Revision;
+        association.AssociationState = RecordingAssociationState.Verified;
+        association.AssociationMethod = "test_fixture";
+        association.AssociationVerifiedAt = now;
+        return item;
     }
 
     private static Playlist MakePlaylist(int userId, string name, DateTimeOffset now)

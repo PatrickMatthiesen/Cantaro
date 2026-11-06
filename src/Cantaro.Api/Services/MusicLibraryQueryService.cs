@@ -8,6 +8,7 @@ namespace Cantaro.Api.Services;
 public class MusicLibraryQueryService(ApplicationDbContext dbContext)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
+    private static DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 
     public async Task<MusicLibraryResponse> GetLibraryAsync(int userId, CancellationToken cancellationToken)
     {
@@ -16,8 +17,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .Include(playlist => playlist.ServiceMappings)
             .Include(playlist => playlist.Entries)
                 .ThenInclude(entry => entry.Track)
+                    .ThenInclude(track => track!.SourceIds)
+                        .ThenInclude(source => source.ProviderCatalogItem)
+            .Include(playlist => playlist.Entries)
+                .ThenInclude(entry => entry.Track)
                     .ThenInclude(track => track!.ArtistCredits)
-                        .ThenInclude(credit => credit.Artist)
             .Include(playlist => playlist.Entries)
                 .ThenInclude(entry => entry.TrackObservation)
             .Where(playlist => playlist.UserId == userId)
@@ -30,7 +34,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
                 .Where(IsMusicEntry)
                 .Select(entry => new MusicLibraryEntryContext(playlist, entry)))
             .GroupBy(item => GetSongStableId(item.Entry))
-            .Select(MapSong)
+            .Select(group => MapSong(group, userId, UtcNow))
             .OrderBy(song => song.Title)
             .ThenBy(song => song.Artist)
             .ToList();
@@ -73,19 +77,19 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
     private static bool IsMusicEntry(PlaylistEntry entry) =>
         entry.TrackObservation?.MatchStatus != TrackMatchingStatuses.NotMusic;
 
-    private static MusicLibrarySongDto MapSong(IGrouping<string, MusicLibraryEntryContext> group)
+    private static MusicLibrarySongDto MapSong(IGrouping<string, MusicLibraryEntryContext> group, int userId, DateTimeOffset now)
     {
         var entries = OrderOwnedEntries(group.Select(item => item.Entry)).ToList();
         var representative = entries[0];
-        var metadata = BuildSongMetadata(representative.Track, entries);
-        var identities = DistinctIdentities(GetSourceIdentities(representative.Track, group.Select(item => item.Entry)));
+        var metadata = BuildSongMetadata(representative.Track, entries, userId, now);
+        var identities = DistinctIdentities(GetSourceIdentities(representative.Track, group.Select(item => item.Entry), userId, now));
 
         return new MusicLibrarySongDto
         {
             Id = group.Key,
             Title = metadata.Title,
             Artist = metadata.Artist,
-            ArtistCredits = BuildArtistCredits(representative.Track),
+            ArtistCredits = BuildArtistCredits(representative.Track, entries, userId, now),
             Albums = metadata.Albums,
             ThumbnailUrl = metadata.ThumbnailUrl,
             DurationSeconds = metadata.DurationSeconds,
@@ -93,7 +97,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             SourcePlatforms = identities.Select(identity => identity.Source).Distinct().Order().ToList(),
             SourceIdentities = identities,
             PlatformLinks = BuildPlatformLinks(identities),
-            VersionLabels = representative.Track is null ? [] : GetVersionLabels(representative.Track.VersionFlags),
+            VersionLabels = metadata.VersionFlags is null ? [] : GetVersionLabels(metadata.VersionFlags.Value),
             Playlists = group
                 .OrderBy(item => item.Playlist.Name)
                 .ThenBy(item => item.Entry.Position)
@@ -112,10 +116,11 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
     {
         var accessibleTrackIds = CanonicalTrackAccess.GetAccessibleTrackIds(_dbContext, userId);
         var track = await _dbContext.Tracks.AsNoTracking()
-            .Include(x => x.ArtistCredits).ThenInclude(x => x.Artist)
+            .Include(x => x.SourceIds).ThenInclude(x => x.ProviderCatalogItem)
+            .Include(x => x.ArtistCredits)
             .FirstOrDefaultAsync(x => x.Id == trackId && accessibleTrackIds.Contains(x.Id), cancellationToken);
         if (track is null) return null;
-        var metadata = ParseJson<TrackCanonicalMetadata>(track.CanonicalMetadata);
+        var now = UtcNow;
         var entries = await _dbContext.PlaylistEntries.AsNoTracking()
             .Include(entry => entry.TrackObservation)
             .Include(entry => entry.Playlist)
@@ -125,22 +130,22 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .ThenBy(entry => entry.PlaylistId)
             .ThenBy(entry => entry.Id)
             .ToListAsync(cancellationToken);
-        var displayMetadata = BuildSongMetadata(track, entries);
+        var displayMetadata = BuildSongMetadata(track, entries, userId, now);
         var memberships = entries
             .Select(x => new MusicLibrarySongPlaylistDto { EntryId = x.Id.ToString(), PlaylistId = x.PlaylistId.ToString(), PlaylistName = x.Playlist!.Name, Position = x.Position })
             .OrderBy(x => x.PlaylistName).ToList();
-        var identities = DistinctIdentities(GetSourceIdentities(track, entries));
+        var identities = DistinctIdentities(GetSourceIdentities(track, entries, userId, now));
         return new MusicLibrarySongDto
         {
-            Id = $"track:{track.Id}", Title = FirstNonEmpty(metadata?.Title, track.SearchTitle, displayMetadata.Title)!,
-            Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(track), track.SearchArtist, displayMetadata.Artist),
-            ArtistCredits = BuildArtistCredits(track),
-            Albums = metadata?.Albums ?? [],
+            Id = $"track:{track.Id}", Title = displayMetadata.Title,
+            Artist = displayMetadata.Artist,
+            ArtistCredits = BuildArtistCredits(track, entries, userId, now),
+            Albums = displayMetadata.Albums,
             ThumbnailUrl = displayMetadata.ThumbnailUrl,
             DurationSeconds = displayMetadata.DurationSeconds,
             MatchStatus = null, SourcePlatforms = identities.Select(x => x.Source).Distinct().Order().ToList(),
             SourceIdentities = identities, PlatformLinks = BuildPlatformLinks(identities), Playlists = memberships,
-            VersionLabels = GetVersionLabels(track.VersionFlags),
+            VersionLabels = displayMetadata.VersionFlags is null ? [] : GetVersionLabels(displayMetadata.VersionFlags.Value),
             RelatedRecordings = await GetRelatedRecordingsAsync(trackId, accessibleTrackIds, userId, cancellationToken)
         };
     }
@@ -178,14 +183,13 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         var entriesByTrack = ownedEntries.ToLookup(entry => entry.TrackId!.Value);
         var tracks = await _dbContext.Tracks.AsNoTracking()
             .Where(candidate => relatedIds.Contains(candidate.Id) && accessibleTrackIds.Contains(candidate.Id))
-            .Include(candidate => candidate.ArtistCredits).ThenInclude(credit => credit.Artist)
+            .Include(candidate => candidate.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
             .ToListAsync(cancellationToken);
 
         return tracks.Select(candidate =>
         {
-            var metadata = ParseJson<TrackCanonicalMetadata>(candidate.CanonicalMetadata);
             var entries = entriesByTrack[candidate.Id];
-            var displayMetadata = BuildSongMetadata(candidate, entries);
+            var displayMetadata = BuildSongMetadata(candidate, entries, userId, UtcNow);
             var labels = relations
                 .Where(relation => relation.FromTrackId == candidate.Id || relation.ToTrackId == candidate.Id)
                 .Select(relation => DescribeRelation(relation, trackId))
@@ -194,12 +198,12 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             return new MusicLibraryRelatedRecordingDto
             {
                 Id = $"track:{candidate.Id}",
-                Title = FirstNonEmpty(metadata?.Title, candidate.SearchTitle, displayMetadata.Title)!,
-                Artist = FirstNonEmpty(metadata?.Artist, BuildArtistDisplay(candidate), candidate.SearchArtist, displayMetadata.Artist),
+                Title = displayMetadata.Title,
+                Artist = displayMetadata.Artist,
                 ThumbnailUrl = displayMetadata.ThumbnailUrl,
                 DurationSeconds = displayMetadata.DurationSeconds,
                 RelationshipLabels = labels,
-                VersionLabels = GetVersionLabels(candidate.VersionFlags),
+                VersionLabels = displayMetadata.VersionFlags is null ? [] : GetVersionLabels(displayMetadata.VersionFlags.Value),
                 InLibrary = entries.Any()
             };
         }).OrderBy(candidate => candidate.Title).ThenBy(candidate => candidate.Id).ToList();
@@ -276,27 +280,28 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         return true;
     }
 
-    // Both callers supply only entries from the requester's playlists. Global source mappings
-    // support matching and sync, but only attached observations authorize provider identities here.
+    // Public identities require a verified, current catalog association. Observation identities
+    // remain private to the user who owns that observation.
     private static IEnumerable<MusicLibrarySongSourceIdentityDto> GetSourceIdentities(
-        Track? track, IEnumerable<PlaylistEntry> ownedEntries)
+        Track? track, IEnumerable<PlaylistEntry> ownedEntries, int userId, DateTimeOffset now)
     {
-        if (!string.IsNullOrWhiteSpace(track?.Isrc))
-        {
-            yield return Identity("isrc", track.Isrc);
-        }
-
-        if (!string.IsNullOrWhiteSpace(track?.MbidRecording))
-        {
-            yield return Identity("musicbrainz", track.MbidRecording);
-        }
+        var facts = ProviderCatalogPolicy.SharedFacts(track, now);
+        if (!string.IsNullOrWhiteSpace(facts?.Isrc)) yield return Identity("isrc", facts.Isrc);
+        if (!string.IsNullOrWhiteSpace(facts?.MusicBrainzRecordingId)) yield return Identity("musicbrainz", facts.MusicBrainzRecordingId);
+        if (track is not null)
+            foreach (var source in track.SourceIds.Where(source => ProviderCatalogPolicy.IsVerified(source, now)))
+                yield return Identity(source.SourceType, source.ExternalId);
 
         foreach (var entry in ownedEntries)
         {
-            if (entry.TrackObservation is { SourceType: { } source, ExternalId: { } externalId }
+            if (ProviderCatalogPolicy.HasOwnedSnapshot(entry.TrackObservation, userId)
+                && entry.TrackObservation is { SourceType: { } source, ExternalId: { } externalId }
                 && !string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(externalId))
             {
                 yield return Identity(source, externalId);
+                var observationMetadata = ParseJson<TrackObservationMetadata>(entry.TrackObservation.RawMetadata);
+                if (!string.IsNullOrWhiteSpace(observationMetadata?.Isrc))
+                    yield return Identity("isrc", observationMetadata.Isrc);
             }
         }
     }
@@ -345,29 +350,28 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         ExternalId = identity.ExternalId
     };
 
-    private static List<MusicLibrarySongArtistCreditDto> BuildArtistCredits(Track? track) =>
-        track?.ArtistCredits
-            .OrderBy(credit => credit.Position)
-            .Select(credit => new MusicLibrarySongArtistCreditDto
-            {
-                ArtistId = credit.ArtistId.ToString(),
-                Name = credit.Artist?.Name ?? credit.CreditedName,
-                CreditedName = credit.CreditedName,
-                Role = credit.Role.ToString().ToLowerInvariant(),
-                Position = credit.Position,
-                MusicBrainzArtistId = credit.Artist?.MusicBrainzArtistId
-            })
-            .ToList() ?? [];
-
-    private static string? BuildArtistDisplay(Track? track)
+    private static List<MusicLibrarySongArtistCreditDto> BuildArtistCredits(Track? track, IEnumerable<PlaylistEntry> ownedEntries, int userId, DateTimeOffset now)
     {
-        var creditedNames = track?.ArtistCredits
-            .OrderBy(credit => credit.Position)
-            .Where(credit => credit.Role is TrackArtistRole.Primary or TrackArtistRole.Featured)
-            .Select(credit => credit.CreditedName.Trim())
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .ToList() ?? [];
-        return creditedNames.Count == 0 ? null : string.Join(" ", creditedNames);
+        var facts = ProviderCatalogPolicy.SharedFacts(track, now);
+        if (facts?.ArtistCredits.Count > 0)
+        {
+            var publicSourceId = ProviderCatalogPolicy.SharedSource(track, now)?.ProviderCatalogItemId;
+            return facts.ArtistCredits.Select((credit, position) => new MusicLibrarySongArtistCreditDto
+            {
+                Name = credit.Name, CreditedName = credit.Name, Role = (credit.Role?.ToString() ?? "primary").ToLowerInvariant(),
+                Position = position, MusicBrainzArtistId = credit.MusicBrainzArtistId,
+                ArtistId = track?.ArtistCredits.FirstOrDefault(row => row.ProviderCatalogItemId == publicSourceId
+                    && row.Position == position && row.CreditedName == credit.Name
+                    && row.Role == (credit.Role ?? TrackArtistRole.Primary))?.ArtistId.ToString()
+            }).ToList();
+        }
+        var ownObservation = ownedEntries.Select(entry => entry.TrackObservation)
+            .FirstOrDefault(observation => ProviderCatalogPolicy.HasOwnedSnapshot(observation, userId));
+        var ownMetadata = ParseJson<TrackObservationMetadata>(ownObservation?.RawMetadata);
+        return ownMetadata?.ArtistIdentities.Select((credit, position) => new MusicLibrarySongArtistCreditDto
+        {
+            Name = credit.Name, CreditedName = credit.Name, Role = (credit.Role?.ToString() ?? "primary").ToLowerInvariant(), Position = position
+        }).ToList() ?? [];
     }
 
     private static IOrderedEnumerable<PlaylistEntry> OrderOwnedEntries(IEnumerable<PlaylistEntry> entries) =>
@@ -376,54 +380,50 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             .ThenBy(entry => entry.PlaylistId)
             .ThenBy(entry => entry.Id);
 
-    // Every caller supplies only entries from the requester's playlists. Canonical artwork
-    // has no public provenance, including legacy URLs copied there by matching. An attached
-    // owned observation must contain that exact URL before canonical precedence applies.
-    private static SongMetadata BuildSongMetadata(Track? track, IEnumerable<PlaylistEntry> ownedEntries)
+    private static SongMetadata BuildSongMetadata(Track? track, IEnumerable<PlaylistEntry> ownedEntries, int userId, DateTimeOffset now)
     {
-        var canonicalMetadata = ParseJson<TrackCanonicalMetadata>(track?.CanonicalMetadata);
         var observations = OrderOwnedEntries(ownedEntries)
-            .Where(entry => entry.TrackObservation is not null)
+            .Where(entry => ProviderCatalogPolicy.HasOwnedSnapshot(entry.TrackObservation, userId))
             .Select(entry => (Observation: entry.TrackObservation!,
                 Metadata: ParseJson<TrackObservationMetadata>(entry.TrackObservation!.RawMetadata)))
             .ToList();
         var observation = observations.FirstOrDefault().Observation;
-        var canonicalArtwork = FirstNonEmpty(canonicalMetadata?.ThumbnailUrl);
-        var thumbnailUrl = canonicalArtwork is not null && observations.Any(item =>
-            string.Equals(canonicalArtwork, FirstNonEmpty(item.Observation.ThumbnailUrl), StringComparison.Ordinal)
-            || string.Equals(canonicalArtwork, FirstNonEmpty(item.Metadata?.ThumbnailUrl), StringComparison.Ordinal))
-            ? canonicalArtwork
-            : observations.Select(item => FirstNonEmpty(item.Observation.ThumbnailUrl, item.Metadata?.ThumbnailUrl))
-                .FirstOrDefault(url => url is not null);
-        var durationSeconds = canonicalMetadata?.DurationSeconds
+        var facts = ProviderCatalogPolicy.SharedFacts(track, now);
+        var durationSeconds = facts?.DurationSeconds
             ?? observations.Select(item => item.Observation.DurationSeconds ?? item.Metadata?.DurationSeconds)
                 .FirstOrDefault(duration => duration is not null);
 
         var title = FirstNonEmpty(
-            canonicalMetadata?.Title,
+            facts?.Title,
             observations.Select(item => FirstNonEmpty(
                     TrackObservationDisplayFormatter.GetQueueTitle(item.Observation, item.Metadata),
                     item.Observation.Title))
                 .FirstOrDefault(value => value is not null),
             "Unknown song")!;
         var artist = FirstNonEmpty(
-            canonicalMetadata?.Artist,
-            BuildArtistDisplay(track),
+            facts?.Artist,
+            facts?.ArtistCredits.Count > 0 ? string.Join(", ", facts.ArtistCredits.Select(credit => credit.Name)) : null,
             observations.Select(item => FirstNonEmpty(
-                    TrackObservationDisplayFormatter.GetQueueArtist(item.Observation, item.Metadata)))
+                    TrackObservationDisplayFormatter.GetQueueArtist(item.Observation, item.Metadata), item.Observation.Artist))
                 .FirstOrDefault(value => value is not null));
 
+        var albums = facts?.Albums.ToList() ?? observations
+            .Select(item => item.Metadata?.Album)
+            .Where(album => !string.IsNullOrWhiteSpace(album))
+            .Select(album => album!)
+            .ToList();
         return new SongMetadata(
             title,
             artist,
-            (canonicalMetadata?.Albums ?? [])
+            albums
                 .Where(album => !string.IsNullOrWhiteSpace(album))
                 .Select(album => album.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList(),
-            thumbnailUrl,
+            FirstNonEmpty(facts?.ThumbnailUrl, observations.Select(item => FirstNonEmpty(item.Observation.ThumbnailUrl, item.Metadata?.ThumbnailUrl)).FirstOrDefault(url => url is not null)),
             durationSeconds,
-            observation?.MatchStatus ?? (track is not null ? TrackMatchingStatuses.Matched : null));
+            observation?.MatchStatus ?? (track is not null ? TrackMatchingStatuses.Matched : null),
+            facts?.VersionFlags);
     }
 
     private static string GetSongStableId(PlaylistEntry entry)
@@ -470,5 +470,6 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
         List<string> Albums,
         string? ThumbnailUrl,
         int? DurationSeconds,
-        string? MatchStatus);
+        string? MatchStatus,
+        TrackVersionFlags? VersionFlags);
 }

@@ -23,8 +23,16 @@ public sealed class PlaylistDestinationIdentityResolverTests
             var first = await SeedUnresolvedAsync(setup);
             firstEntryId = first.Id;
             var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 99, Name = "Another listener" };
+            setup.Users.Add(TestUserFactory.Create(99, "another-listener@example.test"));
+            var firstObservation = await setup.TrackObservations.SingleAsync(item => item.Id == first.TrackObservationId);
+            var secondObservation = new TrackObservation
+            {
+                Id = Guid.NewGuid(), OwnerUserId = 99, SourceType = firstObservation.SourceType,
+                ExternalId = firstObservation.ExternalId, Title = firstObservation.Title, Artist = firstObservation.Artist,
+                DurationSeconds = firstObservation.DurationSeconds, MatchStatus = TrackMatchingStatuses.Pending
+            };
             var second = new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist,
-                PlaylistId = playlist.Id, TrackObservationId = first.TrackObservationId };
+                PlaylistId = playlist.Id, TrackObservationId = secondObservation.Id, TrackObservation = secondObservation };
             setup.PlaylistEntries.Add(second);
             await setup.SaveChangesAsync();
             secondEntryId = second.Id;
@@ -47,8 +55,6 @@ public sealed class PlaylistDestinationIdentityResolverTests
                     var observation = await db.TrackObservations.SingleAsync(item => item.Id == observationId, ct);
                     observation.TrackId = track.Id;
                     observation.MatchStatus = TrackMatchingStatuses.Matched;
-                    db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = track.Id,
-                        SourceType = observation.SourceType, ExternalId = observation.ExternalId });
                     await reconciler.ReconcileObservationAsync(observationId, track.Id, ct);
                     await db.SaveChangesAsync(ct);
                     return track.Id;
@@ -71,8 +77,8 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Equal(new[] { "shared-match", "shared-match" }, await Task.WhenAll(firstRun, secondRun));
         Assert.Equal(2, searches);
         await using var verify = new ApplicationDbContext(options);
-        Assert.Single(await verify.Tracks.ToListAsync());
-        Assert.Equal(2, await verify.TrackSourceIds.CountAsync());
+        Assert.Equal(2, await verify.Tracks.CountAsync());
+        Assert.Empty(await verify.TrackSourceIds.ToListAsync());
     }
 
     [Theory]
@@ -116,10 +122,140 @@ public sealed class PlaylistDestinationIdentityResolverTests
             }, CancellationToken.None);
 
         Assert.Null(result);
-        Assert.Equal(1, searches);
-        Assert.Equal(trackId, (await db.PlaylistEntries.AsNoTracking().SingleAsync(item => item.Id == entryId)).TrackId);
+        Assert.Equal(0, searches);
+        Assert.Null((await db.PlaylistEntries.AsNoTracking().SingleAsync(item => item.Id == entryId)).TrackId);
+        Assert.Equal(observationAlreadyResolved ? trackId : null,
+            (await db.TrackObservations.AsNoTracking().SingleAsync()).TrackId);
         Assert.Single(await db.Tracks.ToListAsync());
         Assert.Equal(2, await db.TrackSourceIds.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_BobReusesFreshVerifiedPublicSpotifyAssociationWithoutSearching(bool referenceOnly)
+    {
+        await using var db = CreateDb();
+        var entry = await SeedCanonicalAsync(db);
+        if (referenceOnly) { entry.TrackObservation!.Title = ""; entry.TrackObservation.RawMetadata = null; }
+        if (!await db.Users.AnyAsync(user => user.Id == 99))
+        {
+            db.Users.Add(TestUserFactory.Create(99, "alice@example.test"));
+            await db.SaveChangesAsync();
+        }
+        db.TrackObservations.Add(new TrackObservation
+        {
+            OwnerUserId = 99,
+            Id = Guid.NewGuid(),
+            SourceType = "youtube",
+            ExternalId = "alice-private-video",
+            Title = "Alice's private title",
+            Artist = "Private artist",
+            ThumbnailUrl = "https://private.example/alice-artwork",
+            MatchStatus = TrackMatchingStatuses.Matched,
+            TrackId = entry.TrackId
+        });
+        var now = DateTimeOffset.UtcNow;
+        var catalogItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "spotify",
+            ExternalId = "verified-spotify-recording",
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Song", Artist = "Artist", DurationSeconds = 180
+            }),
+            VerificationMethod = "spotify_application_catalog",
+            VerifiedAt = now.AddMinutes(-1),
+            RevalidateAfter = now.AddHours(1),
+            VisibilityState = CatalogVisibility.Public,
+            Revision = 1
+        };
+        db.ProviderCatalogItems.Add(catalogItem);
+        db.TrackSourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(),
+            TrackId = entry.TrackId!.Value,
+            SourceType = catalogItem.SourceType,
+            ExternalId = catalogItem.ExternalId,
+            ProviderCatalogItemId = catalogItem.Id,
+            ProviderCatalogItem = catalogItem,
+            CatalogRevision = catalogItem.Revision,
+            AssociationState = RecordingAssociationState.Verified
+        });
+        await db.SaveChangesAsync();
+        var searches = 0;
+
+        var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
+            (_, _, _) => throw new InvalidOperationException("Known public association must not materialize."),
+            (_, _, _) => throw new InvalidOperationException("The entry is already attached."),
+            new PlatformAccountContext(42, 7), "spotify", entry,
+            (_, _) =>
+            {
+                searches++;
+                return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([]);
+            }, CancellationToken.None);
+
+        Assert.Equal("verified-spotify-recording", result);
+        Assert.Equal(0, searches);
+        Assert.DoesNotContain("alice-private-video", await db.TrackSourceIds
+            .Select(source => source.ExternalId).ToArrayAsync());
+        Assert.DoesNotContain("Alice's private title", await db.Tracks
+            .Select(track => track.SearchTitle).ToArrayAsync());
+        Assert.DoesNotContain("https://private.example/alice-artwork", await db.ProviderCatalogItems
+            .Select(item => item.FactsJson).ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("withdrawn")]
+    [InlineData("conflicted")]
+    public async Task ResolveAsync_SearchesWhenPublicAssociationIsNotUsable(string invalidation)
+    {
+        await using var db = CreateDb();
+        var entry = await SeedCanonicalAsync(db);
+        var now = DateTimeOffset.UtcNow;
+        var catalogItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(),
+            SourceType = "spotify",
+            ExternalId = "stale-spotify-recording",
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Song", Artist = "Artist", DurationSeconds = 180
+            }),
+            VerificationMethod = "spotify_application_catalog",
+            VerifiedAt = now.AddDays(-2),
+            RevalidateAfter = invalidation == "expired" ? now.AddMinutes(-1) : now.AddHours(1),
+            VisibilityState = invalidation == "withdrawn" ? CatalogVisibility.Withdrawn : CatalogVisibility.Public,
+            Revision = 1
+        };
+        var mapping = new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = entry.TrackId!.Value,
+            SourceType = catalogItem.SourceType, ExternalId = catalogItem.ExternalId,
+            ProviderCatalogItemId = catalogItem.Id, ProviderCatalogItem = catalogItem,
+            CatalogRevision = catalogItem.Revision,
+            AssociationState = invalidation == "conflicted"
+                ? RecordingAssociationState.Conflicted : RecordingAssociationState.Verified
+        };
+        db.AddRange(catalogItem, mapping);
+        await db.SaveChangesAsync();
+        var searches = 0;
+
+        var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
+            (_, _, _) => throw new InvalidOperationException("Known track should not be recreated."),
+            (_, _, _) => throw new InvalidOperationException("The entry is already attached."),
+            new PlatformAccountContext(42, 7), "spotify", entry,
+            (_, _) =>
+            {
+                searches++;
+                return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([Candidate("fresh-search-id", "spotify")]);
+            }, CancellationToken.None);
+
+        Assert.Equal("fresh-search-id", result);
+        Assert.Equal(1, searches);
+        Assert.Equal("stale-spotify-recording", (await db.TrackSourceIds.SingleAsync()).ExternalId);
     }
 
     [Fact]
@@ -134,8 +270,16 @@ public sealed class PlaylistDestinationIdentityResolverTests
             async (_, _, ct) =>
             {
                 db.Tracks.AddRange(new Track { Id = resolvedTrackId }, new Track { Id = otherTrackId });
+                var now = DateTimeOffset.UtcNow;
+                var catalog = new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "claimed-match",
+                    FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Song", Artist = "Artist", DurationSeconds = 180 }),
+                    VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+                    VisibilityState = CatalogVisibility.Public, Revision = 1, VerifiedAt = now.AddMinutes(-1),
+                    RevalidateAfter = now.AddDays(1) };
                 db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = otherTrackId,
-                    SourceType = "spotify", ExternalId = "claimed-match" });
+                    SourceType = "spotify", ExternalId = "claimed-match", ProviderCatalogItem = catalog,
+                    ProviderCatalogItemId = catalog.Id, CatalogRevision = catalog.Revision,
+                    AssociationState = RecordingAssociationState.Verified });
                 await db.SaveChangesAsync(ct);
                 return resolvedTrackId;
             },
@@ -151,15 +295,16 @@ public sealed class PlaylistDestinationIdentityResolverTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ResolveAsync_LocallyResolvedSourceDoesNotGlobalizeNewDestination(bool existingDestination)
+    public async Task ResolveAsync_UnknownLegacyIdentityDoesNotReuseTrackOrGlobalizeDestination(bool existingDestination)
     {
         await using var db = CreateDb();
         var known = await SeedCanonicalAsync(db);
+        known.TrackObservation!.Title = ""; known.TrackObservation.RawMetadata = null;
         known.Track!.SearchTitle = "Song";
         known.Track.SearchArtist = "Artist";
         db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = known.TrackId!.Value,
             SourceType = "spotify", ExternalId = "existing-song" });
-        var source = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "another-video",
+        var source = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = 42, SourceType = "youtube", ExternalId = "another-video",
             Title = "Song", Artist = "Artist", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Pending };
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 42, Name = "Another playlist" };
         var entry = new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist, PlaylistId = playlist.Id,
@@ -170,8 +315,16 @@ public sealed class PlaylistDestinationIdentityResolverTests
 
         var searches = 0;
         var destination = existingDestination ? "existing-song" : "new-song";
+        var materializedTrackId = Guid.NewGuid();
         var result = await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
-            (_, _, _) => throw new InvalidOperationException("Must reuse the canonical song."),
+            async (observationId, _, ct) =>
+            {
+                db.Tracks.Add(new Track { Id = materializedTrackId });
+                (await db.TrackObservations.SingleAsync(item => item.Id == observationId, ct)).TrackId = materializedTrackId;
+                (await db.PlaylistEntries.SingleAsync(item => item.Id == entry.Id, ct)).TrackId = materializedTrackId;
+                await db.SaveChangesAsync(ct);
+                return materializedTrackId;
+            },
             (observation, track, ct) => reconciler.ReconcileObservationAsync(observation, track, ct),
             new PlatformAccountContext(42, 7), "spotify", entry,
             (_, _) =>
@@ -182,9 +335,9 @@ public sealed class PlaylistDestinationIdentityResolverTests
 
         Assert.Equal(destination, result);
         Assert.Equal(1, searches);
-        Assert.Equal(known.TrackId, source.TrackId);
-        Assert.Contains(await db.TrackSourceIds.ToListAsync(), item => item.SourceType == "youtube"
-            && item.ExternalId == "another-video" && item.TrackId == known.TrackId);
+        Assert.Equal(materializedTrackId, source.TrackId);
+        Assert.DoesNotContain(await db.TrackSourceIds.ToListAsync(), item => item.SourceType == "youtube"
+            && item.ExternalId == "another-video");
         Assert.False(await db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "new-song"));
     }
 
@@ -208,7 +361,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_StrongCrossProviderMatchCreatesCanonicalAndSourceMapping()
+    public async Task ResolveAsync_StrongCrossProviderMatchKeepsDestinationChoiceScoped()
     {
         await using var db = CreateDb();
         var entry = await SeedUnresolvedAsync(db);
@@ -239,10 +392,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
             ]), CancellationToken.None);
 
         Assert.Equal("spotify1", id);
-        var source = await db.TrackSourceIds.SingleAsync();
-        Assert.Equal(createdTrackId, source.TrackId);
-        Assert.Equal("spotify", source.SourceType);
-        Assert.True(source.Confidence >= 0.85m);
+        Assert.Empty(await db.TrackSourceIds.ToListAsync());
     }
 
     [Fact]
@@ -305,7 +455,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
         var ownedPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = 42, Name = "Imported" };
         var ownedObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = entry.TrackId, SourceType = "spotify", ExternalId = "owned-spotify",
+            Id = Guid.NewGuid(), OwnerUserId = 42, TrackId = entry.TrackId, SourceType = "spotify", ExternalId = "owned-spotify",
             Title = "Song", Artist = "Artist", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Matched
         };
         db.PlaylistEntries.Add(new PlaylistEntry
@@ -352,21 +502,22 @@ public sealed class PlaylistDestinationIdentityResolverTests
     {
         await using var db = CreateDb();
         var entry = await SeedCanonicalAsync(db);
-        entry.Track!.Isrc = "us-abc-24-00002";
+        var sourceMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "us-abc-24-00002" });
+        entry.TrackObservation!.RawMetadata = sourceMetadata;
         await db.SaveChangesAsync();
         var other = Candidate("other-recording", "spotify", "USABC2400001");
         var correct = Candidate("correct-recording", "spotify", "USABC2400002");
 
         var id = await ResolveCanonicalAsync(db, entry, "spotify", (evidence, _) =>
         {
-            Assert.Equal("USABC2400002", TrackObservationParser.ReadMetadata(evidence)?.Isrc);
+            Assert.Equal("USABC2400002", TrackIdentityResolver.NormalizeIsrc(TrackObservationParser.ReadMetadata(evidence)?.Isrc));
             Assert.Equal("Song", evidence.Title);
             Assert.Equal(180, evidence.DurationSeconds);
             return Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([other, correct]);
         });
 
         Assert.Equal("correct-recording", id);
-        Assert.Null((await db.TrackObservations.AsNoTracking().SingleAsync()).RawMetadata);
+        Assert.Equal(sourceMetadata, (await db.TrackObservations.AsNoTracking().SingleAsync()).RawMetadata);
     }
 
     [Theory]
@@ -376,7 +527,8 @@ public sealed class PlaylistDestinationIdentityResolverTests
     {
         await using var db = CreateDb();
         var entry = await SeedCanonicalAsync(db);
-        entry.Track!.Isrc = "USABC2400001";
+        entry.TrackObservation!.RawMetadata = JsonSerializer.Serialize(
+            new TrackObservationMetadata { Isrc = "USABC2400001" });
         await db.SaveChangesAsync();
         var candidate = Candidate("conflicting", "spotify", "USABC2400001", title, duration);
 
@@ -388,12 +540,13 @@ public sealed class PlaylistDestinationIdentityResolverTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ResolveAsync_ExistingCanonicalTrackEnrichesArtistsAndReusesScopedDestinationAfterRestart(bool mappingAppearsDuringSearch)
+    public async Task ResolveAsync_ExistingCanonicalTrackDoesNotPromoteSearchArtistDataAndReusesScopedDestinationAfterRestart(bool mappingAppearsDuringSearch)
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
         Guid entryId;
         Guid trackId;
+        Guid artistId;
         await using (var db = new ApplicationDbContext(options))
         {
             var entry = await SeedCanonicalAsync(db);
@@ -403,7 +556,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
             await new ArtistReconciliationService(db).ReconcileAsync(entry.Track!,
                 [new ArtistCreditMetadata { Name = "Artist" }], "observation", DateTimeOffset.UtcNow, default);
             await db.SaveChangesAsync();
-            var artistId = (await db.Artists.SingleAsync()).Id;
+            artistId = (await db.Artists.SingleAsync()).Id;
             var candidate = new TrackMatchSearchCandidate {
                 CandidateSource = "spotify", ExternalId = "accepted", Title = "Song", Artist = "Artist", Isrc = "USABC2400001",
                 ArtistCredits = ["Artist"], DurationSeconds = 180,
@@ -423,6 +576,8 @@ public sealed class PlaylistDestinationIdentityResolverTests
                     return [candidate];
                 }));
             Assert.Equal(artistId, (await db.Artists.SingleAsync()).Id);
+            Assert.Empty(await db.ArtistProviderLinks.ToListAsync());
+            Assert.Equal(artistId, (await db.TrackArtistCredits.SingleAsync()).ArtistId);
             Assert.Equal(mappingAppearsDuringSearch ? 1 : 0, await db.TrackSourceIds.CountAsync());
             var account = new ConnectedServiceAccount { Id = 7, UserId = 42, Service = "spotify",
                 ExternalAccountId = "account", ConnectionState = "connected" };
@@ -445,14 +600,9 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Single(await restarted.Tracks.ToArrayAsync());
         Assert.Equal(mappingAppearsDuringSearch ? 1 : 0, await restarted.TrackSourceIds.CountAsync());
         Assert.All(await restarted.TrackSourceIds.ToArrayAsync(), source => Assert.Equal(trackId, source.TrackId));
-        var link = await restarted.ArtistProviderLinks.SingleAsync();
-        Assert.Equal("artist-id", link.ExternalId);
-        Assert.Equal("https://open.spotify.com/artist/artist-id", link.ProfileUrl);
-        Assert.Equal("https://images/artist", link.ArtworkUrl);
-        Assert.Equal("{\"provider\":true}", link.RawMetadata);
+        Assert.Empty(await restarted.ArtistProviderLinks.ToListAsync());
         var credit = await restarted.TrackArtistCredits.SingleAsync();
-        using var provenance = JsonDocument.Parse(credit.Provenance!);
-        Assert.Equal("artist-id", provenance.RootElement.GetProperty("spotify").GetProperty("ExternalId").GetString());
+        Assert.Equal(artistId, credit.ArtistId);
     }
 
     [Theory]
@@ -512,7 +662,7 @@ public sealed class PlaylistDestinationIdentityResolverTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ResolveAsync_UnresolvedSourceAcceptsArtistsForNewOrEstablishedRecording(bool established)
+    public async Task ResolveAsync_UnresolvedSourceDoesNotPromoteSearchArtistOrReuseUnknownAssociation(bool established)
     {
         await using var db = CreateDb();
         var entry = await SeedUnresolvedAsync(db);
@@ -533,18 +683,20 @@ public sealed class PlaylistDestinationIdentityResolverTests
         Assert.Equal("accepted", await PlaylistDestinationIdentityResolver.ResolveAsync(db, new TrackMatchingOptions(),
             async (observationId, _, ct) =>
             {
-                Assert.False(established);
-                db.Tracks.Add(track);
-                (await db.TrackObservations.SingleAsync(x => x.Id == observationId, ct)).TrackId = track.Id;
+                var selectedTrack = new Track { Id = Guid.NewGuid() };
+                db.Tracks.Add(selectedTrack);
+                (await db.TrackObservations.SingleAsync(x => x.Id == observationId, ct)).TrackId = selectedTrack.Id;
                 await db.SaveChangesAsync(ct);
-                return track.Id;
+                return selectedTrack.Id;
             },
             (observation, id, ct) => reconciler.ReconcileObservationAsync(observation, id, ct),
             new PlatformAccountContext(42, 7), "spotify", entry,
             (_, _) => Task.FromResult<IReadOnlyList<TrackMatchSearchCandidate>>([candidate]), default));
 
-        Assert.Equal("artist-id", (await db.ArtistProviderLinks.SingleAsync()).ExternalId);
-        Assert.Equal(track.Id, (await db.TrackArtistCredits.SingleAsync()).TrackId);
+        Assert.Empty(await db.ArtistProviderLinks.ToListAsync());
+        Assert.Empty(await db.TrackArtistCredits.ToListAsync());
+        if (established)
+            Assert.Equal(RecordingAssociationState.Unknown, (await db.TrackSourceIds.SingleAsync()).AssociationState);
     }
 
     [Theory]
@@ -570,10 +722,20 @@ public sealed class PlaylistDestinationIdentityResolverTests
             var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Song", SearchArtist = "Artist" };
             trackId = track.Id;
             setup.Tracks.Add(track);
-            // The entry and observation stay unresolved. Production ResolveExistingAsync
-            // must discover this global source mapping and return a tracked Track.
+            var youtubeCatalog = new ProviderCatalogItem
+            {
+                Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video1",
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+                    { Title = "Song", Artist = "Artist", DurationSeconds = 180 }),
+                VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo, VerifiedAt = DateTimeOffset.UtcNow,
+                RevalidateAfter = DateTimeOffset.UtcNow.AddHours(1), VisibilityState = CatalogVisibility.Public,
+                Revision = 1
+            };
+            setup.ProviderCatalogItems.Add(youtubeCatalog);
             setup.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-                SourceType = "youtube", ExternalId = "video1" });
+                SourceType = "youtube", ExternalId = "video1", ProviderCatalogItemId = youtubeCatalog.Id,
+                ProviderCatalogItem = youtubeCatalog, CatalogRevision = youtubeCatalog.Revision,
+                AssociationState = RecordingAssociationState.Verified });
             if (credits != "empty")
                 await new ArtistReconciliationService(setup).ReconcileAsync(track,
                     [new ArtistCreditMetadata { Name = "Artist", Provider = credits == "stable" ? "spotify" : null,
@@ -681,9 +843,15 @@ public sealed class PlaylistDestinationIdentityResolverTests
 
     private static async Task<PlaylistEntry> SeedUnresolvedAsync(ApplicationDbContext db)
     {
+        if (!await db.Users.AnyAsync(user => user.Id == 42))
+        {
+            db.Users.Add(TestUserFactory.Create(42, "destination-owner@example.test"));
+            await db.SaveChangesAsync();
+        }
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 42, Name = "Road songs" };
         var observation = new TrackObservation
         {
+            OwnerUserId = 42,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video1",
             Title = "Song", Artist = "Artist", DurationSeconds = 180,
             MatchStatus = TrackMatchingStatuses.Pending

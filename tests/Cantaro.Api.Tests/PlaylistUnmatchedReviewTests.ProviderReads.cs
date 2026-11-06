@@ -150,10 +150,16 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var entries = await fixture.Db.PlaylistEntries.AsNoTracking().OrderBy(item => item.Position).ToArrayAsync();
         Assert.Equal(2, entries.Length);
         Assert.Equal(fixture.Scope.Entry.Id, entries[0].Id);
-        var source = await fixture.Db.TrackSourceIds.SingleAsync(item => item.SourceType == "spotify" && item.ExternalId == "fresh-id");
+        var source = await fixture.Db.TrackObservations.SingleAsync(item => item.OwnerUserId == fixture.Account.UserId
+            && item.SourceType == "spotify" && item.ExternalId == "fresh-id");
         Assert.Equal(source.TrackId, entries[1].TrackId);
-        Assert.Equal("USNEW2400001", (await fixture.Db.Tracks.SingleAsync(item => item.Id == source.TrackId)).Isrc);
-        Assert.True(await fixture.Db.TrackArtistCredits.AnyAsync(item => item.TrackId == source.TrackId));
+        Assert.Equal(fixture.Account.UserId, source.OwnerUserId);
+        Assert.Equal("USNEW2400001", TrackObservationParser.ReadMetadata(source)!.Isrc);
+        var privateTrack = await fixture.Db.Tracks.SingleAsync(item => item.Id == source.TrackId);
+        Assert.Null(privateTrack.PreferredCatalogItemId);
+        Assert.Null(privateTrack.Isrc);
+        Assert.False(await fixture.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "fresh-id"));
+        Assert.False(await fixture.Db.TrackArtistCredits.AnyAsync(item => item.TrackId == source.TrackId));
         await fixture.AssertNoDestinationIngestionAsync();
         Assert.Equal(["chosen-id", "fresh-id"], fixture.Handler.RemoteIds);
     }
@@ -199,17 +205,39 @@ public sealed partial class PlaylistUnmatchedReviewTests
     }
 
     [Fact]
+    public async Task ProductionSpotifyImport_ReusesExistingLinkWithoutProviderRead()
+    {
+        await using var fixture = await ProductionSpotifyReadScope.CreateAsync();
+        fixture.Scope.Link.SyncMode = "from_cantaro";
+        await fixture.Db.SaveChangesAsync();
+
+        var importer = new SpotifyPlaylistSyncService(fixture.Coordinator());
+        var playlistId = await importer.SyncPlaylistAsync(fixture.Account, "playlist", default);
+
+        Assert.Equal(fixture.Scope.Playlist.Id, playlistId);
+        Assert.Equal(0, fixture.Handler.Reads);
+        await fixture.AssertNoDestinationIngestionAsync();
+    }
+
+    [Fact]
     public async Task ProductionSpotifyRead_IndependentPlaylistImportDoesNotBorrowScopedMembership()
     {
         await using var fixture = await ProductionSpotifyReadScope.CreateAsync("USABC2400002");
         await fixture.SyncAsync();
-        var importedId = await fixture.Coordinator().ImportAsync(fixture.Account, "spotify", "independent-playlist", default);
+        var importer = new SpotifyPlaylistSyncService(fixture.Coordinator());
+        var importedId = await importer.SyncPlaylistAsync(fixture.Account, "independent-playlist", default);
         var imported = await fixture.Db.PlaylistEntries.SingleAsync(item => item.PlaylistId == importedId);
         Assert.NotEqual(fixture.Scope.Entry.TrackId, imported.TrackId);
-        var source = await fixture.Db.TrackSourceIds.SingleAsync(item => item.SourceType == "spotify" && item.ExternalId == "chosen-id");
+        var source = await fixture.Db.TrackObservations.SingleAsync(item => item.OwnerUserId == fixture.Account.UserId
+            && item.SourceType == "spotify" && item.ExternalId == "chosen-id");
         Assert.Equal(source.TrackId, imported.TrackId);
-        Assert.Equal("USABC2400001", (await fixture.Db.Tracks.SingleAsync(item => item.Id == source.TrackId)).Isrc);
-        Assert.True(await fixture.Db.TrackArtistCredits.AnyAsync(item => item.TrackId == source.TrackId));
+        Assert.Equal(fixture.Account.UserId, source.OwnerUserId);
+        Assert.Equal("USABC2400001", TrackObservationParser.ReadMetadata(source)!.Isrc);
+        var privateTrack = await fixture.Db.Tracks.SingleAsync(item => item.Id == source.TrackId);
+        Assert.Null(privateTrack.PreferredCatalogItemId);
+        Assert.Null(privateTrack.Isrc);
+        Assert.False(await fixture.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "chosen-id"));
+        Assert.False(await fixture.Db.TrackArtistCredits.AnyAsync(item => item.TrackId == source.TrackId));
         Assert.Equal("USABC2400002", (await fixture.Db.Tracks.SingleAsync(item => item.Id == fixture.Scope.Entry.TrackId)).Isrc);
     }
 
@@ -225,30 +253,6 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal("spotify_account_changed", error.Code);
         Assert.Equal(reads, fixture.Handler.Reads);
         await fixture.AssertNoDestinationIngestionAsync();
-    }
-
-    [Theory]
-    [InlineData("spotify", "baseline")]
-    [InlineData("youtube", "baseline")]
-    [InlineData("spotify", "pending")]
-    [InlineData("youtube", "pending")]
-    [InlineData("spotify", "progress")]
-    [InlineData("youtube", "progress")]
-    public async Task LegacyPlaylistRead_RequiresCoordinatorForScopedSyncState(string service, string state)
-    {
-        await using var scope = await Scope.CreateAsync(service, relational: true);
-        if (state == "baseline") scope.Link.BaselineJson = new PlaylistSyncBaseline([]).Serialize();
-        else if (state == "pending") scope.Link.PendingWriteJson = new PlaylistSyncBaseline([]).Serialize();
-        else scope.Link.MatchingProgressJson = "{}";
-        await scope.Db.SaveChangesAsync();
-        // A null network service makes an accidental legacy provider read fail.
-        var error = await Assert.ThrowsAsync<PlatformApiException>(() => service == "spotify"
-            ? new SpotifyPlaylistSyncService(scope.Db, null!, null!, null!, TimeProvider.System,
-                NullLogger<SpotifyPlaylistSyncService>.Instance).SyncPlaylistAsync(new(scope.UserId, 51, "account"), "playlist", default)
-            : new YouTubePlaylistSyncService(scope.Db, null!, null!, null!,
-                NullLogger<YouTubePlaylistSyncService>.Instance).SyncYouTubePlaylistAsync(new(scope.UserId, 51, "account"), "playlist", default));
-        Assert.Equal("outbound_mapping", error.Code);
-        Assert.Equal(scope.Entry.Id, (await scope.Db.PlaylistEntries.SingleAsync()).Id);
     }
 
     [PostgresFact]
@@ -320,7 +324,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             {
                 SourceType = "youtube", ExternalId = "source-video", Title = "Everything Goes On",
                 OriginalTitle = "Everything Goes On", Artist = "Porter Robinson", OriginalArtist = "Porter Robinson",
-                DurationSeconds = 160
+                DurationSeconds = 160, Isrc = isrc
             });
             if (canonicalOnly) { scope.Entry.TrackObservationId = null; scope.Entry.TrackObservation = null; }
             scope.Link.BaselineName = scope.Playlist.Name;

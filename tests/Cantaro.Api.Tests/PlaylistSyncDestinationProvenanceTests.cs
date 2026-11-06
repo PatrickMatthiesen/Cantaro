@@ -149,17 +149,29 @@ public sealed class PlaylistSyncDestinationProvenanceTests
             };
             var privatePlaylist = new Playlist { Id = Guid.NewGuid(), UserId = other.Id, Name = "Private" };
             var anchor = new Track { Id = Guid.NewGuid(), SearchTitle = "Anchor", SearchArtist = "Artist" };
-            var related = new Track
+            var catalogItem = new ProviderCatalogItem
             {
-                Id = Guid.NewGuid(), SearchTitle = "Song", SearchArtist = "Artist",
-                CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+                Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = "public-recording",
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
                 {
-                    Title = "Song", Artist = "Artist", DurationSeconds = 180
-                })
+                    Title = "Song", Artist = "Artist", DurationSeconds = 180,
+                    MusicBrainzRecordingId = "public-recording"
+                }),
+                VisibilityState = CatalogVisibility.Public,
+                VerificationMethod = CatalogVerificationMethods.MusicBrainz,
+                VerifiedAt = DateTimeOffset.UtcNow, RevalidateAfter = DateTimeOffset.UtcNow.AddDays(1), Revision = 1
             };
+            var related = new Track { Id = Guid.NewGuid(), PreferredCatalogItemId = catalogItem.Id };
+            related.SourceIds.Add(new TrackSourceId
+            {
+                Id = Guid.NewGuid(), TrackId = related.Id, SourceType = catalogItem.SourceType,
+                ExternalId = catalogItem.ExternalId, ProviderCatalogItemId = catalogItem.Id,
+                ProviderCatalogItem = catalogItem, CatalogRevision = catalogItem.Revision,
+                AssociationState = RecordingAssociationState.Verified
+            });
             var privateObservation = new TrackObservation
             {
-                Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "spotify", ExternalId = PrivateId,
+                Id = Guid.NewGuid(), OwnerUserId = other.Id, TrackId = related.Id, SourceType = "spotify", ExternalId = PrivateId,
                 Title = "Song", Artist = "Artist", DurationSeconds = 180,
                 MatchStatus = TrackMatchingStatuses.Matched
             };
@@ -181,7 +193,7 @@ public sealed class PlaylistSyncDestinationProvenanceTests
                 State = "active", BaselineName = syncPlaylist.Name,
                 BaselineJson = new PlaylistSyncBaseline([]).Serialize()
             };
-            db.AddRange(requester, other, accessPlaylist, syncPlaylist, privatePlaylist, anchor, related,
+            db.AddRange(requester, other, accessPlaylist, syncPlaylist, privatePlaylist, anchor, related, catalogItem,
                 privateObservation, account, mapping);
             db.TrackRelations.Add(new TrackRelation
             {
@@ -221,7 +233,7 @@ public sealed class PlaylistSyncDestinationProvenanceTests
             var playlist = new Playlist { Id = Guid.NewGuid(), UserId = RequesterId, Name = $"Owned {service}" };
             var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), TrackId = RelatedTrack.Id, SourceType = service, ExternalId = externalId,
+                Id = Guid.NewGuid(), OwnerUserId = RequesterId, TrackId = RelatedTrack.Id, SourceType = service, ExternalId = externalId,
                 Title = "Song", Artist = "Artist", DurationSeconds = 180,
                 MatchStatus = TrackMatchingStatuses.Matched
             };

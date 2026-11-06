@@ -101,9 +101,12 @@ public sealed class MatchingEvaluationCorpusTests
             .Options;
         await using var dbContext = new ApplicationDbContext(options);
         await dbContext.Database.EnsureCreatedAsync();
+        dbContext.Users.Add(TestUserFactory.Create(900001, "matching-corpus@example.test"));
+        await dbContext.SaveChangesAsync();
 
         var observation = new TrackObservation
         {
+            OwnerUserId = 900001,
             Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = new Uri(testCase.OriginalUrl).Query.TrimStart('?'),

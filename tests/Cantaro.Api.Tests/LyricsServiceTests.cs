@@ -35,6 +35,11 @@ public sealed class LyricsServiceTests
                 DurationSeconds = 200
             })
         };
+        AttachPublicFacts(track, new ProviderCatalogFacts
+        {
+            Title = "Test Song", Artist = "Test Artist", Albums = ["Test Album"],
+            DurationSeconds = 200, MusicBrainzRecordingId = "recording-id", Isrc = "ISRC123"
+        });
         db.AddRange(playlist, track, new PlaylistEntry
         {
             Id = Guid.NewGuid(),
@@ -101,11 +106,16 @@ public sealed class LyricsServiceTests
         var outsider = TestUserFactory.Create(9, "lyrics-related-outsider@example.com");
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = owner.Id, Name = "Saved" };
         var privatePlaylist = new Playlist { Id = Guid.NewGuid(), UserId = other.Id, Name = "Private" };
-        Track Track(string title) => new()
+        Track Track(string title)
         {
-            Id = Guid.NewGuid(),
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = title, Artist = "Artist" })
-        };
+            var track = new Track
+            {
+                Id = Guid.NewGuid(),
+                CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = title, Artist = "Artist" })
+            };
+            AttachPublicFacts(track, new ProviderCatalogFacts { Title = title, Artist = "Artist" });
+            return track;
+        }
         var original = Track("Original");
         var sibling = Track("Composition sibling");
         var remix = Track("Remix");
@@ -115,7 +125,7 @@ public sealed class LyricsServiceTests
         var composition = new Song { Id = Guid.NewGuid() };
         var privateObservation = new TrackObservation
         {
-            Id = Guid.NewGuid(), TrackId = remix.Id, SourceType = "youtube", ExternalId = "private-video",
+            Id = Guid.NewGuid(), OwnerUserId = other.Id, TrackId = remix.Id, SourceType = "youtube", ExternalId = "private-video",
             Title = "Private observation", DurationSeconds = 999, ThumbnailUrl = "https://img.example/private.jpg",
             MatchStatus = TrackMatchingStatuses.Matched
         };
@@ -149,9 +159,11 @@ public sealed class LyricsServiceTests
         {
             var detail = Assert.IsType<MusicLibrarySongDto>(await details.GetCanonicalSongAsync(related.Id, owner.Id, default));
             Assert.Empty(detail.Playlists);
-            Assert.Empty(detail.SourceIdentities);
-            Assert.Empty(detail.PlatformLinks);
-            Assert.Empty(detail.SourcePlatforms);
+            var publicIdentity = Assert.Single(detail.SourceIdentities);
+            Assert.Equal("spotify", publicIdentity.Source);
+            Assert.Single(detail.PlatformLinks, link => link.Platform == "spotify"
+                && link.ExternalId == publicIdentity.ExternalId);
+            Assert.Equal(["spotify"], detail.SourcePlatforms);
             Assert.Null(detail.DurationSeconds);
             Assert.Null(detail.ThumbnailUrl);
             var provider = new CapturingProvider();
@@ -196,9 +208,10 @@ public sealed class LyricsServiceTests
                 Artist = "Canonical Artist"
             })
         };
+        AttachPublicFacts(track, new ProviderCatalogFacts { Title = "Canonical Song", Artist = "Canonical Artist" });
         var observation = new TrackObservation
         {
-            Id = Guid.NewGuid(),
+            Id = Guid.NewGuid(), OwnerUserId = 7,
             SourceType = "youtube",
             ExternalId = "video-id",
             Title = "Raw video title",
@@ -232,6 +245,7 @@ public sealed class LyricsServiceTests
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
+            OwnerUserId = 7,
             SourceType = "youtube",
             ExternalId = "video-id",
             Title = "Test Artist - Test Song (Official Video)",
@@ -267,6 +281,7 @@ public sealed class LyricsServiceTests
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
+            OwnerUserId = 8,
             SourceType = "spotify",
             ExternalId = "source-id",
             Title = "Private Song",
@@ -298,6 +313,7 @@ public sealed class LyricsServiceTests
         var observation = new TrackObservation
         {
             Id = Guid.NewGuid(),
+            OwnerUserId = 7,
             SourceType = "spotify",
             ExternalId = "source-id",
             Title = "Song Without Artist",
@@ -369,6 +385,31 @@ public sealed class LyricsServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static ProviderCatalogItem AttachPublicFacts(Track track, ProviderCatalogFacts facts)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = $"spotify-{Guid.NewGuid():N}", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(facts), VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VisibilityState = CatalogVisibility.Public, VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
+        track.PreferredCatalogItem = item;
+        track.PreferredCatalogItemId = item.Id;
+        track.SearchTitle = facts.Title;
+        track.SearchArtist = facts.Artist;
+        track.Isrc = facts.Isrc;
+        track.MbidRecording = facts.MusicBrainzRecordingId;
+        track.VersionFlags = facts.VersionFlags;
+        track.SourceIds.Add(new TrackSourceId
+        {
+            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            ProviderCatalogItem = item, ProviderCatalogItemId = item.Id, CatalogRevision = item.Revision,
+            AssociationState = RecordingAssociationState.Verified, AssociationMethod = "test_fixture"
+        });
+        return item;
     }
 
     private sealed class CapturingProvider : ILyricsProvider

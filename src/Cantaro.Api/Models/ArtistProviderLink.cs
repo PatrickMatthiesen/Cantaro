@@ -3,6 +3,9 @@ namespace Cantaro.Api.Models;
 /// <summary>A stable artist identity and the metadata supplied by its provider.</summary>
 public sealed class ArtistProviderLink
 {
+    public string? VerificationMethod { get; set; }
+    public DateTimeOffset? VerifiedAt { get; set; }
+    public DateTimeOffset? RevalidateAfter { get; set; }
     public Guid Id { get; set; }
     public Guid ArtistId { get; set; }
     public Artist? Artist { get; set; }

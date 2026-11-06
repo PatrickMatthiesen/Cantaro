@@ -62,6 +62,7 @@ internal static class PlaylistDestinationReadBindings
         var protectedIds = scopedOnly ? ProtectedIds(link) : [];
         var entries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == link.PlaylistId)
             .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
+                .ThenInclude(source => source.ProviderCatalogItem)
             .Include(item => item.TrackObservation).OrderBy(item => item.Position).ToListAsync(ct);
         var byId = entries.ToDictionary(entry => entry.Id);
         var saved = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
@@ -138,25 +139,29 @@ internal static class PlaylistDestinationReadBindings
         var observationIds = choices.Concat(membership).Concat(scopedReads)
             .Select(item => item.ObservationId).OfType<Guid>().Distinct().ToArray();
         var observations = await db.TrackObservations.AsNoTracking().Where(item => observationIds.Contains(item.Id))
-            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId }).ToDictionaryAsync(item => item.Id, ct);
+            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.OwnerUserId, item.Title })
+            .ToDictionaryAsync(item => item.Id, ct);
         foreach (var item in scopedReads)
             if (item.ObservationId is { } id && (!observations.TryGetValue(id, out var observation)
-                || observation.TrackId != item.ReadScope!.ObservationTrackId)) throw ChangedBinding();
+                || observation.TrackId != item.ReadScope!.ObservationTrackId
+                || observation.OwnerUserId != account.UserId)) throw ChangedBinding();
         var trackIds = choices.Select(item => item.TrackId!.Value).Distinct().ToArray();
         var tracks = await db.Tracks.AsNoTracking().Where(item => trackIds.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct);
         var independentIds = membership.Where(item => item.ObservationId is { } id
             && observations.TryGetValue(id, out var observation) && observation.SourceType == link.Service
+            && observation.OwnerUserId == account.UserId && !string.IsNullOrWhiteSpace(observation.Title)
             && observation.ExternalId == item.ExternalId && observation.TrackId == item.TrackId)
             .Select(item => item.ExternalId!).ToHashSet(StringComparer.Ordinal);
         var assignments = new Dictionary<string, List<Guid>>(StringComparer.Ordinal);
         foreach (var keys in choices.Select(item => item.ExternalId!).Concat(protectedIds)
             .Concat(scopedReads.Select(item => item.ExternalId).OfType<string>()).Distinct(StringComparer.Ordinal).Chunk(256))
         {
-            var sources = await db.TrackSourceIds.AsNoTracking()
+            var sources = await db.TrackSourceIds.AsNoTracking().Include(item => item.ProviderCatalogItem)
                 .Where(item => item.SourceType == link.Service && keys.Contains(item.ExternalId))
-                .Select(item => new { item.ExternalId, item.TrackId }).ToListAsync(ct);
+                .ToListAsync(ct);
             foreach (var source in sources)
             {
+                if (!ProviderCatalogPolicy.IsVerified(source, DateTimeOffset.UtcNow)) continue;
                 if (!assignments.TryGetValue(source.ExternalId, out var ids)) assignments[source.ExternalId] = ids = [];
                 ids.Add(source.TrackId);
             }
@@ -166,7 +171,8 @@ internal static class PlaylistDestinationReadBindings
                 && assigned.Any(trackId => trackId != item.TrackId)) throw ChangedBinding();
         choices = choices.Where(item => tracks.Contains(item.TrackId!.Value)
             && (item.ObservationId is null || observations.TryGetValue(item.ObservationId.Value, out var observation)
-                && observation.TrackId == item.DestinationBinding!.ObservationTrackId)
+                && observation.TrackId == item.DestinationBinding!.ObservationTrackId
+                && observation.OwnerUserId == account.UserId)
             && (!assignments.TryGetValue(item.ExternalId!, out var ids) || ids.All(id => id == item.TrackId))).ToList();
         var grouped = choices.DistinctBy(item => (item.ExternalId, item.DestinationBinding!.EntryId))
             .GroupBy(item => item.ExternalId!).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
@@ -196,6 +202,7 @@ internal static class PlaylistDestinationReadBindings
             // independent import evidence. Keep those reads on normal ingestion.
             if (scopedOnly && (assignments.ContainsKey(id)
                 || choice.ObservationId is { } observationId && observations.TryGetValue(observationId, out var source)
+                    && source.OwnerUserId == account.UserId && !string.IsNullOrWhiteSpace(source.Title)
                     && source.SourceType == link.Service && source.ExternalId == id && source.TrackId == choice.TrackId))
                 return item;
             if (byId.ContainsKey(choice.DestinationBinding!.EntryId))

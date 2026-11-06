@@ -32,7 +32,11 @@ public sealed class PlaylistExportAttemptMigrationTests
             await migrator.MigrateAsync(previous);
             db.Users.Add(TestUserFactory.Create(9001, "export-migration@example.com"));
             var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Canonical A" };
-            db.Tracks.Add(track);
+            // Seed the historical table without the current model's newer columns.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Tracks" ("Id", "SearchTitle", "CreatedAt", "UpdatedAt", "VersionFlags")
+                VALUES ({track.Id}, {track.SearchTitle}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
+                """);
             foreach (var service in new[] { "spotify", "youtube" })
             {
                 var account = new ConnectedServiceAccount { UserId = 9001, Service = service,
@@ -57,7 +61,9 @@ public sealed class PlaylistExportAttemptMigrationTests
                     if (kind == "duplicates") link.PendingWriteJson = receipt;
                     if (kind is "legacy" or "foreign-proof")
                     {
-                        var proof = PlaylistMatchingProgress.Create(link, entry, "chosen-id");
+                        // This fixture stops before the proof-version-3 rewrite,
+                        // so its historical receipts must use the old version-2 format.
+                        var proof = PlaylistMatchingProgress.Create(link, entry, "chosen-id") with { ProofVersion = 2 };
                         if (kind == "foreign-proof") proof = proof with { Scope = proof.Scope! with { ExternalAccountId = "foreign" } };
                         link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(new() { [entry.Id] = proof });
                     }
@@ -67,7 +73,9 @@ public sealed class PlaylistExportAttemptMigrationTests
             }
             // Backfill suppression survives metadata-proof expiry and grants no
             // new permission to export these IDs after migration.
-            track.SearchTitle += " changed after proof";
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE "Tracks" SET "SearchTitle" = 'Canonical A changed after proof' WHERE "Id" = {track.Id}
+                """);
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
         }

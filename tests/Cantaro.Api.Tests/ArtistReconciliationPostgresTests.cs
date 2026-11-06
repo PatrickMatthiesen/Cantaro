@@ -33,8 +33,8 @@ public sealed class ArtistReconciliationPostgresTests
         var alternative = incoming with { ExternalId = "different", ProfileUrl = "https://open.spotify.com/artist/different" };
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            var track = await new SpotifyTrackResolver(setup).ResolveAsync(Snapshot("existing") with {
-                ArtistIdentities = [incoming] }, DateTimeOffset.UtcNow, default);
+            var track = await ResolvePublicAsync(setup,Snapshot("existing") with {
+                ArtistIdentities = [incoming], Isrc = "USABC2400001" }, DateTimeOffset.UtcNow, default);
             // Simulate a legacy track whose provider identity exists but credits have not been populated.
             artistId = track.ArtistCredits.Single().ArtistId;
             setup.TrackArtistCredits.RemoveRange(track.ArtistCredits.ToArray());
@@ -65,15 +65,18 @@ public sealed class ArtistReconciliationPostgresTests
         var updatedObservation = await loser.TrackObservations.SingleAsync(o => o.Id == observationId);
         updatedObservation.Title = "Refreshed observation";
         var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-        var winningTrack = await new SpotifyTrackResolver(winner).ResolveAsync(Snapshot("existing") with {
-            ArtistIdentities = [incoming] }, now, default);
-        var losingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("existing") with {
-            ArtistIdentities = [distinctIdentity ? alternative : incoming] }, now.AddSeconds(1), default);
+        var winningTrack = await ResolvePublicAsync(winner,Snapshot("existing-winner") with {
+            ArtistIdentities = [incoming], Isrc = "USABC2400001", Name = "Song existing" }, now, default);
+        var losingTrack = await ResolvePublicAsync(loser,Snapshot(distinctIdentity ? "existing-alternative" : "existing-loser") with {
+            ArtistIdentities = [distinctIdentity ? alternative : incoming], Isrc = "USABC2400001",
+            Name = "Song existing" }, now.AddSeconds(1), default);
         Assert.Equal(trackId, winningTrack.Id);
         Assert.Equal(trackId, losingTrack.Id);
-        var tentativeCreditId = losingTrack.ArtistCredits.Single().Id;
-        var winningCreditId = winningTrack.ArtistCredits.Single().Id;
-        var pendingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("pending"), now, default);
+        var stagedVerification = Assert.IsType<DateTimeOffset>(loser.TrackSourceIds.Local.Single(source =>
+            source.ExternalId == (distinctIdentity ? "existing-alternative" : "existing-loser")).LastVerifiedAt);
+        var tentativeCreditId = loser.TrackArtistCredits.Local.Single(credit => credit.TrackId == trackId).Id;
+        var winningCreditId = winner.TrackArtistCredits.Local.Single(credit => credit.TrackId == trackId).Id;
+        var pendingTrack = await ResolvePublicAsync(loser,Snapshot("pending"), now, default);
         var pendingObservation = Observation("pending", pendingTrack.Id);
         loser.TrackObservations.Add(pendingObservation);
         await winner.SaveChangesAsync();
@@ -99,7 +102,7 @@ public sealed class ArtistReconciliationPostgresTests
         Assert.Equal(TrackArtistRole.Featured, credit.Role);
         Assert.Equal(incoming.JoinPhrase, credit.JoinPhrase);
         Assert.Contains("shared", credit.Provenance!);
-        Assert.Equal(winningCreditId, losingTrack.ArtistCredits.Single().Id);
+        Assert.Equal(winningCreditId, loser.TrackArtistCredits.Local.Single(credit => credit.TrackId == trackId).Id);
         Assert.Equal(previousAttempts + 2, failures.Attempts);
         Assert.Equal([distinctIdentity ? "IX_TrackArtistCredits_TrackId_Position"
             : "IX_TrackArtistCredits_TrackId_ArtistId_Role"], failures.Constraints);
@@ -121,13 +124,16 @@ public sealed class ArtistReconciliationPostgresTests
         Assert.Equal(2, await verify.Tracks.CountAsync());
         Assert.Equal(2, await verify.Songs.CountAsync());
         Assert.Equal(2, await verify.SongTracks.CountAsync());
-        Assert.Equal(2, await verify.TrackSourceIds.CountAsync());
-        Assert.Equal(now.AddSeconds(1), (await verify.TrackSourceIds.SingleAsync(s => s.TrackId == trackId)).LastVerifiedAt);
+        Assert.Equal(4, await verify.TrackSourceIds.CountAsync());
+        var persistedVerification = Assert.IsType<DateTimeOffset>((await verify.TrackSourceIds.SingleAsync(s => s.TrackId == trackId
+            && s.ExternalId == (distinctIdentity ? "existing-alternative" : "existing-loser"))).LastVerifiedAt);
+        // PostgreSQL timestamps retain microseconds, while .NET ticks retain 100 ns.
+        Assert.Equal(stagedVerification.UtcTicks / 10, persistedVerification.UtcTicks / 10);
         Assert.DoesNotContain(loser.ChangeTracker.Entries(), e => e.State == EntityState.Added);
 
         // Repeated import on the same context must reuse the winner and deduplicate conflicts.
-        await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("existing") with {
-            ArtistIdentities = [distinctIdentity ? alternative : incoming] }, now.AddSeconds(2), default);
+        await ResolvePublicAsync(loser,Snapshot(distinctIdentity ? "existing-alternative" : "existing-loser") with {
+            ArtistIdentities = [distinctIdentity ? alternative : incoming], Isrc = "USABC2400001" }, now.AddSeconds(2), default);
         updatedObservation.Title = "Updated after retry";
         await loser.SaveChangesAsync();
         Assert.Equal(winningCreditId, (await verify.TrackArtistCredits.AsNoTracking().SingleAsync(c => c.TrackId == trackId)).Id);
@@ -148,10 +154,10 @@ public sealed class ArtistReconciliationPostgresTests
         await using var transaction = explicitTransaction ? await second.Database.BeginTransactionAsync() : null;
         var now = DateTimeOffset.UtcNow;
         // Both contexts resolve before either saves, as imports of different playlists do.
-        var firstTrack = await new SpotifyTrackResolver(first).ResolveAsync(Snapshot("one"), now, default);
-        var secondTrack = await new SpotifyTrackResolver(second).ResolveAsync(Snapshot("two"), now, default);
-        var thirdTrack = await new SpotifyTrackResolver(second).ResolveAsync(Snapshot("three"), now, default);
-        var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "two",
+        var firstTrack = await ResolvePublicAsync(first,Snapshot("one"), now, default);
+        var secondTrack = await ResolvePublicAsync(second,Snapshot("two"), now, default);
+        var thirdTrack = await ResolvePublicAsync(second,Snapshot("three"), now, default);
+        var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = 9002, SourceType = "spotify", ExternalId = "two",
             Title = "Song two", Artist = "Shared artist", TrackId = secondTrack.Id, MatchStatus = TrackMatchingStatuses.Matched };
         second.TrackObservations.Add(observation);
         await first.SaveChangesAsync();
@@ -187,41 +193,55 @@ public sealed class ArtistReconciliationPostgresTests
     }
 
     [PostgresFact]
-    public async Task MusicBrainzAcceptance_RetriesArtistIdentityCollisionThroughActualMatchingSave()
+    public async Task MusicBrainzCatalogMatch_RetriesArtistIdentityCollisionThroughActualMatchingSave()
     {
         await using var schema = await Schema.CreateAsync();
         Guid observationId;
-        Guid candidateId;
+        TrackMatchSearchCandidate candidate;
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video",
+            const int ownerUserId = 9001;
+            setup.Users.Add(TestUserFactory.Create(ownerUserId, "artist-catalog-match@example.com"));
+            var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = ownerUserId,
+                SourceType = "youtube", ExternalId = "video",
                 Title = "Together", Artist = "Shared artist", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Pending };
-            var candidate = new TrackResolutionCandidate { Id = Guid.NewGuid(), TrackObservationId = observation.Id,
-                CandidateSource = "musicbrainz", ExternalId = "recording", MbidRecording = "recording", Title = "Together",
-                Artist = "Shared artist", Score = 1m,
-                RawMetadata = System.Text.Json.JsonSerializer.Serialize(new TrackMatchCandidateStoredMetadata {
-                    ArtistIdentities = [new ArtistCreditMetadata { Name = "Shared artist", Provider = "musicbrainz",
-                        ExternalId = Mbid, MusicBrainzArtistId = Mbid }] }) };
-            observation.Candidates.Add(candidate);
+            var credit = new ArtistCreditMetadata { Name = "Shared artist", Provider = "musicbrainz",
+                ExternalId = Mbid, MusicBrainzArtistId = Mbid };
+            var catalog = new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = "recording",
+                FactsJson = System.Text.Json.JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Together",
+                    Artist = "Shared artist", MusicBrainzRecordingId = "recording", DurationSeconds = 180,
+                    ArtistCredits = [credit] }), VerificationMethod = "musicbrainz_recording_response",
+                VerifiedAt = DateTimeOffset.UtcNow, RevalidateAfter = DateTimeOffset.UtcNow.AddDays(90),
+                VisibilityState = CatalogVisibility.Public, Revision = 1 };
+            var winnerCatalog = new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = "winner-recording",
+                FactsJson = System.Text.Json.JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Different recording",
+                    Artist = "Shared artist", MusicBrainzRecordingId = "winner-recording", DurationSeconds = 180,
+                    ArtistCredits = [credit] }), VerificationMethod = "musicbrainz_recording_response",
+                VerifiedAt = catalog.VerifiedAt, RevalidateAfter = catalog.RevalidateAfter,
+                VisibilityState = CatalogVisibility.Public, Revision = 1 };
+            setup.ProviderCatalogItems.AddRange(catalog, winnerCatalog);
             setup.TrackObservations.Add(observation);
             await setup.SaveChangesAsync();
             observationId = observation.Id;
-            candidateId = candidate.Id;
+            candidate = new TrackMatchSearchCandidate { CandidateSource = "musicbrainz", ExternalId = catalog.ExternalId,
+                ProviderCatalogItemId = catalog.Id, ProviderCatalogRevision = catalog.Revision, Title = "Together",
+                Artist = "Shared artist", MbidRecording = "recording", DurationSeconds = 180,
+                ArtistCredits = ["Shared artist"], ArtistIdentities = [credit] };
         }
         var failures = new IdentityFailures(async () =>
         {
             await using var winner = new ApplicationDbContext(schema.Options);
             var track = new Track { Id = Guid.NewGuid() };
             winner.Tracks.Add(track);
-            await new ArtistReconciliationService(winner).ReconcileAsync(track,
-                [new ArtistCreditMetadata { Name = "Shared artist", Provider = "musicbrainz", ExternalId = Mbid,
-                    MusicBrainzArtistId = Mbid }], "musicbrainz", DateTimeOffset.UtcNow, default);
+            var item = await winner.ProviderCatalogItems.SingleAsync(row => row.ExternalId == "winner-recording");
+            await new ProviderRecordingAssociations(winner).TryAssociateAsync(track, item, independentFacts: null,
+                providerOrigin: true, default);
             await winner.SaveChangesAsync();
         });
         var options = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options).AddInterceptors(failures).Options;
         await using var db = new ApplicationDbContext(options);
         var matcher = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
-        await matcher.AcceptCandidateAsync(observationId, candidateId, default);
+        await matcher.CreateTrackFromMatchAsync(observationId, candidate, default);
 
         await using var verify = new ApplicationDbContext(schema.Options);
         var artist = await verify.Artists.SingleAsync();
@@ -242,9 +262,9 @@ public sealed class ArtistReconciliationPostgresTests
         await using var schema = await Schema.CreateAsync();
         await using var winner = new ApplicationDbContext(schema.Options);
         await using var loser = new ApplicationDbContext(schema.Options);
-        var firstTrack = await new SpotifyTrackResolver(winner).ResolveAsync(Snapshot("one") with {
+        var firstTrack = await ResolvePublicAsync(winner,Snapshot("one") with {
             ArtistIdentities = [Identity() with { MusicBrainzArtistId = Mbid }] }, DateTimeOffset.UtcNow, default);
-        var secondTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("two") with {
+        var secondTrack = await ResolvePublicAsync(loser,Snapshot("two") with {
             ArtistIdentities = [Identity() with { MusicBrainzArtistId = "82e3e1de-9243-4e58-b2d2-796c64f76c82" }] },
             DateTimeOffset.UtcNow, default);
         await winner.SaveChangesAsync();
@@ -271,18 +291,26 @@ public sealed class ArtistReconciliationPostgresTests
         Guid originalArtistId;
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            var original = await new SpotifyTrackResolver(setup).ResolveAsync(Snapshot("two") with {
-                ArtistIdentities = [new ArtistCreditMetadata { Name = "Shared artist",
-                    MusicBrainzArtistId = identified ? Mbid : null }] }, DateTimeOffset.UtcNow, default);
+            var originalIdentity = new ArtistCreditMetadata { Name = "Shared artist", Provider = "spotify",
+                ExternalId = "shared", ProfileUrl = "https://open.spotify.com/artist/shared",
+                MusicBrainzArtistId = identified ? Mbid : null };
+            var original = await ResolvePublicAsync(setup,Snapshot("two") with {
+                ArtistIdentities = [originalIdentity], Isrc = "USABC2400001", Name = "Shared recording" }, DateTimeOffset.UtcNow, default);
+            if (identified)
+                setup.Artists.Add(new Artist { Id = Guid.NewGuid(), Name = "Shared artist alternate",
+                    MusicBrainzArtistId = "82e3e1de-9243-4e58-b2d2-796c64f76c82" });
             await setup.SaveChangesAsync();
             trackId = original.Id;
             originalArtistId = original.ArtistCredits.Single().ArtistId;
         }
         await using var loser = new ApplicationDbContext(schema.Options);
-        await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("two"), DateTimeOffset.UtcNow, default);
+        var incomingIdentity = Identity() with { MusicBrainzArtistId = identified ? "82e3e1de-9243-4e58-b2d2-796c64f76c82" : null };
+        await ResolvePublicAsync(loser,Snapshot("two-loser") with { Isrc = "USABC2400001", Name = "Shared recording",
+            ArtistIdentities = [incomingIdentity] }, DateTimeOffset.UtcNow, default);
         await using (var winner = new ApplicationDbContext(schema.Options))
         {
-            await new SpotifyTrackResolver(winner).ResolveAsync(Snapshot("one"), DateTimeOffset.UtcNow, default);
+            await ResolvePublicAsync(winner,Snapshot("one") with { Isrc = "USABC2400001", Name = "Shared recording",
+                ArtistIdentities = [incomingIdentity] }, DateTimeOffset.UtcNow, default);
             await winner.SaveChangesAsync();
         }
         await loser.SaveChangesAsync();
@@ -292,8 +320,9 @@ public sealed class ArtistReconciliationPostgresTests
         var credit = await verify.TrackArtistCredits.SingleAsync(c => c.TrackId == trackId);
         Assert.Equal(identified ? originalArtistId : providerArtist, credit.ArtistId);
         Assert.Equal(identified ? 1 : 0, await verify.ArtistReconciliationConflicts.CountAsync());
-        Assert.Equal(2, await verify.Artists.CountAsync());
-        Assert.False(await verify.ArtistProviderLinks.AnyAsync(l => l.ArtistId == originalArtistId && l.Provider == "spotify"));
+        Assert.Equal(identified ? 2 : 1, await verify.Artists.CountAsync());
+        Assert.Equal(originalArtistId, providerArtist);
+        Assert.True(await verify.ArtistProviderLinks.AnyAsync(l => l.ArtistId == originalArtistId && l.Provider == "spotify"));
     }
 
     [PostgresFact]
@@ -303,8 +332,9 @@ public sealed class ArtistReconciliationPostgresTests
         Guid trackId;
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            var track = await new SpotifyTrackResolver(setup).ResolveAsync(Snapshot("one") with {
-                ArtistIdentities = [new ArtistCreditMetadata { Name = "Shared artist" }] }, DateTimeOffset.UtcNow, default);
+            var track = await ResolvePublicAsync(setup,Snapshot("initial") with {
+                ArtistIdentities = [new ArtistCreditMetadata { Name = "Shared artist" }], Isrc = "USABC2400001",
+                Name = "Shared recording" }, DateTimeOffset.UtcNow, default);
             await setup.SaveChangesAsync();
             trackId = track.Id;
         }
@@ -312,8 +342,8 @@ public sealed class ArtistReconciliationPostgresTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options).AddInterceptors(failures).Options;
         await using var winner = new ApplicationDbContext(schema.Options);
         await using var loser = new ApplicationDbContext(options);
-        await new SpotifyTrackResolver(winner).ResolveAsync(Snapshot("one"), DateTimeOffset.UtcNow, default);
-        await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("one") with {
+        await ResolvePublicAsync(winner,Snapshot("winner") with { Isrc = "USABC2400001", Name = "Shared recording" }, DateTimeOffset.UtcNow, default);
+        await ResolvePublicAsync(loser,Snapshot("loser") with { Isrc = "USABC2400001", Name = "Shared recording",
             ArtistIdentities = [Identity() with { ExternalId = "different" }] }, DateTimeOffset.UtcNow, default);
         await winner.SaveChangesAsync();
         await loser.SaveChangesAsync();
@@ -334,19 +364,22 @@ public sealed class ArtistReconciliationPostgresTests
         await using var schema = await Schema.CreateAsync();
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            await new SpotifyTrackResolver(setup).ResolveAsync(Snapshot("two") with {
+            await ResolvePublicAsync(setup,Snapshot("two") with {
                 Artist = "Alpha feat. Beta", ArtistNames = ["Alpha feat. Beta"],
-                ArtistIdentities = [new ArtistCreditMetadata { Name = "Alpha feat. Beta" }] }, DateTimeOffset.UtcNow, default);
+                ArtistIdentities = [new ArtistCreditMetadata { Name = "Alpha feat. Beta" }], Isrc = "USABC2400001",
+                Name = "Shared recording" }, DateTimeOffset.UtcNow, default);
             await setup.SaveChangesAsync();
         }
         await using var winner = new ApplicationDbContext(schema.Options);
         await using var loser = new ApplicationDbContext(schema.Options);
-        var alpha = Identity() with { Name = "Alpha", ExternalId = "alpha" };
-        var beta = Identity() with { Name = "Beta", ExternalId = "beta" };
-        await new SpotifyTrackResolver(winner).ResolveAsync(Snapshot("one") with {
-            Artist = "Alpha", ArtistNames = ["Alpha"], ArtistIdentities = [alpha] }, DateTimeOffset.UtcNow, default);
-        var track = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("two") with {
-            Artist = "Alpha, Beta", ArtistNames = ["Alpha", "Beta"], ArtistIdentities = [alpha, beta] }, DateTimeOffset.UtcNow, default);
+        var alpha = Identity() with { Name = "Alpha", ExternalId = "alpha", MusicBrainzArtistId = Mbid };
+        var beta = Identity() with { Name = "Beta", ExternalId = "beta", MusicBrainzArtistId = "82e3e1de-9243-4e58-b2d2-796c64f76c82" };
+        await ResolvePublicAsync(winner,Snapshot("one") with {
+            Artist = "Alpha", ArtistNames = ["Alpha"], ArtistIdentities = [alpha], Isrc = "USABC2400001",
+            Name = "Shared recording" }, DateTimeOffset.UtcNow, default);
+        var track = await ResolvePublicAsync(loser,Snapshot("two-collaboration") with {
+            Artist = "Alpha, Beta", ArtistNames = ["Alpha", "Beta"], ArtistIdentities = [alpha, beta],
+            Isrc = "USABC2400001", Name = "Shared recording" }, DateTimeOffset.UtcNow, default);
         await winner.SaveChangesAsync();
         await loser.SaveChangesAsync();
 
@@ -366,22 +399,25 @@ public sealed class ArtistReconciliationPostgresTests
     public async Task ConcurrentConflictEvidence_DeduplicatesWithoutLosingPendingImport(bool reordered, bool explicitTransaction)
     {
         await using var schema = await Schema.CreateAsync();
-        var alpha = Identity() with { Name = "Alpha", ExternalId = "alpha" };
-        var beta = Identity() with { Name = "Beta", ExternalId = "beta" };
+        var alpha = Identity() with { Name = "Alpha", ExternalId = "alpha", MusicBrainzArtistId = Mbid };
+        var beta = Identity() with { Name = "Beta", ExternalId = "beta", MusicBrainzArtistId = "82e3e1de-9243-4e58-b2d2-796c64f76c82" };
         var original = Snapshot("existing") with {
-            Artist = "Alpha, Beta", ArtistNames = ["Alpha", "Beta"], ArtistIdentities = [alpha, beta] };
+            Artist = "Alpha, Beta", ArtistNames = ["Alpha", "Beta"], ArtistIdentities = [alpha, beta], Isrc = "USABC2400001" };
         Guid trackId;
         Guid observationId;
         Guid[] canonicalArtists;
+        DateTimeOffset originalMappingLastVerifiedAt;
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            var track = await new SpotifyTrackResolver(setup).ResolveAsync(original, DateTimeOffset.UtcNow, default);
+            var track = await ResolvePublicAsync(setup,original, DateTimeOffset.UtcNow, default);
             var observation = Observation("existing", track.Id);
             setup.TrackObservations.Add(observation);
             await setup.SaveChangesAsync();
             trackId = track.Id;
             observationId = observation.Id;
             canonicalArtists = track.ArtistCredits.OrderBy(c => c.Position).Select(c => c.ArtistId).ToArray();
+            originalMappingLastVerifiedAt = Assert.IsType<DateTimeOffset>(
+                (await setup.TrackSourceIds.AsNoTracking().SingleAsync(source => source.TrackId == trackId)).LastVerifiedAt);
         }
 
         var failures = new IdentityFailures();
@@ -400,15 +436,20 @@ public sealed class ArtistReconciliationPostgresTests
         var updatedObservation = await loser.TrackObservations.SingleAsync(o => o.Id == observationId);
         updatedObservation.Title = "Refreshed observation";
         var incoming = reordered ? original with {
-            Artist = "Beta, Alpha", ArtistNames = ["Beta", "Alpha"], ArtistIdentities = [beta, alpha] }
-            : original with { ArtistIdentities = [alpha with { ExternalId = "different-alpha" }, beta] };
+            Id = "existing-winner", ArtistIdentities = [beta, alpha] }
+            : original with { Id = "existing-winner", ArtistIdentities = [alpha with { ExternalId = "different-alpha" }, beta] };
+        var losingSnapshot = incoming with { Id = reordered ? "existing-reordered" : "existing-loser" };
         var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-        // Both playlist refreshes stage the same evidence before either commits it.
-        await new SpotifyTrackResolver(winner).ResolveAsync(incoming, now, default);
-        await new SpotifyTrackResolver(loser).ResolveAsync(incoming, now.AddSeconds(1), default);
+        // These facts are trusted provider credits on a recording that already
+        // has an active verified public association. The identity verifier
+        // separately decides whether association evidence may reuse it.
+        var winnerItem = await SeedPublicCatalogItemAsync(winner, incoming, now, default);
+        var loserItem = await SeedPublicCatalogItemAsync(loser, losingSnapshot, now.AddSeconds(1), default);
+        await ReconcilePublicCatalogCreditsAsync(winner, trackId, winnerItem.Id, now, default);
+        await ReconcilePublicCatalogCreditsAsync(loser, trackId, loserItem.Id, now.AddSeconds(1), default);
         var evidence = loser.ArtistReconciliationConflicts.Local.Select(c => c.Evidence).Order().ToArray();
         Assert.Equal(reordered ? 2 : 1, evidence.Length);
-        var pendingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(Snapshot("pending"), now, default);
+        var pendingTrack = await ResolvePublicAsync(loser,Snapshot("pending"), now, default);
         var pendingObservation = Observation("pending", pendingTrack.Id);
         loser.TrackObservations.Add(pendingObservation);
         await winner.SaveChangesAsync();
@@ -434,7 +475,8 @@ public sealed class ArtistReconciliationPostgresTests
         Assert.Equal(2, await verify.Songs.CountAsync());
         Assert.Equal(2, await verify.SongTracks.CountAsync());
         Assert.Equal(2, await verify.TrackSourceIds.CountAsync());
-        Assert.Equal(now.AddSeconds(1), (await verify.TrackSourceIds.SingleAsync(s => s.TrackId == trackId)).LastVerifiedAt);
+        Assert.Equal(originalMappingLastVerifiedAt, (await verify.TrackSourceIds.SingleAsync(s => s.TrackId == trackId
+            && s.ExternalId == "existing")).LastVerifiedAt);
         Assert.Equal(3, await verify.ArtistProviderLinks.CountAsync());
         Assert.DoesNotContain(loser.ChangeTracker.Entries<ArtistReconciliationConflict>(), e => e.State == EntityState.Added);
 
@@ -453,22 +495,23 @@ public sealed class ArtistReconciliationPostgresTests
     public async Task EvidenceAndIdentityCollisions_InEitherOrderPreservePendingImport(bool identityFirst, bool explicitTransaction)
     {
         await using var schema = await Schema.CreateAsync();
-        var original = Snapshot("existing");
+        var original = Snapshot("existing") with { Isrc = "USABC2400001",
+            ArtistIdentities = [Identity() with { MusicBrainzArtistId = Mbid }] };
         Guid trackId;
         await using (var setup = new ApplicationDbContext(schema.Options))
         {
-            var track = await new SpotifyTrackResolver(setup).ResolveAsync(original, DateTimeOffset.UtcNow, default);
+            var track = await ResolvePublicAsync(setup,original, DateTimeOffset.UtcNow, default);
             await setup.SaveChangesAsync();
             trackId = track.Id;
         }
         var now = DateTimeOffset.UtcNow;
-        var conflicting = original with { ArtistIdentities = [Identity() with { ExternalId = "conflicting" }] };
+        var conflicting = original with { Id = "conflicting-existing", ArtistIdentities = [Identity() with { ExternalId = "conflicting" }] };
         var pending = Snapshot("pending") with { Artist = "New artist", ArtistNames = ["New artist"],
             ArtistIdentities = [Identity() with { Name = "New artist", ExternalId = "new-artist" }] };
         await using var evidenceWinner = new ApplicationDbContext(schema.Options);
         await using var identityWinner = new ApplicationDbContext(schema.Options);
-        await new SpotifyTrackResolver(evidenceWinner).ResolveAsync(conflicting, now, default);
-        var winningTrack = await new SpotifyTrackResolver(identityWinner).ResolveAsync(pending with {
+        await ResolvePublicAsync(evidenceWinner,conflicting, now, default);
+        var winningTrack = await ResolvePublicAsync(identityWinner,pending with {
             Id = "winner", Name = "Another song" }, now, default);
         var winningConflictId = evidenceWinner.ArtistReconciliationConflicts.Local.Single().Id;
         var failures = new IdentityFailures(beforeSecondSave: async () =>
@@ -481,8 +524,8 @@ public sealed class ArtistReconciliationPostgresTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options).AddInterceptors(failures).Options;
         await using var loser = new ApplicationDbContext(options);
         await using var transaction = explicitTransaction ? await loser.Database.BeginTransactionAsync() : null;
-        await new SpotifyTrackResolver(loser).ResolveAsync(conflicting, now, default);
-        var pendingTrack = await new SpotifyTrackResolver(loser).ResolveAsync(pending, now, default);
+        await ResolvePublicAsync(loser,conflicting with { Id = "conflicting-loser" }, now, default);
+        var pendingTrack = await ResolvePublicAsync(loser,pending, now, default);
         var observation = Observation("pending", pendingTrack.Id);
         loser.TrackObservations.Add(observation);
         if (identityFirst) await identityWinner.SaveChangesAsync();
@@ -509,12 +552,115 @@ public sealed class ArtistReconciliationPostgresTests
         Assert.Equal(3, await verify.Tracks.CountAsync());
         Assert.Equal(3, await verify.Songs.CountAsync());
         Assert.Equal(3, await verify.SongTracks.CountAsync());
-        Assert.Equal(3, await verify.TrackSourceIds.CountAsync());
+        Assert.Equal(5, await verify.TrackSourceIds.CountAsync());
         Assert.DoesNotContain(loser.ChangeTracker.Entries(), e => e.State == EntityState.Added);
     }
 
+    private static async Task<Track> ResolvePublicAsync(ApplicationDbContext db, SpotifyTrackSnapshot snapshot,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var item = await db.ProviderCatalogItems.SingleOrDefaultAsync(row => row.SourceType == "spotify"
+            && row.ExternalId == snapshot.Id, cancellationToken);
+        if (item is null)
+        {
+            var facts = new ProviderCatalogFacts
+            {
+                Title = snapshot.Name,
+                Artist = snapshot.Artist,
+                Albums = snapshot.AlbumName is null ? [] : [snapshot.AlbumName],
+                ThumbnailUrl = snapshot.ImageUrl,
+                ProviderUrl = snapshot.ExternalUrl,
+                DurationSeconds = snapshot.DurationSeconds,
+                Isrc = snapshot.Isrc,
+                MusicBrainzRecordingId = null,
+                ArtistCredits = snapshot.ArtistIdentities.Count > 0
+                    ? snapshot.ArtistIdentities
+                    : snapshot.ArtistNames.Select(name => new ArtistCreditMetadata { Name = name, Provider = "spotify" }).ToArray(),
+                VersionFlags = TrackVersionClassifier.Infer(TrackMetadataParser.Parse(snapshot.Name, snapshot.Artist))
+            };
+            var factsJson = System.Text.Json.JsonSerializer.Serialize(facts);
+            var verifiedAt = DateTimeOffset.UtcNow;
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "ProviderCatalogItems"
+                    ("Id", "SourceType", "ExternalId", "FactsJson", "VerificationMethod", "VerifiedAt", "RevalidateAfter", "VisibilityState", "Revision")
+                VALUES
+                    ({Guid.NewGuid()}, {"spotify"}, {snapshot.Id}, {factsJson}, {"spotify_application_catalog"}, {verifiedAt}, {verifiedAt.AddDays(30)}, {(int)CatalogVisibility.Public}, {1L})
+                ON CONFLICT ("SourceType", "ExternalId") DO NOTHING
+                """, cancellationToken);
+            item = await db.ProviderCatalogItems.SingleAsync(row => row.SourceType == "spotify"
+                && row.ExternalId == snapshot.Id, cancellationToken);
+        }
+
+        var trustedSnapshot = snapshot with
+        {
+            ProviderCatalogItemId = item.Id,
+            ProviderCatalogRevision = item.Revision
+        };
+        return await new SpotifyTrackResolver(db).ResolveAsync(trustedSnapshot, now, cancellationToken);
+    }
+
+    private static async Task<ProviderCatalogItem> SeedPublicCatalogItemAsync(ApplicationDbContext db,
+        SpotifyTrackSnapshot snapshot, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var item = await db.ProviderCatalogItems.SingleOrDefaultAsync(row => row.SourceType == "spotify"
+            && row.ExternalId == snapshot.Id, cancellationToken);
+        if (item is not null) return item;
+
+        var facts = new ProviderCatalogFacts
+        {
+            Title = snapshot.Name,
+            Artist = snapshot.Artist,
+            Albums = snapshot.AlbumName is null ? [] : [snapshot.AlbumName],
+            ThumbnailUrl = snapshot.ImageUrl,
+            ProviderUrl = snapshot.ExternalUrl,
+            DurationSeconds = snapshot.DurationSeconds,
+            Isrc = snapshot.Isrc,
+            ArtistCredits = snapshot.ArtistIdentities.Count > 0
+                ? snapshot.ArtistIdentities
+                : snapshot.ArtistNames.Select(name => new ArtistCreditMetadata { Name = name, Provider = "spotify" }).ToArray(),
+            VersionFlags = TrackVersionClassifier.Infer(TrackMetadataParser.Parse(snapshot.Name, snapshot.Artist))
+        };
+        var factsJson = System.Text.Json.JsonSerializer.Serialize(facts);
+        var verifiedAt = DateTimeOffset.UtcNow;
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ProviderCatalogItems"
+                ("Id", "SourceType", "ExternalId", "FactsJson", "VerificationMethod", "VerifiedAt", "RevalidateAfter", "VisibilityState", "Revision")
+            VALUES
+                ({Guid.NewGuid()}, {"spotify"}, {snapshot.Id}, {factsJson}, {"spotify_application_catalog"}, {verifiedAt}, {verifiedAt.AddDays(30)}, {(int)CatalogVisibility.Public}, {1L})
+            ON CONFLICT ("SourceType", "ExternalId") DO NOTHING
+            """, cancellationToken);
+        return await db.ProviderCatalogItems.SingleAsync(row => row.SourceType == "spotify"
+            && row.ExternalId == snapshot.Id, cancellationToken);
+    }
+
+    private static async Task ReconcilePublicCatalogCreditsAsync(ApplicationDbContext db, Guid trackId,
+        Guid catalogItemId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var item = await db.ProviderCatalogItems.SingleAsync(row => row.Id == catalogItemId, cancellationToken);
+        var verificationTime = DateTimeOffset.UtcNow;
+        var facts = ProviderCatalogPolicy.ReadFacts(item, verificationTime)
+            ?? throw new InvalidOperationException("The test provider facts are not current and public.");
+        var verifiedRecording = await db.TrackSourceIds.Include(source => source.ProviderCatalogItem)
+            .FirstOrDefaultAsync(source => source.TrackId == trackId, cancellationToken);
+        if (!ProviderCatalogPolicy.IsVerified(verifiedRecording, verificationTime))
+            throw new InvalidOperationException("Artist facts can only be reconciled onto a verified public recording.");
+
+        var track = await db.Tracks.Include(row => row.ArtistCredits).SingleAsync(row => row.Id == trackId, cancellationToken);
+        await new ArtistReconciliationService(db).ReconcileAsync(track, facts.ArtistCredits, item.SourceType,
+            now, cancellationToken, facts.Artist);
+        for (var position = 0; position < facts.ArtistCredits.Count; position++)
+        {
+            var expected = facts.ArtistCredits[position];
+            var credit = db.TrackArtistCredits.Local.FirstOrDefault(row => row.TrackId == trackId
+                && row.Position == position && row.CreditedName == expected.Name);
+            if (credit is null) continue;
+            credit.ProviderCatalogItemId = item.Id;
+            credit.ProviderCatalogItem = item;
+        }
+    }
+
     private static TrackObservation Observation(string externalId, Guid trackId) => new() {
-        Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = externalId, Title = $"Observation {externalId}",
+        Id = Guid.NewGuid(), OwnerUserId = 9002, SourceType = "spotify", ExternalId = externalId, Title = $"Observation {externalId}",
         Artist = "Shared artist", TrackId = trackId, MatchStatus = TrackMatchingStatuses.Matched };
 
     private static ArtistCreditMetadata Identity() => new() { Name = "Shared artist", Provider = "spotify",
@@ -565,6 +711,8 @@ public sealed class ArtistReconciliationPostgresTests
             {
                 await using var db = new ApplicationDbContext(options);
                 await db.GetService<IRelationalDatabaseCreator>().CreateTablesAsync();
+                db.Users.Add(TestUserFactory.Create(9002, "artist-reconciliation-owner@example.test"));
+                await db.SaveChangesAsync();
                 return schema;
             }
             catch { await schema.DisposeAsync(); throw; }

@@ -300,8 +300,17 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await readDb.SaveChangesAsync();
         }
         await using var verify = scope.NewContext();
-        Assert.True(await verify.TrackObservations.AnyAsync(observation => observation.SourceType == service && observation.ExternalId == "chosen-id"));
-        if (service == "spotify") Assert.True(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+        if (service == "spotify")
+        {
+            var observation = await verify.TrackObservations.SingleAsync(source => source.OwnerUserId == scope.UserId
+                && source.SourceType == service && source.ExternalId == "chosen-id");
+            Assert.NotNull(observation.TrackId);
+            var privateTrack = await verify.Tracks.SingleAsync(track => track.Id == observation.TrackId);
+            Assert.Null(privateTrack.PreferredCatalogItemId);
+            Assert.Null(privateTrack.Isrc);
+            Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+            Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == privateTrack.Id));
+        }
         else Assert.True(await verify.TrackMatchQueueItems.AnyAsync());
         Assert.Equal("unlinked", (await verify.ServicePlaylistMappings.SingleAsync(link => link.Id == scope.Link.Id)).State);
     }
@@ -342,7 +351,17 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal("USABC2400002", (await verify.Tracks.SingleAsync(track => track.Id == scope.Entry.TrackId)).Isrc);
         Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == scope.Entry.TrackId));
         Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.TrackId == scope.Entry.TrackId && source.SourceType == service));
-        Assert.True(await verify.TrackObservations.AnyAsync(observation => observation.SourceType == service && observation.ExternalId == "chosen-id"));
+        if (service == "spotify")
+        {
+            var observation = await verify.TrackObservations.SingleAsync(source => source.OwnerUserId == otherUserId
+                && source.SourceType == service && source.ExternalId == "chosen-id");
+            Assert.NotNull(observation.TrackId);
+            var privateTrack = await verify.Tracks.SingleAsync(track => track.Id == observation.TrackId);
+            Assert.Null(privateTrack.PreferredCatalogItemId);
+            Assert.Null(privateTrack.Isrc);
+            Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+            Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == privateTrack.Id));
+        }
     }
 
     [Theory]
@@ -388,7 +407,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
                         .ExecuteUpdateAsync(setters => setters.SetProperty(observation => observation.TrackId, replacement.Id));
                 else
                 {
-                    update.TrackSourceIds.Add(new TrackSourceId { TrackId = replacement.Id, SourceType = service, ExternalId = "chosen-id" });
+                    var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = replacement.Id, SourceType = service, ExternalId = "chosen-id" };
+                    scope.VerifyMapping(mapping);
+                    update.TrackSourceIds.Add(mapping);
                     await update.SaveChangesAsync();
                 }
                 changed = true;

@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Cantaro.Api.Data;
 
@@ -24,6 +23,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<SongCredit> SongCredits => Set<SongCredit>();
     public DbSet<SongGroupingSuggestion> SongGroupingSuggestions => Set<SongGroupingSuggestion>();
     public DbSet<Track> Tracks => Set<Track>();
+    public DbSet<ProviderCatalogItem> ProviderCatalogItems => Set<ProviderCatalogItem>();
     public DbSet<TrackRelation> TrackRelations => Set<TrackRelation>();
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
@@ -93,6 +93,35 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ProviderCatalogItem>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.SourceType, item.ExternalId }).IsUnique();
+            entity.HasIndex(item => new { item.NormalizedTitle, item.NormalizedArtist });
+            entity.HasIndex(item => item.NormalizedIsrc);
+            entity.HasIndex(item => item.NormalizedMusicBrainzRecordingId);
+            entity.Property(item => item.Revision).IsConcurrencyToken();
+            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+            {
+                entity.Property(item => item.VerifiedAt).HasConversion(
+                    value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+                entity.Property(item => item.RevalidateAfter).HasConversion(
+                    value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+            }
+        });
+        modelBuilder.Entity<Track>().HasOne(item => item.PreferredCatalogItem).WithMany()
+            .HasForeignKey(item => item.PreferredCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackArtistCredit>().HasOne(item => item.ProviderCatalogItem).WithMany()
+            .HasForeignKey(item => item.ProviderCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackSourceId>().HasOne(item => item.ProviderCatalogItem).WithMany()
+            .HasForeignKey(item => item.ProviderCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackSourceId>().Property(item => item.Revision).IsConcurrencyToken();
+        modelBuilder.Entity<TrackObservation>().HasOne(item => item.ProviderCatalogItem).WithMany()
+            .HasForeignKey(item => item.ProviderCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackObservation>().HasOne<User>().WithMany()
+            .HasForeignKey(item => item.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<User>(entity =>
@@ -390,7 +419,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
-            entity.HasIndex(e => new { e.SourceType, e.ExternalId })
+            entity.HasIndex(e => new { e.OwnerUserId, e.SourceType, e.ExternalId })
                 .IsUnique();
 
             entity.HasIndex(e => e.MatchStatus);
@@ -926,8 +955,21 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     private void PrepareChanges()
     {
         UpdateUserTimestamps();
-        UpdateTrackSearchProjections();
+        UpdateProviderCatalogProjections();
         NormalizeMediaProviderContents();
+    }
+
+    private void UpdateProviderCatalogProjections()
+    {
+        foreach (var entry in ChangeTracker.Entries<ProviderCatalogItem>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified)) continue;
+            var normalized = ProviderCatalogNormalizedFacts.FromJson(entry.Entity.FactsJson);
+            entry.Entity.NormalizedTitle = normalized.Title;
+            entry.Entity.NormalizedArtist = normalized.Artist;
+            entry.Entity.NormalizedIsrc = normalized.Isrc;
+            entry.Entity.NormalizedMusicBrainzRecordingId = normalized.MusicBrainzRecordingId;
+        }
     }
 
     private void NormalizeMediaProviderContents()
@@ -949,70 +991,4 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         }
     }
 
-    private void UpdateTrackSearchProjections()
-    {
-        foreach (var entry in ChangeTracker.Entries<Track>())
-        {
-            if (entry.State is not (EntityState.Added or EntityState.Modified)
-                || (entry.State == EntityState.Modified
-                    && !entry.Property(track => track.CanonicalMetadata).IsModified))
-            {
-                continue;
-            }
-
-            var metadata = ParseTrackSearchMetadata(entry.Entity.CanonicalMetadata);
-            entry.Entity.SearchTitle = TrimToLength(metadata.Title, 512);
-            entry.Entity.SearchArtist = TrimToLength(metadata.Artist, 1024);
-        }
-    }
-
-    private static (string? Title, string? Artist) ParseTrackSearchMetadata(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return default;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return default;
-            }
-
-            return (
-                ReadString(document.RootElement, "Title", "title"),
-                ReadString(document.RootElement, "Artist", "artist"));
-        }
-        catch (JsonException)
-        {
-            return default;
-        }
-    }
-
-    private static string? ReadString(
-        JsonElement element,
-        string propertyName,
-        string fallbackPropertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out var property)
-            && !element.TryGetProperty(fallbackPropertyName, out property))
-        {
-            return null;
-        }
-
-        return property.ValueKind == JsonValueKind.String ? property.GetString() : null;
-    }
-
-    private static string? TrimToLength(string? value, int maxLength)
-    {
-        var trimmed = value?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return null;
-        }
-
-        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
-    }
 }

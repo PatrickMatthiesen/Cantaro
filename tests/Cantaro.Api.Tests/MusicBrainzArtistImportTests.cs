@@ -7,6 +7,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -23,16 +24,24 @@ public sealed class MusicBrainzArtistImportTests
     {
         using var httpClient = new HttpClient(new RecordingHandler());
         var client = new MusicBrainzQueryClient(httpClient, new MusicBrainzRequestGate(TimeProvider.System));
-        var provider = new MusicBrainzSearchProvider(client, NullLogger<MusicBrainzSearchProvider>.Instance,
-            Options.Create(new TrackMatchingOptions()), _ => Task.CompletedTask);
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
+        var services = new ServiceCollection();
+        services.AddDbContext<ApplicationDbContext>(options => options.UseSqlite(connection));
+        await using var providerScopeFactory = services.BuildServiceProvider();
+        var catalogAcquisition = new ProviderCatalogAcquisition(
+            new ProviderCatalogStore(providerScopeFactory.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System),
+            null!, null!, TimeProvider.System);
+        var provider = new MusicBrainzSearchProvider(client, NullLogger<MusicBrainzSearchProvider>.Instance,
+            Options.Create(new TrackMatchingOptions()), _ => Task.CompletedTask, catalogAcquisition);
+        var user = TestUserFactory.Create(900001, "musicbrainz-owner@example.test");
         var observation = new TrackObservation {
+            OwnerUserId = user.Id,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video", Title = "Together",
             Artist = "Alpha feat. Beta", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Pending };
-        db.TrackObservations.Add(observation);
+        db.AddRange(user, observation);
         await db.SaveChangesAsync();
         var matcher = new TrackMatchingService(db, [provider], NullLogger<TrackMatchingService>.Instance);
         await matcher.ProcessObservationAsync(observation.Id, default);
@@ -51,7 +60,8 @@ public sealed class MusicBrainzArtistImportTests
         Assert.Equal(2, links.Count);
         Assert.All(links, link => {
             Assert.Equal($"https://musicbrainz.org/artist/{link.ExternalId}", link.ProfileUrl);
-            Assert.Contains("JoinPhrase", link.RawMetadata);
+            Assert.Null(link.RawMetadata);
+            Assert.Equal(CatalogVerificationMethods.MusicBrainz, link.VerificationMethod);
         });
         Assert.All(credits, credit => Assert.Contains("musicbrainz", credit.Provenance));
         var stored = await db.TrackResolutionCandidates.SingleAsync();
@@ -67,7 +77,9 @@ public sealed class MusicBrainzArtistImportTests
         await connection.OpenAsync();
         await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
+        var user = TestUserFactory.Create(900001, "musicbrainz-owner@example.test");
         var observation = new TrackObservation {
+            OwnerUserId = user.Id,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "legacy-video", Title = "Together",
             Artist = "Alpha feat. Beta", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Pending };
         var candidate = new TrackResolutionCandidate {
@@ -78,14 +90,14 @@ public sealed class MusicBrainzArtistImportTests
                     new { Name = "Alpha", MusicBrainzArtistId = FirstId, JoinPhrase = " feat. ", SortName = "Alpha, sorted" },
                     new { Name = "Beta", MusicBrainzArtistId = SecondId, JoinPhrase = "", SortName = "Beta" } } }) }) };
         observation.Candidates.Add(candidate);
-        db.TrackObservations.Add(observation);
+        db.AddRange(user, observation);
         await db.SaveChangesAsync();
         var matcher = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
         await matcher.AcceptCandidateAsync(observation.Id, candidate.Id, default);
         await matcher.AcceptCandidateAsync(observation.Id, candidate.Id, default);
-        Assert.Equal(2, await db.Artists.CountAsync());
-        Assert.Equal(2, await db.TrackArtistCredits.CountAsync());
-        Assert.Equal(2, await db.ArtistProviderLinks.CountAsync());
+        Assert.Empty(await db.Artists.ToListAsync());
+        Assert.Empty(await db.TrackArtistCredits.ToListAsync());
+        Assert.Empty(await db.ArtistProviderLinks.ToListAsync());
     }
 
     private sealed class RecordingHandler : HttpMessageHandler

@@ -33,7 +33,7 @@ public sealed class MusicLibrarySongDto
 
 public sealed class MusicLibrarySongArtistCreditDto
 {
-    public required string ArtistId { get; set; }
+    public string? ArtistId { get; set; }
     public required string Name { get; set; }
     public required string CreditedName { get; set; }
     public required string Role { get; set; }

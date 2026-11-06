@@ -60,7 +60,7 @@ public sealed class SpotifyArtistEnrichmentTests
     }
 
     [Fact]
-    public async Task EnrichedSyncSnapshot_RepeatedImportPersistsArtworkAndOrderedCredits()
+    public async Task EnrichedAccountSnapshotDoesNotPromoteArtworkOrCredits()
     {
         var handler = new RoutingHandler((request, _) => Task.FromResult(
             RequiredRead(request.RequestUri!) ?? Artist(request.RequestUri!.Segments.Last())));
@@ -76,24 +76,25 @@ public sealed class SpotifyArtistEnrichmentTests
         {
             var snapshot = await api.GetPlaylistSyncReadSnapshotAsync("token", "playlist", CancellationToken.None);
             foreach (var item in snapshot.Items)
-                await resolver.ResolveAsync(item.Track!, DateTimeOffset.UtcNow, CancellationToken.None);
+            {
+                Assert.Equal(["First credited name", "Second credited name"], item.Track!.ArtistNames);
+                Assert.All(item.Track.ArtistIdentities, credit => Assert.NotNull(credit.ArtworkUrl));
+                await resolver.ResolveAsync(item.Track, DateTimeOffset.UtcNow, CancellationToken.None, ownerUserId: 42);
+            }
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
         }
 
-        Assert.Equal(1, await db.Tracks.CountAsync());
-        Assert.Equal(2, await db.Artists.CountAsync());
-        var links = await db.ArtistProviderLinks.OrderBy(link => link.ExternalId).ToArrayAsync();
-        Assert.Equal(["first", "second"], links.Select(link => link.ExternalId));
-        Assert.All(links, link =>
+        Assert.Empty(await db.TrackSourceIds.ToArrayAsync());
+        Assert.Empty(await db.ArtistProviderLinks.ToArrayAsync());
+        Assert.Empty(await db.TrackArtistCredits.ToArrayAsync());
+        Assert.Empty(await db.Artists.ToArrayAsync());
+        Assert.All(await db.Tracks.ToArrayAsync(), track =>
         {
-            Assert.Equal($"https://images/{link.ExternalId}", link.ArtworkUrl);
-            Assert.Equal($"https://open.spotify.com/artist/{link.ExternalId}", link.ProfileUrl);
-            Assert.Contains("images", link.RawMetadata);
+            Assert.Null(track.CanonicalMetadata);
+            Assert.Null(track.PreferredCatalogItemId);
+            Assert.Null(track.Isrc);
         });
-        var credits = await db.TrackArtistCredits.OrderBy(credit => credit.Position).ToArrayAsync();
-        Assert.Equal(["First credited name", "Second credited name"], credits.Select(credit => credit.CreditedName));
-        Assert.All(credits, credit => Assert.Contains("spotify", credit.Provenance));
     }
 
     [Fact]

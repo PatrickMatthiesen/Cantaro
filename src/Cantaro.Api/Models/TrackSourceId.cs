@@ -6,6 +6,14 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class TrackSourceId
 {
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
+    public RecordingAssociationState AssociationState { get; set; }
+    public string? AssociationMethod { get; set; }
+    public DateTimeOffset? AssociationVerifiedAt { get; set; }
+    public long? CatalogRevision { get; set; }
+    public string? IndependentEvidenceJson { get; set; }
+    public long Revision { get; set; }
     public Guid Id { get; set; }
     
     /// <summary>

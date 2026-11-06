@@ -27,6 +27,8 @@ public sealed record SpotifyTrackSnapshot(
     int Position)
 {
     public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
+    public Guid? ProviderCatalogItemId { get; init; }
+    public long? ProviderCatalogRevision { get; init; }
 }
 
 public sealed record SpotifyPlaylistImportSnapshot(

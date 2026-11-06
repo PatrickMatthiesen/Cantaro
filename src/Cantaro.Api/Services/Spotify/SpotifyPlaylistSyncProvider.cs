@@ -14,7 +14,8 @@ public sealed class SpotifyPlaylistSyncProvider(
     IEnumerable<ITrackMetadataSearchProvider> searchProviders,
     TrackMatchingService matchingService,
     PlaylistCanonicalReconciliationService playlistReconciler,
-    IOptions<TrackMatchingOptions> matchingOptions) : IPlaylistSyncProvider
+    IOptions<TrackMatchingOptions> matchingOptions,
+    ProviderCatalogAcquisition? publicCatalog = null) : IPlaylistSyncProvider
 {
     private ValidatedAccount? _validatedAccount;
 
@@ -37,6 +38,11 @@ public sealed class SpotifyPlaylistSyncProvider(
             throw new PlatformApiException("incomplete_playlist", "The platform returned an incomplete playlist. Its missing items were not treated as removals.", 503);
         var readAccount = new PlaylistReadAccount(account, PlatformId, validated.ExternalAccountId, validated.TokenVersion);
         _ = await RequireAccountAsync(account, cancellationToken);
+        var catalog = new Dictionary<string, ProviderCatalogItem>(StringComparer.Ordinal);
+        if (publicCatalog is not null)
+            foreach (var id in raw.Items.Where(item => item.Track is not null).Select(item => item.Track!.Id).Distinct(StringComparer.Ordinal))
+                if (await publicCatalog.EnsureSpotifyAsync(id, cancellationToken) is { } verified)
+                    catalog.Add(id, verified);
         Func<Task>? validateProvenance = null;
         return await PlaylistReadIngestion.RunAsync(dbContext, readAccount, async readDb =>
         {
@@ -65,12 +71,12 @@ public sealed class SpotifyPlaylistSyncProvider(
                 if (!cache.TryGetValue(snapshot.Id, out var ids))
                 {
                     var observation = readDb.TrackObservations.Local.FirstOrDefault(existing =>
-                        existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id)
+                        existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id)
                         ?? await readDb.TrackObservations.SingleOrDefaultAsync(existing =>
-                            existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id, cancellationToken);
+                            existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id, cancellationToken);
                     observation ??= new TrackObservation
                     {
-                        Id = Guid.NewGuid(), SourceType = PlatformId, ExternalId = snapshot.Id,
+                        Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId, ExternalId = snapshot.Id,
                         Title = snapshot.Name, MatchStatus = TrackMatchingStatuses.Matched,
                         CreatedAt = now
                     };
@@ -90,7 +96,11 @@ public sealed class SpotifyPlaylistSyncProvider(
                         SearchTitle = snapshot.Name, SearchArtist = snapshot.Artist,
                         ThumbnailUrl = snapshot.ImageUrl, DurationSeconds = snapshot.DurationSeconds
                     });
-                    var canonical = await trackResolver.ResolveAsync(snapshot, now, cancellationToken);
+                    var verifiedSnapshot = catalog.TryGetValue(snapshot.Id, out var publicItem)
+                        ? snapshot with { ProviderCatalogItemId = publicItem.Id, ProviderCatalogRevision = publicItem.Revision }
+                        : snapshot with { ProviderCatalogItemId = null, ProviderCatalogRevision = null };
+                    observation.ProviderCatalogItemId = publicItem?.Id;
+                    var canonical = await trackResolver.ResolveAsync(verifiedSnapshot, now, cancellationToken, account.UserId);
                     observation.TrackId = canonical.Id;
                     observation.MatchStatus = TrackMatchingStatuses.Matched;
                     observation.UpdatedAt = now;
@@ -108,6 +118,7 @@ public sealed class SpotifyPlaylistSyncProvider(
     public async Task<string?> ResolveAsync(
         PlatformAccountContext account, PlaylistEntry entry, CancellationToken cancellationToken)
     {
+        _ = await RequireAccountAsync(account, cancellationToken);
         var searchProvider = searchProviders.OfType<SpotifySearchProvider>().Single();
         return await PlaylistDestinationIdentityResolver.ResolveAsync(dbContext, matchingOptions.Value,
             async (observationId, candidate, ct) => (await matchingService.CreateTrackFromMatchAsync(observationId, candidate, ct)).TrackId

@@ -47,8 +47,14 @@ public sealed class PlaylistCanonicalReconciliationService(ApplicationDbContext 
         Guid? trackId,
         CancellationToken cancellationToken)
     {
+        var ownerId = await _dbContext.TrackObservations.AsNoTracking()
+            .Where(observation => observation.Id == observationId
+                && observation.OwnerUserId > 0 && observation.Title.Trim() != "")
+            .Select(observation => observation.OwnerUserId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (ownerId <= 0) return;
         var entries = await _dbContext.PlaylistEntries
-            .Where(entry => entry.TrackObservationId == observationId)
+            .Where(entry => entry.TrackObservationId == observationId && entry.Playlist!.UserId == ownerId)
             .ToListAsync(cancellationToken);
 
         if (trackId == null)

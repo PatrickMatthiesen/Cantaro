@@ -42,9 +42,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var expected = new List<Guid> { scope.Entry.Id };
         var ownedPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId, Name = "Owned observations" };
         scope.Db.Add(ownedPlaylist);
+        var conflictTrack = new Track { Id = Guid.NewGuid() };
+        scope.Db.Add(conflictTrack);
         for (var index = 0; index < trackCount; index++)
         {
-            var track = new Track { Id = Guid.NewGuid(), SearchTitle = $"Track {index}",
+            var track = new Track { Id = Guid.NewGuid(),
                 CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = $"Track {index}" }) };
             scope.Db.Add(track);
             // A canonical provider key alone never authorizes a destination identity.
@@ -60,11 +62,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
             progress[entries[1].Id] = PlaylistMatchingProgress.Create(scope.Link, entries[1], $"checkpoint-{index}");
             progress[entries[2].Id] = PlaylistMatchingProgress.Create(scope.Link, entries[0], $"wrong-entry-{index}", true);
             progress[entries[3].Id] = PlaylistMatchingProgress.Create(scope.Link, entries[3], $"reassigned-{index}", true);
-            scope.Db.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-                SourceType = "spotify", ExternalId = $"reassigned-{index}" });
+            var reassignedMapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflictTrack.Id,
+                SourceType = "spotify", ExternalId = $"reassigned-{index}" };
+            scope.VerifyMapping(reassignedMapping);
+            scope.Db.Add(reassignedMapping);
             if (index % 5 == 0)
             {
-                var observation = new TrackObservation { Id = Guid.NewGuid(), TrackId = track.Id,
+                var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = track.Id,
                     SourceType = "spotify", ExternalId = $"owned-{index}", Title = "Owned", MatchStatus = "matched" };
                 scope.Db.Add(new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = ownedPlaylist.Id,
                     TrackId = track.Id, TrackObservation = observation, TrackObservationId = observation.Id, Position = index });
@@ -99,9 +103,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
             entries.Add(entry);
             return entry;
         }
-        void Attach(PlaylistEntry entry, string key, Guid? observationTrackId)
+        void Attach(PlaylistEntry entry, string key, Guid? observationTrackId, int? ownerUserId = null)
         {
-            entry.TrackObservation = new TrackObservation { Id = Guid.NewGuid(), TrackId = observationTrackId,
+            entry.TrackObservation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = ownerUserId ?? scope.UserId, TrackId = observationTrackId,
                 SourceType = "spotify", ExternalId = key, Title = key, MatchStatus = "matched" };
             entry.TrackObservationId = entry.TrackObservation.Id;
             scope.Db.Add(entry.TrackObservation);
@@ -110,7 +114,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         {
             var entry = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = playlist.Id,
                 TrackId = track.Id, Position = position };
-            Attach(entry, key, track.Id);
+            Attach(entry, key, track.Id, playlist.UserId);
             scope.Db.Add(entry);
         }
         var manualA = AddEntry();
@@ -131,8 +135,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var inconsistent = AddEntry();
         Attach(inconsistent, "inconsistent", privateOnly.TrackId);
         var reassigned = AddEntry();
-        scope.Db.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = privateOnly.TrackId.Value,
-            SourceType = "spotify", ExternalId = "reassigned" });
+        var conflictTrack = new Track { Id = Guid.NewGuid() };
+        scope.Db.Add(conflictTrack);
+        var reassignedMapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflictTrack.Id,
+            SourceType = "spotify", ExternalId = "reassigned" };
+        scope.VerifyMapping(reassignedMapping);
+        scope.Db.Add(reassignedMapping);
         var wrongScope = AddEntry();
         var staleMetadata = AddEntry();
         var legacy = AddEntry();
@@ -158,7 +166,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await scope.Db.SaveChangesAsync();
         await using var db = scope.NewContext();
         var loaded = await db.PlaylistEntries.AsNoTracking().Where(entry => entry.PlaylistId == scope.Playlist.Id)
-            .Include(entry => entry.Track).ThenInclude(track => track!.SourceIds).Include(entry => entry.TrackObservation)
+            .Include(entry => entry.Track).ThenInclude(track => track!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+            .Include(entry => entry.TrackObservation)
             .OrderBy(entry => entry.Position).ToListAsync();
         var link = await db.ServicePlaylistMappings.AsNoTracking().Include(item => item.ConnectedServiceAccount).SingleAsync();
         var account = new PlatformAccountContext(scope.UserId, link.ConnectedServiceAccountId, link.ExternalAccountId);
@@ -185,8 +194,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
             scope.UserId, scope.Playlist.Id, link.Id, default)).Select(entry => entry.EntryId));
 
         // A later list must read fresh reassignment evidence, even on the same service instance.
-        scope.Db.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = privateOnly.TrackId.Value,
-            SourceType = "spotify", ExternalId = "checkpoint" });
+        var lateAssignment = new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflictTrack.Id,
+            SourceType = "spotify", ExternalId = "checkpoint" };
+        scope.VerifyMapping(lateAssignment);
+        scope.Db.Add(lateAssignment);
         await scope.Db.SaveChangesAsync();
         Assert.Contains(await review.ListAsync(scope.UserId, scope.Playlist.Id, link.Id, default),
             entry => entry.EntryId == checkpoint.Id);

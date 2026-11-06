@@ -100,13 +100,18 @@ internal static class TrackMatchScorer
             : (titleSimilarity * 0.55m) + (artistSimilarity * 0.30m) + (durationScore * 0.15m) + semanticAdjustment;
         var compatibleDuration = durationDifference.HasValue
             && Math.Abs(durationDifference.Value) <= options.AutoMatchDurationToleranceSeconds;
-        var isAutoMatchEligible = !conflictingCredits
+        var sourceMetadata = TrackObservationParser.ReadMetadata(observation);
+        var sourceIsrc = TrackIdentityResolver.NormalizeIsrc(sourceMetadata?.Isrc);
+        var candidateIsrc = TrackIdentityResolver.NormalizeIsrc(candidate.Isrc);
+        var sourceMbid = NormalizeStableId(sourceMetadata?.MbidRecording);
+        var candidateMbid = NormalizeStableId(candidate.MbidRecording);
+        var conflictingRecordingId = sourceIsrc is not null && candidateIsrc is not null && sourceIsrc != candidateIsrc
+            || sourceMbid is not null && candidateMbid is not null && sourceMbid != candidateMbid;
+        var isAutoMatchEligible = !conflictingCredits && !conflictingRecordingId
             && compatibleCredits && compatibleSemantics
             && (strongIdentity || compatibleDuration);
-        var sourceIsrc = TrackIdentityResolver.NormalizeIsrc(TrackObservationParser.ReadMetadata(observation)?.Isrc);
-        var confirmedRecordingIdentity = sourceIsrc is not null
-            && sourceIsrc == TrackIdentityResolver.NormalizeIsrc(candidate.Isrc)
-            && strongIdentity;
+        var confirmedRecordingIdentity = (sourceIsrc is not null && sourceIsrc == candidateIsrc
+            || sourceMbid is not null && sourceMbid == candidateMbid) && strongIdentity;
         return new TrackMatchScoredCandidate
         {
             Candidate = candidate,
@@ -128,6 +133,8 @@ internal static class TrackMatchScorer
             HasConfirmedRecordingIdentity = confirmedRecordingIdentity,
             AutoMatchEligibilityReason = conflictingCredits
                 ? "The source has conflicting artist credits."
+                : conflictingRecordingId
+                    ? "Stable recording identifiers conflict."
                 : isAutoMatchEligible
                     ? strongIdentity
                         ? "Matching title, artist credits and version; duration is not required."
@@ -241,4 +248,7 @@ internal static class TrackMatchScorer
         return left.OrderBy(marker => marker, StringComparer.Ordinal)
             .SequenceEqual(right.OrderBy(marker => marker, StringComparer.Ordinal), StringComparer.Ordinal);
     }
+
+    private static string? NormalizeStableId(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
 }

@@ -56,6 +56,8 @@ internal sealed class TrackMatchDecision
 public sealed class TrackMatchCandidateStoredMetadata
 {
     public string? ProviderRawMetadata { get; set; }
+    public Guid? ProviderCatalogItemId { get; set; }
+    public long? ProviderCatalogRevision { get; set; }
     public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
     public string? ArtistMusicBrainzId { get; set; }
     public string? ArtistSortName { get; set; }

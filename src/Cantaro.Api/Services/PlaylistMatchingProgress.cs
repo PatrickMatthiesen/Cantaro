@@ -17,7 +17,7 @@ internal sealed record PlaylistMatchingScope(int UserId, Guid PlaylistId, Guid M
 internal static class PlaylistMatchingProgress
 {
     // Reject legacy checkpoints, including version 1 results without account binding.
-    public const int CurrentProofVersion = 2;
+    public const int CurrentProofVersion = 3;
 
     public static Dictionary<Guid, PlaylistMatchingResult> Read(string? json)
     {
@@ -34,11 +34,14 @@ internal static class PlaylistMatchingProgress
         {
             entry.TrackId, entry.TrackObservationId,
             observation?.Title, observation?.Artist, observation?.DurationSeconds,
-            observation?.RawMetadata, ObservationTrackId = observation?.TrackId,
+            observation?.RawMetadata, observation?.OwnerUserId, ObservationTrackId = observation?.TrackId,
             track?.CanonicalMetadata, track?.SearchTitle, track?.SearchArtist, track?.Isrc,
             track?.MbidRecording, track?.VersionFlags,
+            PreferredCatalogItemId = includeProviderMappings ? track?.PreferredCatalogItemId : null,
             Sources = includeProviderMappings ? track?.SourceIds.OrderBy(source => source.SourceType).ThenBy(source => source.ExternalId)
-                .Select(source => new { source.SourceType, source.ExternalId }) : null
+                .Select(source => new { source.SourceType, source.ExternalId, source.AssociationState,
+                    source.Revision, source.ProviderCatalogItemId, source.CatalogRevision,
+                    Current = ProviderCatalogPolicy.IsVerified(source, DateTimeOffset.UtcNow) }) : null
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence)));
     }

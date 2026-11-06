@@ -1,4 +1,5 @@
 using Cantaro.Api.Data;
+using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -19,6 +20,31 @@ internal static class PlaylistReadIngestion
 
     public static async Task<T> RunAsync<T>(ApplicationDbContext caller, PlaylistReadAccount account,
         Func<ApplicationDbContext, Task<T>> ingest, CancellationToken ct, Func<Task>? validateBeforeCommit = null)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return await RunAttemptAsync(caller, account, ingest, ct, validateBeforeCommit); }
+            catch (DbUpdateException ex) when (attempt < 2 && IsCatalogIngestionRace(ex))
+            {
+                // Replay only metadata materialization in a new context. Provider
+                // reads already completed and this callback performs no exports.
+            }
+        }
+    }
+
+    internal static bool IsCatalogIngestionRace(DbUpdateException exception) =>
+        exception.Entries.Count > 0 && exception.Entries.All(entry => entry.Entity is TrackSourceId or TrackObservation or ProviderCatalogItem)
+        && (exception is DbUpdateConcurrencyException
+            || exception.GetBaseException() is Npgsql.PostgresException
+                { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation,
+                    ConstraintName: "IX_TrackSourceIds_SourceType_ExternalId" or "IX_TrackObservations_OwnerUserId_SourceType_ExternalId" }
+            || exception.GetBaseException().Message.Contains(
+                "UNIQUE constraint failed: TrackSourceIds.SourceType, TrackSourceIds.ExternalId", StringComparison.Ordinal)
+            || exception.GetBaseException().Message.Contains(
+                "UNIQUE constraint failed: TrackObservations.OwnerUserId, TrackObservations.SourceType, TrackObservations.ExternalId", StringComparison.Ordinal));
+
+    private static async Task<T> RunAttemptAsync<T>(ApplicationDbContext caller, PlaylistReadAccount account,
+        Func<ApplicationDbContext, Task<T>> ingest, CancellationToken ct, Func<Task>? validateBeforeCommit)
     {
         await using var db = CreateContext(caller);
         // HTTP has already completed. Do not replay materialization with tracked

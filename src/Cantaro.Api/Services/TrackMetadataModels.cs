@@ -26,6 +26,7 @@ public class TrackObservationMetadata
     public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
     public string? Album { get; set; }
     public string? Isrc { get; set; }
+    public string? MbidRecording { get; set; }
     public string? OriginalTitle { get; set; }
     public string? OriginalArtist { get; set; }
     public string? ChannelTitle { get; set; }

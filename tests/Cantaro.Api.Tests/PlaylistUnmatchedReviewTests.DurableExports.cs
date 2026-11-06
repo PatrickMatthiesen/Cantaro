@@ -219,9 +219,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
                     ServicePlaylistId = row.ServicePlaylistId, ExternalTrackId = row.ExternalTrackId });
             }
             else if (scopeChange == "recording")
-                setup.TrackSourceIds.Add(new TrackSourceId { TrackId = scope.Entry.TrackId!.Value, SourceType = service, ExternalId = "chosen-id" });
+            {
+                var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = service, ExternalId = "chosen-id" };
+                scope.VerifyMapping(mapping);
+                setup.TrackSourceIds.Add(mapping);
+            }
             else if (scopeChange == "observation")
-                setup.TrackObservations.Add(new TrackObservation { Id = Guid.NewGuid(), SourceType = service,
+                setup.TrackObservations.Add(new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = service,
                     ExternalId = "chosen-id", Title = "Previously independent observation", TrackId = scope.Entry.TrackId,
                     MatchStatus = TrackMatchingStatuses.Matched });
             await setup.SaveChangesAsync();
@@ -242,10 +246,19 @@ public sealed partial class PlaylistUnmatchedReviewTests
             Assert.Equal("chosen-id", Assert.Single(read.Tracks).ExternalId);
             await readDb.SaveChangesAsync();
             await using var verify = scope.NewContext();
-            var observation = await verify.TrackObservations.SingleAsync(item => item.SourceType == service && item.ExternalId == "chosen-id");
+            var observation = await verify.TrackObservations.SingleAsync(item => item.OwnerUserId == account.UserId
+                && item.SourceType == service && item.ExternalId == "chosen-id");
             if (scopeChange is "recording" or "observation") Assert.Equal(scope.Entry.TrackId, observation.TrackId);
             else if (service == "spotify") Assert.NotNull(observation.TrackId);
             else Assert.Null(observation.TrackId);
+            if (service == "spotify" && scopeChange != "recording")
+            {
+                var privateTrack = await verify.Tracks.SingleAsync(track => track.Id == observation.TrackId);
+                Assert.Null(privateTrack.PreferredCatalogItemId);
+                Assert.Null(privateTrack.Isrc);
+                Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+                Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == privateTrack.Id));
+            }
         }
     }
 
@@ -374,45 +387,6 @@ public sealed partial class PlaylistUnmatchedReviewTests
             }
             return result;
         }
-    }
-
-    [Theory]
-    [InlineData("spotify", false)]
-    [InlineData("youtube", false)]
-    public Task DurableExport_LegacyFallbackRejectsRetainedRemoteBeforeIngestion(string service, bool postgres)
-        => CheckDurableExportLegacyAsync(service, postgres);
-
-    [PostgresTheory]
-    [InlineData("spotify", true)]
-    [InlineData("youtube", true)]
-    public Task DurableExport_PostgresLegacyFallbackRejectsRetainedRemoteBeforeIngestion(string service, bool postgres)
-        => CheckDurableExportLegacyAsync(service, postgres);
-
-    private static async Task CheckDurableExportLegacyAsync(string service, bool postgres)
-    {
-        await using var fixture = await ReplacementReadFixture.CreateAsync(service, postgres);
-        var scope = fixture.Scope;
-        await fixture.SyncAsync(scope.Playlist.Id);
-        await using (var deleteDb = scope.NewContext())
-            await fixture.Lifecycle(deleteDb).UnlinkAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, false, true, default);
-        await using var caller = scope.NewContext();
-        var pending = new Track { Id = Guid.NewGuid(), SearchTitle = "Caller pending legacy edit" };
-        caller.Tracks.Add(pending);
-        var account = new PlatformAccountContext(scope.UserId, scope.Link.ConnectedServiceAccountId, "account");
-        // No HTTP service is supplied: the retained scope must reject first.
-        var read = service == "spotify"
-            ? new SpotifyPlaylistSyncService(caller, null!, null!, null!, TimeProvider.System,
-                NullLogger<SpotifyPlaylistSyncService>.Instance).SyncPlaylistAsync(account, "playlist", default)
-            : new YouTubePlaylistSyncService(caller, null!, new TrackMatchQueue(caller, TimeProvider.System), null!,
-                NullLogger<YouTubePlaylistSyncService>.Instance).SyncYouTubePlaylistAsync(account, "playlist", default);
-        var error = await Assert.ThrowsAsync<PlatformApiException>(() => read);
-        Assert.Equal("outbound_mapping", error.Code);
-        await using (var verify = scope.NewContext()) await AssertReplacementReadIsolationAsync(scope, verify, service);
-        await caller.SaveChangesAsync();
-        await using var persisted = scope.NewContext();
-        Assert.True(await persisted.Tracks.AnyAsync(track => track.Id == pending.Id));
-        Assert.False(await persisted.TrackObservations.AnyAsync(row => row.SourceType == service));
-        Assert.Empty(await persisted.TrackSourceIds.ToArrayAsync());
     }
 
     private sealed class DurableExportWriter(IPlaylistWriter inner, Func<IReadOnlyList<string>, Task> before, Action after) : IPlaylistWriter

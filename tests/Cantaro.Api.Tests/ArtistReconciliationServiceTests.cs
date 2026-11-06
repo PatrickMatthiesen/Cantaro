@@ -19,12 +19,13 @@ public sealed class ArtistReconciliationServiceTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var resolver = new SpotifyTrackResolver(fixture.Db);
-        var snapshot = Snapshot("one", "First spelling", "spotify-artist");
+        var snapshot = await fixture.AddPublicCatalogSnapshotAsync(Snapshot("one", "First spelling", "spotify-artist"));
         var first = await resolver.ResolveAsync(snapshot, Now, default);
         await fixture.Db.SaveChangesAsync();
         fixture.Db.ChangeTracker.Clear();
         await resolver.ResolveAsync(snapshot, Now, default);
-        await resolver.ResolveAsync(Snapshot("two", "Alias", "spotify-artist"), Now, default);
+        var secondSnapshot = await fixture.AddPublicCatalogSnapshotAsync(Snapshot("two", "Alias", "spotify-artist"));
+        await resolver.ResolveAsync(secondSnapshot, Now, default);
         await fixture.Db.SaveChangesAsync();
 
         Assert.Equal(2, await fixture.Db.Tracks.CountAsync());
@@ -35,7 +36,10 @@ public sealed class ArtistReconciliationServiceTests
         Assert.Equal("spotify-artist", link.ExternalId);
         Assert.Equal("https://open.spotify.com/artist/spotify-artist", link.ProfileUrl);
         Assert.Equal("https://images/artist", link.ArtworkUrl);
-        Assert.Contains("upstream", link.RawMetadata);
+        Assert.Null(link.RawMetadata);
+        Assert.Equal(CatalogVerificationMethods.SpotifyApplication, link.VerificationMethod);
+        Assert.NotNull(link.VerifiedAt);
+        Assert.True(link.RevalidateAfter > link.VerifiedAt);
         var credit = await fixture.Db.TrackArtistCredits.SingleAsync(c => c.TrackId == first.Id);
         Assert.Contains("spotify", credit.Provenance);
     }
@@ -184,10 +188,10 @@ public sealed class ArtistReconciliationServiceTests
     }
 
     [Theory]
-    [InlineData("Alpha feat. Beta", true)]
-    [InlineData("Alpha & Beta", true)]
-    [InlineData("Unknown collaboration", false)]
-    public async Task SpotifyImport_LegacyCollaborationFormattingNeverCreatesPartialCredits(string legacyName, bool equivalent)
+    [InlineData("Alpha feat. Beta")]
+    [InlineData("Alpha & Beta")]
+    [InlineData("Unknown collaboration")]
+    public async Task SpotifyImport_DoesNotPromoteAccountCollaborationFormatting(string legacyName)
     {
         await using var fixture = await Fixture.CreateAsync();
         var track = fixture.AddTrack();
@@ -206,15 +210,9 @@ public sealed class ArtistReconciliationServiceTests
         await fixture.Db.SaveChangesAsync();
 
         var credits = await fixture.Db.TrackArtistCredits.OrderBy(c => c.Position).ToArrayAsync();
-        Assert.Equal(equivalent ? ["Alpha", "Beta"] : new[] { legacyName }, credits.Select(c => c.CreditedName));
-        Assert.Equal(equivalent ? 2 : 0, await fixture.Db.ArtistProviderLinks.CountAsync());
-        Assert.Equal(equivalent ? 0 : 2, await fixture.Db.ArtistReconciliationConflicts.CountAsync());
-        if (!equivalent)
-        {
-            var evidence = await fixture.Db.ArtistReconciliationConflicts.Select(c => c.Evidence).ToArrayAsync();
-            Assert.Contains(evidence, e => e.Contains("\"ExternalId\":\"alpha\""));
-            Assert.Contains(evidence, e => e.Contains("\"ExternalId\":\"beta\""));
-        }
+        Assert.Equal([legacyName], credits.Select(c => c.CreditedName));
+        Assert.Empty(await fixture.Db.ArtistProviderLinks.ToListAsync());
+        Assert.Empty(await fixture.Db.ArtistReconciliationConflicts.ToListAsync());
     }
 
     [Fact]
@@ -281,6 +279,35 @@ public sealed class ArtistReconciliationServiceTests
     private sealed class Fixture(SqliteConnection connection, ApplicationDbContext db) : IAsyncDisposable
     {
         public ApplicationDbContext Db { get; } = db;
+        public async Task<SpotifyTrackSnapshot> AddPublicCatalogSnapshotAsync(SpotifyTrackSnapshot snapshot)
+        {
+            var item = new ProviderCatalogItem
+            {
+                Id = Guid.NewGuid(),
+                SourceType = "spotify",
+                ExternalId = snapshot.Id,
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+                {
+                    Title = snapshot.Name,
+                    Artist = snapshot.Artist,
+                    Albums = snapshot.AlbumName is null ? [] : [snapshot.AlbumName],
+                    ThumbnailUrl = snapshot.ImageUrl,
+                    ProviderUrl = snapshot.ExternalUrl,
+                    DurationSeconds = snapshot.DurationSeconds,
+                    Isrc = snapshot.Isrc,
+                    ArtistCredits = snapshot.ArtistIdentities
+                }),
+                VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+                VerifiedAt = Now,
+                RevalidateAfter = Now.AddHours(1),
+                VisibilityState = CatalogVisibility.Public,
+                Revision = 1
+            };
+            Db.ProviderCatalogItems.Add(item);
+            await Db.SaveChangesAsync();
+            return snapshot with { ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision };
+        }
+
         public static async Task<Fixture> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");

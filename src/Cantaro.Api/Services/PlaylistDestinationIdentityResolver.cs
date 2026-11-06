@@ -54,13 +54,16 @@ internal static class PlaylistDestinationIdentityResolver
         var stored = await dbContext.PlaylistEntries.AsNoTracking()
             .Include(item => item.Playlist)
             .Include(item => item.TrackObservation).ThenInclude(observation => observation!.Track)
-                .ThenInclude(track => track!.SourceIds)
+                .ThenInclude(track => track!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
             .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
+                .ThenInclude(source => source.ProviderCatalogItem)
             .SingleOrDefaultAsync(item => item.Id == entry.Id, cancellationToken);
         if (stored?.Playlist?.UserId != account.UserId)
             return null;
 
         var exactObservation = stored.TrackObservation;
+        if (exactObservation is not null && exactObservation.OwnerUserId != account.UserId) return null;
+        if (exactObservation is not null && string.IsNullOrWhiteSpace(exactObservation.Title)) exactObservation = null;
         var track = stored.Track ?? exactObservation?.Track;
         var trackId = track?.Id;
 
@@ -73,7 +76,8 @@ internal static class PlaylistDestinationIdentityResolver
             var local = await new TrackIdentityResolver(dbContext, Options.Create(options)).ResolveExistingAsync(
                 new TrackIdentityQuery(exactObservation.SourceType, exactObservation.ExternalId,
                     exactObservation.Title, exactObservation.Artist, exactObservation.DurationSeconds,
-                    Isrc: sourceMetadata?.Isrc, ArtistCredits: parsed.ArtistCredits, RawMetadata: exactObservation.RawMetadata),
+                    Isrc: sourceMetadata?.Isrc, ArtistCredits: parsed.ArtistCredits, RawMetadata: exactObservation.RawMetadata,
+                    OwnerUserId: account.UserId),
                 cancellationToken);
             track = local?.Track;
             trackId = track?.Id;
@@ -81,20 +85,15 @@ internal static class PlaylistDestinationIdentityResolver
         if (trackId is not null && exactObservation is not null
             && (stored.TrackId != trackId || exactObservation.TrackId != trackId))
         {
-            var sourceMapping = await dbContext.TrackSourceIds.SingleOrDefaultAsync(source =>
+            var sourceMapping = await dbContext.TrackSourceIds.Include(source => source.ProviderCatalogItem).SingleOrDefaultAsync(source =>
                 source.SourceType == exactObservation.SourceType && source.ExternalId == exactObservation.ExternalId,
                 cancellationToken);
-            if (sourceMapping is not null && sourceMapping.TrackId != trackId) return null;
+            if (sourceMapping is not null && ProviderCatalogPolicy.IsVerified(sourceMapping, DateTimeOffset.UtcNow)
+                && sourceMapping.TrackId != trackId) return null;
             var observation = await dbContext.TrackObservations.SingleAsync(item => item.Id == exactObservation.Id, cancellationToken);
             observation.TrackId = trackId;
             observation.MatchStatus = TrackMatchingStatuses.Matched;
             observation.UpdatedAt = DateTimeOffset.UtcNow;
-            if (sourceMapping is null)
-                dbContext.TrackSourceIds.Add(new TrackSourceId
-                {
-                    Id = Guid.NewGuid(), TrackId = trackId.Value, SourceType = observation.SourceType,
-                    ExternalId = observation.ExternalId, LastVerifiedAt = DateTimeOffset.UtcNow
-                });
             await reconcileObservationAsync(observation.Id, trackId.Value, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
             stored.TrackId = trackId;
@@ -106,15 +105,10 @@ internal static class PlaylistDestinationIdentityResolver
         if (authorizedId is not null) return authorizedId;
         if (trackId is null && exactObservation is null) return null;
 
-        TrackCanonicalMetadata? canonical = null;
-        if (!string.IsNullOrWhiteSpace(track?.CanonicalMetadata))
-        {
-            try { canonical = JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata); }
-            catch (JsonException) { return null; }
-        }
-        var title = canonical?.Title ?? track?.SearchTitle ?? exactObservation?.Title;
-        var artist = canonical?.Artist ?? track?.SearchArtist ?? exactObservation?.Artist;
-        var duration = canonical?.DurationSeconds ?? exactObservation?.DurationSeconds;
+        var publicFacts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
+        var title = publicFacts?.Title ?? (exactObservation is not null ? exactObservation.Title : null);
+        var artist = publicFacts?.Artist ?? (exactObservation is not null ? exactObservation.Artist : null);
+        var duration = publicFacts?.DurationSeconds ?? exactObservation?.DurationSeconds;
         if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
             return null;
 
@@ -126,27 +120,20 @@ internal static class PlaylistDestinationIdentityResolver
         };
         // This is an untracked observation. Enrich search evidence without changing
         // the imported title, duration, or version markers saved on the source.
-        var metadata = TrackObservationParser.ReadMetadata(evidence) ?? new TrackObservationMetadata();
-        metadata.Isrc = TrackIdentityResolver.NormalizeIsrc(track?.Isrc)
-            ?? TrackIdentityResolver.NormalizeIsrc(metadata.Isrc);
-        evidence.RawMetadata = JsonSerializer.Serialize(metadata);
-        var recordingEvidence = track is null ? null
-            : await PlaylistArtistEvidenceGuard.CaptureAsync(dbContext, track, cancellationToken);
         var candidates = await searchAsync(evidence, cancellationToken);
         var assessment = Assess(evidence,
             candidates.Where(candidate => candidate.CandidateSource == service).ToArray(), options);
         if (assessment.Accepted is not { } top) return null;
 
-        var existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
+        var existing = await dbContext.TrackSourceIds.Include(source => source.ProviderCatalogItem).SingleOrDefaultAsync(
             source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
             cancellationToken);
+        if (existing is not null && !ProviderCatalogPolicy.IsVerified(existing, DateTimeOffset.UtcNow)) existing = null;
         if (existing is not null && trackId is not null && existing.TrackId != trackId)
             return null;
 
         // Only the copied pre-search evidence can authorize artist enrichment.
         // The fresh mapping lookup above still rejects conflicting ownership.
-        var canReconcileArtists = trackId is null
-            || recordingEvidence?.CorroboratesRecording(top.Candidate) == true;
         var materializingObservation = trackId is null;
         if (materializingObservation)
         {
@@ -158,13 +145,6 @@ internal static class PlaylistDestinationIdentityResolver
                 trackedObservation.TrackId = existing.TrackId;
                 trackedObservation.MatchStatus = TrackMatchingStatuses.Matched;
                 trackedObservation.UpdatedAt = DateTimeOffset.UtcNow;
-                if (!await dbContext.TrackSourceIds.AnyAsync(source => source.SourceType == trackedObservation.SourceType
-                    && source.ExternalId == trackedObservation.ExternalId, cancellationToken))
-                    dbContext.TrackSourceIds.Add(new TrackSourceId
-                    {
-                        Id = Guid.NewGuid(), TrackId = existing.TrackId, SourceType = trackedObservation.SourceType,
-                        ExternalId = trackedObservation.ExternalId, LastVerifiedAt = DateTimeOffset.UtcNow
-                    });
                 await reconcileObservationAsync(trackedObservation.Id,
                     existing.TrackId, cancellationToken);
                 trackId = existing.TrackId;
@@ -174,35 +154,17 @@ internal static class PlaylistDestinationIdentityResolver
                 trackId = await materializeObservationAsync(exactObservation.Id, top.Candidate, cancellationToken);
                 // Materialization saves all accepted identities together. Re-read after it
                 // rather than inserting a duplicate mapping with the same provider key.
-                existing = await dbContext.TrackSourceIds.SingleOrDefaultAsync(
+                existing = await dbContext.TrackSourceIds.Include(source => source.ProviderCatalogItem).SingleOrDefaultAsync(
                     source => source.SourceType == service && source.ExternalId == top.Candidate.ExternalId,
                     cancellationToken);
+                if (!ProviderCatalogPolicy.IsVerified(existing, DateTimeOffset.UtcNow)) existing = null;
             }
         }
 
         var resolvedTrackId = trackId ?? throw new InvalidOperationException("Matching did not create a canonical track.");
         if (existing is not null && existing.TrackId != resolvedTrackId) return null;
-        if (canReconcileArtists && top.Candidate.ArtistIdentities.Count > 0)
-        {
-            var destinationTrack = await dbContext.Tracks.SingleAsync(t => t.Id == resolvedTrackId, cancellationToken);
-            await new ArtistReconciliationService(dbContext).ReconcileAsync(destinationTrack,
-                top.Candidate.ArtistIdentities, service, DateTimeOffset.UtcNow, cancellationToken, top.Candidate.Artist);
-        }
-        // A destination choice for a known recording remains scoped to the
-        // playlist link. Only source materialization can assert global identity.
-        if (materializingObservation && existing is null) dbContext.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = resolvedTrackId, SourceType = service,
-            ExternalId = top.Candidate.ExternalId, Confidence = top.Score,
-            LastVerifiedAt = DateTimeOffset.UtcNow,
-            OriginMetadata = JsonSerializer.Serialize(new
-            {
-                method = "playlist_destination_lookup",
-                title = top.Candidate.Title,
-                artist = top.Candidate.Artist,
-                durationSeconds = top.Candidate.DurationSeconds
-            })
-        });
+        // Search selections and manual destination choices stay scoped to this
+        // playlist. They never create a reusable provider-to-recording assertion.
         await dbContext.SaveChangesAsync(cancellationToken);
         return top.Candidate.ExternalId;
     }

@@ -9,7 +9,8 @@ public sealed class SpotifySearchProvider(
     SpotifyCatalogTokenProvider tokenProvider,
     IOptions<TrackMatchingOptions>? matchingOptions = null,
     SpotifySearchCache? searchCache = null,
-    TimeProvider? timeProvider = null) : ITrackMetadataSearchProvider
+    TimeProvider? timeProvider = null,
+    ProviderCatalogAcquisition? catalogAcquisition = null) : ITrackMetadataSearchProvider
 {
     private const int ResultLimit = 10;
     private readonly TrackMatchingOptions _matchingOptions = matchingOptions?.Value ?? new();
@@ -114,12 +115,20 @@ public sealed class SpotifySearchProvider(
         {
             var token = await tokenProvider.GetAccessTokenAsync(ct)
                 ?? throw new InvalidOperationException("Spotify catalog token is unavailable.");
-            return await apiClient.SearchTrackCreditsAsync(token, query, ResultLimit, ct);
+            var tracks = await apiClient.SearchTrackCreditsAsync(token, query, ResultLimit, ct);
+            if (catalogAcquisition is null) return tracks;
+            var verified = new List<SpotifyTrackSnapshot>(tracks.Count);
+            foreach (var track in tracks)
+                verified.Add(await catalogAcquisition.RecordSpotifyApplicationResponseAsync(track, ct));
+            return verified;
         }
 
-        return searchCache is null
+        var tracks = searchCache is null
             ? await SearchCatalogAsync(cancellationToken)
             : await searchCache.GetOrSearchAsync(query, ResultLimit, SearchCatalogAsync, cancellationToken);
+        return catalogAcquisition is null
+            ? tracks
+            : await catalogAcquisition.ValidateSpotifySearchSnapshotsAsync(tracks, cancellationToken);
     }
 
     private async Task<IReadOnlyList<TrackMatchSearchCandidate>> ToEnrichedCandidatesAsync(
@@ -162,6 +171,8 @@ public sealed class SpotifySearchProvider(
         ArtistIdentities = track.ArtistIdentities,
         Isrc = track.Isrc,
         DurationSeconds = track.DurationSeconds,
+        ProviderCatalogItemId = track.ProviderCatalogItemId,
+        ProviderCatalogRevision = track.ProviderCatalogRevision,
         Explanation = "Suggested by Spotify catalog search."
     }).ToArray();
 

@@ -28,7 +28,7 @@ export interface MusicLibrarySong {
 }
 
 export interface MusicLibrarySongArtistCredit {
-  artistId: string;
+  artistId?: string | null;
   name: string;
   creditedName: string;
   role: 'primary' | 'featured' | 'producer' | 'remixer';

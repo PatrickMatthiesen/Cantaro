@@ -60,7 +60,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
             scope.Entry.Id, scope.Token(Candidate("chosen-id")), default);
         var proof = PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)[scope.Entry.Id];
-        var observation = new TrackObservation { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId,
+        var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = scope.Entry.TrackId,
             SourceType = "spotify", ExternalId = "alternative-a", Title = "Everything Goes On",
             Artist = "Porter Robinson", DurationSeconds = 160, MatchStatus = TrackMatchingStatuses.Matched };
         var duplicate = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
@@ -197,8 +197,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
             case "conflict":
                 var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Other recording" };
                 scope.Db.Tracks.Add(other);
-                scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
-                    SourceType = "spotify", ExternalId = "chosen-id" });
+                var conflict = new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
+                    SourceType = "spotify", ExternalId = "chosen-id" };
+                scope.VerifyMapping(conflict);
+                scope.Db.TrackSourceIds.Add(conflict);
                 break;
         }
         await AddOwnedAlternativeAsync(scope, "alternative-a");
@@ -237,7 +239,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
     private static async Task AddOwnedAlternativeAsync(Scope scope, string externalId)
     {
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId, Name = "Another owned playlist" };
-        var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = externalId,
+        var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "spotify", ExternalId = externalId,
             TrackId = scope.Entry.TrackId, Title = "Everything Goes On", Artist = "Porter Robinson",
             MatchStatus = TrackMatchingStatuses.Matched };
         scope.Db.AddRange(new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist, PlaylistId = playlist.Id,

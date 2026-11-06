@@ -72,11 +72,14 @@ internal static class PlaylistExportAttemptStore
         foreach (var ids in bound.Where(item => item.ReadScope is null).Select(item => item.ExternalId)
             .Distinct(StringComparer.Ordinal).Chunk(256))
         {
-            var established = await db.TrackSourceIds.AsNoTracking()
+            var sources = await db.TrackSourceIds.AsNoTracking().Include(item => item.ProviderCatalogItem)
                 .Where(item => item.SourceType == account.Service && ids.Contains(item.ExternalId))
-                .Select(item => item.ExternalId).ToListAsync(ct);
+                .ToListAsync(ct);
+            var established = sources.Where(item => ProviderCatalogPolicy.IsVerified(item, DateTimeOffset.UtcNow))
+                .Select(item => item.ExternalId);
             var observed = await db.TrackObservations.AsNoTracking()
-                .Where(item => item.SourceType == account.Service && ids.Contains(item.ExternalId))
+                .Where(item => item.OwnerUserId == account.Context.UserId && item.Title.Trim() != ""
+                    && item.SourceType == account.Service && ids.Contains(item.ExternalId))
                 .Select(item => item.ExternalId).ToListAsync(ct);
             uncorroborated.AddRange(ids.Except(established).Except(observed));
         }
@@ -95,17 +98,4 @@ internal static class PlaylistExportAttemptStore
         return ValidateAsync;
     }
 
-    public static async Task RejectLegacyReadAsync(ApplicationDbContext db, PlaylistReadAccount account,
-        string playlistId, CancellationToken ct)
-    {
-        if (await db.ServicePlaylistMappings.AsNoTracking().AnyAsync(item =>
-            item.ConnectedServiceAccountId == account.Context.ConnectedServiceAccountId
-            && item.Service == account.Service && item.ServicePlaylistId == playlistId
-            && (item.SyncMode == "from_cantaro" || item.BaselineJson != null || item.PendingWriteJson != null
-                || item.MatchingProgressJson != null), ct)
-            || await db.PlaylistExportAttempts.AsNoTracking().AnyAsync(item => item.UserId == account.Context.UserId
-            && item.Service == account.Service && item.ExternalAccountId == account.ExternalAccountId
-            && item.ServicePlaylistId == playlistId, ct))
-            throw new PlatformApiException("outbound_mapping", "Sync this linked playlist from the Cantaro playlist.", 409);
-    }
 }
