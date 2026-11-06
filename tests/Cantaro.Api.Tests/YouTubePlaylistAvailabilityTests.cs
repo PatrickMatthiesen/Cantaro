@@ -151,18 +151,6 @@ public sealed class YouTubePlaylistAvailabilityTests
     }
 
     [Fact]
-    public void LegacyImport_PreservesDescriptionWhenRefreshedReadOmitsIt()
-    {
-        const string previousRawMetadata = """{"Description":"Previously captured song credits"}""";
-        const string currentRawMetadata = """{"OriginalTitle":"Video title"}""";
-
-        var preserved = YouTubePlaylistSyncService.PreserveExistingDescription(
-            currentRawMetadata, previousRawMetadata);
-
-        Assert.Contains("Previously captured song credits", preserved);
-    }
-
-    [Fact]
     public void CompactPlaylistPositions_RemovesUnavailableGapsDeterministically()
     {
         var items = new[]

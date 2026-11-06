@@ -15,12 +15,18 @@ public enum TrackArtistRole : short
 /// </summary>
 public sealed class TrackArtistCredit
 {
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
     public Guid Id { get; set; }
     public Guid TrackId { get; set; }
     public Guid ArtistId { get; set; }
     public TrackArtistRole Role { get; set; }
     public int Position { get; set; }
     public required string CreditedName { get; set; }
+
+    public string? JoinPhrase { get; set; }
+    // Provider snapshots keyed by source, independent of the canonical spelling.
+    public string? Provenance { get; set; }
 
     public Track? Track { get; set; }
     public Artist? Artist { get; set; }

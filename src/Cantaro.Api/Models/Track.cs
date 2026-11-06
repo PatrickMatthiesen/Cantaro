@@ -6,24 +6,26 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class Track
 {
+    public Guid? PreferredCatalogItemId { get; set; }
+    public ProviderCatalogItem? PreferredCatalogItem { get; set; }
     /// <summary>
     /// Internal canonical TrackID (primary key)
     /// </summary>
     public Guid Id { get; set; }
 
     /// <summary>
-    /// Canonical metadata stored as JSON (artist, title, duration, etc.)
+    /// Historical metadata cleared by the cutover. Current reads use catalog facts.
     /// </summary>
     public string? CanonicalMetadata { get; set; }
 
     /// <summary>
-    /// Queryable display projection derived from CanonicalMetadata.Title.
+    /// Queryable shared display projection assigned from verified provider facts.
     /// This is not a separate canonical identity field.
     /// </summary>
     public string? SearchTitle { get; set; }
 
     /// <summary>
-    /// Queryable legacy display projection derived from CanonicalMetadata.Artist.
+    /// Queryable shared display projection assigned from verified provider facts.
     /// Artist identity continues to live in the structured artist-credit model.
     /// </summary>
     public string? SearchArtist { get; set; }

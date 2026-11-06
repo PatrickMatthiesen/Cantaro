@@ -102,11 +102,13 @@ public sealed class SpotifyApiClientTests
             Json(HttpStatusCode.OK, """
                 { "tracks": { "items": [{
                   "type": "track", "id": "spotify-track", "name": "Desire", "duration_ms": 179500,
-                  "artists": [{ "name": "Calvin Harris" }, { "name": "Sam Smith" }],
+                  "artists": [{ "id": "calvin", "name": "Calvin Harris", "external_urls": { "spotify": "https://open.spotify.com/artist/calvin" } }, { "id": "sam", "name": "Sam Smith" }],
                   "external_urls": { "spotify": "https://open.spotify.com/track/spotify-track" },
                   "external_ids": { "isrc": "GBARL2300987" }
                 }] } }
-                """)
+                """),
+            Json(HttpStatusCode.OK, """{"id":"calvin","name":"Calvin Harris","images":[{"url":"https://images/calvin"}]}"""),
+            Json(HttpStatusCode.OK, """{"id":"sam","name":"Sam Smith","images":[]}""")
         ]);
         using var client = CreateClient(handler);
 
@@ -116,9 +118,14 @@ public sealed class SpotifyApiClientTests
         var track = Assert.Single(tracks);
         Assert.Equal("spotify-track", track.Id);
         Assert.Equal(["Calvin Harris", "Sam Smith"], track.ArtistNames);
+        Assert.Equal(["calvin", "sam"], track.ArtistIdentities.Select(a => a.ExternalId!).ToArray());
+        Assert.Equal("https://open.spotify.com/artist/calvin", track.ArtistIdentities[0].ProfileUrl);
+        Assert.Equal("https://images/calvin", track.ArtistIdentities[0].ArtworkUrl);
+        Assert.Contains("calvin", track.ArtistIdentities[0].RawMetadata);
         Assert.Equal("GBARL2300987", track.Isrc);
         Assert.Equal(179, track.DurationSeconds);
-        var request = Assert.Single(handler.Requests);
+        Assert.Equal(["/v1/artists/calvin", "/v1/artists/sam"], handler.Requests.Skip(1).Select(request => request.PathAndQuery));
+        var request = handler.Requests[0];
         Assert.StartsWith("/v1/search?type=track&limit=10&q=", request.PathAndQuery, StringComparison.Ordinal);
         Assert.Equal("Bearer catalog-token", request.Authorization?.ToString());
     }

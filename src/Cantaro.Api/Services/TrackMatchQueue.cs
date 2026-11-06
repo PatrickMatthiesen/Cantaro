@@ -10,6 +10,8 @@ public sealed record ClaimedTrackMatch(Guid ObservationId, Guid LeaseId, int Ret
 
 public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider timeProvider)
 {
+    internal TrackMatchQueue ForContext(ApplicationDbContext context) => new(context, timeProvider);
+
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(10);
 
     public async Task EnqueueAsync(
@@ -17,6 +19,7 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
         CancellationToken cancellationToken,
         DateTimeOffset? nextAttemptAt = null)
     {
+        if (!await IsProcessableAsync(observationId, cancellationToken)) return;
         var requestedAt = (nextAttemptAt ?? timeProvider.GetUtcNow()).UtcDateTime;
         if (dbContext.Database.IsNpgsql())
         {
@@ -51,6 +54,7 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
 
     public async Task EnqueueManualRetryAsync(Guid observationId, CancellationToken cancellationToken)
     {
+        if (!await IsProcessableAsync(observationId, cancellationToken)) return;
         var requestedAt = timeProvider.GetUtcNow().UtcDateTime;
         if (dbContext.Database.IsNpgsql())
         {
@@ -93,7 +97,9 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
             var candidate = await dbContext.TrackMatchQueueItems
                 .AsNoTracking()
                 .Where(item => item.NextAttemptAt <= now
-                    && (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now))
+                    && (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now)
+                    && dbContext.TrackObservations.Any(observation => observation.Id == item.TrackObservationId
+                        && observation.OwnerUserId > 0 && observation.Title.Trim() != ""))
                 .OrderBy(item => item.NextAttemptAt)
                 .ThenBy(item => item.TrackObservationId)
                 .Select(item => new { item.TrackObservationId, item.RetryCount })
@@ -104,7 +110,9 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
             var claimed = await dbContext.TrackMatchQueueItems
                 .Where(item => item.TrackObservationId == candidate.TrackObservationId
                     && item.NextAttemptAt <= now
-                    && (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now))
+                    && (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now)
+                    && dbContext.TrackObservations.Any(observation => observation.Id == item.TrackObservationId
+                        && observation.OwnerUserId > 0 && observation.Title.Trim() != ""))
                 .ExecuteUpdateAsync(
                     updates => updates
                         .SetProperty(item => item.LeaseId, leaseId)
@@ -155,6 +163,8 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
             .AsNoTracking()
             .Where(observation => observation.TrackId == null
                 && observation.MatchStatus == TrackMatchingStatuses.Pending
+                && observation.OwnerUserId > 0
+                && observation.Title.Trim() != ""
                 && observation.MatchAttemptCount < maximumAttempts
                 && !queuedIds.Contains(observation.Id))
             .Select(observation => observation.Id)
@@ -166,6 +176,10 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
 
         if (missing.Count > 0) await dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    private Task<bool> IsProcessableAsync(Guid observationId, CancellationToken cancellationToken) =>
+        dbContext.TrackObservations.AsNoTracking().AnyAsync(observation => observation.Id == observationId
+            && observation.OwnerUserId > 0 && observation.Title.Trim() != "", cancellationToken);
 }
 
 public sealed class TrackMatchingWorker(
@@ -209,6 +223,8 @@ public sealed class TrackMatchingWorker(
                 .AsNoTracking()
                 .SingleOrDefaultAsync(item => item.Id == claim.ObservationId, cancellationToken);
             if (current is null
+                || current.OwnerUserId <= 0
+                || string.IsNullOrWhiteSpace(current.Title)
                 || current.TrackId != null
                 || current.MatchStatus != TrackMatchingStatuses.Pending
                 || claim.RetryCount >= _options.MaximumAutomaticAttempts)

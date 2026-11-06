@@ -5,6 +5,9 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class TrackObservation
 {
+    public int OwnerUserId { get; set; }
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
     public Guid Id { get; set; }
 
     /// <summary>

@@ -1,9 +1,12 @@
 using System.Reflection;
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Cantaro.Api.Services.Spotify;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +16,7 @@ using Xunit;
 
 namespace Cantaro.Api.Tests;
 
-public sealed class PlaylistUnmatchedReviewTests
+public sealed partial class PlaylistUnmatchedReviewTests
 {
     [Fact]
     public void AcceptedExpandedCatalogCreditsDoNotShowAConflictWarning()
@@ -103,11 +106,8 @@ public sealed class PlaylistUnmatchedReviewTests
     {
         await using var scope = await Scope.CreateAsync(service);
         var second = scope.AddEntry("Other", "video-other");
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = second.TrackId!.Value,
-            SourceType = service, ExternalId = "known-destination"
-        });
+        second.TrackObservation!.SourceType = service;
+        second.TrackObservation.ExternalId = "known-destination";
         await scope.Db.SaveChangesAsync();
 
         var unmatched = await scope.Review.ListAsync(scope.UserId,
@@ -138,11 +138,13 @@ public sealed class PlaylistUnmatchedReviewTests
         var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Other" };
         scope.Db.Tracks.Add(other);
         await scope.Db.SaveChangesAsync();
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
+        var conflict = new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = other.Id,
             SourceType = "spotify", ExternalId = "new-destination"
-        });
+        };
+        scope.VerifyMapping(conflict);
+        scope.Db.TrackSourceIds.Add(conflict);
         await scope.Db.SaveChangesAsync();
 
         var error = await Assert.ThrowsAsync<PlatformApiException>(() => scope.Review.ConfirmAsync(
@@ -180,7 +182,7 @@ public sealed class PlaylistUnmatchedReviewTests
     }
 
     [Fact]
-    public async Task ConfirmAsync_SavesIdentityWithoutWritingProviderPlaylist()
+    public async Task ConfirmAsync_SavesScopedChoiceWithoutChangingGlobalIdentity()
     {
         await using var scope = await Scope.CreateAsync("spotify");
         var token = scope.Token(Candidate("new-destination"));
@@ -188,16 +190,17 @@ public sealed class PlaylistUnmatchedReviewTests
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id,
             scope.Link.Id, scope.Entry.Id, token, CancellationToken.None);
 
-        var mapping = await scope.Db.TrackSourceIds.SingleAsync();
-        Assert.Equal(scope.Entry.TrackId, mapping.TrackId);
-        Assert.Equal("new-destination", mapping.ExternalId);
-        Assert.Contains("playlist_manual_review", mapping.OriginMetadata);
+        Assert.Empty(await scope.Db.TrackSourceIds.ToListAsync());
+        var saved = Assert.Single(PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)).Value;
+        Assert.Equal("new-destination", saved.ExternalId);
+        Assert.True(saved.ManualConfirmation);
+        Assert.True(PlaylistMatchingProgress.CanReuse(saved, scope.Entry, scope.Link));
         Assert.Empty(await scope.Review.ListAsync(scope.UserId,
             scope.Playlist.Id, scope.Link.Id, CancellationToken.None));
     }
 
     [Fact]
-    public async Task ConfirmAsync_ReusesExistingRecordingAndMapsOriginalSource()
+    public async Task ConfirmAsync_ReusesVerifiedRecordingWithoutPromotingOriginalSource()
     {
         await using var scope = await Scope.CreateAsync("spotify");
         var canonicalId = scope.Entry.TrackId!.Value;
@@ -205,11 +208,13 @@ public sealed class PlaylistUnmatchedReviewTests
         var observation = await scope.Db.TrackObservations.SingleAsync();
         observation.TrackId = null;
         observation.MatchStatus = TrackMatchingStatuses.Pending;
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
+        var mapping = new TrackSourceId
         {
             Id = Guid.NewGuid(), TrackId = canonicalId,
             SourceType = "spotify", ExternalId = "new-destination"
-        });
+        };
+        scope.VerifyMapping(mapping);
+        scope.Db.TrackSourceIds.Add(mapping);
         await scope.Db.SaveChangesAsync();
         var token = scope.Token(Candidate("new-destination"));
 
@@ -218,9 +223,8 @@ public sealed class PlaylistUnmatchedReviewTests
 
         Assert.Equal(canonicalId, observation.TrackId);
         Assert.Equal(canonicalId, (await scope.Db.PlaylistEntries.SingleAsync()).TrackId);
-        Assert.Contains(await scope.Db.TrackSourceIds.ToListAsync(), source =>
-            source.SourceType == "youtube" && source.ExternalId == "source-video"
-            && source.TrackId == canonicalId);
+        Assert.Single(await scope.Db.TrackSourceIds.ToListAsync());
+        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(source => source.SourceType == "youtube"));
     }
 
     [Fact]
@@ -241,11 +245,228 @@ public sealed class PlaylistUnmatchedReviewTests
         Assert.NotNull(observation.TrackId);
         Assert.Equal(observation.TrackId, (await scope.Db.PlaylistEntries.SingleAsync()).TrackId);
         var sources = await scope.Db.TrackSourceIds.ToListAsync();
-        Assert.Equal(2, sources.Count);
-        Assert.Contains(sources, source => source.SourceType == "youtube" && source.ExternalId == "source-video");
-        Assert.Contains(sources, source => source.SourceType == "spotify" && source.ExternalId == "new-destination");
+        Assert.Empty(sources);
         var created = await scope.Db.Tracks.SingleAsync(track => track.Id == observation.TrackId);
         Assert.Contains("playlist-manual-review", created.VersionEvidence);
+    }
+
+    [Theory]
+    [InlineData("existing")]
+    [InlineData("provider-reuse")]
+    [InlineData("isrc-reuse")]
+    [InlineData("new")]
+    public async Task CustomSpotifySearchAndConfirmation_StaysPrivateAndReusesTheOwnedChoice(string path)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: true);
+        using var http = new HttpClient(new ReviewSpotifyHandler(collaboration: true));
+        var review = await scope.WithSpotifyAsync(http);
+        var originalTrackId = scope.Entry.TrackId!.Value;
+        await PrepareManualPathAsync(scope, path);
+        await scope.Db.SaveChangesAsync();
+        var before = await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false);
+        var sourceCount = await scope.Db.TrackSourceIds.CountAsync();
+
+        await SearchAndConfirmAsync(scope, review, scope.Entry);
+        var trackId = (await scope.Db.PlaylistEntries.SingleAsync()).TrackId!.Value;
+        if (path == "existing") Assert.Equal(originalTrackId, trackId);
+        else Assert.NotEqual(originalTrackId, trackId);
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false));
+        Assert.Equal(sourceCount, await scope.Db.TrackSourceIds.CountAsync());
+
+        var trackCount = await scope.Db.Tracks.CountAsync();
+        var repeated = AddUnresolvedReviewEntry(scope);
+        await scope.Db.SaveChangesAsync();
+        await SearchAndConfirmAsync(scope, review, repeated);
+        Assert.Equal(trackId, (await scope.Db.TrackObservations.SingleAsync(item => item.Id == repeated.TrackObservationId)).TrackId);
+        Assert.Equal(trackCount, await scope.Db.Tracks.CountAsync());
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false));
+        Assert.Equal(sourceCount, await scope.Db.TrackSourceIds.CountAsync());
+    }
+
+    [Theory]
+    [InlineData("existing")]
+    [InlineData("provider-reuse")]
+    [InlineData("isrc-reuse")]
+    public async Task CustomSpotifyConfirmation_DoesNotPromoteSelectedArtistIdentity(string path)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: true);
+        using var http = new HttpClient(new ReviewSpotifyHandler(collaboration: false));
+        var review = await scope.WithSpotifyAsync(http);
+        var originalTrackId = scope.Entry.TrackId!.Value;
+        await PrepareManualPathAsync(scope, path);
+        var artist = new Artist { Id = Guid.NewGuid(), Name = "Porter Robinson" };
+        scope.Db.AddRange(artist, new ArtistProviderLink
+        {
+            Id = Guid.NewGuid(), ArtistId = artist.Id, Provider = "spotify", ExternalId = "different-stable-artist"
+        }, new TrackArtistCredit
+        {
+            Id = Guid.NewGuid(), TrackId = originalTrackId, ArtistId = artist.Id,
+            CreditedName = artist.Name, Position = 0, Role = TrackArtistRole.Primary
+        });
+        await scope.Db.SaveChangesAsync();
+        var before = await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false);
+        await SearchAndConfirmAsync(scope, review, scope.Entry);
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db, includeTracks: false));
+        Assert.Empty(await scope.Db.ArtistReconciliationConflicts.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("empty", true)]
+    [InlineData("anonymous", true)]
+    [InlineData("stable", true)]
+    [InlineData("empty", false)]
+    [InlineData("anonymous", false)]
+    [InlineData("stable", false)]
+    public async Task CustomSpotifyConfirmation_DestinationOnlyChoicePreservesSharedArtistEvidence(
+        string credits, bool canonicalHasRecordingId)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: true);
+        using var http = new HttpClient(new ReviewSpotifyHandler(collaboration: false));
+        var review = await scope.WithSpotifyAsync(http);
+        var track = scope.Entry.Track!;
+        track.Isrc = canonicalHasRecordingId ? "USABC2400002" : null;
+        if (credits != "empty")
+            await new ArtistReconciliationService(scope.Db).ReconcileAsync(track,
+                [new ArtistCreditMetadata { Name = "Porter Robinson", Provider = credits == "stable" ? "spotify" : null,
+                    ExternalId = credits == "stable" ? "canonical-artist" : null }],
+                "observation", DateTimeOffset.UtcNow, default);
+        await scope.Db.SaveChangesAsync();
+        var before = await ArtistEvidenceSnapshot.ReadAsync(scope.Db);
+
+        // The real search pipeline signs the candidate's artist identities. A user
+        // can select this credible recording even though its ISRC identifies B.
+        var search = await review.SearchAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, "Everything Goes On Porter Robinson", default);
+        var choice = Assert.Single(search.Candidates);
+        await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, choice.CandidateToken, default);
+
+        Assert.Equal(before, await ArtistEvidenceSnapshot.ReadAsync(scope.Db));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmAsync_LegacyStableIdDoesNotAuthorizeArtistPromotion(bool musicBrainz)
+    {
+        await using var scope = await Scope.CreateAsync("spotify", relational: true);
+        var recordingId = Guid.NewGuid().ToString();
+        scope.Entry.Track!.Isrc = musicBrainz ? null : "us-abc-24-00001";
+        scope.Entry.Track.MbidRecording = musicBrainz ? recordingId : null;
+        await scope.Db.SaveChangesAsync();
+        var candidate = new TrackMatchSearchCandidate
+        {
+            CandidateSource = "spotify", ExternalId = "corroborated", Title = "Everything Goes On",
+            Artist = "Porter Robinson", Isrc = musicBrainz ? null : "USABC2400001",
+            MbidRecording = musicBrainz ? recordingId : null,
+            ArtistIdentities = [new ArtistCreditMetadata { Name = "Porter Robinson", Provider = "spotify",
+                ExternalId = "artist-one", ArtworkUrl = "https://images/artist-one" }]
+        };
+        await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            scope.Entry.Id, scope.Token(candidate), default);
+        Assert.Empty(await scope.Db.ArtistProviderLinks.ToListAsync());
+        Assert.Empty(await scope.Db.TrackArtistCredits.ToListAsync());
+        Assert.Empty(await scope.Db.TrackSourceIds.ToListAsync());
+        Assert.Equal(candidate.ExternalId, Assert.Single(PlaylistMatchingProgress.Read(
+            (await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson)).Value.ExternalId);
+    }
+
+    private static async Task PrepareManualPathAsync(Scope scope, string path)
+    {
+        if (path != "existing")
+        {
+            scope.Entry.TrackId = null;
+            scope.Entry.Track = null;
+            scope.Entry.TrackObservation!.TrackId = null;
+            scope.Entry.TrackObservation.Track = null;
+            scope.Entry.TrackObservation.MatchStatus = TrackMatchingStatuses.Pending;
+        }
+        var track = await scope.Db.Tracks.SingleAsync();
+        if (path == "provider-reuse")
+            scope.Db.TrackSourceIds.Add(new TrackSourceId
+            {
+                Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "spotify", ExternalId = "new-destination"
+            });
+        if (path is "isrc-reuse" or "existing") track.Isrc = "USABC2400001";
+    }
+
+    private static PlaylistEntry AddUnresolvedReviewEntry(Scope scope)
+    {
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "youtube", ExternalId = "second-source-video",
+            Title = "Everything Goes On", Artist = "Porter Robinson", DurationSeconds = 160,
+            MatchStatus = TrackMatchingStatuses.Pending,
+            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Description = "" })
+        };
+        var entry = new PlaylistEntry
+        {
+            Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id, TrackObservation = observation,
+            TrackObservationId = observation.Id, Position = 1
+        };
+        scope.Db.PlaylistEntries.Add(entry);
+        return entry;
+    }
+
+    private static async Task SearchAndConfirmAsync(Scope scope, PlaylistUnmatchedReviewService review, PlaylistEntry entry)
+    {
+        var search = await review.SearchAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            entry.Id, "Everything Goes On Porter Robinson", CancellationToken.None);
+        var choice = Assert.Single(search.Candidates);
+        await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+            entry.Id, choice.CandidateToken, CancellationToken.None);
+        // The retained entry can retry its scoped confirmation. If reconciliation
+        // merged this entry away, its old token must not authorize the survivor.
+        var artists = await ArtistEvidenceSnapshot.ReadAsync(scope.Db);
+        var mappings = await scope.Db.TrackSourceIds.AsNoTracking().OrderBy(source => source.Id)
+            .Select(source => new { source.Id, source.TrackId, source.SourceType, source.ExternalId }).ToArrayAsync();
+        var progress = (await scope.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync()).MatchingProgressJson;
+        if (await scope.Db.PlaylistEntries.AnyAsync(item => item.Id == entry.Id))
+            await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
+                entry.Id, choice.CandidateToken, CancellationToken.None);
+        else
+        {
+            var replay = await Assert.ThrowsAsync<PlatformApiException>(() => review.ConfirmAsync(
+                scope.UserId, scope.Playlist.Id, scope.Link.Id, entry.Id, choice.CandidateToken, CancellationToken.None));
+            Assert.Equal("unmatched_entry_not_found", replay.Code);
+        }
+        Assert.Equal(artists, await ArtistEvidenceSnapshot.ReadAsync(scope.Db));
+        Assert.Equal(mappings, await scope.Db.TrackSourceIds.AsNoTracking().OrderBy(source => source.Id)
+            .Select(source => new { source.Id, source.TrackId, source.SourceType, source.ExternalId }).ToArrayAsync());
+        Assert.Equal(progress, (await scope.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync()).MatchingProgressJson);
+    }
+
+    private sealed class ReviewSpotifyHandler(bool collaboration) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            var path = request.RequestUri!.AbsolutePath;
+            Assert.Contains(path, new[] { "/v1/me", "/v1/search", "/v1/artists/artist-one", "/v1/artists/artist-two" });
+            var body = path == "/v1/me" ? "{\"id\":\"account\"}"
+                : path.StartsWith("/v1/artists/", StringComparison.Ordinal) ? JsonSerializer.Serialize(new
+                {
+                    id = path.Split('/').Last(),
+                    name = path.EndsWith("artist-one", StringComparison.Ordinal) ? "Porter Robinson" : "Guest",
+                    images = new[] { new { url = $"https://images.example/{path.Split('/').Last()}.jpg" } }
+                })
+                : JsonSerializer.Serialize(new
+            {
+                tracks = new { items = new[] { new
+                {
+                    id = "new-destination", type = "track", name = "Everything Goes On", duration_ms = 160000,
+                    external_ids = new { isrc = "USABC2400001" },
+                    artists = (collaboration ? new[] { "Porter Robinson", "Guest" } : ["Porter Robinson"])
+                        .Select((name, index) => new
+                        {
+                            id = index == 0 ? "artist-one" : "artist-two", name,
+                            external_urls = new { spotify = $"https://open.spotify.com/artist/artist-{(index == 0 ? "one" : "two")}" }
+                        })
+                } } }
+            });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+        }
     }
 
     [Fact]
@@ -328,19 +549,44 @@ public sealed class PlaylistUnmatchedReviewTests
         DurationSeconds = duration
     };
 
-    private sealed class Scope : IAsyncDisposable
+    private sealed class SqliteReviewDbContext(DbContextOptions<ApplicationDbContext> options) : ApplicationDbContext(options)
     {
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);
+            // SQLite cannot compare DateTimeOffset columns. This test-only UTC
+            // tick mapping lets the unmodified production lease query execute.
+            builder.Entity<Playlist>().Property(item => item.SyncLeaseExpiresAt)
+                .HasConversion(value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+        }
+    }
+
+    private sealed partial class Scope : IAsyncDisposable
+    {
+        public void VerifyMapping(TrackSourceId mapping, string title = "Everything Goes On", string artist = "Porter Robinson")
+        {
+            var item = new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = mapping.SourceType, ExternalId = mapping.ExternalId,
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = title, Artist = artist, DurationSeconds = 160 }),
+                VerificationMethod = mapping.SourceType == "youtube" ? CatalogVerificationMethods.YouTubePublicVideo
+                    : mapping.SourceType == "spotify" ? CatalogVerificationMethods.SpotifyApplication : CatalogVerificationMethods.MusicBrainz,
+                VisibilityState = CatalogVisibility.Public, Revision = 1, VerifiedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                RevalidateAfter = DateTimeOffset.UtcNow.AddDays(1) };
+            mapping.ProviderCatalogItem = item;
+            mapping.ProviderCatalogItemId = item.Id;
+            mapping.CatalogRevision = 1;
+            mapping.AssociationState = RecordingAssociationState.Verified;
+        }
         private readonly IDataProtectionProvider _protector = new EphemeralDataProtectionProvider();
         private readonly SqliteConnection? _connection;
+        private readonly PostgresTestSchema? _schema;
         private Scope(ApplicationDbContext db, Playlist playlist,
-            ServicePlaylistMapping link, PlaylistEntry entry, int userId, SqliteConnection? connection)
+            ServicePlaylistMapping link, PlaylistEntry entry, int userId, SqliteConnection? connection, PostgresTestSchema? schema)
         {
             Db = db; Playlist = playlist; Link = link; Entry = entry; UserId = userId;
             _connection = connection;
-            Review = new PlaylistUnmatchedReviewService(db, null!, null!, [], null!,
-                new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance),
-                new PlaylistCanonicalReconciliationService(db),
-                Options.Create(new TrackMatchingOptions()), _protector);
+            _schema = schema;
+            Review = CreateReview(db);
         }
 
         public ApplicationDbContext Db { get; }
@@ -350,19 +596,40 @@ public sealed class PlaylistUnmatchedReviewTests
         public int UserId { get; }
         public PlaylistUnmatchedReviewService Review { get; }
 
-        public static async Task<Scope> CreateAsync(string service, bool relational = false)
+        public async Task<PlaylistUnmatchedReviewService> WithSpotifyAsync(HttpClient http)
+        {
+            http.BaseAddress = new Uri("https://api.spotify.com");
+            var encryption = new TokenEncryptionService(_protector);
+            var account = await Db.ConnectedServiceAccounts.SingleAsync();
+            account.EncryptedAccessToken = encryption.Encrypt("test-access-token");
+            account.TokenExpiresAt = DateTime.UtcNow.AddHours(1);
+            var metadata = TrackObservationParser.ReadMetadata(Entry.TrackObservation!)!;
+            metadata.Description = "";
+            Entry.TrackObservation!.RawMetadata = JsonSerializer.Serialize(metadata);
+            await Db.SaveChangesAsync();
+            var api = new SpotifyApiClient(http, Options.Create(new SpotifyOptions()), new SpotifyRetryDelay());
+            var tokens = new SpotifyTokenManager(Db, api, encryption, TimeProvider.System, null!);
+            return new PlaylistUnmatchedReviewService(Db, api, tokens, [], null!,
+                new TrackMatchingService(Db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(Db), Options.Create(new TrackMatchingOptions()), _protector,
+                new PlaylistSyncCoordinator(Db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));
+        }
+
+        public static async Task<Scope> CreateAsync(string service, bool relational = false, bool postgres = false)
         {
             const int userId = 5801;
             SqliteConnection? connection = null;
             var builder = new DbContextOptionsBuilder<ApplicationDbContext>();
             if (relational)
             {
-                connection = new SqliteConnection("Data Source=:memory:");
+                connection = new SqliteConnection($"Data Source=review-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
                 await connection.OpenAsync();
-                builder.UseSqlite(connection);
+                builder.UseSqlite(connection.ConnectionString);
             }
             else builder.UseInMemoryDatabase(Guid.NewGuid().ToString());
-            var db = new ApplicationDbContext(builder.Options);
+            var schema = postgres ? await PostgresTestSchema.CreateAsync() : null;
+            var db = schema?.Db ?? (relational
+                ? new SqliteReviewDbContext(builder.Options) : new ApplicationDbContext(builder.Options));
             if (relational) await db.Database.EnsureCreatedAsync();
             var now = DateTimeOffset.UtcNow;
             var playlist = new Playlist
@@ -373,7 +640,8 @@ public sealed class PlaylistUnmatchedReviewTests
             var account = new ConnectedServiceAccount
             {
                 Id = 51, UserId = userId, Service = service,
-                ExternalAccountId = "account", ConnectionState = "connected"
+                ExternalAccountId = "account", ConnectionState = "connected",
+                TokenExpiresAt = DateTime.UtcNow.AddHours(1)
             };
             var link = new ServicePlaylistMapping
             {
@@ -392,7 +660,7 @@ public sealed class PlaylistUnmatchedReviewTests
             };
             var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), SourceType = service == "youtube" ? "spotify" : "youtube",
+                Id = Guid.NewGuid(), OwnerUserId = userId, SourceType = service == "youtube" ? "spotify" : "youtube",
                 ExternalId = "source-video",
                 Title = "Everything Goes On", Artist = "Porter Robinson", DurationSeconds = 160,
                 MatchStatus = TrackMatchingStatuses.Matched, TrackId = track.Id,
@@ -408,7 +676,25 @@ public sealed class PlaylistUnmatchedReviewTests
             var user = TestUserFactory.Create(userId, "playlist-review@example.com");
             db.AddRange(user, playlist, account, link, track, observation, entry);
             await db.SaveChangesAsync();
-            return new Scope(db, playlist, link, entry, userId, connection);
+            return new Scope(db, playlist, link, entry, userId, connection, schema);
+        }
+
+        public PlaylistUnmatchedReviewService CreateReview(ApplicationDbContext db)
+            => new(db, null!, null!, [], null!,
+                new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(db), Options.Create(new TrackMatchingOptions()), _protector,
+                new PlaylistSyncCoordinator(db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));
+
+        public ApplicationDbContext NewContext(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
+        {
+            if (_schema is not null)
+                return new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+                    .UseNpgsql(Db.Database.GetConnectionString(), options => options.EnableRetryOnFailure(maxRetryCount: 1))
+                    .AddInterceptors(interceptors).Options);
+            if (_connection is not null)
+                return new SqliteReviewDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+                    .UseSqlite(_connection.ConnectionString).AddInterceptors(interceptors).Options);
+            throw new InvalidOperationException("Separate contexts in these tests require a relational database.");
         }
 
         public PlaylistEntry AddEntry(string name, string sourceId)
@@ -416,7 +702,7 @@ public sealed class PlaylistUnmatchedReviewTests
             var track = new Track { Id = Guid.NewGuid(), SearchTitle = name };
             var observation = new TrackObservation
             {
-                Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = sourceId,
+                Id = Guid.NewGuid(), OwnerUserId = UserId, SourceType = "youtube", ExternalId = sourceId,
                 Title = name, TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched
             };
             var entry = new PlaylistEntry
@@ -428,18 +714,48 @@ public sealed class PlaylistUnmatchedReviewTests
             return entry;
         }
 
-        public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null)
+        public async Task<PlaylistUnmatchedReviewService> SearchReviewAsync(HttpClient http)
         {
-            var entry = Db.PlaylistEntries.Include(item => item.TrackObservation)
-                .Include(item => item.Track).Single(item => item.Id == Entry.Id);
+            var encryption = new TokenEncryptionService(_protector);
+            var account = await Db.ConnectedServiceAccounts.SingleAsync();
+            account.EncryptedAccessToken = encryption.Encrypt("test-token");
+            var source = Entry.TrackObservation;
+            if (source is not null)
+            {
+                var metadata = TrackObservationParser.ReadMetadata(source)!;
+                metadata.Description = "";
+                source.RawMetadata = JsonSerializer.Serialize(metadata);
+            }
+            await Db.SaveChangesAsync();
+            var options = Options.Create(new Cantaro.Api.Configuration.SpotifyOptions
+                { ClientId = "client", ClientSecret = "secret" });
+            var api = new Cantaro.Api.Services.Spotify.SpotifyApiClient(http, options, new NoDelay());
+            var tokens = new Cantaro.Api.Services.Spotify.SpotifyTokenManager(
+                Db, api, encryption, TimeProvider.System, null!);
+            var search = new Cantaro.Api.Services.Spotify.SpotifySearchProvider(api,
+                new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenProvider(api, options,
+                    TimeProvider.System, new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenCache()));
+            return new PlaylistUnmatchedReviewService(Db, api, tokens, [search], null!,
+                new TrackMatchingService(Db, [], NullLogger<TrackMatchingService>.Instance),
+                new PlaylistCanonicalReconciliationService(Db), Options.Create(new TrackMatchingOptions()), _protector,
+                new PlaylistSyncCoordinator(Db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));
+        }
+
+        public string Token(TrackMatchSearchCandidate candidate, DateTimeOffset? issuedAt = null, Guid? entryId = null)
+        {
+            var targetId = entryId ?? Entry.Id;
+            var entry = Db.PlaylistEntries.AsNoTracking().Include(item => item.TrackObservation)
+                .Include(item => item.Track).Single(item => item.Id == targetId);
             var fingerprint = (string)typeof(PlaylistUnmatchedReviewService)
                 .GetMethod("Fingerprint", BindingFlags.NonPublic | BindingFlags.Static)!
                 .Invoke(null, [entry])!;
             var proof = new
             {
                 UserId, PlaylistId = Playlist.Id, MappingId = Link.Id,
-                EntryId = Entry.Id, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
+                EntryId = targetId, ConnectedServiceAccountId = Link.ConnectedServiceAccountId,
                 ExternalAccountId = Link.ExternalAccountId, Service = Link.Service,
+                ServicePlaylistId = Link.ServicePlaylistId,
+                TokenVersion = Db.ConnectedServiceAccounts.Single(account => account.Id == Link.ConnectedServiceAccountId).TokenVersion,
                 Fingerprint = fingerprint, Candidate = candidate,
                 IssuedAt = issuedAt ?? DateTimeOffset.UtcNow
             };
@@ -449,7 +765,8 @@ public sealed class PlaylistUnmatchedReviewTests
 
         public async ValueTask DisposeAsync()
         {
-            await Db.DisposeAsync();
+            if (_schema is not null) await _schema.DisposeAsync();
+            else await Db.DisposeAsync();
             if (_connection is not null) await _connection.DisposeAsync();
         }
     }

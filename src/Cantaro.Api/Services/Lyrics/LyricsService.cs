@@ -27,24 +27,24 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
 
     public async Task<LyricsResult?> GetLyricsAsync(int userId, Guid trackId, CancellationToken cancellationToken)
     {
+        var accessibleTrackIds = CanonicalTrackAccess.GetAccessibleTrackIds(dbContext, userId);
         var track = await dbContext.Tracks
             .AsNoTracking()
-            .Where(item => item.Id == trackId
-                && item.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
+            .Include(item => item.SourceIds).ThenInclude(item => item.ProviderCatalogItem)
+            .Where(item => item.Id == trackId && accessibleTrackIds.Contains(item.Id))
             .SingleOrDefaultAsync(cancellationToken);
         if (track is null)
         {
             return null;
         }
 
-        return await GetTrackLyricsAsync(track, cancellationToken);
+        return await GetTrackLyricsAsync(track, userId, cancellationToken);
     }
 
     private async Task<LyricsResult?> GetObservationLyricsAsync(int userId, Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await dbContext.TrackObservations
             .AsNoTracking()
-            .Include(item => item.Track)
             .Where(item => item.Id == observationId
                 && item.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
             .SingleOrDefaultAsync(cancellationToken);
@@ -53,11 +53,25 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
             return null;
         }
 
-        if (observation.Track is { } track)
+        if (observation.TrackId is { } trackId)
         {
-            return await GetTrackLyricsAsync(track, cancellationToken);
+            var track = await dbContext.Tracks.AsNoTracking()
+                .Include(item => item.SourceIds).ThenInclude(item => item.ProviderCatalogItem)
+                .SingleOrDefaultAsync(item => item.Id == trackId, cancellationToken);
+            var facts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
+            if (facts is not null)
+                return await GetPublicLyricsAsync(track!.Id, facts, cancellationToken);
         }
 
+        if (!ProviderCatalogPolicy.HasOwnedSnapshot(observation, userId))
+            return null;
+
+        return await GetObservationLyricsAsync(observation, cancellationToken);
+    }
+
+    private async Task<LyricsResult> GetObservationLyricsAsync(TrackObservation observation,
+        CancellationToken cancellationToken)
+    {
         var metadata = TrackObservationParser.Parse(observation);
         if (string.IsNullOrWhiteSpace(metadata.SearchTitle) || string.IsNullOrWhiteSpace(metadata.SearchArtist))
         {
@@ -72,37 +86,38 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
             sourceMetadata?.Album?.Trim(),
             observation.DurationSeconds ?? sourceMetadata?.DurationSeconds,
             null,
-            null), cancellationToken);
+            sourceMetadata?.Isrc), cancellationToken);
     }
 
-    private async Task<LyricsResult> GetTrackLyricsAsync(Track track, CancellationToken cancellationToken)
+    private async Task<LyricsResult> GetTrackLyricsAsync(Track track, int userId, CancellationToken cancellationToken)
     {
-        TrackCanonicalMetadata? metadata = null;
-        if (!string.IsNullOrWhiteSpace(track.CanonicalMetadata))
-        {
-            try
-            {
-                metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata);
-            }
-            catch (JsonException)
-            {
-                // Invalid legacy metadata is reported as unavailable below.
-            }
-        }
+        var facts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
+        if (facts is not null)
+            return await GetPublicLyricsAsync(track.Id, facts, cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(metadata?.Title) || string.IsNullOrWhiteSpace(metadata.Artist))
-        {
-            return Unavailable("The canonical track does not have enough metadata to look up lyrics.");
-        }
+        var observation = await dbContext.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackId == track.Id && entry.Playlist != null && entry.Playlist.UserId == userId
+                && entry.TrackObservation != null && entry.TrackObservation.OwnerUserId == userId
+                && entry.TrackObservation.Title.Trim() != "")
+            .OrderBy(entry => entry.Position)
+            .Select(entry => entry.TrackObservation)
+            .FirstOrDefaultAsync(cancellationToken);
+        return observation is null
+            ? Unavailable("The track has no current public facts or owned observation for a lyrics lookup.")
+            : await GetObservationLyricsAsync(observation, cancellationToken);
+    }
 
-        return await provider.GetLyricsAsync(new LyricsLookup(
-            track.Id,
-            metadata.Title.Trim(),
-            metadata.Artist.Trim(),
-            metadata.Albums.FirstOrDefault(album => !string.IsNullOrWhiteSpace(album))?.Trim(),
-            metadata.DurationSeconds,
-            track.MbidRecording,
-            track.Isrc), cancellationToken);
+    private Task<LyricsResult> GetPublicLyricsAsync(Guid trackId, ProviderCatalogFacts facts,
+        CancellationToken cancellationToken)
+    {
+        var artist = facts.Artist ?? (facts.ArtistCredits.Count > 0
+            ? string.Join(", ", facts.ArtistCredits.Select(credit => credit.Name)) : null);
+        if (string.IsNullOrWhiteSpace(facts.Title) || string.IsNullOrWhiteSpace(artist))
+            return Task.FromResult(Unavailable("The public track facts do not have enough metadata to look up lyrics."));
+
+        return provider.GetLyricsAsync(new LyricsLookup(trackId, facts.Title.Trim(), artist.Trim(),
+            facts.Albums.FirstOrDefault(album => !string.IsNullOrWhiteSpace(album))?.Trim(),
+            facts.DurationSeconds, facts.MusicBrainzRecordingId, facts.Isrc), cancellationToken);
     }
 
     private static LyricsResult Unavailable(string explanation) => new()

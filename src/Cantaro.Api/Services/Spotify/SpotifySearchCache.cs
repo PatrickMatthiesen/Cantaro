@@ -22,7 +22,7 @@ public sealed class SpotifySearchCache(IServiceScopeFactory scopes, TimeProvider
         Func<CancellationToken, Task<IReadOnlyList<SpotifyTrackSnapshot>>> search,
         CancellationToken ct)
     {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"catalog-v1\n{Math.Clamp(limit, 1, 50)}\n{query}"));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"catalog-v2\n{Math.Clamp(limit, 1, 50)}\n{query}"));
         var key = Convert.ToHexString(hash);
         // Coalesce simultaneous matching workers in this process; the database
         // retains completed queries for other processes and future runs.

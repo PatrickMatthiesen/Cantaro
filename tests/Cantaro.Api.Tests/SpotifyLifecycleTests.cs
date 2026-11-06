@@ -656,6 +656,7 @@ public sealed class SpotifyLifecycleTests
         scope.DbContext.TrackObservations.Add(new TrackObservation
         {
             Id = observationId,
+            OwnerUserId = account.UserId,
             SourceType = SpotifyService.ServiceName,
             ExternalId = "spotify-track-1",
             RawMetadata = """{ "provider": "spotify" }""",

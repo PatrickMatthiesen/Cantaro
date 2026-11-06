@@ -1,9 +1,9 @@
 using Cantaro.Api.Models;
+using Cantaro.Api.Services;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Cantaro.Api.Data;
 
@@ -12,7 +12,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : base(options)
     {
+        ArtistReconciliationRetry = new(this);
     }
+
+    internal ArtistReconciliationRetryState ArtistReconciliationRetry { get; }
 
     public DbSet<ConnectedServiceAccount> ConnectedServiceAccounts => Set<ConnectedServiceAccount>();
     public DbSet<Song> Songs => Set<Song>();
@@ -20,6 +23,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<SongCredit> SongCredits => Set<SongCredit>();
     public DbSet<SongGroupingSuggestion> SongGroupingSuggestions => Set<SongGroupingSuggestion>();
     public DbSet<Track> Tracks => Set<Track>();
+    public DbSet<ProviderCatalogItem> ProviderCatalogItems => Set<ProviderCatalogItem>();
     public DbSet<TrackRelation> TrackRelations => Set<TrackRelation>();
     public DbSet<Artist> Artists => Set<Artist>();
     public DbSet<TrackArtistCredit> TrackArtistCredits => Set<TrackArtistCredit>();
@@ -30,6 +34,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<Playlist> Playlists => Set<Playlist>();
     public DbSet<PlaylistEntry> PlaylistEntries => Set<PlaylistEntry>();
     public DbSet<ServicePlaylistMapping> ServicePlaylistMappings => Set<ServicePlaylistMapping>();
+    public DbSet<PlaylistExportAttempt> PlaylistExportAttempts => Set<PlaylistExportAttempt>();
     public DbSet<SpotifyApiGateState> SpotifyApiGateStates => Set<SpotifyApiGateState>();
     public DbSet<SpotifySearchCacheEntry> SpotifySearchCacheEntries => Set<SpotifySearchCacheEntry>();
     public DbSet<MusicSyncJob> MusicSyncJobs => Set<MusicSyncJob>();
@@ -51,34 +56,72 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<ExtensionAuthorizationCode> ExtensionAuthorizationCodes => Set<ExtensionAuthorizationCode>();
     public DbSet<ExtensionRefreshToken> ExtensionRefreshTokens => Set<ExtensionRefreshToken>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+    public DbSet<ArtistProviderLink> ArtistProviderLinks => Set<ArtistProviderLink>();
+    public DbSet<ArtistReconciliationConflict> ArtistReconciliationConflicts => Set<ArtistReconciliationConflict>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
 
-    public override int SaveChanges()
-    {
-        PrepareChanges();
-        return base.SaveChanges();
-    }
+    public override int SaveChanges() => SaveChanges(true);
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         PrepareChanges();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var count = base.SaveChanges(acceptAllChangesOnSuccess);
+        ArtistReconciliationRetry.Clear();
+        return count;
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        PrepareChanges();
-        return base.SaveChangesAsync(cancellationToken);
-    }
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        SaveChangesAsync(true, cancellationToken);
 
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        PrepareChanges();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        for (var attempt = 0; ; attempt++)
+        {
+            PrepareChanges();
+            try
+            {
+                var count = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+                ArtistReconciliationRetry.Clear();
+                return count;
+            }
+            catch (DbUpdateException exception) when (attempt < 2 && ArtistReconciliationRetry.CanRetry(exception))
+            {
+                await ArtistReconciliationRetry.ReplayAsync(cancellationToken);
+            }
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<ProviderCatalogItem>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.SourceType, item.ExternalId }).IsUnique();
+            entity.HasIndex(item => new { item.NormalizedTitle, item.NormalizedArtist });
+            entity.HasIndex(item => item.NormalizedIsrc);
+            entity.HasIndex(item => item.NormalizedMusicBrainzRecordingId);
+            entity.Property(item => item.Revision).IsConcurrencyToken();
+            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+            {
+                entity.Property(item => item.VerifiedAt).HasConversion(
+                    value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+                entity.Property(item => item.RevalidateAfter).HasConversion(
+                    value => value.HasValue ? (long?)value.Value.UtcTicks : null,
+                    value => value.HasValue ? new DateTimeOffset(value.Value, TimeSpan.Zero) : null);
+            }
+        });
+        modelBuilder.Entity<Track>().HasOne(item => item.PreferredCatalogItem).WithMany()
+            .HasForeignKey(item => item.PreferredCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackArtistCredit>().HasOne(item => item.ProviderCatalogItem).WithMany()
+            .HasForeignKey(item => item.ProviderCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackSourceId>().HasOne(item => item.ProviderCatalogItem).WithMany()
+            .HasForeignKey(item => item.ProviderCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackSourceId>().Property(item => item.Revision).IsConcurrencyToken();
+        modelBuilder.Entity<TrackObservation>().HasOne(item => item.ProviderCatalogItem).WithMany()
+            .HasForeignKey(item => item.ProviderCatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<TrackObservation>().HasOne<User>().WithMany()
+            .HasForeignKey(item => item.OwnerUserId).OnDelete(DeleteBehavior.Cascade);
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<User>(entity =>
@@ -276,6 +319,26 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .HasFilter("\"MusicBrainzArtistId\" IS NOT NULL");
         });
 
+        modelBuilder.Entity<ArtistProviderLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Provider).HasMaxLength(50);
+            entity.Property(e => e.ExternalId).HasMaxLength(200);
+            entity.HasIndex(e => new { e.Provider, e.ExternalId }).IsUnique();
+            entity.HasIndex(e => new { e.ArtistId, e.Provider }).IsUnique();
+            entity.HasOne(e => e.Artist).WithMany(e => e.ProviderLinks)
+                .HasForeignKey(e => e.ArtistId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ArtistReconciliationConflict>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EvidenceKey).HasMaxLength(64);
+            entity.HasIndex(e => new { e.TrackId, e.EvidenceKey }).IsUnique();
+            entity.HasOne(e => e.Track).WithMany().HasForeignKey(e => e.TrackId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<TrackArtistCredit>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -356,7 +419,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.HasKey(e => e.Id);
 
-            entity.HasIndex(e => new { e.SourceType, e.ExternalId })
+            entity.HasIndex(e => new { e.OwnerUserId, e.SourceType, e.ExternalId })
                 .IsUnique();
 
             entity.HasIndex(e => e.MatchStatus);
@@ -462,6 +525,16 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(a => a.ServicePlaylistMappings)
                 .HasForeignKey(e => e.ConnectedServiceAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlaylistExportAttempt>(entity =>
+        {
+            entity.HasKey(item => new { item.UserId, item.Service, item.ExternalAccountId,
+                item.ServicePlaylistId, item.ExternalTrackId });
+            // Local playlist, entry, recording and connected-account deletion
+            // must not erase read suppression. Deleting the user can erase it.
+            entity.HasOne<User>().WithMany().HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SpotifySearchCacheEntry>(entity =>
@@ -882,8 +955,21 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     private void PrepareChanges()
     {
         UpdateUserTimestamps();
-        UpdateTrackSearchProjections();
+        UpdateProviderCatalogProjections();
         NormalizeMediaProviderContents();
+    }
+
+    private void UpdateProviderCatalogProjections()
+    {
+        foreach (var entry in ChangeTracker.Entries<ProviderCatalogItem>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified)) continue;
+            var normalized = ProviderCatalogNormalizedFacts.FromJson(entry.Entity.FactsJson);
+            entry.Entity.NormalizedTitle = normalized.Title;
+            entry.Entity.NormalizedArtist = normalized.Artist;
+            entry.Entity.NormalizedIsrc = normalized.Isrc;
+            entry.Entity.NormalizedMusicBrainzRecordingId = normalized.MusicBrainzRecordingId;
+        }
     }
 
     private void NormalizeMediaProviderContents()
@@ -905,70 +991,4 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         }
     }
 
-    private void UpdateTrackSearchProjections()
-    {
-        foreach (var entry in ChangeTracker.Entries<Track>())
-        {
-            if (entry.State is not (EntityState.Added or EntityState.Modified)
-                || (entry.State == EntityState.Modified
-                    && !entry.Property(track => track.CanonicalMetadata).IsModified))
-            {
-                continue;
-            }
-
-            var metadata = ParseTrackSearchMetadata(entry.Entity.CanonicalMetadata);
-            entry.Entity.SearchTitle = TrimToLength(metadata.Title, 512);
-            entry.Entity.SearchArtist = TrimToLength(metadata.Artist, 1024);
-        }
-    }
-
-    private static (string? Title, string? Artist) ParseTrackSearchMetadata(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return default;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return default;
-            }
-
-            return (
-                ReadString(document.RootElement, "Title", "title"),
-                ReadString(document.RootElement, "Artist", "artist"));
-        }
-        catch (JsonException)
-        {
-            return default;
-        }
-    }
-
-    private static string? ReadString(
-        JsonElement element,
-        string propertyName,
-        string fallbackPropertyName)
-    {
-        if (!element.TryGetProperty(propertyName, out var property)
-            && !element.TryGetProperty(fallbackPropertyName, out property))
-        {
-            return null;
-        }
-
-        return property.ValueKind == JsonValueKind.String ? property.GetString() : null;
-    }
-
-    private static string? TrimToLength(string? value, int maxLength)
-    {
-        var trimmed = value?.Trim();
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return null;
-        }
-
-        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
-    }
 }

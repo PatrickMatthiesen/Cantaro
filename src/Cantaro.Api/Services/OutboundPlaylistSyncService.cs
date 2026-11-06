@@ -143,6 +143,8 @@ public sealed class OutboundPlaylistSyncService(
 
         try
         {
+            await PlaylistExportAttemptStore.RecordAsync(dbContext, account, service, mapping.ServicePlaylistId,
+                prepared.TrackIds, cancellationToken);
             await writer.ReconcileAsync(account, mapping.ServicePlaylistId, prepared.TrackIds, cancellationToken);
             mapping.LastSyncedAt = DateTimeOffset.UtcNow;
             mapping.LastSyncStatus = "success";
@@ -217,10 +219,23 @@ public sealed class OutboundPlaylistSyncService(
 
         var entries = await dbContext.PlaylistEntries.AsNoTracking()
             .Where(item => item.PlaylistId == playlistId)
-            .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
+            .Include(item => item.Track)
             .Include(item => item.TrackObservation)
             .OrderBy(item => item.Position).ThenBy(item => item.Id)
             .ToListAsync(cancellationToken);
+        var canonicalTrackIds = entries.Where(item => item.TrackId.HasValue)
+            .Select(item => item.TrackId!.Value).Distinct().ToList();
+        var ownedProviderIds = await dbContext.PlaylistEntries.AsNoTracking()
+            .Where(item => item.Playlist!.UserId == account.UserId
+                && item.TrackId != null && canonicalTrackIds.Contains(item.TrackId.Value)
+                && item.TrackObservation != null
+                && item.TrackObservation.SourceType == service
+                && item.TrackObservation.TrackId == item.TrackId)
+            .Select(item => new { TrackId = item.TrackId!.Value, ExternalId = item.TrackObservation!.ExternalId })
+            .ToListAsync(cancellationToken);
+        var ownedProviderIdsByTrack = ownedProviderIds.GroupBy(item => item.TrackId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.ExternalId)
+                .OrderBy(id => id, StringComparer.Ordinal).First());
         var trackIds = new List<string>(entries.Count);
         var unmatched = new List<string>();
         foreach (var entry in entries)
@@ -229,12 +244,9 @@ public sealed class OutboundPlaylistSyncService(
             var providerId = observation?.SourceType == service
                 && (entry.TrackId is null || observation.TrackId == entry.TrackId)
                 ? observation.ExternalId
-                : entry.Track?.SourceIds
-                    .Where(source => source.SourceType == service && !string.IsNullOrWhiteSpace(source.ExternalId))
-                    .OrderByDescending(source => source.Confidence)
-                    .ThenByDescending(source => source.LastVerifiedAt)
-                    .ThenBy(source => source.ExternalId, StringComparer.Ordinal)
-                    .Select(source => source.ExternalId).FirstOrDefault();
+                : entry.TrackId is { } trackId
+                    ? ownedProviderIdsByTrack.GetValueOrDefault(trackId)
+                    : null;
             if (string.IsNullOrWhiteSpace(providerId))
             {
                 unmatched.Add(entry.Track?.SearchTitle ?? observation?.Title ?? $"Track {entry.Position + 1}");

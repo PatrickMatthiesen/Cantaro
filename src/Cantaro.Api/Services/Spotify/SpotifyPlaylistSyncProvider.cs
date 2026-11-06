@@ -11,11 +11,11 @@ public sealed class SpotifyPlaylistSyncProvider(
     ApplicationDbContext dbContext,
     SpotifyApiClient apiClient,
     SpotifyTokenManager tokenManager,
-    SpotifyTrackResolver trackResolver,
     IEnumerable<ITrackMetadataSearchProvider> searchProviders,
     TrackMatchingService matchingService,
     PlaylistCanonicalReconciliationService playlistReconciler,
-    IOptions<TrackMatchingOptions> matchingOptions) : IPlaylistSyncProvider
+    IOptions<TrackMatchingOptions> matchingOptions,
+    ProviderCatalogAcquisition? publicCatalog = null) : IPlaylistSyncProvider
 {
     private ValidatedAccount? _validatedAccount;
 
@@ -34,64 +34,91 @@ public sealed class SpotifyPlaylistSyncProvider(
     {
         var validated = await GetValidatedAccountAsync(account, cancellationToken);
         var raw = await apiClient.GetPlaylistSyncReadSnapshotAsync(validated.AccessToken, playlistId, cancellationToken);
-        var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
-        var cache = new Dictionary<string, (Guid TrackId, Guid ObservationId)>(StringComparer.Ordinal);
-        var now = DateTimeOffset.UtcNow;
-        foreach (var item in raw.Items)
-        {
-            if (item.Track is not { } snapshot)
-            {
-                tracks.Add(new PlaylistRemoteTrack($"!unavailable:{item.Position}", null, null,
-                    "Unavailable Spotify item", item.Position));
-                continue;
-            }
-
-            if (!cache.TryGetValue(snapshot.Id, out var ids))
-            {
-                var observation = dbContext.TrackObservations.Local.FirstOrDefault(existing =>
-                    existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id)
-                    ?? await dbContext.TrackObservations.SingleOrDefaultAsync(existing =>
-                        existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id, cancellationToken);
-                observation ??= new TrackObservation
-                {
-                    Id = Guid.NewGuid(), SourceType = PlatformId, ExternalId = snapshot.Id,
-                    Title = snapshot.Name, MatchStatus = TrackMatchingStatuses.Matched,
-                    CreatedAt = now
-                };
-                if (dbContext.Entry(observation).State == EntityState.Detached)
-                    dbContext.TrackObservations.Add(observation);
-                observation.Title = snapshot.Name;
-                observation.Artist = snapshot.Artist;
-                observation.DurationSeconds = snapshot.DurationSeconds;
-                observation.ThumbnailUrl = snapshot.ImageUrl;
-                observation.NormalizedTitle = TrackTextNormalizer.Normalize(snapshot.Name);
-                observation.NormalizedArtist = TrackTextNormalizer.Normalize(snapshot.Artist);
-                observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
-                {
-                    SourceType = PlatformId, ExternalId = snapshot.Id, SourceUrl = snapshot.ExternalUrl,
-                    Title = snapshot.Name, Artist = snapshot.Artist, Album = snapshot.AlbumName,
-                    Isrc = snapshot.Isrc, OriginalTitle = snapshot.Name, OriginalArtist = snapshot.Artist,
-                    SearchTitle = snapshot.Name, SearchArtist = snapshot.Artist,
-                    ThumbnailUrl = snapshot.ImageUrl, DurationSeconds = snapshot.DurationSeconds
-                });
-                var canonical = await trackResolver.ResolveAsync(snapshot, now, cancellationToken);
-                observation.TrackId = canonical.Id;
-                observation.MatchStatus = TrackMatchingStatuses.Matched;
-                observation.UpdatedAt = now;
-                ids = (canonical.Id, observation.Id);
-                cache.Add(snapshot.Id, ids);
-            }
-            tracks.Add(new PlaylistRemoteTrack(snapshot.Id, ids.TrackId, ids.ObservationId,
-                snapshot.Name, item.Position));
-        }
+        if (!raw.IsComplete)
+            throw new PlatformApiException("incomplete_playlist", "The platform returned an incomplete playlist. Its missing items were not treated as removals.", 503);
+        var readAccount = new PlaylistReadAccount(account, PlatformId, validated.ExternalAccountId, validated.TokenVersion);
         _ = await RequireAccountAsync(account, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return new PlaylistRemoteSnapshot(raw.Id, raw.Name, tracks, raw.SnapshotId, raw.IsComplete);
+        var catalog = new Dictionary<string, ProviderCatalogItem>(StringComparer.Ordinal);
+        if (publicCatalog is not null)
+            foreach (var id in raw.Items.Where(item => item.Track is not null).Select(item => item.Track!.Id).Distinct(StringComparer.Ordinal))
+                if (await publicCatalog.EnsureSpotifyAsync(id, cancellationToken) is { } verified)
+                    catalog.Add(id, verified);
+        Func<Task>? validateProvenance = null;
+        return await PlaylistReadIngestion.RunAsync(dbContext, readAccount, async readDb =>
+        {
+            var trackResolver = new SpotifyTrackResolver(readDb);
+            var bound = await PlaylistDestinationReadBindings.BindReadAsync(readDb, account, PlatformId, playlistId,
+                raw.Items.Select(item => new PlaylistRemoteTrack(item.Track?.Id ?? $"!unavailable:{item.Position}",
+                    null, null, item.Track?.Name ?? "Unavailable Spotify item", item.Position)).ToArray(), cancellationToken);
+            validateProvenance = await PlaylistExportAttemptStore.GuardReadAsync(readDb, readAccount, playlistId, bound, cancellationToken);
+            var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
+            var cache = new Dictionary<string, (Guid TrackId, Guid ObservationId)>(StringComparer.Ordinal);
+            var now = DateTimeOffset.UtcNow;
+            foreach (var item in raw.Items)
+            {
+                if (bound[item.Position].ReadScope is not null)
+                {
+                    tracks.Add(bound[item.Position]);
+                    continue;
+                }
+                if (item.Track is not { } snapshot)
+                {
+                    tracks.Add(new PlaylistRemoteTrack($"!unavailable:{item.Position}", null, null,
+                        "Unavailable Spotify item", item.Position));
+                    continue;
+                }
+
+                if (!cache.TryGetValue(snapshot.Id, out var ids))
+                {
+                    var observation = readDb.TrackObservations.Local.FirstOrDefault(existing =>
+                        existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id)
+                        ?? await readDb.TrackObservations.SingleOrDefaultAsync(existing =>
+                            existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == snapshot.Id, cancellationToken);
+                    observation ??= new TrackObservation
+                    {
+                        Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId, ExternalId = snapshot.Id,
+                        Title = snapshot.Name, MatchStatus = TrackMatchingStatuses.Matched,
+                        CreatedAt = now
+                    };
+                    if (readDb.Entry(observation).State == EntityState.Detached)
+                        readDb.TrackObservations.Add(observation);
+                    observation.Title = snapshot.Name;
+                    observation.Artist = snapshot.Artist;
+                    observation.DurationSeconds = snapshot.DurationSeconds;
+                    observation.ThumbnailUrl = snapshot.ImageUrl;
+                    observation.NormalizedTitle = TrackTextNormalizer.Normalize(snapshot.Name);
+                    observation.NormalizedArtist = TrackTextNormalizer.Normalize(snapshot.Artist);
+                    observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+                    {
+                        SourceType = PlatformId, ExternalId = snapshot.Id, SourceUrl = snapshot.ExternalUrl,
+                        Title = snapshot.Name, Artist = snapshot.Artist, Album = snapshot.AlbumName,
+                        ArtistIdentities = snapshot.ArtistIdentities, Isrc = snapshot.Isrc, OriginalTitle = snapshot.Name, OriginalArtist = snapshot.Artist,
+                        SearchTitle = snapshot.Name, SearchArtist = snapshot.Artist,
+                        ThumbnailUrl = snapshot.ImageUrl, DurationSeconds = snapshot.DurationSeconds
+                    });
+                    var verifiedSnapshot = catalog.TryGetValue(snapshot.Id, out var publicItem)
+                        ? snapshot with { ProviderCatalogItemId = publicItem.Id, ProviderCatalogRevision = publicItem.Revision }
+                        : snapshot with { ProviderCatalogItemId = null, ProviderCatalogRevision = null };
+                    observation.ProviderCatalogItemId = publicItem?.Id;
+                    var canonical = await trackResolver.ResolveAsync(verifiedSnapshot, now, cancellationToken, account.UserId);
+                    observation.TrackId = canonical.Id;
+                    observation.MatchStatus = TrackMatchingStatuses.Matched;
+                    observation.UpdatedAt = now;
+                    ids = (canonical.Id, observation.Id);
+                    cache.Add(snapshot.Id, ids);
+                }
+                tracks.Add(new PlaylistRemoteTrack(snapshot.Id, ids.TrackId, ids.ObservationId,
+                    snapshot.Name, item.Position));
+            }
+            _ = await RequireAccountAsync(account, cancellationToken);
+            return new PlaylistRemoteSnapshot(raw.Id, raw.Name, tracks, raw.SnapshotId, raw.IsComplete);
+        }, cancellationToken, () => validateProvenance!());
     }
 
     public async Task<string?> ResolveAsync(
         PlatformAccountContext account, PlaylistEntry entry, CancellationToken cancellationToken)
     {
+        _ = await RequireAccountAsync(account, cancellationToken);
         var searchProvider = searchProviders.OfType<SpotifySearchProvider>().Single();
         return await PlaylistDestinationIdentityResolver.ResolveAsync(dbContext, matchingOptions.Value,
             async (observationId, candidate, ct) => (await matchingService.CreateTrackFromMatchAsync(observationId, candidate, ct)).TrackId

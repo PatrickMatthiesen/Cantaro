@@ -5,7 +5,6 @@ using Cantaro.Api.Services.Spotify;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Npgsql;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -22,7 +21,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
     [PostgresFact]
     public async Task SpotifySearchCache_PersistsAndRefreshesEvenIfExpiryCleanupRemovedItsRow()
     {
-        await using var schema = await SchemaContext.CreateAsync();
+        await using var schema = await PostgresTestSchema.CreateAsync();
         var services = new ServiceCollection();
         services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(schema.Db.Database.GetConnectionString()));
         await using var provider = services.BuildServiceProvider();
@@ -196,7 +195,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
         private readonly Dictionary<string, Guid> _tracks = new(StringComparer.Ordinal);
         private readonly Dictionary<string, FakeProvider> _providers = new(StringComparer.Ordinal);
 
-        private Scenario(SchemaContext schema)
+        private Scenario(PostgresTestSchema schema)
         {
             Schema = schema;
             Db = schema.Db;
@@ -207,7 +206,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
                 TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance);
         }
 
-        public SchemaContext Schema { get; }
+        public PostgresTestSchema Schema { get; }
         public ApplicationDbContext Db { get; }
         public PlaylistSyncCoordinator Coordinator { get; }
         public FakeProvider Provider(string service) => _providers[service];
@@ -272,7 +271,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
 
         public static async Task<Scenario> CreateAsync()
         {
-            var schema = await SchemaContext.CreateAsync();
+            var schema = await PostgresTestSchema.CreateAsync();
             var scenario = new Scenario(schema);
             schema.Db.Users.Add(new User
             {
@@ -357,82 +356,6 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
         {
             provider.SetRemoteItems(trackIds.ToArray());
             return Task.CompletedTask;
-        }
-    }
-
-    private sealed class SchemaContext : IAsyncDisposable
-    {
-        private readonly string _adminConnectionString;
-        private readonly string _schema;
-        private bool _disposed;
-
-        private SchemaContext(string adminConnectionString, string schema, ApplicationDbContext db)
-        {
-            _adminConnectionString = adminConnectionString;
-            _schema = schema;
-            Db = db;
-        }
-
-        public ApplicationDbContext Db { get; }
-
-        public static async Task<SchemaContext> CreateAsync()
-        {
-            var raw = Environment.GetEnvironmentVariable("CANTARO_TEST_POSTGRES");
-            if (string.IsNullOrWhiteSpace(raw)) throw new InvalidOperationException("CANTARO_TEST_POSTGRES is required.");
-            var admin = new NpgsqlConnectionStringBuilder(raw);
-            if (admin.Host is not ("localhost" or "127.0.0.1" or "::1"))
-                throw new InvalidOperationException("CANTARO_TEST_POSTGRES must point to a loopback PostgreSQL server.");
-            if (string.IsNullOrWhiteSpace(admin.Database)
-                || !admin.Database.Contains("test", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("CANTARO_TEST_POSTGRES must use a database whose name contains 'test'.");
-
-            var schema = $"cantaro_sync_test_{Guid.NewGuid():N}";
-            var adminConnectionString = admin.ConnectionString;
-            await using (var connection = new NpgsqlConnection(adminConnectionString))
-            {
-                await connection.OpenAsync();
-                await using var command = connection.CreateCommand();
-                command.CommandText = $"CREATE SCHEMA \"{schema}\"";
-                await command.ExecuteNonQueryAsync();
-            }
-
-            var scoped = new NpgsqlConnectionStringBuilder(adminConnectionString) { SearchPath = schema };
-            var testConnectionString = scoped.ConnectionString;
-            var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseNpgsql(testConnectionString, options => options.EnableRetryOnFailure(maxRetryCount: 1))
-                .Options);
-            var context = new SchemaContext(adminConnectionString, schema, db);
-            try
-            {
-                await db.Database.EnsureCreatedAsync();
-                return context;
-            }
-            catch
-            {
-                await context.DisposeAsync();
-                throw;
-            }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (_disposed) return;
-            _disposed = true;
-            await Db.DisposeAsync();
-            await using var connection = new NpgsqlConnection(_adminConnectionString);
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"DROP SCHEMA IF EXISTS \"{_schema}\" CASCADE";
-            await command.ExecuteNonQueryAsync();
-        }
-    }
-
-    private sealed class PostgresFactAttribute : FactAttribute
-    {
-        public PostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CANTARO_TEST_POSTGRES")))
-                Skip = "Set CANTARO_TEST_POSTGRES to a loopback database whose name contains 'test'.";
         }
     }
 }

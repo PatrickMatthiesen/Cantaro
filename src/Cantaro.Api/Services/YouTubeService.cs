@@ -90,6 +90,8 @@ public class YouTubeService : IYouTubePlaylistClient
     private readonly ApplicationDbContext _dbContext;
     private readonly TokenEncryptionService _tokenEncryption;
     private readonly ILogger<YouTubeService> _logger;
+    private readonly ProviderCatalogStore? _catalogStore;
+    private readonly Func<ConnectedServiceAccount, CancellationToken, Task<Google.Apis.YouTube.v3.YouTubeService>>? _serviceFactory;
 
     private const string ServiceName = "youtube";
 
@@ -97,12 +99,23 @@ public class YouTubeService : IYouTubePlaylistClient
         IConfiguration configuration,
         ApplicationDbContext dbContext,
         TokenEncryptionService tokenEncryption,
-        ILogger<YouTubeService> logger)
+        ILogger<YouTubeService> logger,
+        ProviderCatalogStore? catalogStore = null)
     {
         _configuration = configuration;
         _dbContext = dbContext;
         _tokenEncryption = tokenEncryption;
         _logger = logger;
+        _catalogStore = catalogStore;
+    }
+
+    internal YouTubeService(IConfiguration configuration, ApplicationDbContext dbContext,
+        TokenEncryptionService tokenEncryption, ILogger<YouTubeService> logger,
+        Func<ConnectedServiceAccount, CancellationToken, Task<Google.Apis.YouTube.v3.YouTubeService>> serviceFactory,
+        ProviderCatalogStore? catalogStore = null)
+        : this(configuration, dbContext, tokenEncryption, logger, catalogStore)
+    {
+        _serviceFactory = serviceFactory;
     }
 
     private static DateTimeOffset? ParsePublishedAtRaw(string? publishedAtRaw)
@@ -306,9 +319,9 @@ public class YouTubeService : IYouTubePlaylistClient
 
     internal sealed record SyncReadItem(string ExternalId, string PlaylistItemId, string Title, string? Artist,
         string? ThumbnailUrl, int? DurationSeconds, int Position, bool IsAvailable,
-        string? Description = null);
+        string? Description = null, Guid? ProviderCatalogItemId = null);
     internal sealed record SyncReadSnapshot(string Id, string Name, string? Revision,
-        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount);
+        IReadOnlyList<SyncReadItem> Items, bool IsComplete, int UnavailableItemCount, PlaylistReadAccount Account);
 
     internal async Task ValidateSyncAccountAsync(
         PlatformAccountContext accountContext, CancellationToken cancellationToken)
@@ -317,6 +330,7 @@ public class YouTubeService : IYouTubePlaylistClient
     internal async Task<SyncReadSnapshot> GetSyncReadSnapshotAsync(
         PlatformAccountContext accountContext, string playlistId, CancellationToken cancellationToken)
     {
+        var readAccount = await PlaylistReadAccount.CaptureAsync(_dbContext, accountContext, ServiceName, cancellationToken);
         var account = await RequireAccountAsync(accountContext, cancellationToken);
         using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
         var metadataRequest = service.Playlists.List("snippet,contentDetails");
@@ -350,6 +364,7 @@ public class YouTubeService : IYouTubePlaylistClient
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!)
                 .Distinct(StringComparer.Ordinal).ToArray();
             var videosById = new Dictionary<string, Video>(StringComparer.Ordinal);
+            var catalogById = new Dictionary<string, Guid>(StringComparer.Ordinal);
             if (videoIds.Length > 0)
             {
                 var videosRequest = service.Videos.List("snippet,contentDetails,status");
@@ -358,6 +373,17 @@ public class YouTubeService : IYouTubePlaylistClient
                 var videos = await videosRequest.ExecuteAsync(cancellationToken);
                 foreach (var video in videos.Items ?? [])
                     if (!string.IsNullOrWhiteSpace(video.Id)) videosById[video.Id] = video;
+                if (_catalogStore is not null)
+                    foreach (var id in videoIds)
+                    {
+                        if (videosById.TryGetValue(id, out var publicVideo) && publicVideo.Status?.PrivacyStatus == "public"
+                            && publicVideo.Snippet?.Title is { Length: > 0 })
+                        {
+                            var parsed = TrackMetadataParser.Parse(publicVideo.Snippet.Title, publicVideo.Snippet.ChannelTitle);
+                            catalogById[id] = (await StorePublicVideoAsync(publicVideo, parsed, cancellationToken)).Id;
+                        }
+                        else await _catalogStore.MarkWithdrawnAsync("youtube", id, cancellationToken);
+                    }
             }
             foreach (var item in response.Items)
             {
@@ -379,7 +405,8 @@ public class YouTubeService : IYouTubePlaylistClient
                     item?.Snippet?.VideoOwnerChannelTitle,
                     item?.Snippet?.Thumbnails?.Medium?.Url ?? item?.Snippet?.Thumbnails?.Default__?.Url,
                     available ? ParseVideoDuration(video!.ContentDetails?.Duration) : null,
-                    position, available, available ? video!.Snippet?.Description : null));
+                    position, available, available ? video!.Snippet?.Description : null,
+                    catalogById.TryGetValue(videoId ?? string.Empty, out var catalogId) ? catalogId : null));
             }
             pageToken = response.NextPageToken;
             if (!string.IsNullOrWhiteSpace(pageToken) && !seenTokens.Add(pageToken))
@@ -395,7 +422,7 @@ public class YouTubeService : IYouTubePlaylistClient
             || after.ContentDetails?.ItemCount != before.ContentDetails?.ItemCount)
             complete = false;
         return new SyncReadSnapshot(playlistId, before.Snippet.Title, before.ETag, items, complete,
-            unavailableItemCount);
+            unavailableItemCount, readAccount);
     }
 
     internal static bool IsPlaylistItemUnavailable(
@@ -437,33 +464,80 @@ public class YouTubeService : IYouTubePlaylistClient
         videosRequest.Id = string.Join(',', ids);
         videosRequest.MaxResults = ids.Length;
         var videos = await videosRequest.ExecuteAsync(cancellationToken);
-        return videos.Items?.Where(video => video.Id is { Length: > 0 }
+        if (_catalogStore is not null)
+        {
+            foreach (var withdrawn in videos.Items?.Where(video => video.Id is { Length: > 0 }
+                         && video.Status?.PrivacyStatus != "public") ?? [])
+                await _catalogStore.MarkWithdrawnAsync("youtube", withdrawn.Id!, cancellationToken);
+        }
+        var candidates = new List<TrackMatchSearchCandidate>();
+        foreach (var video in videos.Items?.Where(video => video.Id is { Length: > 0 }
                 && video.Snippet?.Title is { Length: > 0 }
-                && video.Status?.PrivacyStatus == "public")
-            .Select(video =>
+                && video.Status?.PrivacyStatus == "public") ?? [])
+        {
+            var parsed = TrackMetadataParser.Parse(video.Snippet!.Title, video.Snippet.ChannelTitle);
+            ProviderCatalogItem? catalogItem = null;
+            if (_catalogStore is not null)
             {
-                var parsed = TrackMetadataParser.Parse(video.Snippet.Title, video.Snippet.ChannelTitle);
-                return new TrackMatchSearchCandidate
+                catalogItem = await StorePublicVideoAsync(video, parsed, cancellationToken);
+            }
+            candidates.Add(new TrackMatchSearchCandidate
+            {
+                CandidateSource = "youtube", ExternalId = video.Id!,
+                Title = parsed.DisplayTitle,
+                Artist = parsed.DisplayArtist ?? video.Snippet.ChannelTitle,
+                ArtistCredits = parsed.ArtistCredits,
+                DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration),
+                ProviderCatalogItemId = catalogItem?.Id,
+                ProviderCatalogRevision = catalogItem?.Revision,
+                RawMetadata = System.Text.Json.JsonSerializer.Serialize(new TrackObservationMetadata
                 {
-                    CandidateSource = "youtube", ExternalId = video.Id,
+                    SourceType = "youtube", ExternalId = video.Id,
                     Title = parsed.DisplayTitle,
                     Artist = parsed.DisplayArtist ?? video.Snippet.ChannelTitle,
-                    ArtistCredits = parsed.ArtistCredits,
-                    DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration),
-                    RawMetadata = System.Text.Json.JsonSerializer.Serialize(new TrackObservationMetadata
-                    {
-                        SourceType = "youtube", ExternalId = video.Id,
-                        Title = parsed.DisplayTitle,
-                        Artist = parsed.DisplayArtist ?? video.Snippet.ChannelTitle,
-                        OriginalTitle = video.Snippet.Title,
-                        OriginalArtist = video.Snippet.ChannelTitle,
-                        ChannelTitle = video.Snippet.ChannelTitle,
-                        Description = video.Snippet.Description,
-                        DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration)
-                    })
-                };
-            }).ToArray() ?? [];
+                    OriginalTitle = video.Snippet.Title,
+                    OriginalArtist = video.Snippet.ChannelTitle,
+                    ChannelTitle = video.Snippet.ChannelTitle,
+                    Description = video.Snippet.Description,
+                    DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration)
+                })
+            });
+        }
+        return candidates;
     }
+
+    public async Task<ProviderCatalogItem?> GetPublicCatalogItemAsync(
+        PlatformAccountContext accountContext, string videoId, CancellationToken cancellationToken)
+    {
+        if (_catalogStore is null) return null;
+        var account = await RequireAccountAsync(accountContext, cancellationToken);
+        using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
+        var request = service.Videos.List("snippet,contentDetails,status");
+        request.Id = videoId;
+        request.MaxResults = 1;
+        var video = (await request.ExecuteAsync(cancellationToken)).Items?.SingleOrDefault();
+        if (video?.Id != videoId || video.Snippet?.Title is not { Length: > 0 }
+            || video.Status?.PrivacyStatus != "public")
+        {
+            await _catalogStore.MarkWithdrawnAsync("youtube", videoId, cancellationToken);
+            return null;
+        }
+        var parsed = TrackMetadataParser.Parse(video.Snippet.Title, video.Snippet.ChannelTitle);
+        return await StorePublicVideoAsync(video, parsed, cancellationToken);
+    }
+
+    private Task<ProviderCatalogItem> StorePublicVideoAsync(
+        Google.Apis.YouTube.v3.Data.Video video, ParsedTrackMetadata parsed, CancellationToken ct)
+        => _catalogStore!.RecordVerifiedAsync("youtube", video.Id!, CatalogVerificationMethods.YouTubePublicVideo,
+            new ProviderCatalogFacts
+            {
+                Title = parsed.DisplayTitle, Artist = parsed.DisplayArtist ?? video.Snippet?.ChannelTitle,
+                DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration),
+                ThumbnailUrl = video.Snippet?.Thumbnails?.High?.Url ?? video.Snippet?.Thumbnails?.Default__?.Url,
+                ProviderUrl = $"https://www.youtube.com/watch?v={Uri.EscapeDataString(video.Id!)}",
+                ArtistCredits = parsed.ArtistCredits.Select(name => new ArtistCreditMetadata { Name = name }).ToArray(),
+                VersionFlags = TrackVersionClassifier.Infer(parsed)
+            }, ct);
 
     private static int? ParseVideoDuration(string? duration)
     {
@@ -1167,6 +1241,7 @@ public class YouTubeService : IYouTubePlaylistClient
         ConnectedServiceAccount account, CancellationToken cancellationToken = default,
         bool disableAutomaticRetries = false)
     {
+        if (_serviceFactory is not null) return await _serviceFactory(account, cancellationToken);
         if (string.IsNullOrEmpty(account.EncryptedRefreshToken))
             throw new InvalidOperationException("No refresh token available");
 

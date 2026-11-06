@@ -511,7 +511,7 @@ public sealed class PlaylistLinkLifecycleTests
     }
 
     [Fact]
-    public async Task Attach_ReusesOwnUnlinkedCopyAndDropsDifferentOldTombstone()
+    public async Task Attach_ReusesOwnUnlinkedCopyAndRetainsDifferentOldTombstone()
     {
         await using var scope = await Scope.CreateAsync("youtube");
         var old = scope.AddMapping();
@@ -527,7 +527,8 @@ public sealed class PlaylistLinkLifecycleTests
             "youtube", "remote-playlist", "bidirectional", "combine", preview.PreviewToken, default);
 
         Assert.Equal(same.Id, Assert.Single(status.Links).MappingId);
-        Assert.Equal("active", (await scope.Db.ServicePlaylistMappings.SingleAsync()).State);
+        Assert.Equal("active", (await scope.Db.ServicePlaylistMappings.SingleAsync(link => link.Id == same.Id)).State);
+        Assert.Equal("unlinked", (await scope.Db.ServicePlaylistMappings.SingleAsync(link => link.Id == old.Id)).State);
         Assert.Equal(0, scope.Writer.Creates);
     }
 

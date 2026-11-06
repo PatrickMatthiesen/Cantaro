@@ -25,6 +25,21 @@ public sealed class TrackMatchQueueTests
     }
 
     [Fact]
+    public async Task EnqueueAndRecovery_IgnoreIdentityOnlyReference()
+    {
+        await using var fixture = await QueueFixture.CreateAsync();
+        var observation = fixture.AddPendingObservation();
+        observation.Title = "";
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Queue.EnqueueAsync(observation.Id, CancellationToken.None);
+        await fixture.Queue.RecoverPendingAsync(maximumAttempts: 5, CancellationToken.None);
+
+        Assert.Empty(await fixture.Db.TrackMatchQueueItems.ToListAsync());
+        Assert.Null(await fixture.Queue.TryClaimNextAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Claim_RespectsScheduleAndLeaseToken()
     {
         await using var fixture = await QueueFixture.CreateAsync();
@@ -105,6 +120,8 @@ public sealed class TrackMatchQueueTests
             var db = new ApplicationDbContext(
                 new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
+            db.Users.Add(TestUserFactory.Create(77, "queue-owner@example.test"));
+            await db.SaveChangesAsync();
             return new QueueFixture(
                 connection,
                 db,
@@ -117,6 +134,7 @@ public sealed class TrackMatchQueueTests
         {
             var observation = new TrackObservation
             {
+                OwnerUserId = 77,
                 Id = Guid.NewGuid(),
                 SourceType = "youtube",
                 ExternalId = Guid.NewGuid().ToString("N"),
