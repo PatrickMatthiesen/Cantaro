@@ -30,6 +30,6 @@
         "compose:up": "docker compose -p cantaro up"
     },
     "devDependencies": {
-        "postcss": "^8.5.15"
+        "postcss": "^8.5.32"
     }
 }
