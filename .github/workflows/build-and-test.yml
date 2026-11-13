@@ -30,7 +30,7 @@ jobs:
         with:
           filters: |
             backend:
-              - '.github/workflows/build-and-test.yml'
+              - '.github/workflows/**'
               - '.github/workflows/music-relation-benchmarks.yml'
               - 'Cantaro.slnx'
               - 'NuGet.config'
@@ -42,13 +42,13 @@ jobs:
               - 'tests/**/*.cs'
               - 'tests/**/*.csproj'
             frontend:
-              - '.github/workflows/build-and-test.yml'
+              - '.github/workflows/**'
               - 'package.json'
               - 'bun.lock'
               - 'src/Cantaro.ClientShared/**'
               - 'src/Cantaro.Web/**'
             extension:
-              - '.github/workflows/build-and-test.yml'
+              - '.github/workflows/**'
               - '.github/workflows/publish-extension.yml'
               - 'scripts/extension-release.test.ts'
               - 'package.json'
@@ -139,3 +139,15 @@ jobs:
 
       - name: Test extension release workflow
         run: bun run test:extension-release
+
+  required-ci:
+    name: Required CI
+    runs-on: ubuntu-latest
+    needs: [changes, backend, frontend, extension]
+    if: always()
+    steps:
+      - name: Require successful applicable checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e '.changes.result == "success" and ([.backend.result, .frontend.result, .extension.result] | all(. == "success" or . == "skipped"))'
