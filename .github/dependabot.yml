@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: bun
+    directories:
+      - /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: nuget
+    directories:
+      - /
+      - /src/Cantaro.Api
+      - /src/Cantaro.AppHost
+      - /src/Cantaro.MigrationService
+      - /src/Cantaro.ServiceDefaults
+      - /tests/Cantaro.Api.Tests
+      - /benchmarks/Cantaro.Benchmarks
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directories:
+      - /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
