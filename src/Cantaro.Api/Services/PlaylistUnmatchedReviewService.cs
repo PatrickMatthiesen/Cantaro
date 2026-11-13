@@ -63,7 +63,7 @@ public sealed class PlaylistUnmatchedReviewService(
         var link = await RequireLinkAsync(userId, playlistId, mappingId, ct);
         var entry = await RequireEntryAsync(playlistId, entryId, link, ct);
         if (entry.TrackObservation is { } observation
-            && !ProviderCatalogPolicy.HasOwnedSnapshot(observation, userId)) throw StaleChoice();
+            && observation.OwnerUserId != userId) throw StaleChoice();
         var searchText = query?.Trim();
         if (query is not null && (string.IsNullOrWhiteSpace(searchText) || searchText.Length > 200))
             throw new PlatformApiException("invalid_match_query", "Enter a search of up to 200 characters.", 400);
@@ -74,12 +74,7 @@ public sealed class PlaylistUnmatchedReviewService(
         var parsed = TrackObservationParser.ParseSearchHypotheses(evidence)[0];
         var suggestedQuery = string.Join(" ", new[] { parsed.SearchTitle, parsed.SearchArtist }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
-        var searched = searchText is null ? evidence : new TrackObservation
-        {
-            Id = evidence.Id, SourceType = evidence.SourceType, ExternalId = evidence.ExternalId,
-            Title = searchText, Artist = null, DurationSeconds = evidence.DurationSeconds,
-            MatchStatus = TrackMatchingStatuses.Pending
-        };
+        var searched = searchText is null ? evidence : evidence with { Title = searchText, Artist = null };
         var account = new PlatformAccountContext(userId, link.ConnectedServiceAccountId, link.ExternalAccountId);
         IReadOnlyList<TrackMatchSearchCandidate> candidates;
         long? searchedTokenVersion = null;
@@ -125,8 +120,10 @@ public sealed class PlaylistUnmatchedReviewService(
         CancellationToken ct)
     {
         if (entry.TrackObservation is not { SourceType: "youtube" } source) return;
-        if (!ProviderCatalogPolicy.HasOwnedSnapshot(source, entry.Playlist?.UserId)) return;
-        var metadata = TrackObservationParser.ReadMetadata(source) ?? new TrackObservationMetadata();
+        if (!ProviderCatalogPolicy.HasOwnedInput(source, entry.Playlist?.UserId)) return;
+        var input = ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow);
+        if (input is null) return;
+        var metadata = input.Metadata;
         // Empty is a successfully read description; null is evidence we never fetched.
         if (metadata.Description is not null) return;
         var video = await readVideo(source.ExternalId, ct);
@@ -135,7 +132,15 @@ public sealed class PlaylistUnmatchedReviewService(
         metadata.OriginalTitle = video.Title;
         metadata.OriginalArtist = video.ChannelTitle ?? metadata.OriginalArtist;
         metadata.ChannelTitle = video.ChannelTitle ?? metadata.ChannelTitle;
-        source.RawMetadata = JsonSerializer.Serialize(metadata);
+        // Only private input may retain authenticated response evidence. Public input
+        // is refreshed by the provider's independent catalog acquisition.
+        if (source.InputKind == ObservationInputKind.Public)
+        {
+            if (source.ProviderCatalogItem is not null) await db.Entry(source.ProviderCatalogItem).ReloadAsync(ct);
+            else if (source.ProviderCatalogItemId is not null) await db.Entry(source).Reference(o => o.ProviderCatalogItem).LoadAsync(ct);
+            return;
+        }
+        ObservationInput.SetPrivate(source, input.Title, input.Artist, input.DurationSeconds, input.ThumbnailUrl, metadata);
         source.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
     }
@@ -158,7 +163,7 @@ public sealed class PlaylistUnmatchedReviewService(
         var link = await RequireLinkAsync(userId, playlistId, mappingId, ct);
         var entry = await RequireEntryAsync(playlistId, entryId, link, ct, requireUnmatched: false);
         if (entry.TrackObservation is { } ownerObservation
-            && !ProviderCatalogPolicy.HasOwnedSnapshot(ownerObservation, userId)) throw StaleChoice();
+            && ownerObservation.OwnerUserId != userId) throw StaleChoice();
         var proof = ReadProof(candidateToken);
         if (proof.UserId != userId || proof.PlaylistId != playlistId || proof.MappingId != mappingId
             || proof.EntryId != entryId || proof.ConnectedServiceAccountId != link.ConnectedServiceAccountId
@@ -174,7 +179,7 @@ public sealed class PlaylistUnmatchedReviewService(
 
         // Keep canonical identity conflicts independent of destination eligibility,
         // including retries whose scoped confirmation is already persisted.
-        var existing = await db.TrackSourceIds.Include(source => source.ProviderCatalogItem).SingleOrDefaultAsync(source =>
+        var existing = await db.ProviderCatalogItems.SingleOrDefaultAsync(source =>
             source.SourceType == link.Service && source.ExternalId == proof.Candidate.ExternalId, ct);
         if (existing is not null && !ProviderCatalogPolicy.IsVerified(existing, DateTimeOffset.UtcNow)) existing = null;
         if (existing is not null && entry.TrackId is { } currentTrackId && existing.TrackId != currentTrackId)
@@ -191,7 +196,7 @@ public sealed class PlaylistUnmatchedReviewService(
             throw new PlatformApiException("unmatched_entry_not_found", "That playlist entry no longer needs a match.", 404);
 
         var sourceIdentity = entry.TrackObservation is { } savedObservation
-            ? await db.TrackSourceIds.AsNoTracking().Include(source => source.ProviderCatalogItem).SingleOrDefaultAsync(source =>
+            ? await db.ProviderCatalogItems.AsNoTracking().SingleOrDefaultAsync(source =>
                 source.SourceType == savedObservation.SourceType
                 && source.ExternalId == savedObservation.ExternalId, ct)
             : null;
@@ -216,7 +221,7 @@ public sealed class PlaylistUnmatchedReviewService(
                 if (sourceIdentity is not null && sourceIdentity.TrackId != existing.TrackId)
                     throw new PlatformApiException("recording_already_linked",
                         "The source recording is already linked to a different Cantaro track.", 409);
-                trackId = existing.TrackId;
+                trackId = existing.TrackId!.Value;
                 observation.TrackId = trackId;
                 observation.MatchStatus = TrackMatchingStatuses.Matched;
                 observation.ResolutionNotes = "Linked to an existing recording during playlist review.";
@@ -259,7 +264,8 @@ public sealed class PlaylistUnmatchedReviewService(
         // Reconciliation can replace the original entry with an existing canonical
         // entry. Authorize only the survivor in this requester's playlist and link.
         var retained = await db.PlaylistEntries.AsNoTracking()
-            .Include(item => item.TrackObservation).Include(item => item.Track)
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
+            .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
             .Where(item => item.PlaylistId == playlistId && item.TrackId == trackId)
             .OrderBy(item => item.Id == entryId ? 0 : 1).ThenBy(item => item.Position).FirstOrDefaultAsync(ct)
             ?? throw StaleChoice();
@@ -286,7 +292,7 @@ public sealed class PlaylistUnmatchedReviewService(
     }
 
     private async Task<(IReadOnlyList<TrackMatchSearchCandidate> Candidates, long TokenVersion)> SearchSpotifyAsync(
-        PlatformAccountContext account, TrackObservation evidence, string? query, CancellationToken ct)
+        PlatformAccountContext account, ObservationInput evidence, string? query, CancellationToken ct)
     {
         var token = await spotifyTokens.GetAccessTokenSnapshotAsync(account, false, ct);
         var profile = await spotifyApi.GetProfileAsync(token.Value, ct);
@@ -326,8 +332,8 @@ public sealed class PlaylistUnmatchedReviewService(
         ServicePlaylistMapping link, CancellationToken ct, bool requireUnmatched = true)
     {
         var entry = await db.PlaylistEntries
-            .Include(item => item.TrackObservation)
-            .Include(item => item.Track).ThenInclude(item => item!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
+            .Include(item => item.Track).ThenInclude(item => item!.ProviderItems)
             .SingleOrDefaultAsync(item => item.PlaylistId == playlistId && item.Id == entryId, ct);
         if (entry is null || requireUnmatched && await HasDestinationIdentityAsync(entry, link, ct)
             || (entry.TrackId is null && entry.TrackObservation is null))
@@ -337,8 +343,8 @@ public sealed class PlaylistUnmatchedReviewService(
 
     private Task<List<PlaylistEntry>> LoadEntriesAsync(Guid playlistId, CancellationToken ct)
         => db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == playlistId)
-            .Include(item => item.TrackObservation)
-            .Include(item => item.Track).ThenInclude(item => item!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
+            .Include(item => item.Track).ThenInclude(item => item!.ProviderItems)
             .OrderBy(item => item.Position).ToListAsync(ct);
 
     private async Task<bool> HasDestinationIdentityAsync(PlaylistEntry entry, ServicePlaylistMapping link, CancellationToken ct)
@@ -348,10 +354,9 @@ public sealed class PlaylistUnmatchedReviewService(
 
     private static PlaylistUnmatchedEntry ToDto(PlaylistEntry entry, int userId)
     {
-        var observation = ProviderCatalogPolicy.HasOwnedSnapshot(entry.TrackObservation, userId)
-            ? entry.TrackObservation : null;
+        var observation = ObservationInput.Read(entry.TrackObservation, userId, DateTimeOffset.UtcNow);
         var canonical = ProviderCatalogPolicy.SharedFacts(entry.Track, DateTimeOffset.UtcNow);
-        var metadata = observation is null ? null : TrackObservationParser.ReadMetadata(observation);
+        var metadata = observation is null ? null : observation.Metadata;
         var sourceUrl = observation is not null
             && System.Text.RegularExpressions.Regex.IsMatch(observation.ExternalId, "^[A-Za-z0-9_-]{1,128}$")
             ? CandidateUrl(observation.SourceType, observation.ExternalId) : null;
@@ -361,24 +366,13 @@ public sealed class PlaylistUnmatchedReviewService(
             canonical?.DurationSeconds ?? observation?.DurationSeconds, sourceUrl);
     }
 
-    private static TrackObservation BuildEvidence(PlaylistEntry entry, int userId)
+    private static ObservationInput BuildEvidence(PlaylistEntry entry, int userId)
     {
-        var source = ProviderCatalogPolicy.HasOwnedSnapshot(entry.TrackObservation, userId)
-            ? entry.TrackObservation : null;
-        var dto = ToDto(entry, userId);
-        var metadata = source is null ? new TrackObservationMetadata() :
-            TrackObservationParser.ReadMetadata(source) ?? new TrackObservationMetadata();
-        return new TrackObservation
-        {
-            Id = source?.Id ?? Guid.NewGuid(),
-            SourceType = source?.SourceType ?? "cantaro",
-            ExternalId = source?.ExternalId ?? entry.TrackId?.ToString() ?? "",
-            Title = source?.Title ?? dto.Title,
-            Artist = source?.Artist ?? dto.Artist,
-            DurationSeconds = source?.DurationSeconds ?? dto.DurationSeconds,
-            RawMetadata = JsonSerializer.Serialize(metadata),
-            MatchStatus = TrackMatchingStatuses.Pending
-        };
+        var source = ObservationInput.Read(entry.TrackObservation, userId, DateTimeOffset.UtcNow);
+        if (source is not null) return source;
+        var facts = ProviderCatalogPolicy.SharedFacts(entry.Track, DateTimeOffset.UtcNow);
+        return ObservationInput.FromFacts("cantaro", entry.TrackId?.ToString() ?? "",
+            facts ?? new ProviderCatalogFacts { Title = "Unknown track" });
     }
 
     private static string CandidateUrl(string service, string id) => service switch
@@ -393,11 +387,13 @@ public sealed class PlaylistUnmatchedReviewService(
         var value = JsonSerializer.Serialize(new
         {
             entry.Id, entry.PlaylistId, entry.TrackId, entry.TrackObservationId,
-            entry.TrackObservation?.UpdatedAt, entry.TrackObservation?.Title,
-            entry.TrackObservation?.Artist, entry.TrackObservation?.DurationSeconds,
-            entry.TrackObservation?.RawMetadata, ObservationTrackId = entry.TrackObservation?.TrackId,
-            entry.Track?.CanonicalMetadata, entry.Track?.SearchTitle, entry.Track?.SearchArtist, entry.Track?.Isrc,
-            entry.Track?.MbidRecording, entry.Track?.VersionFlags
+            entry.TrackObservation?.UpdatedAt,
+            Input = ObservationInput.Read(entry.TrackObservation, entry.OwnerUserId, DateTimeOffset.UtcNow),
+            ObservationTrackId = entry.TrackObservation?.TrackId,
+            Sources = entry.Track?.ProviderItems.OrderBy(item => item.SourceType, StringComparer.Ordinal)
+                .ThenBy(item => item.ExternalId, StringComparer.Ordinal)
+                .Select(item => new { item.Id, item.Revision, item.AssociationRevision, item.AssociationFactsRevision }),
+            entry.Track?.Isrc, entry.Track?.MbidRecording, entry.Track?.VersionFlags
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }

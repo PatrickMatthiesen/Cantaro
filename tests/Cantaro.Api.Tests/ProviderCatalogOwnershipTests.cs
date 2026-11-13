@@ -59,7 +59,7 @@ public sealed class ProviderCatalogOwnershipTests
 
         var migrator = db.GetService<IMigrator>();
         var previous = db.Database.GetMigrations().Last(migration =>
-            !migration.EndsWith("SeparateProviderCatalogAndObservationOwnership", StringComparison.Ordinal));
+            string.CompareOrdinal(migration, CatalogReductionMigrator.PreviousMigration) < 0);
         await migrator.MigrateAsync(previous);
 
         var originalId = Guid.NewGuid();
@@ -89,10 +89,9 @@ public sealed class ProviderCatalogOwnershipTests
                 createdAt, updatedAt, firstAddedAt, secondAddedAt, thirdAddedAt);
         }
 
-        await migrator.MigrateAsync();
+        await CatalogReductionMigrator.ApplyAsync(db);
         Assert.False(db.Database.HasPendingModelChanges());
         Assert.Empty(await db.ProviderCatalogItems.ToArrayAsync());
-        Assert.Empty(await db.TrackSourceIds.ToArrayAsync());
 
         var observations = await db.TrackObservations.OrderBy(observation => observation.OwnerUserId).ToArrayAsync();
         Assert.Equal(populated ? 3 : 0, observations.Length);
@@ -111,13 +110,12 @@ public sealed class ProviderCatalogOwnershipTests
                 Assert.Equal(originalTrackId, observation.TrackId);
                 Assert.Equal(createdAt, observation.CreatedAt);
                 Assert.Equal(updatedAt, observation.UpdatedAt);
-                Assert.Equal(string.Empty, observation.Title);
-                Assert.Null(observation.RawMetadata);
+                Assert.Null(observation.Title);
+                Assert.Equal(ObservationInputKind.Reference, observation.InputKind);
+                Assert.Null(observation.PrivateInputJson);
                 Assert.Null(observation.Artist);
                 Assert.Null(observation.ThumbnailUrl);
                 Assert.Null(observation.DurationSeconds);
-                Assert.Null(observation.NormalizedTitle);
-                Assert.Null(observation.NormalizedArtist);
                 Assert.Null(observation.ResolutionNotes);
                 Assert.Null(observation.AcceptedCandidateId);
                 Assert.Equal(0, observation.MatchAttemptCount);
@@ -151,15 +149,16 @@ public sealed class ProviderCatalogOwnershipTests
             await AssertDisconnectedAccountMakesNoHttpRequestAsync(db);
 
             ownerTwo.Title = "Bob refreshed private snapshot";
+            ownerTwo.InputKind = ObservationInputKind.Private;
             await db.SaveChangesAsync();
-            var error = await Assert.ThrowsAsync<PostgresException>(() => migrator.MigrateAsync(previous));
-            Assert.Contains("Unsafe downgrade", error.MessageText);
+            var error = await Assert.ThrowsAsync<NotSupportedException>(() => migrator.MigrateAsync(previous));
+            Assert.Contains("backup", error.Message);
             Assert.Equal(3, await db.TrackObservations.CountAsync());
         }
         else
         {
-            await migrator.MigrateAsync(previous);
-            await migrator.MigrateAsync();
+            await Assert.ThrowsAsync<NotSupportedException>(() => migrator.MigrateAsync(previous));
+            await CatalogReductionMigrator.ApplyAsync(db);
         }
     }
 
@@ -329,6 +328,6 @@ public sealed class ProviderCatalogOwnershipTests
     private static TrackObservation Observation(int owner, string title, Guid itemId) => new()
     {
         Id = Guid.NewGuid(), OwnerUserId = owner, SourceType = "youtube", ExternalId = "same", Title = title,
-        ProviderCatalogItemId = itemId, MatchStatus = "pending"
+        ProviderCatalogItemId = itemId, InputKind = ObservationInputKind.Private, MatchStatus = "pending"
     };
 }

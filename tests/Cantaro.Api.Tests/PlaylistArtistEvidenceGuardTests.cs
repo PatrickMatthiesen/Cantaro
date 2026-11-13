@@ -16,24 +16,24 @@ public sealed class PlaylistArtistEvidenceGuardTests
         var trackId = Guid.NewGuid();
         await using (var setup = new ApplicationDbContext(options))
         {
-            setup.Tracks.Add(new Track { Id = trackId });
-            setup.TrackSourceIds.AddRange(
-                new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-                    SourceType = "youtube", ExternalId = "source" },
-                new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-                    SourceType = "spotify", ExternalId = "established" });
+            setup.Tracks.Add(new Track {  Id = trackId  });
+            setup.ProviderCatalogItems.AddRange(
+                new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = trackId, SourceType = "youtube", ExternalId = "source", FactsJson = "{}" },
+                new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = trackId, SourceType = "spotify", ExternalId = "established", FactsJson = "{}" });
+            foreach (var item in setup.ProviderCatalogItems.Local) CatalogFixture.Verify(item, new ProviderCatalogFacts { Title = "Song", Artist = "Artist" });
             await setup.SaveChangesAsync();
         }
         await using var db = new ApplicationDbContext(options);
         var track = await db.Tracks.SingleAsync();
-        await db.TrackSourceIds.SingleAsync(s => s.SourceType == "youtube");
-        Assert.Single(track.SourceIds);
-        Assert.False(db.Entry(track).Collection(t => t.SourceIds).IsLoaded);
+        await db.ProviderCatalogItems.SingleAsync(s => s.SourceType == "youtube");
+        Assert.Single(track.ProviderItems);
+        Assert.False(db.Entry(track).Collection(t => t.ProviderItems).IsLoaded);
 
         var evidence = await PlaylistArtistEvidenceGuard.CaptureAsync(db, track, default);
         Assert.True(evidence.CorroboratesRecording(Candidate("established")));
-        var mapping = await db.TrackSourceIds.SingleAsync(s => s.SourceType == "spotify");
-        mapping.ExternalId = "late";
+        var mapping = await db.ProviderCatalogItems.SingleAsync(s => s.SourceType == "spotify");
+        db.ProviderCatalogItems.Remove(mapping);
+        db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "spotify", ExternalId = "late", FactsJson = "{}" });
         track.Isrc = "USABC2400001";
         track.MbidRecording = "late-recording";
         await db.SaveChangesAsync();
@@ -52,15 +52,14 @@ public sealed class PlaylistArtistEvidenceGuardTests
     {
         await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        var track = new Track { Id = Guid.NewGuid(),
+        var track = new Track {  Id = Guid.NewGuid(),
             Isrc = identifier == "isrc" ? "us-abc-24-00001" : null,
-            MbidRecording = identifier == "musicbrainz" ? " RECORDING-A " : null };
+            MbidRecording = identifier == "musicbrainz" ? " RECORDING-A " : null  };
         db.Tracks.Add(track);
         // Matching stable IDs must work without a provider mapping. A contradictory
         // ID must still reject an otherwise established provider recording key.
         if (contradictory)
-            db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = track.Id,
-                SourceType = "spotify", ExternalId = "candidate" });
+            db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "spotify", ExternalId = "candidate", FactsJson = "{}" });
         await db.SaveChangesAsync();
         var evidence = await PlaylistArtistEvidenceGuard.CaptureAsync(db, track, default);
         var candidate = Candidate("candidate",

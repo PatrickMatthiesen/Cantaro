@@ -57,6 +57,8 @@ public class YouTubePlaylistItemDto
 public sealed class YouTubeVideoMetadataDto
 {
     public required string VideoId { get; init; }
+    public Guid? ProviderCatalogItemId { get; init; }
+    public bool IsPublic { get; init; }
     public required string Title { get; init; }
     public string? ChannelTitle { get; init; }
     public string? Description { get; init; }
@@ -142,7 +144,7 @@ public class YouTubeService : IYouTubePlaylistClient
         try
         {
             using var youtubeService = await CreateYouTubeServiceAsync(account, cancellationToken);
-            var request = youtubeService.Videos.List("snippet,contentDetails,topicDetails");
+            var request = youtubeService.Videos.List("snippet,contentDetails,topicDetails,status");
             request.Id = videoId;
             request.MaxResults = 1;
             response = await request.ExecuteAsync(cancellationToken);
@@ -153,7 +155,7 @@ public class YouTubeService : IYouTubePlaylistClient
             return null;
         }
         var video = response.Items?.FirstOrDefault();
-        if (video is null) return null;
+        if (video?.Id != videoId) return null;
 
         int? durationSeconds = null;
         if (!string.IsNullOrWhiteSpace(video.ContentDetails?.Duration))
@@ -162,9 +164,16 @@ public class YouTubeService : IYouTubePlaylistClient
             catch (FormatException) { }
         }
 
+        ProviderCatalogItem? catalogItem = null;
+        if (video.Id == videoId && video.Status?.PrivacyStatus == "public" && video.Snippet?.Title is { Length: > 0 } && _catalogStore != null)
+            catalogItem = await StorePublicVideoAsync(video, TrackMetadataParser.Parse(video.Snippet.Title, video.Snippet.ChannelTitle), cancellationToken);
+        else if (_catalogStore != null)
+            await _catalogStore.MarkWithdrawnAsync("youtube", videoId, cancellationToken);
         return new YouTubeVideoMetadataDto
         {
             VideoId = video.Id,
+            ProviderCatalogItemId = catalogItem?.Id,
+            IsPublic = video.Status?.PrivacyStatus == "public",
             Title = video.Snippet?.Title ?? videoId,
             ChannelTitle = video.Snippet?.ChannelTitle,
             Description = video.Snippet?.Description,
@@ -367,7 +376,7 @@ public class YouTubeService : IYouTubePlaylistClient
             var catalogById = new Dictionary<string, Guid>(StringComparer.Ordinal);
             if (videoIds.Length > 0)
             {
-                var videosRequest = service.Videos.List("snippet,contentDetails,status");
+                var videosRequest = service.Videos.List("snippet,contentDetails,topicDetails,status");
                 videosRequest.Id = string.Join(',', videoIds);
                 videosRequest.MaxResults = videoIds.Length;
                 var videos = await videosRequest.ExecuteAsync(cancellationToken);
@@ -401,9 +410,9 @@ public class YouTubeService : IYouTubePlaylistClient
                 if (!structurallyReadable) complete = false;
                 items.Add(new SyncReadItem(videoId ?? $"!unavailable:{playlistItemId ?? position.ToString(CultureInfo.InvariantCulture)}",
                     playlistItemId ?? $"!missing-playlist-item:{position.ToString(CultureInfo.InvariantCulture)}",
-                    item?.Snippet?.Title ?? "Unavailable YouTube item",
-                    item?.Snippet?.VideoOwnerChannelTitle,
-                    item?.Snippet?.Thumbnails?.Medium?.Url ?? item?.Snippet?.Thumbnails?.Default__?.Url,
+                    video?.Snippet?.Title ?? item?.Snippet?.Title ?? "Unavailable YouTube item",
+                    video?.Snippet?.ChannelTitle ?? item?.Snippet?.VideoOwnerChannelTitle,
+                    video?.Snippet?.Thumbnails?.Medium?.Url ?? video?.Snippet?.Thumbnails?.Default__?.Url,
                     available ? ParseVideoDuration(video!.ContentDetails?.Duration) : null,
                     position, available, available ? video!.Snippet?.Description : null,
                     catalogById.TryGetValue(videoId ?? string.Empty, out var catalogId) ? catalogId : null));
@@ -438,7 +447,7 @@ public class YouTubeService : IYouTubePlaylistClient
             && !string.IsNullOrWhiteSpace(title);
 
     internal async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchVideoCandidatesAsync(
-        PlatformAccountContext accountContext, TrackObservation evidence, CancellationToken cancellationToken)
+        PlatformAccountContext accountContext, ObservationInput evidence, CancellationToken cancellationToken)
     {
         var account = await RequireAccountAsync(accountContext, cancellationToken);
         using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
@@ -460,7 +469,7 @@ public class YouTubeService : IYouTubePlaylistClient
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray() ?? [];
         }
         if (ids.Length == 0) return [];
-        var videosRequest = service.Videos.List("snippet,contentDetails,status");
+        var videosRequest = service.Videos.List("snippet,contentDetails,topicDetails,status");
         videosRequest.Id = string.Join(',', ids);
         videosRequest.MaxResults = ids.Length;
         var videos = await videosRequest.ExecuteAsync(cancellationToken);
@@ -512,7 +521,7 @@ public class YouTubeService : IYouTubePlaylistClient
         if (_catalogStore is null) return null;
         var account = await RequireAccountAsync(accountContext, cancellationToken);
         using var service = await CreateYouTubeServiceAsync(account, cancellationToken);
-        var request = service.Videos.List("snippet,contentDetails,status");
+        var request = service.Videos.List("snippet,contentDetails,topicDetails,status");
         request.Id = videoId;
         request.MaxResults = 1;
         var video = (await request.ExecuteAsync(cancellationToken)).Items?.SingleOrDefault();
@@ -532,6 +541,9 @@ public class YouTubeService : IYouTubePlaylistClient
             new ProviderCatalogFacts
             {
                 Title = parsed.DisplayTitle, Artist = parsed.DisplayArtist ?? video.Snippet?.ChannelTitle,
+                OriginalTitle = video.Snippet?.Title, ChannelTitle = video.Snippet?.ChannelTitle,
+                ChannelId = video.Snippet?.ChannelId, Description = video.Snippet?.Description,
+                CategoryId = video.Snippet?.CategoryId, TopicCategories = video.TopicDetails?.TopicCategories?.ToArray() ?? [],
                 DurationSeconds = ParseVideoDuration(video.ContentDetails?.Duration),
                 ThumbnailUrl = video.Snippet?.Thumbnails?.High?.Url ?? video.Snippet?.Thumbnails?.Default__?.Url,
                 ProviderUrl = $"https://www.youtube.com/watch?v={Uri.EscapeDataString(video.Id!)}",
@@ -1171,9 +1183,7 @@ public class YouTubeService : IYouTubePlaylistClient
             {
                 VideoId = videoId,
                 Title = item.Snippet.Title,
-                Description = string.IsNullOrWhiteSpace(video.Description)
-                    ? item.Snippet.Description
-                    : video.Description,
+                Description = video.Description,
                 ThumbnailUrl = item.Snippet.Thumbnails?.Medium?.Url
                     ?? item.Snippet.Thumbnails?.Default__?.Url,
                 ChannelTitle = item.Snippet.VideoOwnerChannelTitle,
@@ -1194,7 +1204,7 @@ public class YouTubeService : IYouTubePlaylistClient
             return [];
         }
 
-        var request = youtubeService.Videos.List("snippet,contentDetails,status");
+        var request = youtubeService.Videos.List("snippet,contentDetails,topicDetails,status");
         request.Id = string.Join(",", videoIds);
         request.MaxResults = videoIds.Count;
 

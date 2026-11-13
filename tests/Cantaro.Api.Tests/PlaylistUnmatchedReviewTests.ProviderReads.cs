@@ -28,27 +28,27 @@ public sealed partial class PlaylistUnmatchedReviewTests
     public async Task ProductionSpotifyRead_FirstVerificationDoesNotPromoteScalarsOrCreateRecording(string? isrc)
     {
         await using var fixture = await ProductionSpotifyReadScope.CreateAsync(isrc);
-        var before = await fixture.Db.Tracks.AsNoTracking().SingleAsync();
+        var before = await fixture.Db.Tracks.Include(track => track.ProviderItems).AsNoTracking().SingleAsync();
         await fixture.SyncAsync();
-        var after = await fixture.Db.Tracks.AsNoTracking().SingleAsync(item => item.Id == before.Id);
-        Assert.Equal((before.Isrc, before.CanonicalMetadata), (after.Isrc, after.CanonicalMetadata));
-        Assert.Single(await fixture.Db.Tracks.AsNoTracking().ToArrayAsync());
+        var after = await fixture.Db.Tracks.Include(track => track.ProviderItems).AsNoTracking().SingleAsync(item => item.Id == before.Id);
+        Assert.Equal((before.Isrc, CatalogFixture.FactsJson(before)), (after.Isrc, CatalogFixture.FactsJson(after)));
+        Assert.Single(await fixture.Db.Tracks.Include(track => track.ProviderItems).AsNoTracking().ToArrayAsync());
         await fixture.AssertNoDestinationIngestionAsync();
     }
 
     private static async Task AssertProductionReadIsolationAsync(string? isrc, bool canonicalOnly, bool postgres = false)
     {
         await using var fixture = await ProductionSpotifyReadScope.CreateAsync(isrc, canonicalOnly, postgres);
-        var before = await fixture.Db.Tracks.AsNoTracking().SingleAsync();
+        var before = await fixture.Db.Tracks.Include(track => track.ProviderItems).AsNoTracking().SingleAsync();
         for (var pass = 0; pass < 2; pass++) await fixture.SyncAsync();
         await fixture.AssertOriginalMembershipAsync();
         Assert.Equal(["chosen-id"], fixture.Handler.RemoteIds);
         Assert.Single(fixture.Writer.Writes);
         Assert.DoesNotContain(fixture.Writer.Writes, ids => ids.Length == 0);
         await fixture.AssertNoDestinationIngestionAsync();
-        var after = await fixture.Db.Tracks.AsNoTracking().SingleAsync();
-        Assert.Equal((before.Isrc, before.CanonicalMetadata, before.MbidRecording),
-            (after.Isrc, after.CanonicalMetadata, after.MbidRecording));
+        var after = await fixture.Db.Tracks.Include(track => track.ProviderItems).AsNoTracking().SingleAsync();
+        Assert.Equal((before.Isrc, CatalogFixture.FactsJson(before), before.MbidRecording),
+            (after.Isrc, CatalogFixture.FactsJson(after), after.MbidRecording));
         Assert.True(fixture.Handler.Reads >= 5); // initial, pre-write, verification, then repeated current/pre-write reads
     }
 
@@ -154,11 +154,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
             && item.SourceType == "spotify" && item.ExternalId == "fresh-id");
         Assert.Equal(source.TrackId, entries[1].TrackId);
         Assert.Equal(fixture.Account.UserId, source.OwnerUserId);
-        Assert.Equal("USNEW2400001", TrackObservationParser.ReadMetadata(source)!.Isrc);
-        var privateTrack = await fixture.Db.Tracks.SingleAsync(item => item.Id == source.TrackId);
-        Assert.Null(privateTrack.PreferredCatalogItemId);
+        Assert.Equal("USNEW2400001", TrackObservationParser.ReadMetadata(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!)!.Isrc);
+        var privateTrack = await fixture.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == source.TrackId);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(privateTrack, DateTimeOffset.UtcNow)?.Id);
         Assert.Null(privateTrack.Isrc);
-        Assert.False(await fixture.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "fresh-id"));
+        Assert.False(await fixture.Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "fresh-id"));
         Assert.False(await fixture.Db.TrackArtistCredits.AnyAsync(item => item.TrackId == source.TrackId));
         await fixture.AssertNoDestinationIngestionAsync();
         Assert.Equal(["chosen-id", "fresh-id"], fixture.Handler.RemoteIds);
@@ -232,13 +232,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
             && item.SourceType == "spotify" && item.ExternalId == "chosen-id");
         Assert.Equal(source.TrackId, imported.TrackId);
         Assert.Equal(fixture.Account.UserId, source.OwnerUserId);
-        Assert.Equal("USABC2400001", TrackObservationParser.ReadMetadata(source)!.Isrc);
-        var privateTrack = await fixture.Db.Tracks.SingleAsync(item => item.Id == source.TrackId);
-        Assert.Null(privateTrack.PreferredCatalogItemId);
+        Assert.Equal("USABC2400001", TrackObservationParser.ReadMetadata(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!)!.Isrc);
+        var privateTrack = await fixture.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == source.TrackId);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(privateTrack, DateTimeOffset.UtcNow)?.Id);
         Assert.Null(privateTrack.Isrc);
-        Assert.False(await fixture.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "chosen-id"));
+        Assert.False(await fixture.Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "chosen-id"));
         Assert.False(await fixture.Db.TrackArtistCredits.AnyAsync(item => item.TrackId == source.TrackId));
-        Assert.Equal("USABC2400002", (await fixture.Db.Tracks.SingleAsync(item => item.Id == fixture.Scope.Entry.TrackId)).Isrc);
+        Assert.Equal("USABC2400002", (await fixture.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == fixture.Scope.Entry.TrackId)).Isrc);
     }
 
     [Fact]
@@ -290,15 +290,16 @@ public sealed partial class PlaylistUnmatchedReviewTests
         }
         public async Task ChangeMetadataAsync(string change)
         {
-            var track = await Db.Tracks.SingleAsync(item => item.Id == Scope.Entry.TrackId);
-            if (change == "artwork") TrackArtworkUpdater.FillMissingCanonicalThumbnail(track, "https://example.invalid/local-art.jpg");
-            else if (change == "title") track.SearchTitle += " updated";
+            var track = await Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == Scope.Entry.TrackId);
+            if (change == "artwork") CatalogFixture.SetArtwork(track, "https://example.invalid/local-art.jpg");
+            else if (change == "title") CatalogFixture.SetTitle(track, (CatalogFixture.Facts(track)?.Title ?? "") + " updated");
             else
             {
-                var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata!)!;
-                metadata.DurationSeconds++;
-                track.CanonicalMetadata = JsonSerializer.Serialize(metadata);
+                var metadata = System.Text.Json.Nodes.JsonNode.Parse(CatalogFixture.FactsJson(track) ?? "{\"Title\":\"Everything Goes On\",\"Artist\":\"Porter Robinson\",\"DurationSeconds\":160}")!.AsObject();
+                metadata["DurationSeconds"] = metadata["DurationSeconds"]!.GetValue<int>() + 1;
+                CatalogFixture.SetFacts(track, metadata.ToJsonString());
             }
+            await CatalogFixture.AddNewItemsAsync(Db);
             await Db.SaveChangesAsync();
         }
         public async Task AssertOriginalMembershipAsync(bool requireSuccess = true)
@@ -310,17 +311,17 @@ public sealed partial class PlaylistUnmatchedReviewTests
         }
         public async Task AssertNoDestinationIngestionAsync()
         {
-            Assert.False(await Db.TrackSourceIds.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "chosen-id"));
+            Assert.False(await Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "spotify" && item.ExternalId == "chosen-id"));
             Assert.False(await Db.TrackObservations.AnyAsync(item => item.SourceType == "spotify"
                 && item.ExternalId == "chosen-id" && item.TrackId != null));
             Assert.False(await Db.TrackArtistCredits.AnyAsync(item => item.TrackId == Scope.Entry.TrackId));
-            Assert.NotEqual("USABC2400001", (await Db.Tracks.AsNoTracking().SingleAsync(item => item.Id == Scope.Entry.TrackId)).Isrc);
+            Assert.NotEqual("USABC2400001", (await Db.Tracks.Include(track => track.ProviderItems).AsNoTracking().SingleAsync(item => item.Id == Scope.Entry.TrackId)).Isrc);
         }
         public static async Task<ProductionSpotifyReadScope> CreateAsync(string? isrc = null, bool canonicalOnly = false, bool postgres = false)
         {
             var scope = await Scope.CreateAsync("spotify", relational: !postgres, postgres: postgres);
             scope.Entry.Track!.Isrc = isrc;
-            scope.Entry.TrackObservation!.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            scope.Entry.TrackObservation!.PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
             {
                 SourceType = "youtube", ExternalId = "source-video", Title = "Everything Goes On",
                 OriginalTitle = "Everything Goes On", Artist = "Porter Robinson", OriginalArtist = "Porter Robinson",
@@ -333,7 +334,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             var account = await scope.Db.ConnectedServiceAccounts.SingleAsync();
             account.EncryptedAccessToken = encryption.Encrypt("read-token");
             account.Scopes = "playlist-read-private playlist-modify-private";
-            await scope.Db.SaveChangesAsync();
+        await scope.Db.SaveChangesAsync();
             scope.Db.ChangeTracker.Clear();
             await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id,
                 scope.Token(new TrackMatchSearchCandidate { CandidateSource = "spotify", ExternalId = "chosen-id",

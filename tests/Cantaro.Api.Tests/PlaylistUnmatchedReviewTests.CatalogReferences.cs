@@ -21,9 +21,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await fixture.SyncAsync();
         Assert.Single(fixture.Writer.Writes);
         var observation = await fixture.Db.TrackObservations.SingleAsync();
-        observation.Title = "";
+        observation.InputKind = ObservationInputKind.Reference;
+        observation.Title = null;
+        observation.DurationSeconds = null;
+        observation.ThumbnailUrl = null;
         observation.Artist = null;
-        observation.RawMetadata = null;
+        observation.PrivateInputJson = null;
         observation.SourceType = "spotify";
         observation.ExternalId = "chosen-id";
         var link = await fixture.Db.ServicePlaylistMappings.SingleAsync();
@@ -39,7 +42,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await fixture.SyncAsync();
         Assert.Equal("success", (await fixture.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync()).LastSyncStatus);
         Assert.Single(fixture.Writer.Writes);
-        Assert.Empty(await fixture.Db.TrackSourceIds.ToListAsync());
+        Assert.Empty(await fixture.Db.ProviderCatalogItems.ToListAsync());
         Assert.Empty(await fixture.Db.TrackMatchQueueItems.ToListAsync());
 
         fixture.Handler.RemoteIds = [];
@@ -51,7 +54,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
         Assert.Empty(fixture.Handler.RemoteIds);
         Assert.Single(fixture.Writer.Writes);
-        Assert.Equal("", (await fixture.Db.TrackObservations.AsNoTracking().SingleAsync()).Title);
+        Assert.Null((await fixture.Db.TrackObservations.AsNoTracking().SingleAsync()).Title);
         Assert.Equal(1, (await fixture.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync()).UnresolvedCount);
     }
 
@@ -61,8 +64,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using var fixture = await ProductionSpotifyReadScope.CreateAsync();
         await fixture.SyncAsync();
         var observation = await fixture.Db.TrackObservations.SingleAsync();
-        observation.Title = "";
-        observation.RawMetadata = null;
+        observation.InputKind = ObservationInputKind.Reference;
+        observation.Title = null;
+        observation.DurationSeconds = null;
+        observation.ThumbnailUrl = null;
+        observation.PrivateInputJson = null;
         observation.Artist = null;
         observation.SourceType = "spotify";
         observation.ExternalId = "chosen-id";
@@ -74,8 +80,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             fixture.Provider.ReadAsync(fixture.Account, "playlist", default));
 
         Assert.Equal("remote_changed", failure.Code);
-        Assert.Equal("", (await fixture.Db.TrackObservations.AsNoTracking().SingleAsync()).Title);
-        Assert.Empty(await fixture.Db.TrackSourceIds.ToListAsync());
+        Assert.Null((await fixture.Db.TrackObservations.AsNoTracking().SingleAsync()).Title);
+        Assert.Empty(await fixture.Db.ProviderCatalogItems.ToListAsync());
         Assert.Single(await fixture.Db.PlaylistExportAttempts.ToListAsync());
     }
 }

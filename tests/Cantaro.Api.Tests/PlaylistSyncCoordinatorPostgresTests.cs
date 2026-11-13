@@ -215,7 +215,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
         {
             var id = Guid.NewGuid();
             _tracks.Add(name, id);
-            Db.Tracks.Add(new Track { Id = id, SearchTitle = name });
+            Db.Tracks.Add(new Track {  Id = id });
             return id;
         }
 
@@ -228,8 +228,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
             };
             Db.Playlists.Add(playlist);
             for (var index = 0; index < trackIds.Count; index++)
-                Db.PlaylistEntries.Add(new PlaylistEntry
-                {
+                Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId,
                     Id = Guid.NewGuid(), PlaylistId = playlist.Id, TrackId = trackIds[index], Position = index
                 });
             return playlist;

@@ -17,7 +17,7 @@ internal sealed record PlaylistMatchingScope(int UserId, Guid PlaylistId, Guid M
 internal static class PlaylistMatchingProgress
 {
     // Reject legacy checkpoints, including version 1 results without account binding.
-    public const int CurrentProofVersion = 3;
+    public const int CurrentProofVersion = 4;
 
     public static Dictionary<Guid, PlaylistMatchingResult> Read(string? json)
     {
@@ -30,17 +30,26 @@ internal static class PlaylistMatchingProgress
     {
         var observation = entry.TrackObservation;
         var track = entry.Track;
+        var displaySource = ProviderCatalogPolicy.SharedSource(track, DateTimeOffset.UtcNow);
         var evidence = JsonSerializer.Serialize(new
         {
-            entry.TrackId, entry.TrackObservationId,
-            observation?.Title, observation?.Artist, observation?.DurationSeconds,
-            observation?.RawMetadata, observation?.OwnerUserId, ObservationTrackId = observation?.TrackId,
-            track?.CanonicalMetadata, track?.SearchTitle, track?.SearchArtist, track?.Isrc,
-            track?.MbidRecording, track?.VersionFlags,
-            PreferredCatalogItemId = includeProviderMappings ? track?.PreferredCatalogItemId : null,
-            Sources = includeProviderMappings ? track?.SourceIds.OrderBy(source => source.SourceType).ThenBy(source => source.ExternalId)
+            entry.OwnerUserId, entry.TrackId, entry.TrackObservationId,
+            ObservationOwnerUserId = observation?.OwnerUserId, observation?.InputKind, ObservationTrackId = observation?.TrackId,
+            observation?.SourceType, observation?.ExternalId, observation?.ProviderCatalogItemId,
+            // Public metadata is referenced by its facts generation. Lease
+            // renewal alone must not erase an otherwise unchanged manual choice.
+            InputRevision = observation?.InputKind == ObservationInputKind.Public
+                ? observation.ProviderCatalogItem?.Revision : null,
+            Title = observation?.InputKind == ObservationInputKind.Private ? observation.Title : null,
+            Artist = observation?.InputKind == ObservationInputKind.Private ? observation.Artist : null,
+            DurationSeconds = observation?.InputKind == ObservationInputKind.Private ? observation.DurationSeconds : null,
+            PrivateInputJson = observation?.InputKind == ObservationInputKind.Private ? observation.PrivateInputJson : null,
+            track?.Isrc, track?.MbidRecording, track?.VersionFlags,
+            DisplaySourceId = displaySource?.Id, DisplayFactsRevision = displaySource?.Revision,
+            Sources = includeProviderMappings ? track?.ProviderItems.OrderBy(source => source.SourceType, StringComparer.Ordinal)
+                .ThenBy(source => source.ExternalId, StringComparer.Ordinal)
                 .Select(source => new { source.SourceType, source.ExternalId, source.AssociationState,
-                    source.Revision, source.ProviderCatalogItemId, source.CatalogRevision,
+                    source.Id, source.Revision, source.AssociationRevision, source.AssociationFactsRevision,
                     Current = ProviderCatalogPolicy.IsVerified(source, DateTimeOffset.UtcNow) }) : null
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence)));

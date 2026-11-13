@@ -27,7 +27,6 @@ public sealed partial class PlaylistUnmatchedReviewTests
         scope.Entry.Position = 1;
         var first = scope.AddEntry("Other song", "other-source");
         first.Position = 0;
-        first.Track!.SearchArtist = "Other artist";
         first.TrackObservation!.Artist = "Other artist";
         scope.Link.BaselineName = scope.Playlist.Name;
         scope.Link.BaselineJson = new PlaylistSyncBaseline([]).Serialize();
@@ -46,7 +45,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await AssertBusyAsync(() => review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
                 scope.Entry.Id, token, default));
             Assert.Equal(before, (await confirmDb.ServicePlaylistMappings.AsNoTracking().SingleAsync()).MatchingProgressJson);
-            Assert.False(await confirmDb.TrackSourceIds.AnyAsync(source => source.ExternalId == "chosen-id"));
+            Assert.False(await confirmDb.ProviderCatalogItems.AnyAsync(source => source.ExternalId == "chosen-id"));
             Assert.Equal(scope.Entry.TrackId, (await confirmDb.PlaylistEntries.AsNoTracking()
                 .SingleAsync(entry => entry.Id == scope.Entry.Id)).TrackId);
         }
@@ -144,7 +143,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using (var syncDb = scope.NewContext())
         {
             await AssertReleasedAsync(syncDb, scope.Playlist.Id);
-            Assert.False(await syncDb.TrackSourceIds.AnyAsync(source => source.ExternalId == "chosen-id"));
+            Assert.False(await syncDb.ProviderCatalogItems.AnyAsync(source => source.ExternalId == "chosen-id"));
             Assert.Empty(PlaylistMatchingProgress.Read((await syncDb.ServicePlaylistMappings.AsNoTracking()
                 .SingleAsync()).MatchingProgressJson));
             var entry = await syncDb.PlaylistEntries.AsNoTracking().SingleAsync();
@@ -191,7 +190,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         }
         await using var retryDb = scope.NewContext();
         await AssertReleasedAsync(retryDb, scope.Playlist.Id);
-        Assert.False(await retryDb.TrackSourceIds.AnyAsync(source => source.ExternalId == "chosen-id"));
+        Assert.False(await retryDb.ProviderCatalogItems.AnyAsync(source => source.ExternalId == "chosen-id"));
         Assert.Empty(PlaylistMatchingProgress.Read((await retryDb.ServicePlaylistMappings.AsNoTracking()
             .SingleAsync()).MatchingProgressJson));
         // This verifies release of both the process gate and the database lease.
@@ -219,7 +218,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await AssertBusyAsync(() => Coordinator(confirmDb, provider, new ReviewWriter(provider))
             .RunAsync(scope.UserId, scope.Playlist.Id, "spotify", default));
         Assert.Equal(otherLease, (await scope.Db.Playlists.AsNoTracking().SingleAsync()).SyncLeaseId);
-        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(source => source.ExternalId == "chosen-id"));
+        Assert.False(await scope.Db.ProviderCatalogItems.AnyAsync(source => source.ExternalId == "chosen-id"));
         await scope.Db.Playlists.ExecuteUpdateAsync(setters => setters
             .SetProperty(item => item.SyncLeaseExpiresAt, DateTimeOffset.UtcNow.AddSeconds(-1)));
         await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, default);

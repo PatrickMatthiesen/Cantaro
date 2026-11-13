@@ -43,16 +43,15 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
                 scope.Entry.Id, choice.CandidateToken, default);
             var playlist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId, Name = "Owned alternative" };
-            var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = scope.Entry.TrackId,
+            var observation = new TrackObservation {  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = scope.Entry.TrackId,
                 SourceType = "youtube", ExternalId = "alternative-a", Title = "Everything Goes On",
-                MatchStatus = TrackMatchingStatuses.Matched };
-            scope.Db.PlaylistEntries.Add(new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist,
+                MatchStatus = TrackMatchingStatuses.Matched  };
+            scope.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId, Id = Guid.NewGuid(), Playlist = playlist,
                 PlaylistId = playlist.Id, TrackId = scope.Entry.TrackId, TrackObservation = observation,
                 TrackObservationId = observation.Id });
         }
-        var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Shelter" };
-        var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
-            SourceType = "youtube", ExternalId = choice.ExternalId };
+        var other = new Track {  Id = Guid.NewGuid() };
+        var mapping = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = other.Id, SourceType = "youtube", ExternalId = choice.ExternalId, FactsJson = "{}" };
         scope.VerifyMapping(mapping, "Shelter");
         scope.Db.AddRange(other, mapping);
         await scope.Db.SaveChangesAsync();
@@ -61,7 +60,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, choice.CandidateToken, default));
 
         Assert.Equal("recording_already_linked", error.Code);
-        Assert.Equal(other.Id, (await scope.Db.TrackSourceIds.SingleAsync()).TrackId);
+        Assert.Equal(other.Id, (await scope.Db.ProviderCatalogItems.SingleAsync()).TrackId);
         Assert.Equal(alreadyConfirmed, !string.IsNullOrEmpty((await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson));
         Assert.Equal(scope.Entry.TrackId, scope.Entry.TrackObservation!.TrackId);
     }
@@ -72,11 +71,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var trackId = scope.Entry.TrackId!.Value;
         var source = scope.Entry.TrackObservation!;
         var sourceId = source.Id;
-        scope.Db.TrackSourceIds.AddRange(
-            new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-                SourceType = source.SourceType, ExternalId = source.ExternalId, OriginMetadata = "original-source" },
-            new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-                SourceType = "youtube", ExternalId = "canonical-video-a", OriginMetadata = "original-canonical" });
+        scope.Db.ProviderCatalogItems.AddRange(
+            new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = trackId, SourceType = source.SourceType, ExternalId = source.ExternalId, FactsJson = "{}" },
+            new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = trackId, SourceType = "youtube", ExternalId = "canonical-video-a", FactsJson = "{}" });
         if (canonicalOnly)
         {
             scope.Entry.TrackObservationId = null;
@@ -90,12 +87,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
             UserId = otherUser, Service = "youtube", ConnectedServiceAccountId = otherAccount.Id,
             ExternalAccountId = otherAccount.ExternalAccountId, ServicePlaylistId = "other-playlist",
             State = "active", SyncMode = "bidirectional" };
-        var otherEntry = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = otherPlaylist.Id, TrackId = trackId };
+        var otherEntry = new PlaylistEntry { OwnerUserId = otherPlaylist.UserId, Id = Guid.NewGuid(), PlaylistId = otherPlaylist.Id, TrackId = trackId };
         scope.Db.AddRange(TestUserFactory.Create(otherUser, "scope-other@example.com"),
             otherPlaylist, otherAccount, otherLink, otherEntry);
         await scope.Db.SaveChangesAsync();
-        var originals = await scope.Db.TrackSourceIds.AsNoTracking().OrderBy(item => item.ExternalId)
-            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.OriginMetadata }).ToArrayAsync();
+        var originals = await scope.Db.ProviderCatalogItems.AsNoTracking().OrderBy(item => item.ExternalId)
+            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.AssociationEvidenceJson }).ToArrayAsync();
         var handler = new DestinationVideoHandler();
         var review = scope.YouTubeSearchReview(handler);
         var searched = await review.SearchAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
@@ -108,10 +105,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
             scope.Entry.Id, choice.CandidateToken, default);
 
-        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "youtube"
+        Assert.False(await scope.Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "youtube"
             && item.ExternalId == "public-video-b"));
-        Assert.Equal(originals, await scope.Db.TrackSourceIds.AsNoTracking().OrderBy(item => item.ExternalId)
-            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.OriginMetadata }).ToArrayAsync());
+        Assert.Equal(originals, await scope.Db.ProviderCatalogItems.AsNoTracking().OrderBy(item => item.ExternalId)
+            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.AssociationEvidenceJson }).ToArrayAsync());
         Assert.Equal(trackId, (await scope.Db.TrackObservations.SingleAsync(item => item.Id == sourceId)).TrackId);
         var saved = await scope.Db.ServicePlaylistMappings.SingleAsync(item => item.Id == scope.Link.Id);
         var proof = Assert.Single(PlaylistMatchingProgress.Read(saved.MatchingProgressJson)).Value;
@@ -129,10 +126,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Null(await otherProvider.ResolveAsync(new(scope.UserId, 52, "other-account"), scope.Entry, default));
 
         // Later imports of B use ordinary identity resolution, not the confirming user's proof.
-        var imported = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "youtube", ExternalId = choice.ExternalId,
+        var imported = new TrackObservation {  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), OwnerUserId = otherUser, SourceType = "youtube", ExternalId = choice.ExternalId,
             Title = "Shelter", Artist = "Porter Robinson", DurationSeconds = 160,
-            MatchStatus = TrackMatchingStatuses.Pending };
-        scope.Db.PlaylistEntries.Add(new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = otherPlaylist.Id,
+            MatchStatus = TrackMatchingStatuses.Pending  };
+        scope.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = otherPlaylist.UserId, Id = Guid.NewGuid(), PlaylistId = otherPlaylist.Id,
             TrackObservation = imported, TrackObservationId = imported.Id, Position = 1 });
         await scope.Db.SaveChangesAsync();
         Assert.Null(await new TrackIdentityResolver(scope.Db).ResolveExistingAsync(
@@ -156,15 +153,15 @@ public sealed partial class PlaylistUnmatchedReviewTests
             Assert.Equal(trackId, Assert.Single(PlaylistSyncBaseline.Parse(link.BaselineJson)!.Items).TrackId);
             Assert.Equal(proof, Assert.Single(PlaylistMatchingProgress.Read(link.MatchingProgressJson)).Value);
             Assert.Equal(scope.Entry.Id, (await scope.Db.PlaylistEntries.SingleAsync(item => item.PlaylistId == scope.Playlist.Id)).Id);
-            Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "youtube"
+            Assert.False(await scope.Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "youtube"
                 && item.ExternalId == "public-video-b"));
         }
         Assert.Equal(["public-video-b"], Assert.Single(writer.Writes));
         Assert.Equal(0, provider.Searches);
         await review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
             scope.Entry.Id, choice.CandidateToken, default);
-        Assert.Equal(originals, await scope.Db.TrackSourceIds.AsNoTracking().OrderBy(item => item.ExternalId)
-            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.OriginMetadata }).ToArrayAsync());
+        Assert.Equal(originals, await scope.Db.ProviderCatalogItems.AsNoTracking().OrderBy(item => item.ExternalId)
+            .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId, item.AssociationEvidenceJson }).ToArrayAsync());
         Assert.Null((await scope.Db.TrackObservations.SingleAsync(item => item.Id == imported.Id)).TrackId);
     }
 

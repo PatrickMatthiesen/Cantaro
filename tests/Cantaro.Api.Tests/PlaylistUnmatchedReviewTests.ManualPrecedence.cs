@@ -60,13 +60,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
             scope.Entry.Id, scope.Token(Candidate("chosen-id")), default);
         var proof = PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)[scope.Entry.Id];
-        var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = scope.Entry.TrackId,
+        var observation = new TrackObservation {  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), OwnerUserId = scope.UserId, TrackId = scope.Entry.TrackId,
             SourceType = "spotify", ExternalId = "alternative-a", Title = "Everything Goes On",
-            Artist = "Porter Robinson", DurationSeconds = 160, MatchStatus = TrackMatchingStatuses.Matched };
-        var duplicate = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
+            Artist = "Porter Robinson", DurationSeconds = 160, MatchStatus = TrackMatchingStatuses.Matched  };
+        var duplicate = new PlaylistEntry { OwnerUserId = scope.Playlist.UserId, Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
             TrackId = scope.Entry.TrackId, TrackObservation = observation, TrackObservationId = observation.Id, Position = 1 };
-        scope.Db.AddRange(duplicate, new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-            SourceType = "spotify", ExternalId = observation.ExternalId });
+        scope.Db.AddRange(duplicate, new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = observation.ExternalId, FactsJson = "{}" });
         await scope.Db.SaveChangesAsync();
         var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name) { RemoteIds = ["alternative-a"] };
         var writer = new ReviewWriter(provider);
@@ -79,7 +78,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal(2, Assert.Single(writer.Writes).Length);
         Assert.Contains("chosen-id", provider.RemoteIds);
         Assert.Contains("alternative-a", provider.RemoteIds);
-        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.ExternalId == "chosen-id"));
+        Assert.False(await scope.Db.ProviderCatalogItems.AnyAsync(item => item.ExternalId == "chosen-id"));
     }
 
     [Theory]
@@ -97,10 +96,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             scope.Entry.Id, scope.Token(Candidate("chosen-id")), default);
         var proof = PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)[scope.Entry.Id];
         await AddOwnedAlternativeAsync(scope, "alternative-a");
-        scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-            SourceType = "spotify", ExternalId = "alternative-c" });
-        var repeats = Enumerable.Range(1, 2).Select(position => new PlaylistEntry
-        {
+        scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = "alternative-c", FactsJson = "{}" });
+        var repeats = Enumerable.Range(1, 2).Select(position => new PlaylistEntry { OwnerUserId = scope.Playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id, TrackId = scope.Entry.TrackId, Position = position
         }).ToArray();
         scope.Db.PlaylistEntries.AddRange(repeats);
@@ -118,8 +115,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await AssertManualChoiceAsync(scope, proof);
         if (staleMetadata)
         {
-            var track = await scope.Db.Tracks.SingleAsync(item => item.Id == scope.Entry.TrackId);
-            Assert.True(TrackArtworkUpdater.FillMissingCanonicalThumbnail(track, "https://example.invalid/art.jpg"));
+            var track = await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == scope.Entry.TrackId);
+            Assert.True(CatalogFixture.SetArtwork(track, "https://example.invalid/art.jpg"));
+            await CatalogFixture.AddNewItemsAsync(scope.Db);
             await scope.Db.SaveChangesAsync();
         }
         scope.Db.ChangeTracker.Clear();
@@ -157,8 +155,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         scope.Link.SyncMode = "from_cantaro";
         scope.Entry.TrackObservation!.SourceType = "spotify";
         scope.Entry.TrackObservation.ExternalId = "alternative-a";
-        scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-            SourceType = "spotify", ExternalId = "chosen-id" });
+        scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = "chosen-id", FactsJson = "{}" });
         var proof = PlaylistMatchingProgress.Create(scope.Link, scope.Entry, "chosen-id", manualConfirmation: true);
         scope.Link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(new() { [scope.Entry.Id] = proof });
         await scope.Db.SaveChangesAsync();
@@ -191,22 +188,22 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var proof = PlaylistMatchingProgress.Read(scope.Link.MatchingProgressJson)[scope.Entry.Id];
         switch (invalidation)
         {
-            case "metadata": scope.Entry.Track!.SearchTitle = "Changed title"; break;
+            case "metadata": CatalogFixture.SetTitle(scope.Entry.Track!, "Changed title"); break;
             case "scope": proof = proof with { Scope = proof.Scope! with { EntryId = Guid.NewGuid() } }; break;
             case "legacy": proof = proof with { ProofVersion = 1 }; break;
             case "conflict":
-                var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Other recording" };
+                var other = new Track {  Id = Guid.NewGuid() };
                 scope.Db.Tracks.Add(other);
-                var conflict = new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
-                    SourceType = "spotify", ExternalId = "chosen-id" };
+                var conflict = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = other.Id, SourceType = "spotify", ExternalId = "chosen-id", FactsJson = "{}" };
                 scope.VerifyMapping(conflict);
-                scope.Db.TrackSourceIds.Add(conflict);
+                scope.Db.ProviderCatalogItems.Add(conflict);
                 break;
         }
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await AddOwnedAlternativeAsync(scope, "alternative-a");
         // A shared private mapping is never a fallback authorization.
-        scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-            SourceType = "spotify", ExternalId = "global-private-id" });
+        scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = "global-private-id", FactsJson = "{}" });
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         if (invalidation == "search-checkpoint")
             proof = PlaylistMatchingProgress.Create(scope.Link, scope.Entry, "chosen-id");
@@ -216,7 +213,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         if (invalidation == "search-checkpoint")
         {
             var entry = await scope.Db.PlaylistEntries.AsNoTracking().Include(item => item.Track)
-                .ThenInclude(track => track!.SourceIds).SingleAsync(item => item.Id == scope.Entry.Id);
+                .ThenInclude(track => track!.ProviderItems).SingleAsync(item => item.Id == scope.Entry.Id);
             Assert.True(PlaylistMatchingProgress.CanReuse(proof, entry, scope.Link));
             Assert.False(proof.ManualConfirmation);
         }
@@ -239,13 +236,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
     private static async Task AddOwnedAlternativeAsync(Scope scope, string externalId)
     {
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId, Name = "Another owned playlist" };
-        var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "spotify", ExternalId = externalId,
+        var observation = new TrackObservation {  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), OwnerUserId = scope.UserId, SourceType = "spotify", ExternalId = externalId,
             TrackId = scope.Entry.TrackId, Title = "Everything Goes On", Artist = "Porter Robinson",
-            MatchStatus = TrackMatchingStatuses.Matched };
-        scope.Db.AddRange(new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist, PlaylistId = playlist.Id,
+            MatchStatus = TrackMatchingStatuses.Matched  };
+        scope.Db.AddRange(new PlaylistEntry { OwnerUserId = playlist.UserId, Id = Guid.NewGuid(), Playlist = playlist, PlaylistId = playlist.Id,
             TrackId = scope.Entry.TrackId, TrackObservation = observation, TrackObservationId = observation.Id },
-            new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-                SourceType = "spotify", ExternalId = externalId });
+            new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = externalId, FactsJson = "{}" });
         await scope.Db.SaveChangesAsync();
     }
 

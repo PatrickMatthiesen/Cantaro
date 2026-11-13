@@ -54,16 +54,11 @@ public sealed class MusicRecognitionProvenanceTests
             VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
             VerifiedAt = now, RevalidateAfter = now.AddDays(1), Revision = 1
         };
-        var track = new Track { Id = Guid.NewGuid(), PreferredCatalogItemId = item.Id };
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
-            ProviderCatalogItemId = item.Id, ProviderCatalogItem = item, CatalogRevision = item.Revision,
-            AssociationState = RecordingAssociationState.Verified
-        });
+        var track = new Track { Id = Guid.NewGuid(), };
+        track.ProviderItems.Add(TrackMatchFixtures.Associate(item, track.Id, RecordingAssociationState.Verified));
         db.AddRange(requester, playlist, track);
         db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        { OwnerUserId = requester.Id,
             Id = Guid.NewGuid(), PlaylistId = playlist.Id, TrackId = track.Id, Position = 0
         });
         await db.SaveChangesAsync();
@@ -93,18 +88,16 @@ public sealed class MusicRecognitionProvenanceTests
         var track = new Track { Id = Guid.NewGuid() };
         var privateObservation = new TrackObservation
         {
+            InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), OwnerUserId = owner.Id, TrackId = track.Id, SourceType = "youtube",
             ExternalId = "privateVid1", Title = "Private video", ThumbnailUrl = "https://img.example/private.jpg",
             MatchStatus = TrackMatchingStatuses.Matched
         };
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = privateObservation.ExternalId
-        });
+        track.ProviderItems.Add(TrackMatchFixtures.Associate(new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = privateObservation.ExternalId, FactsJson = "{}" }, track.Id, RecordingAssociationState.Unknown));
         db.AddRange(requester, owner, requesterPlaylist, ownerPlaylist, track, privateObservation);
         db.PlaylistEntries.AddRange(
-            new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = requesterPlaylist.Id, TrackId = track.Id, Position = 0 },
-            new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = ownerPlaylist.Id, TrackId = track.Id,
+            new PlaylistEntry { OwnerUserId = requester.Id, Id = Guid.NewGuid(), PlaylistId = requesterPlaylist.Id, TrackId = track.Id, Position = 0 },
+            new PlaylistEntry { OwnerUserId = owner.Id, Id = Guid.NewGuid(), PlaylistId = ownerPlaylist.Id, TrackId = track.Id,
                 TrackObservationId = privateObservation.Id, Position = 0 });
         await db.SaveChangesAsync();
 
@@ -141,8 +134,9 @@ public sealed class MusicRecognitionProvenanceTests
         if (existingReference)
             db.TrackObservations.Add(new TrackObservation
             {
+            InputKind = ObservationInputKind.Reference,
                 Id = Guid.NewGuid(), OwnerUserId = user.Id, SourceType = "youtube", ExternalId = "sourceVid01",
-                Title = "", MatchStatus = TrackMatchingStatuses.Pending
+                Title = null, MatchStatus = TrackMatchingStatuses.Pending
             });
         await db.SaveChangesAsync();
 
@@ -157,9 +151,9 @@ public sealed class MusicRecognitionProvenanceTests
         Assert.Equal(existingReference ? 1 : 0, observations.Count);
         Assert.All(observations, reference =>
         {
-            Assert.Equal("", reference.Title);
-            Assert.Null(reference.RawMetadata);
-            Assert.False(ProviderCatalogPolicy.HasOwnedSnapshot(reference, user.Id));
+            Assert.Null(reference.Title);
+            Assert.Null(reference.PrivateInputJson);
+            Assert.False(ProviderCatalogPolicy.HasOwnedInput(reference, user.Id));
         });
     }
 
@@ -181,8 +175,9 @@ public sealed class MusicRecognitionProvenanceTests
         if (existingReference)
             db.TrackObservations.Add(new TrackObservation
             {
+            InputKind = ObservationInputKind.Reference,
                 Id = referenceId, OwnerUserId = user.Id, SourceType = "youtube", ExternalId = "sourceVid01",
-                Title = "", MatchStatus = TrackMatchingStatuses.Pending
+                Title = null, MatchStatus = TrackMatchingStatuses.Pending
             });
         await db.SaveChangesAsync();
         using var handler = new RecognitionVideoHandler();
@@ -199,11 +194,105 @@ public sealed class MusicRecognitionProvenanceTests
             .UseSqlite(connection).Options);
         var observation = await verify.TrackObservations.SingleAsync();
         if (existingReference) Assert.Equal(referenceId, observation.Id);
-        Assert.True(ProviderCatalogPolicy.HasOwnedSnapshot(observation, user.Id));
-        Assert.NotNull(observation.RawMetadata);
+        Assert.True(ProviderCatalogPolicy.HasOwnedInput(observation, user.Id));
+        Assert.NotNull(observation.PrivateInputJson);
         Assert.Equal(observation.Id, (await verify.TrackMatchQueueItems.SingleAsync()).TrackObservationId);
         var claimed = await new TrackMatchQueue(verify, TimeProvider.System).TryClaimNextAsync(default);
         Assert.Equal(observation.Id, Assert.IsType<ClaimedTrackMatch>(claimed).ObservationId);
+    }
+
+    [Fact]
+    public async Task Recognize_DoesNotServeAnAutomaticResultWhosePublicFactsExpired()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var user = TestUserFactory.Create(735, "expired-recognition@example.test");
+        var track = new Track { Id = Guid.NewGuid() };
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "expiredVid1",
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Expired public title" }),
+            Revision = 1, VisibilityState = CatalogVisibility.Public,
+            VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VerifiedAt = DateTimeOffset.UtcNow.AddDays(-2), RevalidateAfter = DateTimeOffset.UtcNow.AddDays(-1)
+        };
+        TrackMatchFixtures.Associate(item, track.Id, RecordingAssociationState.Verified);
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = user.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched
+        };
+        ObservationInput.SetPublic(observation, item);
+        db.AddRange(user, track, item, observation);
+        await db.SaveChangesAsync();
+        var response = await RecognizeAsync(db, user, item.ExternalId);
+        Assert.Equal("pending", response.Status);
+        Assert.Null(response.TrackId);
+        Assert.Null(response.Title);
+    }
+
+    [Theory]
+    [InlineData(false, "fresh")]
+    [InlineData(true, "fresh")]
+    [InlineData(false, "expired")]
+    [InlineData(true, "expired")]
+    [InlineData(false, "other-owner")]
+    [InlineData(true, "other-owner")]
+    public async Task Recognize_StandaloneReviewedPublicResultUsesOnlyFreshOwnedInput(bool version, string access)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var owner = TestUserFactory.Create(735, "reviewed-recognition@example.test");
+        var other = TestUserFactory.Create(736, "other-recognition@example.test");
+        var now = DateTimeOffset.UtcNow;
+        var track = new Track { Id = Guid.NewGuid(), VersionFlags = version ? TrackVersionFlags.Live : TrackVersionFlags.None };
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "reviewedVid", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Reviewed source title", Artist = "Reviewed source artist" }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VerifiedAt = now.AddDays(-2), RevalidateAfter = access == "expired" ? now.AddDays(-1) : now.AddHours(1)
+        };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched,
+            ResolutionNotes = version ? "Created a live version Track after explicit review." : "Resolved by manual candidate selection."
+        };
+        ObservationInput.SetPublic(observation, item);
+        var candidate = new TrackResolutionCandidate
+        {
+            Id = Guid.NewGuid(), TrackObservationId = observation.Id, CandidateSource = item.SourceType,
+            ExternalId = item.ExternalId, ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision,
+            IsAccepted = true, Score = 1
+        };
+        db.AddRange(owner, other, track, item, observation, candidate);
+        await db.SaveChangesAsync();
+        observation.AcceptedCandidateId = candidate.Id;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var response = await RecognizeAsync(db, access == "other-owner" ? other : owner, item.ExternalId);
+
+        Assert.False(response.InUserLibrary);
+        Assert.Null(response.Song);
+        if (access == "fresh")
+        {
+            Assert.Equal("matched", response.Status);
+            Assert.Equal(track.Id, response.TrackId);
+            Assert.Equal("Reviewed source title", response.Title);
+            Assert.Equal("Reviewed source artist", response.Artist);
+        }
+        else
+        {
+            Assert.Equal("pending", response.Status);
+            Assert.Null(response.TrackId); Assert.Null(response.Title); Assert.Null(response.Artist);
+        }
+        Assert.Empty(await db.PlaylistEntries.ToArrayAsync());
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+        Assert.Null((await db.TrackObservations.SingleAsync()).Title);
     }
 
     private sealed class RecognitionVideoHandler : HttpMessageHandler, Google.Apis.Http.IHttpClientFactory

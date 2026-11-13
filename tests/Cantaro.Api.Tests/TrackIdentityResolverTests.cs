@@ -29,12 +29,7 @@ public sealed class TrackIdentityResolverTests
         };
         database.Db.Tracks.Add(track);
         database.Db.ProviderCatalogItems.Add(item);
-        database.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
-            ProviderCatalogItemId = item.Id, CatalogRevision = item.Revision,
-            AssociationState = RecordingAssociationState.Verified
-        });
+        database.Db.ProviderCatalogItems.Add(CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision));
         await database.Db.SaveChangesAsync();
 
         var resolver = new TrackIdentityResolver(database.Db);
@@ -73,13 +68,7 @@ public sealed class TrackIdentityResolverTests
             };
             database.Db.Tracks.Add(track);
             database.Db.ProviderCatalogItems.Add(item);
-            database.Db.TrackSourceIds.Add(new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = track.Id,
-                SourceType = item.SourceType, ExternalId = item.ExternalId,
-                ProviderCatalogItemId = item.Id, CatalogRevision = item.Revision,
-                AssociationState = RecordingAssociationState.Verified
-            });
+            database.Db.ProviderCatalogItems.Add(CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision));
             await database.Db.SaveChangesAsync();
             Assert.Equal("i said hello again", item.NormalizedTitle);
             Assert.Equal("ac dc friends", item.NormalizedArtist);
@@ -101,7 +90,7 @@ public sealed class TrackIdentityResolverTests
     {
         await using var database = await CreateDatabaseAsync();
         var now = DateTimeOffset.UtcNow;
-        var rows = new List<(Track Track, ProviderCatalogItem Item, TrackSourceId Source)>();
+        var rows = new List<(Track Track, ProviderCatalogItem Item, ProviderCatalogItem Source)>();
         for (var index = 0; index < 101; index++)
         {
             var track = NewTrack();
@@ -116,13 +105,7 @@ public sealed class TrackIdentityResolverTests
                 VerifiedAt = now.AddDays(-60), RevalidateAfter = now.AddDays(-30),
                 VisibilityState = CatalogVisibility.Public, Revision = 1
             };
-            rows.Add((track, item, new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = track.Id,
-                SourceType = item.SourceType, ExternalId = item.ExternalId,
-                ProviderCatalogItemId = item.Id, CatalogRevision = item.Revision,
-                AssociationState = RecordingAssociationState.Verified
-            }));
+            rows.Add((track, item, CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision)));
         }
 
         var validTrack = NewTrack();
@@ -137,16 +120,10 @@ public sealed class TrackIdentityResolverTests
             VerifiedAt = now.AddMinutes(-1), RevalidateAfter = now.AddHours(1),
             VisibilityState = CatalogVisibility.Public, Revision = 1
         };
-        rows.Add((validTrack, validItem, new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = validTrack.Id,
-            SourceType = validItem.SourceType, ExternalId = validItem.ExternalId,
-            ProviderCatalogItemId = validItem.Id, CatalogRevision = validItem.Revision,
-            AssociationState = RecordingAssociationState.Verified
-        }));
+        rows.Add((validTrack, validItem, CatalogFixture.Associate(validItem, validTrack.Id, RecordingAssociationState.Verified, validItem.Revision)));
         database.Db.Tracks.AddRange(rows.Select(row => row.Track));
         database.Db.ProviderCatalogItems.AddRange(rows.Select(row => row.Item));
-        database.Db.TrackSourceIds.AddRange(rows.Select(row => row.Source));
+        database.Db.ProviderCatalogItems.AddRange(rows.Select(row => row.Source));
         await database.Db.SaveChangesAsync();
         database.Db.ChangeTracker.Clear();
 
@@ -213,7 +190,7 @@ public sealed class TrackIdentityResolverTests
         var track = NewTrack();
         var observation = NewObservation(track.Id, "spotify", "owned-track", "Same song", "Same artist", 180,
             ownerUserId: 42);
-        observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "USABC2400001" });
+        observation.PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "USABC2400001" });
         database.Db.Tracks.Add(track);
         database.Db.TrackObservations.Add(observation);
         await database.Db.SaveChangesAsync();
@@ -273,11 +250,7 @@ public sealed class TrackIdentityResolverTests
         var stale = NewTrack(isrc: "USRC17607839");
         var intended = NewTrack(isrc: "USRC17607840");
         database.Db.Tracks.AddRange(stale, intended);
-        database.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = stale.Id,
-            SourceType = "youtube", ExternalId = "youtube-video"
-        });
+        database.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = stale.Id, SourceType = "youtube", ExternalId = "youtube-video", FactsJson = "{}" });
         await database.Db.SaveChangesAsync();
 
         var resolver = new TrackIdentityResolver(database.Db);
@@ -319,7 +292,7 @@ public sealed class TrackIdentityResolverTests
         string artist,
         int durationSeconds,
         int ownerUserId = 42) => new()
-    {
+    { InputKind = ObservationInputKind.Private,
         OwnerUserId = ownerUserId,
         Id = Guid.NewGuid(),
         TrackId = trackId,
@@ -327,8 +300,7 @@ public sealed class TrackIdentityResolverTests
         ExternalId = externalId,
         Title = title,
         Artist = artist,
-        NormalizedTitle = TrackTextNormalizer.Normalize(title),
-        NormalizedArtist = TrackTextNormalizer.Normalize(artist),
+
         DurationSeconds = durationSeconds,
         MatchStatus = TrackMatchingStatuses.Matched,
         CreatedAt = DateTimeOffset.UtcNow,

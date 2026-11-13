@@ -194,7 +194,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             {
                 if (scopeChange == "reconnect") setup.ConnectedServiceAccounts.Remove(saved);
                 else setup.Users.Add(TestUserFactory.Create(scope.UserId + 1, "independent-durable@example.com"));
-                await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync();
                 var userId = scopeChange == "reconnect" ? scope.UserId : scope.UserId + 1;
                 setup.ConnectedServiceAccounts.Add(new ConnectedServiceAccount { Id = 52, UserId = userId,
                     Service = service, ExternalAccountId = "account", ConnectionState = "connected",
@@ -220,15 +220,15 @@ public sealed partial class PlaylistUnmatchedReviewTests
             }
             else if (scopeChange == "recording")
             {
-                var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = service, ExternalId = "chosen-id" };
+                var mapping = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = service, ExternalId = "chosen-id", FactsJson = "{}" };
                 scope.VerifyMapping(mapping);
-                setup.TrackSourceIds.Add(mapping);
+                setup.ProviderCatalogItems.Add(mapping);
             }
             else if (scopeChange == "observation")
-                setup.TrackObservations.Add(new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = service,
+                setup.TrackObservations.Add(new TrackObservation {  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = service,
                     ExternalId = "chosen-id", Title = "Previously independent observation", TrackId = scope.Entry.TrackId,
-                    MatchStatus = TrackMatchingStatuses.Matched });
-            await setup.SaveChangesAsync();
+                    MatchStatus = TrackMatchingStatuses.Matched  });
+        await setup.SaveChangesAsync();
             Assert.Single(await setup.PlaylistExportAttempts.ToArrayAsync());
         }
         await using var readDb = scope.NewContext();
@@ -253,10 +253,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
             else Assert.Null(observation.TrackId);
             if (service == "spotify" && scopeChange != "recording")
             {
-                var privateTrack = await verify.Tracks.SingleAsync(track => track.Id == observation.TrackId);
-                Assert.Null(privateTrack.PreferredCatalogItemId);
+                var privateTrack = await verify.Tracks.Include(track => track.ProviderItems).SingleAsync(track => track.Id == observation.TrackId);
+                Assert.Null(ProviderCatalogPolicy.SharedSource(privateTrack, DateTimeOffset.UtcNow)?.Id);
                 Assert.Null(privateTrack.Isrc);
-                Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+                Assert.False(await verify.ProviderCatalogItems.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
                 Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == privateTrack.Id));
             }
         }
@@ -281,10 +281,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using (var setup = scope.NewContext())
         {
             (await setup.Playlists.SingleAsync()).AllowDuplicateTracks = true;
-            var duplicate = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
+            var duplicate = new PlaylistEntry { OwnerUserId = scope.Playlist.UserId, Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
                 TrackId = scope.Entry.TrackId, TrackObservationId = scope.Entry.TrackObservationId, Position = 1 };
             setup.PlaylistEntries.Add(duplicate);
-            await setup.SaveChangesAsync();
+        await setup.SaveChangesAsync();
             await scope.CreateReview(setup).ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, duplicate.Id,
                 scope.Token(new TrackMatchSearchCandidate { CandidateSource = service, ExternalId = "chosen-id",
                     Title = "Everything Goes On", Artist = "Porter Robinson", ArtistCredits = ["Porter Robinson"], DurationSeconds = 160 },
@@ -298,7 +298,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             var duplicate = await setup.PlaylistEntries.SingleAsync(entry => entry.Id != scope.Entry.Id);
             setup.PlaylistEntries.Remove(duplicate);
             // A user can change a choice after its metadata proof expires.
-            (await setup.Tracks.SingleAsync()).SearchTitle += " revised";
+            CatalogFixture.SetTitle((await setup.Tracks.Include(track => track.ProviderItems).SingleAsync()), (CatalogFixture.Facts((await setup.Tracks.Include(track => track.ProviderItems).SingleAsync()))?.Title ?? "") + " revised", "musicbrainz");
+            await CatalogFixture.AddNewItemsAsync(setup);
             await setup.SaveChangesAsync();
             var candidate = new TrackMatchSearchCandidate { CandidateSource = service, ExternalId = "replacement-id",
                 Title = "Everything Goes On", Artist = "Porter Robinson", ArtistCredits = ["Porter Robinson"], DurationSeconds = 160 };
@@ -313,8 +314,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
             Assert.Equal("replacement-id", Assert.Single(PlaylistSyncBaseline.Parse(link.BaselineJson)!.Items).ExternalId);
             Assert.DoesNotContain(PlaylistMatchingProgress.Read(link.MatchingProgressJson).Values, proof => proof.ExternalId == "chosen-id");
             // Expire the current choice while retaining its local membership.
-            (await setup.Tracks.SingleAsync()).SearchTitle += " edited";
+            CatalogFixture.SetTitle((await setup.Tracks.Include(track => track.ProviderItems).SingleAsync()), (CatalogFixture.Facts((await setup.Tracks.Include(track => track.ProviderItems).SingleAsync()))?.Title ?? "") + " edited", "musicbrainz");
             link.SyncMode = "from_cantaro";
+            await CatalogFixture.AddNewItemsAsync(setup);
             await setup.SaveChangesAsync();
         }
         fixture.RemoteIds = [];
@@ -328,11 +330,18 @@ public sealed partial class PlaylistUnmatchedReviewTests
         }
         fixture.RemoteIds = ["chosen-id"];
         await using var readDb = scope.NewContext();
+        var catalogBeforeRejectedRead = await readDb.ProviderCatalogItems.AsNoTracking().OrderBy(item => item.Id)
+            .Select(item => new { item.Id, item.SourceType, item.ExternalId, item.FactsJson, item.TrackId,
+                item.Revision, item.AssociationRevision }).ToArrayAsync();
         var error = await Assert.ThrowsAsync<PlatformApiException>(() => fixture.Provider(readDb)
             .ReadAsync(new(scope.UserId, scope.Link.ConnectedServiceAccountId, "account"), "playlist", default));
         Assert.Equal("remote_changed", error.Code);
         await using var persisted = scope.NewContext();
-        Assert.Empty(await persisted.TrackSourceIds.ToArrayAsync());
+        var catalogAfterRejectedRead = await persisted.ProviderCatalogItems.AsNoTracking().OrderBy(item => item.Id)
+            .Select(item => new { item.Id, item.SourceType, item.ExternalId, item.FactsJson, item.TrackId,
+                item.Revision, item.AssociationRevision }).ToArrayAsync();
+        Assert.Equal(catalogBeforeRejectedRead, catalogAfterRejectedRead);
+        Assert.DoesNotContain(catalogAfterRejectedRead, item => item.SourceType == service);
         Assert.False(await persisted.TrackObservations.AnyAsync(row => row.SourceType == service));
         Assert.Empty(await persisted.TrackArtistCredits.ToArrayAsync());
         Assert.Empty(await persisted.TrackMatchQueueItems.ToArrayAsync());
@@ -355,7 +364,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await PlaylistExportAttemptStore.RecordAsync(exportDb, account, service, "playlist", ["chosen-id"], default);
         });
         await using var readDb = scope.NewContext(interceptor);
-        var unrelated = new Track { Id = Guid.NewGuid(), SearchTitle = "Caller pending edit" };
+        var unrelated = new Track {  Id = Guid.NewGuid() };
         readDb.Tracks.Add(unrelated);
         var error = await Assert.ThrowsAsync<PlatformApiException>(() => fixture.Provider(readDb).ReadAsync(account, "playlist", default));
         Assert.Equal("remote_changed", error.Code);
@@ -369,7 +378,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using var persisted = scope.NewContext();
         Assert.True(await persisted.Tracks.AnyAsync(track => track.Id == unrelated.Id));
         Assert.False(await persisted.TrackObservations.AnyAsync(row => row.SourceType == service));
-        Assert.Empty(await persisted.TrackSourceIds.ToArrayAsync());
+        Assert.Empty(await persisted.ProviderCatalogItems.ToArrayAsync());
         Assert.Empty(await persisted.TrackMatchQueueItems.ToArrayAsync());
     }
 

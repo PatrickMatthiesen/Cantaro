@@ -8,14 +8,14 @@ namespace Cantaro.Api.Services;
 internal static class PlaylistArtistEvidenceGuard
 {
     // Capture before external search or destination materialization. A locally
-    // resolved Track can be tracked, with only a partially fixed-up SourceIds
+    // resolved Track can be tracked, with only a partially loaded ProviderItems
     // collection. Read every established key and retain no EF entities.
     public static async Task<RecordingEvidence> CaptureAsync(
         ApplicationDbContext dbContext, Track track, CancellationToken cancellationToken)
     {
         var isrc = TrackIdentityResolver.NormalizeIsrc(track.Isrc);
         var mbid = NormalizeRecordingId(track.MbidRecording);
-        var mappings = await dbContext.TrackSourceIds.AsNoTracking()
+        var mappings = await ProviderCatalogPolicy.CurrentSources(dbContext.ProviderCatalogItems.AsNoTracking(), DateTimeOffset.UtcNow)
             .Where(source => source.TrackId == track.Id)
             .Select(source => new { source.SourceType, source.ExternalId })
             .ToArrayAsync(cancellationToken);

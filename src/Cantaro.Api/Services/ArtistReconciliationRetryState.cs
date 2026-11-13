@@ -25,16 +25,16 @@ internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
         {
             SqlState: PostgresErrorCodes.UniqueViolation,
             ConstraintName: "IX_ArtistProviderLinks_Provider_ExternalId"
-                or "IX_ArtistProviderLinks_ArtistId_Provider" or "IX_Artists_MusicBrainzArtistId"
+                or "IX_ArtistProviderLinks_ArtistId_Provider"
                 or "IX_ArtistReconciliationConflicts_TrackId_EvidenceKey"
                 or "IX_TrackArtistCredits_TrackId_Position"
                 or "IX_TrackArtistCredits_TrackId_ArtistId_Role"
         };
 
     public void Record(Track track, IReadOnlyList<ArtistCreditMetadata> credits, string source,
-        DateTimeOffset now, string? displayArtist)
+        DateTimeOffset now, string? displayArtist, Guid? sourceItemId, long? sourceRevision)
     {
-        if (!_replaying) _requests.Add(new(track, credits.ToArray(), source, now, displayArtist));
+        if (!_replaying) _requests.Add(new(track, credits.ToArray(), source, now, displayArtist, sourceItemId, sourceRevision));
     }
 
     public void CaptureTrack(Track track)
@@ -114,14 +114,14 @@ internal sealed class ArtistReconciliationRetryState(ApplicationDbContext db)
             {
                 if (db.Entry(request.Track).State == EntityState.Detached) continue;
                 await new ArtistReconciliationService(db).ReconcileAsync(request.Track, request.Credits,
-                    request.Source, request.Now, cancellationToken, request.DisplayArtist);
+                    request.Source, request.Now, cancellationToken, request.DisplayArtist, request.SourceItemId, request.SourceRevision);
             }
         }
         finally { _replaying = false; }
     }
 
     private sealed record Request(Track Track, IReadOnlyList<ArtistCreditMetadata> Credits,
-        string Source, DateTimeOffset Now, string? DisplayArtist);
+        string Source, DateTimeOffset Now, string? DisplayArtist, Guid? SourceItemId, long? SourceRevision);
     private sealed record Snapshot(EntityState State, PropertyValues Values, PropertyValues OriginalValues,
         HashSet<string> Modified, Artist? Artist, ArtistProviderLink[]? Links, TrackArtistCredit[]? Credits);
 }

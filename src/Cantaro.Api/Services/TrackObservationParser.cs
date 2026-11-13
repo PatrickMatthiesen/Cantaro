@@ -8,14 +8,14 @@ public static class TrackObservationParser
 {
     private static readonly string[] ArtistTitleSeparators = [" - ", " \u2013 ", " \u2014 "];
 
-    public static ParsedTrackMetadata Parse(TrackObservation observation)
+    public static ParsedTrackMetadata Parse(ObservationInput observation)
     {
         var metadata = ReadMetadata(observation);
         return Parse(observation, metadata);
     }
 
     public static ParsedTrackMetadata Parse(
-        TrackObservation observation,
+        ObservationInput observation,
         TrackObservationMetadata? metadata)
     {
         var effectiveTitle = TrackObservationDisplayFormatter.GetQueueTitle(
@@ -32,7 +32,7 @@ public static class TrackObservationParser
             parseArtistFromTitle: !hasStructuredProviderArtist);
     }
 
-    public static IReadOnlyList<ParsedTrackMetadata> ParseSearchHypotheses(TrackObservation observation)
+    public static IReadOnlyList<ParsedTrackMetadata> ParseSearchHypotheses(ObservationInput observation)
     {
         var metadata = ReadMetadata(observation);
         var primary = Parse(observation, metadata);
@@ -237,21 +237,5 @@ public static class TrackObservationParser
         };
     }
 
-    public static TrackObservationMetadata? ReadMetadata(TrackObservation observation)
-    {
-        if (string.IsNullOrWhiteSpace(observation.RawMetadata))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<TrackObservationMetadata>(
-                observation.RawMetadata);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+    public static TrackObservationMetadata ReadMetadata(ObservationInput observation) => observation.Metadata;
 }

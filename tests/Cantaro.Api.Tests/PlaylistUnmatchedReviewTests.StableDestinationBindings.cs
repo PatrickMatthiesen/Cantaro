@@ -23,22 +23,23 @@ public sealed partial class PlaylistUnmatchedReviewTests
     {
         await using var scope = await Scope.CreateAsync("youtube", relational: !postgres, postgres: postgres);
         var (provider, writer) = await ExportScopedDestinationAsync(scope, manual);
-        var track = await scope.Db.Tracks.SingleAsync(item => item.Id == scope.Entry.TrackId);
+        var track = await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == scope.Entry.TrackId);
         switch (update)
         {
             case "artwork":
-                Assert.True(TrackArtworkUpdater.FillMissingCanonicalThumbnail(track, "https://example.invalid/art.jpg"));
+                Assert.True(CatalogFixture.SetArtwork(track, "https://example.invalid/art.jpg"));
                 break;
-            case "title": track.SearchTitle += " (updated)"; break;
+            case "title": CatalogFixture.SetTitle(track, (CatalogFixture.Facts(track)?.Title ?? "") + " (updated)"); break;
             case "duration":
-                var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata!)!;
-                metadata.DurationSeconds += 1;
-                track.CanonicalMetadata = JsonSerializer.Serialize(metadata);
+                var metadata = System.Text.Json.Nodes.JsonNode.Parse(CatalogFixture.FactsJson(track) ?? "{\"Title\":\"Everything Goes On\",\"Artist\":\"Porter Robinson\",\"DurationSeconds\":160}")!.AsObject();
+                metadata["DurationSeconds"] = metadata["DurationSeconds"]!.GetValue<int>() + 1;
+                CatalogFixture.SetFacts(track, metadata.ToJsonString());
                 break;
         }
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         var changed = await scope.Db.PlaylistEntries.AsNoTracking().Include(item => item.Track)
-            .ThenInclude(item => item!.SourceIds).Include(item => item.TrackObservation).SingleAsync();
+            .ThenInclude(item => item!.ProviderItems).Include(item => item.TrackObservation).SingleAsync();
         var proof = PlaylistMatchingProgress.Read((await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson)[changed.Id];
         Assert.False(PlaylistMatchingProgress.CanReuse(proof, changed, scope.Link));
 
@@ -133,11 +134,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
     {
         await using var scope = await Scope.CreateAsync("youtube", relational: true);
         var (provider, writer) = await ExportScopedDestinationAsync(scope, manual);
-        var track = await scope.Db.Tracks.SingleAsync(item => item.Id == scope.Entry.TrackId);
-        track.SearchTitle += " updated";
+        var track = await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == scope.Entry.TrackId);
+        CatalogFixture.SetTitle(track, (CatalogFixture.Facts(track)?.Title ?? "") + " updated");
         var link = await scope.Db.ServicePlaylistMappings.SingleAsync();
         var proof = PlaylistMatchingProgress.Read(link.MatchingProgressJson)[scope.Entry.Id];
         link.SyncMode = "from_cantaro";
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         await RunDestinationSyncAsync(scope, provider, writer);
         Assert.Equal(proof, PlaylistMatchingProgress.Read((await scope.Db.ServicePlaylistMappings.SingleAsync()).MatchingProgressJson)[scope.Entry.Id]);
@@ -164,7 +166,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using var scope = await Scope.CreateAsync("youtube", relational: true);
         var (provider, writer) = await ExportScopedDestinationAsync(scope, manual: true);
         var link = await scope.Db.ServicePlaylistMappings.SingleAsync();
-        var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Other recording" };
+        var other = new Track {  Id = Guid.NewGuid() };
         scope.Db.Tracks.Add(other);
         switch (change)
         {
@@ -183,8 +185,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 (await scope.Db.TrackObservations.SingleAsync(item => item.Id == scope.Entry.TrackObservationId)).TrackId = other.Id;
                 break;
             case "global":
-                scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = other.Id,
-                    SourceType = "youtube", ExternalId = "chosen-id" });
+                scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = other.Id, SourceType = "youtube", ExternalId = "chosen-id", FactsJson = "{}" });
                 break;
         }
         await scope.Db.SaveChangesAsync();
@@ -205,8 +206,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var link = await scope.Db.ServicePlaylistMappings.SingleAsync();
         var baseline = PlaylistSyncBaseline.Parse(link.BaselineJson)!;
         link.BaselineJson = new PlaylistSyncBaseline(baseline.Items.Select(item => item with { DestinationBinding = null }).ToList()).Serialize();
-        (await scope.Db.Tracks.SingleAsync()).SearchTitle += " updated";
+        CatalogFixture.SetTitle((await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync()), (CatalogFixture.Facts((await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync()))?.Title ?? "") + " updated");
         if (removeLocal) scope.Db.PlaylistEntries.Remove(await scope.Db.PlaylistEntries.SingleAsync());
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
 
         await RunDestinationSyncAsync(scope, provider, writer);
@@ -252,7 +254,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name, "youtube");
         var writer = new ReviewWriter(provider);
         await RunDestinationSyncAsync(scope, provider, writer);
-        (await scope.Db.Tracks.SingleAsync(item => item.Id == scope.Entry.TrackId)).SearchTitle += " updated";
+        CatalogFixture.SetTitle((await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == scope.Entry.TrackId)), (CatalogFixture.Facts((await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(item => item.Id == scope.Entry.TrackId)))?.Title ?? "") + " updated");
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         for (var pass = 0; pass < 2; pass++)
         {
@@ -315,7 +318,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
     private static async Task AssertDestinationRemainsScopedAsync(Scope scope)
     {
-        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
+        Assert.False(await scope.Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
         Assert.Null((await scope.Db.TrackObservations.SingleAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id")).TrackId);
         Assert.Empty(await scope.Db.TrackArtistCredits.ToArrayAsync());
     }

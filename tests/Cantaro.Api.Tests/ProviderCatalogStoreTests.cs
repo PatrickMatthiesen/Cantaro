@@ -46,9 +46,47 @@ public sealed class ProviderCatalogStoreTests
         Assert.Equal(changed.Revision + 1, withdrawn.Revision);
     }
 
-    private static async Task<TrackSourceId[]> ReadSourcesAsync(ServiceProvider services)
+    [Fact]
+    public async Task FactsUpsertRetainsAssociationStateAndMakesChangedFactsProofStale()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var services = new ServiceCollection()
+            .AddDbContext<ApplicationDbContext>(options => options.UseSqlite(connection)).BuildServiceProvider();
+        await using (var scope = services.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Database.EnsureCreatedAsync();
+        var store = new ProviderCatalogStore(services.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System);
+        var facts = new ProviderCatalogFacts { Title = "Song", Artist = "Artist" };
+        var item = await store.RecordVerifiedAsync("spotify", "association", CatalogVerificationMethods.SpotifyApplication, facts, default);
+        Guid trackId;
+        string? anchor;
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var track = new Track { Id = Guid.NewGuid() };
+            trackId = track.Id;
+            db.Tracks.Add(track);
+            var tracked = await db.ProviderCatalogItems.SingleAsync();
+            Assert.True(await new ProviderRecordingAssociations(db).TryAssociateAsync(track, tracked, null, true, default));
+            await db.SaveChangesAsync();
+            anchor = tracked.AssociationEvidenceJson;
+        }
+        var renewed = await store.RecordVerifiedAsync("spotify", "association", CatalogVerificationMethods.SpotifyApplication, facts, default);
+        Assert.Equal(trackId, renewed.TrackId);
+        Assert.Equal(item.Revision, renewed.Revision);
+        Assert.Equal(1, renewed.AssociationRevision);
+        var changed = await store.RecordVerifiedAsync("spotify", "association", CatalogVerificationMethods.SpotifyApplication,
+            new ProviderCatalogFacts { Title = "Other", Artist = "Artist" }, default);
+        Assert.Equal(trackId, changed.TrackId);
+        Assert.Equal(1, changed.AssociationRevision);
+        Assert.Equal(anchor, changed.AssociationEvidenceJson);
+        Assert.Equal(item.Revision, changed.AssociationFactsRevision);
+        Assert.False(ProviderCatalogPolicy.IsVerified(changed, DateTimeOffset.UtcNow));
+    }
+
+    private static async Task<ProviderCatalogItem[]> ReadSourcesAsync(ServiceProvider services)
     {
         await using var scope = services.CreateAsyncScope();
-        return await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().TrackSourceIds.ToArrayAsync();
+        return await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().ProviderCatalogItems.Where(item => item.TrackId != null).ToArrayAsync();
     }
 }

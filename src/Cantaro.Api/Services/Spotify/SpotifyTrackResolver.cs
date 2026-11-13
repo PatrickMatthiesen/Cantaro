@@ -24,7 +24,7 @@ public sealed class SpotifyTrackResolver
         var associations = new ProviderRecordingAssociations(_dbContext);
         var verified = await associations.FindUsableAsync(SpotifyService.ServiceName, snapshot.Id, cancellationToken);
         if (verified is not null)
-            return await LoadTrackAsync(verified.TrackId, cancellationToken);
+            return await LoadTrackAsync(verified.TrackId!.Value, cancellationToken);
 
         var candidate = new TrackMatchSearchCandidate { CandidateSource = SpotifyService.ServiceName,
             ExternalId = snapshot.Id, Title = snapshot.Name, ProviderCatalogItemId = snapshot.ProviderCatalogItemId,
@@ -61,6 +61,6 @@ public sealed class SpotifyTrackResolver
 
     private async Task<Track> LoadTrackAsync(Guid id, CancellationToken ct) =>
         _dbContext.Tracks.Local.FirstOrDefault(track => track.Id == id)
-        ?? await _dbContext.Tracks.Include(track => track.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+        ?? await _dbContext.Tracks.Include(track => track.ProviderItems)
             .Include(track => track.ArtistCredits).SingleAsync(track => track.Id == id, ct);
 }

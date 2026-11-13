@@ -55,27 +55,7 @@ internal sealed class TrackMatchDecision
 
 public sealed class TrackMatchCandidateStoredMetadata
 {
-    public string? ProviderRawMetadata { get; set; }
-    public Guid? ProviderCatalogItemId { get; set; }
-    public long? ProviderCatalogRevision { get; set; }
-    public IReadOnlyList<ArtistCreditMetadata> ArtistIdentities { get; init; } = [];
-    public string? ArtistMusicBrainzId { get; set; }
-    public string? ArtistSortName { get; set; }
     public TrackMatchCandidateDiagnostics? Matching { get; set; }
-
-    internal static string? ReadProviderMetadata(string? rawMetadata)
-    {
-        if (string.IsNullOrWhiteSpace(rawMetadata)) return rawMetadata;
-        try
-        {
-            return System.Text.Json.JsonSerializer.Deserialize<TrackMatchCandidateStoredMetadata>(rawMetadata)
-                ?.ProviderRawMetadata ?? rawMetadata;
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return rawMetadata;
-        }
-    }
 }
 
 public sealed class TrackMatchCandidateDiagnostics

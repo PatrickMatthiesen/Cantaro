@@ -18,8 +18,8 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         var tracks = (await _dbContext.Tracks
             .AsNoTracking()
             .Include(track => track.SongMemberships)
-            .Include(track => track.SourceIds)
-                .ThenInclude(source => source.ProviderCatalogItem)
+            .Include(track => track.ProviderItems)
+
             .ToListAsync(cancellationToken))
             .OrderBy(track => track.CreatedAt)
             .ThenBy(track => track.Id)

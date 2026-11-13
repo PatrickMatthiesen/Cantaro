@@ -1,20 +1,7 @@
 namespace Cantaro.Api.Services;
 
 /// <summary>
-/// Canonical metadata snapshot stored on resolved tracks.
-/// </summary>
-public class TrackCanonicalMetadata
-{
-    public string? Title { get; set; }
-    public string? Artist { get; set; }
-    public List<string> Albums { get; set; } = [];
-    public string? Description { get; set; }
-    public string? ThumbnailUrl { get; set; }
-    public int? DurationSeconds { get; set; }
-}
-
-/// <summary>
-/// Raw snapshot stored on imported observations.
+/// Operation input for provider parsing. Only an allowlisted private remainder is persisted.
 /// </summary>
 public class TrackObservationMetadata
 {

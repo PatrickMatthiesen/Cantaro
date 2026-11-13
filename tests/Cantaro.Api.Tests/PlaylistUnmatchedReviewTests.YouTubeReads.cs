@@ -46,13 +46,14 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 NullLogger<PlaylistSyncCoordinator>.Instance).RunAsync(scope.UserId, scope.Playlist.Id, "youtube", default);
         }
         await SyncAsync();
-        TrackArtworkUpdater.FillMissingCanonicalThumbnail(await scope.Db.Tracks.SingleAsync(), "https://example.invalid/local-art.jpg");
+        CatalogFixture.SetArtwork(await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(), "https://example.invalid/local-art.jpg");
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         handler.RemoteIds = addNew ? ["chosen-id", "fresh-id"] : ["chosen-id", "chosen-id"];
         for (var pass = 0; pass < 2; pass++) await SyncAsync();
         var original = await scope.Db.PlaylistEntries.AsNoTracking().SingleAsync(item => item.Id == scope.Entry.Id);
         Assert.Equal((scope.Entry.TrackId, scope.Entry.TrackObservationId), (original.TrackId, original.TrackObservationId));
-        Assert.False(await scope.Db.TrackSourceIds.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
+        Assert.False(await scope.Db.ProviderCatalogItems.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
         Assert.False(await scope.Db.TrackObservations.AnyAsync(item => item.SourceType == "youtube" && item.ExternalId == "chosen-id"));
         Assert.Empty(await scope.Db.TrackArtistCredits.ToArrayAsync());
         var synced = await scope.Db.ServicePlaylistMappings.SingleAsync();

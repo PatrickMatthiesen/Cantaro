@@ -7,7 +7,11 @@ public sealed class ArtistReconciliationConflict
     public Guid TrackId { get; set; }
     public Track? Track { get; set; }
     public required string EvidenceKey { get; set; }
-    public required string Evidence { get; set; }
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
+    public long? ProviderCatalogRevision { get; set; }
+    public int? SourceCreditPosition { get; set; }
+    public string? IdentityConflictJson { get; set; }
     public required string Reason { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

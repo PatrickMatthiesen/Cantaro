@@ -1,4 +1,5 @@
 using Cantaro.Api.Models;
+using Cantaro.Api.Data;
 using Cantaro.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -31,11 +32,12 @@ public sealed class PlaylistExportAttemptMigrationTests
         {
             await migrator.MigrateAsync(previous);
             db.Users.Add(TestUserFactory.Create(9001, "export-migration@example.com"));
-            var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Canonical A" };
+            var track = new Track { Id = Guid.NewGuid() };
+            const string historicalTitle = "Canonical A";
             // Seed the historical table without the current model's newer columns.
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "Tracks" ("Id", "SearchTitle", "CreatedAt", "UpdatedAt", "VersionFlags")
-                VALUES ({track.Id}, {track.SearchTitle}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
+                VALUES ({track.Id}, {historicalTitle}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
                 """);
             foreach (var service in new[] { "spotify", "youtube" })
             {
@@ -67,7 +69,12 @@ public sealed class PlaylistExportAttemptMigrationTests
                         if (kind == "foreign-proof") proof = proof with { Scope = proof.Scope! with { ExternalAccountId = "foreign" } };
                         link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(new() { [entry.Id] = proof });
                     }
-                    db.AddRange(playlist, entry, link);
+                    db.AddRange(playlist, link);
+                    await db.SaveChangesAsync();
+                    await db.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO "PlaylistEntries" ("Id", "PlaylistId", "TrackId", "Position", "AddedAt")
+                        VALUES ({entry.Id}, {playlist.Id}, {track.Id}, {entry.Position}, {entry.AddedAt})
+                        """);
                 }
                 await db.SaveChangesAsync();
             }
@@ -79,7 +86,7 @@ public sealed class PlaylistExportAttemptMigrationTests
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
         }
-        await migrator.MigrateAsync();
+        await CatalogReductionMigrator.ApplyAsync(db);
         Assert.False(db.Database.HasPendingModelChanges());
         var records = await db.PlaylistExportAttempts.AsNoTracking().ToArrayAsync();
         Assert.Equal(populated ? 10 : 0, records.Length);
@@ -96,10 +103,9 @@ public sealed class PlaylistExportAttemptMigrationTests
             await db.Users.ExecuteDeleteAsync();
             Assert.Empty(await db.PlaylistExportAttempts.ToArrayAsync());
         }
-        // Executing down/up also proves the schema can be deployed again. An
-        // intentionally rolled-back ledger cannot restore erased attempt history.
-        await migrator.MigrateAsync(previous);
-        await migrator.MigrateAsync();
+        // The reduction cannot invent discarded payload copies during rollback.
+        await Assert.ThrowsAsync<NotSupportedException>(() => migrator.MigrateAsync(previous));
+        await CatalogReductionMigrator.ApplyAsync(db);
         Assert.Empty(await db.PlaylistExportAttempts.ToArrayAsync());
         using var pool = new NpgsqlConnection(db.Database.GetConnectionString());
         NpgsqlConnection.ClearPool(pool);

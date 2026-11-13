@@ -106,6 +106,7 @@ public sealed class MatchingEvaluationCorpusTests
 
         var observation = new TrackObservation
         {
+            InputKind = ObservationInputKind.Private,
             OwnerUserId = 900001,
             Id = Guid.NewGuid(),
             SourceType = "youtube",
@@ -177,7 +178,7 @@ public sealed class MatchingEvaluationCorpusTests
         : ITrackMetadataSearchProvider
     {
         public Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(
-            TrackObservation observation,
+            ObservationInput observation,
             CancellationToken cancellationToken)
         {
             IReadOnlyList<TrackMatchSearchCandidate> results = candidates

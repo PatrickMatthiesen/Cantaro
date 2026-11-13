@@ -9,16 +9,12 @@ public class TrackObservationDisplayFormatterTests
     [Fact]
     public void GetQueueTitle_StripsSoundtrackContextAfterOriginalArtistPrefix()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "soundtrack-video",
             Title = "No Footfalls to Follow - OST",
             Artist = "Horizon Forbidden West",
-            MatchStatus = TrackMatchingStatuses.Ambiguous,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
         var metadata = new TrackObservationMetadata
         {
@@ -35,16 +31,12 @@ public class TrackObservationDisplayFormatterTests
     [Fact]
     public void GetQueueArtist_PrefersParsedFeaturedArtistsFromTitle()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "featured-artist",
             Title = "Love Me The Same (ft. GLNNA)",
             Artist = "Vaance, Deerock, Wyle",
-            MatchStatus = TrackMatchingStatuses.Ambiguous,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
         var metadata = new TrackObservationMetadata
         {
@@ -60,16 +52,12 @@ public class TrackObservationDisplayFormatterTests
     [Fact]
     public void GetQueueTitle_StripsArtistPrefixAndKeepsAcousticVideoContext()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "VmFu_j6iWKM",
             Title = "Crop Circles",
             Artist = "Jon Bellion",
-            MatchStatus = TrackMatchingStatuses.Ambiguous,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
         var metadata = new TrackObservationMetadata
         {
@@ -88,16 +76,12 @@ public class TrackObservationDisplayFormatterTests
     [Fact]
     public void GetQueueTitle_StripsCollaborationArtistPrefixFromOriginalTitle()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "J9Zjgb03FMQ",
             Title = "Good Things Fall Apart",
             Artist = "ILLENIUM, Jon Bellion",
-            MatchStatus = TrackMatchingStatuses.Ambiguous,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
         var metadata = new TrackObservationMetadata
         {
@@ -114,16 +98,12 @@ public class TrackObservationDisplayFormatterTests
     [Fact]
     public void GetQueueTitle_UsesOriginalTitleWhenItContainsTheMeaningfulSuffix()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "eo-6ra0Y5qw",
             Title = "1990 (Demo)",
             Artist = "Jon Bellion",
-            MatchStatus = TrackMatchingStatuses.NoMatch,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
         var metadata = new TrackObservationMetadata
         {
@@ -140,16 +120,12 @@ public class TrackObservationDisplayFormatterTests
     [Fact]
     public void GetQueueTitle_FallsBackToObservationTitleWhenNoOriginalTitleExists()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "video-plain",
             Title = "Crop Circles",
             Artist = "Jon Bellion",
-            MatchStatus = TrackMatchingStatuses.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
 
         var title = TrackObservationDisplayFormatter.GetQueueTitle(observation, metadata: null);

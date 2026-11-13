@@ -36,7 +36,7 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
         _catalogAcquisition = catalogAcquisition;
     }
 
-    public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(TrackObservation observation, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(ObservationInput observation, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(observation.Title))
         {
@@ -105,8 +105,8 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
                     _options).Decision.MatchStatus == TrackMatchingStatuses.Matched)
             {
                 _logger.LogDebug(
-                    "Stopping MusicBrainz search after shared matching accepted a candidate from the searched title/credit hypotheses for observation {ObservationId}",
-                    observation.Id);
+                    "Stopping MusicBrainz search after matching accepted a candidate for {SourceType} item {ExternalId}",
+                    observation.SourceType, observation.ExternalId);
                 break;
             }
         }
@@ -121,7 +121,8 @@ public class MusicBrainzSearchProvider : ITrackMetadataSearchProvider
             .Take(_options.MusicBrainzMaxReturnedCandidates)
             .ToList();
 
-        _logger.LogDebug("MusicBrainz returned {Count} candidate(s) for observation {ObservationId}", orderedCandidates.Count, observation.Id);
+        _logger.LogDebug("MusicBrainz returned {Count} candidates for {SourceType} item {ExternalId}",
+            orderedCandidates.Count, observation.SourceType, observation.ExternalId);
 
         return orderedCandidates;
     }

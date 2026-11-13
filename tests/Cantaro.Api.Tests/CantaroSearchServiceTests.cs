@@ -32,12 +32,9 @@ public sealed class CantaroSearchServiceTests
         var artistTrack = MakeTrack("A Different Song", "Echo", null, now);
         var otherTrack = MakeTrack("Echo Private", "Other Artist", null, now);
         var unreachableTrack = MakeTrack("Echo Orphan", "Nobody", null, now);
-        var legacyPrivateTrack = new Track
-        {
-            Id = Guid.NewGuid(),
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = "Echo poisoned legacy title", Artist = "Private artist" }),
-            SearchTitle = "Echo poisoned legacy title", SearchArtist = "Private artist", CreatedAt = now, UpdatedAt = now
-        };
+        var legacyPrivateTrack = new Track {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now
+         };
         db.Tracks.AddRange(exactTrack, prefixTrack, containsTrack, artistTrack, otherTrack, unreachableTrack, legacyPrivateTrack);
 
         var exactPlaylist = MakePlaylist(owner.Id, "Echo", "Exact playlist", now);
@@ -47,12 +44,12 @@ public sealed class CantaroSearchServiceTests
         await db.SaveChangesAsync();
 
         db.PlaylistEntries.AddRange(
-            MakeEntry(exactPlaylist.Id, exactTrack.Id, 0, now),
-            MakeEntry(exactPlaylist.Id, prefixTrack.Id, 1, now),
-            MakeEntry(exactPlaylist.Id, containsTrack.Id, 2, now),
-            MakeEntry(exactPlaylist.Id, artistTrack.Id, 3, now),
-            MakeEntry(exactPlaylist.Id, legacyPrivateTrack.Id, 4, now),
-            MakeEntry(otherPlaylist.Id, otherTrack.Id, 0, now));
+            MakeEntry(exactPlaylist, exactTrack.Id, 0, now),
+            MakeEntry(exactPlaylist, prefixTrack.Id, 1, now),
+            MakeEntry(exactPlaylist, containsTrack.Id, 2, now),
+            MakeEntry(exactPlaylist, artistTrack.Id, 3, now),
+            MakeEntry(exactPlaylist, legacyPrivateTrack.Id, 4, now),
+            MakeEntry(otherPlaylist, otherTrack.Id, 0, now));
 
         var exactMedia = MakeMediaTitle("Echo", "anime", 2024, now);
         var prefixMedia = MakeMediaTitle("Echo Point", "movie", 2023, now);
@@ -156,7 +153,7 @@ public sealed class CantaroSearchServiceTests
             .ToList();
         db.Tracks.AddRange(tracks);
         await db.SaveChangesAsync();
-        db.PlaylistEntries.AddRange(tracks.Select((track, index) => MakeEntry(playlist.Id, track.Id, index, now)));
+        db.PlaylistEntries.AddRange(tracks.Select((track, index) => MakeEntry(playlist, track.Id, index, now)));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -192,13 +189,11 @@ public sealed class CantaroSearchServiceTests
         var now = DateTimeOffset.UtcNow;
         var owner = TestUserFactory.Create(804, "search-legacy@example.com");
         var playlist = MakePlaylist(owner.Id, "Library", null, now);
-        var track = new Track
-        {
+        var track = new Track {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = """{"Title":"Legacy song","Artist":"Legacy artist","Albums":null}""",
             CreatedAt = now,
             UpdatedAt = now
-        };
+         };
         var expiredItem = new ProviderCatalogItem
         {
             Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "expired-song", Revision = 1,
@@ -206,16 +201,11 @@ public sealed class CantaroSearchServiceTests
             VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
             VerifiedAt = now.AddDays(-2), RevalidateAfter = now.AddDays(-1)
         };
-        track.PreferredCatalogItemId = expiredItem.Id;
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "spotify", ExternalId = expiredItem.ExternalId,
-            ProviderCatalogItemId = expiredItem.Id, ProviderCatalogItem = expiredItem, CatalogRevision = expiredItem.Revision,
-            AssociationState = RecordingAssociationState.Verified
-        });
+
+        track.ProviderItems.Add(CatalogFixture.Associate(expiredItem, track.Id, RecordingAssociationState.Verified, expiredItem.Revision));
         db.AddRange(owner, playlist, track);
         await db.SaveChangesAsync();
-        db.PlaylistEntries.Add(MakeEntry(playlist.Id, track.Id, 0, now));
+        db.PlaylistEntries.Add(MakeEntry(playlist, track.Id, 0, now));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -236,7 +226,7 @@ public sealed class CantaroSearchServiceTests
         var owner = TestUserFactory.Create(805, $"search-secondary-{unavailableState}@example.com");
         var playlist = MakePlaylist(owner.Id, "Library", null, now);
         var track = MakeTrack("Old preferred title", "Old artist", "https://img.example/old.jpg", now);
-        var preferred = track.SourceIds.Single().ProviderCatalogItem!;
+        var preferred = track.ProviderItems.Single();
         if (unavailableState == "expired") preferred.RevalidateAfter = now.AddSeconds(-1);
         else preferred.VisibilityState = CatalogVisibility.Withdrawn;
         var secondary = new ProviderCatalogItem
@@ -249,27 +239,15 @@ public sealed class CantaroSearchServiceTests
             VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.MusicBrainz,
             VerifiedAt = now, RevalidateAfter = now.AddDays(1)
         };
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = secondary.SourceType, ExternalId = secondary.ExternalId,
-            ProviderCatalogItem = secondary, ProviderCatalogItemId = secondary.Id, CatalogRevision = secondary.Revision,
-            AssociationState = RecordingAssociationState.Verified
-        });
-        track.SearchTitle = "Legacy hidden search title";
-        track.SearchArtist = "Legacy hidden artist";
-        var unknownOnly = new Track
-        {
-            Id = Guid.NewGuid(), SearchTitle = "Secondary Melody", SearchArtist = "Public Performer",
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-            {
-                Title = "Secondary Melody", Artist = "Public Performer"
-            }),
+        track.ProviderItems.Add(CatalogFixture.Associate(secondary, track.Id, RecordingAssociationState.Verified, secondary.Revision));
+        var unknownOnly = new Track {
+            Id = Guid.NewGuid(),
             CreatedAt = now, UpdatedAt = now
-        };
+         };
         db.AddRange(owner, playlist, track, unknownOnly);
         db.PlaylistEntries.AddRange(
-            MakeEntry(playlist.Id, track.Id, 0, now),
-            MakeEntry(playlist.Id, unknownOnly.Id, 1, now));
+            MakeEntry(playlist, track.Id, 0, now),
+            MakeEntry(playlist, unknownOnly.Id, 1, now));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -716,32 +694,28 @@ public sealed class CantaroSearchServiceTests
         await using var __ = db;
         var now = DateTimeOffset.UtcNow;
         var track = MakeTrack("  Searchable title  ", "  Display artist  ", null, now);
-        var malformed = new Track
-        {
+        var malformed = new Track {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = "{broken",
             CreatedAt = now,
             UpdatedAt = now
-        };
-        var nonObject = new Track
-        {
+         };
+        var nonObject = new Track {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = "[]",
             CreatedAt = now,
             UpdatedAt = now
-        };
+         };
         db.Tracks.AddRange(track, malformed, nonObject);
-        var catalog = Assert.Single(track.SourceIds).ProviderCatalogItem!;
+        var catalog = Assert.Single(track.ProviderItems);
         Assert.True(await new ProviderRecordingAssociations(db).TryAssociateAsync(track, catalog, null, true, default));
 
         await db.SaveChangesAsync();
 
-        Assert.Equal("Searchable title", track.SearchTitle);
-        Assert.Equal("Display artist", track.SearchArtist);
-        Assert.Null(malformed.SearchTitle);
-        Assert.Null(malformed.SearchArtist);
-        Assert.Null(nonObject.SearchTitle);
-        Assert.Null(nonObject.SearchArtist);
+        Assert.Equal("Searchable title", CatalogFixture.Facts(track)?.Title.Trim());
+        Assert.Equal("Display artist", CatalogFixture.Facts(track)?.Artist?.Trim());
+        Assert.Null(CatalogFixture.Facts(malformed)?.Title);
+        Assert.Null(CatalogFixture.Facts(malformed)?.Artist);
+        Assert.Null(CatalogFixture.Facts(nonObject)?.Title);
+        Assert.Null(CatalogFixture.Facts(nonObject)?.Artist);
     }
 
     [Fact]
@@ -776,6 +750,37 @@ public sealed class CantaroSearchServiceTests
             6);
 
         Assert.IsType<BadRequestObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task SearchAndDisplaySelectSameOrdinalSourceDespitePreferredPointer()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(803, "ordinal-selection@example.test");
+        var playlist = MakePlaylist(user.Id, "Selection", null, now);
+        var track = MakeTrack("Chosen public title", "Artist", null, now);
+        var first = track.ProviderItems.Single();
+        first.ExternalId = "Z-key";
+        first.ExternalId = first.ExternalId;
+        var later = MakeTrack("Ignored public title", "Artist", null, now).ProviderItems.Single();
+        later.TrackId = track.Id;
+        later.ExternalId = "a-key";
+        later.ExternalId = later.ExternalId;
+        track.ProviderItems.Add(later);
+
+        db.AddRange(user, playlist, track, MakeEntry(playlist, track.Id, 0, now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var selected = await CreateService(db).SearchAsync(user.Id, "Chosen public title", 1, false, default);
+        Assert.Equal("Chosen public title", Assert.Single(selected.Groups.Songs.Items).Title);
+        var ignored = await CreateService(db).SearchAsync(user.Id, "Ignored public title", 1, false, default);
+        Assert.Empty(ignored.Groups.Songs.Items);
+        var library = await new MusicLibraryQueryService(db).GetLibraryAsync(user.Id, default);
+        Assert.Equal("Chosen public title", Assert.Single(library.Songs).Title);
     }
 
     private static async Task<(ApplicationDbContext Db, SqliteConnection Connection)> CreateDbAsync()
@@ -815,7 +820,7 @@ public sealed class CantaroSearchServiceTests
         string? artworkUrl,
         DateTimeOffset now)
     {
-        var track = new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        var track = new Track {  Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now  };
         var item = new ProviderCatalogItem
         {
             Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = Guid.NewGuid().ToString("N"), Revision = 1,
@@ -826,13 +831,8 @@ public sealed class CantaroSearchServiceTests
             VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
             VerifiedAt = now, RevalidateAfter = now.AddDays(1)
         };
-        track.PreferredCatalogItemId = item.Id;
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
-            ProviderCatalogItemId = item.Id, ProviderCatalogItem = item, CatalogRevision = item.Revision,
-            AssociationState = RecordingAssociationState.Verified, AssociationMethod = "test_fixture"
-        });
+
+        track.ProviderItems.Add(CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision));
         return track;
     }
 
@@ -852,14 +852,14 @@ public sealed class CantaroSearchServiceTests
         };
 
     private static PlaylistEntry MakeEntry(
-        Guid playlistId,
+        Playlist playlist,
         Guid trackId,
         int position,
         DateTimeOffset now) =>
         new()
         {
             Id = Guid.NewGuid(),
-            PlaylistId = playlistId,
+            PlaylistId = playlist.Id, OwnerUserId = playlist.UserId,
             TrackId = trackId,
             Position = position,
             AddedAt = now

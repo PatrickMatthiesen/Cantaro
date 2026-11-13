@@ -12,6 +12,33 @@ namespace Cantaro.Api.Tests;
 public sealed class TrackMatchingManualCatalogTests
 {
     [Fact]
+    public async Task CandidateReloadRejectsARevisionChangedOutsideTheTrackingContext()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var now = DateTimeOffset.UtcNow;
+        var item = new ProviderCatalogItem { Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "changed",
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Public song" }),
+            Revision = 1, VisibilityState = CatalogVisibility.Public,
+            VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now, RevalidateAfter = now.AddHours(1) };
+        db.ProviderCatalogItems.Add(item);
+        await db.SaveChangesAsync();
+        var candidate = new TrackResolutionCandidate { Id = Guid.NewGuid(), TrackObservationId = Guid.NewGuid(),
+            CandidateSource = item.SourceType, ExternalId = item.ExternalId,
+            ProviderCatalogItemId = item.Id, ProviderCatalogItem = item, ProviderCatalogRevision = item.Revision };
+        await db.ProviderCatalogItems.Where(row => row.Id == item.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Revision, 2));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => TrackMatchCandidateInput.ReloadAsync(db, candidate, default));
+        Assert.Same(item, candidate.ProviderCatalogItem);
+        Assert.Equal(2, item.Revision);
+        Assert.Empty(await db.Tracks.ToArrayAsync());
+    }
+
+    [Fact]
     public async Task AcceptCandidateAsync_KeepsTrustedCatalogFactsWithoutCreatingGlobalAssociation()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -43,6 +70,7 @@ public sealed class TrackMatchingManualCatalogTests
         };
         var observation = new TrackObservation
         {
+            InputKind = ObservationInputKind.Private,
             OwnerUserId = user.Id,
             Id = Guid.NewGuid(),
             SourceType = "youtube",
@@ -59,16 +87,11 @@ public sealed class TrackMatchingManualCatalogTests
             TrackObservationId = observation.Id,
             CandidateSource = catalogItem.SourceType,
             ExternalId = catalogItem.ExternalId,
-            Title = "Public facts song",
-            Artist = "Public facts artist",
-            Isrc = "USABC1234567",
+
             Score = 0.99m,
             CreatedAt = now,
-            RawMetadata = JsonSerializer.Serialize(new TrackMatchCandidateStoredMetadata
-            {
-                ProviderCatalogItemId = catalogItem.Id,
-                ProviderCatalogRevision = catalogItem.Revision
-            })
+            ProviderCatalogItemId = catalogItem.Id,
+            ProviderCatalogRevision = catalogItem.Revision
         };
         observation.Candidates.Add(candidate);
         db.AddRange(user, catalogItem, observation);
@@ -81,9 +104,8 @@ public sealed class TrackMatchingManualCatalogTests
         Assert.NotNull(result.TrackId);
         Assert.Equal(CatalogVisibility.Public, catalogItem.VisibilityState);
         Assert.Equal("Public facts song", JsonSerializer.Deserialize<ProviderCatalogFacts>(catalogItem.FactsJson)!.Title);
-        Assert.Empty(await db.TrackSourceIds.ToListAsync());
+        Assert.Null(catalogItem.TrackId);
         var track = await db.Tracks.SingleAsync();
         Assert.Equal(result.TrackId, track.Id);
-        Assert.Null(track.CanonicalMetadata);
     }
 }

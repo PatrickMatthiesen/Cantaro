@@ -42,9 +42,9 @@ public sealed class ProviderCatalogStore(IServiceScopeFactory scopes, TimeProvid
             object revalidateAfter = sqlite ? expires.UtcTicks : expires;
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "ProviderCatalogItems"
-                    ("Id", "SourceType", "ExternalId", "FactsJson", "NormalizedTitle", "NormalizedArtist", "NormalizedIsrc", "NormalizedMusicBrainzRecordingId", "VerificationMethod", "VerifiedAt", "RevalidateAfter", "VisibilityState", "Revision")
+                    ("Id", "SourceType", "ExternalId", "FactsJson", "NormalizedTitle", "NormalizedArtist", "NormalizedIsrc", "NormalizedMusicBrainzRecordingId", "VerificationMethod", "VerifiedAt", "RevalidateAfter", "VisibilityState", "Revision", "AssociationState", "AssociationRevision", "PresentationKind")
                 VALUES
-                    ({Guid.NewGuid()}, {sourceType}, {externalId}, {json}, {normalized.Title}, {normalized.Artist}, {normalized.Isrc}, {normalized.MusicBrainzRecordingId}, {verificationMethod}, {verifiedAt}, {revalidateAfter}, {(int)CatalogVisibility.Public}, {1L})
+                    ({Guid.NewGuid()}, {sourceType}, {externalId}, {json}, {normalized.Title}, {normalized.Artist}, {normalized.Isrc}, {normalized.MusicBrainzRecordingId}, {verificationMethod}, {verifiedAt}, {revalidateAfter}, {(int)CatalogVisibility.Public}, {1L}, {(int)RecordingAssociationState.Unknown}, {0L}, {(int)TrackSourcePresentationKind.Unknown})
                 ON CONFLICT ("SourceType", "ExternalId") DO UPDATE SET
                     "Revision" = CASE
                         WHEN "ProviderCatalogItems"."FactsJson" <> EXCLUDED."FactsJson"
@@ -113,7 +113,12 @@ public sealed class ProviderCatalogStore(IServiceScopeFactory scopes, TimeProvid
         Isrc = Clean(facts.Isrc), MusicBrainzRecordingId = Clean(facts.MusicBrainzRecordingId),
         ArtistCredits = facts.ArtistCredits.Where(credit => !string.IsNullOrWhiteSpace(credit.Name))
             .Select(credit => credit with { RawMetadata = null }).ToArray(),
-        VersionFlags = facts.VersionFlags
+        VersionFlags = facts.VersionFlags,
+        OriginalTitle = Clean(facts.OriginalTitle), ChannelTitle = Clean(facts.ChannelTitle),
+        ChannelId = Clean(facts.ChannelId), Description = Clean(facts.Description),
+        CategoryId = Clean(facts.CategoryId),
+        TopicCategories = facts.TopicCategories.Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim()).Distinct(StringComparer.Ordinal).ToArray()
     };
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

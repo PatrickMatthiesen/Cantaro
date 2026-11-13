@@ -217,10 +217,11 @@ public sealed class OutboundPlaylistSyncService(
                 StatusCodes.Status409Conflict);
         }
 
+        var eligibleIds = ObservationInput.Eligible(dbContext.TrackObservations, DateTimeOffset.UtcNow).Select(o => o.Id);
         var entries = await dbContext.PlaylistEntries.AsNoTracking()
             .Where(item => item.PlaylistId == playlistId)
-            .Include(item => item.Track)
-            .Include(item => item.TrackObservation)
+            .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
             .OrderBy(item => item.Position).ThenBy(item => item.Id)
             .ToListAsync(cancellationToken);
         var canonicalTrackIds = entries.Where(item => item.TrackId.HasValue)
@@ -230,7 +231,8 @@ public sealed class OutboundPlaylistSyncService(
                 && item.TrackId != null && canonicalTrackIds.Contains(item.TrackId.Value)
                 && item.TrackObservation != null
                 && item.TrackObservation.SourceType == service
-                && item.TrackObservation.TrackId == item.TrackId)
+                && item.TrackObservation.TrackId == item.TrackId && item.TrackObservation.OwnerUserId == account.UserId
+                && eligibleIds.Contains(item.TrackObservation.Id))
             .Select(item => new { TrackId = item.TrackId!.Value, ExternalId = item.TrackObservation!.ExternalId })
             .ToListAsync(cancellationToken);
         var ownedProviderIdsByTrack = ownedProviderIds.GroupBy(item => item.TrackId)
@@ -249,7 +251,7 @@ public sealed class OutboundPlaylistSyncService(
                     : null;
             if (string.IsNullOrWhiteSpace(providerId))
             {
-                unmatched.Add(entry.Track?.SearchTitle ?? observation?.Title ?? $"Track {entry.Position + 1}");
+                unmatched.Add(ProviderCatalogPolicy.SharedFacts(entry.Track, DateTimeOffset.UtcNow)?.Title ?? ObservationInput.Read(observation, account.UserId, DateTimeOffset.UtcNow)?.Title ?? $"Track {entry.Position + 1}");
             }
             else
             {

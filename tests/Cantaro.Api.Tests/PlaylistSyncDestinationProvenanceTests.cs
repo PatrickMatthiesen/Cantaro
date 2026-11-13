@@ -53,7 +53,7 @@ public sealed class PlaylistSyncDestinationProvenanceTests
         Assert.Equal(["safe-result"], Assert.Single(scenario.Writer.Writes));
         Assert.DoesNotContain(Scenario.PrivateId, scenario.Writer.Writes.SelectMany(ids => ids));
         Assert.Equal("success", scenario.Mapping.LastSyncStatus);
-        Assert.False(await scenario.Db.TrackSourceIds.AnyAsync(source => source.SourceType == "spotify"
+        Assert.False(await scenario.Db.ProviderCatalogItems.AnyAsync(source => source.SourceType == "spotify"
             && source.ExternalId == "safe-result"));
         Assert.Equal("safe-result", Assert.Single(PlaylistMatchingProgress.Read(scenario.Mapping.MatchingProgressJson)).Value.ExternalId);
         scenario.Provider.SearchResults = [];
@@ -110,6 +110,29 @@ public sealed class PlaylistSyncDestinationProvenanceTests
         Assert.Equal(0, scenario.Mapping.UnresolvedCount);
     }
 
+    [Fact]
+    public async Task ObservationResultDoesNotAuthorizeDestinationForUnresolvedEntry()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var entry = await scenario.AddRelatedSongAsync();
+        await scenario.AddOwnedObservationAsync("spotify", "recognition-result");
+        await scenario.AddOwnedObservationAsync("youtube", "recognition-input");
+        var observation = await scenario.Db.TrackObservations.SingleAsync(item => item.OwnerUserId == Scenario.RequesterId
+            && item.SourceType == "youtube");
+        entry.TrackId = null;
+        entry.Track = null;
+        entry.TrackObservationId = observation.Id;
+        entry.TrackObservation = observation;
+        // Evidence lookup must not reinterpret a recognition result as playlist identity.
+        var account = new PlatformAccountContext(Scenario.RequesterId,
+            scenario.Mapping.ConnectedServiceAccountId, scenario.Mapping.ExternalAccountId);
+        var result = await PlaylistDestinationIdentityEvidence.FindAsync(scenario.Db,
+            account, "spotify", entry, default);
+        Assert.Null(result);
+        Assert.Equal(scenario.RelatedTrack.Id, observation.TrackId);
+        Assert.Null(entry.TrackId);
+    }
+
     private sealed class Scenario : IAsyncDisposable
     {
         public const int RequesterId = 801;
@@ -148,7 +171,7 @@ public sealed class PlaylistSyncDestinationProvenanceTests
                 SyncEnabled = true, NextSyncAt = DateTimeOffset.UtcNow
             };
             var privatePlaylist = new Playlist { Id = Guid.NewGuid(), UserId = other.Id, Name = "Private" };
-            var anchor = new Track { Id = Guid.NewGuid(), SearchTitle = "Anchor", SearchArtist = "Artist" };
+            var anchor = new Track {  Id = Guid.NewGuid() };
             var catalogItem = new ProviderCatalogItem
             {
                 Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = "public-recording",
@@ -161,25 +184,14 @@ public sealed class PlaylistSyncDestinationProvenanceTests
                 VerificationMethod = CatalogVerificationMethods.MusicBrainz,
                 VerifiedAt = DateTimeOffset.UtcNow, RevalidateAfter = DateTimeOffset.UtcNow.AddDays(1), Revision = 1
             };
-            var related = new Track { Id = Guid.NewGuid(), PreferredCatalogItemId = catalogItem.Id };
-            related.SourceIds.Add(new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = related.Id, SourceType = catalogItem.SourceType,
-                ExternalId = catalogItem.ExternalId, ProviderCatalogItemId = catalogItem.Id,
-                ProviderCatalogItem = catalogItem, CatalogRevision = catalogItem.Revision,
-                AssociationState = RecordingAssociationState.Verified
-            });
-            var privateObservation = new TrackObservation
-            {
+            var related = new Track {  Id = Guid.NewGuid() };
+            related.ProviderItems.Add(CatalogFixture.Associate(catalogItem, related.Id, RecordingAssociationState.Verified, catalogItem.Revision));
+            var privateObservation = new TrackObservation {  InputKind = ObservationInputKind.Private,
                 Id = Guid.NewGuid(), OwnerUserId = other.Id, TrackId = related.Id, SourceType = "spotify", ExternalId = PrivateId,
                 Title = "Song", Artist = "Artist", DurationSeconds = 180,
                 MatchStatus = TrackMatchingStatuses.Matched
-            };
-            related.SourceIds.Add(new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "spotify", ExternalId = PrivateId,
-                Confidence = 1, LastVerifiedAt = DateTimeOffset.UtcNow
-            });
+             };
+            related.ProviderItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = related.Id, SourceType = "spotify", ExternalId = PrivateId, FactsJson = "{}" });
             var account = new ConnectedServiceAccount
             {
                 Id = 91, UserId = requester.Id, Service = "spotify",
@@ -200,13 +212,11 @@ public sealed class PlaylistSyncDestinationProvenanceTests
                 FromTrackId = anchor.Id, ToTrackId = related.Id, RelationType = TrackRelationType.RemixOf
             });
             db.PlaylistEntries.AddRange(
-                new PlaylistEntry
-                {
+                new PlaylistEntry { OwnerUserId = accessPlaylist.UserId,
                     Id = Guid.NewGuid(), PlaylistId = accessPlaylist.Id, TrackId = anchor.Id,
                     Position = 0, SourceService = "cantaro"
                 },
-                new PlaylistEntry
-                {
+                new PlaylistEntry { OwnerUserId = privatePlaylist.UserId,
                     Id = Guid.NewGuid(), PlaylistId = privatePlaylist.Id, TrackId = related.Id,
                     TrackObservationId = privateObservation.Id, Position = 0, SourceService = "spotify"
                 });
@@ -223,7 +233,7 @@ public sealed class PlaylistSyncDestinationProvenanceTests
             Db.ChangeTracker.Clear();
             Mapping = await Db.ServicePlaylistMappings.SingleAsync();
             return await Db.PlaylistEntries.AsNoTracking()
-                .Include(entry => entry.Track).ThenInclude(track => track!.SourceIds)
+                .Include(entry => entry.Track).ThenInclude(track => track!.ProviderItems)
                 .Include(entry => entry.TrackObservation)
                 .SingleAsync(entry => entry.PlaylistId == SyncPlaylist.Id && entry.TrackId == RelatedTrack.Id);
         }
@@ -231,14 +241,12 @@ public sealed class PlaylistSyncDestinationProvenanceTests
         public async Task AddOwnedObservationAsync(string service, string externalId)
         {
             var playlist = new Playlist { Id = Guid.NewGuid(), UserId = RequesterId, Name = $"Owned {service}" };
-            var observation = new TrackObservation
-            {
+            var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
                 Id = Guid.NewGuid(), OwnerUserId = RequesterId, TrackId = RelatedTrack.Id, SourceType = service, ExternalId = externalId,
                 Title = "Song", Artist = "Artist", DurationSeconds = 180,
                 MatchStatus = TrackMatchingStatuses.Matched
-            };
-            Db.PlaylistEntries.Add(new PlaylistEntry
-            {
+             };
+            Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId,
                 Id = Guid.NewGuid(), Playlist = playlist, PlaylistId = playlist.Id,
                 TrackId = RelatedTrack.Id, TrackObservation = observation,
                 TrackObservationId = observation.Id, SourceService = service
@@ -278,14 +286,14 @@ public sealed class PlaylistSyncDestinationProvenanceTests
                 var externalId = RemoteIds[index];
                 var observation = await db.TrackObservations.AsNoTracking().SingleOrDefaultAsync(item =>
                     item.SourceType == PlatformId && item.ExternalId == externalId, cancellationToken);
-                var trackId = observation?.TrackId ?? await db.TrackSourceIds.AsNoTracking()
+                var trackId = observation?.TrackId ?? await db.ProviderCatalogItems.AsNoTracking()
                     .Where(item => item.SourceType == PlatformId && item.ExternalId == externalId)
                     .Select(item => (Guid?)item.TrackId).SingleOrDefaultAsync(cancellationToken);
                 if (observation is null && trackId is null)
                 {
-                    observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = PlatformId,
+                    observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), SourceType = PlatformId,
                         ExternalId = externalId, Title = "Song", Artist = "Artist",
-                        MatchStatus = TrackMatchingStatuses.Pending };
+                        MatchStatus = TrackMatchingStatuses.Pending  };
                     db.TrackObservations.Add(observation);
                     await db.SaveChangesAsync(cancellationToken);
                 }

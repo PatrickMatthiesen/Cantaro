@@ -1,3 +1,4 @@
+using Cantaro.Api.Services;
 using Cantaro.Api.Data;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Models;
@@ -29,11 +30,10 @@ public sealed class SpotifySearchCacheTests
             var api = new SpotifyApiClient(http, options, new SpotifyRetryDelay(), cooldown);
             var tokens = new SpotifyCatalogTokenProvider(api, options, TimeProvider.System, new SpotifyCatalogTokenCache());
             var provider = new SpotifySearchProvider(api, tokens, searchCache: fixture.Cache());
-            var results = await provider.SearchAsync(new TrackObservation
-            {
-                Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = Guid.NewGuid().ToString(),
-                Title = "Heaven", Artist = "Rival", DurationSeconds = 253, MatchStatus = "pending"
-            }, default);
+            var results = await provider.SearchAsync(new ObservationInput {
+                 SourceType = "youtube", ExternalId = Guid.NewGuid().ToString(),
+                Title = "Heaven", Artist = "Rival", DurationSeconds = 253,
+             }, default);
             return Assert.Single(results).ExternalId;
         }
         Assert.Equal("spotify-id", await SearchWithFreshWorker(false));
@@ -167,10 +167,10 @@ public sealed class SpotifySearchCacheTests
         finally { caller.Cancel(); }
     }
 
-    private static TrackObservation CachedObservation() => new()
+    private static ObservationInput CachedObservation() => new()
     {
         SourceType = "youtube", ExternalId = "video", Title = "Heaven", Artist = "Rival",
-        DurationSeconds = 253, MatchStatus = "pending"
+        DurationSeconds = 253,
     };
 
     [Fact]

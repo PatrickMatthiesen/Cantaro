@@ -191,7 +191,8 @@ public sealed class MatchingControllerTests
         db.Users.AddRange(alice, bob);
         var aliceObservation = AddObservation(db, "youtube", TrackMatchingStatuses.Pending, null, "Alice song", ownerUserId: alice.Id);
         var referenceOnly = AddObservation(db, "youtube", TrackMatchingStatuses.NoMatch, null, "Legacy snapshot", ownerUserId: alice.Id);
-        referenceOnly.Title = "";
+        referenceOnly.Title = null;
+        referenceOnly.InputKind = ObservationInputKind.Reference;
         var bobObservation = AddObservation(db, "spotify", TrackMatchingStatuses.Ambiguous, "private error", "Bob song", ownerUserId: bob.Id);
         db.TrackMatchQueueItems.AddRange(
             new TrackMatchQueueItem { TrackObservationId = referenceOnly.Id, NextAttemptAt = DateTime.UtcNow },
@@ -241,6 +242,7 @@ public sealed class MatchingControllerTests
     {
         var observation = new TrackObservation
         {
+            InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = source, ExternalId = Guid.NewGuid().ToString("N"),
             Title = title, MatchStatus = status, LastMatchError = error, TrackId = trackId,
             OwnerUserId = ownerUserId ?? db.Users.Local.Single().Id,

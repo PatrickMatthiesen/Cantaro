@@ -41,7 +41,9 @@ public sealed class ArtistReconciliationServiceTests
         Assert.NotNull(link.VerifiedAt);
         Assert.True(link.RevalidateAfter > link.VerifiedAt);
         var credit = await fixture.Db.TrackArtistCredits.SingleAsync(c => c.TrackId == first.Id);
-        Assert.Contains("spotify", credit.Provenance);
+        Assert.Equal(snapshot.ProviderCatalogItemId, credit.ProviderCatalogItemId);
+        Assert.Equal(snapshot.ProviderCatalogRevision, credit.ProviderCatalogRevision);
+        Assert.Equal(0, credit.SourceCreditPosition);
     }
 
     [Fact]
@@ -93,7 +95,7 @@ public sealed class ArtistReconciliationServiceTests
         await fixture.Import(track, [MusicBrainz("Artist", Mbid)]);
         await fixture.Db.SaveChangesAsync();
         Assert.Equal(originalArtist, track.ArtistCredits.Single().ArtistId);
-        Assert.Equal(Mbid, (await fixture.Db.Artists.SingleAsync()).MusicBrainzArtistId);
+        Assert.Equal(Mbid, (await fixture.Db.ArtistProviderLinks.SingleAsync(l => l.Provider == "musicbrainz")).ExternalId);
         Assert.Equal(2, await fixture.Db.ArtistProviderLinks.CountAsync());
         Assert.Empty(await fixture.Db.ArtistReconciliationConflicts.ToListAsync());
     }
@@ -115,8 +117,8 @@ public sealed class ArtistReconciliationServiceTests
         Assert.Equal(original, track.ArtistCredits.Single().ArtistId);
         Assert.Equal("a", (await fixture.Db.ArtistProviderLinks.SingleAsync()).ExternalId);
         var conflict = await fixture.Db.ArtistReconciliationConflicts.SingleAsync();
-        Assert.Contains("\"ExternalId\":\"b\"", conflict.Evidence);
-        Assert.Contains(original.ToString(), conflict.Evidence);
+        Assert.Contains("\"ExternalId\":\"b\"", conflict.IdentityConflictJson);
+        Assert.Contains(original.ToString(), conflict.IdentityConflictJson);
         Assert.Single(await fixture.Db.Artists.ToListAsync());
     }
 
@@ -137,7 +139,7 @@ public sealed class ArtistReconciliationServiceTests
         Assert.Equal(original, first.ArtistCredits.Single().ArtistId);
         Assert.Equal(2, await fixture.Db.Artists.CountAsync());
         Assert.Equal(2, await fixture.Db.ArtistReconciliationConflicts.CountAsync());
-        Assert.Null((await fixture.Db.Artists.SingleAsync(a => a.Id == original)).MusicBrainzArtistId);
+        Assert.False(await fixture.Db.ArtistProviderLinks.AnyAsync(l => l.ArtistId == original && l.Provider == "musicbrainz"));
     }
 
     [Fact]
@@ -149,7 +151,7 @@ public sealed class ArtistReconciliationServiceTests
         await fixture.Db.SaveChangesAsync();
         await fixture.Import(track, [MusicBrainz("Artist", "82e3e1de-9243-4e58-b2d2-796c64f76c82")]);
         await fixture.Db.SaveChangesAsync();
-        Assert.Equal(Mbid, (await fixture.Db.Artists.SingleAsync()).MusicBrainzArtistId);
+        Assert.Equal(Mbid, (await fixture.Db.ArtistProviderLinks.SingleAsync(l => l.Provider == "musicbrainz")).ExternalId);
         Assert.Single(await fixture.Db.ArtistReconciliationConflicts.ToListAsync());
     }
 
@@ -196,8 +198,8 @@ public sealed class ArtistReconciliationServiceTests
         await using var fixture = await Fixture.CreateAsync();
         var track = fixture.AddTrack();
         await fixture.Import(track, [new() { Name = legacyName }]);
-        fixture.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = track.Id,
-            SourceType = "spotify", ExternalId = "collaboration" });
+        fixture.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = track.Id,
+            SourceType = "spotify", ExternalId = "collaboration", FactsJson = "{}" });
         await fixture.Db.SaveChangesAsync();
         var snapshot = Snapshot("collaboration", "Alpha, Beta", "alpha") with {
             ArtistIdentities = [Spotify("Alpha", "alpha"), Spotify("Beta", "beta")] };
@@ -260,11 +262,104 @@ public sealed class ArtistReconciliationServiceTests
         foreach (var conflict in conflicts)
         {
             Assert.Contains("order", conflict.Reason);
-            using var json = JsonDocument.Parse(conflict.Evidence);
-            var position = json.RootElement.GetProperty("position").GetInt32();
-            Assert.Equal(position == 0 ? "b" : "a", json.RootElement.GetProperty("incoming").GetProperty("ExternalId").GetString());
-            Assert.Equal(position == 0 ? " & " : "", json.RootElement.GetProperty("incoming").GetProperty("JoinPhrase").GetString());
+            using var json = JsonDocument.Parse(Assert.IsType<string>(conflict.IdentityConflictJson));
+            var position = conflict.SourceCreditPosition;
+            Assert.Equal(position == 0 ? "b" : "a", json.RootElement.GetProperty("ExternalId").GetString());
+            Assert.False(json.RootElement.TryGetProperty("Name", out _));
+            Assert.False(json.RootElement.TryGetProperty("JoinPhrase", out _));
         }
+    }
+
+    [Fact]
+    public async Task MbidOnlyAndSpotifyPlusMbid_ResolveBothLinksAcrossRestartWithoutNameIdentity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = fixture.AddTrack();
+        await fixture.Import(first, [new() { Name = "Original", MusicBrainzArtistId = $" {Mbid.ToUpperInvariant()} " }]);
+        await fixture.Db.SaveChangesAsync();
+        var artistId = first.ArtistCredits.Single().ArtistId;
+        fixture.Db.ChangeTracker.Clear();
+
+        var second = fixture.AddTrack();
+        await fixture.Import(second, [Spotify("Different credited name", "spotify-a") with { MusicBrainzArtistId = Mbid }]);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        var third = fixture.AddTrack();
+        await fixture.Import(third, [Spotify("Third spelling", "spotify-a")]);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.Equal(artistId, second.ArtistCredits.Single().ArtistId);
+        Assert.Equal(artistId, third.ArtistCredits.Single().ArtistId);
+        Assert.Single(await fixture.Db.Artists.ToListAsync());
+        var links = await fixture.Db.ArtistProviderLinks.ToListAsync();
+        Assert.Equal(2, links.Count);
+        Assert.Contains(links, l => l.Provider == "musicbrainz" && l.ExternalId == Mbid && l.ArtistId == artistId);
+        Assert.Contains(links, l => l.Provider == "spotify" && l.ExternalId == "spotify-a" && l.ArtistId == artistId);
+    }
+
+    [Fact]
+    public async Task SuppliedMusicBrainzIdsThatDisagree_AreRejectedBeforeCreatingAnyIdentity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var track = fixture.AddTrack();
+        await fixture.Import(track, [MusicBrainz("Artist", Mbid) with {
+            MusicBrainzArtistId = "82e3e1de-9243-4e58-b2d2-796c64f76c82" }]);
+        await fixture.Db.SaveChangesAsync();
+        Assert.Empty(await fixture.Db.Artists.ToListAsync());
+        Assert.Empty(await fixture.Db.ArtistProviderLinks.ToListAsync());
+        Assert.Empty(track.ArtistCredits);
+        Assert.Contains("disagrees", (await fixture.Db.ArtistReconciliationConflicts.SingleAsync()).Reason);
+    }
+
+    [Fact]
+    public async Task SourceReferences_RejectPartialEvidenceBeforeChangingTheTrack()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var track = fixture.AddTrack();
+        var reconcile = new ArtistReconciliationService(fixture.Db);
+        await Assert.ThrowsAsync<ArgumentException>(() => reconcile.ReconcileAsync(track, [Spotify("Artist", "a")],
+            "spotify", Now, default, sourceItemId: Guid.NewGuid()));
+        await Assert.ThrowsAsync<ArgumentException>(() => reconcile.ReconcileAsync(track, [Spotify("Artist", "a")],
+            "spotify", Now, default, sourceRevision: 1));
+        Assert.Empty(track.ArtistCredits);
+        Assert.Empty(fixture.Db.ArtistProviderLinks.Local);
+    }
+
+    [Fact]
+    public async Task CreditAndConflictReferences_PreserveCanonicalValuesAndExcludeCopiedMetadata()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var track = fixture.AddTrack();
+        var snapshot = await fixture.AddPublicCatalogSnapshotAsync(Snapshot("source", "Artist", "a"));
+        var reconcile = new ArtistReconciliationService(fixture.Db);
+        await reconcile.ReconcileAsync(track, [Spotify("Artist", "a") with { JoinPhrase = " feat. ", Role = TrackArtistRole.Featured }],
+            "spotify", Now, default, sourceItemId: snapshot.ProviderCatalogItemId, sourceRevision: snapshot.ProviderCatalogRevision);
+        await fixture.Db.SaveChangesAsync();
+        var incoming = Spotify("Artist", "b") with { RawMetadata = "secret-payload", ArtworkUrl = "secret-artwork", JoinPhrase = " & " };
+        await reconcile.ReconcileAsync(track, [incoming], "spotify", Now, default,
+            sourceItemId: snapshot.ProviderCatalogItemId, sourceRevision: snapshot.ProviderCatalogRevision);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        track = await fixture.Db.Tracks.SingleAsync(t => t.Id == track.Id);
+        await reconcile.ReconcileAsync(track, [incoming with { RawMetadata = "changed-payload" }], "spotify", Now, default,
+            sourceItemId: snapshot.ProviderCatalogItemId, sourceRevision: snapshot.ProviderCatalogRevision);
+        await fixture.Db.SaveChangesAsync();
+
+        var credit = track.ArtistCredits.Single();
+        Assert.Equal(snapshot.ProviderCatalogItemId, credit.ProviderCatalogItemId);
+        Assert.Equal(snapshot.ProviderCatalogRevision, credit.ProviderCatalogRevision);
+        Assert.Equal(0, credit.SourceCreditPosition);
+        Assert.Equal("Artist", credit.CreditedName);
+        Assert.Equal(" feat. ", credit.JoinPhrase);
+        Assert.Equal(TrackArtistRole.Featured, credit.Role);
+        var conflict = await fixture.Db.ArtistReconciliationConflicts.SingleAsync();
+        Assert.Equal(snapshot.ProviderCatalogItemId, conflict.ProviderCatalogItemId);
+        Assert.Equal(snapshot.ProviderCatalogRevision, conflict.ProviderCatalogRevision);
+        Assert.Equal(0, conflict.SourceCreditPosition);
+        Assert.DoesNotContain("payload", conflict.IdentityConflictJson!);
+        Assert.DoesNotContain("artwork", conflict.IdentityConflictJson!);
+        Assert.DoesNotContain("JoinPhrase", conflict.IdentityConflictJson!);
+        Assert.Contains("\"ExternalId\":\"b\"", conflict.IdentityConflictJson!);
     }
 
     private static ArtistCreditMetadata Spotify(string name, string id) => new() {

@@ -55,7 +55,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         using var cancellation = new CancellationTokenSource();
         var interceptor = new ExportInsertFailure(failure, cancellation);
         await using var caller = scope.NewContext(interceptor);
-        var pending = new Track { Id = Guid.NewGuid(), SearchTitle = "Caller has not saved this" };
+        var pending = new Track {  Id = Guid.NewGuid() };
         caller.Tracks.Add(pending);
         var record = PlaylistExportAttemptStore.RecordAsync(caller,
             new(scope.UserId, scope.Link.ConnectedServiceAccountId, "account"), "spotify", "playlist", ["first-id", "second-id"], cancellation.Token);
@@ -106,7 +106,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using var fixture = await ReplacementReadFixture.CreateAsync("spotify", true);
         var scope = fixture.Scope;
         await using var caller = scope.NewContext();
-        var pending = new Track { Id = Guid.NewGuid(), SearchTitle = "Caller transaction" };
+        var pending = new Track {  Id = Guid.NewGuid() };
         await new PlaylistSyncCoordinator.PlaylistTransactionStrategy(caller).ExecuteAsync(async () =>
         {
             await using var transaction = await caller.Database.BeginTransactionAsync();

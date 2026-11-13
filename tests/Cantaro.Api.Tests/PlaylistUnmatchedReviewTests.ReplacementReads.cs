@@ -247,8 +247,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using (var setup = scope.NewContext())
         {
             await fixture.Lifecycle(setup).UnlinkAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, false, false, default);
-            var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Different recording" };
-            var entry = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = target.Id, TrackId = track.Id };
+            var track = new Track {  Id = Guid.NewGuid() };
+            var entry = new PlaylistEntry { OwnerUserId = target.UserId, Id = Guid.NewGuid(), PlaylistId = target.Id, TrackId = track.Id };
             var old = new ServicePlaylistMapping
             {
                 Id = secondFirst ? Guid.Empty : Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"),
@@ -268,11 +268,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await readDb.SaveChangesAsync();
         }
         await using var verify = scope.NewContext();
-        Assert.Empty(await verify.TrackSourceIds.ToArrayAsync());
+        Assert.Empty(await verify.ProviderCatalogItems.ToArrayAsync());
         Assert.Empty(await verify.TrackArtistCredits.ToArrayAsync());
         Assert.Empty(await verify.TrackMatchQueueItems.ToArrayAsync());
         Assert.False(await verify.TrackObservations.AnyAsync(observation => observation.SourceType == service));
-        Assert.All(await verify.Tracks.ToArrayAsync(), track => Assert.Null(track.Isrc));
+        Assert.All(await verify.Tracks.Include(track => track.ProviderItems).ToArrayAsync(), track => Assert.Null(track.Isrc));
         Assert.All(await verify.ServicePlaylistMappings.ToArrayAsync(), link => Assert.Equal("unlinked", link.State));
     }
 
@@ -305,10 +305,10 @@ public sealed partial class PlaylistUnmatchedReviewTests
             var observation = await verify.TrackObservations.SingleAsync(source => source.OwnerUserId == scope.UserId
                 && source.SourceType == service && source.ExternalId == "chosen-id");
             Assert.NotNull(observation.TrackId);
-            var privateTrack = await verify.Tracks.SingleAsync(track => track.Id == observation.TrackId);
-            Assert.Null(privateTrack.PreferredCatalogItemId);
+            var privateTrack = await verify.Tracks.Include(track => track.ProviderItems).SingleAsync(track => track.Id == observation.TrackId);
+            Assert.Null(ProviderCatalogPolicy.SharedSource(privateTrack, DateTimeOffset.UtcNow)?.Id);
             Assert.Null(privateTrack.Isrc);
-            Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+            Assert.False(await verify.ProviderCatalogItems.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
             Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == privateTrack.Id));
         }
         else Assert.True(await verify.TrackMatchQueueItems.AnyAsync());
@@ -327,7 +327,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using (var setup = scope.NewContext())
         {
             // Give the real independently imported recording a distinct ISRC.
-            (await setup.Tracks.SingleAsync()).Isrc = "USABC2400002";
+            (await setup.Tracks.Include(track => track.ProviderItems).SingleAsync()).Isrc = "USABC2400002";
             var original = await setup.ConnectedServiceAccounts.SingleAsync();
             setup.Users.Add(TestUserFactory.Create(otherUserId, "replacement-other@example.com"));
             setup.ConnectedServiceAccounts.Add(new ConnectedServiceAccount
@@ -348,18 +348,18 @@ public sealed partial class PlaylistUnmatchedReviewTests
             await readDb.SaveChangesAsync();
         }
         await using var verify = scope.NewContext();
-        Assert.Equal("USABC2400002", (await verify.Tracks.SingleAsync(track => track.Id == scope.Entry.TrackId)).Isrc);
+        Assert.Equal("USABC2400002", (await verify.Tracks.Include(track => track.ProviderItems).SingleAsync(track => track.Id == scope.Entry.TrackId)).Isrc);
         Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == scope.Entry.TrackId));
-        Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.TrackId == scope.Entry.TrackId && source.SourceType == service));
+        Assert.False(await verify.ProviderCatalogItems.AnyAsync(source => source.TrackId == scope.Entry.TrackId && source.SourceType == service));
         if (service == "spotify")
         {
             var observation = await verify.TrackObservations.SingleAsync(source => source.OwnerUserId == otherUserId
                 && source.SourceType == service && source.ExternalId == "chosen-id");
             Assert.NotNull(observation.TrackId);
-            var privateTrack = await verify.Tracks.SingleAsync(track => track.Id == observation.TrackId);
-            Assert.Null(privateTrack.PreferredCatalogItemId);
+            var privateTrack = await verify.Tracks.Include(track => track.ProviderItems).SingleAsync(track => track.Id == observation.TrackId);
+            Assert.Null(ProviderCatalogPolicy.SharedSource(privateTrack, DateTimeOffset.UtcNow)?.Id);
             Assert.Null(privateTrack.Isrc);
-            Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+            Assert.False(await verify.ProviderCatalogItems.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
             Assert.False(await verify.TrackArtistCredits.AnyAsync(credit => credit.TrackId == privateTrack.Id));
         }
     }
@@ -399,7 +399,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             {
                 if (read != 3) return; // After preview, attach revalidation and the initialization read.
                 await using var update = scope.NewContext();
-                var replacement = new Track { Id = Guid.NewGuid(), SearchTitle = "Reassigned source" };
+                var replacement = new Track {  Id = Guid.NewGuid() };
                 update.Tracks.Add(replacement);
                 await update.SaveChangesAsync();
                 if (change == "observation")
@@ -407,9 +407,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
                         .ExecuteUpdateAsync(setters => setters.SetProperty(observation => observation.TrackId, replacement.Id));
                 else
                 {
-                    var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = replacement.Id, SourceType = service, ExternalId = "chosen-id" };
+                    var mapping = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = replacement.Id, SourceType = service, ExternalId = "chosen-id", FactsJson = "{}" };
                     scope.VerifyMapping(mapping);
-                    update.TrackSourceIds.Add(mapping);
+                    update.ProviderCatalogItems.Add(mapping);
                     await update.SaveChangesAsync();
                 }
                 changed = true;
@@ -428,13 +428,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal("initialization_pending", current.LastSyncStatus);
         Assert.Null(current.BaselineJson);
         Assert.False(await verify.PlaylistEntries.AnyAsync(entry => entry.PlaylistId == target.Id));
-        var mappings = await verify.TrackSourceIds.ToArrayAsync();
+        var mappings = await verify.ProviderCatalogItems.ToArrayAsync();
         Assert.Equal(change == "recording" ? 1 : 0, mappings.Length);
         Assert.DoesNotContain(mappings, source => source.TrackId == scope.Entry.TrackId);
         Assert.Empty(await verify.TrackMatchQueueItems.ToArrayAsync());
         Assert.Empty(await verify.TrackArtistCredits.ToArrayAsync());
         Assert.False(await verify.TrackObservations.AnyAsync(observation => observation.SourceType == service));
-        Assert.All(await verify.Tracks.ToArrayAsync(), track => Assert.Null(track.Isrc));
+        Assert.All(await verify.Tracks.Include(track => track.ProviderItems).ToArrayAsync(), track => Assert.Null(track.Isrc));
         Assert.All(await verify.Playlists.ToArrayAsync(), playlist => Assert.Null(playlist.SyncLeaseId));
     }
 
@@ -477,14 +477,14 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
     private static async Task AssertReplacementReadIsolationAsync(Scope scope, ApplicationDbContext verify, string service)
     {
-        Assert.False(await verify.TrackSourceIds.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
+        Assert.False(await verify.ProviderCatalogItems.AnyAsync(source => source.SourceType == service && source.ExternalId == "chosen-id"));
         Assert.False(await verify.TrackObservations.AnyAsync(observation => observation.SourceType == service && observation.ExternalId == "chosen-id"));
         Assert.Empty(await verify.TrackMatchQueueItems.ToArrayAsync());
         Assert.Empty(await verify.TrackArtistCredits.ToArrayAsync());
-        var track = Assert.Single(await verify.Tracks.ToArrayAsync());
+        var track = Assert.Single(await verify.Tracks.Include(track => track.ProviderItems).ToArrayAsync());
         Assert.Equal(scope.Entry.TrackId, track.Id);
         Assert.Null(track.Isrc);
-        Assert.Null(JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata!)!.ThumbnailUrl);
+        Assert.Null(CatalogFixture.Facts(track)?.ThumbnailUrl);
         Assert.All(await verify.Playlists.ToArrayAsync(), playlist => Assert.Null(playlist.SyncLeaseId));
     }
 

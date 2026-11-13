@@ -6,29 +6,11 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class Track
 {
-    public Guid? PreferredCatalogItemId { get; set; }
-    public ProviderCatalogItem? PreferredCatalogItem { get; set; }
     /// <summary>
     /// Internal canonical TrackID (primary key)
     /// </summary>
     public Guid Id { get; set; }
 
-    /// <summary>
-    /// Historical metadata cleared by the cutover. Current reads use catalog facts.
-    /// </summary>
-    public string? CanonicalMetadata { get; set; }
-
-    /// <summary>
-    /// Queryable shared display projection assigned from verified provider facts.
-    /// This is not a separate canonical identity field.
-    /// </summary>
-    public string? SearchTitle { get; set; }
-
-    /// <summary>
-    /// Queryable shared display projection assigned from verified provider facts.
-    /// Artist identity continues to live in the structured artist-credit model.
-    /// </summary>
-    public string? SearchArtist { get; set; }
     
     /// <summary>
     /// MusicBrainz Recording ID (nullable - may not always be available)
@@ -59,11 +41,10 @@ public class Track
     /// <summary>
     /// Navigation property to source IDs
     /// </summary>
-    public ICollection<TrackSourceId> SourceIds { get; set; } = [];
+    public ICollection<ProviderCatalogItem> ProviderItems { get; set; } = [];
 
     /// <summary>
-    /// Ordered artist credits. CanonicalMetadata.Artist remains as a legacy
-    /// display snapshot while clients migrate to this structured relationship.
+    /// Ordered artist credits for this recording.
     /// </summary>
     public ICollection<TrackArtistCredit> ArtistCredits { get; set; } = [];
 

@@ -54,7 +54,7 @@ public class Worker(
             await EnsureDatabaseExistsAsync(dbContext, cancellationToken);
 
             // Run migration in a transaction to avoid partial migration if it fails.
-            await dbContext.Database.MigrateAsync(cancellationToken);
+            await CatalogReductionMigrator.ApplyAsync(dbContext, cancellationToken);
         });
     }
 

@@ -75,8 +75,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal("error", link.LastSyncStatus);
         Assert.NotNull(link.PendingWriteJson);
         Assert.Equal(["chosen-id"], provider.RemoteIds);
-        Assert.True(TrackArtworkUpdater.FillMissingCanonicalThumbnail(
-            await scope.Db.Tracks.SingleAsync(), "https://example.invalid/recovered.jpg"));
+        Assert.True(CatalogFixture.SetArtwork(
+            await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(), "https://example.invalid/recovered.jpg"));
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         if (!present) provider.RemoteIds = [];
         for (var pass = 0; pass < 2; pass++)
@@ -119,8 +120,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal(scope.Entry.TrackId, bound.TrackId);
         Assert.Equal(scope.Entry.Id, bound.DestinationBinding!.EntryId);
         provider.SearchResults = [];
-        Assert.True(TrackArtworkUpdater.FillMissingCanonicalThumbnail(
-            await scope.Db.Tracks.SingleAsync(), "https://example.invalid/counterpart.jpg"));
+        Assert.True(CatalogFixture.SetArtwork(
+            await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(), "https://example.invalid/counterpart.jpg"));
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         for (var pass = 0; pass < 2; pass++)
         {

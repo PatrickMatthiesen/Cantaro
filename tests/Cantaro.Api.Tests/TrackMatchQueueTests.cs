@@ -29,7 +29,8 @@ public sealed class TrackMatchQueueTests
     {
         await using var fixture = await QueueFixture.CreateAsync();
         var observation = fixture.AddPendingObservation();
-        observation.Title = "";
+        observation.Title = null;
+        observation.InputKind = ObservationInputKind.Reference;
         await fixture.Db.SaveChangesAsync();
 
         await fixture.Queue.EnqueueAsync(observation.Id, CancellationToken.None);
@@ -96,6 +97,31 @@ public sealed class TrackMatchQueueTests
         Assert.Equal(fixture.Now.AddMinutes(5).UtcDateTime, item.NextAttemptAt);
     }
 
+    [Fact]
+    public async Task SavedPublicReferenceWithNullPrivateTitleCanBeEnqueuedAndClaimed()
+    {
+        await using var fixture = await QueueFixture.CreateAsync();
+        var observation = fixture.AddPendingObservation();
+        observation.InputKind = ObservationInputKind.Reference;
+        observation.Title = null;
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Queue.EnqueueAsync(observation.Id, default);
+        Assert.Empty(fixture.Db.TrackMatchQueueItems.Local);
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = observation.SourceType, ExternalId = observation.ExternalId,
+            FactsJson = "{\"Title\":\"Public song\"}", Revision = 1,
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VerifiedAt = fixture.Now, RevalidateAfter = fixture.Now.AddHours(1)
+        };
+        fixture.Db.ProviderCatalogItems.Add(item);
+        ObservationInput.SetPublic(observation, item);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Queue.EnqueueAsync(observation.Id, default);
+        await fixture.Db.SaveChangesAsync();
+        Assert.Equal(observation.Id, (await fixture.Queue.TryClaimNextAsync(default))!.ObservationId);
+    }
+
     private sealed class QueueFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -134,6 +160,7 @@ public sealed class TrackMatchQueueTests
         {
             var observation = new TrackObservation
             {
+            InputKind = ObservationInputKind.Private,
                 OwnerUserId = 77,
                 Id = Guid.NewGuid(),
                 SourceType = "youtube",

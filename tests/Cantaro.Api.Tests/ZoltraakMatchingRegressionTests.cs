@@ -11,22 +11,21 @@ public sealed class ZoltraakMatchingRegressionTests
     public void SharedMatcherUsesCoverArtistAndFullDashTitleForZoltraak()
     {
         const string originalTitle = "Zoltraak | Epic Orchestral Cover - Frieren: Beyond Journey's End 葬送のフリーレン";
-        var source = new TrackObservation
-        {
+        var source = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             SourceType = "youtube",
             ExternalId = "zoltraak-video",
             Title = originalTitle,
             Artist = "Luke Chu",
             DurationSeconds = 137,
             MatchStatus = TrackMatchingStatuses.Pending,
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
             {
                 OriginalTitle = originalTitle,
                 OriginalArtist = "Luke Chu",
-                SearchArtist = "Luke Chu",
+
                 Description = "Composer: Evan Call\n\nCover Artist: Luke Chu"
             })
-        };
+         };
         var candidates = new[]
         {
             Candidate("correct", "Zoltraak - Epic Orchestral Cover", "Luke Chu"),
@@ -34,7 +33,7 @@ public sealed class ZoltraakMatchingRegressionTests
             Candidate("wrong-cover", "Zoltraak - Epic Orchestral Cover", "Logan Feece")
         };
 
-        var decision = TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision;
+        var decision = TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision;
 
         Assert.Equal("correct", decision.AcceptedCandidate?.Candidate.ExternalId);
     }

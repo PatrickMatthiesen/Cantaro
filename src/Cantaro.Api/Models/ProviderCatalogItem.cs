@@ -19,4 +19,16 @@ public sealed class ProviderCatalogItem
     public DateTimeOffset? RevalidateAfter { get; set; }
     public CatalogVisibility VisibilityState { get; set; }
     public long Revision { get; set; }
+
+    public Guid? TrackId { get; set; }
+    public Track? Track { get; set; }
+    public RecordingAssociationState AssociationState { get; set; }
+    public string? AssociationMethod { get; set; }
+    public DateTimeOffset? AssociationVerifiedAt { get; set; }
+    public long? AssociationFactsRevision { get; set; }
+    public long AssociationRevision { get; set; }
+    public string? AssociationEvidenceJson { get; set; }
+    public TrackSourcePresentationKind PresentationKind { get; set; }
+    public byte? PresentationConfidence { get; set; }
+    public bool? IsOfficial { get; set; }
 }

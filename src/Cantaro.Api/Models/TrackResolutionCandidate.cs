@@ -7,6 +7,9 @@ public class TrackResolutionCandidate
 {
     public Guid Id { get; set; }
     public Guid TrackObservationId { get; set; }
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
+    public long? ProviderCatalogRevision { get; set; }
 
     /// <summary>
     /// Candidate provider/source (e.g. musicbrainz, manual).
@@ -18,7 +21,7 @@ public class TrackResolutionCandidate
     /// </summary>
     public required string ExternalId { get; set; }
 
-    public required string Title { get; set; }
+    public string? Title { get; set; }
     public string? Artist { get; set; }
     public string? MbidRecording { get; set; }
     public string? Isrc { get; set; }
@@ -35,9 +38,9 @@ public class TrackResolutionCandidate
     public string? Explanation { get; set; }
 
     /// <summary>
-    /// Raw provider payload for debugging or replay.
+    /// Score diagnostics and necessary unverified input, without copied public provider payloads.
     /// </summary>
-    public string? RawMetadata { get; set; }
+    public string? EvaluationJson { get; set; }
 
     public bool IsAccepted { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

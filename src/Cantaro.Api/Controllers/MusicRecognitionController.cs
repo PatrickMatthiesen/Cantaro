@@ -40,26 +40,24 @@ public sealed class MusicRecognitionController(
         var user = await userManager.GetUserAsync(User);
         if (user is null) return Unauthorized();
 
-        var source = await new ProviderRecordingAssociations(dbContext).FindUsableAsync("youtube", videoId, cancellationToken);
-        if (source is not null) return Ok(await BuildMatchedResponse(source.TrackId, user.Id, cancellationToken));
-
-        var existing = await dbContext.TrackObservations
+        var existing = await dbContext.TrackObservations.Include(o => o.ProviderCatalogItem)
             .FirstOrDefaultAsync(x => x.OwnerUserId == user.Id && x.SourceType == "youtube" && x.ExternalId == videoId, cancellationToken);
-        if (existing is { TrackId: { } existingTrackId } && ProviderCatalogPolicy.HasOwnedSnapshot(existing, user.Id))
+        if (existing is { TrackId: { } existingTrackId } && CanReuseResult(existing, user.Id))
             return Ok(await BuildMatchedResponse(existingTrackId, user.Id, cancellationToken));
 
-        if (existing is not null && ProviderCatalogPolicy.HasOwnedSnapshot(existing, user.Id)
+        var source = await new ProviderRecordingAssociations(dbContext).FindUsableAsync("youtube", videoId, cancellationToken);
+        if (source is not null) return Ok(await BuildMatchedResponse(source.TrackId!.Value, user.Id, cancellationToken));
+
+
+        if (existing is not null && existing.TrackId == null && ProviderCatalogPolicy.HasOwnedInput(existing, user.Id)
             && ShouldBackOff(existing, includeFreshPending: false))
-            return Ok(new RecognizeYouTubeResponse("music", existing.MatchStatus, null, existing.Title, existing.Artist, false, null));
+            return Ok(new RecognizeYouTubeResponse("music", existing.MatchStatus, null, ObservationInput.Read(existing, user.Id, DateTimeOffset.UtcNow)?.Title, ObservationInput.Read(existing, user.Id, DateTimeOffset.UtcNow)?.Artist, false, null));
 
         YouTubeVideoMetadataDto? metadata = null;
         try { metadata = await youtubeService.GetVideoMetadataAsync(user.Id, videoId, cancellationToken); }
         catch (Google.GoogleApiException) { }
         if (metadata is null)
         {
-            if (existing?.TrackId is { } referencedTrackId
-                && await BuildSharedCanonicalResponseAsync(referencedTrackId, user.Id, cancellationToken) is { } sharedResponse)
-                return Ok(sharedResponse);
             return Ok(new RecognizeYouTubeResponse("uncertain", "pending", null, null, null, false, null));
         }
         var classification = Classify(request.Site, metadata);
@@ -77,17 +75,26 @@ public sealed class MusicRecognitionController(
             Id = Guid.NewGuid(), OwnerUserId = user.Id, SourceType = "youtube", ExternalId = videoId,
             Title = parsedMetadata.DisplayTitle,
             Artist = parsedMetadata.DisplayArtist,
-            ThumbnailUrl = metadata?.ThumbnailUrl,
-            DurationSeconds = metadata?.DurationSeconds, MatchStatus = TrackMatchingStatuses.Pending,
+            ThumbnailUrl = metadata.ThumbnailUrl,
+            DurationSeconds = metadata.DurationSeconds, MatchStatus = TrackMatchingStatuses.Pending,
             CreatedAt = now, UpdatedAt = now
         };
-        observation.Title = parsedMetadata.DisplayTitle;
-        observation.Artist = parsedMetadata.DisplayArtist;
-        observation.ThumbnailUrl = metadata?.ThumbnailUrl;
-        observation.DurationSeconds = metadata?.DurationSeconds;
-        observation.NormalizedTitle = TrackTextNormalizer.Normalize(parsedMetadata.DisplayTitle);
-        observation.NormalizedArtist = TrackTextNormalizer.Normalize(parsedMetadata.DisplayArtist);
-        observation.RawMetadata = JsonSerializer.Serialize(metadata);
+        if (metadata.ProviderCatalogItemId is { } catalogId)
+            ObservationInput.SetPublic(observation, await dbContext.ProviderCatalogItems.SingleAsync(i => i.Id == catalogId, cancellationToken));
+        else
+            ObservationInput.SetPrivate(observation, parsedMetadata.DisplayTitle, parsedMetadata.DisplayArtist,
+                metadata.DurationSeconds, metadata.ThumbnailUrl, new TrackObservationMetadata
+                {
+                    OriginalTitle = metadata.Title, OriginalArtist = metadata.ChannelTitle,
+                    ChannelTitle = metadata.ChannelTitle, Description = metadata.Description
+                });
+        if (!CanReuseResult(observation, user.Id))
+        {
+            observation.TrackId = null;
+            observation.MatchStatus = TrackMatchingStatuses.Pending;
+            observation.AcceptedCandidateId = null;
+        }
+        observation.UpdatedAt = now;
         if (existing is null)
         {
             dbContext.TrackObservations.Add(observation);
@@ -95,12 +102,12 @@ public sealed class MusicRecognitionController(
             catch (DbUpdateException)
             {
                 dbContext.Entry(observation).State = EntityState.Detached;
-                observation = await dbContext.TrackObservations
+                observation = await dbContext.TrackObservations.Include(o => o.ProviderCatalogItem)
                     .SingleAsync(x => x.OwnerUserId == user.Id && x.SourceType == "youtube" && x.ExternalId == videoId, cancellationToken);
-                if (ProviderCatalogPolicy.HasOwnedSnapshot(observation, user.Id) && observation.TrackId is Guid concurrentTrackId)
+                if (CanReuseResult(observation, user.Id) && observation.TrackId is Guid concurrentTrackId)
                     return Ok(await BuildMatchedResponse(concurrentTrackId, user.Id, cancellationToken));
                 if (ShouldBackOff(observation, includeFreshPending: true))
-                    return Ok(new RecognizeYouTubeResponse("music", observation.MatchStatus, null, observation.Title, observation.Artist, false, null));
+                    return Ok(new RecognizeYouTubeResponse("music", observation.MatchStatus, null, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Title, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Artist, false, null));
             }
         }
 
@@ -109,7 +116,15 @@ public sealed class MusicRecognitionController(
         await dbContext.SaveChangesAsync(cancellationToken);
         if (observation.TrackId is { } refreshedTrackId)
             return Ok(await BuildMatchedResponse(refreshedTrackId, user.Id, cancellationToken));
-        return Ok(new RecognizeYouTubeResponse("music", TrackMatchingStatuses.Pending, null, observation.Title, observation.Artist, false, null));
+        return Ok(new RecognizeYouTubeResponse("music", TrackMatchingStatuses.Pending, null, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Title, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Artist, false, null));
+    }
+
+    private static bool CanReuseResult(TrackObservation observation, int userId)
+    {
+        if (ObservationInput.Read(observation, userId, DateTimeOffset.UtcNow) == null) return false;
+        if (observation.InputKind == ObservationInputKind.Private || ObservationInput.HasReviewedResult(observation)) return true;
+        return ProviderCatalogPolicy.IsVerified(observation.ProviderCatalogItem, DateTimeOffset.UtcNow)
+            && observation.ProviderCatalogItem!.TrackId == observation.TrackId;
     }
 
     public static string Classify(string site, YouTubeVideoMetadataDto? metadata)
@@ -130,22 +145,24 @@ public sealed class MusicRecognitionController(
 
     private async Task<RecognizeYouTubeResponse> BuildMatchedResponse(Guid trackId, int userId, CancellationToken cancellationToken)
     {
-        var track = await dbContext.Tracks.AsNoTracking().Include(item => item.SourceIds)
-            .ThenInclude(item => item.ProviderCatalogItem).FirstAsync(x => x.Id == trackId, cancellationToken);
-        var metadata = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
-        var owned = await dbContext.TrackObservations.AsNoTracking().FirstOrDefaultAsync(item =>
-            item.TrackId == trackId && item.OwnerUserId == userId && item.Title.Trim() != "", cancellationToken);
+        var track = await dbContext.Tracks.AsNoTracking().Include(item => item.ProviderItems).FirstAsync(x => x.Id == trackId, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var metadata = ProviderCatalogPolicy.SharedFacts(track, now);
+        var owned = await ObservationInput.Eligible(dbContext.TrackObservations.AsNoTracking(), now)
+            .Include(item => item.ProviderCatalogItem)
+            .Where(item => item.TrackId == trackId && item.OwnerUserId == userId)
+            .OrderBy(item => item.Id).FirstOrDefaultAsync(cancellationToken);
+        var input = ObservationInput.Read(owned, userId, now);
         var inLibrary = await dbContext.PlaylistEntries.AsNoTracking()
             .AnyAsync(x => x.TrackId == trackId && x.Playlist != null && x.Playlist.UserId == userId, cancellationToken);
-        return new RecognizeYouTubeResponse("music", "matched", trackId, metadata?.Title ?? owned?.Title, metadata?.Artist ?? owned?.Artist, inLibrary,
+        return new RecognizeYouTubeResponse("music", "matched", trackId, metadata?.Title ?? input?.Title, metadata?.Artist ?? input?.Artist, inLibrary,
             await musicLibraryQueryService.GetCanonicalSongAsync(trackId, userId, cancellationToken));
     }
 
     private async Task<RecognizeYouTubeResponse?> BuildSharedCanonicalResponseAsync(
         Guid trackId, int userId, CancellationToken cancellationToken)
     {
-        var track = await dbContext.Tracks.AsNoTracking().Include(item => item.SourceIds)
-            .ThenInclude(item => item.ProviderCatalogItem).FirstOrDefaultAsync(x => x.Id == trackId, cancellationToken);
+        var track = await dbContext.Tracks.AsNoTracking().Include(item => item.ProviderItems).FirstOrDefaultAsync(x => x.Id == trackId, cancellationToken);
         if (track is null) return null;
         var metadata = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
         if (metadata is null) return null;

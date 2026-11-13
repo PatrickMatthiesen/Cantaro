@@ -32,7 +32,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         fixture.Handler.RemoteIds = ["chosen-id", "fresh-id"];
         var failure = new PartialReadFailure("fresh-id", true, null);
         await using var reader = fixture.Scope.NewContext(reject ? [failure] : []);
-        var unrelated = new Track { Id = Guid.NewGuid(), SearchTitle = "Caller transaction recording" };
+        var unrelated = new Track {  Id = Guid.NewGuid() };
         await new PlaylistSyncCoordinator.PlaylistTransactionStrategy(reader).ExecuteAsync(async () =>
         {
             await using var transaction = await reader.Database.BeginTransactionAsync();
@@ -85,9 +85,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         using var cancellation = new CancellationTokenSource();
         var failure = new PartialReadFailure("fresh-id", stagedSave, cancel ? cancellation : null);
         await using var reader = fixture.Scope.NewContext(failure);
-        var original = await reader.Tracks.SingleAsync();
-        original.SearchTitle = "Caller edit";
-        var unrelated = new Track { Id = Guid.NewGuid(), SearchTitle = "Caller new recording" };
+        var original = await reader.Tracks.Include(track => track.ProviderItems).SingleAsync();
+        original.Isrc = "CALLER-EDIT";
+        CatalogFixture.SetTitle(original, "Caller edit");
+        await CatalogFixture.AddNewItemsAsync(reader);
+        var unrelated = new Track {  Id = Guid.NewGuid() };
         reader.Tracks.Add(unrelated);
         var read = fixture.ProviderFor(reader).ReadAsync(fixture.Account, "independent-playlist", cancellation.Token);
         if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
@@ -95,15 +97,15 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal(1, failure.Failures);
         Assert.Equal(EntityState.Modified, reader.Entry(original).State);
         Assert.Equal(EntityState.Added, reader.Entry(unrelated).State);
-        Assert.Equal("Caller edit", original.SearchTitle);
-        Assert.Empty(reader.ChangeTracker.Entries<TrackSourceId>());
+        Assert.Equal("Caller edit", CatalogFixture.Facts(original)?.Title);
+        Assert.DoesNotContain(reader.ChangeTracker.Entries<ProviderCatalogItem>(), entry => entry.Entity.ExternalId == "fresh-id");
         await reader.SaveChangesAsync();
         await using var verify = fixture.Scope.NewContext();
-        await AssertRejectedReadIsolationAsync(fixture, verify);
-        Assert.Equal("Caller edit", (await verify.Tracks.SingleAsync(t => t.Id == original.Id)).SearchTitle);
+        await AssertRejectedReadIsolationAsync(fixture, verify, "CALLER-EDIT");
+        Assert.Equal("Caller edit", CatalogFixture.Facts(await verify.Tracks.Include(t => t.ProviderItems).SingleAsync(t => t.Id == original.Id))?.Title);
         Assert.True(await verify.Tracks.AnyAsync(t => t.Id == unrelated.Id));
         Assert.Equal(2, await verify.Tracks.CountAsync());
-        Assert.False(await verify.TrackSourceIds.AnyAsync(s => s.ExternalId == "fresh-id"));
+        Assert.False(await verify.ProviderCatalogItems.AnyAsync(s => s.ExternalId == "fresh-id"));
     }
 
     [Fact]
@@ -125,8 +127,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Null((await verify.Playlists.SingleAsync()).SyncLeaseId);
         Assert.Equal("pending", (await verify.ServicePlaylistMappings.SingleAsync()).LastSyncStatus);
         await AssertRejectedReadIsolationAsync(fixture, verify);
-        Assert.Single(await verify.Tracks.ToArrayAsync());
-        Assert.Empty(await verify.TrackSourceIds.ToArrayAsync());
+        Assert.Single(await verify.Tracks.Include(track => track.ProviderItems).ToArrayAsync());
+        Assert.Empty(await verify.ProviderCatalogItems.ToArrayAsync());
         // The same lease can be acquired again after cancellation.
         fixture.Handler.RemoteIds = ["chosen-id"];
         await fixture.SyncAsync();
@@ -157,8 +159,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             Assert.Equal("error", (await verify.ServicePlaylistMappings.SingleAsync()).LastSyncStatus);
             Assert.Null((await verify.Playlists.SingleAsync()).SyncLeaseId);
             await AssertRejectedReadIsolationAsync(fixture, verify);
-            Assert.Empty(await verify.TrackSourceIds.ToArrayAsync());
-            Assert.Single(await verify.Tracks.ToArrayAsync());
+            Assert.Empty(await verify.ProviderCatalogItems.ToArrayAsync());
+            Assert.Single(await verify.Tracks.Include(track => track.ProviderItems).ToArrayAsync());
             Assert.Single(fixture.Writer.Writes);
         }
     }
@@ -302,7 +304,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             }
             else
             {
-                var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Different recording" };
+                var track = new Track {  Id = Guid.NewGuid() };
                 other.Tracks.Add(track);
                 await other.SaveChangesAsync();
                 if (change == "observation") await other.TrackObservations.ExecuteUpdateAsync(s => s.SetProperty(o => o.TrackId, track.Id));
@@ -320,28 +322,28 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal("remote_changed", error.Code);
         await fixture.Db.SaveChangesAsync();
         await using var verify = fixture.Scope.NewContext();
-        Assert.False(await verify.TrackSourceIds.AnyAsync(s => s.ExternalId == "chosen-id"));
+        Assert.False(await verify.ProviderCatalogItems.AnyAsync(s => s.ExternalId == "chosen-id"));
         Assert.False(await verify.TrackObservations.AnyAsync(o => o.SourceType == "spotify"));
         Assert.False(await verify.TrackArtistCredits.AnyAsync());
-        Assert.Null((await verify.Tracks.SingleAsync(t => t.Id == fixture.Scope.Entry.TrackId)).Isrc);
+        Assert.Null((await verify.Tracks.Include(track => track.ProviderItems).SingleAsync(t => t.Id == fixture.Scope.Entry.TrackId)).Isrc);
         var entry = await verify.PlaylistEntries.SingleAsync(item => item.Id == fixture.Scope.Entry.Id);
         var observation = await verify.TrackObservations.SingleAsync(item => item.Id == entry.TrackObservationId);
         Assert.Equal(fixture.Account.UserId, observation.OwnerUserId);
         Assert.Equal("youtube", observation.SourceType);
-        Assert.NotNull(TrackObservationParser.ReadMetadata(observation));
+        Assert.NotNull(TrackObservationParser.ReadMetadata(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!));
     }
 
     private static PlaylistLinkLifecycleService SpotifyReadLifecycle(ProductionSpotifyReadScope fixture)
         => new(fixture.Db, new PlatformRegistry([new ReadTestPlatform(fixture.Db, "spotify")]),
             [fixture.Provider], fixture.Coordinator(), new EphemeralDataProtectionProvider());
 
-    private static async Task AssertRejectedReadIsolationAsync(ProductionSpotifyReadScope fixture, ApplicationDbContext verify)
+    private static async Task AssertRejectedReadIsolationAsync(ProductionSpotifyReadScope fixture, ApplicationDbContext verify, string? expectedIsrc = null)
     {
-        Assert.False(await verify.TrackSourceIds.AnyAsync(s => s.SourceType == "spotify" && s.ExternalId == "chosen-id"));
+        Assert.False(await verify.ProviderCatalogItems.AnyAsync(s => s.SourceType == "spotify" && s.ExternalId == "chosen-id"));
         Assert.False(await verify.TrackObservations.AnyAsync(s => s.SourceType == "spotify" && s.ExternalId == "chosen-id"));
-        var track = await verify.Tracks.SingleAsync(t => t.Id == fixture.Scope.Entry.TrackId);
-        Assert.Null(track.Isrc);
-        Assert.Null(System.Text.Json.JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata!)!.ThumbnailUrl);
+        var track = await verify.Tracks.Include(track => track.ProviderItems).SingleAsync(t => t.Id == fixture.Scope.Entry.TrackId);
+        Assert.Equal(expectedIsrc, track.Isrc);
+        Assert.Null(CatalogFixture.Facts(track)?.ThumbnailUrl);
         Assert.False(await verify.TrackArtistCredits.AnyAsync(c => c.TrackId == track.Id));
         var entry = await verify.PlaylistEntries.SingleAsync(e => e.Id == fixture.Scope.Entry.Id);
         Assert.Equal((fixture.Scope.Entry.TrackId, fixture.Scope.Entry.TrackObservationId), (entry.TrackId, entry.TrackObservationId));
@@ -349,7 +351,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Equal(track.Id, observation.TrackId);
         Assert.Equal(fixture.Account.UserId, observation.OwnerUserId);
         Assert.Equal("youtube", observation.SourceType);
-        Assert.NotNull(TrackObservationParser.ReadMetadata(observation));
+        Assert.NotNull(TrackObservationParser.ReadMetadata(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!));
     }
 
     private sealed class ReadTestPlatform(ApplicationDbContext db, string service) : IPlatformService

@@ -15,8 +15,12 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
 {
     public async Task ReconcileAsync(
         Track track, IReadOnlyList<ArtistCreditMetadata> credits, string source,
-        DateTimeOffset now, CancellationToken cancellationToken, string? displayArtist = null)
+        DateTimeOffset now, CancellationToken cancellationToken, string? displayArtist = null,
+        Guid? sourceItemId = null, long? sourceRevision = null)
     {
+        if (sourceItemId.HasValue != sourceRevision.HasValue || sourceRevision is <= 0)
+            throw new ArgumentException("Artist source evidence requires both an item ID and a positive revision.");
+
         if (dbContext.Entry(track).State != EntityState.Added)
         {
             await dbContext.Entry(track).Collection(t => t.ArtistCredits).Query()
@@ -24,7 +28,7 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
         }
 
         var retry = dbContext.ArtistReconciliationRetry;
-        retry.Record(track, credits, source, now, displayArtist);
+        retry.Record(track, credits, source, now, displayArtist, sourceItemId, sourceRevision);
         retry.CaptureTrack(track);
 
         // Parse only the legacy anonymous display. The provider's structured list
@@ -33,7 +37,7 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
             && track.ArtistCredits.Count == 1
             && track.ArtistCredits.Single() is { } aggregate
             && !credits.Any(c => Normalize(c.Name) == Normalize(aggregate.CreditedName))
-            && aggregate.Artist is { MusicBrainzArtistId: null } anonymous)
+            && aggregate.Artist is { } anonymous)
         {
             await LoadLinksAsync(anonymous, cancellationToken);
             if (anonymous.ProviderLinks.Count == 0)
@@ -44,7 +48,7 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
                 {
                     for (var index = 0; index < credits.Count; index++)
                         await ConflictAsync(track, credits[index], source, index,
-                            "Incoming collaboration cannot safely replace the legacy aggregate credit.", now, cancellationToken);
+                            "Incoming collaboration cannot safely replace the legacy aggregate credit.", now, cancellationToken, sourceItemId, sourceRevision);
                     return;
                 }
                 track.ArtistCredits.Remove(aggregate);
@@ -57,12 +61,12 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
             var incoming = credits[position];
             var role = incoming.Role ?? TrackArtistRole.Primary;
             if (string.IsNullOrWhiteSpace(incoming.Name)) continue;
-            var provider = incoming.Provider?.Trim().ToLowerInvariant();
+            var provider = Clean(incoming.Provider)?.ToLowerInvariant();
             var externalId = Clean(incoming.ExternalId);
             var mbid = Clean(incoming.MusicBrainzArtistId)?.ToLowerInvariant();
             if (provider == "musicbrainz")
             {
-                externalId = externalId?.ToLowerInvariant();
+                externalId = externalId?.ToLowerInvariant() ?? mbid;
                 mbid ??= externalId;
             }
             if (mbid != null && provider == null)
@@ -73,20 +77,18 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
 
             if (provider == "musicbrainz" && externalId != null && mbid != externalId)
             {
-                await ConflictAsync(track, incoming, source, position, "MusicBrainz provider ID disagrees with the supplied MusicBrainz artist ID.", now, cancellationToken);
+                await ConflictAsync(track, incoming, source, position, "MusicBrainz provider ID disagrees with the supplied MusicBrainz artist ID.", now, cancellationToken, sourceItemId, sourceRevision);
                 continue;
             }
 
-            var byMbid = mbid == null ? null : dbContext.Artists.Local.FirstOrDefault(a => string.Equals(a.MusicBrainzArtistId, mbid, StringComparison.OrdinalIgnoreCase))
-                ?? await dbContext.Artists.FirstOrDefaultAsync(a => a.MusicBrainzArtistId == mbid, cancellationToken);
+            var mbLink = mbid == null ? null : await FindLinkAsync("musicbrainz", mbid, cancellationToken);
+            var byMbid = mbLink?.Artist;
             var link = provider == null || externalId == null ? null
-                : dbContext.ArtistProviderLinks.Local.FirstOrDefault(l => l.Provider == provider && l.ExternalId == externalId)
-                ?? await dbContext.ArtistProviderLinks.Include(l => l.Artist).FirstOrDefaultAsync(
-                    l => l.Provider == provider && l.ExternalId == externalId, cancellationToken);
-            var byProvider = link?.Artist ?? (link == null ? null : await dbContext.Artists.FindAsync([link.ArtistId], cancellationToken));
+                : await FindLinkAsync(provider, externalId, cancellationToken);
+            var byProvider = link?.Artist;
             if (byMbid != null && byProvider != null && byMbid.Id != byProvider.Id)
             {
-                await ConflictAsync(track, incoming, source, position, "Provider ID and MusicBrainz ID identify different artists.", now, cancellationToken);
+                await ConflictAsync(track, incoming, source, position, "Provider ID and MusicBrainz ID identify different artists.", now, cancellationToken, sourceItemId, sourceRevision);
                 continue;
             }
             var stableArtist = byMbid ?? byProvider;
@@ -101,16 +103,16 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
                 current = await dbContext.Artists.FindAsync([existing.ArtistId], cancellationToken);
             if (current != null) await LoadLinksAsync(current, cancellationToken);
             var separateIdentities = current != null && stableArtist != null && current.Id != stableArtist.Id
-                && (current.MusicBrainzArtistId != null || current.ProviderLinks.Count > 0);
+                && current.ProviderLinks.Count > 0;
             var artist = stableArtist ?? current;
             if (artist != null)
             {
                 await LoadLinksAsync(artist, cancellationToken);
-                var conflictingMbid = mbid != null && artist.MusicBrainzArtistId != null && !string.Equals(artist.MusicBrainzArtistId, mbid, StringComparison.OrdinalIgnoreCase);
+                var conflictingMbid = mbid != null && artist.ProviderLinks.Any(l => l.Provider == "musicbrainz" && l.ExternalId != mbid);
                 var conflictingProvider = provider != null && externalId != null && artist.ProviderLinks.Any(l => l.Provider == provider && l.ExternalId != externalId);
                 if (conflictingMbid || conflictingProvider || separateIdentities)
                 {
-                    await ConflictAsync(track, incoming, source, position, "Incoming identity conflicts with an existing artist credit.", now, cancellationToken);
+                    await ConflictAsync(track, incoming, source, position, "Incoming identity conflicts with an existing artist credit.", now, cancellationToken, sourceItemId, sourceRevision);
                     continue;
                 }
             }
@@ -119,12 +121,12 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
             if (existing != null && existing.Position != position)
             {
                 await ConflictAsync(track, incoming, source, position,
-                    "Incoming credit order disagrees with the existing credit order.", now, cancellationToken);
+                    "Incoming credit order disagrees with the existing credit order.", now, cancellationToken, sourceItemId, sourceRevision);
                 continue;
             }
             if (existing == null && track.ArtistCredits.Any(c => c.Position == position))
             {
-                await ConflictAsync(track, incoming, source, position, "Incoming credit disagrees with an occupied credit position.", now, cancellationToken);
+                await ConflictAsync(track, incoming, source, position, "Incoming credit disagrees with an occupied credit position.", now, cancellationToken, sourceItemId, sourceRevision);
                 continue;
             }
             if (artist == null)
@@ -133,20 +135,14 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
                 retry.Capture(artist);
                 dbContext.Artists.Add(artist);
             }
-            artist.MusicBrainzArtistId ??= mbid;
             if (string.IsNullOrWhiteSpace(artist.SortName)) artist.SortName = Clean(incoming.SortName);
             artist.UpdatedAt = now;
             if (provider != null && externalId != null)
-            {
-                link ??= new ArtistProviderLink { Id = Guid.NewGuid(), ArtistId = artist.Id, Artist = artist, Provider = provider, ExternalId = externalId };
-                retry.Capture(link);
-                link.ProfileUrl = Clean(incoming.ProfileUrl) ?? link.ProfileUrl
-                    ?? (provider == "musicbrainz" ? $"https://musicbrainz.org/artist/{externalId}" : null);
-                link.ArtworkUrl = Clean(incoming.ArtworkUrl) ?? link.ArtworkUrl;
-                link.RawMetadata = incoming.RawMetadata ?? link.RawMetadata;
-                link.UpdatedAt = now;
-                if (dbContext.Entry(link).State == EntityState.Detached) dbContext.ArtistProviderLinks.Add(link);
-            }
+                UpdateLink(artist, link, provider, externalId, incoming, now);
+            // A Spotify credit can independently supply a MusicBrainz identity.
+            // Persist both identities on the same artist, including during replay.
+            if (mbid != null && provider != "musicbrainz")
+                UpdateLink(artist, mbLink, "musicbrainz", mbid, null, now);
             if (existing == null)
             {
                 existing = new TrackArtistCredit { Id = Guid.NewGuid(), TrackId = track.Id, ArtistId = artist.Id,
@@ -159,11 +155,37 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
             existing.ArtistId = artist.Id;
             if (incoming.Role != null) existing.Role = role;
             existing.JoinPhrase ??= incoming.JoinPhrase;
-            var provenance = existing.Provenance == null ? new Dictionary<string, ArtistCreditMetadata>()
-                : JsonSerializer.Deserialize<Dictionary<string, ArtistCreditMetadata>>(existing.Provenance) ?? [];
-            provenance[source] = incoming;
-            existing.Provenance = JsonSerializer.Serialize(provenance);
+            if (sourceItemId != null)
+            {
+                existing.ProviderCatalogItemId = sourceItemId;
+                existing.ProviderCatalogRevision = sourceRevision;
+                existing.SourceCreditPosition = position;
+            }
         }
+    }
+
+    private async Task<ArtistProviderLink?> FindLinkAsync(string provider, string externalId, CancellationToken cancellationToken)
+    {
+        var link = dbContext.ArtistProviderLinks.Local.FirstOrDefault(l => l.Provider == provider && l.ExternalId == externalId)
+            ?? await dbContext.ArtistProviderLinks.Include(l => l.Artist).FirstOrDefaultAsync(
+                l => l.Provider == provider && l.ExternalId == externalId, cancellationToken);
+        if (link != null && link.Artist == null)
+            link.Artist = await dbContext.Artists.FindAsync([link.ArtistId], cancellationToken);
+        return link;
+    }
+
+    private void UpdateLink(Artist artist, ArtistProviderLink? link, string provider, string externalId,
+        ArtistCreditMetadata? incoming, DateTimeOffset now)
+    {
+        link ??= new ArtistProviderLink { Id = Guid.NewGuid(), ArtistId = artist.Id, Artist = artist,
+            Provider = provider, ExternalId = externalId };
+        dbContext.ArtistReconciliationRetry.Capture(link);
+        link.ProfileUrl = Clean(incoming?.ProfileUrl) ?? link.ProfileUrl
+            ?? (provider == "musicbrainz" ? $"https://musicbrainz.org/artist/{externalId}" : null);
+        link.ArtworkUrl = Clean(incoming?.ArtworkUrl) ?? link.ArtworkUrl;
+        link.RawMetadata = incoming?.RawMetadata ?? link.RawMetadata;
+        link.UpdatedAt = now;
+        if (dbContext.Entry(link).State == EntityState.Detached) dbContext.ArtistProviderLinks.Add(link);
     }
 
     private async Task LoadLinksAsync(Artist artist, CancellationToken cancellationToken)
@@ -175,15 +197,24 @@ public sealed class ArtistReconciliationService(ApplicationDbContext dbContext)
     }
 
     private async Task ConflictAsync(Track track, ArtistCreditMetadata incoming, string source, int position,
-        string reason, DateTimeOffset now, CancellationToken cancellationToken)
+        string reason, DateTimeOffset now, CancellationToken cancellationToken, Guid? sourceItemId, long? sourceRevision)
     {
-        var evidence = JsonSerializer.Serialize(new { source, position, incoming,
-            existing = track.ArtistCredits.OrderBy(c => c.Position).Select(c => new { c.ArtistId, c.Position, c.Role, c.CreditedName }) });
+        var identities = JsonSerializer.Serialize(new {
+            Provider = Clean(incoming.Provider)?.ToLowerInvariant(),
+            ExternalId = string.Equals(Clean(incoming.Provider), "musicbrainz", StringComparison.OrdinalIgnoreCase)
+                ? Clean(incoming.ExternalId)?.ToLowerInvariant() : Clean(incoming.ExternalId),
+            MusicBrainzArtistId = Clean(incoming.MusicBrainzArtistId)?.ToLowerInvariant(),
+            existing = track.ArtistCredits.OrderBy(c => c.Position).Select(c => new {
+                c.ArtistId, providers = c.Artist?.ProviderLinks.OrderBy(l => l.Provider).ThenBy(l => l.ExternalId)
+                    .Select(l => new { l.Provider, l.ExternalId }) }) });
+        var evidence = JsonSerializer.Serialize(new { source, sourceItemId, sourceRevision, position, reason, identities });
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(evidence)));
         if (dbContext.ArtistReconciliationConflicts.Local.Any(c => c.TrackId == track.Id && c.EvidenceKey == key)
             || await dbContext.ArtistReconciliationConflicts.AnyAsync(c => c.TrackId == track.Id && c.EvidenceKey == key, cancellationToken)) return;
         var conflict = new ArtistReconciliationConflict {
-            Id = Guid.NewGuid(), TrackId = track.Id, EvidenceKey = key, Evidence = evidence, Reason = reason, CreatedAt = now };
+            Id = Guid.NewGuid(), TrackId = track.Id, EvidenceKey = key, IdentityConflictJson = identities,
+            ProviderCatalogItemId = sourceItemId, ProviderCatalogRevision = sourceRevision,
+            SourceCreditPosition = position, Reason = reason, CreatedAt = now };
         dbContext.ArtistReconciliationRetry.Capture(conflict);
         dbContext.ArtistReconciliationConflicts.Add(conflict);
     }

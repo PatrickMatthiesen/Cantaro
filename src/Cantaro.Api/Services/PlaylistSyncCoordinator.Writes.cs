@@ -118,9 +118,9 @@ public sealed partial class PlaylistSyncCoordinator
         link.LastError = null;
         await db.SaveChangesAsync(ct);
         var entries = await db.PlaylistEntries.Where(item => item.PlaylistId == playlist.Id)
-            .Include(item => item.Track).ThenInclude(track => track!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+            .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
             .Include(item => item.TrackObservation).ThenInclude(observation => observation!.Track)
-                .ThenInclude(track => track!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+                .ThenInclude(track => track!.ProviderItems)
             .OrderBy(item => item.Position).ToListAsync(ct);
         var resolutions = new Dictionary<Guid, string?>();
         var available = read.Items.ToList();
@@ -132,7 +132,7 @@ public sealed partial class PlaylistSyncCoordinator
         foreach (var saved in progress.ToArray())
         {
             var trackId = entries.Single(entry => entry.Id == saved.Key).TrackId;
-            var assigned = await db.TrackSourceIds.AsNoTracking().Include(source => source.ProviderCatalogItem)
+            var assigned = await db.ProviderCatalogItems.AsNoTracking()
                 .SingleOrDefaultAsync(source => source.SourceType == link.Service && source.ExternalId == saved.Value.ExternalId, ct);
             if (assigned is not null && ProviderCatalogPolicy.IsVerified(assigned, clock.GetUtcNow()) && assigned.TrackId != trackId)
                 progress.Remove(saved.Key);
@@ -208,8 +208,8 @@ public sealed partial class PlaylistSyncCoordinator
             // Resolution may have attached a canonical track and enriched its metadata.
             // Checkpoint that saved state so our own update does not invalidate the result.
             var resolvedEntry = await db.PlaylistEntries.AsNoTracking()
-                .Include(item => item.Track).ThenInclude(track => track!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
-                .Include(item => item.TrackObservation).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
+                .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
+                .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
             if (resolvedEntry is not null)
             {
                 // An acknowledged read cannot refresh stale outbound permission.
@@ -232,7 +232,7 @@ public sealed partial class PlaylistSyncCoordinator
         // Matching can unify observations and remove duplicate entries. Export the resulting
         // membership rather than the list that existed before destination lookup.
         entries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == playlist.Id)
-            .Include(item => item.TrackObservation).OrderBy(item => item.Position).ToListAsync(ct);
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem).OrderBy(item => item.Position).ToListAsync(ct);
         var ids = new List<string>();
         var exported = new List<PlaylistSyncItem>();
         var unresolved = 0;
@@ -260,8 +260,8 @@ public sealed partial class PlaylistSyncCoordinator
         // slow remote read. An expired or withdrawn shared association cannot
         // authorize a new outbound write using an earlier matching checkpoint.
         var finalEntries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == playlist.Id)
-            .Include(item => item.TrackObservation)
-            .Include(item => item.Track).ThenInclude(track => track!.SourceIds).ThenInclude(source => source.ProviderCatalogItem)
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
+            .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
             .ToListAsync(ct);
         foreach (var entry in finalEntries)
         {
@@ -329,8 +329,8 @@ public sealed partial class PlaylistSyncCoordinator
     private static string? AttachedDestinationId(PlaylistEntry entry, string service, int userId)
     {
         var observation = entry.TrackObservation;
-        var track = entry.Track ?? observation?.Track;
-        if (observation?.SourceType == service && ProviderCatalogPolicy.HasOwnedSnapshot(observation, userId)
+        var track = entry.Track;
+        if (observation?.SourceType == service && ProviderCatalogPolicy.HasOwnedInput(observation, userId)
             && (track is null || observation.TrackId == track.Id))
             return observation.ExternalId;
         return null;

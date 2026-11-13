@@ -72,13 +72,13 @@ internal static class PlaylistExportAttemptStore
         foreach (var ids in bound.Where(item => item.ReadScope is null).Select(item => item.ExternalId)
             .Distinct(StringComparer.Ordinal).Chunk(256))
         {
-            var sources = await db.TrackSourceIds.AsNoTracking().Include(item => item.ProviderCatalogItem)
+            var sources = await db.ProviderCatalogItems.AsNoTracking()
                 .Where(item => item.SourceType == account.Service && ids.Contains(item.ExternalId))
                 .ToListAsync(ct);
             var established = sources.Where(item => ProviderCatalogPolicy.IsVerified(item, DateTimeOffset.UtcNow))
                 .Select(item => item.ExternalId);
-            var observed = await db.TrackObservations.AsNoTracking()
-                .Where(item => item.OwnerUserId == account.Context.UserId && item.Title.Trim() != ""
+            var observed = await ObservationInput.Eligible(db.TrackObservations.AsNoTracking(), DateTimeOffset.UtcNow)
+                .Where(item => item.OwnerUserId == account.Context.UserId
                     && item.SourceType == account.Service && ids.Contains(item.ExternalId))
                 .Select(item => item.ExternalId).ToListAsync(ct);
             uncorroborated.AddRange(ids.Except(established).Except(observed));

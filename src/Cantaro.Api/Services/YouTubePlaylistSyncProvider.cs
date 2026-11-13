@@ -76,26 +76,21 @@ public sealed class YouTubePlaylistSyncProvider(
                     };
                     if (readDb.Entry(observation).State == EntityState.Detached)
                         readDb.TrackObservations.Add(observation);
-                    var preservedDescription = GetPreservedDescription(item.Description,
-                        string.IsNullOrWhiteSpace(observation.Title) ? null : observation.RawMetadata);
-                    observation.Title = parsed.DisplayTitle;
-                    observation.Artist = displayArtist;
-                    observation.ThumbnailUrl = item.ThumbnailUrl;
-                    observation.DurationSeconds = item.DurationSeconds;
-                    observation.NormalizedTitle = TrackTextNormalizer.Normalize(parsed.DisplayTitle);
-                    observation.NormalizedArtist = TrackTextNormalizer.Normalize(displayArtist);
-                    observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+                    if (item.ProviderCatalogItemId is { } publicId)
                     {
-                        SourceType = PlatformId, ExternalId = item.ExternalId,
-                        Title = parsed.DisplayTitle, Artist = displayArtist,
-                        OriginalTitle = item.Title, OriginalArtist = item.Artist,
-                        ChannelTitle = item.Artist, SearchTitle = parsed.SearchTitle,
-                        SearchArtist = parsed.SearchArtist, ThumbnailUrl = item.ThumbnailUrl,
-                        DurationSeconds = item.DurationSeconds,
-                        Description = preservedDescription
-                    });
+                        var publicItem = await readDb.ProviderCatalogItems.SingleAsync(i => i.Id == publicId, cancellationToken);
+                        ObservationInput.SetPublic(observation, publicItem);
+                    }
+                    else
+                    {
+                        ObservationInput.SetPrivate(observation, parsed.DisplayTitle, displayArtist,
+                            item.DurationSeconds, item.ThumbnailUrl, new TrackObservationMetadata
+                            {
+                                OriginalTitle = item.Title, OriginalArtist = item.Artist,
+                                ChannelTitle = item.Artist, Description = item.Description
+                            });
+                    }
                     observation.UpdatedAt = now;
-                    observation.ProviderCatalogItemId = item.ProviderCatalogItemId;
                     var associations = new ProviderRecordingAssociations(readDb);
                     var knownTrackId = (await associations.FindUsableAsync(PlatformId, item.ExternalId, cancellationToken))?.TrackId;
                     if (knownTrackId is null && item.ProviderCatalogItemId is { } catalogId)
@@ -104,6 +99,9 @@ public sealed class YouTubePlaylistSyncProvider(
                             cancellationToken);
                         knownTrackId = (await associations.RevalidateExactAsync(catalogItem, cancellationToken))?.Id;
                     }
+                    if (observation.InputKind == ObservationInputKind.Public && knownTrackId == null
+                        && !ObservationInput.HasReviewedResult(observation))
+                        observation.TrackId = null;
                     if (observation.TrackId is null)
                     {
                         if (knownTrackId is not null)
@@ -151,23 +149,6 @@ public sealed class YouTubePlaylistSyncProvider(
         YouTubeService.SyncReadItem item, Guid? existingTrackId, Guid? existingObservationId)
         => new(item.ExternalId, existingTrackId, existingObservationId, item.Title, item.Position,
             IsAvailable: false);
-
-    internal static string? GetPreservedDescription(string? currentDescription, string? previousRawMetadata)
-    {
-        if (!string.IsNullOrWhiteSpace(currentDescription))
-            return currentDescription;
-        if (string.IsNullOrWhiteSpace(previousRawMetadata))
-            return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<TrackObservationMetadata>(previousRawMetadata)?.Description;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 
     public async Task<string?> ResolveAsync(
         PlatformAccountContext account, PlaylistEntry entry, CancellationToken cancellationToken)

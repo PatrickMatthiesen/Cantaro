@@ -92,14 +92,14 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
     public async Task<ClaimedTrackMatch?> TryClaimNextAsync(CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
+        var eligibleIds = ObservationInput.Eligible(dbContext.TrackObservations, timeProvider.GetUtcNow()).Select(o => o.Id);
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var candidate = await dbContext.TrackMatchQueueItems
                 .AsNoTracking()
                 .Where(item => item.NextAttemptAt <= now
                     && (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now)
-                    && dbContext.TrackObservations.Any(observation => observation.Id == item.TrackObservationId
-                        && observation.OwnerUserId > 0 && observation.Title.Trim() != ""))
+                    && eligibleIds.Contains(item.TrackObservationId))
                 .OrderBy(item => item.NextAttemptAt)
                 .ThenBy(item => item.TrackObservationId)
                 .Select(item => new { item.TrackObservationId, item.RetryCount })
@@ -111,8 +111,7 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
                 .Where(item => item.TrackObservationId == candidate.TrackObservationId
                     && item.NextAttemptAt <= now
                     && (item.LeaseExpiresAt == null || item.LeaseExpiresAt <= now)
-                    && dbContext.TrackObservations.Any(observation => observation.Id == item.TrackObservationId
-                        && observation.OwnerUserId > 0 && observation.Title.Trim() != ""))
+                    && eligibleIds.Contains(item.TrackObservationId))
                 .ExecuteUpdateAsync(
                     updates => updates
                         .SetProperty(item => item.LeaseId, leaseId)
@@ -159,12 +158,10 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
     public async Task RecoverPendingAsync(int maximumAttempts, CancellationToken cancellationToken)
     {
         var queuedIds = dbContext.TrackMatchQueueItems.Select(item => item.TrackObservationId);
-        var missing = await dbContext.TrackObservations
+        var missing = await ObservationInput.Eligible(dbContext.TrackObservations, timeProvider.GetUtcNow())
             .AsNoTracking()
             .Where(observation => observation.TrackId == null
                 && observation.MatchStatus == TrackMatchingStatuses.Pending
-                && observation.OwnerUserId > 0
-                && observation.Title.Trim() != ""
                 && observation.MatchAttemptCount < maximumAttempts
                 && !queuedIds.Contains(observation.Id))
             .Select(observation => observation.Id)
@@ -178,8 +175,8 @@ public sealed class TrackMatchQueue(ApplicationDbContext dbContext, TimeProvider
     }
 
     private Task<bool> IsProcessableAsync(Guid observationId, CancellationToken cancellationToken) =>
-        dbContext.TrackObservations.AsNoTracking().AnyAsync(observation => observation.Id == observationId
-            && observation.OwnerUserId > 0 && observation.Title.Trim() != "", cancellationToken);
+        ObservationInput.Eligible(dbContext.TrackObservations.AsNoTracking(), timeProvider.GetUtcNow())
+            .AnyAsync(observation => observation.Id == observationId, cancellationToken);
 }
 
 public sealed class TrackMatchingWorker(
@@ -219,12 +216,12 @@ public sealed class TrackMatchingWorker(
         try
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var current = await dbContext.TrackObservations
+            var current = await dbContext.TrackObservations.Include(o => o.ProviderCatalogItem)
                 .AsNoTracking()
                 .SingleOrDefaultAsync(item => item.Id == claim.ObservationId, cancellationToken);
             if (current is null
                 || current.OwnerUserId <= 0
-                || string.IsNullOrWhiteSpace(current.Title)
+                || ObservationInput.Read(current, current.OwnerUserId, timeProvider.GetUtcNow()) == null
                 || current.TrackId != null
                 || current.MatchStatus != TrackMatchingStatuses.Pending
                 || claim.RetryCount >= _options.MaximumAutomaticAttempts)

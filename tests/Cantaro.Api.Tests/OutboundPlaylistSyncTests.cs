@@ -64,11 +64,10 @@ public sealed class OutboundPlaylistSyncTests
         db.PlaylistEntries.Add(new PlaylistEntry
         {
             Id = Guid.NewGuid(), PlaylistId = playlist.Id,
-            TrackObservation = new TrackObservation
-            {
+            TrackObservation = new TrackObservation { OwnerUserId = 42,  InputKind = ObservationInputKind.Private,
                 Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "observed",
                 Title = "Pending song", MatchStatus = "pending"
-            }
+             }
         });
         await db.SaveChangesAsync();
         var writer = new RecordingWriter();
@@ -119,17 +118,15 @@ public sealed class OutboundPlaylistSyncTests
         var entry = db.ChangeTracker.Entries<PlaylistEntry>().Single().Entity;
         var currentObservation = entry.TrackObservation!;
         var otherOwnedPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = 42, Name = "Imported" };
-        db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = otherOwnedPlaylist.UserId,
             Id = Guid.NewGuid(), Playlist = otherOwnedPlaylist, PlaylistId = otherOwnedPlaylist.Id,
             TrackId = entry.TrackId, TrackObservationId = currentObservation.Id,
             TrackObservation = currentObservation
         });
-        entry.TrackObservation = new TrackObservation
-        {
+        entry.TrackObservation = new TrackObservation { OwnerUserId = 42,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "stale-track",
             Title = "Stale song", MatchStatus = "matched", TrackId = Guid.NewGuid()
-        };
+         };
         db.TrackObservations.Add(entry.TrackObservation);
         await db.SaveChangesAsync();
         var writer = new RecordingWriter();
@@ -144,14 +141,9 @@ public sealed class OutboundPlaylistSyncTests
     {
         await using var db = CreateDb();
         var playlist = await SeedAsync(db);
-        var track = new Track { Id = Guid.NewGuid(), SearchTitle = "Private mapping" };
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube",
-            ExternalId = "other-users-private-id", Confidence = 1
-        });
-        db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        var track = new Track {  Id = Guid.NewGuid() };
+        track.ProviderItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "youtube", ExternalId = "other-users-private-id", FactsJson = "{}" });
+        db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = playlist.Id, Track = track,
             TrackId = track.Id, Position = 0
         });
@@ -434,9 +426,9 @@ public sealed class OutboundPlaylistSyncTests
         });
         await db.SaveChangesAsync();
         var provider = new CoordinatorPlatform();
-        provider.KnownTrackIds["matched"] = await db.TrackSourceIds
+        provider.KnownTrackIds["matched"] = await db.ProviderCatalogItems
             .Where(source => source.SourceType == "youtube" && source.ExternalId == "matched")
-            .Select(source => source.TrackId).SingleAsync();
+            .Select(source => source.TrackId!.Value).SingleAsync();
         var writer = new RecordingWriter { OnReconcile = ids => provider.RemoteIds = ids.ToList() };
         var coordinator = new PlaylistSyncCoordinator(db, [provider], [writer], TimeProvider.System,
             NullLogger<PlaylistSyncCoordinator>.Instance);
@@ -551,18 +543,13 @@ public sealed class OutboundPlaylistSyncTests
 
     private static void AddTrack(ApplicationDbContext db, Playlist playlist, int position, string id, string service)
     {
-        var track = new Track { Id = Guid.NewGuid(), CanonicalMetadata = JsonSerializer.Serialize(new { Title = id }) };
-        var observation = new TrackObservation
-        {
+        var track = new Track {  Id = Guid.NewGuid() };
+        var observation = new TrackObservation { OwnerUserId = 42,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), TrackId = track.Id, SourceType = service,
             ExternalId = id, Title = id, MatchStatus = TrackMatchingStatuses.Matched
-        };
-        track.SourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = track.Id, SourceType = service, ExternalId = id, Confidence = 1
-        });
-        db.PlaylistEntries.Add(new PlaylistEntry
-        {
+         };
+        track.ProviderItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = track.Id, SourceType = service, ExternalId = id, FactsJson = "{}" });
+        db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = playlist.Id, Position = position, Track = track, TrackId = track.Id,
             TrackObservation = observation, TrackObservationId = observation.Id
         });
@@ -622,7 +609,7 @@ public sealed class OutboundPlaylistSyncTests
                     KnownTrackIds.TryGetValue(id, out var trackId) ? trackId : null, null, id, index)).ToList()));
         public Task<string?> ResolveAsync(PlatformAccountContext account, PlaylistEntry entry,
             CancellationToken cancellationToken)
-            => Task.FromResult(entry.Track?.SourceIds.FirstOrDefault(source => source.SourceType == Service)?.ExternalId);
+            => Task.FromResult(entry.Track?.ProviderItems.FirstOrDefault(source => source.SourceType == Service)?.ExternalId);
         public Task RenameAsync(PlatformAccountContext account, string playlistId, string name,
             CancellationToken cancellationToken) => Task.CompletedTask;
         public Task DeleteAsync(PlatformAccountContext account, string playlistId,

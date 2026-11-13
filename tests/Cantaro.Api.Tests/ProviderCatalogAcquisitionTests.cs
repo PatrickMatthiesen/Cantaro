@@ -27,11 +27,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var provider = fixture.SpotifyProvider();
-        var candidates = await provider.SearchAsync(new TrackObservation
+        var candidates = await provider.SearchAsync(new ObservationInput
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "source-video",
-            Title = "Song (Live)", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
-        }, default);
+            SourceType = "youtube", ExternalId = "source-video",
+            Title = "Song (Live)", Artist = "Artist", }, default);
         var candidate = Assert.Single(candidates);
         Assert.NotNull(candidate.ProviderCatalogItemId);
         Assert.NotNull(candidate.ProviderCatalogRevision);
@@ -58,7 +57,7 @@ public sealed partial class ProviderCatalogAcquisitionTests
         var oldTime = DateTimeOffset.UtcNow.AddDays(-60);
         var oldItem = new ProviderCatalogItem
         {
-            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "legacy-id",
+            SourceType = "spotify", ExternalId = "legacy-id",
             FactsJson = "{\"Title\":\"Old private-looking cache value\"}",
             VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
             VerifiedAt = oldTime, RevalidateAfter = oldTime.AddDays(30),
@@ -74,11 +73,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
         }));
         fixture.Handler.EmptySearchResults = true;
 
-        var result = await fixture.SpotifyProvider().SearchAsync(new TrackObservation
+        var result = await fixture.SpotifyProvider().SearchAsync(new ObservationInput
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "source-video",
-            Title = "Legacy", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
-        }, default);
+            SourceType = "youtube", ExternalId = "source-video",
+            Title = "Legacy", Artist = "Artist", }, default);
 
         Assert.Empty(result);
         Assert.Equal(2, fixture.Handler.SearchRequests);
@@ -96,11 +94,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var provider = fixture.SpotifyProvider();
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "source-video",
-            Title = "Song (Live)", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
-        };
+            SourceType = "youtube", ExternalId = "source-video",
+            Title = "Song (Live)", Artist = "Artist", };
         var first = Assert.Single(await provider.SearchAsync(observation, default));
         var before = await fixture.Store.FindAsync("spotify", first.ExternalId, default);
         Assert.NotNull(before);
@@ -124,8 +121,8 @@ public sealed partial class ProviderCatalogAcquisitionTests
     {
         await using var fixture = await Fixture.CreateAsync();
         var provider = fixture.SpotifyProvider();
-        var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "source-video",
-            Title = "Song (Live)", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending };
+        var observation = new ObservationInput { SourceType = "youtube", ExternalId = "source-video",
+            Title = "Song (Live)", Artist = "Artist", };
         var first = Assert.Single(await provider.SearchAsync(observation, default));
         var original = (await fixture.Store.FindAsync("spotify", first.ExternalId, default))!;
         var facts = ProviderCatalogPolicy.ReadFacts(original, DateTimeOffset.UtcNow)!;
@@ -217,10 +214,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
 
         public IServiceScope OpenScope() => services.CreateScope();
 
-        public async Task<TrackSourceId[]> ReadSourcesAsync()
+        public async Task<ProviderCatalogItem[]> ReadSourcesAsync()
         {
             await using var scope = services.CreateAsyncScope();
-            return await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().TrackSourceIds.ToArrayAsync();
+            return await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().ProviderCatalogItems.Where(item => item.TrackId != null).ToArrayAsync();
         }
 
         public async Task<PlatformAccountContext> AddYouTubeAccountAsync(int userId = 8901, int accountId = 89)

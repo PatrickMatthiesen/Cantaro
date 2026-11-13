@@ -82,24 +82,17 @@ public sealed class SpotifyPlaylistSyncProvider(
                     };
                     if (readDb.Entry(observation).State == EntityState.Detached)
                         readDb.TrackObservations.Add(observation);
-                    observation.Title = snapshot.Name;
-                    observation.Artist = snapshot.Artist;
-                    observation.DurationSeconds = snapshot.DurationSeconds;
-                    observation.ThumbnailUrl = snapshot.ImageUrl;
-                    observation.NormalizedTitle = TrackTextNormalizer.Normalize(snapshot.Name);
-                    observation.NormalizedArtist = TrackTextNormalizer.Normalize(snapshot.Artist);
-                    observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
-                    {
-                        SourceType = PlatformId, ExternalId = snapshot.Id, SourceUrl = snapshot.ExternalUrl,
-                        Title = snapshot.Name, Artist = snapshot.Artist, Album = snapshot.AlbumName,
-                        ArtistIdentities = snapshot.ArtistIdentities, Isrc = snapshot.Isrc, OriginalTitle = snapshot.Name, OriginalArtist = snapshot.Artist,
-                        SearchTitle = snapshot.Name, SearchArtist = snapshot.Artist,
-                        ThumbnailUrl = snapshot.ImageUrl, DurationSeconds = snapshot.DurationSeconds
-                    });
                     var verifiedSnapshot = catalog.TryGetValue(snapshot.Id, out var publicItem)
                         ? snapshot with { ProviderCatalogItemId = publicItem.Id, ProviderCatalogRevision = publicItem.Revision }
                         : snapshot with { ProviderCatalogItemId = null, ProviderCatalogRevision = null };
-                    observation.ProviderCatalogItemId = publicItem?.Id;
+                    if (publicItem != null)
+                        ObservationInput.SetPublic(observation, await readDb.ProviderCatalogItems.SingleAsync(i => i.Id == publicItem.Id, cancellationToken));
+                    else
+                        ObservationInput.SetPrivate(observation, snapshot.Name, snapshot.Artist,
+                            snapshot.DurationSeconds, snapshot.ImageUrl, new TrackObservationMetadata
+                            {
+                                ArtistIdentities = snapshot.ArtistIdentities, Isrc = snapshot.Isrc, Album = snapshot.AlbumName
+                            });
                     var canonical = await trackResolver.ResolveAsync(verifiedSnapshot, now, cancellationToken, account.UserId);
                     observation.TrackId = canonical.Id;
                     observation.MatchStatus = TrackMatchingStatuses.Matched;

@@ -85,14 +85,14 @@ public sealed class SpotifyArtistEnrichmentTests
             db.ChangeTracker.Clear();
         }
 
-        Assert.Empty(await db.TrackSourceIds.ToArrayAsync());
+        Assert.Empty(await db.ProviderCatalogItems.ToArrayAsync());
         Assert.Empty(await db.ArtistProviderLinks.ToArrayAsync());
         Assert.Empty(await db.TrackArtistCredits.ToArrayAsync());
         Assert.Empty(await db.Artists.ToArrayAsync());
-        Assert.All(await db.Tracks.ToArrayAsync(), track =>
+        Assert.All(await db.Tracks.Include(track => track.ProviderItems).ToArrayAsync(), track =>
         {
-            Assert.Null(track.CanonicalMetadata);
-            Assert.Null(track.PreferredCatalogItemId);
+            Assert.Null(CatalogFixture.FactsJson(track));
+            Assert.Null(ProviderCatalogPolicy.SharedSource(track, DateTimeOffset.UtcNow)?.Id);
             Assert.Null(track.Isrc);
         });
     }
@@ -266,13 +266,12 @@ public sealed class SpotifyArtistEnrichmentTests
         var api = CreateApi(http);
         var provider = new SpotifySearchProvider(api,
             new SpotifyCatalogTokenProvider(api, options, TimeProvider.System, new SpotifyCatalogTokenCache()));
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             SourceType = "youtube", ExternalId = "video", Title = "Song", Artist = "First credited name, Second credited name", MatchStatus = "pending",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "USABC2400001" })
-        };
+            PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "USABC2400001" })
+         };
 
-        var candidates = await provider.SearchAsync(observation, CancellationToken.None);
+        var candidates = await provider.SearchAsync(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!, CancellationToken.None);
 
         Assert.Equal(2, searches);
         Assert.NotEmpty(candidates);

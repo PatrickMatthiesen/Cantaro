@@ -208,13 +208,14 @@ public sealed class SpotifyPlaylistSyncProviderTests
             {
                 var observation = new TrackObservation
                 {
+            InputKind = ObservationInputKind.Private,
                     Id = Guid.NewGuid(), OwnerUserId = Account.UserId,
                     SourceType = "youtube", ExternalId = $"video-{index}",
                     Title = $"Song {index}", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
                 };
                 _dbContext.TrackObservations.Add(observation);
                 return new PlaylistEntry
-                {
+                { OwnerUserId = Account.UserId,
                     Id = Guid.NewGuid(), PlaylistId = playlist.Id, TrackObservationId = observation.Id,
                     Position = index, AddedAt = Now
                 };

@@ -57,7 +57,7 @@ internal static class PlaylistDestinationIdentityEvidence
         foreach (var keys in savedByEntry.Values.SelectMany(items => items)
             .Select(saved => saved.ExternalId!).Distinct(StringComparer.Ordinal).Chunk(BatchSize))
         {
-            var sources = await db.TrackSourceIds.AsNoTracking().Include(source => source.ProviderCatalogItem)
+            var sources = await db.ProviderCatalogItems.AsNoTracking()
                 .Where(source => source.SourceType == service && keys.Contains(source.ExternalId))
                 .ToListAsync(ct);
             foreach (var source in sources)
@@ -65,14 +65,14 @@ internal static class PlaylistDestinationIdentityEvidence
                 if (!ProviderCatalogPolicy.IsVerified(source, DateTimeOffset.UtcNow)) continue;
                 if (!assignments.TryGetValue(source.ExternalId, out var tracks))
                     assignments[source.ExternalId] = tracks = [];
-                tracks.Add(source.TrackId);
+                tracks.Add(source.TrackId!.Value);
             }
         }
 
         string? FindSaved(PlaylistEntry entry, bool manualConfirmation)
         {
             if (!savedByEntry.TryGetValue(entry.Id, out var savedResults)) return null;
-            var trackId = entry.TrackId ?? entry.TrackObservation?.TrackId;
+            var trackId = entry.TrackId;
             return savedResults.FirstOrDefault(saved => saved.ManualConfirmation == manualConfirmation
                 && (!assignments.TryGetValue(saved.ExternalId!, out var tracks)
                     || tracks.All(id => id == trackId)))?.ExternalId;
@@ -84,53 +84,53 @@ internal static class PlaylistDestinationIdentityEvidence
         {
             ct.ThrowIfCancellationRequested();
             if (entry.TrackObservation is { } attached
-                && !ProviderCatalogPolicy.HasOwnedSnapshot(attached, account.UserId))
+                && attached.OwnerUserId != account.UserId)
             {
                 remaining.Add(entry);
                 continue;
             }
             var confirmed = FindSaved(entry, manualConfirmation: true);
             var observation = entry.TrackObservation;
-            var trackId = entry.TrackId ?? observation?.TrackId;
+            var trackId = entry.TrackId;
             if (confirmed is not null) identities[entry.Id] = confirmed;
             else if (observation?.SourceType == service
-                && ProviderCatalogPolicy.HasOwnedSnapshot(observation, account.UserId)
+                && ProviderCatalogPolicy.HasOwnedInput(observation, account.UserId)
                 && (trackId is null || observation.TrackId == trackId))
                 identities[entry.Id] = observation.ExternalId;
             else remaining.Add(entry);
         }
 
         var ownedByTrack = new Dictionary<Guid, string>();
-        foreach (var trackIds in remaining.Select(entry => entry.TrackId ?? entry.TrackObservation?.TrackId)
+        foreach (var trackIds in remaining.Select(entry => entry.TrackId)
             .OfType<Guid>().Distinct().Chunk(BatchSize))
         {
-            var owned = await db.PlaylistEntries.AsNoTracking()
+            var owned = await db.PlaylistEntries.AsNoTracking().Include(item => item.TrackObservation)
+                .ThenInclude(observation => observation!.ProviderCatalogItem)
                 .Where(item => item.Playlist!.UserId == account.UserId && item.TrackId != null
                     && trackIds.Contains(item.TrackId.Value) && item.TrackObservation != null
                     && item.TrackObservation.SourceType == service && item.TrackObservation.TrackId == item.TrackId
-                    && item.TrackObservation.OwnerUserId == account.UserId
-                    && item.TrackObservation.Title.Trim() != "")
-                .Select(item => new { TrackId = item.TrackId!.Value, item.TrackObservation!.ExternalId })
-                .Distinct().OrderBy(item => item.ExternalId).ToListAsync(ct);
-            // Preserve the database's provider-key ordering used by the single lookup.
-            foreach (var observation in owned) ownedByTrack.TryAdd(observation.TrackId, observation.ExternalId);
+                    && item.TrackObservation.OwnerUserId == account.UserId)
+                .OrderBy(item => item.TrackObservation!.ExternalId).ToListAsync(ct);
+            foreach (var member in owned)
+                if (ObservationInput.Read(member.TrackObservation, account.UserId, DateTimeOffset.UtcNow) is not null)
+                    ownedByTrack.TryAdd(member.TrackId!.Value, member.TrackObservation!.ExternalId);
         }
         var publicByTrack = new Dictionary<Guid, string>();
-        foreach (var trackIds in remaining.Select(entry => entry.TrackId ?? entry.TrackObservation?.TrackId)
+        foreach (var trackIds in remaining.Select(entry => entry.TrackId)
             .OfType<Guid>().Distinct().Chunk(BatchSize))
         {
-            var sources = await db.TrackSourceIds.AsNoTracking().Include(source => source.ProviderCatalogItem)
-                .Where(source => trackIds.Contains(source.TrackId) && source.SourceType == service
+            var sources = await db.ProviderCatalogItems.AsNoTracking()
+                .Where(source => source.TrackId != null && trackIds.Contains(source.TrackId.Value) && source.SourceType == service
                     && source.AssociationState == RecordingAssociationState.Verified)
                 .OrderBy(source => source.ExternalId).ToListAsync(ct);
             foreach (var source in sources)
                 if (ProviderCatalogPolicy.IsVerified(source, DateTimeOffset.UtcNow))
-                    publicByTrack.TryAdd(source.TrackId, source.ExternalId);
+                    publicByTrack.TryAdd(source.TrackId!.Value, source.ExternalId);
         }
         foreach (var entry in remaining)
         {
             ct.ThrowIfCancellationRequested();
-            var trackId = entry.TrackId ?? entry.TrackObservation?.TrackId;
+            var trackId = entry.TrackId;
             var externalId = trackId is { } id && ownedByTrack.TryGetValue(id, out var owned)
                 ? owned : FindSaved(entry, manualConfirmation: false);
             if (externalId is null && trackId is { } canonicalTrackId)

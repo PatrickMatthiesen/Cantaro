@@ -129,7 +129,7 @@ public sealed partial class PlaylistSyncCoordinator
             .Select(item => new { item.Id, item.TrackId, item.SourceType, item.ExternalId }).ToDictionaryAsync(item => item.Id, ct);
         return items.Select(item => item.DestinationBinding is null && item.ReadScope is null
             && item.ObservationId is { } id && observations.TryGetValue(id, out var observation)
-            ? item with { TrackId = observation.TrackId ?? item.TrackId, ExternalId = observation.ExternalId, Service = observation.SourceType }
+            ? item with { ExternalId = observation.ExternalId, Service = observation.SourceType }
             : item).ToList();
     }
 
@@ -202,7 +202,7 @@ public sealed partial class PlaylistSyncCoordinator
             else
                 db.PlaylistEntries.Add(new PlaylistEntry
                 {
-                    Id = Guid.NewGuid(), PlaylistId = playlist.Id, Position = index,
+                    Id = Guid.NewGuid(), PlaylistId = playlist.Id, OwnerUserId = playlist.UserId, Position = index,
                     TrackId = item.TrackId, TrackObservationId = item.ObservationId,
                     SourceService = item.Service, AddedAt = clock.GetUtcNow()
                 });

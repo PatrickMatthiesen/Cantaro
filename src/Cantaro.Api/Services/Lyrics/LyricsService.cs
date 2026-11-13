@@ -30,7 +30,7 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
         var accessibleTrackIds = CanonicalTrackAccess.GetAccessibleTrackIds(dbContext, userId);
         var track = await dbContext.Tracks
             .AsNoTracking()
-            .Include(item => item.SourceIds).ThenInclude(item => item.ProviderCatalogItem)
+            .Include(item => item.ProviderItems)
             .Where(item => item.Id == trackId && accessibleTrackIds.Contains(item.Id))
             .SingleOrDefaultAsync(cancellationToken);
         if (track is null)
@@ -45,6 +45,7 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
     {
         var observation = await dbContext.TrackObservations
             .AsNoTracking()
+            .Include(item => item.ProviderCatalogItem)
             .Where(item => item.Id == observationId
                 && item.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
             .SingleOrDefaultAsync(cancellationToken);
@@ -53,32 +54,30 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
             return null;
         }
 
-        if (observation.TrackId is { } trackId)
-        {
-            var track = await dbContext.Tracks.AsNoTracking()
-                .Include(item => item.SourceIds).ThenInclude(item => item.ProviderCatalogItem)
-                .SingleOrDefaultAsync(item => item.Id == trackId, cancellationToken);
-            var facts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
-            if (facts is not null)
-                return await GetPublicLyricsAsync(track!.Id, facts, cancellationToken);
-        }
-
-        if (!ProviderCatalogPolicy.HasOwnedSnapshot(observation, userId))
+        if (!ProviderCatalogPolicy.HasOwnedInput(observation, userId))
             return null;
 
+        var membershipTracks = await dbContext.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackObservationId == observation.Id && entry.OwnerUserId == userId
+                && entry.TrackId != null).Select(entry => entry.TrackId!.Value).Distinct().Take(2)
+            .ToArrayAsync(cancellationToken);
+        if (membershipTracks.Length == 1)
+            return await GetLyricsAsync(userId, membershipTracks[0], cancellationToken);
         return await GetObservationLyricsAsync(observation, cancellationToken);
     }
 
     private async Task<LyricsResult> GetObservationLyricsAsync(TrackObservation observation,
         CancellationToken cancellationToken)
     {
-        var metadata = TrackObservationParser.Parse(observation);
+        var input = ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow);
+        if (input is null) return Unavailable("The source input is unavailable.");
+        var metadata = TrackObservationParser.Parse(input);
         if (string.IsNullOrWhiteSpace(metadata.SearchTitle) || string.IsNullOrWhiteSpace(metadata.SearchArtist))
         {
             return Unavailable("The observed song does not have enough metadata to look up lyrics.");
         }
 
-        var sourceMetadata = TrackObservationParser.ReadMetadata(observation);
+        var sourceMetadata = input.Metadata;
         return await provider.GetLyricsAsync(new LyricsLookup(
             observation.Id,
             metadata.SearchTitle.Trim(),
@@ -98,8 +97,9 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
         var observation = await dbContext.PlaylistEntries.AsNoTracking()
             .Where(entry => entry.TrackId == track.Id && entry.Playlist != null && entry.Playlist.UserId == userId
                 && entry.TrackObservation != null && entry.TrackObservation.OwnerUserId == userId
-                && entry.TrackObservation.Title.Trim() != "")
+                && entry.TrackObservation.InputKind != ObservationInputKind.Reference)
             .OrderBy(entry => entry.Position)
+            .Include(entry => entry.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
             .Select(entry => entry.TrackObservation)
             .FirstOrDefaultAsync(cancellationToken);
         return observation is null

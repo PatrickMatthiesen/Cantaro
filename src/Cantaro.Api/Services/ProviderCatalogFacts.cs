@@ -16,6 +16,12 @@ public sealed class ProviderCatalogFacts
     public string? MusicBrainzRecordingId { get; init; }
     public IReadOnlyList<ArtistCreditMetadata> ArtistCredits { get; init; } = [];
     public TrackVersionFlags VersionFlags { get; init; }
+    public string? OriginalTitle { get; init; }
+    public string? ChannelTitle { get; init; }
+    public string? ChannelId { get; init; }
+    public string? Description { get; init; }
+    public string? CategoryId { get; init; }
+    public IReadOnlyList<string> TopicCategories { get; init; } = [];
 }
 
 internal static class CatalogVerificationMethods

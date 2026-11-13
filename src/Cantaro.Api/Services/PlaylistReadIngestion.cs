@@ -33,13 +33,13 @@ internal static class PlaylistReadIngestion
     }
 
     internal static bool IsCatalogIngestionRace(DbUpdateException exception) =>
-        exception.Entries.Count > 0 && exception.Entries.All(entry => entry.Entity is TrackSourceId or TrackObservation or ProviderCatalogItem)
+        exception.Entries.Count > 0 && exception.Entries.All(entry => entry.Entity is TrackObservation or ProviderCatalogItem)
         && (exception is DbUpdateConcurrencyException
             || exception.GetBaseException() is Npgsql.PostgresException
                 { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation,
-                    ConstraintName: "IX_TrackSourceIds_SourceType_ExternalId" or "IX_TrackObservations_OwnerUserId_SourceType_ExternalId" }
+                    ConstraintName: "IX_ProviderCatalogItems_SourceType_ExternalId" or "IX_TrackObservations_OwnerUserId_SourceType_ExternalId" }
             || exception.GetBaseException().Message.Contains(
-                "UNIQUE constraint failed: TrackSourceIds.SourceType, TrackSourceIds.ExternalId", StringComparison.Ordinal)
+                "UNIQUE constraint failed: ProviderCatalogItems.SourceType, ProviderCatalogItems.ExternalId", StringComparison.Ordinal)
             || exception.GetBaseException().Message.Contains(
                 "UNIQUE constraint failed: TrackObservations.OwnerUserId, TrackObservations.SourceType, TrackObservations.ExternalId", StringComparison.Ordinal));
 

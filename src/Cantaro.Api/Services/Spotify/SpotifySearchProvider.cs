@@ -16,7 +16,7 @@ public sealed class SpotifySearchProvider(
     private readonly TrackMatchingOptions _matchingOptions = matchingOptions?.Value ?? new();
 
     public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(
-        TrackObservation observation,
+        ObservationInput observation,
         CancellationToken cancellationToken)
     {
         var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
@@ -81,7 +81,7 @@ public sealed class SpotifySearchProvider(
     }
 
     private static bool CanStopBeforeRemainingQueries(
-        TrackObservation observation,
+        ObservationInput observation,
         TrackObservationMetadata? metadata,
         string? isrc,
         IReadOnlyList<ParsedTrackMetadata> hypotheses,

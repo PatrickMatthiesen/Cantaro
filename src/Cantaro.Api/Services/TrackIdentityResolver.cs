@@ -30,7 +30,7 @@ public sealed record TrackIdentityMatch(
     Track Track,
     TrackIdentityMatchKind Kind,
     string Reason,
-    TrackSourceId? ExactSourceMapping = null);
+    ProviderCatalogItem? ExactSourceMapping = null);
 
 /// <summary>
 /// Resolves provider items against existing Cantaro Tracks. Callers decide
@@ -62,21 +62,21 @@ public sealed class TrackIdentityResolver
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var exactSource = _dbContext.TrackSourceIds.Local.FirstOrDefault(sourceId =>
+        var exactSource = _dbContext.ProviderCatalogItems.Local.FirstOrDefault(sourceId =>
             sourceId.SourceType == query.SourceType
             && sourceId.ExternalId == query.ExternalId
             && ProviderCatalogPolicy.IsVerified(sourceId, now));
-        exactSource ??= await _dbContext.TrackSourceIds.Include(source => source.ProviderCatalogItem).FirstOrDefaultAsync(
+        exactSource ??= await _dbContext.ProviderCatalogItems.FirstOrDefaultAsync(
             sourceId => sourceId.SourceType == query.SourceType
                 && sourceId.ExternalId == query.ExternalId
                 && sourceId.AssociationState == RecordingAssociationState.Verified
-                && sourceId.ProviderCatalogItemId != null,
+                && sourceId.TrackId != null,
             cancellationToken);
 
         if (exactSource != null && ProviderCatalogPolicy.IsVerified(exactSource, now))
         {
             var exactTrack = await LoadRequiredTrackAsync(
-                exactSource.TrackId,
+                exactSource.TrackId!.Value,
                 cancellationToken);
             return new TrackIdentityMatch(
                 exactTrack,
@@ -91,11 +91,11 @@ public sealed class TrackIdentityResolver
         {
             var owned = _dbContext.TrackObservations.Local.FirstOrDefault(observation =>
                 observation.SourceType == query.SourceType && observation.ExternalId == query.ExternalId
-                && observation.TrackId != null && ProviderCatalogPolicy.HasOwnedSnapshot(observation, ownerId));
-            owned ??= await _dbContext.TrackObservations.AsNoTracking().FirstOrDefaultAsync(observation =>
+                && observation.InputKind == ObservationInputKind.Private && observation.TrackId != null && ProviderCatalogPolicy.HasOwnedInput(observation, ownerId));
+            owned ??= await ObservationInput.Eligible(_dbContext.TrackObservations.AsNoTracking(), now).Include(o => o.ProviderCatalogItem).FirstOrDefaultAsync(observation =>
                 observation.SourceType == query.SourceType && observation.ExternalId == query.ExternalId
-                && observation.TrackId != null && observation.OwnerUserId == ownerId
-                && observation.Title.Trim() != "", cancellationToken);
+                && observation.InputKind == ObservationInputKind.Private && observation.TrackId != null && observation.OwnerUserId == ownerId
+, cancellationToken);
             if (owned?.TrackId is { } ownedTrackId)
             {
                 return new TrackIdentityMatch(
@@ -116,49 +116,33 @@ public sealed class TrackIdentityResolver
         var normalizedMusicBrainzId = TrackTextNormalizer.Normalize(query.MusicBrainzRecordingId);
         var normalizedTitle = TrackTextNormalizer.Normalize(query.Title);
         var normalizedArtist = TrackTextNormalizer.Normalize(query.Artist);
-        var sourceRows = await _dbContext.TrackSourceIds.AsNoTracking()
-            .Include(source => source.ProviderCatalogItem)
-            .Where(source => source.AssociationState == RecordingAssociationState.Verified
-                && source.ProviderCatalogItemId != null
-                && source.CatalogRevision == source.ProviderCatalogItem!.Revision
-                && source.SourceType == source.ProviderCatalogItem.SourceType
-                && source.ExternalId == source.ProviderCatalogItem.ExternalId
-                && source.ProviderCatalogItem.VisibilityState == CatalogVisibility.Public
-                && source.ProviderCatalogItem.VerifiedAt != null
-                && source.ProviderCatalogItem.VerifiedAt <= now
-                && source.ProviderCatalogItem.RevalidateAfter != null
-                && source.ProviderCatalogItem.RevalidateAfter > now
-                && ((source.SourceType == "spotify"
-                        && source.ProviderCatalogItem.VerificationMethod == CatalogVerificationMethods.SpotifyApplication)
-                    || (source.SourceType == "youtube"
-                        && source.ProviderCatalogItem.VerificationMethod == CatalogVerificationMethods.YouTubePublicVideo)
-                    || (source.SourceType == "musicbrainz"
-                        && source.ProviderCatalogItem.VerificationMethod == CatalogVerificationMethods.MusicBrainz))
+        var sourceRows = await ProviderCatalogPolicy.CurrentSources(_dbContext.ProviderCatalogItems.AsNoTracking(), now)
+            .Where(source => true
                 && (source.SourceType == query.SourceType && source.ExternalId == query.ExternalId
                     || normalizedMusicBrainzId.Length > 0
-                        && source.ProviderCatalogItem.NormalizedMusicBrainzRecordingId == normalizedMusicBrainzId
-                    || normalizedIsrc != null && source.ProviderCatalogItem.NormalizedIsrc == normalizedIsrc
+                        && source.NormalizedMusicBrainzRecordingId == normalizedMusicBrainzId
+                    || normalizedIsrc != null && source.NormalizedIsrc == normalizedIsrc
                     || normalizedTitle.Length > 0 && normalizedArtist.Length > 0
-                        && source.ProviderCatalogItem.NormalizedTitle == normalizedTitle
-                        && source.ProviderCatalogItem.NormalizedArtist == normalizedArtist))
+                        && source.NormalizedTitle == normalizedTitle
+                        && source.NormalizedArtist == normalizedArtist))
             .OrderBy(source => source.SourceType).ThenBy(source => source.ExternalId)
             .Take(MaximumMetadataCandidates + 1).ToListAsync(cancellationToken);
-        var rows = sourceRows.Concat(_dbContext.TrackSourceIds.Local)
+        var rows = sourceRows.Concat(_dbContext.ProviderCatalogItems.Local)
             .DistinctBy(source => source.Id)
             .Where(source => MatchesPublicCatalogQuery(source, query, normalizedIsrc,
                 normalizedMusicBrainzId, normalizedTitle, normalizedArtist, now)).ToArray();
         if (rows.Length > MaximumMetadataCandidates) return null;
-        var trackIds = rows.Select(source => source.TrackId).Distinct().ToArray();
+        var trackIds = rows.Select(source => source.TrackId!.Value).Distinct().ToArray();
         var tracks = await _dbContext.Tracks.AsNoTracking().Include(track => track.ArtistCredits)
             .Where(track => trackIds.Contains(track.Id)).ToListAsync(cancellationToken);
         var trackById = tracks.Concat(_dbContext.Tracks.Local).DistinctBy(track => track.Id)
             .ToDictionary(track => track.Id);
         var queryObservation = CreateQueryObservation(query);
-        var candidates = rows.Where(source => trackById.ContainsKey(source.TrackId))
+        var candidates = rows.Where(source => trackById.ContainsKey(source.TrackId!.Value))
             .Select(source =>
             {
-                var facts = ProviderCatalogPolicy.ReadFacts(source.ProviderCatalogItem, now);
-                return facts is null ? null : ProviderCatalogPolicy.Candidate(source.ProviderCatalogItem!, facts);
+                var facts = ProviderCatalogPolicy.ReadFacts(source, now);
+                return facts is null ? null : ProviderCatalogPolicy.Candidate(source, facts);
             }).Where(candidate => candidate is not null).Cast<TrackMatchSearchCandidate>().ToArray();
         if (candidates.Length == 0) return null;
         var assessment = TrackMatchDecisionEngine.Evaluate(queryObservation, candidates, _options);
@@ -173,13 +157,13 @@ public sealed class TrackIdentityResolver
             && source.ExternalId == accepted.Candidate.ExternalId
             && ProviderCatalogPolicy.IsVerified(source, now)
             && source.TrackId == credibleTrackIds[0]);
-        if (acceptedRow is null || !trackById.ContainsKey(acceptedRow.TrackId)) return null;
-        return new TrackIdentityMatch(await LoadRequiredTrackAsync(acceptedRow.TrackId, cancellationToken), TrackIdentityMatchKind.Metadata,
+        if (acceptedRow is null || !trackById.ContainsKey(acceptedRow.TrackId!.Value)) return null;
+        return new TrackIdentityMatch(await LoadRequiredTrackAsync(acceptedRow.TrackId!.Value, cancellationToken), TrackIdentityMatchKind.Metadata,
             "Matched against a current verified public provider record.", acceptedRow);
     }
 
     private static bool MatchesPublicCatalogQuery(
-        TrackSourceId source,
+        ProviderCatalogItem source,
         TrackIdentityQuery query,
         string? normalizedIsrc,
         string normalizedMusicBrainzId,
@@ -187,8 +171,9 @@ public sealed class TrackIdentityResolver
         string normalizedArtist,
         DateTimeOffset now)
     {
-        if (!ProviderCatalogPolicy.IsVerified(source, now) || source.ProviderCatalogItem is not { } item)
+        if (!ProviderCatalogPolicy.IsVerified(source, now))
             return false;
+        var item = source;
         var normalizedFacts = ProviderCatalogNormalizedFacts.FromJson(item.FactsJson);
         var title = item.NormalizedTitle ?? normalizedFacts.Title;
         var artist = item.NormalizedArtist ?? normalizedFacts.Artist;
@@ -223,42 +208,15 @@ public sealed class TrackIdentityResolver
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        var storedCandidates = await _dbContext.TrackObservations
-            .AsNoTracking()
-            .Include(candidate => candidate.Track)!
-                .ThenInclude(track => track!.ArtistCredits)
-            .Where(candidate =>
-                candidate.TrackId != null
-                && candidate.OwnerUserId == ownerId
-                && candidate.Title.Trim() != ""
-                && (normalizedTitles.Contains(candidate.NormalizedTitle!)
-                    || candidate.NormalizedTitle == null
-                    || candidate.NormalizedTitle == string.Empty)
-                && (candidate.SourceType == "youtube"
-                    || normalizedArtists.Length == 0
-                    || normalizedArtists.Contains(candidate.NormalizedArtist!)
-                    || candidate.NormalizedArtist == null
-                    || candidate.NormalizedArtist == string.Empty))
-            .Take(MaximumMetadataCandidates + 1)
-            .ToListAsync(cancellationToken);
-
-        if (storedCandidates.Count > MaximumMetadataCandidates)
-        {
-            return null;
-        }
-
-        var candidates = _dbContext.TrackObservations.Local
-            .Where(candidate =>
-                candidate.TrackId != null
-                && candidate.OwnerUserId == ownerId
-                && !string.IsNullOrWhiteSpace(candidate.Title)
-                && (normalizedTitles.Contains(candidate.NormalizedTitle ?? string.Empty)
-                    || string.IsNullOrWhiteSpace(candidate.NormalizedTitle))
-                && (candidate.SourceType == "youtube"
-                    || normalizedArtists.Contains(TrackTextNormalizer.Normalize(candidate.NormalizedArtist))
-                    || string.IsNullOrWhiteSpace(candidate.NormalizedArtist)))
-            .Concat(storedCandidates)
-            .DistinctBy(candidate => candidate.Id);
+        var storedCandidates = await ObservationInput.Eligible(_dbContext.TrackObservations.AsNoTracking(), DateTimeOffset.UtcNow)
+            .Include(candidate => candidate.ProviderCatalogItem)
+            .Include(candidate => candidate.Track)!.ThenInclude(track => track!.ArtistCredits)
+            .Where(candidate => candidate.InputKind == ObservationInputKind.Private && candidate.TrackId != null && candidate.OwnerUserId == ownerId)
+            .Take(MaximumMetadataCandidates + 1).ToListAsync(cancellationToken);
+        if (storedCandidates.Count > MaximumMetadataCandidates) return null;
+        var candidates = _dbContext.TrackObservations.Local.Concat(storedCandidates)
+            .DistinctBy(candidate => candidate.Id)
+            .Where(candidate => candidate.InputKind == ObservationInputKind.Private && candidate.TrackId != null && ObservationInput.Read(candidate, ownerId, DateTimeOffset.UtcNow) is not null);
         var candidateObservations = candidates.Where(candidate => candidate.TrackId is not null).ToArray();
         if (candidateObservations.Length == 0)
             return null;
@@ -322,50 +280,31 @@ public sealed class TrackIdentityResolver
                 : null;
     }
 
-    private static TrackObservation CreateQueryObservation(TrackIdentityQuery query)
+    private static ObservationInput CreateQueryObservation(TrackIdentityQuery query)
     {
-        var artist = query.ArtistCredits is { Count: > 0 }
-            ? string.Join(", ", query.ArtistCredits)
-            : query.Artist;
-        var observation = new TrackObservation
+        var metadata = ObservationInput.ReadOperationMetadata(query.RawMetadata);
+        metadata.Isrc = query.Isrc ?? metadata.Isrc;
+        metadata.MbidRecording = query.MusicBrainzRecordingId ?? metadata.MbidRecording;
+        return new ObservationInput
         {
-            Id = Guid.Empty,
-            SourceType = query.SourceType,
-            ExternalId = query.ExternalId,
-            Title = query.Title,
-            Artist = artist,
-            RawMetadata = query.RawMetadata,
-            DurationSeconds = query.DurationSeconds,
-            MatchStatus = TrackMatchingStatuses.Pending
+            SourceType = query.SourceType, ExternalId = query.ExternalId, Title = query.Title,
+            Artist = query.ArtistCredits is { Count: > 0 } ? string.Join(", ", query.ArtistCredits) : query.Artist,
+            DurationSeconds = query.DurationSeconds, Metadata = metadata
         };
-        if (!string.IsNullOrWhiteSpace(query.Isrc) || !string.IsNullOrWhiteSpace(query.MusicBrainzRecordingId))
-        {
-            var metadata = TrackObservationParser.ReadMetadata(observation) ?? new TrackObservationMetadata();
-            metadata.Isrc = query.Isrc ?? metadata.Isrc;
-            metadata.MbidRecording = query.MusicBrainzRecordingId ?? metadata.MbidRecording;
-            observation.RawMetadata = System.Text.Json.JsonSerializer.Serialize(metadata);
-        }
-        return observation;
     }
 
-    private static TrackMatchSearchCandidate ToSearchCandidate(
-        TrackObservation observation,
-        Track track,
-        bool includeTrackFacts = true)
+    private static TrackMatchSearchCandidate ToSearchCandidate(TrackObservation observation, Track track, bool includeTrackFacts = true)
     {
+        var input = ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)
+            ?? throw new InvalidOperationException("Observation has no usable owned input.");
         return new TrackMatchSearchCandidate
         {
-            CandidateSource = observation.SourceType,
-            ExternalId = observation.ExternalId,
-            Title = observation.Title,
-            Artist = observation.Artist,
-            ArtistCredits = includeTrackFacts ? track?.ArtistCredits
-                .OrderBy(credit => credit.Position)
-                .Select(credit => credit.CreditedName).ToArray() ?? [] : [],
-            Isrc = includeTrackFacts ? track?.Isrc : TrackObservationParser.ReadMetadata(observation)?.Isrc,
-            MbidRecording = includeTrackFacts ? track?.MbidRecording : TrackObservationParser.ReadMetadata(observation)?.MbidRecording,
-            DurationSeconds = observation.DurationSeconds,
-            RawMetadata = observation.RawMetadata
+            CandidateSource = input.SourceType, ExternalId = input.ExternalId,
+            Title = input.Title, Artist = input.Artist, DurationSeconds = input.DurationSeconds,
+            ArtistCredits = input.Metadata.ArtistIdentities.Select(credit => credit.Name).ToArray(),
+            ArtistIdentities = input.Metadata.ArtistIdentities,
+            Isrc = input.Metadata.Isrc, MbidRecording = input.Metadata.MbidRecording,
+            RawMetadata = System.Text.Json.JsonSerializer.Serialize(input.Metadata)
         };
     }
 
@@ -383,19 +322,10 @@ public sealed class TrackIdentityResolver
                     .Include(credit => credit.Artist)
                     .LoadAsync(cancellationToken);
             }
-            var sources = _dbContext.Entry(localTrack).Collection(track => track.SourceIds);
+            var sources = _dbContext.Entry(localTrack).Collection(track => track.ProviderItems);
             if (_dbContext.Entry(localTrack).State != EntityState.Added && !sources.IsLoaded)
             {
-                await sources.Query().Include(source => source.ProviderCatalogItem).LoadAsync(cancellationToken);
-            }
-            else
-            {
-                foreach (var source in localTrack.SourceIds)
-                {
-                    var catalogItem = _dbContext.Entry(source).Reference(item => item.ProviderCatalogItem);
-                    if (_dbContext.Entry(source).State != EntityState.Added && !catalogItem.IsLoaded)
-                        await catalogItem.LoadAsync(cancellationToken);
-                }
+                await sources.Query().LoadAsync(cancellationToken);
             }
 
             return localTrack;
@@ -404,8 +334,8 @@ public sealed class TrackIdentityResolver
         return await _dbContext.Tracks
             .Include(track => track.ArtistCredits)
                 .ThenInclude(credit => credit.Artist)
-            .Include(track => track.SourceIds)
-                .ThenInclude(source => source.ProviderCatalogItem)
+            .Include(track => track.ProviderItems)
+
             .SingleOrDefaultAsync(track => track.Id == trackId, cancellationToken)
             ?? throw new InvalidOperationException(
                 $"Track identity mapping references missing track {trackId}.");

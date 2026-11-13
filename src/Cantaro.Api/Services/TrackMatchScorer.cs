@@ -5,7 +5,7 @@ namespace Cantaro.Api.Services;
 internal static class TrackMatchScorer
 {
     public static TrackMatchScoredCandidate Score(
-        Cantaro.Api.Models.TrackObservation observation,
+        ObservationInput observation,
         TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options)
         => TrackObservationParser.ParseSearchHypotheses(observation)
@@ -15,7 +15,7 @@ internal static class TrackMatchScorer
             .First();
 
     private static TrackMatchScoredCandidate Score(
-        Cantaro.Api.Models.TrackObservation observation,
+        ObservationInput observation,
         TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options,
         ParsedTrackMetadata parsedObservation)
@@ -28,17 +28,16 @@ internal static class TrackMatchScorer
     {
         if (candidate.CandidateSource != "youtube")
             return [TrackMetadataParser.Parse(candidate.Title, candidate.Artist, parseArtistFromTitle: false)];
-        var rawMetadata = TrackMatchCandidateStoredMetadata.ReadProviderMetadata(candidate.RawMetadata);
-        return TrackObservationParser.ParseSearchHypotheses(new Models.TrackObservation
+        return TrackObservationParser.ParseSearchHypotheses(new ObservationInput
         {
             SourceType = "youtube", ExternalId = candidate.ExternalId, Title = candidate.Title,
             Artist = candidate.Artist, DurationSeconds = candidate.DurationSeconds,
-            RawMetadata = rawMetadata, MatchStatus = TrackMatchingStatuses.Pending
+            Metadata = ObservationInput.ReadOperationMetadata(candidate.RawMetadata)
         });
     }
 
     private static TrackMatchScoredCandidate Score(
-        Models.TrackObservation observation, TrackMatchSearchCandidate candidate,
+        ObservationInput observation, TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options, ParsedTrackMetadata parsedObservation, ParsedTrackMetadata parsedCandidate)
     {
         if (candidate.CandidateSource == "youtube")
@@ -51,7 +50,8 @@ internal static class TrackMatchScorer
                 Isrc = candidate.Isrc, MbidRecording = candidate.MbidRecording,
                 ArtistMusicBrainzId = candidate.ArtistMusicBrainzId, ArtistSortName = candidate.ArtistSortName,
                 ArtistIdentities = candidate.ArtistIdentities,
-                Explanation = candidate.Explanation, RawMetadata = candidate.RawMetadata
+                Explanation = candidate.Explanation, RawMetadata = candidate.RawMetadata,
+                ProviderCatalogItemId = candidate.ProviderCatalogItemId, ProviderCatalogRevision = candidate.ProviderCatalogRevision
             };
         }
         var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedObservation.DisplayTitle, parsedObservation.SearchTitle);

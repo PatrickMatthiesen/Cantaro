@@ -123,9 +123,9 @@ public sealed partial class PlaylistUnmatchedReviewTests
         Assert.Null((await verify.Playlists.SingleAsync()).SyncLeaseId);
         Assert.False(await verify.TrackObservations.AnyAsync(o => o.SourceType == "youtube"));
         Assert.Empty(await verify.TrackMatchQueueItems.ToArrayAsync());
-        Assert.Empty(await verify.TrackSourceIds.ToArrayAsync());
+        Assert.Empty(await verify.ProviderCatalogItems.ToArrayAsync());
         Assert.Empty(await verify.TrackArtistCredits.ToArrayAsync());
-        Assert.Single(await verify.Tracks.ToArrayAsync());
+        Assert.Single(await verify.Tracks.Include(track => track.ProviderItems).ToArrayAsync());
         var entry = await verify.PlaylistEntries.SingleAsync();
         Assert.Equal((scope.Entry.Id, scope.Entry.TrackId, scope.Entry.TrackObservationId), (entry.Id, entry.TrackId, entry.TrackObservationId));
     }

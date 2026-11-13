@@ -4,7 +4,7 @@ public static class TrackObservationDisplayFormatter
 {
     private static readonly string[] ArtistTitleSeparators = [" - ", " \u2013 ", " \u2014 "];
 
-    public static string GetQueueTitle(Models.TrackObservation observation, TrackObservationMetadata? metadata)
+    public static string GetQueueTitle(ObservationInput observation, TrackObservationMetadata? metadata)
     {
         var preferredTitle = metadata?.OriginalTitle;
         if (string.IsNullOrWhiteSpace(preferredTitle))
@@ -46,7 +46,7 @@ public static class TrackObservationDisplayFormatter
         return TrackMetadataParser.StripTrailingSoundtrackContext(trimmedTitle);
     }
 
-    public static string? GetQueueArtist(Models.TrackObservation observation, TrackObservationMetadata? metadata)
+    public static string? GetQueueArtist(ObservationInput observation, TrackObservationMetadata? metadata)
     {
         return !string.IsNullOrWhiteSpace(metadata?.SearchArtist)
             ? metadata.SearchArtist

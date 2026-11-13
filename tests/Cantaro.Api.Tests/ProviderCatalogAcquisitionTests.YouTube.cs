@@ -29,9 +29,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         db.TrackObservations.Add(new TrackObservation
         {
+            InputKind = referenceOnly ? ObservationInputKind.Reference : ObservationInputKind.Private,
             Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = "youtube", ExternalId = "video",
-            Title = referenceOnly ? "" : "Old title", MatchStatus = TrackMatchingStatuses.Pending,
-            RawMetadata = referenceOnly ? null : JsonSerializer.Serialize(new TrackObservationMetadata { Description = "Other Artist - Song" })
+            Title = referenceOnly ? null : "Old title", MatchStatus = TrackMatchingStatuses.Pending,
+            PrivateInputJson = referenceOnly ? null : JsonSerializer.Serialize(new TrackObservationMetadata { Description = "Other Artist - Song" })
         });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
@@ -40,11 +41,13 @@ public sealed partial class ProviderCatalogAcquisitionTests
         await ReadYouTubeAsync(fixture, db, handler, account, viaImporter);
 
         db.ChangeTracker.Clear();
-        var refreshed = await db.TrackObservations.SingleAsync();
-        Assert.Equal("Song", refreshed.Title);
-        Assert.Equal(referenceOnly ? null : "Other Artist - Song",
-            TrackObservationParser.ReadMetadata(refreshed)?.Description);
-        Assert.Empty(await db.TrackSourceIds.ToListAsync());
+        var refreshed = await db.TrackObservations.Include(o => o.ProviderCatalogItem).SingleAsync();
+        Assert.Null(refreshed.Title);
+        Assert.Null(refreshed.PrivateInputJson);
+        Assert.Equal(ObservationInputKind.Public, refreshed.InputKind);
+        Assert.Equal("Song", ObservationInput.Read(refreshed, account.UserId, DateTimeOffset.UtcNow)!.Title);
+        Assert.Null(ObservationInput.Read(refreshed, account.UserId, DateTimeOffset.UtcNow)!.Metadata.Description);
+        Assert.Single(await db.ProviderCatalogItems.ToListAsync());
         Assert.Empty(await db.TrackArtistCredits.ToListAsync());
     }
 
@@ -72,6 +75,7 @@ public sealed partial class ProviderCatalogAcquisitionTests
             Assert.True(await new ProviderRecordingAssociations(db).TryAssociateAsync(track, catalog, null, true, default));
             db.TrackObservations.Add(new TrackObservation
             {
+            InputKind = ObservationInputKind.Private,
                 Id = Guid.NewGuid(), OwnerUserId = alice.UserId, SourceType = "youtube", ExternalId = "video",
                 Title = "Song", Artist = "Artist", TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched
             });
@@ -87,17 +91,17 @@ public sealed partial class ProviderCatalogAcquisitionTests
 
         using var verificationScope = fixture.OpenScope();
         var verify = verificationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var mapping = await verify.TrackSourceIds.Include(item => item.ProviderCatalogItem).SingleAsync();
-        Assert.True(mapping.ProviderCatalogItem!.Revision > originalRevision);
+        var mapping = await verify.ProviderCatalogItems.SingleAsync();
+        Assert.True(mapping.Revision > originalRevision);
         Assert.Equal(!changedRecording, ProviderCatalogPolicy.IsVerified(mapping, DateTimeOffset.UtcNow));
         var bobObservation = await verify.TrackObservations.SingleAsync(item => item.OwnerUserId == bob.UserId);
         Assert.Equal(changedRecording ? (Guid?)null : trackId, bobObservation.TrackId);
-        Assert.Equal(trackId, (await verify.TrackObservations.SingleAsync(item => item.OwnerUserId == alice.UserId)).TrackId);
+        Assert.Equal(changedRecording ? (Guid?)null : trackId, (await verify.TrackObservations.SingleAsync(item => item.OwnerUserId == alice.UserId)).TrackId);
         Assert.Single(await verify.Tracks.ToListAsync());
         if (!changedRecording)
         {
-            Assert.Equal(mapping.ProviderCatalogItem.Revision, mapping.CatalogRevision);
-            var current = await verify.Tracks.Include(item => item.SourceIds).ThenInclude(item => item.ProviderCatalogItem).SingleAsync();
+            Assert.Equal(mapping.Revision, mapping.AssociationFactsRevision);
+            var current = await verify.Tracks.Include(item => item.ProviderItems).SingleAsync();
             Assert.Equal(handler.Artwork, ProviderCatalogPolicy.SharedFacts(current, DateTimeOffset.UtcNow)!.ThumbnailUrl);
             Assert.Empty(await verify.TrackMatchQueueItems.ToListAsync());
         }
@@ -117,10 +121,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
             Title = "MORTALS FUNK REMIX // Victory Royale B**ch!", Channel = "MrMoMMusic", Duration = "PT2M27S",
             Description = "LXNGVX, Warriyo - Mortals Funk Remix" + (conflicting ? "\nOther Artist - Mortals Funk Remix" : "")
         };
-        var source = new TrackObservation
+        var source = new ObservationInput
         {
-            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "source", Title = "Mortals Funk Remix",
-            Artist = "LXNGVX, Warriyo", DurationSeconds = 146, MatchStatus = TrackMatchingStatuses.Pending
+            SourceType = "spotify", ExternalId = "source", Title = "Mortals Funk Remix",
+            Artist = "LXNGVX, Warriyo", DurationSeconds = 146
         };
 
         var candidate = Assert.Single(await fixture.YouTubeService(db, handler).SearchVideoCandidatesAsync(account, source, default));
@@ -134,8 +138,26 @@ public sealed partial class ProviderCatalogAcquisitionTests
         Assert.Equal(!conflicting, decision.AcceptedCandidate is not null);
         Assert.Equal(!conflicting, PlaylistDestinationIdentityResolver.Assess(source, [candidate], new TrackMatchingOptions()).Accepted is not null);
         var catalog = (await fixture.Store.FindAsync("youtube", "video", default))!;
-        Assert.DoesNotContain("Description", catalog.FactsJson, StringComparison.Ordinal);
-        Assert.Empty(await fixture.ReadSourcesAsync());
+        Assert.Equal(handler.Description, JsonSerializer.Deserialize<ProviderCatalogFacts>(catalog.FactsJson)!.Description);
+        Assert.All(await fixture.ReadSourcesAsync(), item => Assert.Null(item.TrackId));
+    }
+
+    [Fact]
+    public async Task CompletePublicVideoResponseClearsAnEmptyDescription()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var account = await fixture.AddYouTubeAccountAsync();
+        using var scope = fixture.OpenScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        using var handler = new YouTubeCatalogHandler { Description = "Artist - Song" };
+        var service = fixture.YouTubeService(db, handler);
+        var first = (await service.GetPublicCatalogItemAsync(account, "video", default))!;
+        var firstRevision = first.Revision;
+        Assert.Equal("Artist - Song", JsonSerializer.Deserialize<ProviderCatalogFacts>(first.FactsJson)!.Description);
+        handler.Description = "";
+        var refreshed = (await service.GetPublicCatalogItemAsync(account, "video", default))!;
+        Assert.True(refreshed.Revision > firstRevision);
+        Assert.True(string.IsNullOrEmpty(JsonSerializer.Deserialize<ProviderCatalogFacts>(refreshed.FactsJson)!.Description));
     }
 
     private static async Task ReadYouTubeAsync(Fixture fixture, ApplicationDbContext db, YouTubeCatalogHandler handler,

@@ -38,7 +38,7 @@ public sealed class MusicBrainzArtistImportTests
             Options.Create(new TrackMatchingOptions()), _ => Task.CompletedTask, catalogAcquisition);
         var user = TestUserFactory.Create(900001, "musicbrainz-owner@example.test");
         var observation = new TrackObservation {
-            OwnerUserId = user.Id,
+            InputKind = ObservationInputKind.Private, OwnerUserId = user.Id,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video", Title = "Together",
             Artist = "Alpha feat. Beta", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Pending };
         db.AddRange(user, observation);
@@ -48,10 +48,10 @@ public sealed class MusicBrainzArtistImportTests
         Assert.NotNull(observation.TrackId);
         db.ChangeTracker.Clear();
         await matcher.ProcessObservationAsync(observation.Id, default);
-        var credits = await db.TrackArtistCredits.Include(c => c.Artist).OrderBy(c => c.Position).ToListAsync();
+        var credits = await db.TrackArtistCredits.Include(c => c.Artist).ThenInclude(a => a!.ProviderLinks).OrderBy(c => c.Position).ToListAsync();
         Assert.Equal(2, credits.Count);
         Assert.Equal(["Alpha", "Beta"], credits.Select(c => c.CreditedName).ToArray());
-        Assert.Equal([FirstId, SecondId], credits.Select(c => c.Artist!.MusicBrainzArtistId!).ToArray());
+        Assert.Equal([FirstId, SecondId], credits.Select(c => c.Artist!.ProviderLinks.Single(l => l.Provider == "musicbrainz").ExternalId).ToArray());
         Assert.Equal("Alpha, canonical", credits[0].Artist!.Name);
         Assert.Equal("Alpha, sorted", credits[0].Artist!.SortName);
         Assert.Equal(" feat. ", credits[0].JoinPhrase);
@@ -63,15 +63,24 @@ public sealed class MusicBrainzArtistImportTests
             Assert.Null(link.RawMetadata);
             Assert.Equal(CatalogVerificationMethods.MusicBrainz, link.VerificationMethod);
         });
-        Assert.All(credits, credit => Assert.Contains("musicbrainz", credit.Provenance));
+        Assert.All(credits, credit => {
+            Assert.NotNull(credit.ProviderCatalogItemId);
+            Assert.Equal(1L, credit.ProviderCatalogRevision);
+            Assert.Equal(credit.Position, credit.SourceCreditPosition);
+        });
         var stored = await db.TrackResolutionCandidates.SingleAsync();
-        var metadata = JsonSerializer.Deserialize<TrackMatchCandidateStoredMetadata>(stored.RawMetadata!);
-        Assert.Equal(2, metadata!.ArtistIdentities.Count);
+        Assert.NotNull(stored.ProviderCatalogItemId);
+        Assert.Null(stored.Title);
+        Assert.Null(stored.Artist);
+        var catalog = await db.ProviderCatalogItems.SingleAsync(i => i.Id == stored.ProviderCatalogItemId);
+        var facts = JsonSerializer.Deserialize<ProviderCatalogFacts>(catalog.FactsJson);
+        Assert.Equal(2, facts!.ArtistCredits.Count);
+        Assert.DoesNotContain("ProviderRawMetadata", stored.EvaluationJson ?? "");
         Assert.Empty(await db.ArtistReconciliationConflicts.ToListAsync());
     }
 
     [Fact]
-    public async Task LegacyStoredMusicBrainzCredits_AreAvailableForManualAcceptance()
+    public async Task UnverifiedStoredMusicBrainzCredits_DoNotCreateSharedArtistsOnManualAcceptance()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -79,16 +88,17 @@ public sealed class MusicBrainzArtistImportTests
         await db.Database.EnsureCreatedAsync();
         var user = TestUserFactory.Create(900001, "musicbrainz-owner@example.test");
         var observation = new TrackObservation {
-            OwnerUserId = user.Id,
+            InputKind = ObservationInputKind.Private, OwnerUserId = user.Id,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "legacy-video", Title = "Together",
             Artist = "Alpha feat. Beta", DurationSeconds = 180, MatchStatus = TrackMatchingStatuses.Pending };
         var candidate = new TrackResolutionCandidate {
             Id = Guid.NewGuid(), TrackObservationId = observation.Id, CandidateSource = "musicbrainz", ExternalId = "recording",
             MbidRecording = "recording", Title = "Together", Artist = "Alpha feat. Beta", Score = 0.8m,
-            RawMetadata = JsonSerializer.Serialize(new TrackMatchCandidateStoredMetadata {
-                ProviderRawMetadata = JsonSerializer.Serialize(new { ArtistCredits = new[] {
-                    new { Name = "Alpha", MusicBrainzArtistId = FirstId, JoinPhrase = " feat. ", SortName = "Alpha, sorted" },
-                    new { Name = "Beta", MusicBrainzArtistId = SecondId, JoinPhrase = "", SortName = "Beta" } } }) }) };
+            EvaluationJson = JsonSerializer.Serialize(new {
+                ArtistIdentities = new[] {
+                    new ArtistCreditMetadata { Name = "Alpha", MusicBrainzArtistId = FirstId, JoinPhrase = " feat. ", SortName = "Alpha, sorted" },
+                    new ArtistCreditMetadata { Name = "Beta", MusicBrainzArtistId = SecondId, JoinPhrase = "", SortName = "Beta" } } }) };
+
         observation.Candidates.Add(candidate);
         db.AddRange(user, observation);
         await db.SaveChangesAsync();

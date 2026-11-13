@@ -49,11 +49,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         await using var scope = await Scope.CreateAsync("spotify");
         scope.Entry.TrackObservationId = null;
         scope.Entry.TrackObservation = null;
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-            SourceType = "spotify", ExternalId = "other-users-private-id"
-        });
+        scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = "other-users-private-id", FactsJson = "{}" });
         await scope.Db.SaveChangesAsync();
         using var http = new HttpClient(new ReviewSearchHandler()) { BaseAddress = new Uri("https://api.spotify.com") };
         var review = await scope.SearchReviewAsync(http);
@@ -91,16 +87,12 @@ public sealed partial class PlaylistUnmatchedReviewTests
             scope.Entry.TrackObservation.Track = null;
             scope.Entry.TrackObservation.MatchStatus = TrackMatchingStatuses.Pending;
         }
-        if (canonical == "new") scope.Db.Tracks.Remove(await scope.Db.Tracks.SingleAsync());
+        if (canonical == "new") scope.Db.Tracks.Remove(await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync());
         if (canonical == "reused")
         {
-            var mapping = new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = (await scope.Db.Tracks.SingleAsync()).Id,
-                SourceType = "spotify", ExternalId = "chosen-id"
-            };
+            var mapping = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = (await scope.Db.Tracks.Include(track => track.ProviderItems).SingleAsync()).Id, SourceType = "spotify", ExternalId = "chosen-id", FactsJson = "{}" };
             scope.VerifyMapping(mapping);
-            scope.Db.TrackSourceIds.Add(mapping);
+            scope.Db.ProviderCatalogItems.Add(mapping);
         }
         await scope.Db.SaveChangesAsync();
         var token = scope.Token(Candidate("chosen-id"));
@@ -108,7 +100,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         // A retried HTTP confirmation must not create duplicate identities or proof.
         await scope.Review.ConfirmAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id, scope.Entry.Id, token, default);
         Assert.Equal(canonical == "reused" ? 1 : 0,
-            await scope.Db.TrackSourceIds.CountAsync(source => source.SourceType == "spotify"));
+            await scope.Db.ProviderCatalogItems.CountAsync(source => source.SourceType == "spotify"));
         var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name);
         var writer = new ReviewWriter(provider);
         scope.Db.ChangeTracker.Clear();
@@ -118,11 +110,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
 
         // After a successful export and process restart, keep the choice even when
         // unrelated users add or remove shared catalog mappings.
-        scope.Db.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(), TrackId = (await scope.Db.PlaylistEntries.SingleAsync()).TrackId!.Value,
-            SourceType = "spotify", ExternalId = "unrelated-global-id"
-        });
+        scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = (await scope.Db.PlaylistEntries.SingleAsync()).TrackId!.Value, SourceType = "spotify", ExternalId = "unrelated-global-id", FactsJson = "{}" });
         await scope.Db.SaveChangesAsync();
         savedLink.BaselineJson = new PlaylistSyncBaseline([]).Serialize();
         (await scope.Db.ConnectedServiceAccounts.SingleAsync()).TokenVersion++;
@@ -172,23 +160,23 @@ public sealed partial class PlaylistUnmatchedReviewTests
                 scope.Db.ServicePlaylistMappings.Add(link);
                 break;
             case "remote-playlist": link.ServicePlaylistId = "new-playlist"; break;
-            case "metadata": scope.Entry.Track!.CanonicalMetadata = "{\"Title\":\"Different song\",\"Artist\":\"Other\"}"; break;
+            case "metadata": CatalogFixture.SetFacts(scope.Entry.Track!, "{\"Title\":\"Different song\",\"Artist\":\"Other\"}", "musicbrainz"); break;
             case "version": scope.Entry.Track!.VersionFlags = TrackVersionFlags.Live; break;
-            case "observation-metadata": scope.Entry.TrackObservation!.RawMetadata = "{\"Description\":\"Changed credits\"}"; break;
+            case "observation-metadata": scope.Entry.TrackObservation!.PrivateInputJson = "{\"Description\":\"Changed credits\"}"; break;
             case "track":
-                var other = new Track { Id = Guid.NewGuid(), SearchTitle = "Different", SearchArtist = "Other" };
+                var other = new Track {  Id = Guid.NewGuid() };
                 scope.Db.Tracks.Add(other);
                 scope.Entry.TrackId = scope.Entry.TrackObservation!.TrackId = other.Id;
                 break;
             case "selected-identity-conflict":
-                var conflicting = new Track { Id = Guid.NewGuid(), SearchTitle = "Other" };
+                var conflicting = new Track {  Id = Guid.NewGuid() };
                 scope.Db.Tracks.Add(conflicting);
-                var mapping = new TrackSourceId { Id = Guid.NewGuid(), TrackId = conflicting.Id,
-                    SourceType = "spotify", ExternalId = "chosen-id" };
+                var mapping = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = conflicting.Id, SourceType = "spotify", ExternalId = "chosen-id", FactsJson = "{}" };
                 scope.VerifyMapping(mapping);
-                scope.Db.TrackSourceIds.Add(mapping);
+                scope.Db.ProviderCatalogItems.Add(mapping);
                 break;
         }
+        await CatalogFixture.AddNewItemsAsync(scope.Db);
         await scope.Db.SaveChangesAsync();
         var mappingId = link.Id;
         var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name);
@@ -226,10 +214,15 @@ public sealed partial class PlaylistUnmatchedReviewTests
             case "disconnected": account.ConnectionState = "reconnect_required"; break;
             case "remote-playlist": scope.Link.ServicePlaylistId = "other-playlist"; break;
         }
+        if (change == "owner")
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Db.SaveChangesAsync());
+            return;
+        }
         await scope.Db.SaveChangesAsync();
         await Assert.ThrowsAsync<PlatformApiException>(() => review.ConfirmAsync(scope.UserId, scope.Playlist.Id,
             scope.Link.Id, scope.Entry.Id, Assert.Single(searched.Candidates).CandidateToken, default));
-        Assert.Empty(await scope.Db.TrackSourceIds.ToListAsync());
+        Assert.Empty(await scope.Db.ProviderCatalogItems.ToListAsync());
     }
 
     [Fact]
@@ -241,14 +234,13 @@ public sealed partial class PlaylistUnmatchedReviewTests
         scope.Entry.Track = null;
         scope.Entry.TrackObservation!.TrackId = null;
         scope.Entry.TrackObservation.Track = null;
-        var verified = new TrackSourceId { Id = Guid.NewGuid(), TrackId = trackId,
-            SourceType = "spotify", ExternalId = "chosen-id" };
+        var verified = new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = trackId, SourceType = "spotify", ExternalId = "chosen-id", FactsJson = "{}" };
         scope.VerifyMapping(verified);
-        scope.Db.TrackSourceIds.Add(verified);
-        var survivor = new PlaylistEntry { Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
+        scope.Db.ProviderCatalogItems.Add(verified);
+        var survivor = new PlaylistEntry { OwnerUserId = scope.Playlist.UserId, Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
             TrackId = trackId, Position = -1 };
         var otherPlaylist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId + 1, Name = "Other" };
-        var otherEntry = new PlaylistEntry { Id = Guid.NewGuid(), Playlist = otherPlaylist,
+        var otherEntry = new PlaylistEntry { OwnerUserId = otherPlaylist.UserId, Id = Guid.NewGuid(), Playlist = otherPlaylist,
             PlaylistId = otherPlaylist.Id, TrackObservationId = scope.Entry.TrackObservationId };
         scope.Db.AddRange(survivor, otherEntry);
         await scope.Db.SaveChangesAsync();
@@ -280,7 +272,6 @@ public sealed partial class PlaylistUnmatchedReviewTests
         {
             var entry = scope.AddEntry($"Unknown {i}", $"video-{i}");
             entry.Position = i + 1;
-            entry.Track!.SearchArtist = "Artist";
             entry.TrackObservation!.Artist = "Artist";
         }
         await scope.Db.SaveChangesAsync();
@@ -317,7 +308,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             scope.Entry.TrackObservationId = null;
             scope.Entry.TrackObservation = null;
             var playlist = new Playlist { Id = Guid.NewGuid(), UserId = scope.UserId, Name = "Owned" };
-            scope.Db.PlaylistEntries.Add(new PlaylistEntry { Id = Guid.NewGuid(), Playlist = playlist,
+            scope.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId, Id = Guid.NewGuid(), Playlist = playlist,
                 PlaylistId = playlist.Id, TrackId = scope.Entry.TrackId, TrackObservationId = observation.Id });
         }
         await scope.Db.SaveChangesAsync();
@@ -330,8 +321,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
         var writer = new ReviewWriter(provider);
         // Fake reads need the global identity to map remote responses back to the
         // canonical track after writing, just as production imports observations.
-        scope.Db.TrackSourceIds.Add(new TrackSourceId { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value,
-            SourceType = "spotify", ExternalId = observation.ExternalId });
+        scope.Db.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = scope.Entry.TrackId!.Value, SourceType = "spotify", ExternalId = observation.ExternalId, FactsJson = "{}" });
         await scope.Db.SaveChangesAsync();
         await RunReviewSyncAsync(scope, provider, writer);
         Assert.Equal([observation.ExternalId], Assert.Single(writer.Writes));
@@ -349,19 +339,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         (await scope.Db.ConnectedServiceAccounts.SingleAsync()).UserId = newOwner;
         scope.Link.BaselineJson = new PlaylistSyncBaseline([]).Serialize();
         scope.Link.BaselineName = scope.Playlist.Name;
-        await scope.Db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Db.SaveChangesAsync());
         scope.Db.ChangeTracker.Clear();
-        Assert.Single(await scope.Review.ListAsync(newOwner, scope.Playlist.Id, scope.Link.Id, default));
-        var provider = new ReviewResolverProvider(scope.Db, scope.Playlist.Name);
-        var writer = new ReviewWriter(provider);
-        var coordinator = new PlaylistSyncCoordinator(scope.Db, [provider], [writer], TimeProvider.System,
-            NullLogger<PlaylistSyncCoordinator>.Instance);
-
-        await coordinator.RunAsync(newOwner, scope.Playlist.Id, "spotify", default);
-
-        Assert.Empty(writer.Writes);
-        Assert.Equal(0, provider.Searches);
-        Assert.Single(await scope.Review.ListAsync(newOwner, scope.Playlist.Id, scope.Link.Id, default));
+        Assert.Equal(scope.UserId, (await scope.Db.Playlists.SingleAsync()).UserId);
+        Assert.Equal(scope.UserId, (await scope.Db.ConnectedServiceAccounts.SingleAsync()).UserId);
+        await Assert.ThrowsAsync<PlatformApiException>(() => scope.Review.ListAsync(newOwner, scope.Playlist.Id, scope.Link.Id, default));
     }
 
     [Theory]
@@ -453,14 +435,14 @@ public sealed partial class PlaylistUnmatchedReviewTests
             for (var i = 0; i < RemoteIds.Count; i++)
             {
                 var id = RemoteIds[i];
-                var trackId = await db.TrackSourceIds.Where(s => s.SourceType == PlatformId && s.ExternalId == id)
+                var trackId = await db.ProviderCatalogItems.Where(s => s.SourceType == PlatformId && s.ExternalId == id)
                     .Select(s => (Guid?)s.TrackId).SingleOrDefaultAsync(ct);
                 var observation = await db.TrackObservations.SingleOrDefaultAsync(item =>
                     item.OwnerUserId == account.UserId && item.SourceType == PlatformId && item.ExternalId == id, ct);
                 if (observation is null && trackId is null)
                 {
-                    observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId,
-                        ExternalId = id, Title = id, Artist = "Provider artist", MatchStatus = TrackMatchingStatuses.Pending };
+                    observation = new TrackObservation {  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId,
+                        ExternalId = id, Title = id, Artist = "Provider artist", MatchStatus = TrackMatchingStatuses.Pending  };
                     db.TrackObservations.Add(observation);
                     await db.SaveChangesAsync(ct);
                 }

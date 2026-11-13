@@ -59,34 +59,33 @@ public class TrackMatchCreditEvidenceTests
         AssertRejectedByBothPaths(Kronus(), Candidate(title, artist, 177));
     }
 
-    private static TrackObservation Kronus()
+    private static ObservationInput Kronus()
     {
         var source = Source("Story of My Life x Clarity (Kronus Mashup)", "Kronus", 177);
-        source.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        source = source with { Metadata = new TrackObservationMetadata
         {
             OriginalTitle = source.Title, OriginalArtist = "Kronus", ChannelTitle = "Kronus",
             Description = "Kronus, Zedd - Story of My Life x Clarity (Kronus Mashup)"
-        });
+        } };
         return source;
     }
 
-    private static void AssertAcceptedByBothPaths(TrackObservation source, TrackMatchSearchCandidate candidate)
+    private static void AssertAcceptedByBothPaths(ObservationInput source, TrackMatchSearchCandidate candidate)
     {
         Assert.NotNull(TrackMatchDecisionEngine.Evaluate(source, [candidate], new()).Decision.AcceptedCandidate);
         Assert.NotNull(PlaylistDestinationIdentityResolver.Assess(source, [candidate], new()).Accepted);
     }
 
-    private static void AssertRejectedByBothPaths(TrackObservation source, TrackMatchSearchCandidate candidate)
+    private static void AssertRejectedByBothPaths(ObservationInput source, TrackMatchSearchCandidate candidate)
     {
         Assert.Null(TrackMatchDecisionEngine.Evaluate(source, [candidate], new()).Decision.AcceptedCandidate);
         Assert.Null(PlaylistDestinationIdentityResolver.Assess(source, [candidate], new()).Accepted);
     }
 
-    private static TrackObservation Source(string title, string artist, int duration) => new()
+    private static ObservationInput Source(string title, string artist, int duration) => new()
     {
         SourceType = "youtube", ExternalId = "video", Title = title, Artist = artist,
-        DurationSeconds = duration, MatchStatus = TrackMatchingStatuses.Pending
-    };
+        DurationSeconds = duration, };
 
     private static TrackMatchSearchCandidate Candidate(string title, string artist, int duration, string provider = "spotify") => new()
     {
