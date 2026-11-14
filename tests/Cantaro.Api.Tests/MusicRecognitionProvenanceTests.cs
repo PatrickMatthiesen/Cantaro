@@ -233,13 +233,16 @@ public sealed class MusicRecognitionProvenanceTests
     }
 
     [Theory]
-    [InlineData(false, "fresh")]
-    [InlineData(true, "fresh")]
-    [InlineData(false, "expired")]
-    [InlineData(true, "expired")]
-    [InlineData(false, "other-owner")]
-    [InlineData(true, "other-owner")]
-    public async Task Recognize_StandaloneReviewedPublicResultUsesOnlyFreshOwnedInput(bool version, string access)
+    [InlineData("candidate", "fresh")]
+    [InlineData("version", "fresh")]
+    [InlineData("candidate", "expired")]
+    [InlineData("version", "expired")]
+    [InlineData("candidate", "other-owner")]
+    [InlineData("version", "other-owner")]
+    [InlineData("create", "fresh")]
+    [InlineData("create", "expired")]
+    [InlineData("create", "other-owner")]
+    public async Task Recognize_StandaloneReviewedPublicResultUsesOnlyFreshOwnedInput(string resolution, string access)
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -247,7 +250,7 @@ public sealed class MusicRecognitionProvenanceTests
         var owner = TestUserFactory.Create(735, "reviewed-recognition@example.test");
         var other = TestUserFactory.Create(736, "other-recognition@example.test");
         var now = DateTimeOffset.UtcNow;
-        var track = new Track { Id = Guid.NewGuid(), VersionFlags = version ? TrackVersionFlags.Live : TrackVersionFlags.None };
+        var track = new Track { Id = Guid.NewGuid(), VersionFlags = resolution == "version" ? TrackVersionFlags.Live : TrackVersionFlags.None };
         var item = new ProviderCatalogItem
         {
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "reviewedVid", Revision = 1,
@@ -259,7 +262,7 @@ public sealed class MusicRecognitionProvenanceTests
         {
             Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
             TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched,
-            ResolutionNotes = version ? "Created a live version Track after explicit review." : "Resolved by manual candidate selection."
+            ResolutionNotes = resolution == "version" ? "Created a live version Track after explicit review." : resolution == "create" ? "Created canonical track from observation during manual review." : "Resolved by manual candidate selection."
         };
         ObservationInput.SetPublic(observation, item);
         var candidate = new TrackResolutionCandidate
@@ -270,7 +273,7 @@ public sealed class MusicRecognitionProvenanceTests
         };
         db.AddRange(owner, other, track, item, observation, candidate);
         await db.SaveChangesAsync();
-        observation.AcceptedCandidateId = candidate.Id;
+        observation.AcceptedCandidateId = resolution == "create" ? null : candidate.Id;
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 

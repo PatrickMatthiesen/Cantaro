@@ -40,7 +40,9 @@ public sealed record ObservationInput
         catch (JsonException) { return new(); }
     }
 
-    public static bool HasReviewedResult(TrackObservation observation) => observation.AcceptedCandidateId != null
+    public static bool HasReviewedResult(TrackObservation observation) =>
+        observation.ResolutionNotes == "Created canonical track from observation during manual review."
+        || observation.AcceptedCandidateId != null
         && (observation.ResolutionNotes == "Resolved by manual candidate selection."
             || (observation.ResolutionNotes?.StartsWith("Created a ", StringComparison.Ordinal) == true
                 && observation.ResolutionNotes.Contains("version Track", StringComparison.Ordinal)));

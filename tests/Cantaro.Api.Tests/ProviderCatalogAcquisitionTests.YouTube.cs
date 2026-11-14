@@ -16,6 +16,37 @@ namespace Cantaro.Api.Tests;
 
 public sealed partial class ProviderCatalogAcquisitionTests
 {
+    [Fact]
+    public async Task YouTubeReadPreservesExplicitlyCreatedRecordingWithoutAcceptedCandidate()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var account = await fixture.AddYouTubeAccountAsync();
+        using var scope = fixture.OpenScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        using var handler = new YouTubeCatalogHandler();
+        await ReadYouTubeAsync(fixture, db, handler, account, viaImporter: false);
+        var observation = await db.TrackObservations.Include(row => row.ProviderCatalogItem).SingleAsync();
+        var service = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
+        var created = await service.CreateTrackFromObservationAsync(observation.Id, default);
+        var trackId = created.TrackId;
+        Assert.NotNull(trackId);
+        Assert.Null(created.AcceptedCandidateId);
+        // Remove the original pending job so the refresh must not queue it again.
+        db.TrackMatchQueueItems.RemoveRange(await db.TrackMatchQueueItems.ToListAsync());
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        await ReadYouTubeAsync(fixture, db, handler, account, viaImporter: false);
+        db.ChangeTracker.Clear();
+
+        var retained = await db.TrackObservations.SingleAsync();
+        Assert.Equal(trackId, retained.TrackId);
+        Assert.Equal(TrackMatchingStatuses.Matched, retained.MatchStatus);
+        Assert.Null(retained.AcceptedCandidateId);
+        Assert.Empty(await db.TrackMatchQueueItems.ToListAsync());
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]

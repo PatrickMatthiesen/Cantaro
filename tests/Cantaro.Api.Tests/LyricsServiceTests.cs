@@ -333,6 +333,40 @@ public sealed class LyricsServiceTests
         Assert.Null(provider.Lookup);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetLyricsAsync_PublicInputRetainsDurationWithoutRecordingAssociation(bool linked)
+    {
+        await using var db = CreateDb();
+        var track = new Track { Id = Guid.NewGuid() };
+        var item = AttachPublicFacts(new Track { Id = Guid.NewGuid() }, new ProviderCatalogFacts
+        { Title = "Test Song", Artist = "Test Artist", DurationSeconds = 203 });
+        item.TrackId = null;
+        item.AssociationState = RecordingAssociationState.Unknown;
+        var observation = new TrackObservation
+        { Id = Guid.NewGuid(), OwnerUserId = 7, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            MatchStatus = TrackMatchingStatuses.Pending };
+        ObservationInput.SetPublic(observation, item);
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Saved" };
+        db.AddRange(track, item, observation, playlist, new PlaylistEntry
+        {
+            Id = Guid.NewGuid(), OwnerUserId = 7, PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id, TrackId = linked ? track.Id : null, Position = 0
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(7,
+            linked ? $"track:{track.Id}" : $"observation:{observation.Id}", default);
+
+        Assert.NotNull(result);
+        Assert.Equal(203, provider.Lookup?.DurationSeconds);
+        Assert.Null((await db.TrackObservations.SingleAsync()).DurationSeconds);
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+    }
+
     private static ApplicationDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

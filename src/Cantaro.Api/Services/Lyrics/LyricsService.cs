@@ -83,7 +83,7 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
             metadata.SearchTitle.Trim(),
             metadata.SearchArtist.Trim(),
             sourceMetadata?.Album?.Trim(),
-            observation.DurationSeconds ?? sourceMetadata?.DurationSeconds,
+            input.DurationSeconds,
             null,
             sourceMetadata?.Isrc), cancellationToken);
     }

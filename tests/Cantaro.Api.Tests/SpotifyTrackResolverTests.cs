@@ -13,6 +13,46 @@ public sealed class SpotifyTrackResolverTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("expired")]
+    [InlineData("other-owner")]
+    public async Task ResolveAsync_RefreshedOwnedPublicInputReusesLocalRecordingOnlyForItsOwner(string access)
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var db = fixture.DbContext;
+        db.Users.AddRange(TestUserFactory.Create(2101, "owner@example.test"),
+            TestUserFactory.Create(2102, "other@example.test"));
+        var track = fixture.AddTrackWithSong(null);
+        fixture.AddObservation(2101, track.Id, "spotify", "same-id", "Song", "Artist", 180);
+        await db.SaveChangesAsync();
+        var item = fixture.AddCatalogItem("spotify", "same-id", Facts("Song", "Artist", null));
+        var snapshot = Snapshot("same-id", null, title: "Song", artist: "Artist") with
+        { ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision };
+        // This first refresh still sees the account-only input. It must retain
+        // its recording without inventing an independently verified association.
+        var refreshed = await fixture.Resolver.ResolveAsync(snapshot, Now, default, 2101);
+        Assert.Equal(track.Id, refreshed.Id);
+        var observation = await db.TrackObservations.SingleAsync();
+        ObservationInput.SetPublic(observation, item);
+        if (access == "expired") item.RevalidateAfter = Now.AddMinutes(-1);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var repeated = await fixture.Resolver.ResolveAsync(snapshot, Now, default,
+            access == "other-owner" ? 2102 : 2101);
+        await db.SaveChangesAsync();
+
+        if (access == "owner") Assert.Equal(track.Id, repeated.Id);
+        else Assert.NotEqual(track.Id, repeated.Id);
+        Assert.Equal(access == "owner" ? 1 : 2, await db.Tracks.CountAsync());
+        // A different user may establish a new provider-origin association,
+        // but must not inherit the first user's unverified recording choice.
+        Assert.Equal(access == "other-owner" ? repeated.Id : (Guid?)null,
+            (await db.ProviderCatalogItems.SingleAsync()).TrackId);
+        Assert.Null((await db.TrackObservations.SingleAsync()).Title);
+    }
+
     [Fact]
     public async Task ResolveAsync_AccountSnapshotWithoutCatalogReferenceCreatesBlankCanonicalTrack()
     {
@@ -201,9 +241,17 @@ public sealed class SpotifyTrackResolverTests
     }
 
     [Theory]
-    [InlineData("isrc")]
-    [InlineData("version")]
-    public async Task ResolveAsync_RejectsExactRevalidationWhenStableEvidenceChanges(string change)
+    [InlineData("isrc", "none")]
+    [InlineData("isrc", "stored")]
+    [InlineData("isrc", "tracked")]
+    [InlineData("isrc", "manual-stored")]
+    [InlineData("isrc", "manual-tracked")]
+    [InlineData("version", "none")]
+    [InlineData("version", "stored")]
+    [InlineData("version", "tracked")]
+    [InlineData("version", "manual-stored")]
+    [InlineData("version", "manual-tracked")]
+    public async Task ResolveAsync_RejectsExactRevalidationWhenStableEvidenceChanges(string change, string ownerResult)
     {
         await using var fixture = await ResolverFixture.CreateAsync();
         var originalFacts = Facts("Verified title", "Verified artist", "USSP02600001");
@@ -216,6 +264,21 @@ public sealed class SpotifyTrackResolverTests
         }, Now, CancellationToken.None);
         await fixture.DbContext.SaveChangesAsync();
 
+        if (ownerResult != "none")
+        {
+            fixture.DbContext.Users.Add(TestUserFactory.Create(2101, "refresh-owner@example.test"));
+            var observation = new TrackObservation
+            {
+                Id = Guid.NewGuid(), OwnerUserId = 2101, SourceType = item.SourceType, ExternalId = item.ExternalId,
+                TrackId = original.Id, MatchStatus = TrackMatchingStatuses.Matched,
+                ResolutionNotes = ownerResult.StartsWith("manual", StringComparison.Ordinal)
+                    ? "Created canonical track from observation during manual review." : null
+            };
+            ObservationInput.SetPublic(observation, item);
+            fixture.DbContext.TrackObservations.Add(observation);
+            await fixture.DbContext.SaveChangesAsync();
+        }
+
         var changedFacts = change == "isrc"
             ? CopyFacts(originalFacts, isrc: "USSP02600002")
             : CopyFacts(originalFacts, versionFlags: TrackVersionFlags.Acoustic);
@@ -227,16 +290,23 @@ public sealed class SpotifyTrackResolverTests
         fixture.DbContext.ChangeTracker.Clear();
 
         var refreshedItem = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        if (ownerResult.EndsWith("tracked", StringComparison.Ordinal))
+        {
+            var loaded = await fixture.DbContext.TrackObservations.SingleAsync();
+            ObservationInput.SetPublic(loaded, refreshedItem);
+        }
         var rejected = await fixture.Resolver.ResolveAsync(Snapshot("stable-provider-id", "ACCOUNT-ISRC",
             "Account title changed", "Account artist changed") with
         {
             ProviderCatalogItemId = refreshedItem.Id, ProviderCatalogRevision = refreshedItem.Revision
-        }, Now, CancellationToken.None);
+        }, Now, CancellationToken.None, ownerResult == "none" ? null : 2101);
         await fixture.DbContext.SaveChangesAsync();
 
-        Assert.NotEqual(original.Id, rejected.Id);
+        var explicitChoice = ownerResult.StartsWith("manual", StringComparison.Ordinal);
+        if (explicitChoice) Assert.Equal(original.Id, rejected.Id);
+        else Assert.NotEqual(original.Id, rejected.Id);
         Assert.Null(ProviderCatalogPolicy.SharedSource(rejected, DateTimeOffset.UtcNow)?.Id);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+        Assert.Equal(explicitChoice ? 1 : 2, await fixture.DbContext.Tracks.CountAsync());
         var mapping = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
         Assert.Equal(original.Id, mapping.TrackId);
         Assert.Equal(1, mapping.AssociationFactsRevision);

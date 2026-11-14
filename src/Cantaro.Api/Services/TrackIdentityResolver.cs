@@ -85,18 +85,25 @@ public sealed class TrackIdentityResolver
                 exactSource);
         }
 
-        // An imported provider ID and its payload are private evidence. Reuse a
-        // previously linked observation only for the explicitly supplied owner.
+        // An owner-specific processing result can reuse this exact provider ID
+        // without establishing a shared recording association.
         if (query.OwnerUserId is { } ownerId)
         {
             var owned = _dbContext.TrackObservations.Local.FirstOrDefault(observation =>
                 observation.SourceType == query.SourceType && observation.ExternalId == query.ExternalId
-                && observation.InputKind == ObservationInputKind.Private && observation.TrackId != null && ProviderCatalogPolicy.HasOwnedInput(observation, ownerId));
+                && observation.InputKind != ObservationInputKind.Reference && observation.TrackId != null && ProviderCatalogPolicy.HasOwnedInput(observation, ownerId));
             owned ??= await ObservationInput.Eligible(_dbContext.TrackObservations.AsNoTracking(), now).Include(o => o.ProviderCatalogItem).FirstOrDefaultAsync(observation =>
                 observation.SourceType == query.SourceType && observation.ExternalId == query.ExternalId
-                && observation.InputKind == ObservationInputKind.Private && observation.TrackId != null && observation.OwnerUserId == ownerId
+                && observation.InputKind != ObservationInputKind.Reference && observation.TrackId != null && observation.OwnerUserId == ownerId
 , cancellationToken);
-            if (owned?.TrackId is { } ownedTrackId)
+            // Fresh provider metadata cannot renew an automatic recording result
+            // when the association that produced it no longer validates.
+            var invalidAutomaticResult = owned is
+                { InputKind: ObservationInputKind.Public, ProviderCatalogItem: { } catalog }
+                && catalog.TrackId == owned.TrackId && !ProviderCatalogPolicy.IsVerified(catalog, now)
+                && !ObservationInput.HasReviewedResult(owned);
+            if (!invalidAutomaticResult && owned?.TrackId is { } ownedTrackId
+                && ProviderCatalogPolicy.HasOwnedInput(owned, ownerId, now))
             {
                 return new TrackIdentityMatch(
                     await LoadRequiredTrackAsync(ownedTrackId, cancellationToken),
