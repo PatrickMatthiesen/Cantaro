@@ -7,11 +7,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.Dotnet" Version="14.0.0-preview.1.26473.3" />
+    <PackageReference Include="Aspire.Hosting.Dotnet" Version="14.0.0-preview.1.26479.9" />
     <PackageReference Include="Subjective.Aspire.Hosting.Garage" Version="0.1.0-preview.6" />
-    <PackageReference Include="Aspire.Hosting.Docker" Version="14.0.0-preview.1.26473.3" />
-    <PackageReference Include="Aspire.Hosting.JavaScript" Version="14.0.0-preview.1.26473.3" />
-    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="14.0.0-preview.1.26473.3" />
+    <PackageReference Include="Aspire.Hosting.Docker" Version="14.0.0-preview.1.26479.9" />
+    <PackageReference Include="Aspire.Hosting.JavaScript" Version="14.0.0-preview.1.26479.9" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="14.0.0-preview.1.26479.9" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
