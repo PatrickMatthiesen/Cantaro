@@ -43,6 +43,7 @@ public sealed record ObservationInput
 
     public static bool HasReviewedResult(TrackObservation observation) =>
         observation.ResolutionNotes == "Created canonical track from observation during manual review."
+        || observation.ResolutionNotes == "Confirmed recording during playlist review."
         || observation.AcceptedCandidateId != null
         && (observation.ResolutionNotes == "Resolved by manual candidate selection."
             || (observation.ResolutionNotes?.StartsWith("Created a ", StringComparison.Ordinal) == true

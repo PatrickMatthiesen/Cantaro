@@ -76,8 +76,10 @@ public sealed partial class ProviderCatalogAcquisitionTests
         Assert.Null((await db.ProviderCatalogItems.SingleAsync(row => row.SourceType == "youtube")).TrackId);
     }
 
-    [Fact]
-    public async Task YouTubeReadPreservesExplicitlyCreatedRecordingWithoutAcceptedCandidate()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task YouTubeReadPreservesExplicitlyCreatedRecordingWithoutAcceptedCandidate(bool playlistReview)
     {
         await using var fixture = await Fixture.CreateAsync();
         var account = await fixture.AddYouTubeAccountAsync();
@@ -87,7 +89,11 @@ public sealed partial class ProviderCatalogAcquisitionTests
         await ReadYouTubeAsync(fixture, db, handler, account, viaImporter: false);
         var observation = await db.TrackObservations.Include(row => row.ProviderCatalogItem).SingleAsync();
         var service = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
-        var created = await service.CreateTrackFromObservationAsync(observation.Id, default);
+        var created = playlistReview
+            ? await service.CreateTrackFromMatchAsync(observation.Id, new TrackMatchSearchCandidate
+                { CandidateSource = "spotify", ExternalId = "chosen", Title = "Song", Artist = "Artist", DurationSeconds = 180 },
+                default, manualReview: true)
+            : await service.CreateTrackFromObservationAsync(observation.Id, default);
         var trackId = created.TrackId;
         Assert.NotNull(trackId);
         Assert.Null(created.AcceptedCandidateId);

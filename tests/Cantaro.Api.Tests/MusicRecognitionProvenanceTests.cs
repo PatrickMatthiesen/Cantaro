@@ -242,6 +242,9 @@ public sealed class MusicRecognitionProvenanceTests
     [InlineData("create", "fresh")]
     [InlineData("create", "expired")]
     [InlineData("create", "other-owner")]
+    [InlineData("playlist-review", "fresh")]
+    [InlineData("playlist-review", "expired")]
+    [InlineData("playlist-review", "other-owner")]
     public async Task Recognize_StandaloneReviewedPublicResultUsesOnlyFreshOwnedInput(string resolution, string access)
     {
         var (db, connection) = await CreateDbAsync();
@@ -262,7 +265,8 @@ public sealed class MusicRecognitionProvenanceTests
         {
             Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
             TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched,
-            ResolutionNotes = resolution == "version" ? "Created a live version Track after explicit review." : resolution == "create" ? "Created canonical track from observation during manual review." : "Resolved by manual candidate selection."
+            ResolutionNotes = resolution == "version" ? "Created a live version Track after explicit review." : resolution == "create" ? "Created canonical track from observation during manual review."
+                : resolution == "playlist-review" ? "Confirmed recording during playlist review." : "Resolved by manual candidate selection."
         };
         ObservationInput.SetPublic(observation, item);
         var candidate = new TrackResolutionCandidate
@@ -273,7 +277,7 @@ public sealed class MusicRecognitionProvenanceTests
         };
         db.AddRange(owner, other, track, item, observation, candidate);
         await db.SaveChangesAsync();
-        observation.AcceptedCandidateId = resolution == "create" ? null : candidate.Id;
+        observation.AcceptedCandidateId = resolution is "create" or "playlist-review" ? null : candidate.Id;
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
