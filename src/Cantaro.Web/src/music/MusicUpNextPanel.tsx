@@ -1,5 +1,7 @@
-import type { MusicQueueTrack } from './useMusicQueue';
+import type { PlaybackTrack } from './playback/playbackState';
 import { formatDuration } from './musicPresentation';
+
+type MusicQueueTrack = Pick<PlaybackTrack, 'id' | 'title' | 'artist' | 'artworkUrl' | 'durationSeconds'>;
 
 function QueueArtwork({ track }: { track: MusicQueueTrack }) {
   if (track.artworkUrl) {
