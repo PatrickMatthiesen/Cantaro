@@ -103,14 +103,9 @@ public sealed class TrackIdentityResolver
                     TrackIdentityMatchKind.ExactSource,
                     "Matched this user's existing source observation.");
             }
-
-            var ownedMetadataTrackId = await FindUniqueMetadataTrackIdAsync(query, cancellationToken);
-            if (ownedMetadataTrackId is { } privateTrackId)
-                return new TrackIdentityMatch(await LoadRequiredTrackAsync(privateTrackId, cancellationToken),
-                    TrackIdentityMatchKind.Metadata, "Matched this user's existing observation metadata.");
         }
 
-        // Shared fallback is built only from current catalog items whose
+        // Shared matching uses only current catalog items whose
         // recording association has been independently verified.
         var normalizedIsrc = NormalizeIsrc(query.Isrc);
         var normalizedMusicBrainzId = TrackTextNormalizer.Normalize(query.MusicBrainzRecordingId);
@@ -131,6 +126,16 @@ public sealed class TrackIdentityResolver
             .DistinctBy(source => source.Id)
             .Where(source => MatchesPublicCatalogQuery(source, query, normalizedIsrc,
                 normalizedMusicBrainzId, normalizedTitle, normalizedArtist, now)).ToArray();
+        // Private metadata is a last resort when no shared recording matches the
+        // query. It must not override a shared match or resolve shared ambiguity.
+        if (rows.Length == 0)
+        {
+            var ownedTrackId = await FindUniqueMetadataTrackIdAsync(query, cancellationToken);
+            return ownedTrackId is { } trackId
+                ? new TrackIdentityMatch(await LoadRequiredTrackAsync(trackId, cancellationToken),
+                    TrackIdentityMatchKind.Metadata, "Matched this user's existing observation metadata.")
+                : null;
+        }
         if (rows.Length > MaximumMetadataCandidates) return null;
         var trackIds = rows.Select(source => source.TrackId!.Value).Distinct().ToArray();
         var tracks = await _dbContext.Tracks.AsNoTracking().Include(track => track.ArtistCredits)
@@ -202,58 +207,40 @@ public sealed class TrackIdentityResolver
         {
             return null;
         }
-        var normalizedArtists = queryHypotheses.Select(hypothesis =>
-                TrackTextNormalizer.Normalize(hypothesis.SearchArtist))
-            .Where(value => value.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        var storedCandidates = await ObservationInput.Eligible(_dbContext.TrackObservations.AsNoTracking(), DateTimeOffset.UtcNow)
-            .Include(candidate => candidate.ProviderCatalogItem)
-            .Include(candidate => candidate.Track)!.ThenInclude(track => track!.ArtistCredits)
-            .Where(candidate => candidate.InputKind == ObservationInputKind.Private && candidate.TrackId != null && candidate.OwnerUserId == ownerId)
-            .Take(MaximumMetadataCandidates + 1).ToListAsync(cancellationToken);
-        if (storedCandidates.Count > MaximumMetadataCandidates) return null;
-        var candidates = _dbContext.TrackObservations.Local.Concat(storedCandidates)
-            .DistinctBy(candidate => candidate.Id)
-            .Where(candidate => candidate.InputKind == ObservationInputKind.Private && candidate.TrackId != null && ObservationInput.Read(candidate, ownerId, DateTimeOffset.UtcNow) is not null);
-        var candidateObservations = candidates.Where(candidate => candidate.TrackId is not null).ToArray();
-        if (candidateObservations.Length == 0)
-            return null;
-
-        var candidateTrackIds = candidateObservations.Select(candidate => candidate.TrackId!.Value)
-            .Distinct().ToArray();
-        var candidateTracks = candidateObservations.Where(candidate => candidate.Track is not null)
-            .Select(candidate => candidate.Track!)
-            .Concat(_dbContext.Tracks.Local.Where(track => candidateTrackIds.Contains(track.Id)))
-            .DistinctBy(track => track.Id)
-            .ToDictionary(track => track.Id);
-        var missingTrackIds = candidateTrackIds.Where(trackId => !candidateTracks.ContainsKey(trackId)).ToArray();
-        if (missingTrackIds.Length > 0)
+        var scoredCandidates = new List<TrackMatchScoredCandidate>();
+        var byIdentity = new Dictionary<(string Source, string Id), Guid>();
+        var seen = new HashSet<Guid>();
+        var now = DateTimeOffset.UtcNow;
+        void Consider(TrackObservation candidate)
         {
-            var missingTracks = await _dbContext.Tracks.AsNoTracking()
-                .Include(track => track.ArtistCredits)
-                .Where(track => missingTrackIds.Contains(track.Id))
-                .ToListAsync(cancellationToken);
-            foreach (var track in missingTracks)
-                candidateTracks.TryAdd(track.Id, track);
+            if (!seen.Add(candidate.Id) || candidate.InputKind != ObservationInputKind.Private
+                || candidate.TrackId is not { } trackId
+                || ObservationInput.Read(candidate, ownerId, now) is not { } input) return;
+            var scored = TrackMatchScorer.Score(queryObservation, ToSearchCandidate(input), _options);
+            if (scored.Score < _options.MinimumCandidateScore) return;
+            byIdentity[(candidate.SourceType, candidate.ExternalId)] = trackId;
+            scoredCandidates.Add(scored);
         }
-
-        var matchedObservations = candidateObservations
-            .Where(candidate => candidate.TrackId is { } trackId
-                && candidateTracks.ContainsKey(trackId))
-            .ToArray();
-        if (matchedObservations.Length == 0)
-            return null;
-
-        var byIdentity = matchedObservations.ToDictionary(
-            candidate => (candidate.SourceType, candidate.ExternalId));
-        var searchCandidates = matchedObservations.Select(candidate => ToSearchCandidate(
-            candidate, candidateTracks[candidate.TrackId!.Value], includeTrackFacts: false)).ToArray();
-        var assessment = TrackMatchDecisionEngine.Evaluate(queryObservation, searchCandidates, _options);
-        if (assessment.Decision.AcceptedCandidate is not { } accepted)
-            return null;
-
+        // Read owner-only input in bounded batches, without recording/credit collections.
+        // Unrelated rows cannot consume a fixed library-wide candidate allowance.
+        foreach (var candidate in _dbContext.TrackObservations.Local) Consider(candidate);
+        var storedInputs = _dbContext.TrackObservations.AsNoTracking()
+            .Where(candidate => candidate.OwnerUserId == ownerId
+                && candidate.InputKind == ObservationInputKind.Private && candidate.TrackId != null
+                && candidate.Title != null && candidate.Title.Trim() != "");
+        Guid? afterId = null;
+        while (true)
+        {
+            var page = afterId is { } previousId
+                ? storedInputs.Where(candidate => candidate.Id.CompareTo(previousId) > 0) : storedInputs;
+            var batch = await page.OrderBy(candidate => candidate.Id).Take(MaximumMetadataCandidates)
+                .ToListAsync(cancellationToken);
+            foreach (var candidate in batch) Consider(candidate);
+            if (batch.Count < MaximumMetadataCandidates) break;
+            afterId = batch[^1].Id;
+        }
+        var assessment = TrackMatchDecisionEngine.EvaluateScored(scoredCandidates, _options);
+        if (assessment.Decision.AcceptedCandidate is not { } accepted) return null;
         // Several stored source observations can support one Track. Never choose
         // between distinct Tracks just because one provider snapshot scores higher.
         // Ineligible alternatives, such as a Live version, do not make an otherwise
@@ -263,7 +250,7 @@ public sealed class TrackIdentityResolver
                 && result.Score >= _options.AmbiguousThreshold)
             .Select(result => byIdentity.TryGetValue(
                 (result.Candidate.CandidateSource, result.Candidate.ExternalId), out var observation)
-                    ? observation.TrackId
+                    ? (Guid?)observation
                     : null)
             .Where(trackId => trackId.HasValue)
             .Select(trackId => trackId!.Value)
@@ -275,8 +262,8 @@ public sealed class TrackIdentityResolver
 
         return byIdentity.TryGetValue(
                 (accepted.Candidate.CandidateSource, accepted.Candidate.ExternalId), out var acceptedObservation)
-            && acceptedObservation.TrackId == credibleTrackIds[0]
-                ? acceptedObservation.TrackId
+            && acceptedObservation == credibleTrackIds[0]
+                ? (Guid?)acceptedObservation
                 : null;
     }
 
@@ -293,10 +280,8 @@ public sealed class TrackIdentityResolver
         };
     }
 
-    private static TrackMatchSearchCandidate ToSearchCandidate(TrackObservation observation, Track track, bool includeTrackFacts = true)
+    private static TrackMatchSearchCandidate ToSearchCandidate(ObservationInput input)
     {
-        var input = ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)
-            ?? throw new InvalidOperationException("Observation has no usable owned input.");
         return new TrackMatchSearchCandidate
         {
             CandidateSource = input.SourceType, ExternalId = input.ExternalId,

@@ -85,6 +85,56 @@ public sealed class TrackIdentityResolverTests
         Assert.Equal(TrackIdentityMatchKind.Metadata, match.Kind);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task ResolveExistingAsync_SharedIdentityPrecedesPrivateMetadataButPreservesExactOwnedMatch(
+        bool exactOwnedSource, bool ambiguousSharedIdentity)
+    {
+        await using var database = await CreateDatabaseAsync();
+        var now = DateTimeOffset.UtcNow;
+        var shared = NewTrack();
+        var privateTrack = NewTrack();
+        database.Db.Tracks.AddRange(shared, privateTrack);
+        database.Db.TrackObservations.Add(NewObservation(privateTrack.Id,
+            exactOwnedSource ? "youtube" : "spotify", exactOwnedSource ? "incoming" : "private-item",
+            "Same Song", "Same Artist", 180, ownerUserId: 42));
+        foreach (var track in ambiguousSharedIdentity ? new[] { shared, NewTrack() } : new[] { shared })
+        {
+            if (track != shared) database.Db.Tracks.Add(track);
+            var item = new ProviderCatalogItem
+            {
+                Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = track.Id.ToString(),
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+                {
+                    Title = "Same Song", Artist = "Same Artist", DurationSeconds = 180
+                }),
+                VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+                VerifiedAt = now.AddMinutes(-1), RevalidateAfter = now.AddDays(1),
+                VisibilityState = CatalogVisibility.Public, Revision = 1
+            };
+            database.Db.ProviderCatalogItems.Add(CatalogFixture.Associate(item, track.Id,
+                RecordingAssociationState.Verified, item.Revision));
+        }
+        await database.Db.SaveChangesAsync();
+        database.Db.ChangeTracker.Clear();
+
+        var match = await new TrackIdentityResolver(database.Db).ResolveExistingAsync(
+            new TrackIdentityQuery("youtube", "incoming", "Same Song", "Same Artist", 180,
+                OwnerUserId: 42), CancellationToken.None);
+
+        if (ambiguousSharedIdentity)
+        {
+            Assert.Null(match);
+            return;
+        }
+        Assert.NotNull(match);
+        Assert.Equal(exactOwnedSource ? privateTrack.Id : shared.Id, match.Track.Id);
+        Assert.Equal(exactOwnedSource ? TrackIdentityMatchKind.ExactSource : TrackIdentityMatchKind.Metadata,
+            match.Kind);
+    }
+
     [Fact]
     public async Task ResolveExistingAsync_ExpiredRowsDoNotConsumePublicCandidateLimit()
     {
@@ -259,6 +309,57 @@ public sealed class TrackIdentityResolverTests
             Isrc: "USRC17607840"), CancellationToken.None);
 
         Assert.Null(match);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveExistingAsync_LargePrivateLibraryStillChecksTheRelevantIdentities(bool competingIdentity)
+    {
+        await using var database = await CreateDatabaseAsync();
+        await AssertLargePrivateLibraryAsync(database.Db, competingIdentity);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveExistingAsync_PostgresLargePrivateLibraryUsesBoundedCandidateBatches(bool competingIdentity)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        schema.Db.Users.AddRange(TestUserFactory.Create(42, "resolver-alice@example.test"),
+            TestUserFactory.Create(84, "resolver-bob@example.test"));
+        await schema.Db.SaveChangesAsync();
+        await AssertLargePrivateLibraryAsync(schema.Db, competingIdentity);
+    }
+
+    private static async Task AssertLargePrivateLibraryAsync(ApplicationDbContext db, bool competingIdentity)
+    {
+        for (var index = 0; index < 125; index++)
+        {
+            var unrelated = NewTrack();
+            db.AddRange(unrelated, NewObservation(unrelated.Id, "spotify", $"unrelated-{index}",
+                $"Unrelated item {index}", "Different performer", 180));
+        }
+        var expected = NewTrack();
+        db.AddRange(expected, NewObservation(expected.Id, "spotify", "intended",
+            "Everything Goes On", "Porter Robinson", 180));
+        var other = NewTrack();
+        db.AddRange(other, NewObservation(other.Id, "youtube", "other-owner",
+            "Everything Goes On", "Porter Robinson", 180, ownerUserId: 84));
+        if (competingIdentity)
+        {
+            var competing = NewTrack();
+            db.AddRange(competing, NewObservation(competing.Id, "youtube", "competing",
+                "Everything Goes On", "Porter Robinson", 180));
+        }
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var match = await new TrackIdentityResolver(db).ResolveExistingAsync(new TrackIdentityQuery(
+            "youtube", "new-import", "Everything Goes On", "Porter Robinson", 180, OwnerUserId: 42), default);
+
+        if (competingIdentity) Assert.Null(match);
+        else Assert.Equal(expected.Id, Assert.IsType<TrackIdentityMatch>(match).Track.Id);
     }
 
     private static async Task<DatabaseScope> CreateDatabaseAsync()

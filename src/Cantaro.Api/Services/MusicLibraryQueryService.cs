@@ -423,7 +423,7 @@ public class MusicLibraryQueryService(ApplicationDbContext dbContext)
             FirstNonEmpty(facts?.ThumbnailUrl, observations.Select(item => FirstNonEmpty(item.Observation.ThumbnailUrl, item.Metadata?.ThumbnailUrl)).FirstOrDefault(url => url is not null)),
             durationSeconds,
             OrderOwnedEntries(ownedEntries).Select(entry => entry.TrackObservation?.MatchStatus).FirstOrDefault(status => status != null) ?? (track is not null ? TrackMatchingStatuses.Matched : null),
-            facts?.VersionFlags);
+            track?.VersionFlags ?? facts?.VersionFlags);
     }
 
     private static string GetSongStableId(PlaylistEntry entry)

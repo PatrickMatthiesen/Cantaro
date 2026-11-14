@@ -1410,6 +1410,52 @@ public class MusicLibraryQueryServiceTests
         return item;
     }
 
+    [Theory]
+    [InlineData(TrackVersionFlags.Live, "Live")]
+    [InlineData(TrackVersionFlags.Remix, "Remix")]
+    [InlineData(TrackVersionFlags.Acoustic, "Acoustic")]
+    public async Task ReviewedVersionWithoutSharedAssociationKeepsDetailAndRelatedLabels(TrackVersionFlags flags, string label)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(720, "reviewed-version@example.test");
+        var playlist = MakePlaylist(owner.Id, "Versions", now);
+        var original = new Track { Id = Guid.NewGuid() };
+        var version = new Track { Id = Guid.NewGuid(), VersionFlags = flags };
+        var composition = new Song { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "reviewed-version", Revision = 1,
+            VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VisibilityState = CatalogVisibility.Public, VerifiedAt = now, RevalidateAfter = now.AddHours(1),
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "User-selected version", Artist = "Performer" })
+        };
+        var input = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            TrackId = version.Id, MatchStatus = TrackMatchingStatuses.Matched
+        };
+        ObservationInput.SetPublic(input, item);
+        db.AddRange(owner, playlist, original, version, composition, item, input,
+            new SongTrack { SongId = composition.Id, TrackId = original.Id },
+            new SongTrack { SongId = composition.Id, TrackId = version.Id },
+            MakeEntry(playlist, original.Id, null, 0, null, now),
+            MakeEntry(playlist, version.Id, input.Id, 1, "youtube", now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var service = new MusicLibraryQueryService(db);
+        var detail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(version.Id, owner.Id, default));
+        Assert.Equal(new[] { label }, detail.VersionLabels);
+        var originalDetail = Assert.IsType<MusicLibrarySongDto>(await service.GetCanonicalSongAsync(original.Id, owner.Id, default));
+        var related = Assert.Single(originalDetail.RelatedRecordings, row => row.Id == $"track:{version.Id}");
+        Assert.Equal(new[] { label }, related.VersionLabels);
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+        Assert.Null((await db.TrackObservations.SingleAsync()).Title);
+    }
+
     private static Playlist MakePlaylist(int userId, string name, DateTimeOffset now)
     {
         return new Playlist

@@ -783,6 +783,79 @@ public sealed class CantaroSearchServiceTests
         Assert.Equal("Chosen public title", Assert.Single(library.Songs).Title);
     }
 
+    [Theory]
+    [InlineData("title")]
+    [InlineData("artist")]
+    [InlineData("expired")]
+    [InlineData("other-owner")]
+    public async Task SearchAsync_FindsOnlyUsableOwnedPublicInputsWithoutGlobalAssociations(string scenario)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        await AssertOwnedPublicInputSearchAsync(db, scenario);
+    }
+
+    [PostgresTheory]
+    [InlineData("title")]
+    [InlineData("artist")]
+    [InlineData("expired")]
+    [InlineData("other-owner")]
+    public async Task SearchAsync_PostgresOwnedPublicInputFilteringPrecedesPagination(string scenario)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertOwnedPublicInputSearchAsync(schema.Db, scenario);
+    }
+
+    private static async Task AssertOwnedPublicInputSearchAsync(ApplicationDbContext db, string scenario)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(801, "public-input-owner@example.test");
+        var other = TestUserFactory.Create(802, "public-input-other@example.test");
+        var ownerPlaylist = MakePlaylist(owner.Id, "Owner", null, now);
+        var otherPlaylist = MakePlaylist(other.Id, "Other", null, now);
+        var track = new Track { Id = Guid.NewGuid(), VersionFlags = TrackVersionFlags.Live };
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "reviewed-input", Revision = 1,
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VerifiedAt = now.AddDays(-2), RevalidateAfter = scenario == "expired" ? now.AddDays(-1) : now.AddHours(1),
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "A Reviewed Song: Live", Artist = "Artist & Friends", ThumbnailUrl = "https://example.test/reviewed.jpg"
+            })
+        };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched
+        };
+        ObservationInput.SetPublic(observation, item);
+        var ownerEntry = MakeEntry(ownerPlaylist, track.Id, 0, now);
+        ownerEntry.TrackObservationId = observation.Id;
+        db.AddRange(owner, other, ownerPlaylist, otherPlaylist, track, item, observation, ownerEntry,
+            MakeEntry(otherPlaylist, track.Id, 0, now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var response = await CreateService(db).SearchAsync(scenario == "other-owner" ? other.Id : owner.Id,
+            scenario == "artist" ? "artist friends" : "reviewed song live", 1, false, default);
+
+        Assert.Equal(SearchGroupStatuses.Ok, response.Groups.Songs.Status);
+        Assert.False(response.Groups.Songs.HasMore);
+        if (scenario is "expired" or "other-owner") Assert.Empty(response.Groups.Songs.Items);
+        else
+        {
+            var song = Assert.Single(response.Groups.Songs.Items);
+            Assert.Equal($"track:{track.Id}", song.Id);
+            Assert.Equal("A Reviewed Song: Live", song.Title);
+            Assert.Equal("Artist & Friends", song.Subtitle);
+            Assert.Equal("https://example.test/reviewed.jpg", song.ArtworkUrl);
+        }
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+        Assert.Null((await db.TrackObservations.SingleAsync()).Title);
+    }
+
     private static async Task<(ApplicationDbContext Db, SqliteConnection Connection)> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
