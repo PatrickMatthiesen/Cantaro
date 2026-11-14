@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Cantaro.Api.Data;
+using Cantaro.Api.Configuration;
+using Microsoft.Extensions.Options;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -21,7 +23,8 @@ public sealed class MusicRecognitionController(
     YouTubeService youtubeService,
     TrackMatchQueue trackMatchQueue,
     MusicLibraryQueryService musicLibraryQueryService,
-    UserManager<User> userManager) : ControllerBase
+    UserManager<User> userManager,
+    IOptions<TrackMatchingOptions>? matchingOptions = null) : ControllerBase
 {
     private static readonly Regex YouTubeVideoIdPattern = new("^[A-Za-z0-9_-]{11}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly TimeSpan MatchRetryDelay = TimeSpan.FromMinutes(15);
@@ -42,7 +45,7 @@ public sealed class MusicRecognitionController(
 
         var existing = await dbContext.TrackObservations.Include(o => o.ProviderCatalogItem)
             .FirstOrDefaultAsync(x => x.OwnerUserId == user.Id && x.SourceType == "youtube" && x.ExternalId == videoId, cancellationToken);
-        if (existing is { TrackId: { } existingTrackId } && CanReuseResult(existing, user.Id))
+        if (existing is { TrackId: { } existingTrackId } && await CanReuseResultAsync(existing, user.Id, cancellationToken))
             return Ok(await BuildMatchedResponse(existingTrackId, user.Id, cancellationToken));
 
         var source = await new ProviderRecordingAssociations(dbContext).FindUsableAsync("youtube", videoId, cancellationToken);
@@ -88,7 +91,7 @@ public sealed class MusicRecognitionController(
                     OriginalTitle = metadata.Title, OriginalArtist = metadata.ChannelTitle,
                     ChannelTitle = metadata.ChannelTitle, Description = metadata.Description
                 });
-        if (!CanReuseResult(observation, user.Id))
+        if (!await CanReuseResultAsync(observation, user.Id, cancellationToken))
         {
             observation.TrackId = null;
             observation.MatchStatus = TrackMatchingStatuses.Pending;
@@ -104,7 +107,7 @@ public sealed class MusicRecognitionController(
                 dbContext.Entry(observation).State = EntityState.Detached;
                 observation = await dbContext.TrackObservations.Include(o => o.ProviderCatalogItem)
                     .SingleAsync(x => x.OwnerUserId == user.Id && x.SourceType == "youtube" && x.ExternalId == videoId, cancellationToken);
-                if (CanReuseResult(observation, user.Id) && observation.TrackId is Guid concurrentTrackId)
+                if (await CanReuseResultAsync(observation, user.Id, cancellationToken) && observation.TrackId is Guid concurrentTrackId)
                     return Ok(await BuildMatchedResponse(concurrentTrackId, user.Id, cancellationToken));
                 if (ShouldBackOff(observation, includeFreshPending: true))
                     return Ok(new RecognizeYouTubeResponse("music", observation.MatchStatus, null, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Title, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Artist, false, null));
@@ -119,13 +122,8 @@ public sealed class MusicRecognitionController(
         return Ok(new RecognizeYouTubeResponse("music", TrackMatchingStatuses.Pending, null, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Title, ObservationInput.Read(observation, user.Id, DateTimeOffset.UtcNow)?.Artist, false, null));
     }
 
-    private static bool CanReuseResult(TrackObservation observation, int userId)
-    {
-        if (ObservationInput.Read(observation, userId, DateTimeOffset.UtcNow) == null) return false;
-        if (observation.InputKind == ObservationInputKind.Private || ObservationInput.HasReviewedResult(observation)) return true;
-        return ProviderCatalogPolicy.IsVerified(observation.ProviderCatalogItem, DateTimeOffset.UtcNow)
-            && observation.ProviderCatalogItem!.TrackId == observation.TrackId;
-    }
+    private Task<bool> CanReuseResultAsync(TrackObservation observation, int userId, CancellationToken ct) =>
+        new ProviderRecordingAssociations(dbContext, matchingOptions?.Value).CanReuseObservationResultAsync(observation, userId, ct);
 
     public static string Classify(string site, YouTubeVideoMetadataDto? metadata)
     {

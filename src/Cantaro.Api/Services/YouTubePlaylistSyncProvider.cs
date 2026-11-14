@@ -91,7 +91,7 @@ public sealed class YouTubePlaylistSyncProvider(
                             });
                     }
                     observation.UpdatedAt = now;
-                    var associations = new ProviderRecordingAssociations(readDb);
+                    var associations = new ProviderRecordingAssociations(readDb, matchingOptions.Value);
                     var knownTrackId = (await associations.FindUsableAsync(PlatformId, item.ExternalId, cancellationToken))?.TrackId;
                     if (knownTrackId is null && item.ProviderCatalogItemId is { } catalogId)
                     {
@@ -100,7 +100,7 @@ public sealed class YouTubePlaylistSyncProvider(
                         knownTrackId = (await associations.RevalidateExactAsync(catalogItem, cancellationToken))?.Id;
                     }
                     if (observation.InputKind == ObservationInputKind.Public && knownTrackId == null
-                        && !ObservationInput.HasReviewedResult(observation))
+                        && !await associations.CanReuseObservationResultAsync(observation, account.UserId, cancellationToken))
                         observation.TrackId = null;
                     if (observation.TrackId is null)
                     {

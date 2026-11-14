@@ -298,6 +298,61 @@ public sealed class MusicRecognitionProvenanceTests
         Assert.Null((await db.TrackObservations.SingleAsync()).Title);
     }
 
+    [Theory]
+    [InlineData("current")]
+    [InlineData("candidate-expired")]
+    [InlineData("source-changed")]
+    [InlineData("other-owner")]
+    public async Task Recognize_ReusesOnlySupportedOwnerCrossProviderMatches(string state)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var owner = TestUserFactory.Create(735, "cross-owner@example.test");
+        var other = TestUserFactory.Create(736, "cross-other@example.test");
+        var now = DateTimeOffset.UtcNow;
+        var track = new Track { Id = Guid.NewGuid() };
+        var source = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "reviewedVid", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            { Title = state == "source-changed" ? "Unrelated Piece" : "Song",
+                Artist = state == "source-changed" ? "Other Performer" : "Artist", DurationSeconds = 180 }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VerifiedAt = now.AddMinutes(-1), RevalidateAfter = now.AddHours(1)
+        };
+        var catalog = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "matched-recording", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Song", Artist = "Artist", DurationSeconds = 180 }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now.AddDays(-2), RevalidateAfter = state == "candidate-expired" ? now.AddDays(-1) : now.AddHours(1)
+        };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = source.SourceType, ExternalId = source.ExternalId,
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched, ResolutionNotes = "Automatically resolved from stored provider evidence."
+        };
+        ObservationInput.SetPublic(observation, source);
+        var candidate = new TrackResolutionCandidate
+        {
+            Id = Guid.NewGuid(), TrackObservationId = observation.Id, CandidateSource = catalog.SourceType,
+            ExternalId = catalog.ExternalId, ProviderCatalogItemId = catalog.Id, ProviderCatalogRevision = catalog.Revision,
+            IsAccepted = true, Score = 1
+        };
+        db.AddRange(owner, other, track, source, CatalogFixture.Associate(catalog, track.Id), observation, candidate);
+        await db.SaveChangesAsync();
+        observation.AcceptedCandidateId = candidate.Id;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var response = await RecognizeAsync(db, state == "other-owner" ? other : owner, source.ExternalId);
+
+        Assert.Equal(state == "current" ? "matched" : "pending", response.Status);
+        Assert.Equal(state == "current" ? track.Id : (Guid?)null, response.TrackId);
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync(row => row.SourceType == "youtube")).TrackId);
+    }
+
     private sealed class RecognitionVideoHandler : HttpMessageHandler, Google.Apis.Http.IHttpClientFactory
     {
         public ConfigurableHttpClient CreateHttpClient(CreateHttpClientArgs args) => new(new ConfigurableMessageHandler(this));

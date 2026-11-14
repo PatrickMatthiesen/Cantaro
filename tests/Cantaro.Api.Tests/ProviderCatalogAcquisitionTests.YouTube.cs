@@ -16,6 +16,66 @@ namespace Cantaro.Api.Tests;
 
 public sealed partial class ProviderCatalogAcquisitionTests
 {
+    [Theory]
+    [InlineData("spotify", "current")]
+    [InlineData("musicbrainz", "current")]
+    [InlineData("spotify", "source-changed")]
+    [InlineData("spotify", "candidate-expired")]
+    [InlineData("spotify", "candidate-reassigned")]
+    public async Task YouTubeReadRetainsOnlyCurrentlySupportedAutomaticCrossProviderMatches(string provider, string state)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var account = await fixture.AddYouTubeAccountAsync();
+        using var scope = fixture.OpenScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        using var handler = new YouTubeCatalogHandler();
+        await ReadYouTubeAsync(fixture, db, handler, account, viaImporter: false);
+        var observation = await db.TrackObservations.Include(row => row.ProviderCatalogItem).SingleAsync();
+        var now = DateTimeOffset.UtcNow;
+        var track = new Track { Id = Guid.NewGuid() };
+        var catalog = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = provider, ExternalId = "matched-recording", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            { Title = "Song", Artist = "Artist", DurationSeconds = 180 }),
+            VisibilityState = CatalogVisibility.Public, VerifiedAt = now.AddMinutes(-1), RevalidateAfter = now.AddDays(1),
+            VerificationMethod = provider == "spotify" ? CatalogVerificationMethods.SpotifyApplication
+                : CatalogVerificationMethods.MusicBrainz
+        };
+        var candidate = new TrackResolutionCandidate
+        {
+            Id = Guid.NewGuid(), TrackObservationId = observation.Id, CandidateSource = provider,
+            ExternalId = catalog.ExternalId, ProviderCatalogItemId = catalog.Id, ProviderCatalogRevision = catalog.Revision
+        };
+        db.AddRange(track, CatalogFixture.Associate(catalog, track.Id), candidate);
+        await db.SaveChangesAsync();
+        var matching = new TrackMatchingService(db, [], NullLogger<TrackMatchingService>.Instance);
+        var matched = await matching.ReevaluateStoredCandidatesAsync(observation.Id, default);
+        Assert.NotNull(matched);
+        Assert.Equal(track.Id, matched.TrackId);
+        Assert.Equal(candidate.Id, matched.AcceptedCandidateId);
+        Assert.False(ObservationInput.HasReviewedResult(matched));
+        db.TrackMatchQueueItems.RemoveRange(await db.TrackMatchQueueItems.ToListAsync());
+        if (state == "source-changed") { handler.Title = "Other Artist - Other Song"; handler.Channel = "Other Artist"; }
+        if (state == "candidate-expired") catalog.RevalidateAfter = now.AddMinutes(-1);
+        if (state == "candidate-reassigned")
+        {
+            var other = new Track { Id = Guid.NewGuid() };
+            db.Tracks.Add(other); catalog.TrackId = other.Id; catalog.Track = other;
+        }
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        await ReadYouTubeAsync(fixture, db, handler, account, viaImporter: false);
+        db.ChangeTracker.Clear();
+
+        var retained = await db.TrackObservations.SingleAsync();
+        Assert.Equal(state == "current" ? track.Id : (Guid?)null, retained.TrackId);
+        Assert.Equal(state == "current" ? TrackMatchingStatuses.Matched : TrackMatchingStatuses.Pending, retained.MatchStatus);
+        Assert.Equal(state == "current" ? 0 : 1, await db.TrackMatchQueueItems.CountAsync());
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync(row => row.SourceType == "youtube")).TrackId);
+    }
+
     [Fact]
     public async Task YouTubeReadPreservesExplicitlyCreatedRecordingWithoutAcceptedCandidate()
     {

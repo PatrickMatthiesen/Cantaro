@@ -12,6 +12,31 @@ internal sealed class ProviderRecordingAssociations(ApplicationDbContext db, Tra
 {
     private DateTimeOffset Now => (clock ?? TimeProvider.System).GetUtcNow();
 
+    public async Task<bool> CanReuseObservationResultAsync(TrackObservation observation, int ownerUserId,
+        CancellationToken ct)
+    {
+        var now = Now;
+        var input = ObservationInput.Read(observation, ownerUserId, now);
+        if (input is null || observation.TrackId is not { } trackId) return false;
+        if (observation.InputKind == ObservationInputKind.Private || ObservationInput.HasReviewedResult(observation))
+            return true;
+        var source = observation.ProviderCatalogItem;
+        if (ProviderCatalogPolicy.IsVerified(source, now) && source!.TrackId == trackId) return true;
+        // An invalidated source association cannot be replaced by an older
+        // automatic result. Cross-provider matches need their own current support.
+        if (source?.TrackId is not null || observation.MatchStatus != TrackMatchingStatuses.Matched
+            || observation.AcceptedCandidateId is not { } acceptedId) return false;
+        var candidate = await db.TrackResolutionCandidates.AsNoTracking()
+            .Include(row => row.ProviderCatalogItem)
+            .SingleOrDefaultAsync(row => row.Id == acceptedId && row.TrackObservationId == observation.Id
+                && row.IsAccepted, ct);
+        if (candidate?.ProviderCatalogItem is not { } catalog
+            || catalog.TrackId != trackId || !ProviderCatalogPolicy.IsVerified(catalog, now)
+            || TrackMatchCandidateInput.Read(candidate, now) is not { } candidateInput) return false;
+        return TrackMatchDecisionEngine.Evaluate(input, [candidateInput], options ?? new TrackMatchingOptions())
+            .Decision.AcceptedCandidate is not null;
+    }
+
     public async Task<ProviderCatalogItem?> LoadCandidateAsync(TrackMatchSearchCandidate candidate, CancellationToken ct)
     {
         if (candidate.ProviderCatalogItemId is not { } id || candidate.ProviderCatalogRevision is null) return null;
