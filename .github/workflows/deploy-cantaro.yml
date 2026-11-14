@@ -71,7 +71,7 @@ jobs:
           aspire publish --output-path ./aspire-output --non-interactive
 
       - name: Upload Aspire publish output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cantaro-aspire-output
           path: ./aspire-output/
