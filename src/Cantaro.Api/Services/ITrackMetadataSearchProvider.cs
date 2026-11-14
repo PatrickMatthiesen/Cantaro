@@ -4,5 +4,5 @@ namespace Cantaro.Api.Services;
 
 public interface ITrackMetadataSearchProvider
 {
-    Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(TrackObservation observation, CancellationToken cancellationToken);
+    Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(ObservationInput observation, CancellationToken cancellationToken);
 }

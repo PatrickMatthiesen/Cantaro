@@ -27,20 +27,16 @@ public sealed class TrackVersionAcceptanceTests
             TrackVersionFlags.SpedUp,
             CancellationToken.None);
 
-        var versionTrack = await fixture.DbContext.Tracks
+        var versionTrack = await fixture.DbContext.Tracks.Include(track => track.ProviderItems)
             .SingleAsync(track => track.Id == result.TrackId);
-        var anchorTrack = await fixture.DbContext.Tracks
-            .SingleAsync(track => track.MbidRecording == setup.Candidate.MbidRecording);
-        var versionMetadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
-            versionTrack.CanonicalMetadata!);
+        var anchorTrack = await fixture.DbContext.Tracks.Include(track => track.ProviderItems)
+            .SingleAsync(track => track.Id != versionTrack.Id);
 
         Assert.NotEqual(anchorTrack.Id, versionTrack.Id);
         Assert.Equal(TrackVersionFlags.SpedUp, versionTrack.VersionFlags);
         Assert.Null(versionTrack.MbidRecording);
         Assert.Null(versionTrack.Isrc);
-        Assert.Equal("GUY.exe", versionMetadata?.Title);
-        Assert.Equal("Superfruit", versionMetadata?.Artist);
-        Assert.Equal(185, versionMetadata?.DurationSeconds);
+        Assert.Null(CatalogFixture.FactsJson(versionTrack));
         using var evidence = JsonDocument.Parse(versionTrack.VersionEvidence!);
         Assert.Equal(
             "manual-candidate-version",
@@ -51,39 +47,31 @@ public sealed class TrackVersionAcceptanceTests
         Assert.Equal(
             setup.Candidate.Id.ToString(),
             evidence.RootElement.GetProperty("candidateId").GetString());
-        Assert.Contains(
-            "speed up",
-            versionTrack.VersionEvidence!,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("SpedUp", evidence.RootElement.GetProperty("selectedFlags").GetString());
+        Assert.DoesNotContain(Assert.IsType<string>(setup.Observation.Title), versionTrack.VersionEvidence!, StringComparison.Ordinal);
+        Assert.NotNull(setup.Observation.Artist);
+        Assert.DoesNotContain(setup.Observation.Artist, versionTrack.VersionEvidence!, StringComparison.Ordinal);
+        Assert.DoesNotContain(setup.Candidate.ExternalId, versionTrack.VersionEvidence!, StringComparison.Ordinal);
+        Assert.Equal("Superfruit - Guy.exe speed up", result.Title);
+        Assert.Equal("Iztuwa", result.Artist);
 
-        Assert.Equal("mb-guy-exe", anchorTrack.MbidRecording);
-        Assert.Equal("USRC17607839", anchorTrack.Isrc);
+        Assert.Null(anchorTrack.MbidRecording);
+        Assert.Null(anchorTrack.Isrc);
         Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
         Assert.Equal(1, await fixture.DbContext.Songs.CountAsync());
         Assert.Equal(2, await fixture.DbContext.SongTracks.CountAsync());
         var memberships = await fixture.DbContext.SongTracks.ToListAsync();
         Assert.Single(memberships.Select(membership => membership.SongId).Distinct());
 
-        Assert.Equal(
-            ["youtube"],
-            await fixture.DbContext.TrackSourceIds
-                .Where(source => source.TrackId == versionTrack.Id)
-                .Select(source => source.SourceType)
-                .ToArrayAsync());
-        Assert.Equal(
-            ["musicbrainz"],
-            await fixture.DbContext.TrackSourceIds
-                .Where(source => source.TrackId == anchorTrack.Id)
-                .Select(source => source.SourceType)
-                .ToArrayAsync());
-        Assert.Equal(versionTrack.Id, setup.PlaylistEntry.TrackId);
-        Assert.True(setup.Candidate.IsAccepted);
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.ToListAsync());
+        Assert.Equal(versionTrack.Id, (await fixture.DbContext.PlaylistEntries.AsNoTracking().SingleAsync(e => e.Id == setup.PlaylistEntry.Id)).TrackId);
+        Assert.True((await fixture.DbContext.TrackResolutionCandidates.AsNoTracking().SingleAsync(c => c.Id == setup.Candidate.Id)).IsAccepted);
         Assert.Equal(setup.Candidate.Id, result.AcceptedCandidateId);
         Assert.Contains("sped-up version", result.ResolutionNotes!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AcceptCandidateAsVersionAsync_ReusesExistingCandidateAnchorAndSong()
+    public async Task AcceptCandidateAsVersionAsync_DoesNotReuseLegacyUnverifiedCandidateAnchor()
     {
         await using var fixture = await VersionFixture.CreateAsync();
         var setup = fixture.AddGuyExeObservation();
@@ -97,14 +85,17 @@ public sealed class TrackVersionAcceptanceTests
             CancellationToken.None);
 
         Assert.NotEqual(anchor.Track.Id, result.TrackId);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal(1, await fixture.DbContext.Songs.CountAsync());
-        Assert.Equal(
-            anchor.Song.Id,
-            await fixture.DbContext.SongTracks
+        Assert.Equal(3, await fixture.DbContext.Tracks.CountAsync());
+        Assert.Equal(2, await fixture.DbContext.Songs.CountAsync());
+        var newAnchor = await fixture.DbContext.Tracks.Include(track => track.ProviderItems).SingleAsync(track =>
+            track.Id != anchor.Track.Id && track.Id != result.TrackId);
+        Assert.Null(newAnchor.MbidRecording);
+        var legacyMapping = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        Assert.Equal(anchor.Track.Id, legacyMapping.TrackId);
+        Assert.NotEqual(anchor.Song.Id, await fixture.DbContext.SongTracks
                 .Where(membership => membership.TrackId == result.TrackId)
                 .Select(membership => membership.SongId)
-            .SingleAsync());
+                .SingleAsync());
     }
 
     [Fact]
@@ -131,11 +122,7 @@ public sealed class TrackVersionAcceptanceTests
         Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
         Assert.Equal(1, await fixture.DbContext.Songs.CountAsync());
         Assert.Equal(2, await fixture.DbContext.SongTracks.CountAsync());
-        Assert.Equal(
-            1,
-            await fixture.DbContext.TrackSourceIds.CountAsync(source =>
-                source.SourceType == "youtube"
-                && source.ExternalId == setup.Observation.ExternalId));
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.ToListAsync());
     }
 
     [Fact]
@@ -143,23 +130,17 @@ public sealed class TrackVersionAcceptanceTests
     {
         await using var fixture = await VersionFixture.CreateAsync();
         var setup = fixture.AddGuyExeObservation();
-        var unrelatedTrack = new Track
-        {
+        var unrelatedTrack = new Track {
             Id = Guid.NewGuid(),
             VersionFlags = TrackVersionFlags.SpedUp,
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-            {
-                Title = "GUY.exe",
-                Artist = "Superfruit",
-                DurationSeconds = 185
-            }),
             CreatedAt = Now,
             UpdatedAt = Now
-        };
+         };
         setup.Observation.TrackId = unrelatedTrack.Id;
         setup.Observation.MatchStatus = TrackMatchingStatuses.Matched;
-        setup.Observation.AcceptedCandidateId = setup.Candidate.Id;
         fixture.DbContext.Tracks.Add(unrelatedTrack);
+        await fixture.DbContext.SaveChangesAsync();
+        setup.Observation.AcceptedCandidateId = setup.Candidate.Id;
         await fixture.DbContext.SaveChangesAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -169,11 +150,11 @@ public sealed class TrackVersionAcceptanceTests
                 TrackVersionFlags.SpedUp,
                 CancellationToken.None));
 
-        Assert.Single(await fixture.DbContext.Tracks.ToListAsync());
+        Assert.Single(await fixture.DbContext.Tracks.Include(track => track.ProviderItems).ToListAsync());
     }
 
     [Fact]
-    public async Task AcceptCandidateAsVersionAsync_ReusesExistingAnchorByIsrc()
+    public async Task AcceptCandidateAsVersionAsync_DoesNotReuseLegacyIsrcWithoutPublicEvidence()
     {
         await using var fixture = await VersionFixture.CreateAsync();
         var setup = fixture.AddGuyExeObservation();
@@ -191,17 +172,13 @@ public sealed class TrackVersionAcceptanceTests
             CancellationToken.None);
 
         Assert.NotEqual(anchor.Track.Id, result.TrackId);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal(anchor.Track.Id, await fixture.DbContext.Tracks
-            .Where(track => track.Isrc == setup.Candidate.Isrc)
-            .Select(track => track.Id)
-            .SingleAsync());
-        Assert.Equal(
-            anchor.Song.Id,
-            await fixture.DbContext.SongTracks
-                .Where(membership => membership.TrackId == result.TrackId)
-                .Select(membership => membership.SongId)
-                .SingleAsync());
+        Assert.Equal(3, await fixture.DbContext.Tracks.CountAsync());
+        var newAnchor = await fixture.DbContext.Tracks.Include(track => track.ProviderItems).SingleAsync(track =>
+            track.Id != anchor.Track.Id && track.Id != result.TrackId);
+        Assert.Null(newAnchor.Isrc);
+        Assert.NotEqual(anchor.Song.Id, await fixture.DbContext.SongTracks
+            .Where(membership => membership.TrackId == result.TrackId)
+            .Select(membership => membership.SongId).SingleAsync());
     }
 
     [Theory]
@@ -221,10 +198,10 @@ public sealed class TrackVersionAcceptanceTests
                 (TrackVersionFlags)rawFlags,
                 CancellationToken.None));
 
-        Assert.Empty(await fixture.DbContext.Tracks.ToListAsync());
+        Assert.Empty(await fixture.DbContext.Tracks.Include(track => track.ProviderItems).ToListAsync());
         Assert.Empty(await fixture.DbContext.Songs.ToListAsync());
         Assert.Empty(await fixture.DbContext.SongTracks.ToListAsync());
-        Assert.Empty(await fixture.DbContext.TrackSourceIds.ToListAsync());
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.ToListAsync());
         Assert.Equal(TrackMatchingStatuses.Ambiguous, setup.Observation.MatchStatus);
         Assert.Null(setup.Observation.TrackId);
         Assert.False(setup.Candidate.IsAccepted);
@@ -243,10 +220,14 @@ public sealed class TrackVersionAcceptanceTests
             setup.Observation.Id,
             CancellationToken.None);
 
-        var track = await fixture.DbContext.Tracks.SingleAsync(
+        var track = await fixture.DbContext.Tracks.Include(track => track.ProviderItems).SingleAsync(
             candidate => candidate.Id == result.TrackId);
         Assert.Equal(TrackVersionFlags.SpedUp, track.VersionFlags);
-        Assert.Contains("speed up", track.VersionEvidence!, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(CatalogFixture.FactsJson(track));
+        Assert.Contains("SpedUp", track.VersionEvidence!, StringComparison.Ordinal);
+        Assert.DoesNotContain(Assert.IsType<string>(setup.Observation.Title), track.VersionEvidence!, StringComparison.Ordinal);
+        Assert.NotNull(setup.Observation.Artist);
+        Assert.DoesNotContain(setup.Observation.Artist, track.VersionEvidence!, StringComparison.Ordinal);
     }
 
     private sealed class VersionFixture : IAsyncDisposable
@@ -291,8 +272,8 @@ public sealed class TrackVersionAcceptanceTests
                 CreatedAt = Now,
                 UpdatedAt = Now
             };
-            var observation = new TrackObservation
-            {
+            var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
+                OwnerUserId = user.Id,
                 Id = Guid.NewGuid(),
                 SourceType = "youtube",
                 ExternalId = "CH_oVqS6iss",
@@ -303,7 +284,7 @@ public sealed class TrackVersionAcceptanceTests
                 MatchStatus = TrackMatchingStatuses.Ambiguous,
                 CreatedAt = Now,
                 UpdatedAt = Now
-            };
+             };
             var candidate = new TrackResolutionCandidate
             {
                 Id = Guid.NewGuid(),
@@ -316,11 +297,10 @@ public sealed class TrackVersionAcceptanceTests
                 Isrc = "USRC17607839",
                 DurationSeconds = 223,
                 Score = 0.65m,
-                RawMetadata = "{}",
+                EvaluationJson = "{}",
                 CreatedAt = Now
             };
-            var playlistEntry = new PlaylistEntry
-            {
+            var playlistEntry = new PlaylistEntry { OwnerUserId = playlist.UserId,
                 Id = Guid.NewGuid(),
                 PlaylistId = playlist.Id,
                 TrackObservationId = observation.Id,
@@ -342,20 +322,13 @@ public sealed class TrackVersionAcceptanceTests
                 CreatedAt = Now,
                 UpdatedAt = Now
             };
-            var track = new Track
-            {
+            var track = new Track {
                 Id = Guid.NewGuid(),
                 MbidRecording = candidate.MbidRecording,
                 Isrc = candidate.Isrc,
-                CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-                {
-                    Title = candidate.Title,
-                    Artist = candidate.Artist,
-                    DurationSeconds = candidate.DurationSeconds
-                }),
                 CreatedAt = Now,
                 UpdatedAt = Now
-            };
+             };
             DbContext.AddRange(
                 song,
                 track,
@@ -368,13 +341,7 @@ public sealed class TrackVersionAcceptanceTests
                 });
             if (addSourceMapping)
             {
-                DbContext.TrackSourceIds.Add(new TrackSourceId
-                {
-                    Id = Guid.NewGuid(),
-                    TrackId = track.Id,
-                    SourceType = "musicbrainz",
-                    ExternalId = candidate.ExternalId
-                });
+                DbContext.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = track.Id, SourceType = "musicbrainz", ExternalId = candidate.ExternalId, FactsJson = "{}" });
             }
             return (song, track);
         }

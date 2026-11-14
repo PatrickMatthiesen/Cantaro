@@ -174,7 +174,7 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
 
         limited = false;
         if (evidenceChanged)
-            (await scenario.Db.Tracks.SingleAsync(track => track.Id == scenario.TrackId("A"))).Isrc = "USAAA2600001";
+            (await scenario.Db.Tracks.Include(track => track.ProviderItems).SingleAsync(track => track.Id == scenario.TrackId("A"))).Isrc = "USAAA2600001";
         scenario.Mapping("spotify").NextAttemptAt = DateTimeOffset.UtcNow.AddSeconds(-1);
         await scenario.SaveAsync();
         scenario.Db.ChangeTracker.Clear();
@@ -183,20 +183,29 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         Assert.Equal(evidenceChanged ? ["A", "B", "A", "B", "C"] : ["A", "B", "B", "C"], calls);
         Assert.Equal(["B", "C"], scenario.Provider("spotify").Items);
         Assert.Equal("partial", scenario.Mapping("spotify").LastSyncStatus);
-        Assert.Null(scenario.Mapping("spotify").MatchingProgressJson);
+        Assert.Equal(scenario.Provider("spotify").Items,
+            PlaylistMatchingProgress.Read(scenario.Mapping("spotify").MatchingProgressJson).Values
+                .Select(item => item.ExternalId).ToArray());
         Assert.Equal(["A", "B", "C"], await scenario.CanonicalIdsAsync());
     }
 
     [Fact]
-    public async Task MatchingProgress_CountsKnownIdentitiesBeforeAnEarlyRateLimit()
+    public async Task MatchingProgress_CountsOwnedObservedIdentitiesBeforeAnEarlyRateLimit()
     {
         await using var scenario = await Scenario.CreateAsync(["A", "B", "C"]);
         scenario.Link("spotify", []);
         foreach (var title in new[] { "B", "C" })
-            scenario.Db.TrackSourceIds.Add(new TrackSourceId
-            {
-                Id = Guid.NewGuid(), TrackId = scenario.TrackId(title), SourceType = "spotify", ExternalId = title
-            });
+        {
+            var trackId = scenario.TrackId(title);
+            var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
+                Id = Guid.NewGuid(), OwnerUserId = 42, TrackId = trackId, SourceType = "spotify", ExternalId = title,
+                Title = title, MatchStatus = TrackMatchingStatuses.Matched
+             };
+            scenario.Db.TrackObservations.Add(observation);
+            var entry = await scenario.Db.PlaylistEntries.SingleAsync(item => item.TrackId == trackId);
+            entry.TrackObservation = observation;
+            entry.TrackObservationId = observation.Id;
+        }
         var calls = new List<Guid>();
         scenario.Provider("spotify").OnResolve = (entry, _) =>
         {
@@ -263,8 +272,7 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         await using var scenario = await Scenario.CreateAsync([]);
         var titles = Enumerable.Range(0, 30).Select(index => $"Song{index}").ToArray();
         foreach (var (title, index) in titles.Select((title, index) => (title, index)))
-            scenario.Db.PlaylistEntries.Add(new PlaylistEntry
-            {
+            scenario.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scenario.Playlist.UserId,
                 Id = Guid.NewGuid(), PlaylistId = scenario.Playlist.Id,
                 TrackId = scenario.AddTrack(title), Position = index
             });
@@ -290,7 +298,9 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         Assert.Equal(titles, calls);
         Assert.Equal(titles, scenario.Provider("spotify").Items);
         Assert.Equal("success", scenario.Mapping("spotify").LastSyncStatus);
-        Assert.Null(scenario.Mapping("spotify").MatchingProgressJson);
+        Assert.Equal(scenario.Provider("spotify").Items,
+            PlaylistMatchingProgress.Read(scenario.Mapping("spotify").MatchingProgressJson).Values
+                .Select(item => item.ExternalId).ToArray());
     }
 
     [Theory]
@@ -370,13 +380,11 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
     public async Task UnresolvedSourceOccurrence_RemainsCanonicalWhileOtherPlatformExportsKnownSubset()
     {
         await using var scenario = await Scenario.CreateAsync(["A"]);
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "X",
             Title = "Unmatched song", MatchStatus = TrackMatchingStatuses.Pending
-        };
-        scenario.Db.PlaylistEntries.Add(new PlaylistEntry
-        {
+         };
+        scenario.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scenario.Playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = scenario.Playlist.Id,
             TrackObservationId = observation.Id, TrackObservation = observation, Position = 1
         });
@@ -604,8 +612,7 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
     public async Task ResolveOrder_KeepsIndependentAdditionForBothChoices(string use, string expected)
     {
         await using var scenario = await Scenario.CreateAsync(["C", "A", "B"]);
-        scenario.Db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        scenario.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scenario.Playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = scenario.Playlist.Id,
             TrackId = scenario.AddTrack("E"), Position = 1
         });
@@ -685,13 +692,11 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
     public async Task ResolutionThatDeduplicatesCanonicalEntries_DoesNotExportStaleDuplicate()
     {
         await using var scenario = await Scenario.CreateAsync(["A"]);
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "Y",
             Title = "Same recording", MatchStatus = TrackMatchingStatuses.Pending
-        };
-        scenario.Db.PlaylistEntries.Add(new PlaylistEntry
-        {
+         };
+        scenario.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scenario.Playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = scenario.Playlist.Id, Position = 1,
             TrackObservationId = observation.Id, TrackObservation = observation
         });
@@ -719,18 +724,16 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         scenario.Playlist.AllowDuplicateTracks = true;
         scenario.AliasTrack("video-first", "A");
         scenario.AliasTrack("video-second", "A");
-        var first = new TrackObservation
-        {
+        var first = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-first",
             Title = "Song", MatchStatus = TrackMatchingStatuses.Matched,
             TrackId = scenario.TrackId("A")
-        };
-        var second = new TrackObservation
-        {
+         };
+        var second = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-second",
             Title = "Song", MatchStatus = TrackMatchingStatuses.Matched,
             TrackId = scenario.TrackId("A")
-        };
+         };
         scenario.Db.TrackObservations.AddRange(first, second);
         var firstEntry = await scenario.Db.PlaylistEntries.SingleAsync();
         var originalAddedAt = DateTimeOffset.UtcNow.AddDays(-3);
@@ -738,8 +741,7 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         firstEntry.TrackObservationId = first.Id;
         firstEntry.AddedAt = originalAddedAt;
         var secondEntryId = Guid.NewGuid();
-        scenario.Db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        scenario.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scenario.Playlist.UserId,
             Id = secondEntryId, PlaylistId = scenario.Playlist.Id, Position = 1,
             TrackId = scenario.TrackId("A"), TrackObservation = second,
             TrackObservationId = second.Id, AddedAt = originalAddedAt.AddHours(1)
@@ -805,7 +807,7 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
         {
             var trackId = Guid.NewGuid();
             _trackIds[id] = trackId;
-            Db.Tracks.Add(new Track { Id = trackId, SearchTitle = id });
+            Db.Tracks.Add(new Track {  Id = trackId });
             return trackId;
         }
         public ServicePlaylistMapping Mapping(string service) => Db.ServicePlaylistMappings.Local.Single(item => item.Service == service);
@@ -822,11 +824,10 @@ public sealed class PlaylistSyncCoordinatorIntegrationTests
             {
                 var trackId = Guid.NewGuid();
                 scenario._trackIds[id] = trackId;
-                db.Tracks.Add(new Track { Id = trackId, SearchTitle = id });
+                db.Tracks.Add(new Track {  Id = trackId });
             }
             for (var position = 0; position < initial.Length; position++)
-                db.PlaylistEntries.Add(new PlaylistEntry
-                {
+                db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = playlist.UserId,
                     Id = Guid.NewGuid(), PlaylistId = playlist.Id,
                     TrackId = scenario._trackIds[initial[position]], Position = position
                 });

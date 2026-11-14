@@ -26,101 +26,122 @@ public sealed class YouTubePlaylistSyncProvider(
         PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
     {
         var raw = await youtubeService.GetSyncReadSnapshotAsync(account, playlistId, cancellationToken);
-        var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
-        var cache = new Dictionary<string, TrackObservation>(StringComparer.Ordinal);
-        var unavailableIdentityCache = new Dictionary<string, (Guid? TrackId, Guid? ObservationId)>(StringComparer.Ordinal);
-        var enqueue = new HashSet<Guid>();
-        var now = DateTimeOffset.UtcNow;
-        foreach (var item in raw.Items)
+        if (!raw.IsComplete)
+            throw new PlatformApiException("incomplete_playlist", "The platform returned an incomplete playlist. Its missing items were not treated as removals.", 503);
+        await youtubeService.ValidateSyncAccountAsync(account, cancellationToken);
+        Func<Task>? validateProvenance = null;
+        return await PlaylistReadIngestion.RunAsync(dbContext, raw.Account, async readDb =>
         {
-            if (!item.IsAvailable)
+            var bound = await PlaylistDestinationReadBindings.BindReadAsync(readDb, account, PlatformId, playlistId,
+                raw.Items.Select(item => new PlaylistRemoteTrack(item.ExternalId, null, null, item.Title,
+                    item.Position, item.IsAvailable)).ToArray(), cancellationToken);
+            validateProvenance = await PlaylistExportAttemptStore.GuardReadAsync(readDb, raw.Account, playlistId, bound, cancellationToken);
+            var tracks = new List<PlaylistRemoteTrack>(raw.Items.Count);
+            var cache = new Dictionary<string, TrackObservation>(StringComparer.Ordinal);
+            var unavailableIdentityCache = new Dictionary<string, (Guid? TrackId, Guid? ObservationId)>(StringComparer.Ordinal);
+            var enqueue = new HashSet<Guid>();
+            var now = DateTimeOffset.UtcNow;
+            foreach (var item in raw.Items)
             {
-                var existing = unavailableIdentityCache.GetValueOrDefault(item.ExternalId);
-                if (!unavailableIdentityCache.ContainsKey(item.ExternalId))
+                if (bound[item.Position].ReadScope is not null)
                 {
-                    existing = await FindExistingUnavailableIdentityAsync(item.ExternalId, cancellationToken);
-                    unavailableIdentityCache.Add(item.ExternalId, existing);
+                    tracks.Add(bound[item.Position]);
+                    continue;
                 }
-                tracks.Add(MapUnavailableItem(item, existing.TrackId, existing.ObservationId));
-                continue;
-            }
-            if (!cache.TryGetValue(item.ExternalId, out var observation))
-            {
-                observation = dbContext.TrackObservations.Local.FirstOrDefault(existing =>
-                    existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId)
-                    ?? await dbContext.TrackObservations.SingleOrDefaultAsync(existing =>
-                        existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId,
-                        cancellationToken);
-                var parsed = TrackMetadataParser.Parse(item.Title, item.Artist);
-                var displayArtist = parsed.DisplayArtist ?? item.Artist;
-                observation ??= new TrackObservation
+                if (!item.IsAvailable)
                 {
-                    Id = Guid.NewGuid(), SourceType = PlatformId, ExternalId = item.ExternalId,
-                    Title = parsed.DisplayTitle, MatchStatus = TrackMatchingStatuses.Pending,
-                    CreatedAt = now
-                };
-                if (dbContext.Entry(observation).State == EntityState.Detached)
-                    dbContext.TrackObservations.Add(observation);
-                var preservedDescription = GetPreservedDescription(item.Description, observation.RawMetadata);
-                observation.Title = parsed.DisplayTitle;
-                observation.Artist = displayArtist;
-                observation.ThumbnailUrl = item.ThumbnailUrl;
-                observation.DurationSeconds = item.DurationSeconds;
-                observation.NormalizedTitle = TrackTextNormalizer.Normalize(parsed.DisplayTitle);
-                observation.NormalizedArtist = TrackTextNormalizer.Normalize(displayArtist);
-                observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
-                {
-                    SourceType = PlatformId, ExternalId = item.ExternalId,
-                    Title = parsed.DisplayTitle, Artist = displayArtist,
-                    OriginalTitle = item.Title, OriginalArtist = item.Artist,
-                    ChannelTitle = item.Artist, SearchTitle = parsed.SearchTitle,
-                    SearchArtist = parsed.SearchArtist, ThumbnailUrl = item.ThumbnailUrl,
-                    DurationSeconds = item.DurationSeconds,
-                    Description = preservedDescription
-                });
-                observation.UpdatedAt = now;
-                if (observation.TrackId is null)
-                {
-                    var known = await dbContext.TrackSourceIds.AsNoTracking().SingleOrDefaultAsync(source =>
-                        source.SourceType == PlatformId && source.ExternalId == item.ExternalId,
-                        cancellationToken);
-                    if (known is not null)
+                    var existing = unavailableIdentityCache.GetValueOrDefault(item.ExternalId);
+                    if (!unavailableIdentityCache.ContainsKey(item.ExternalId))
                     {
-                        observation.TrackId = known.TrackId;
-                        observation.MatchStatus = TrackMatchingStatuses.Matched;
+                        existing = await FindExistingUnavailableIdentityAsync(readDb, account, item.ExternalId, cancellationToken);
+                        unavailableIdentityCache.Add(item.ExternalId, existing);
+                    }
+                    tracks.Add(MapUnavailableItem(item, existing.TrackId, existing.ObservationId));
+                    continue;
+                }
+                if (!cache.TryGetValue(item.ExternalId, out var observation))
+                {
+                    observation = readDb.TrackObservations.Local.FirstOrDefault(existing =>
+                        existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId)
+                        ?? await readDb.TrackObservations.SingleOrDefaultAsync(existing =>
+                            existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == item.ExternalId,
+                            cancellationToken);
+                    var parsed = TrackMetadataParser.Parse(item.Title, item.Artist);
+                    var displayArtist = parsed.DisplayArtist ?? item.Artist;
+                    observation ??= new TrackObservation
+                    {
+                        Id = Guid.NewGuid(), OwnerUserId = account.UserId, SourceType = PlatformId, ExternalId = item.ExternalId,
+                        Title = parsed.DisplayTitle, MatchStatus = TrackMatchingStatuses.Pending,
+                        CreatedAt = now
+                    };
+                    if (readDb.Entry(observation).State == EntityState.Detached)
+                        readDb.TrackObservations.Add(observation);
+                    if (item.ProviderCatalogItemId is { } publicId)
+                    {
+                        var publicItem = await readDb.ProviderCatalogItems.SingleAsync(i => i.Id == publicId, cancellationToken);
+                        ObservationInput.SetPublic(observation, publicItem);
                     }
                     else
                     {
-                        observation.MatchStatus = TrackMatchingStatuses.Pending;
-                        enqueue.Add(observation.Id);
+                        ObservationInput.SetPrivate(observation, parsed.DisplayTitle, displayArtist,
+                            item.DurationSeconds, item.ThumbnailUrl, new TrackObservationMetadata
+                            {
+                                OriginalTitle = item.Title, OriginalArtist = item.Artist,
+                                ChannelTitle = item.Artist, Description = item.Description
+                            });
                     }
+                    observation.UpdatedAt = now;
+                    var associations = new ProviderRecordingAssociations(readDb, matchingOptions.Value);
+                    var knownTrackId = (await associations.FindUsableAsync(PlatformId, item.ExternalId, cancellationToken))?.TrackId;
+                    if (knownTrackId is null && item.ProviderCatalogItemId is { } catalogId)
+                    {
+                        var catalogItem = await readDb.ProviderCatalogItems.SingleAsync(row => row.Id == catalogId,
+                            cancellationToken);
+                        knownTrackId = (await associations.RevalidateExactAsync(catalogItem, cancellationToken))?.Id;
+                    }
+                    if (observation.InputKind == ObservationInputKind.Public && knownTrackId == null
+                        && !await associations.CanReuseObservationResultAsync(observation, account.UserId, cancellationToken))
+                        observation.TrackId = null;
+                    if (observation.TrackId is null)
+                    {
+                        if (knownTrackId is not null)
+                        {
+                            observation.TrackId = knownTrackId;
+                            observation.MatchStatus = TrackMatchingStatuses.Matched;
+                        }
+                        else
+                        {
+                            observation.MatchStatus = TrackMatchingStatuses.Pending;
+                            enqueue.Add(observation.Id);
+                        }
+                    }
+                    cache.Add(item.ExternalId, observation);
                 }
-                cache.Add(item.ExternalId, observation);
+                tracks.Add(new PlaylistRemoteTrack(item.ExternalId, observation.TrackId,
+                    observation.Id, item.Title, item.Position));
             }
-            tracks.Add(new PlaylistRemoteTrack(item.ExternalId, observation.TrackId,
-                observation.Id, item.Title, item.Position));
-        }
-        await youtubeService.ValidateSyncAccountAsync(account, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        foreach (var observationId in enqueue)
-            await matchQueue.EnqueueAsync(observationId, cancellationToken);
-        return new PlaylistRemoteSnapshot(raw.Id, raw.Name, tracks, raw.Revision, raw.IsComplete,
-            raw.UnavailableItemCount);
+            await youtubeService.ValidateSyncAccountAsync(account, cancellationToken);
+            await readDb.SaveChangesAsync(cancellationToken);
+            var readQueue = matchQueue.ForContext(readDb);
+            foreach (var observationId in enqueue)
+                await readQueue.EnqueueAsync(observationId, cancellationToken);
+            return new PlaylistRemoteSnapshot(raw.Id, raw.Name, tracks, raw.Revision, raw.IsComplete,
+                raw.UnavailableItemCount);
+        }, cancellationToken, () => validateProvenance!());
     }
 
     private async Task<(Guid? TrackId, Guid? ObservationId)> FindExistingUnavailableIdentityAsync(
-        string externalId, CancellationToken cancellationToken)
+        ApplicationDbContext readDb, PlatformAccountContext account, string externalId, CancellationToken cancellationToken)
     {
         if (externalId.StartsWith("!unavailable:", StringComparison.Ordinal)) return (null, null);
-        var observation = dbContext.TrackObservations.Local.FirstOrDefault(existing =>
-                existing.SourceType == PlatformId && existing.ExternalId == externalId)
-            ?? await dbContext.TrackObservations.AsNoTracking().SingleOrDefaultAsync(existing =>
-                existing.SourceType == PlatformId && existing.ExternalId == externalId,
+        var observation = readDb.TrackObservations.Local.FirstOrDefault(existing =>
+                existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == externalId)
+            ?? await readDb.TrackObservations.AsNoTracking().SingleOrDefaultAsync(existing =>
+                existing.OwnerUserId == account.UserId && existing.SourceType == PlatformId && existing.ExternalId == externalId,
                 cancellationToken);
         if (observation is not null) return (observation.TrackId, observation.Id);
 
-        var sourceId = await dbContext.TrackSourceIds.AsNoTracking().SingleOrDefaultAsync(source =>
-            source.SourceType == PlatformId && source.ExternalId == externalId, cancellationToken);
+        var sourceId = await new ProviderRecordingAssociations(readDb).FindUsableAsync(PlatformId, externalId, cancellationToken);
         return (sourceId?.TrackId, null);
     }
 
@@ -129,26 +150,10 @@ public sealed class YouTubePlaylistSyncProvider(
         => new(item.ExternalId, existingTrackId, existingObservationId, item.Title, item.Position,
             IsAvailable: false);
 
-    internal static string? GetPreservedDescription(string? currentDescription, string? previousRawMetadata)
-    {
-        if (!string.IsNullOrWhiteSpace(currentDescription))
-            return currentDescription;
-        if (string.IsNullOrWhiteSpace(previousRawMetadata))
-            return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<TrackObservationMetadata>(previousRawMetadata)?.Description;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
     public async Task<string?> ResolveAsync(
         PlatformAccountContext account, PlaylistEntry entry, CancellationToken cancellationToken)
     {
+        await youtubeService.ValidateSyncAccountAsync(account, cancellationToken);
         return await PlaylistDestinationIdentityResolver.ResolveAsync(dbContext, matchingOptions.Value,
             async (observationId, candidate, ct) => (await matchingService.CreateTrackFromMatchAsync(observationId, candidate, ct)).TrackId
                 ?? throw new InvalidOperationException("Matching did not create a canonical track."),

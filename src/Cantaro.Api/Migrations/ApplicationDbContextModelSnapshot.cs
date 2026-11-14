@@ -34,10 +34,6 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                    b.Property<string>("MusicBrainzArtistId")
-                        .HasMaxLength(36)
-                        .HasColumnType("character varying(36)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -52,11 +48,101 @@ namespace Cantaro.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MusicBrainzArtistId")
-                        .IsUnique()
-                        .HasFilter("\"MusicBrainzArtistId\" IS NOT NULL");
-
                     b.ToTable("Artists");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistProviderLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ArtistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ArtworkUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProfileUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("RawMetadata")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("RevalidateAfter")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VerificationMethod")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtistId", "Provider")
+                        .IsUnique();
+
+                    b.HasIndex("Provider", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("ArtistProviderLinks");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistReconciliationConflict", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvidenceKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("IdentityConflictJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ProviderCatalogItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("ProviderCatalogRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("SourceCreditPosition")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TrackId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderCatalogItemId");
+
+                    b.HasIndex("TrackId", "EvidenceKey")
+                        .IsUnique();
+
+                    b.ToTable("ArtistReconciliationConflicts");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.ConnectedServiceAccount", b =>
@@ -1312,6 +1398,9 @@ namespace Cantaro.Api.Migrations
                     b.Property<DateTimeOffset>("AddedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("OwnerUserId")
+                        .HasColumnType("integer");
+
                     b.Property<Guid>("PlaylistId")
                         .HasColumnType("uuid");
 
@@ -1331,7 +1420,7 @@ namespace Cantaro.Api.Migrations
 
                     b.HasIndex("TrackId");
 
-                    b.HasIndex("TrackObservationId");
+                    b.HasIndex("PlaylistId", "OwnerUserId");
 
                     b.HasIndex("PlaylistId", "Position")
                         .IsUnique();
@@ -1339,7 +1428,129 @@ namespace Cantaro.Api.Migrations
                     b.HasIndex("PlaylistId", "TrackId")
                         .HasFilter("\"TrackId\" IS NOT NULL");
 
+                    b.HasIndex("TrackObservationId", "OwnerUserId");
+
                     b.ToTable("PlaylistEntries");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.PlaylistExportAttempt", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Service")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalAccountId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ServicePlaylistId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExternalTrackId")
+                        .HasColumnType("text");
+
+                    b.HasKey("UserId", "Service", "ExternalAccountId", "ServicePlaylistId", "ExternalTrackId");
+
+                    b.ToTable("PlaylistExportAttempts");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ProviderCatalogItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AssociationEvidenceJson")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("AssociationFactsRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AssociationMethod")
+                        .HasColumnType("text");
+
+                    b.Property<long>("AssociationRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("AssociationState")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("AssociationVerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FactsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool?>("IsOfficial")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("NormalizedArtist")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NormalizedIsrc")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NormalizedMusicBrainzRecordingId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NormalizedTitle")
+                        .HasColumnType("text");
+
+                    b.Property<byte?>("PresentationConfidence")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("PresentationKind")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset?>("RevalidateAfter")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("TrackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VerificationMethod")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("VisibilityState")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedIsrc");
+
+                    b.HasIndex("NormalizedMusicBrainzRecordingId");
+
+                    b.HasIndex("TrackId");
+
+                    b.HasIndex("NormalizedTitle", "NormalizedArtist");
+
+                    b.HasIndex("SourceType", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("ProviderCatalogItems", t =>
+                        {
+                            t.HasCheckConstraint("CK_ProviderCatalogItems_PresentationConfidence", "\"PresentationConfidence\" IS NULL OR (\"PresentationConfidence\" >= 0 AND \"PresentationConfidence\" <= 100)");
+
+                            t.HasCheckConstraint("CK_ProviderCatalogItems_VerifiedAssociation", "\"AssociationState\" <> 1 OR (\"TrackId\" IS NOT NULL AND \"AssociationMethod\" IS NOT NULL AND \"AssociationMethod\" IN ('provider_origin', 'independent_recording') AND \"AssociationVerifiedAt\" IS NOT NULL AND \"AssociationEvidenceJson\" IS NOT NULL AND \"AssociationFactsRevision\" IS NOT NULL AND \"AssociationFactsRevision\" > 0)");
+                        });
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.ServicePlaylistMapping", b =>
@@ -1430,9 +1641,11 @@ namespace Cantaro.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectedServiceAccountId");
-
                     b.HasIndex("NextAttemptAt");
+
+                    b.HasIndex("PlaylistId", "UserId");
+
+                    b.HasIndex("ConnectedServiceAccountId", "UserId", "Service");
 
                     b.HasIndex("PlaylistId", "Service", "ExternalAccountId")
                         .IsUnique()
@@ -1662,9 +1875,6 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("CanonicalMetadata")
-                        .HasColumnType("text");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -1675,14 +1885,6 @@ namespace Cantaro.Api.Migrations
 
                     b.Property<string>("MbidRecording")
                         .HasColumnType("text");
-
-                    b.Property<string>("SearchArtist")
-                        .HasMaxLength(1024)
-                        .HasColumnType("character varying(1024)");
-
-                    b.Property<string>("SearchTitle")
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -1717,11 +1919,23 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("JoinPhrase")
+                        .HasColumnType("text");
+
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ProviderCatalogItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("ProviderCatalogRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<short>("Role")
                         .HasColumnType("smallint");
+
+                    b.Property<int?>("SourceCreditPosition")
+                        .HasColumnType("integer");
 
                     b.Property<Guid>("TrackId")
                         .HasColumnType("uuid");
@@ -1729,6 +1943,8 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ArtistId");
+
+                    b.HasIndex("ProviderCatalogItemId");
 
                     b.HasIndex("TrackId", "Position")
                         .IsUnique();
@@ -1766,7 +1982,6 @@ namespace Cantaro.Api.Migrations
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("AcceptedCandidateId")
@@ -1787,6 +2002,9 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("InputKind")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("LastMatchAttemptedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1800,14 +2018,14 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("NormalizedArtist")
+                    b.Property<int>("OwnerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PrivateInputJson")
                         .HasColumnType("text");
 
-                    b.Property<string>("NormalizedTitle")
-                        .HasColumnType("text");
-
-                    b.Property<string>("RawMetadata")
-                        .HasColumnType("text");
+                    b.Property<Guid?>("ProviderCatalogItemId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ResolutionNotes")
                         .HasColumnType("text");
@@ -1820,7 +2038,6 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Title")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<Guid?>("TrackId")
@@ -1835,15 +2052,23 @@ namespace Cantaro.Api.Migrations
 
                     b.HasIndex("MatchStatus");
 
+                    b.HasIndex("ProviderCatalogItemId");
+
                     b.HasIndex("TrackId");
 
-                    b.HasIndex("SourceType", "ExternalId")
+                    b.HasIndex("AcceptedCandidateId", "Id");
+
+                    b.HasIndex("OwnerUserId", "TrackId");
+
+                    b.HasIndex("OwnerUserId", "SourceType", "ExternalId")
                         .IsUnique();
 
-                    b.HasIndex("NormalizedTitle", "DurationSeconds", "TrackId", "SourceType")
-                        .HasDatabaseName("IX_TrackObservations_IdentityLookup");
+                    b.HasIndex("ProviderCatalogItemId", "SourceType", "ExternalId");
 
-                    b.ToTable("TrackObservations");
+                    b.ToTable("TrackObservations", t =>
+                        {
+                            t.HasCheckConstraint("CK_TrackObservations_Input", "(\"InputKind\" = 2 AND \"Title\" IS NOT NULL AND length(trim(\"Title\")) > 0) OR (\"InputKind\" IN (0, 1) AND (\"InputKind\" <> 1 OR \"ProviderCatalogItemId\" IS NOT NULL) AND \"Title\" IS NULL AND \"Artist\" IS NULL AND \"ThumbnailUrl\" IS NULL AND \"DurationSeconds\" IS NULL AND \"PrivateInputJson\" IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackRelation", b =>
@@ -1873,6 +2098,9 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AnchorTrackId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Artist")
                         .HasColumnType("text");
 
@@ -1887,6 +2115,9 @@ namespace Cantaro.Api.Migrations
 
                     b.Property<int?>("DurationSeconds")
                         .HasColumnType("integer");
+
+                    b.Property<string>("EvaluationJson")
+                        .HasColumnType("text");
 
                     b.Property<string>("Explanation")
                         .HasColumnType("text");
@@ -1904,14 +2135,16 @@ namespace Cantaro.Api.Migrations
                     b.Property<string>("MbidRecording")
                         .HasColumnType("text");
 
-                    b.Property<string>("RawMetadata")
-                        .HasColumnType("text");
+                    b.Property<Guid?>("ProviderCatalogItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("ProviderCatalogRevision")
+                        .HasColumnType("bigint");
 
                     b.Property<decimal>("Score")
                         .HasColumnType("numeric");
 
                     b.Property<string>("Title")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<Guid>("TrackObservationId")
@@ -1919,56 +2152,15 @@ namespace Cantaro.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AnchorTrackId");
+
                     b.HasIndex("TrackObservationId", "Score");
 
-                    b.ToTable("TrackResolutionCandidates");
-                });
+                    b.HasIndex("ProviderCatalogItemId", "CandidateSource", "ExternalId");
 
-            modelBuilder.Entity("Cantaro.Api.Models.TrackSourceId", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal?>("Confidence")
-                        .HasColumnType("numeric");
-
-                    b.Property<string>("ExternalId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool?>("IsOfficial")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset?>("LastVerifiedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("OriginMetadata")
-                        .HasColumnType("text");
-
-                    b.Property<byte?>("PresentationConfidence")
-                        .HasColumnType("smallint");
-
-                    b.Property<short>("PresentationKind")
-                        .HasColumnType("smallint");
-
-                    b.Property<string>("SourceType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TrackId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TrackId");
-
-                    b.HasIndex("SourceType", "ExternalId")
-                        .IsUnique();
-
-                    b.ToTable("TrackSourceIds", t =>
+                    b.ToTable("TrackResolutionCandidates", t =>
                         {
-                            t.HasCheckConstraint("CK_TrackSourceIds_PresentationConfidence", "\"PresentationConfidence\" IS NULL OR (\"PresentationConfidence\" >= 0 AND \"PresentationConfidence\" <= 100)");
+                            t.HasCheckConstraint("CK_TrackResolutionCandidates_PublicInput", "\"ProviderCatalogItemId\" IS NULL OR (\"ProviderCatalogRevision\" IS NOT NULL AND \"ProviderCatalogRevision\" > 0 AND \"Title\" IS NULL AND \"Artist\" IS NULL AND \"MbidRecording\" IS NULL AND \"Isrc\" IS NULL AND \"DurationSeconds\" IS NULL)");
                         });
                 });
 
@@ -2276,6 +2468,35 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistProviderLink", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.Artist", "Artist")
+                        .WithMany("ProviderLinks")
+                        .HasForeignKey("ArtistId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Artist");
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ArtistReconciliationConflict", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.ProviderCatalogItem", "ProviderCatalogItem")
+                        .WithMany()
+                        .HasForeignKey("ProviderCatalogItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Cantaro.Api.Models.Track", "Track")
+                        .WithMany()
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ProviderCatalogItem");
+
+                    b.Navigation("Track");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.ConnectedServiceAccount", b =>
                 {
                     b.HasOne("Cantaro.Api.Models.User", "User")
@@ -2566,21 +2787,23 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.PlaylistEntry", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.Playlist", "Playlist")
-                        .WithMany("Entries")
-                        .HasForeignKey("PlaylistId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.HasOne("Cantaro.Api.Models.Track", "Track")
                         .WithMany("PlaylistEntries")
                         .HasForeignKey("TrackId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Cantaro.Api.Models.Playlist", "Playlist")
+                        .WithMany("Entries")
+                        .HasForeignKey("PlaylistId", "OwnerUserId")
+                        .HasPrincipalKey("Id", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Cantaro.Api.Models.TrackObservation", "TrackObservation")
                         .WithMany("PlaylistEntries")
-                        .HasForeignKey("TrackObservationId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .HasForeignKey("TrackObservationId", "OwnerUserId")
+                        .HasPrincipalKey("Id", "OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Playlist");
 
@@ -2589,18 +2812,39 @@ namespace Cantaro.Api.Migrations
                     b.Navigation("TrackObservation");
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.PlaylistExportAttempt", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.ProviderCatalogItem", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.Track", "Track")
+                        .WithMany("ProviderItems")
+                        .HasForeignKey("TrackId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Track");
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.ServicePlaylistMapping", b =>
                 {
-                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
-                        .WithMany("ServicePlaylistMappings")
-                        .HasForeignKey("ConnectedServiceAccountId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("Cantaro.Api.Models.Playlist", "Playlist")
                         .WithMany("ServiceMappings")
-                        .HasForeignKey("PlaylistId")
+                        .HasForeignKey("PlaylistId", "UserId")
+                        .HasPrincipalKey("Id", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cantaro.Api.Models.ConnectedServiceAccount", "ConnectedServiceAccount")
+                        .WithMany("ServicePlaylistMappings")
+                        .HasForeignKey("ConnectedServiceAccountId", "UserId", "Service")
+                        .HasPrincipalKey("Id", "UserId", "Service")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("ConnectedServiceAccount");
@@ -2696,6 +2940,11 @@ namespace Cantaro.Api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Cantaro.Api.Models.ProviderCatalogItem", "ProviderCatalogItem")
+                        .WithMany()
+                        .HasForeignKey("ProviderCatalogItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Cantaro.Api.Models.Track", "Track")
                         .WithMany("ArtistCredits")
                         .HasForeignKey("TrackId")
@@ -2703,6 +2952,8 @@ namespace Cantaro.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Artist");
+
+                    b.Navigation("ProviderCatalogItem");
 
                     b.Navigation("Track");
                 });
@@ -2720,10 +2971,30 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>
                 {
+                    b.HasOne("Cantaro.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Cantaro.Api.Models.Track", "Track")
                         .WithMany()
                         .HasForeignKey("TrackId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Cantaro.Api.Models.TrackResolutionCandidate", null)
+                        .WithMany()
+                        .HasForeignKey("AcceptedCandidateId", "Id")
+                        .HasPrincipalKey("Id", "TrackObservationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Cantaro.Api.Models.ProviderCatalogItem", "ProviderCatalogItem")
+                        .WithMany()
+                        .HasForeignKey("ProviderCatalogItemId", "SourceType", "ExternalId")
+                        .HasPrincipalKey("Id", "SourceType", "ExternalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ProviderCatalogItem");
 
                     b.Navigation("Track");
                 });
@@ -2749,24 +3020,28 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackResolutionCandidate", b =>
                 {
+                    b.HasOne("Cantaro.Api.Models.Track", "AnchorTrack")
+                        .WithMany()
+                        .HasForeignKey("AnchorTrackId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Cantaro.Api.Models.TrackObservation", "TrackObservation")
                         .WithMany("Candidates")
                         .HasForeignKey("TrackObservationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Cantaro.Api.Models.ProviderCatalogItem", "ProviderCatalogItem")
+                        .WithMany()
+                        .HasForeignKey("ProviderCatalogItemId", "CandidateSource", "ExternalId")
+                        .HasPrincipalKey("Id", "SourceType", "ExternalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AnchorTrack");
+
+                    b.Navigation("ProviderCatalogItem");
+
                     b.Navigation("TrackObservation");
-                });
-
-            modelBuilder.Entity("Cantaro.Api.Models.TrackSourceId", b =>
-                {
-                    b.HasOne("Cantaro.Api.Models.Track", "Track")
-                        .WithMany("SourceIds")
-                        .HasForeignKey("TrackId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Track");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.UserSettings", b =>
@@ -2833,6 +3108,8 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.Artist", b =>
                 {
+                    b.Navigation("ProviderLinks");
+
                     b.Navigation("SongCredits");
 
                     b.Navigation("TrackCredits");
@@ -2918,9 +3195,9 @@ namespace Cantaro.Api.Migrations
 
                     b.Navigation("PlaylistEntries");
 
-                    b.Navigation("SongMemberships");
+                    b.Navigation("ProviderItems");
 
-                    b.Navigation("SourceIds");
+                    b.Navigation("SongMemberships");
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackObservation", b =>

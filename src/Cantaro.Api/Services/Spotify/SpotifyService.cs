@@ -332,6 +332,53 @@ public sealed class SpotifyService
         return new SpotifyPlaylistImportSnapshot(playlist, tracks);
     }
 
+    internal Task<(SpotifyPlaylistImportSnapshot Snapshot, PlaylistReadAccount Account)> GetPlaylistImportReadSnapshotAsync(
+        PlaylistReadAccount expectedAccount,
+        string playlistId,
+        CancellationToken cancellationToken)
+    {
+        // Pin the generation returned by token acquisition, which can legitimately
+        // refresh. Never infer the read's generation from the account after HTTP.
+        var context = expectedAccount.Context with { ExpectedExternalAccountId = expectedAccount.ExternalAccountId };
+        return WithAuthorizedTokenRetryAsync(context, async (token, ct) =>
+        {
+            var readAccount = expectedAccount with { TokenVersion = token.Version };
+            await readAccount.ValidateAsync(_dbContext, ct);
+            try
+            {
+                // Retry the entire snapshot with one token so an items 401 cannot
+                // combine a playlist from the old generation with refreshed items.
+                var playlists = await _apiClient.GetPlaylistsAsync(token.Value, ct);
+                await readAccount.ValidateAsync(_dbContext, ct);
+                var playlist = playlists.SingleOrDefault(candidate => candidate.Id == playlistId)
+                    ?? throw new PlatformApiException("spotify_playlist_not_found",
+                        "Spotify did not return that playlist for the selected connected account.",
+                        StatusCodes.Status404NotFound);
+                IReadOnlyList<SpotifyTrackSnapshot> tracks;
+                try
+                {
+                    tracks = await _apiClient.GetPlaylistItemsAsync(token.Value, playlistId, ct);
+                }
+                catch (PlatformApiException ex) when (ex.StatusCode == StatusCodes.Status403Forbidden
+                    && string.Equals(ex.Code, "spotify_forbidden", StringComparison.Ordinal))
+                {
+                    throw new PlatformApiException("spotify_playlist_items_unavailable",
+                        "Spotify denied access to this playlist's items. This can happen when the connected account follows a playlist but does not own or collaborate on it.",
+                        StatusCodes.Status403Forbidden, innerException: ex);
+                }
+                await readAccount.ValidateAsync(_dbContext, ct);
+                return (new SpotifyPlaylistImportSnapshot(playlist, tracks), readAccount);
+            }
+            catch
+            {
+                // Check failed responses too, before the authorized retry can
+                // acquire a newer token and hide a change during the request.
+                await readAccount.ValidateAsync(_dbContext, ct);
+                throw;
+            }
+        }, cancellationToken, (force, ct) => _tokenManager.GetFreshAccessTokenSnapshotAsync(context, force, ct));
+    }
+
     public async Task DisconnectAsync(int userId, CancellationToken cancellationToken)
     {
         var account = await _dbContext.ConnectedServiceAccounts.SingleOrDefaultAsync(
@@ -409,22 +456,30 @@ public sealed class SpotifyService
         }
     }
 
-    private async Task<T> WithAuthorizedRetryAsync<T>(
+    private Task<T> WithAuthorizedRetryAsync<T>(
         PlatformAccountContext account,
         Func<string, CancellationToken, Task<T>> operation,
         CancellationToken cancellationToken)
+        => WithAuthorizedTokenRetryAsync(account, (token, ct) => operation(token.Value, ct), cancellationToken);
+
+    private async Task<T> WithAuthorizedTokenRetryAsync<T>(
+        PlatformAccountContext account,
+        Func<SpotifyAccessToken, CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken,
+        Func<bool, CancellationToken, Task<SpotifyAccessToken>>? acquireToken = null)
     {
-        var accessToken = await _tokenManager.GetAccessTokenSnapshotAsync(account, false, cancellationToken);
+        acquireToken ??= (force, ct) => _tokenManager.GetAccessTokenSnapshotAsync(account, force, ct);
+        var accessToken = await acquireToken(false, cancellationToken);
         try
         {
-            return await operation(accessToken.Value, cancellationToken);
+            return await operation(accessToken, cancellationToken);
         }
         catch (PlatformApiException ex) when (ex.StatusCode == StatusCodes.Status401Unauthorized)
         {
-            accessToken = await _tokenManager.GetAccessTokenSnapshotAsync(account, true, cancellationToken);
+            accessToken = await acquireToken(true, cancellationToken);
             try
             {
-                return await operation(accessToken.Value, cancellationToken);
+                return await operation(accessToken, cancellationToken);
             }
             catch (PlatformApiException retryException) when (
                 retryException.StatusCode == StatusCodes.Status401Unauthorized)
@@ -441,11 +496,8 @@ public sealed class SpotifyService
                         retryException);
                 }
 
-                var newest = await _tokenManager.GetAccessTokenSnapshotAsync(
-                    account,
-                    false,
-                    cancellationToken);
-                return await operation(newest.Value, cancellationToken);
+                var newest = await acquireToken(false, cancellationToken);
+                return await operation(newest, cancellationToken);
             }
         }
     }

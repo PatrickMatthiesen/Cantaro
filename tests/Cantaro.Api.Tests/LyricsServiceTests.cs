@@ -3,6 +3,7 @@ using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Lyrics;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -21,21 +22,16 @@ public sealed class LyricsServiceTests
             UserId = 7,
             Name = "Favorites"
         };
-        var track = new Track
-        {
+        var track = new Track {
             Id = trackId,
             MbidRecording = "recording-id",
-            Isrc = "ISRC123",
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-            {
-                Title = "Test Song",
-                Artist = "Test Artist",
-                Albums = ["Test Album"],
-                DurationSeconds = 200
-            })
-        };
-        db.AddRange(playlist, track, new PlaylistEntry
+            Isrc = "ISRC123" };
+        AttachPublicFacts(track, new ProviderCatalogFacts
         {
+            Title = "Test Song", Artist = "Test Artist", Albums = ["Test Album"],
+            DurationSeconds = 200, MusicBrainzRecordingId = "recording-id", Isrc = "ISRC123"
+        });
+        db.AddRange(playlist, track, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
             TrackId = trackId,
@@ -62,17 +58,9 @@ public sealed class LyricsServiceTests
         await using var db = CreateDb();
         var trackId = Guid.NewGuid();
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 8, Name = "Private" };
-        var track = new Track
-        {
-            Id = trackId,
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-            {
-                Title = "Test Song",
-                Artist = "Test Artist"
-            })
-        };
-        db.AddRange(playlist, track, new PlaylistEntry
-        {
+        var track = new Track {
+            Id = trackId };
+        db.AddRange(playlist, track, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
             TrackId = trackId,
@@ -88,33 +76,118 @@ public sealed class LyricsServiceTests
     }
 
     [Fact]
+    public async Task GetLyricsAsync_AllowsOnlyImmediateRelatedCanonicalRecordings()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var owner = TestUserFactory.Create(7, "lyrics-related-owner@example.com");
+        var other = TestUserFactory.Create(8, "lyrics-related-other@example.com");
+        var outsider = TestUserFactory.Create(9, "lyrics-related-outsider@example.com");
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = owner.Id, Name = "Saved" };
+        var privatePlaylist = new Playlist { Id = Guid.NewGuid(), UserId = other.Id, Name = "Private" };
+        Track Track(string title)
+        {
+            var track = new Track {
+                Id = Guid.NewGuid() };
+            AttachPublicFacts(track, new ProviderCatalogFacts { Title = title, Artist = "Artist" });
+            return track;
+        }
+        var original = Track("Original");
+        var sibling = Track("Composition sibling");
+        var remix = Track("Remix");
+        var source = Track("Sample source");
+        var secondHop = Track("Remix of remix");
+        var unrelated = Track("Unrelated");
+        var composition = new Song { Id = Guid.NewGuid() };
+        var privateObservation = new TrackObservation {  InputKind = ObservationInputKind.Private,
+            Id = Guid.NewGuid(), OwnerUserId = other.Id, TrackId = remix.Id, SourceType = "youtube", ExternalId = "private-video",
+            Title = "Private observation", DurationSeconds = 999, ThumbnailUrl = "https://img.example/private.jpg",
+            MatchStatus = TrackMatchingStatuses.Matched
+         };
+        remix.ProviderItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = remix.Id, SourceType = privateObservation.SourceType, ExternalId = privateObservation.ExternalId, FactsJson = "{}" });
+        db.AddRange(owner, other, outsider, playlist, privatePlaylist, original, sibling, remix, source,
+            secondHop, unrelated, composition, privateObservation);
+        db.SongTracks.AddRange(
+            new SongTrack { SongId = composition.Id, TrackId = original.Id },
+            new SongTrack { SongId = composition.Id, TrackId = sibling.Id });
+        db.TrackRelations.AddRange(
+            new TrackRelation { FromTrackId = remix.Id, ToTrackId = original.Id, RelationType = TrackRelationType.RemixOf },
+            new TrackRelation { FromTrackId = original.Id, ToTrackId = source.Id, RelationType = TrackRelationType.Samples },
+            new TrackRelation { FromTrackId = secondHop.Id, ToTrackId = remix.Id, RelationType = TrackRelationType.RemixOf });
+        db.PlaylistEntries.AddRange(
+            new PlaylistEntry { OwnerUserId = playlist.UserId, Id = Guid.NewGuid(), PlaylistId = playlist.Id, TrackId = original.Id, Position = 0 },
+            new PlaylistEntry { OwnerUserId = privatePlaylist.UserId,
+                Id = Guid.NewGuid(), PlaylistId = privatePlaylist.Id, TrackId = remix.Id,
+                TrackObservationId = privateObservation.Id, Position = 0
+            },
+            new PlaylistEntry { OwnerUserId = privatePlaylist.UserId, Id = Guid.NewGuid(), PlaylistId = privatePlaylist.Id, TrackId = unrelated.Id, Position = 1 });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var details = new MusicLibraryQueryService(db);
+
+        foreach (var related in new[] { sibling, remix, source })
+        {
+            var detail = Assert.IsType<MusicLibrarySongDto>(await details.GetCanonicalSongAsync(related.Id, owner.Id, default));
+            Assert.Empty(detail.Playlists);
+            var publicIdentity = Assert.Single(detail.SourceIdentities);
+            Assert.Equal("spotify", publicIdentity.Source);
+            Assert.Single(detail.PlatformLinks, link => link.Platform == "spotify"
+                && link.ExternalId == publicIdentity.ExternalId);
+            Assert.Equal(["spotify"], detail.SourcePlatforms);
+            Assert.Null(detail.DurationSeconds);
+            Assert.Null(detail.ThumbnailUrl);
+            var provider = new CapturingProvider();
+
+            var lyrics = await new LyricsService(db, provider).GetLyricsAsync(owner.Id, detail.Id, default);
+
+            Assert.Equal(LyricsStates.Available, lyrics?.State);
+            Assert.Equal(related.Id, provider.Lookup?.TrackId);
+            Assert.Equal(detail.Title, provider.Lookup?.Title);
+            Assert.Null(provider.Lookup?.DurationSeconds);
+
+            var outsiderProvider = new CapturingProvider();
+            Assert.Null(await details.GetCanonicalSongAsync(related.Id, outsider.Id, default));
+            Assert.Null(await new LyricsService(db, outsiderProvider).GetLyricsAsync(outsider.Id, detail.Id, default));
+            Assert.Null(outsiderProvider.Lookup);
+        }
+
+        foreach (var denied in new[] { secondHop, unrelated })
+        {
+            var provider = new CapturingProvider();
+            Assert.Null(await details.GetCanonicalSongAsync(denied.Id, owner.Id, default));
+            Assert.Null(await new LyricsService(db, provider).GetLyricsAsync(owner.Id, $"track:{denied.Id}", default));
+            Assert.Null(provider.Lookup);
+        }
+        var observationProvider = new CapturingProvider();
+        Assert.Null(await new LyricsService(db, observationProvider).GetLyricsAsync(
+            owner.Id, $"observation:{privateObservation.Id}", default));
+        Assert.Null(observationProvider.Lookup);
+        Assert.Equal(3, await db.PlaylistEntries.CountAsync());
+    }
+
+    [Fact]
     public async Task GetLyricsAsync_UsesCanonicalMetadataForLinkedObservation()
     {
         await using var db = CreateDb();
-        var track = new Track
-        {
-            Id = Guid.NewGuid(),
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-            {
-                Title = "Canonical Song",
-                Artist = "Canonical Artist"
-            })
-        };
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(),
+        var track = new Track {
+            Id = Guid.NewGuid() };
+        AttachPublicFacts(track, new ProviderCatalogFacts { Title = "Canonical Song", Artist = "Canonical Artist" });
+        var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
+            Id = Guid.NewGuid(), OwnerUserId = 7,
             SourceType = "youtube",
             ExternalId = "video-id",
             Title = "Raw video title",
             MatchStatus = TrackMatchingStatuses.Matched,
             TrackId = track.Id
-        };
+         };
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
-        db.AddRange(track, observation, playlist, new PlaylistEntry
-        {
+        db.AddRange(track, observation, playlist, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
-            TrackObservationId = observation.Id,
+            TrackObservationId = observation.Id, TrackId = track.Id,
             Position = 0
         });
         await db.SaveChangesAsync();
@@ -133,19 +206,18 @@ public sealed class LyricsServiceTests
     public async Task GetLyricsAsync_UsesParsedMetadataForUnlinkedObservation()
     {
         await using var db = CreateDb();
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(),
+            OwnerUserId = 7,
             SourceType = "youtube",
             ExternalId = "video-id",
             Title = "Test Artist - Test Song (Official Video)",
             Artist = "Test Artist",
             DurationSeconds = 200,
             MatchStatus = TrackMatchingStatuses.NoMatch
-        };
+         };
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
-        db.AddRange(observation, playlist, new PlaylistEntry
-        {
+        db.AddRange(observation, playlist, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
             TrackObservationId = observation.Id,
@@ -168,18 +240,17 @@ public sealed class LyricsServiceTests
     public async Task GetLyricsAsync_RejectsObservationOutsideUsersLibrary()
     {
         await using var db = CreateDb();
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(),
+            OwnerUserId = 8,
             SourceType = "spotify",
             ExternalId = "source-id",
             Title = "Private Song",
             Artist = "Private Artist",
             MatchStatus = TrackMatchingStatuses.NoMatch
-        };
+         };
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 8, Name = "Private" };
-        db.AddRange(observation, playlist, new PlaylistEntry
-        {
+        db.AddRange(observation, playlist, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
             TrackObservationId = observation.Id,
@@ -199,17 +270,16 @@ public sealed class LyricsServiceTests
     public async Task GetLyricsAsync_ReturnsUnavailableForObservationWithoutArtist()
     {
         await using var db = CreateDb();
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(),
+            OwnerUserId = 7,
             SourceType = "spotify",
             ExternalId = "source-id",
             Title = "Song Without Artist",
             MatchStatus = TrackMatchingStatuses.NoMatch
-        };
+         };
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
-        db.AddRange(observation, playlist, new PlaylistEntry
-        {
+        db.AddRange(observation, playlist, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
             TrackObservationId = observation.Id,
@@ -245,13 +315,9 @@ public sealed class LyricsServiceTests
         await using var db = CreateDb();
         var trackId = Guid.NewGuid();
         var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Favorites" };
-        var track = new Track
-        {
-            Id = trackId,
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata { Title = "Test Song" })
-        };
-        db.AddRange(playlist, track, new PlaylistEntry
-        {
+        var track = new Track {
+            Id = trackId };
+        db.AddRange(playlist, track, new PlaylistEntry { OwnerUserId = playlist.UserId,
             Id = Guid.NewGuid(),
             PlaylistId = playlist.Id,
             TrackId = trackId,
@@ -267,12 +333,64 @@ public sealed class LyricsServiceTests
         Assert.Null(provider.Lookup);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetLyricsAsync_PublicInputRetainsDurationWithoutRecordingAssociation(bool linked)
+    {
+        await using var db = CreateDb();
+        var track = new Track { Id = Guid.NewGuid() };
+        var item = AttachPublicFacts(new Track { Id = Guid.NewGuid() }, new ProviderCatalogFacts
+        { Title = "Test Song", Artist = "Test Artist", DurationSeconds = 203 });
+        item.TrackId = null;
+        item.AssociationState = RecordingAssociationState.Unknown;
+        var observation = new TrackObservation
+        { Id = Guid.NewGuid(), OwnerUserId = 7, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            MatchStatus = TrackMatchingStatuses.Pending };
+        ObservationInput.SetPublic(observation, item);
+        var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 7, Name = "Saved" };
+        db.AddRange(track, item, observation, playlist, new PlaylistEntry
+        {
+            Id = Guid.NewGuid(), OwnerUserId = 7, PlaylistId = playlist.Id,
+            TrackObservationId = observation.Id, TrackId = linked ? track.Id : null, Position = 0
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var provider = new CapturingProvider();
+
+        var result = await new LyricsService(db, provider).GetLyricsAsync(7,
+            linked ? $"track:{track.Id}" : $"observation:{observation.Id}", default);
+
+        Assert.NotNull(result);
+        Assert.Equal(203, provider.Lookup?.DurationSeconds);
+        Assert.Null((await db.TrackObservations.SingleAsync()).DurationSeconds);
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+    }
+
     private static ApplicationDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new ApplicationDbContext(options);
+    }
+
+    private static ProviderCatalogItem AttachPublicFacts(Track track, ProviderCatalogFacts facts)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = $"spotify-{Guid.NewGuid():N}", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(facts), VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VisibilityState = CatalogVisibility.Public, VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
+
+
+        track.Isrc = facts.Isrc;
+        track.MbidRecording = facts.MusicBrainzRecordingId;
+        track.VersionFlags = facts.VersionFlags;
+        track.ProviderItems.Add(CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision));
+        return item;
     }
 
     private sealed class CapturingProvider : ILyricsProvider

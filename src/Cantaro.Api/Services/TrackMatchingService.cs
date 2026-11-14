@@ -57,9 +57,12 @@ public class TrackMatchingService
     public async Task<TrackObservation> ProcessObservationAsync(Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
-            .Include(o => o.Candidates)
+            .Include(o => o.ProviderCatalogItem)
+            .Include(o => o.Candidates).ThenInclude(c => c.ProviderCatalogItem)
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
+
+        EnsureProcessable(observation);
 
         return await ProcessObservationAsync(observation, cancellationToken);
     }
@@ -69,30 +72,34 @@ public class TrackMatchingService
         CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
-            .Include(item => item.Candidates)
+            .Include(o => o.ProviderCatalogItem)
+            .Include(item => item.Candidates).ThenInclude(c => c.ProviderCatalogItem)
             .FirstOrDefaultAsync(item => item.Id == observationId, cancellationToken);
         if (observation is null || observation.TrackId != null)
         {
             return null;
         }
+        if (!IsProcessable(observation)) return null;
 
         return await TryResolveFromStoredCandidatesAsync(
             observation,
-            TrackObservationParser.Parse(observation),
+            TrackObservationParser.Parse(Input(observation)),
             cancellationToken);
     }
 
     public async Task<TrackObservation> AcceptCandidateAsync(Guid observationId, Guid candidateId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
-            .Include(o => o.Candidates)
+            .Include(o => o.ProviderCatalogItem)
+            .Include(o => o.Candidates).ThenInclude(c => c.ProviderCatalogItem)
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
+        EnsureProcessable(observation);
 
         var candidate = observation.Candidates.FirstOrDefault(c => c.Id == candidateId)
             ?? throw new InvalidOperationException($"Candidate {candidateId} does not belong to observation {observationId}.");
 
-        await ResolveObservationToTrackAsync(observation, candidate, "Resolved by manual candidate selection.", cancellationToken);
+        await ResolveObservationToTrackAsync(observation, candidate, "Resolved by manual candidate selection.", cancellationToken, manualReview: true);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return observation;
     }
@@ -104,9 +111,38 @@ public class TrackMatchingService
         CancellationToken cancellationToken)
     {
         ValidateVersionFlags(versionFlags);
+        if (_dbContext.Database.CurrentTransaction is not null || _dbContext.ChangeTracker.HasChanges())
+            throw new InvalidOperationException("Version acceptance requires a clean context without an active transaction.");
+        _dbContext.ChangeTracker.Clear();
+        return await new PlaylistSyncCoordinator.PlaylistTransactionStrategy(_dbContext).ExecuteAsync(async () =>
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await AcceptCandidateVersionCoreAsync(observationId, candidateId, versionFlags, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                _dbContext.ChangeTracker.Clear();
+                for (Exception? cause = exception; cause is not null; cause = cause.InnerException)
+                    if (cause is Npgsql.PostgresException { SqlState: "40001" or "40P01" })
+                        throw new InvalidOperationException("Concurrent version acceptance conflicted. Retry with a fresh request.", exception);
+                throw;
+            }
+        });
+    }
+
+    private async Task<TrackObservation> AcceptCandidateVersionCoreAsync(Guid observationId, Guid candidateId,
+        TrackVersionFlags versionFlags, CancellationToken cancellationToken)
+    {
 
         var observation = await _dbContext.TrackObservations
-            .Include(item => item.Candidates)
+            .Include(o => o.ProviderCatalogItem)
+            .Include(item => item.Candidates).ThenInclude(c => c.ProviderCatalogItem)
             .FirstOrDefaultAsync(item => item.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException(
                 $"Track observation {observationId} was not found.");
@@ -130,9 +166,11 @@ public class TrackMatchingService
                 "This observation has already been resolved to a Track.");
         }
 
+        EnsureProcessable(observation);
         var originalUpdatedAt = observation.UpdatedAt;
         var claimedAt = DateTimeOffset.UtcNow;
         var claimed = await _dbContext.TrackObservations
+            .Include(o => o.ProviderCatalogItem)
             .Where(item =>
                 item.Id == observationId
                 && item.TrackId == null
@@ -147,7 +185,8 @@ public class TrackMatchingService
         {
             _dbContext.ChangeTracker.Clear();
             var current = await _dbContext.TrackObservations
-                .Include(item => item.Candidates)
+            .Include(o => o.ProviderCatalogItem)
+                .Include(item => item.Candidates).ThenInclude(c => c.ProviderCatalogItem)
                 .SingleAsync(item => item.Id == observationId, cancellationToken);
             if (await IsAcceptedCandidateVersionResolutionAsync(
                     current,
@@ -163,41 +202,36 @@ public class TrackMatchingService
         }
         observation.UpdatedAt = claimedAt;
 
+        var candidateInput = await TrackMatchCandidateInput.ReloadAsync(_dbContext, candidate, cancellationToken);
         var anchorTrack = await ResolveCandidateAnchorTrackAsync(
             candidate,
+            observation.OwnerUserId,
             cancellationToken);
         var targetSongId = await GetSingleSongIdAsync(
             anchorTrack.Id,
             cancellationToken);
-        var parsedObservation = TrackObservationParser.Parse(observation);
-        var artistIdentity = ReadCandidateArtistIdentity(candidate.RawMetadata);
+        var parsedObservation = TrackObservationParser.Parse(Input(observation));
         var versionEvidence = CreateVersionEvidence(
             observation,
             candidate,
-            parsedObservation,
             versionFlags,
             "manual-candidate-version");
         var versionTrack = await CreateTrackAsync(
             mbidRecording: null,
             isrc: null,
-            title: candidate.Title,
-            artist: candidate.Artist ?? parsedObservation.DisplayArtist,
-            durationSeconds: observation.DurationSeconds,
+            title: candidateInput.Title,
+            artist: candidateInput.Artist ?? parsedObservation.DisplayArtist,
+            durationSeconds: Input(observation).DurationSeconds,
             description: null,
-            thumbnailUrl: observation.ThumbnailUrl,
-            artistMusicBrainzId: artistIdentity.MusicBrainzId,
-            artistSortName: artistIdentity.SortName,
+            thumbnailUrl: null,
+            artistMusicBrainzId: null,
+            artistSortName: null,
             targetSongId,
             versionFlags,
             versionEvidence,
-            cancellationToken);
+            cancellationToken, artistIdentities: null);
 
-        await EnsureSourceMappingAsync(
-            versionTrack.Id,
-            observation.SourceType,
-            observation.ExternalId,
-            cancellationToken);
-
+        candidate.AnchorTrackId = anchorTrack.Id;
         candidate.IsAccepted = true;
         observation.TrackId = versionTrack.Id;
         observation.MatchStatus = TrackMatchingStatuses.Matched;
@@ -263,6 +297,7 @@ public class TrackMatchingService
     public async Task<TrackObservation> MarkNotMusicAsync(Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
+            .Include(o => o.ProviderCatalogItem)
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
@@ -296,6 +331,7 @@ public class TrackMatchingService
     public async Task<TrackObservation> CreateTrackFromObservationAsync(Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await _dbContext.TrackObservations
+            .Include(o => o.ProviderCatalogItem)
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
@@ -310,6 +346,7 @@ public class TrackMatchingService
     {
         ArgumentNullException.ThrowIfNull(candidate);
         var observation = await _dbContext.TrackObservations
+            .Include(o => o.ProviderCatalogItem)
             .FirstOrDefaultAsync(o => o.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException($"Track observation {observationId} was not found.");
 
@@ -322,64 +359,36 @@ public class TrackMatchingService
         CancellationToken cancellationToken,
         bool manualReview = false)
     {
+        EnsureProcessable(observation);
         var candidateIdentity = matchedCandidate == null ? null : await _identityResolver.ResolveExistingAsync(
             new TrackIdentityQuery(
                 matchedCandidate.CandidateSource,
                 matchedCandidate.ExternalId,
                 matchedCandidate.Title,
                 matchedCandidate.Artist,
-                matchedCandidate.DurationSeconds ?? observation.DurationSeconds,
+                matchedCandidate.DurationSeconds ?? Input(observation).DurationSeconds,
                 matchedCandidate.Isrc,
                 matchedCandidate.MbidRecording,
                 matchedCandidate.ArtistCredits,
-                matchedCandidate.RawMetadata),
+                matchedCandidate.RawMetadata,
+                OwnerUserId: observation.OwnerUserId),
             cancellationToken);
         if (observation.TrackId != null)
         {
             if (matchedCandidate != null)
             {
                 var trackId = observation.TrackId.Value;
+                var observedPublicMapping = await new ProviderRecordingAssociations(_dbContext, _options)
+                    .FindUsableAsync(observation.SourceType, observation.ExternalId, cancellationToken);
+                if (observedPublicMapping is not null && observedPublicMapping.TrackId != trackId)
+                    throw new InvalidOperationException("The verified provider recording belongs to a different Track.");
                 if (candidateIdentity is not null && candidateIdentity.Track.Id != trackId)
                 {
                     throw new InvalidOperationException(
                         "The accepted catalog recording belongs to a different Track.");
                 }
 
-                var identities = new List<(string SourceType, string ExternalId)>
-                {
-                    (observation.SourceType, observation.ExternalId)
-                };
-                if (!string.IsNullOrWhiteSpace(matchedCandidate.CandidateSource)
-                    && !string.IsNullOrWhiteSpace(matchedCandidate.ExternalId))
-                {
-                    identities.Add((matchedCandidate.CandidateSource, matchedCandidate.ExternalId));
-                }
-                if (!string.IsNullOrWhiteSpace(matchedCandidate.MbidRecording)
-                    && (!string.Equals(matchedCandidate.CandidateSource, "musicbrainz", StringComparison.OrdinalIgnoreCase)
-                        || !string.Equals(matchedCandidate.ExternalId, matchedCandidate.MbidRecording,
-                            StringComparison.OrdinalIgnoreCase)))
-                {
-                    identities.Add(("musicbrainz", matchedCandidate.MbidRecording));
-                }
-
-                foreach (var (sourceType, externalId) in identities.Distinct())
-                {
-                    var mapped = _dbContext.TrackSourceIds.Local.FirstOrDefault(source =>
-                        source.SourceType == sourceType && source.ExternalId == externalId);
-                    mapped ??= await _dbContext.TrackSourceIds.FirstOrDefaultAsync(source =>
-                        source.SourceType == sourceType && source.ExternalId == externalId,
-                        cancellationToken);
-                    if (mapped is not null && mapped.TrackId != trackId)
-                    {
-                        throw new InvalidOperationException(
-                            "The accepted catalog recording belongs to a different Track.");
-                    }
-                }
-
-                foreach (var (sourceType, externalId) in identities.Distinct())
-                {
-                    await EnsureSourceMappingAsync(trackId, sourceType, externalId, cancellationToken);
-                }
+                var existing = await _dbContext.Tracks.SingleAsync(t => t.Id == trackId, cancellationToken);
                 observation.MatchStatus = TrackMatchingStatuses.Matched;
                 observation.UpdatedAt = DateTimeOffset.UtcNow;
                 await _playlistReconciler.ReconcileObservationAsync(observation.Id, trackId, cancellationToken);
@@ -389,71 +398,40 @@ public class TrackMatchingService
         }
 
         var parsed = matchedCandidate == null
-            ? TrackObservationParser.Parse(observation)
+            ? TrackObservationParser.Parse(Input(observation))
             : TrackMetadataParser.Parse(matchedCandidate.Title, matchedCandidate.Artist);
         var inferredFlags = TrackVersionClassifier.Infer(parsed);
         var existingTrack = candidateIdentity?.Track;
         var track = existingTrack ?? await CreateTrackAsync(
-            mbidRecording: matchedCandidate?.MbidRecording,
-            isrc: matchedCandidate?.Isrc,
+            mbidRecording: null,
+            isrc: null,
             title: matchedCandidate?.Title ?? parsed.DisplayTitle,
             artist: matchedCandidate?.Artist ?? parsed.DisplayArtist,
-            durationSeconds: matchedCandidate?.DurationSeconds ?? observation.DurationSeconds,
+            durationSeconds: matchedCandidate?.DurationSeconds ?? Input(observation).DurationSeconds,
             description: null,
-            thumbnailUrl: observation.ThumbnailUrl,
-            artistMusicBrainzId: matchedCandidate?.ArtistMusicBrainzId,
-            artistSortName: matchedCandidate?.ArtistSortName,
+            thumbnailUrl: null,
+            artistMusicBrainzId: null,
+            artistSortName: null,
             targetSongId: null,
             inferredFlags,
             CreateVersionEvidence(
                 observation,
-                candidate: null,
-                parsed,
+                null,
                 inferredFlags,
                 matchedCandidate == null ? "manual-observation-track"
-                    : manualReview ? "playlist-manual-review" : "automatic-catalog-match",
-                matchedCandidate?.ExternalId),
-            cancellationToken);
+                    : manualReview ? "playlist-manual-review" : "automatic-catalog-match"),
+            cancellationToken, artistIdentities: null);
+
+        if (existingTrack is null && matchedCandidate is not null && !manualReview
+            && matchedCandidate.ProviderCatalogItemId is not null)
+            await new ProviderRecordingAssociations(_dbContext, _options)
+                .TryAssociateCandidateAsync(track, matchedCandidate, independentFacts: null,
+                    providerOrigin: true, cancellationToken);
 
         if (existingTrack != null && matchedCandidate != null)
         {
-            if (string.IsNullOrWhiteSpace(track.MbidRecording)
-                && !string.IsNullOrWhiteSpace(matchedCandidate.MbidRecording))
-            {
-                track.MbidRecording = matchedCandidate.MbidRecording.Trim().ToLowerInvariant();
-            }
-            if (string.IsNullOrWhiteSpace(track.Isrc)
-                && !string.IsNullOrWhiteSpace(matchedCandidate.Isrc))
-            {
-                track.Isrc = TrackIdentityResolver.NormalizeIsrc(matchedCandidate.Isrc);
-            }
-            await EnsurePrimaryArtistCreditAsync(
-                track,
-                matchedCandidate.Artist,
-                matchedCandidate.ArtistMusicBrainzId,
-                matchedCandidate.ArtistSortName,
-                cancellationToken);
-            TrackArtworkUpdater.FillMissingCanonicalThumbnail(track, observation.ThumbnailUrl);
+            // A destination choice that resolves to an existing Track stays scoped.
             track.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
-        await EnsureSourceMappingAsync(track.Id, observation.SourceType, observation.ExternalId, cancellationToken);
-        if (matchedCandidate != null)
-        {
-            if (!string.IsNullOrWhiteSpace(matchedCandidate.CandidateSource)
-                && !string.IsNullOrWhiteSpace(matchedCandidate.ExternalId))
-            {
-                await EnsureSourceMappingAsync(
-                    track.Id, matchedCandidate.CandidateSource, matchedCandidate.ExternalId, cancellationToken);
-            }
-            if (!string.IsNullOrWhiteSpace(matchedCandidate.MbidRecording)
-                && (!string.Equals(matchedCandidate.CandidateSource, "musicbrainz", StringComparison.OrdinalIgnoreCase)
-                    || !string.Equals(matchedCandidate.ExternalId, matchedCandidate.MbidRecording,
-                        StringComparison.OrdinalIgnoreCase)))
-            {
-                await EnsureSourceMappingAsync(
-                    track.Id, "musicbrainz", matchedCandidate.MbidRecording, cancellationToken);
-            }
         }
 
         observation.TrackId = track.Id;
@@ -472,6 +450,7 @@ public class TrackMatchingService
 
     private async Task<TrackObservation> ProcessObservationAsync(TrackObservation observation, CancellationToken cancellationToken)
     {
+        EnsureProcessable(observation);
         var now = DateTimeOffset.UtcNow;
 
         observation.MatchAttemptCount += 1;
@@ -479,16 +458,17 @@ public class TrackMatchingService
         observation.LastMatchError = null;
         observation.UpdatedAt = now;
 
-        var parsedObservation = TrackObservationParser.Parse(observation);
+        var parsedObservation = TrackObservationParser.Parse(Input(observation));
         var localIdentityMatch = await _identityResolver.ResolveExistingAsync(
             new TrackIdentityQuery(
                 observation.SourceType,
                 observation.ExternalId,
-                observation.Title,
-                observation.Artist,
-                observation.DurationSeconds,
+                Input(observation).Title,
+                Input(observation).Artist,
+                Input(observation).DurationSeconds,
                 ArtistCredits: parsedObservation.ArtistCredits,
-                RawMetadata: observation.RawMetadata),
+                RawMetadata: JsonSerializer.Serialize(Input(observation).Metadata),
+                OwnerUserId: observation.OwnerUserId),
             cancellationToken);
 
         if (localIdentityMatch != null)
@@ -496,28 +476,13 @@ public class TrackMatchingService
             if (localIdentityMatch.Kind != TrackIdentityMatchKind.ExactSource
                 && observation.Candidates.Count > 0)
             {
+                observation.AcceptedCandidateId = null;
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 _dbContext.TrackResolutionCandidates.RemoveRange(observation.Candidates);
                 observation.Candidates.Clear();
             }
 
-            await EnsurePrimaryArtistCreditAsync(
-                localIdentityMatch.Track,
-                ReadCanonicalArtist(localIdentityMatch.Track) ?? observation.Artist,
-                artistMusicBrainzId: null,
-                artistSortName: null,
-                cancellationToken);
-            TrackArtworkUpdater.FillMissingCanonicalThumbnail(
-                localIdentityMatch.Track,
-                observation.ThumbnailUrl);
-            if (localIdentityMatch.Kind != TrackIdentityMatchKind.ExactSource)
-            {
-                await EnsureSourceMappingAsync(
-                    localIdentityMatch.Track.Id,
-                    observation.SourceType,
-                    observation.ExternalId,
-                    cancellationToken);
-            }
-
+            // Linking a private observation does not change shared artist or artwork facts.
             observation.TrackId = localIdentityMatch.Track.Id;
             observation.MatchStatus = TrackMatchingStatuses.Matched;
             observation.ResolutionNotes = localIdentityMatch.Reason;
@@ -546,8 +511,8 @@ public class TrackMatchingService
             {
                 try
                 {
-                    var providerCandidates = await provider.SearchAsync(observation, cancellationToken);
-                    scoredCandidates.AddRange(providerCandidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, _options)));
+                    var providerCandidates = await provider.SearchAsync(Input(observation), cancellationToken);
+                    scoredCandidates.AddRange(providerCandidates.Select(candidate => TrackMatchScorer.Score(Input(observation), candidate, _options)));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -571,6 +536,8 @@ public class TrackMatchingService
 
             if (observation.Candidates.Count > 0)
             {
+                observation.AcceptedCandidateId = null;
+                await _dbContext.SaveChangesAsync(cancellationToken);
                 _dbContext.TrackResolutionCandidates.RemoveRange(observation.Candidates);
                 observation.Candidates.Clear();
             }
@@ -596,14 +563,16 @@ public class TrackMatchingService
                     TrackObservationId = observation.Id,
                     CandidateSource = result.Candidate.CandidateSource,
                     ExternalId = result.Candidate.ExternalId,
-                    Title = result.Candidate.Title,
-                    Artist = result.Candidate.Artist,
-                    MbidRecording = result.Candidate.MbidRecording,
-                    Isrc = result.Candidate.Isrc,
-                    DurationSeconds = result.Candidate.DurationSeconds,
+                    ProviderCatalogItemId = result.Candidate.ProviderCatalogItemId,
+                    ProviderCatalogRevision = result.Candidate.ProviderCatalogRevision,
+                    Title = result.Candidate.ProviderCatalogItemId == null ? result.Candidate.Title : null,
+                    Artist = result.Candidate.ProviderCatalogItemId == null ? result.Candidate.Artist : null,
+                    MbidRecording = result.Candidate.ProviderCatalogItemId == null ? result.Candidate.MbidRecording : null,
+                    Isrc = result.Candidate.ProviderCatalogItemId == null ? result.Candidate.Isrc : null,
+                    DurationSeconds = result.Candidate.ProviderCatalogItemId == null ? result.Candidate.DurationSeconds : null,
                     Score = result.Score,
                     Explanation = BuildCandidateExplanation(result),
-                    RawMetadata = SerializeCandidateMetadata(result, cluster),
+                    EvaluationJson = SerializeCandidateMetadata(result, cluster),
                     CreatedAt = now
                 };
 
@@ -618,7 +587,7 @@ public class TrackMatchingService
                 observation.ResolutionNotes = decision.ResolutionNotes;
                 observation.AcceptedCandidateId = null;
                 PersistObservationDiagnostics(observation, CreateObservationDiagnostics(
-                    rankedCandidates.FirstOrDefault()?.ObservationMetadata ?? TrackObservationParser.Parse(observation),
+                    rankedCandidates.FirstOrDefault()?.ObservationMetadata ?? TrackObservationParser.Parse(Input(observation)),
                     decision.DecisionReason,
                     decision.TopScore,
                     decision.SecondDistinctScore,
@@ -672,6 +641,13 @@ public class TrackMatchingService
         {
             throw;
         }
+        catch (DbUpdateException)
+        {
+            // A failed write may leave catalog/association work staged in this
+            // context. Let the worker retry with a fresh scope instead of saving
+            // the failed change tracker again while recording a matching error.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Track matching failed for observation {ObservationId}", observation.Id);
@@ -682,7 +658,7 @@ public class TrackMatchingService
             PersistObservationDiagnostics(
                 observation,
                 CreateObservationDiagnostics(
-                    TrackObservationParser.Parse(observation),
+                    TrackObservationParser.Parse(Input(observation)),
                     $"Matching failed: {ex.Message}",
                     topScore: null,
                     secondDistinctScore: null,
@@ -703,19 +679,9 @@ public class TrackMatchingService
             return null;
         }
 
-        var assessment = TrackMatchDecisionEngine.Evaluate(observation, observation.Candidates
-            .Select(candidate => new TrackMatchSearchCandidate
-            {
-                CandidateSource = candidate.CandidateSource,
-                ExternalId = candidate.ExternalId,
-                Title = candidate.Title,
-                Artist = candidate.Artist,
-                MbidRecording = candidate.MbidRecording,
-                Isrc = candidate.Isrc,
-                DurationSeconds = candidate.DurationSeconds,
-                Explanation = candidate.Explanation,
-                RawMetadata = candidate.RawMetadata
-            }), _options);
+        var candidates = observation.Candidates.Select(c => TrackMatchCandidateInput.Read(c, DateTimeOffset.UtcNow))
+            .Where(c => c != null).Cast<TrackMatchSearchCandidate>();
+        var assessment = TrackMatchDecisionEngine.Evaluate(Input(observation), candidates, _options);
         var rankedCandidates = assessment.Ranked;
         var clusters = assessment.Clusters;
         var decision = assessment.Decision;
@@ -770,59 +736,52 @@ public class TrackMatchingService
         TrackObservation observation,
         TrackResolutionCandidate candidate,
         string resolutionNotes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool manualReview = false)
     {
+        var input = await TrackMatchCandidateInput.ReloadAsync(_dbContext, candidate, cancellationToken);
         var identityMatch = await _identityResolver.ResolveExistingAsync(
             new TrackIdentityQuery(
-                observation.SourceType,
-                observation.ExternalId,
-                candidate.Title,
-                candidate.Artist,
-                candidate.DurationSeconds ?? observation.DurationSeconds,
-                candidate.Isrc,
-                candidate.MbidRecording,
-                TrackMetadataParser.Parse(candidate.Title, candidate.Artist).ArtistCredits),
+                input.CandidateSource,
+                input.ExternalId,
+                input.Title,
+                input.Artist,
+                input.DurationSeconds ?? Input(observation).DurationSeconds,
+                input.Isrc,
+                input.MbidRecording,
+                TrackMetadataParser.Parse(input.Title, input.Artist).ArtistCredits,
+                OwnerUserId: observation.OwnerUserId),
             cancellationToken);
         var existingTrack = identityMatch?.Track;
-        var artistIdentity = ReadCandidateArtistIdentity(candidate.RawMetadata);
         var track = existingTrack ?? await CreateTrackAsync(
-            candidate.MbidRecording,
-            candidate.Isrc,
-            candidate.Title,
-            candidate.Artist,
-            candidate.DurationSeconds ?? observation.DurationSeconds,
+            mbidRecording: null,
+            isrc: null,
+            input.Title,
+            input.Artist,
+            input.DurationSeconds ?? Input(observation).DurationSeconds,
             description: null,
-            thumbnailUrl: observation.ThumbnailUrl,
-            artistMusicBrainzId: artistIdentity.MusicBrainzId,
-            artistSortName: artistIdentity.SortName,
-            cancellationToken);
+            thumbnailUrl: null,
+            artistMusicBrainzId: null,
+            artistSortName: null,
+            cancellationToken, artistIdentities: null);
 
-        if (existingTrack != null)
+        var catalogReference = candidate.ProviderCatalogItemId;
+        var searchCandidate = new TrackMatchSearchCandidate
         {
-            await EnsurePrimaryArtistCreditAsync(
-                track,
-                candidate.Artist,
-                artistIdentity.MusicBrainzId,
-                artistIdentity.SortName,
-                cancellationToken);
-            TrackArtworkUpdater.FillMissingCanonicalThumbnail(
-                track,
-                observation.ThumbnailUrl);
-        }
-
-        await EnsureSourceMappingAsync(track.Id, observation.SourceType, observation.ExternalId, cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(candidate.CandidateSource)
-            && !string.IsNullOrWhiteSpace(candidate.ExternalId))
+            CandidateSource = candidate.CandidateSource,
+            ExternalId = candidate.ExternalId,
+            Title = input.Title,
+            Artist = input.Artist,
+            DurationSeconds = input.DurationSeconds,
+            Isrc = input.Isrc,
+            MbidRecording = input.MbidRecording,
+            ProviderCatalogItemId = candidate.ProviderCatalogItemId,
+            ProviderCatalogRevision = candidate.ProviderCatalogRevision
+        };
+        if (!manualReview && existingTrack is null && catalogReference is not null)
         {
-            await EnsureSourceMappingAsync(track.Id, candidate.CandidateSource, candidate.ExternalId, cancellationToken);
-        }
-
-        if (!string.IsNullOrWhiteSpace(candidate.MbidRecording)
-            && (!string.Equals(candidate.CandidateSource, "musicbrainz", StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(candidate.ExternalId, candidate.MbidRecording, StringComparison.OrdinalIgnoreCase)))
-        {
-            await EnsureSourceMappingAsync(track.Id, "musicbrainz", candidate.MbidRecording, cancellationToken);
+            await new ProviderRecordingAssociations(_dbContext, _options).TryAssociateCandidateAsync(
+                track, searchCandidate, independentFacts: null, providerOrigin: true, cancellationToken);
         }
 
         candidate.IsAccepted = true;
@@ -837,80 +796,43 @@ public class TrackMatchingService
 
     private async Task<Track> ResolveCandidateAnchorTrackAsync(
         TrackResolutionCandidate candidate,
+        int? ownerUserId,
         CancellationToken cancellationToken)
     {
+        var input = await TrackMatchCandidateInput.ReloadAsync(_dbContext, candidate, cancellationToken);
         var parsedCandidate = TrackMetadataParser.Parse(
-            candidate.Title,
-            candidate.Artist);
+            input.Title,
+            input.Artist);
         var identityMatch = await _identityResolver.ResolveExistingAsync(
             new TrackIdentityQuery(
                 candidate.CandidateSource,
                 candidate.ExternalId,
-                candidate.Title,
-                candidate.Artist,
-                candidate.DurationSeconds,
-                candidate.Isrc,
-                candidate.MbidRecording,
+                input.Title,
+                input.Artist,
+                input.DurationSeconds,
+                input.Isrc,
+                input.MbidRecording,
                 parsedCandidate.ArtistCredits,
-                RawMetadata: TrackMatchCandidateStoredMetadata.ReadProviderMetadata(candidate.RawMetadata)),
+                RawMetadata: input.RawMetadata,
+                OwnerUserId: ownerUserId),
             cancellationToken);
-        var artistIdentity = ReadCandidateArtistIdentity(candidate.RawMetadata);
-        var anchorTrack = identityMatch?.Track ?? await CreateTrackAsync(
-            candidate.MbidRecording,
-            candidate.Isrc,
-            candidate.Title,
-            candidate.Artist,
-            candidate.DurationSeconds,
+        var ownedAnchorIds = await OwnedCandidateAnchorInput.FindAnchorIdsAsync(_dbContext,
+            ownerUserId, candidate.CandidateSource, candidate.ExternalId, cancellationToken);
+        if (identityMatch?.Kind != TrackIdentityMatchKind.ExactSource && ownedAnchorIds.Count > 1)
+            throw new InvalidOperationException("The selected candidate has conflicting original recordings and requires review.");
+        var retainedAnchor = identityMatch?.Kind != TrackIdentityMatchKind.ExactSource && ownedAnchorIds.Count == 1
+            ? await _dbContext.Tracks.SingleAsync(t => t.Id == ownedAnchorIds[0], cancellationToken) : null;
+        var anchorTrack = (identityMatch?.Kind == TrackIdentityMatchKind.ExactSource ? identityMatch.Track : retainedAnchor ?? identityMatch?.Track) ?? await CreateTrackAsync(
+            mbidRecording: null,
+            isrc: null,
+            input.Title,
+            input.Artist,
+            input.DurationSeconds,
             description: null,
             thumbnailUrl: null,
-            artistMusicBrainzId: artistIdentity.MusicBrainzId,
-            artistSortName: artistIdentity.SortName,
-            cancellationToken);
-
-        if (identityMatch != null)
-        {
-            if (string.IsNullOrWhiteSpace(anchorTrack.MbidRecording)
-                && !string.IsNullOrWhiteSpace(candidate.MbidRecording))
-            {
-                anchorTrack.MbidRecording = candidate.MbidRecording.Trim().ToLowerInvariant();
-            }
-
-            if (string.IsNullOrWhiteSpace(anchorTrack.Isrc)
-                && !string.IsNullOrWhiteSpace(candidate.Isrc))
-            {
-                anchorTrack.Isrc = TrackIdentityResolver.NormalizeIsrc(candidate.Isrc);
-            }
-
-            anchorTrack.UpdatedAt = DateTimeOffset.UtcNow;
-            await EnsurePrimaryArtistCreditAsync(
-                anchorTrack,
-                candidate.Artist,
-                artistIdentity.MusicBrainzId,
-                artistIdentity.SortName,
-                cancellationToken);
-        }
-
-        await EnsureSourceMappingAsync(
-            anchorTrack.Id,
-            candidate.CandidateSource,
-            candidate.ExternalId,
-            cancellationToken);
-        if (!string.IsNullOrWhiteSpace(candidate.MbidRecording)
-            && (!string.Equals(
-                    candidate.CandidateSource,
-                    "musicbrainz",
-                    StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(
-                    candidate.ExternalId,
-                    candidate.MbidRecording,
-                    StringComparison.OrdinalIgnoreCase)))
-        {
-            await EnsureSourceMappingAsync(
-                anchorTrack.Id,
-                "musicbrainz",
-                candidate.MbidRecording,
-                cancellationToken);
-        }
+            artistMusicBrainzId: null,
+            artistSortName: null,
+            cancellationToken, artistIdentities: null);
 
         return anchorTrack;
     }
@@ -967,7 +889,8 @@ public class TrackMatchingService
         string? thumbnailUrl,
         string? artistMusicBrainzId,
         string? artistSortName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<ArtistCreditMetadata>? artistIdentities = null)
         => await CreateTrackAsync(
             mbidRecording,
             isrc,
@@ -981,7 +904,7 @@ public class TrackMatchingService
             targetSongId: null,
             TrackVersionFlags.None,
             versionEvidence: null,
-            cancellationToken);
+            cancellationToken, artistIdentities);
 
     private async Task<Track> CreateTrackAsync(
         string? mbidRecording,
@@ -996,7 +919,8 @@ public class TrackMatchingService
         Guid? targetSongId,
         TrackVersionFlags versionFlags,
         string? versionEvidence,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<ArtistCreditMetadata>? artistIdentities = null)
     {
         var now = DateTimeOffset.UtcNow;
         var song = targetSongId == null
@@ -1015,14 +939,6 @@ public class TrackMatchingService
             Isrc = TrackIdentityResolver.NormalizeIsrc(isrc),
             VersionFlags = versionFlags,
             VersionEvidence = versionEvidence,
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-            {
-                Title = title,
-                Artist = artist,
-                Description = description,
-                ThumbnailUrl = thumbnailUrl,
-                DurationSeconds = durationSeconds
-            }),
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -1042,33 +958,20 @@ public class TrackMatchingService
         {
             _dbContext.AddRange(song, track, membership);
         }
-        await EnsurePrimaryArtistCreditAsync(
-            track,
-            artist,
-            artistMusicBrainzId,
-            artistSortName,
-            cancellationToken);
         return track;
     }
 
     private static string CreateVersionEvidence(
         TrackObservation observation,
         TrackResolutionCandidate? candidate,
-        ParsedTrackMetadata parsedObservation,
         TrackVersionFlags selectedFlags,
-        string origin,
-        string? matchedCandidateExternalId = null) =>
+        string origin) =>
         JsonSerializer.Serialize(new
         {
             origin,
             selectedFlags = selectedFlags.ToString(),
             observationId = observation.Id,
-            observationTitle = observation.Title,
-            observationArtist = observation.Artist,
-            detectedVersionMarkers = parsedObservation.VersionMarkers,
-            detectedPlaybackModifiers = parsedObservation.PlaybackModifiers,
-            candidateId = candidate?.Id,
-            candidateExternalId = candidate?.ExternalId ?? matchedCandidateExternalId
+            candidateId = candidate?.Id
         });
 
     private static void ValidateVersionFlags(TrackVersionFlags versionFlags)
@@ -1093,180 +996,13 @@ public class TrackMatchingService
             .Replace("AlternateTake", "alternate take", StringComparison.Ordinal)
             .ToLowerInvariant();
 
-    private async Task EnsurePrimaryArtistCreditAsync(
-        Track track,
-        string? creditedArtist,
-        string? artistMusicBrainzId,
-        string? artistSortName,
-        CancellationToken cancellationToken)
+    private static bool IsProcessable(TrackObservation observation) =>
+        ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow) != null;
+
+    private static void EnsureProcessable(TrackObservation observation)
     {
-        var creditedName = creditedArtist?.Trim();
-        if (string.IsNullOrWhiteSpace(creditedName))
-        {
-            return;
-        }
-
-        var stableId = string.IsNullOrWhiteSpace(artistMusicBrainzId)
-            ? null
-            : artistMusicBrainzId.Trim().ToLowerInvariant();
-        var primaryCredit = track.ArtistCredits
-            .OrderBy(credit => credit.Position)
-            .FirstOrDefault(credit => credit.Role == TrackArtistRole.Primary);
-
-        if (primaryCredit != null)
-        {
-            if (stableId != null)
-            {
-                await AttachStableArtistIdentityAsync(primaryCredit, stableId, artistSortName, cancellationToken);
-            }
-
-            return;
-        }
-
-        Artist? artist = null;
-        if (stableId != null)
-        {
-            artist = _dbContext.Artists.Local.FirstOrDefault(existing =>
-                string.Equals(existing.MusicBrainzArtistId, stableId, StringComparison.OrdinalIgnoreCase));
-            artist ??= await _dbContext.Artists.FirstOrDefaultAsync(
-                existing => existing.MusicBrainzArtistId == stableId,
-                cancellationToken);
-        }
-
-        if (artist == null)
-        {
-            var now = DateTimeOffset.UtcNow;
-            artist = new Artist
-            {
-                Id = Guid.NewGuid(),
-                Name = creditedName,
-                SortName = string.IsNullOrWhiteSpace(artistSortName) ? null : artistSortName.Trim(),
-                MusicBrainzArtistId = stableId,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-            _dbContext.Artists.Add(artist);
-        }
-
-        var credit = new TrackArtistCredit
-        {
-            Id = Guid.NewGuid(),
-            TrackId = track.Id,
-            ArtistId = artist.Id,
-            Artist = artist,
-            Role = TrackArtistRole.Primary,
-            Position = track.ArtistCredits.Count == 0 ? 0 : track.ArtistCredits.Max(credit => credit.Position) + 1,
-            CreditedName = creditedName
-        };
-        track.ArtistCredits.Add(credit);
-        // Existing tracks discover an assigned-Guid dependent as Modified when
-        // it is added only through the navigation. Mark the new credit as Added
-        // explicitly so backfills insert instead of issuing a phantom update.
-        _dbContext.TrackArtistCredits.Add(credit);
-    }
-
-    private async Task AttachStableArtistIdentityAsync(
-        TrackArtistCredit credit,
-        string stableId,
-        string? artistSortName,
-        CancellationToken cancellationToken)
-    {
-        var currentArtist = credit.Artist;
-        if (currentArtist == null)
-        {
-            currentArtist = await _dbContext.Artists.FirstAsync(artist => artist.Id == credit.ArtistId, cancellationToken);
-            credit.Artist = currentArtist;
-        }
-
-        if (!string.IsNullOrWhiteSpace(currentArtist.MusicBrainzArtistId))
-        {
-            // A conflicting stable identity is not safe to overwrite implicitly.
-            return;
-        }
-
-        var stableArtist = _dbContext.Artists.Local.FirstOrDefault(artist =>
-            artist.Id != currentArtist.Id
-            && string.Equals(artist.MusicBrainzArtistId, stableId, StringComparison.OrdinalIgnoreCase));
-        stableArtist ??= await _dbContext.Artists.FirstOrDefaultAsync(
-            artist => artist.Id != currentArtist.Id && artist.MusicBrainzArtistId == stableId,
-            cancellationToken);
-
-        if (stableArtist != null)
-        {
-            credit.Artist = stableArtist;
-            credit.ArtistId = stableArtist.Id;
-            return;
-        }
-
-        currentArtist.MusicBrainzArtistId = stableId;
-        if (string.IsNullOrWhiteSpace(currentArtist.SortName) && !string.IsNullOrWhiteSpace(artistSortName))
-        {
-            currentArtist.SortName = artistSortName.Trim();
-        }
-        currentArtist.UpdatedAt = DateTimeOffset.UtcNow;
-    }
-
-    private static CandidateArtistIdentity ReadCandidateArtistIdentity(string? rawMetadata)
-    {
-        if (string.IsNullOrWhiteSpace(rawMetadata))
-        {
-            return default;
-        }
-
-        try
-        {
-            var metadata = JsonSerializer.Deserialize<TrackMatchCandidateStoredMetadata>(rawMetadata);
-            return new CandidateArtistIdentity(metadata?.ArtistMusicBrainzId, metadata?.ArtistSortName);
-        }
-        catch (JsonException)
-        {
-            return default;
-        }
-    }
-
-    private static string? ReadCanonicalArtist(Track track)
-    {
-        if (string.IsNullOrWhiteSpace(track.CanonicalMetadata))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata)?.Artist;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private async Task EnsureSourceMappingAsync(Guid trackId, string sourceType, string externalId, CancellationToken cancellationToken)
-    {
-        var existingSourceId = _dbContext.TrackSourceIds.Local.FirstOrDefault(sourceId =>
-            sourceId.SourceType == sourceType && sourceId.ExternalId == externalId);
-        existingSourceId ??= await _dbContext.TrackSourceIds
-            .FirstOrDefaultAsync(sourceId => sourceId.SourceType == sourceType && sourceId.ExternalId == externalId, cancellationToken);
-
-        if (existingSourceId != null)
-        {
-            if (existingSourceId.TrackId != trackId)
-            {
-                existingSourceId.TrackId = trackId;
-            }
-
-            existingSourceId.LastVerifiedAt = DateTimeOffset.UtcNow;
-            return;
-        }
-
-        _dbContext.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(),
-            TrackId = trackId,
-            SourceType = sourceType,
-            ExternalId = externalId,
-            LastVerifiedAt = DateTimeOffset.UtcNow
-        });
+        if (!IsProcessable(observation))
+            throw new InvalidOperationException("This observation needs current public facts or usable owner-private input before matching.");
     }
 
     private static string BuildCandidateExplanation(TrackMatchScoredCandidate result)
@@ -1274,18 +1010,6 @@ public class TrackMatchingService
         var parsedObservation = result.ObservationMetadata;
 
         var interpretation = string.Empty;
-        if (!string.Equals(parsedObservation.SearchTitle, result.ObservationTitle, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(parsedObservation.SearchArtist, result.ObservationArtist, StringComparison.OrdinalIgnoreCase))
-        {
-            interpretation = $" Interpreted as title '{parsedObservation.SearchTitle}'";
-            if (!string.IsNullOrWhiteSpace(parsedObservation.SearchArtist))
-            {
-                interpretation += $" and artist '{parsedObservation.SearchArtist}'";
-            }
-
-            interpretation += ".";
-        }
-
         var semanticExplanation = string.IsNullOrWhiteSpace(result.SemanticExplanation)
             ? string.Empty
             : $" {result.SemanticExplanation}";
@@ -1297,17 +1021,8 @@ public class TrackMatchingService
     {
         var metadata = new TrackMatchCandidateStoredMetadata
         {
-            ProviderRawMetadata = result.Candidate.RawMetadata,
-            ArtistMusicBrainzId = result.Candidate.ArtistMusicBrainzId,
-            ArtistSortName = result.Candidate.ArtistSortName,
             Matching = new TrackMatchCandidateDiagnostics
             {
-                ObservationSearchTitle = result.ObservationMetadata.SearchTitle,
-                ObservationSearchArtist = result.ObservationMetadata.SearchArtist,
-                CandidateSearchTitle = result.CandidateMetadata.SearchTitle,
-                CandidateSearchArtist = result.CandidateMetadata.SearchArtist,
-                ObservationArtistEvidenceLine = result.ObservationMetadata.ArtistEvidenceLine,
-                CandidateArtistEvidenceLine = result.CandidateMetadata.ArtistEvidenceLine,
                 ObservationVersionMarkers = [.. result.ObservationMetadata.VersionMarkers],
                 ObservationPlaybackModifiers = [.. result.ObservationMetadata.PlaybackModifiers],
                 CandidateVersionMarkers = [.. result.CandidateMetadata.VersionMarkers],
@@ -1324,7 +1039,7 @@ public class TrackMatchingService
             }
         };
 
-        return JsonSerializer.Serialize(metadata);
+        return JsonSerializer.Serialize(new { metadata.Matching });
     }
 
     private static TrackMatchObservationDiagnostics CreateObservationDiagnostics(
@@ -1345,38 +1060,13 @@ public class TrackMatchingService
         };
     }
 
+    private static ObservationInput Input(TrackObservation observation) =>
+        ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)
+        ?? throw new InvalidOperationException("Observation input is unavailable.");
+
     private static void PersistObservationDiagnostics(TrackObservation observation, TrackMatchObservationDiagnostics diagnostics)
     {
-        TrackObservationMetadata observationMetadata;
-        if (string.IsNullOrWhiteSpace(observation.RawMetadata))
-        {
-            observationMetadata = new TrackObservationMetadata();
-        }
-        else
-        {
-            try
-            {
-                observationMetadata = JsonSerializer.Deserialize<TrackObservationMetadata>(observation.RawMetadata) ?? new TrackObservationMetadata();
-            }
-            catch (JsonException)
-            {
-                observationMetadata = new TrackObservationMetadata();
-            }
-        }
-
-        observationMetadata.SourceType = observation.SourceType;
-        observationMetadata.ExternalId = observation.ExternalId;
-        observationMetadata.Title = observation.Title;
-        observationMetadata.Artist = observation.Artist;
-        var parsedObservation = TrackObservationParser.Parse(observation, observationMetadata);
-        observationMetadata.SearchTitle = parsedObservation.SearchTitle;
-        observationMetadata.SearchArtist = parsedObservation.SearchArtist;
-        observationMetadata.ThumbnailUrl = observation.ThumbnailUrl;
-        observationMetadata.DurationSeconds = observation.DurationSeconds;
-        observationMetadata.Matching = diagnostics;
-
-        observation.RawMetadata = JsonSerializer.Serialize(observationMetadata);
+        // Job decision text is retained without copying provider facts or search hypotheses.
+        observation.ResolutionNotes = diagnostics.DecisionReason;
     }
-
-    private readonly record struct CandidateArtistIdentity(string? MusicBrainzId, string? SortName);
 }

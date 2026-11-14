@@ -25,12 +25,11 @@ public sealed class SpotifySearchProviderTests
         var apiClient = new SpotifyApiClient(httpClient, options, new NoDelay());
         var tokenProvider = new SpotifyCatalogTokenProvider(apiClient, options, TimeProvider.System, new SpotifyCatalogTokenCache());
         var provider = new SpotifySearchProvider(apiClient, tokenProvider);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-1",
+        var observation = new ObservationInput {
+             SourceType = "youtube", ExternalId = "video-1",
             Title = "Zedd - Beautiful Now ft. Jon Bellion (Official Music Video)",
-            Artist = "Zedd, Jon Bellion", MatchStatus = "pending"
-        };
+            Artist = "Zedd, Jon Bellion",
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -56,11 +55,10 @@ public sealed class SpotifySearchProviderTests
             apiClient,
             new SpotifyCatalogTokenProvider(apiClient, options, TimeProvider.System, new SpotifyCatalogTokenCache()));
 
-        var candidates = await provider.SearchAsync(new TrackObservation
-        {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-1",
-            Title = "Strangers", Artist = "Sigrid", MatchStatus = "pending"
-        }, CancellationToken.None);
+        var candidates = await provider.SearchAsync(new ObservationInput {
+             SourceType = "youtube", ExternalId = "video-1",
+            Title = "Strangers", Artist = "Sigrid",
+         }, CancellationToken.None);
 
         Assert.Empty(candidates);
         Assert.Empty(handler.Requests);
@@ -75,12 +73,11 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "wrong-track", "name": "Other Song", "duration_ms": 200000, "artists": [{ "name": "Other Artist" }], "external_ids": { "isrc": "GBAYE0601498" } }, { "type": "track", "id": "right-track", "name": "Song", "duration_ms": 180000, "artists": [{ "name": "Artist" }], "external_ids": { "isrc": "USUM71504549" } }] } }""")
         ]);
         var provider = CreateProvider(handler);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-1",
-            Title = "Song", Artist = "Artist", MatchStatus = "pending",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "us-um7-15-04549" })
-        };
+        var observation = new ObservationInput {
+             SourceType = "youtube", ExternalId = "video-1",
+            Title = "Song", Artist = "Artist",
+            Metadata = new TrackObservationMetadata { Isrc = "us-um7-15-04549" }
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -101,12 +98,11 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "title-match", "name": "Song", "duration_ms": 180000, "artists": [{ "name": "Artist" }], "external_ids": { "isrc": "USUM71504549" } }] } }""")
         ]);
         var provider = CreateProvider(handler);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-1",
-            Title = "Song", Artist = "Artist", MatchStatus = "pending",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "USUM71504549" })
-        };
+        var observation = new ObservationInput {
+             SourceType = "youtube", ExternalId = "video-1",
+            Title = "Song", Artist = "Artist",
+            Metadata = new TrackObservationMetadata { Isrc = "USUM71504549" }
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -126,11 +122,10 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "title-only-match", "name": "Strangers", "duration_ms": 210000, "artists": [{ "name": "Sigrid" }] }] } }""")
         ]);
         var provider = CreateProvider(handler);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video-1",
-            Title = "Strangers", Artist = "Unknown uploader", MatchStatus = "pending"
-        };
+        var observation = new ObservationInput {
+             SourceType = "youtube", ExternalId = "video-1",
+            Title = "Strangers", Artist = "Unknown uploader",
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -149,13 +144,12 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [] } }"""),
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "correct", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }], "external_ids": { "isrc": "USABC2400001" } }] } }""")
         ]);
-        var observation = new TrackObservation
-        {
+        var observation = new ObservationInput {
             SourceType = "youtube", ExternalId = "video", Title = "Porter Robinson | Star Guardian 2022",
-            Artist = "Everything Goes On", DurationSeconds = 160, MatchStatus = "pending",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
-            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" })
-        };
+            Artist = "Everything Goes On", DurationSeconds = 160,
+            Metadata = new TrackObservationMetadata
+            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" }
+         };
 
         var candidate = Assert.Single(await CreateProvider(handler).SearchAsync(observation, CancellationToken.None));
 
@@ -175,13 +169,12 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "recording-a", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }], "external_ids": { "isrc": "USABC2400001" } }, { "type": "track", "id": "recording-b", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }], "external_ids": { "isrc": "USABC2400002" } }] } }"""),
             Json("""{ "tracks": { "items": [] } }""")
         ]);
-        var observation = new TrackObservation
-        {
+        var observation = new ObservationInput {
             SourceType = "youtube", ExternalId = "video", Title = "Porter Robinson | Star Guardian 2022",
-            Artist = "Everything Goes On", DurationSeconds = 160, MatchStatus = "pending",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
-            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" })
-        };
+            Artist = "Everything Goes On", DurationSeconds = 160,
+            Metadata = new TrackObservationMetadata
+            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" }
+         };
 
         var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
 
@@ -198,18 +191,16 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "alpha-artist", "name": "Beta", "duration_ms": 180000, "artists": [{ "name": "Alpha" }] }] } }"""),
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "beta-artist", "name": "Alpha", "duration_ms": 180000, "artists": [{ "name": "Beta" }] }] } }""")
         ]);
-        var observation = new TrackObservation
-        {
+        var observation = new ObservationInput {
             SourceType = "youtube", ExternalId = "video", Title = "Alpha - Beta",
-            DurationSeconds = 180, MatchStatus = "pending"
-        };
+            DurationSeconds = 180,
+         };
 
         var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
 
         Assert.Equal(3, handler.Requests.Count);
         Assert.Equal(["alpha-artist", "beta-artist"], candidates.Select(candidate => candidate.ExternalId));
-        Assert.All(candidates, candidate => Assert.NotNull(TrackMatchDecisionEngine.Evaluate(
-            observation, [candidate], new()).Decision.AcceptedCandidate));
+        Assert.All(candidates, candidate => Assert.NotNull(TrackMatchDecisionEngine.Evaluate(observation, [candidate], new()).Decision.AcceptedCandidate));
         Assert.Null(TrackMatchDecisionEngine.Evaluate(observation, candidates, new()).Decision.AcceptedCandidate);
     }
 
@@ -221,13 +212,12 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "live", "name": "Everything Goes On (Live)", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }] }] } }"""),
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "studio", "name": "Everything Goes On", "duration_ms": 160000, "artists": [{ "name": "Porter Robinson" }] }] } }""")
         ]);
-        var observation = new TrackObservation
-        {
+        var observation = new ObservationInput {
             SourceType = "youtube", ExternalId = "video", Title = "Porter Robinson | Star Guardian 2022",
-            Artist = "Everything Goes On", DurationSeconds = 160, MatchStatus = "pending",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
-            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" })
-        };
+            Artist = "Everything Goes On", DurationSeconds = 160,
+            Metadata = new TrackObservationMetadata
+            { OriginalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022" }
+         };
 
         var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
 
@@ -245,11 +235,10 @@ public sealed class SpotifySearchProviderTests
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "wrong", "name": "Addicted - Karaoke", "duration_ms": 153000, "artists": [{ "name": "Karaoke Singer" }] }] } }"""),
             Json("""{ "tracks": { "items": [{ "type": "track", "id": "correct", "name": "Addicted", "duration_ms": 153000, "artists": [{ "name": "Zerb" }, { "name": "The Chainsmokers" }, { "name": "Ink" }], "external_ids": { "isrc": "USABC2400001" } }] } }""")
         ]);
-        var observation = new TrackObservation
-        {
+        var observation = new ObservationInput {
             SourceType = "youtube", ExternalId = "video", Title = "ADDICTED //// Zerb, The Chainsmokers & Ink",
-            Artist = "MrMoMMusic", DurationSeconds = 153, MatchStatus = "pending"
-        };
+            Artist = "MrMoMMusic", DurationSeconds = 153,
+         };
         var candidates = await CreateProvider(handler).SearchAsync(observation, CancellationToken.None);
 
         Assert.Equal(2, candidates.Count);
@@ -291,19 +280,18 @@ public sealed class SpotifySearchProviderTests
         return new SpotifySearchProvider(apiClient, tokenProvider);
     }
 
-    private static TrackObservation CreateMortalsObservation()
+    private static ObservationInput CreateMortalsObservation()
     {
         const string title = "MORTALS FUNK REMIX // Victory Royale B**ch!";
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "dKmnejGmcjQ",
-            Title = title, Artist = "MrMoMMusic", DurationSeconds = 147, MatchStatus = "pending"
-        };
-        observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        var observation = new ObservationInput {
+             SourceType = "youtube", ExternalId = "dKmnejGmcjQ",
+            Title = title, Artist = "MrMoMMusic", DurationSeconds = 147,
+         };
+        observation = observation with { Metadata = new TrackObservationMetadata
         {
             OriginalTitle = title, OriginalArtist = "MrMoMMusic", ChannelTitle = "MrMoMMusic",
             Description = "LXNGVX, Warriyo - Mortals Funk Remix\n\nAvailable here: https://open.spotify.com/album/example\n\nFollow Lxngvx"
-        });
+        } };
         return observation;
     }
 

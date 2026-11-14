@@ -68,7 +68,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
         const string description = "Composer: Evan Call\n\nCover Artist: Luke Chu";
         var observation = YouTubeObservation(title, title, "Luke Chu", description);
 
-        var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
+        var hypotheses = TrackObservationParser.ParseSearchHypotheses(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
         var coverArtist = Assert.Single(hypotheses, hypothesis => hypothesis.IsDescriptionArtistEvidence);
 
         Assert.Equal("Zoltraak - Epic Orchestral Cover", coverArtist.SearchTitle);
@@ -85,7 +85,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
         const string title = "Story of My Life x Clarity (Kronus Mashup)";
         var observation = YouTubeObservation(title, title, "Kronus", null);
 
-        var mashup = Assert.Single(TrackObservationParser.ParseSearchHypotheses(observation),
+        var mashup = Assert.Single(TrackObservationParser.ParseSearchHypotheses(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!),
             hypothesis => hypothesis.SearchTitle == "Story of My Life - Clarity Edit");
 
         Assert.Equal("Kronus", mashup.SearchArtist);
@@ -99,7 +99,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
         var observation = YouTubeObservation("Zoltraak - Epic Orchestral Cover", "Zoltraak - Epic Orchestral Cover", "Luke Chu", null);
         observation.SourceType = "spotify";
 
-        var parsed = TrackObservationParser.Parse(observation);
+        var parsed = TrackObservationParser.Parse(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
 
         Assert.Equal("Zoltraak - Epic Orchestral Cover", parsed.SearchTitle);
         Assert.Equal("Luke Chu", parsed.SearchArtist);
@@ -142,7 +142,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
             "MrMoMMusic",
             "LXNGVX, Warriyo - Mortals Funk Remix");
 
-        var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
+        var hypotheses = TrackObservationParser.ParseSearchHypotheses(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
         var descriptionHypothesis = hypotheses[0];
 
         Assert.True(descriptionHypothesis.IsDescriptionArtistEvidence);
@@ -162,7 +162,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
             "Uploader",
             "Other Artist - Mortals Funk Remix");
 
-        var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
+        var hypotheses = TrackObservationParser.ParseSearchHypotheses(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
 
         Assert.NotEmpty(hypotheses);
         Assert.All(hypotheses, hypothesis => Assert.True(hypothesis.HasConflictingArtistEvidence));
@@ -177,7 +177,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
             "Uploader",
             "LXNGVX, Warriyo - Mortals Funk Remix\nOther Artist - Mortals Funk Remix");
 
-        var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
+        var hypotheses = TrackObservationParser.ParseSearchHypotheses(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
 
         Assert.Equal(2, hypotheses.Count(hypothesis => hypothesis.IsDescriptionArtistEvidence));
         Assert.All(hypotheses, hypothesis => Assert.True(hypothesis.HasConflictingArtistEvidence));
@@ -192,7 +192,7 @@ public class YouTubeDescriptionArtistEvidenceParserTests
             "MrMoMMusic",
             "LXNGVX, Warriyo - Mortals Funk Remix");
 
-        var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
+        var hypotheses = TrackObservationParser.ParseSearchHypotheses(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
 
         Assert.DoesNotContain(hypotheses, hypothesis => hypothesis.HasConflictingArtistEvidence);
     }
@@ -202,19 +202,19 @@ public class YouTubeDescriptionArtistEvidenceParserTests
         string title,
         string artist,
         string? description) => new()
-    {
-        Id = Guid.NewGuid(),
+    { InputKind = ObservationInputKind.Private,
+        Id = Guid.NewGuid(), OwnerUserId = 1,
         SourceType = "youtube",
         ExternalId = Guid.NewGuid().ToString("N"),
         Title = title,
         Artist = artist,
-        RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
         {
             OriginalTitle = originalTitle,
             OriginalArtist = artist,
             ChannelTitle = artist,
-            SearchTitle = title,
-            SearchArtist = artist,
+
+
             Description = description
         }),
         MatchStatus = TrackMatchingStatuses.Pending

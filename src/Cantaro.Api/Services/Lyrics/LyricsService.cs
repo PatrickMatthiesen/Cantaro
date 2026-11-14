@@ -27,24 +27,25 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
 
     public async Task<LyricsResult?> GetLyricsAsync(int userId, Guid trackId, CancellationToken cancellationToken)
     {
+        var accessibleTrackIds = CanonicalTrackAccess.GetAccessibleTrackIds(dbContext, userId);
         var track = await dbContext.Tracks
             .AsNoTracking()
-            .Where(item => item.Id == trackId
-                && item.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
+            .Include(item => item.ProviderItems)
+            .Where(item => item.Id == trackId && accessibleTrackIds.Contains(item.Id))
             .SingleOrDefaultAsync(cancellationToken);
         if (track is null)
         {
             return null;
         }
 
-        return await GetTrackLyricsAsync(track, cancellationToken);
+        return await GetTrackLyricsAsync(track, userId, cancellationToken);
     }
 
     private async Task<LyricsResult?> GetObservationLyricsAsync(int userId, Guid observationId, CancellationToken cancellationToken)
     {
         var observation = await dbContext.TrackObservations
             .AsNoTracking()
-            .Include(item => item.Track)
+            .Include(item => item.ProviderCatalogItem)
             .Where(item => item.Id == observationId
                 && item.PlaylistEntries.Any(entry => entry.Playlist != null && entry.Playlist.UserId == userId))
             .SingleOrDefaultAsync(cancellationToken);
@@ -53,56 +54,79 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
             return null;
         }
 
-        if (observation.Track is { } track)
-        {
-            return await GetTrackLyricsAsync(track, cancellationToken);
-        }
+        if (!ProviderCatalogPolicy.HasOwnedInput(observation, userId))
+            return null;
 
-        var metadata = TrackObservationParser.Parse(observation);
+        var membershipTracks = await dbContext.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackObservationId == observation.Id && entry.OwnerUserId == userId
+                && entry.TrackId != null).Select(entry => entry.TrackId!.Value).Distinct().Take(2)
+            .ToArrayAsync(cancellationToken);
+        if (membershipTracks.Length == 1)
+            return await GetLyricsAsync(userId, membershipTracks[0], cancellationToken);
+        return await GetObservationLyricsAsync(observation, cancellationToken);
+    }
+
+    private async Task<LyricsResult> GetObservationLyricsAsync(TrackObservation observation,
+        CancellationToken cancellationToken)
+    {
+        var input = ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow);
+        if (input is null) return Unavailable("The source input is unavailable.");
+        return await GetInputLyricsAsync(observation.Id, input, cancellationToken);
+    }
+
+    private async Task<LyricsResult> GetInputLyricsAsync(Guid trackId, ObservationInput input, CancellationToken cancellationToken)
+    {
+        var metadata = TrackObservationParser.Parse(input);
         if (string.IsNullOrWhiteSpace(metadata.SearchTitle) || string.IsNullOrWhiteSpace(metadata.SearchArtist))
         {
             return Unavailable("The observed song does not have enough metadata to look up lyrics.");
         }
 
-        var sourceMetadata = TrackObservationParser.ReadMetadata(observation);
+        var sourceMetadata = input.Metadata;
         return await provider.GetLyricsAsync(new LyricsLookup(
-            observation.Id,
+            trackId,
             metadata.SearchTitle.Trim(),
             metadata.SearchArtist.Trim(),
             sourceMetadata?.Album?.Trim(),
-            observation.DurationSeconds ?? sourceMetadata?.DurationSeconds,
+            input.DurationSeconds,
             null,
-            null), cancellationToken);
+            sourceMetadata?.Isrc), cancellationToken);
     }
 
-    private async Task<LyricsResult> GetTrackLyricsAsync(Track track, CancellationToken cancellationToken)
+    private async Task<LyricsResult> GetTrackLyricsAsync(Track track, int userId, CancellationToken cancellationToken)
     {
-        TrackCanonicalMetadata? metadata = null;
-        if (!string.IsNullOrWhiteSpace(track.CanonicalMetadata))
-        {
-            try
-            {
-                metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(track.CanonicalMetadata);
-            }
-            catch (JsonException)
-            {
-                // Invalid legacy metadata is reported as unavailable below.
-            }
-        }
+        var facts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
+        if (facts is not null)
+            return await GetPublicLyricsAsync(track.Id, facts, cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(metadata?.Title) || string.IsNullOrWhiteSpace(metadata.Artist))
-        {
-            return Unavailable("The canonical track does not have enough metadata to look up lyrics.");
-        }
+        var usableIds = ObservationInput.Eligible(dbContext.TrackObservations.AsNoTracking(), DateTimeOffset.UtcNow)
+            .Where(input => input.OwnerUserId == userId).Select(input => input.Id);
+        var observation = await dbContext.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackId == track.Id && entry.Playlist != null && entry.Playlist.UserId == userId
+                && entry.TrackObservation != null && entry.TrackObservation.OwnerUserId == userId
+                && usableIds.Contains(entry.TrackObservation.Id))
+            .OrderBy(entry => entry.Position).ThenBy(entry => entry.Id)
+            .Include(entry => entry.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
+            .Select(entry => entry.TrackObservation)
+            .FirstOrDefaultAsync(cancellationToken);
+        var input = ObservationInput.Read(observation, userId, DateTimeOffset.UtcNow)
+            ?? (await OwnedCandidateAnchorInput.LoadAsync(dbContext, userId, [track.Id], cancellationToken)).GetValueOrDefault(track.Id);
+        return input is null
+            ? Unavailable("The track has no current public facts or owned observation for a lyrics lookup.")
+            : await GetInputLyricsAsync(track.Id, input, cancellationToken);
+    }
 
-        return await provider.GetLyricsAsync(new LyricsLookup(
-            track.Id,
-            metadata.Title.Trim(),
-            metadata.Artist.Trim(),
-            metadata.Albums.FirstOrDefault(album => !string.IsNullOrWhiteSpace(album))?.Trim(),
-            metadata.DurationSeconds,
-            track.MbidRecording,
-            track.Isrc), cancellationToken);
+    private Task<LyricsResult> GetPublicLyricsAsync(Guid trackId, ProviderCatalogFacts facts,
+        CancellationToken cancellationToken)
+    {
+        var artist = facts.Artist ?? (facts.ArtistCredits.Count > 0
+            ? string.Join(", ", facts.ArtistCredits.Select(credit => credit.Name)) : null);
+        if (string.IsNullOrWhiteSpace(facts.Title) || string.IsNullOrWhiteSpace(artist))
+            return Task.FromResult(Unavailable("The public track facts do not have enough metadata to look up lyrics."));
+
+        return provider.GetLyricsAsync(new LyricsLookup(trackId, facts.Title.Trim(), artist.Trim(),
+            facts.Albums.FirstOrDefault(album => !string.IsNullOrWhiteSpace(album))?.Trim(),
+            facts.DurationSeconds, facts.MusicBrainzRecordingId, facts.Isrc), cancellationToken);
     }
 
     private static LyricsResult Unavailable(string explanation) => new()

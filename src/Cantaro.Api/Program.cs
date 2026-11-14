@@ -151,6 +151,8 @@ builder.Services.AddScoped<MediaObservationProgressService>();
 builder.Services.AddScoped<MediaEpisodeIdentityService>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, SpotifySearchProvider>();
 builder.Services.AddScoped<ITrackMetadataSearchProvider, MusicBrainzSearchProvider>();
+builder.Services.AddScoped<ProviderCatalogStore>();
+builder.Services.AddScoped<ProviderCatalogAcquisition>();
 builder.Services.AddScoped<TrackMatchingService>();
 builder.Services.AddScoped<SongGroupingSuggestionService>();
 builder.Services.AddScoped<TrackMatchQueue>();

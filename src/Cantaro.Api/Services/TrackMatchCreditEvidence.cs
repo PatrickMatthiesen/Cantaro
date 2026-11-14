@@ -14,7 +14,7 @@ internal static partial class TrackMatchCreditEvidence
     }
 
     public static bool HasCompatibleFeaturedCredits(
-        TrackObservation source, ParsedTrackMetadata parsedSource,
+        ObservationInput source, ParsedTrackMetadata parsedSource,
         TrackMatchSearchCandidate candidate, bool exactTitle)
     {
         // Catalogs sometimes omit the video's featured collaborator. Never infer
@@ -32,7 +32,7 @@ internal static partial class TrackMatchCreditEvidence
     }
 
     public static bool IsSameNamedMashup(
-        TrackObservation source, TrackMatchSearchCandidate candidate,
+        ObservationInput source, TrackMatchSearchCandidate candidate,
         ParsedTrackMetadata parsedSource, ParsedTrackMetadata parsedCandidate)
     {
         // A creator's "A x B (Creator Mashup)" can be cataloged as "A - B Edit".

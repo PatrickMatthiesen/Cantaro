@@ -646,26 +646,24 @@ public sealed class SpotifyLifecycleTests
         var sourceId = Guid.NewGuid();
         var mappingId = Guid.NewGuid();
 
-        scope.DbContext.Tracks.Add(new Track
-        {
+        scope.DbContext.Tracks.Add(new Track {
             Id = trackId,
-            CanonicalMetadata = """{ "title": "Canonical song" }""",
             CreatedAt = Now,
             UpdatedAt = Now
-        });
-        scope.DbContext.TrackObservations.Add(new TrackObservation
-        {
+         });
+        scope.DbContext.TrackObservations.Add(new TrackObservation {  InputKind = ObservationInputKind.Private,
             Id = observationId,
+            OwnerUserId = account.UserId,
             SourceType = SpotifyService.ServiceName,
             ExternalId = "spotify-track-1",
-            RawMetadata = """{ "provider": "spotify" }""",
+            PrivateInputJson = """{ "provider": "spotify" }""",
             Title = "Provider title",
             Artist = "Provider artist",
             MatchStatus = TrackMatchingStatuses.Matched,
             TrackId = trackId,
             CreatedAt = Now,
             UpdatedAt = Now
-        });
+         });
         scope.DbContext.TrackResolutionCandidates.Add(new TrackResolutionCandidate
         {
             Id = candidateId,
@@ -676,13 +674,7 @@ public sealed class SpotifyLifecycleTests
             Score = 0.9m,
             CreatedAt = Now
         });
-        scope.DbContext.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = sourceId,
-            TrackId = trackId,
-            SourceType = SpotifyService.ServiceName,
-            ExternalId = "spotify-track-1"
-        });
+        scope.DbContext.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = sourceId, TrackId = trackId, SourceType = SpotifyService.ServiceName, ExternalId = "spotify-track-1", FactsJson = "{}" });
         scope.DbContext.Playlists.Add(new Playlist
         {
             Id = playlistId,
@@ -745,7 +737,7 @@ public sealed class SpotifyLifecycleTests
         Assert.Equal("account_disconnected", retainedMapping.LastError);
         Assert.True(await scope.DbContext.TrackObservations.AnyAsync(observation => observation.Id == observationId));
         Assert.True(await scope.DbContext.TrackResolutionCandidates.AnyAsync(candidate => candidate.Id == candidateId));
-        Assert.True(await scope.DbContext.TrackSourceIds.AnyAsync(source => source.Id == sourceId));
+        Assert.True(await scope.DbContext.ProviderCatalogItems.AnyAsync(source => source.Id == sourceId));
         Assert.True(await scope.DbContext.MusicSyncJobs.AnyAsync(
             job => job.UserId == scope.UserId && job.Service == SpotifyService.ServiceName));
         Assert.True(await scope.DbContext.Tracks.AnyAsync(track => track.Id == trackId));

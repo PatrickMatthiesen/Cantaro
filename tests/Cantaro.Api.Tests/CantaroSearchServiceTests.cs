@@ -32,7 +32,10 @@ public sealed class CantaroSearchServiceTests
         var artistTrack = MakeTrack("A Different Song", "Echo", null, now);
         var otherTrack = MakeTrack("Echo Private", "Other Artist", null, now);
         var unreachableTrack = MakeTrack("Echo Orphan", "Nobody", null, now);
-        db.Tracks.AddRange(exactTrack, prefixTrack, containsTrack, artistTrack, otherTrack, unreachableTrack);
+        var legacyPrivateTrack = new Track {
+            Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now
+         };
+        db.Tracks.AddRange(exactTrack, prefixTrack, containsTrack, artistTrack, otherTrack, unreachableTrack, legacyPrivateTrack);
 
         var exactPlaylist = MakePlaylist(owner.Id, "Echo", "Exact playlist", now);
         var ownedPlaylist = MakePlaylist(owner.Id, "Echo collection", "An owned collection", now);
@@ -41,11 +44,12 @@ public sealed class CantaroSearchServiceTests
         await db.SaveChangesAsync();
 
         db.PlaylistEntries.AddRange(
-            MakeEntry(exactPlaylist.Id, exactTrack.Id, 0, now),
-            MakeEntry(exactPlaylist.Id, prefixTrack.Id, 1, now),
-            MakeEntry(exactPlaylist.Id, containsTrack.Id, 2, now),
-            MakeEntry(exactPlaylist.Id, artistTrack.Id, 3, now),
-            MakeEntry(otherPlaylist.Id, otherTrack.Id, 0, now));
+            MakeEntry(exactPlaylist, exactTrack.Id, 0, now),
+            MakeEntry(exactPlaylist, prefixTrack.Id, 1, now),
+            MakeEntry(exactPlaylist, containsTrack.Id, 2, now),
+            MakeEntry(exactPlaylist, artistTrack.Id, 3, now),
+            MakeEntry(exactPlaylist, legacyPrivateTrack.Id, 4, now),
+            MakeEntry(otherPlaylist, otherTrack.Id, 0, now));
 
         var exactMedia = MakeMediaTitle("Echo", "anime", 2024, now);
         var prefixMedia = MakeMediaTitle("Echo Point", "movie", 2023, now);
@@ -75,6 +79,13 @@ public sealed class CantaroSearchServiceTests
         Assert.Equal($"/music/songs/track%3A{exactTrack.Id}", song.CanonicalRoute);
         Assert.DoesNotContain(result.Groups.Songs.Items, item => item.Id == $"track:{otherTrack.Id}");
         Assert.DoesNotContain(result.Groups.Songs.Items, item => item.Id == $"track:{unreachableTrack.Id}");
+        Assert.DoesNotContain(result.Groups.Songs.Items, item => item.Id == $"track:{legacyPrivateTrack.Id}");
+
+        var secondUserResult = await CreateService(db).SearchAsync(other.Id, "echo", 3, false, default);
+        var sharedPublicSong = Assert.Single(secondUserResult.Groups.Songs.Items);
+        Assert.Equal($"track:{otherTrack.Id}", sharedPublicSong.Id);
+        Assert.Equal("Echo Private", sharedPublicSong.Title);
+        Assert.Equal("Other Artist", sharedPublicSong.Subtitle);
 
         Assert.Equal(SearchGroupStatuses.Unavailable, result.Groups.Artists.Status);
         Assert.Empty(result.Groups.Artists.Items);
@@ -142,7 +153,7 @@ public sealed class CantaroSearchServiceTests
             .ToList();
         db.Tracks.AddRange(tracks);
         await db.SaveChangesAsync();
-        db.PlaylistEntries.AddRange(tracks.Select((track, index) => MakeEntry(playlist.Id, track.Id, index, now)));
+        db.PlaylistEntries.AddRange(tracks.Select((track, index) => MakeEntry(playlist, track.Id, index, now)));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -170,7 +181,7 @@ public sealed class CantaroSearchServiceTests
     }
 
     [Fact]
-    public async Task SearchAsync_ToleratesLegacyNullAlbumCollection()
+    public async Task SearchAsync_DoesNotSearchExpiredOrUnverifiedMetadata()
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
@@ -178,24 +189,75 @@ public sealed class CantaroSearchServiceTests
         var now = DateTimeOffset.UtcNow;
         var owner = TestUserFactory.Create(804, "search-legacy@example.com");
         var playlist = MakePlaylist(owner.Id, "Library", null, now);
-        var track = new Track
-        {
+        var track = new Track {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = """{"Title":"Legacy song","Artist":"Legacy artist","Albums":null}""",
             CreatedAt = now,
             UpdatedAt = now
+         };
+        var expiredItem = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = "expired-song", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts { Title = "Legacy song", Artist = "Legacy artist" }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now.AddDays(-2), RevalidateAfter = now.AddDays(-1)
         };
+
+        track.ProviderItems.Add(CatalogFixture.Associate(expiredItem, track.Id, RecordingAssociationState.Verified, expiredItem.Revision));
         db.AddRange(owner, playlist, track);
         await db.SaveChangesAsync();
-        db.PlaylistEntries.Add(MakeEntry(playlist.Id, track.Id, 0, now));
+        db.PlaylistEntries.Add(MakeEntry(playlist, track.Id, 0, now));
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
         var result = await CreateService(db).SearchAsync(owner.Id, "legacy", 6, false, default);
+        Assert.Empty(result.Groups.Songs.Items);
+        Assert.False(result.Groups.Songs.HasMore);
+    }
 
-        var item = Assert.Single(result.Groups.Songs.Items);
-        Assert.Equal("Legacy song", item.Title);
-        Assert.Null(item.Detail);
+    [Theory]
+    [InlineData("expired")]
+    [InlineData("withdrawn")]
+    public async Task SearchAsync_UsesCurrentSecondaryPublicSourceWhenPreferredSourceIsUnavailable(string unavailableState)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(805, $"search-secondary-{unavailableState}@example.com");
+        var playlist = MakePlaylist(owner.Id, "Library", null, now);
+        var track = MakeTrack("Old preferred title", "Old artist", "https://img.example/old.jpg", now);
+        var preferred = track.ProviderItems.Single();
+        if (unavailableState == "expired") preferred.RevalidateAfter = now.AddSeconds(-1);
+        else preferred.VisibilityState = CatalogVisibility.Withdrawn;
+        var secondary = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = "secondary-recording", Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "Secondary Melody", Artist = "Public Performer", DurationSeconds = 194
+            }),
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.MusicBrainz,
+            VerifiedAt = now, RevalidateAfter = now.AddDays(1)
+        };
+        track.ProviderItems.Add(CatalogFixture.Associate(secondary, track.Id, RecordingAssociationState.Verified, secondary.Revision));
+        var unknownOnly = new Track {
+            Id = Guid.NewGuid(),
+            CreatedAt = now, UpdatedAt = now
+         };
+        db.AddRange(owner, playlist, track, unknownOnly);
+        db.PlaylistEntries.AddRange(
+            MakeEntry(playlist, track.Id, 0, now),
+            MakeEntry(playlist, unknownOnly.Id, 1, now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var result = await CreateService(db).SearchAsync(owner.Id, "secondary melody", 10, false, default);
+
+        var found = Assert.Single(result.Groups.Songs.Items);
+        Assert.Equal($"track:{track.Id}", found.Id);
+        Assert.Equal("Secondary Melody", found.Title);
+        Assert.Equal("Public Performer", found.Subtitle);
+        Assert.False(result.Groups.Songs.HasMore);
     }
 
     [Fact]
@@ -625,37 +687,35 @@ public sealed class CantaroSearchServiceTests
     }
 
     [Fact]
-    public async Task SaveChanges_DerivesSearchProjectionsAndToleratesMalformedMetadata()
+    public async Task VerifiedAssociationSetsSearchProjectionsWithoutReadingLegacyMetadata()
     {
         var (db, connection) = await CreateDbAsync();
         await using var _ = connection;
         await using var __ = db;
         var now = DateTimeOffset.UtcNow;
         var track = MakeTrack("  Searchable title  ", "  Display artist  ", null, now);
-        var malformed = new Track
-        {
+        var malformed = new Track {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = "{broken",
             CreatedAt = now,
             UpdatedAt = now
-        };
-        var nonObject = new Track
-        {
+         };
+        var nonObject = new Track {
             Id = Guid.NewGuid(),
-            CanonicalMetadata = "[]",
             CreatedAt = now,
             UpdatedAt = now
-        };
+         };
         db.Tracks.AddRange(track, malformed, nonObject);
+        var catalog = Assert.Single(track.ProviderItems);
+        Assert.True(await new ProviderRecordingAssociations(db).TryAssociateAsync(track, catalog, null, true, default));
 
         await db.SaveChangesAsync();
 
-        Assert.Equal("Searchable title", track.SearchTitle);
-        Assert.Equal("Display artist", track.SearchArtist);
-        Assert.Null(malformed.SearchTitle);
-        Assert.Null(malformed.SearchArtist);
-        Assert.Null(nonObject.SearchTitle);
-        Assert.Null(nonObject.SearchArtist);
+        Assert.Equal("Searchable title", CatalogFixture.Facts(track)?.Title.Trim());
+        Assert.Equal("Display artist", CatalogFixture.Facts(track)?.Artist?.Trim());
+        Assert.Null(CatalogFixture.Facts(malformed)?.Title);
+        Assert.Null(CatalogFixture.Facts(malformed)?.Artist);
+        Assert.Null(CatalogFixture.Facts(nonObject)?.Title);
+        Assert.Null(CatalogFixture.Facts(nonObject)?.Artist);
     }
 
     [Fact]
@@ -690,6 +750,110 @@ public sealed class CantaroSearchServiceTests
             6);
 
         Assert.IsType<BadRequestObjectResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task SearchAndDisplaySelectSameOrdinalSourceDespitePreferredPointer()
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var now = DateTimeOffset.UtcNow;
+        var user = TestUserFactory.Create(803, "ordinal-selection@example.test");
+        var playlist = MakePlaylist(user.Id, "Selection", null, now);
+        var track = MakeTrack("Chosen public title", "Artist", null, now);
+        var first = track.ProviderItems.Single();
+        first.ExternalId = "Z-key";
+        first.ExternalId = first.ExternalId;
+        var later = MakeTrack("Ignored public title", "Artist", null, now).ProviderItems.Single();
+        later.TrackId = track.Id;
+        later.ExternalId = "a-key";
+        later.ExternalId = later.ExternalId;
+        track.ProviderItems.Add(later);
+
+        db.AddRange(user, playlist, track, MakeEntry(playlist, track.Id, 0, now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var selected = await CreateService(db).SearchAsync(user.Id, "Chosen public title", 1, false, default);
+        Assert.Equal("Chosen public title", Assert.Single(selected.Groups.Songs.Items).Title);
+        var ignored = await CreateService(db).SearchAsync(user.Id, "Ignored public title", 1, false, default);
+        Assert.Empty(ignored.Groups.Songs.Items);
+        var library = await new MusicLibraryQueryService(db).GetLibraryAsync(user.Id, default);
+        Assert.Equal("Chosen public title", Assert.Single(library.Songs).Title);
+    }
+
+    [Theory]
+    [InlineData("title")]
+    [InlineData("artist")]
+    [InlineData("expired")]
+    [InlineData("other-owner")]
+    public async Task SearchAsync_FindsOnlyUsableOwnedPublicInputsWithoutGlobalAssociations(string scenario)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        await AssertOwnedPublicInputSearchAsync(db, scenario);
+    }
+
+    [PostgresTheory]
+    [InlineData("title")]
+    [InlineData("artist")]
+    [InlineData("expired")]
+    [InlineData("other-owner")]
+    public async Task SearchAsync_PostgresOwnedPublicInputFilteringPrecedesPagination(string scenario)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertOwnedPublicInputSearchAsync(schema.Db, scenario);
+    }
+
+    private static async Task AssertOwnedPublicInputSearchAsync(ApplicationDbContext db, string scenario)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var owner = TestUserFactory.Create(801, "public-input-owner@example.test");
+        var other = TestUserFactory.Create(802, "public-input-other@example.test");
+        var ownerPlaylist = MakePlaylist(owner.Id, "Owner", null, now);
+        var otherPlaylist = MakePlaylist(other.Id, "Other", null, now);
+        var track = new Track { Id = Guid.NewGuid(), VersionFlags = TrackVersionFlags.Live };
+        var item = new ProviderCatalogItem
+        {
+            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "reviewed-input", Revision = 1,
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.YouTubePublicVideo,
+            VerifiedAt = now.AddDays(-2), RevalidateAfter = scenario == "expired" ? now.AddDays(-1) : now.AddHours(1),
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+            {
+                Title = "A Reviewed Song: Live", Artist = "Artist & Friends", ThumbnailUrl = "https://example.test/reviewed.jpg"
+            })
+        };
+        var observation = new TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = owner.Id, SourceType = item.SourceType, ExternalId = item.ExternalId,
+            TrackId = track.Id, MatchStatus = TrackMatchingStatuses.Matched
+        };
+        ObservationInput.SetPublic(observation, item);
+        var ownerEntry = MakeEntry(ownerPlaylist, track.Id, 0, now);
+        ownerEntry.TrackObservationId = observation.Id;
+        db.AddRange(owner, other, ownerPlaylist, otherPlaylist, track, item, observation, ownerEntry,
+            MakeEntry(otherPlaylist, track.Id, 0, now));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var response = await CreateService(db).SearchAsync(scenario == "other-owner" ? other.Id : owner.Id,
+            scenario == "artist" ? "artist friends" : "reviewed song live", 1, false, default);
+
+        Assert.Equal(SearchGroupStatuses.Ok, response.Groups.Songs.Status);
+        Assert.False(response.Groups.Songs.HasMore);
+        if (scenario is "expired" or "other-owner") Assert.Empty(response.Groups.Songs.Items);
+        else
+        {
+            var song = Assert.Single(response.Groups.Songs.Items);
+            Assert.Equal($"track:{track.Id}", song.Id);
+            Assert.Equal("A Reviewed Song: Live", song.Title);
+            Assert.Equal("Artist & Friends", song.Subtitle);
+            Assert.Equal("https://example.test/reviewed.jpg", song.ArtworkUrl);
+        }
+        Assert.Null((await db.ProviderCatalogItems.SingleAsync()).TrackId);
+        Assert.Null((await db.TrackObservations.SingleAsync()).Title);
     }
 
     private static async Task<(ApplicationDbContext Db, SqliteConnection Connection)> CreateDbAsync()
@@ -727,20 +891,23 @@ public sealed class CantaroSearchServiceTests
         string title,
         string artist,
         string? artworkUrl,
-        DateTimeOffset now) =>
-        new()
+        DateTimeOffset now)
+    {
+        var track = new Track {  Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now  };
+        var item = new ProviderCatalogItem
         {
-            Id = Guid.NewGuid(),
-            CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
+            Id = Guid.NewGuid(), SourceType = "spotify", ExternalId = Guid.NewGuid().ToString("N"), Revision = 1,
+            FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
             {
-                Title = title,
-                Artist = artist,
-                Albums = ["Search album"],
-                ThumbnailUrl = artworkUrl
+                Title = title, Artist = artist, Albums = ["Search album"], ThumbnailUrl = artworkUrl
             }),
-            CreatedAt = now,
-            UpdatedAt = now
+            VisibilityState = CatalogVisibility.Public, VerificationMethod = CatalogVerificationMethods.SpotifyApplication,
+            VerifiedAt = now, RevalidateAfter = now.AddDays(1)
         };
+
+        track.ProviderItems.Add(CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision));
+        return track;
+    }
 
     private static Playlist MakePlaylist(
         int userId,
@@ -758,14 +925,14 @@ public sealed class CantaroSearchServiceTests
         };
 
     private static PlaylistEntry MakeEntry(
-        Guid playlistId,
+        Playlist playlist,
         Guid trackId,
         int position,
         DateTimeOffset now) =>
         new()
         {
             Id = Guid.NewGuid(),
-            PlaylistId = playlistId,
+            PlaylistId = playlist.Id, OwnerUserId = playlist.UserId,
             TrackId = trackId,
             Position = position,
             AddedAt = now

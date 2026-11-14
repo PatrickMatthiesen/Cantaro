@@ -47,9 +47,30 @@ public sealed class PlaylistCanonicalReconciliationService(ApplicationDbContext 
         Guid? trackId,
         CancellationToken cancellationToken)
     {
-        var entries = await _dbContext.PlaylistEntries
-            .Where(entry => entry.TrackObservationId == observationId)
+        var observation = await _dbContext.TrackObservations.AsNoTracking().Include(o => o.ProviderCatalogItem)
+            .SingleOrDefaultAsync(o => o.Id == observationId, cancellationToken);
+        if (ObservationInput.Read(observation, observation?.OwnerUserId, DateTimeOffset.UtcNow) is null) return;
+        var ownerId = observation!.OwnerUserId;
+        var entries = await _dbContext.PlaylistEntries.Include(entry => entry.TrackObservation)
+            .ThenInclude(o => o!.ProviderCatalogItem)
+            .Include(entry => entry.Track).ThenInclude(track => track!.ProviderItems)
+            .Where(entry => entry.TrackObservationId == observationId && entry.Playlist!.UserId == ownerId)
             .ToListAsync(cancellationToken);
+        var playlistIdsWithEntries = entries.Select(entry => entry.PlaylistId).Distinct().ToArray();
+        var links = await _dbContext.ServicePlaylistMappings.AsNoTracking()
+            .Where(link => playlistIdsWithEntries.Contains(link.PlaylistId) && link.UserId == ownerId)
+            .ToListAsync(cancellationToken);
+        var allPlaylistEntries = await _dbContext.PlaylistEntries
+            .Where(entry => playlistIdsWithEntries.Contains(entry.PlaylistId) && entry.OwnerUserId == ownerId)
+            .ToListAsync(cancellationToken);
+        // A scoped manual choice protects membership even when later input changes
+        // make its destination proof ineligible for reuse. This does not grant export permission.
+        var protectedEntryIds = allPlaylistEntries.Where(entry => links.Any(link => link.PlaylistId == entry.PlaylistId
+            && PlaylistMatchingProgress.Read(link.MatchingProgressJson).TryGetValue(entry.Id, out var saved)
+            && saved.ManualConfirmation && saved.ProofVersion == PlaylistMatchingProgress.CurrentProofVersion
+            && saved.Scope == PlaylistMatchingProgress.ScopeFor(link, entry)))
+            .Select(entry => entry.Id).ToHashSet();
+        entries = entries.Where(entry => !protectedEntryIds.Contains(entry.Id)).ToList();
 
         if (trackId == null)
         {
@@ -69,7 +90,7 @@ public sealed class PlaylistCanonicalReconciliationService(ApplicationDbContext 
                 .Where(entry =>
                     playlistIds.Contains(entry.PlaylistId)
                     && entry.TrackId == trackId
-                    && !entryIds.Contains(entry.Id))
+                    && !entryIds.Contains(entry.Id) && !protectedEntryIds.Contains(entry.Id))
                 .ToListAsync(cancellationToken);
 
         foreach (var playlistId in playlistIds)

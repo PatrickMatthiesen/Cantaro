@@ -11,22 +11,6 @@ public class Track
     /// </summary>
     public Guid Id { get; set; }
 
-    /// <summary>
-    /// Canonical metadata stored as JSON (artist, title, duration, etc.)
-    /// </summary>
-    public string? CanonicalMetadata { get; set; }
-
-    /// <summary>
-    /// Queryable display projection derived from CanonicalMetadata.Title.
-    /// This is not a separate canonical identity field.
-    /// </summary>
-    public string? SearchTitle { get; set; }
-
-    /// <summary>
-    /// Queryable legacy display projection derived from CanonicalMetadata.Artist.
-    /// Artist identity continues to live in the structured artist-credit model.
-    /// </summary>
-    public string? SearchArtist { get; set; }
     
     /// <summary>
     /// MusicBrainz Recording ID (nullable - may not always be available)
@@ -57,11 +41,10 @@ public class Track
     /// <summary>
     /// Navigation property to source IDs
     /// </summary>
-    public ICollection<TrackSourceId> SourceIds { get; set; } = [];
+    public ICollection<ProviderCatalogItem> ProviderItems { get; set; } = [];
 
     /// <summary>
-    /// Ordered artist credits. CanonicalMetadata.Artist remains as a legacy
-    /// display snapshot while clients migrate to this structured relationship.
+    /// Ordered artist credits for this recording.
     /// </summary>
     public ICollection<TrackArtistCredit> ArtistCredits { get; set; } = [];
 

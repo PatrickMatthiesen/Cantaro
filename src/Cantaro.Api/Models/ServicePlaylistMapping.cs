@@ -22,6 +22,7 @@ public class ServicePlaylistMapping
     public string State { get; set; } = "active";
     public string? BaselineJson { get; set; }
     public string? PendingWriteJson { get; set; }
+    // Unfinished search checkpoints and durable, account-scoped manual choices.
     public string? MatchingProgressJson { get; set; }
     public int MatchingProcessedCount { get; set; }
     public int MatchingTotalCount { get; set; }

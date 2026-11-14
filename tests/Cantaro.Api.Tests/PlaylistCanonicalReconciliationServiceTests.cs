@@ -114,6 +114,45 @@ public sealed class PlaylistCanonicalReconciliationServiceTests
         Assert.Equal([firstTrack.Id, secondTrack.Id], persisted.Select(entry => entry.TrackId));
     }
 
+    [Fact]
+    public async Task ReconciliationPreservesScopedManualChoiceAndUpdatesOnlyTheOtherOccurrence()
+    {
+        await using var fixture = await ReconciliationFixture.CreateAsync();
+        fixture.Playlist.AllowDuplicateTracks = true;
+        var manualTrack = fixture.AddTrack(TrackVersionFlags.None);
+        var automaticTrack = fixture.AddTrack(TrackVersionFlags.None);
+        var observation = fixture.AddObservation("shared-input", automaticTrack.Id);
+        var manual = fixture.CreateEntry(observation.Id, manualTrack.Id, 0);
+        var automatic = fixture.CreateEntry(observation.Id, manualTrack.Id, 1);
+        fixture.DbContext.AddRange(manual, automatic);
+        var account = new ConnectedServiceAccount
+        {
+            Id = 81, UserId = fixture.Playlist.UserId, Service = "spotify",
+            ExternalAccountId = "account", ConnectionState = "connected"
+        };
+        var link = new ServicePlaylistMapping
+        {
+            Id = Guid.NewGuid(), PlaylistId = fixture.Playlist.Id, UserId = fixture.Playlist.UserId,
+            ConnectedServiceAccountId = account.Id, Service = "spotify", ExternalAccountId = "account",
+            ServicePlaylistId = "destination", State = "active", SyncMode = "bidirectional"
+        };
+        fixture.DbContext.AddRange(account, link);
+        await fixture.DbContext.SaveChangesAsync();
+        link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(new()
+        {
+            [manual.Id] = PlaylistMatchingProgress.Create(link, manual, "manual-destination", true)
+        });
+        await fixture.DbContext.SaveChangesAsync();
+        await fixture.Service.ReconcileObservationAsync(observation.Id, automaticTrack.Id, default);
+        await fixture.DbContext.SaveChangesAsync();
+        Assert.Equal(manualTrack.Id, manual.TrackId);
+        Assert.Equal(automaticTrack.Id, automatic.TrackId);
+        Assert.Equal(2, await fixture.DbContext.PlaylistEntries.CountAsync());
+        var positions = await fixture.DbContext.PlaylistEntries.OrderBy(entry => entry.Position).Select(entry => entry.Position).ToArrayAsync();
+        Assert.Equal(new[] { 0, 1 }, positions);
+        Assert.Equal("manual-destination", PlaylistMatchingProgress.Read(link.MatchingProgressJson)[manual.Id].ExternalId);
+    }
+
     private sealed class ReconciliationFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -163,21 +202,20 @@ public sealed class PlaylistCanonicalReconciliationServiceTests
 
         public Track AddTrack(TrackVersionFlags versionFlags)
         {
-            var track = new Track
-            {
+            var track = new Track {
                 Id = Guid.NewGuid(),
                 VersionFlags = versionFlags,
                 CreatedAt = Now,
                 UpdatedAt = Now
-            };
+             };
             DbContext.Tracks.Add(track);
             return track;
         }
 
         public TrackObservation AddObservation(string externalId, Guid? trackId)
         {
-            var observation = new TrackObservation
-            {
+            var observation = new TrackObservation {  InputKind = ObservationInputKind.Private,
+                OwnerUserId = Playlist.UserId,
                 Id = Guid.NewGuid(),
                 SourceType = "youtube",
                 ExternalId = externalId,
@@ -186,7 +224,7 @@ public sealed class PlaylistCanonicalReconciliationServiceTests
                 TrackId = trackId,
                 CreatedAt = Now,
                 UpdatedAt = Now
-            };
+             };
             DbContext.TrackObservations.Add(observation);
             return observation;
         }
@@ -194,7 +232,7 @@ public sealed class PlaylistCanonicalReconciliationServiceTests
         public PlaylistEntry CreateEntry(Guid observationId, Guid? trackId, int position) => new()
         {
             Id = Guid.NewGuid(),
-            PlaylistId = Playlist.Id,
+            PlaylistId = Playlist.Id, OwnerUserId = Playlist.UserId,
             TrackObservationId = observationId,
             TrackId = trackId,
             Position = position,

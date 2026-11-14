@@ -5,7 +5,7 @@ namespace Cantaro.Api.Services;
 internal static class TrackMatchDecisionEngine
 {
     public static TrackMatchAssessment Evaluate(
-        Models.TrackObservation observation,
+        ObservationInput observation,
         IEnumerable<TrackMatchSearchCandidate> candidates,
         Configuration.TrackMatchingOptions options) => EvaluateScored(
             candidates.Select(candidate => TrackMatchScorer.Score(observation, candidate, options)), options);

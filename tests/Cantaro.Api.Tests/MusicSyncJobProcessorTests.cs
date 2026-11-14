@@ -313,8 +313,7 @@ public sealed class MusicSyncJobProcessorTests
         {
             var observationId = Guid.NewGuid();
             var now = DateTimeOffset.UtcNow;
-            dbContext.TrackObservations.Add(new TrackObservation
-            {
+            dbContext.TrackObservations.Add(new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
                 Id = observationId,
                 SourceType = "youtube",
                 ExternalId = "pending-video",
@@ -322,7 +321,7 @@ public sealed class MusicSyncJobProcessorTests
                 MatchStatus = TrackMatchingStatuses.Pending,
                 CreatedAt = now,
                 UpdatedAt = now
-            });
+             });
             dbContext.TrackMatchQueueItems.Add(new TrackMatchQueueItem
             {
                 TrackObservationId = observationId,

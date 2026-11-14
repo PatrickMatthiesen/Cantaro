@@ -29,17 +29,16 @@ public class MusicBrainzSearchProviderTests
             });
 
         var provider = CreateProvider(fakeClient);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(),
+        var observation = new ObservationInput {
+
             SourceType = "youtube",
             ExternalId = "video-1",
             Title = "Kx5 - Escape (feat. Hayla) [Official Lyric Video]",
             Artist = "Kx5",
-            MatchStatus = TrackMatchingStatuses.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+
+
+
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -83,17 +82,16 @@ public class MusicBrainzSearchProviderTests
             });
 
         var provider = CreateProvider(fakeClient);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(),
+        var observation = new ObservationInput {
+
             SourceType = "youtube",
             ExternalId = "J9Zjgb03FMQ",
             Title = "Good Things Fall Apart",
             Artist = "ILLENIUM, Jon Bellion",
-            MatchStatus = TrackMatchingStatuses.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+
+
+
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -109,17 +107,16 @@ public class MusicBrainzSearchProviderTests
     {
         var fakeClient = new FakeMusicBrainzQueryClient();
         var provider = CreateProvider(fakeClient);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(),
+        var observation = new ObservationInput {
+
             SourceType = "youtube",
             ExternalId = "lucid-eyes",
             Title = "Lucid Eyes (ft. Jay Mason)",
             Artist = "Rival x Sabai",
-            MatchStatus = TrackMatchingStatuses.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+
+
+
+         };
 
         await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -254,17 +251,16 @@ public class MusicBrainzSearchProviderTests
             });
 
         var provider = CreateProvider(fakeClient);
-        var observation = new TrackObservation
-        {
-            Id = Guid.NewGuid(),
+        var observation = new ObservationInput {
+
             SourceType = "youtube",
             ExternalId = "J9Zjgb03FMQ",
             Title = "Good Things Fall Apart",
             Artist = "ILLENIUM, Jon Bellion",
-            MatchStatus = TrackMatchingStatuses.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
+
+
+
+         };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -337,7 +333,7 @@ public class MusicBrainzSearchProviderTests
             });
         var provider = CreateProvider(fakeClient);
         var observation = CreateObservation("Uploader Promo Title", "Uploader", durationSeconds: 160);
-        observation.RawMetadata = """{"OriginalTitle":"Song Name - Actual Artist"}""";
+        observation = observation with { Metadata = ObservationInput.ReadOperationMetadata("""{"OriginalTitle":"Song Name - Actual Artist"}""") };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -365,7 +361,7 @@ public class MusicBrainzSearchProviderTests
         var provider = CreateProvider(fakeClient);
         const string title = "MORTALS FUNK REMIX // Victory Royale B**ch!";
         var observation = CreateObservation(title, "MrMoMMusic", durationSeconds: 147);
-        observation.RawMetadata = """{"OriginalTitle":"MORTALS FUNK REMIX // Victory Royale B**ch!","OriginalArtist":"MrMoMMusic","ChannelTitle":"MrMoMMusic","Description":"LXNGVX, Warriyo - Mortals Funk Remix\n\nAvailable here: https://open.spotify.com/album/example\n\nFollow Lxngvx"}""";
+        observation = observation with { Metadata = ObservationInput.ReadOperationMetadata("""{"OriginalTitle":"MORTALS FUNK REMIX // Victory Royale B**ch!","OriginalArtist":"MrMoMMusic","ChannelTitle":"MrMoMMusic","Description":"LXNGVX, Warriyo - Mortals Funk Remix\n\nAvailable here: https://open.spotify.com/album/example\n\nFollow Lxngvx"}""") };
 
         var candidates = await provider.SearchAsync(observation, CancellationToken.None);
 
@@ -447,17 +443,17 @@ public class MusicBrainzSearchProviderTests
             _ => Task.CompletedTask);
     }
 
-    private static TrackObservation CreateObservation(string title, string? artist, int? durationSeconds = null) => new()
+    private static ObservationInput CreateObservation(string title, string? artist, int? durationSeconds = null) => new()
     {
-        Id = Guid.NewGuid(),
+
         SourceType = "youtube",
         ExternalId = "video-1",
         Title = title,
         Artist = artist,
         DurationSeconds = durationSeconds,
-        MatchStatus = TrackMatchingStatuses.Pending,
-        CreatedAt = DateTimeOffset.UtcNow,
-        UpdatedAt = DateTimeOffset.UtcNow
+
+
+
     };
 
     private sealed class FakeMusicBrainzQueryClient : IMusicBrainzQueryClient

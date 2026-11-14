@@ -98,6 +98,30 @@ public sealed class SongGroupingSuggestionServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_UsesVerifiedCatalogFactsInsteadOfLegacyTrackFields()
+    {
+        await using var fixture = await GroupingFixture.CreateAsync();
+        var anchor = fixture.AddTrack("Signal", "The Artist", "USAAA2600001");
+        var candidate = fixture.AddTrack("Signal (Live)", "The Artist", "USAAA2600002");
+        fixture.DbContext.TrackObservations.AddRange(
+            new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = 42, SourceType = "youtube",
+                ExternalId = "private-anchor", InputKind = ObservationInputKind.Private, TrackId = anchor.Track.Id,
+                Title = "Private legacy title", Artist = "Private legacy artist", MatchStatus = "matched" },
+            new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = 42, SourceType = "youtube",
+                ExternalId = "private-candidate", InputKind = ObservationInputKind.Private, TrackId = candidate.Track.Id,
+                Title = "Unrelated private title", Artist = "Unrelated private artist", MatchStatus = "matched" });
+        candidate.Track.VersionFlags = TrackVersionFlags.Cover;
+        await fixture.DbContext.SaveChangesAsync();
+
+        var suggestions = await fixture.Service.GenerateAsync(CancellationToken.None);
+
+        var suggestion = Assert.Single(suggestions);
+        Assert.Equal(candidate.Track.Id, suggestion.CandidateTrackId);
+        Assert.Contains("Signal", suggestion.EvidenceJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Private legacy", suggestion.EvidenceJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateAsync_IsIdempotent()
     {
         await using var fixture = await GroupingFixture.CreateAsync();
@@ -369,27 +393,40 @@ public sealed class SongGroupingSuggestionServiceTests
                 CreatedAt = createdAt,
                 UpdatedAt = createdAt
             };
-            var track = new Track
-            {
+            var track = new Track {
                 Id = Guid.NewGuid(),
                 Isrc = isrc,
                 VersionFlags = versionFlags,
-                CanonicalMetadata = JsonSerializer.Serialize(new TrackCanonicalMetadata
-                {
-                    Title = title,
-                    Artist = artist,
-                    DurationSeconds = 180
-                }),
                 CreatedAt = createdAt,
                 UpdatedAt = createdAt
+             };
+            var catalogItem = new ProviderCatalogItem
+            {
+                Id = Guid.NewGuid(), SourceType = "musicbrainz", ExternalId = Guid.NewGuid().ToString("D"),
+                FactsJson = JsonSerializer.Serialize(new ProviderCatalogFacts
+                {
+                    Title = title, Artist = artist, Isrc = isrc,
+                    MusicBrainzRecordingId = Guid.NewGuid().ToString("D"),
+                    ArtistCredits = [new ArtistCreditMetadata { Name = artist }],
+                    VersionFlags = versionFlags
+                }),
+                VerificationMethod = "musicbrainz_recording_response",
+                VerifiedAt = DateTimeOffset.UtcNow,
+                RevalidateAfter = DateTimeOffset.UtcNow.AddDays(60),
+                VisibilityState = CatalogVisibility.Public,
+                Revision = 1
             };
+
+
+            var source = CatalogFixture.Associate(catalogItem, track.Id, RecordingAssociationState.Verified, catalogItem.Revision);
+            track.ProviderItems.Add(source);
             DbContext.AddRange(song, track, new SongTrack
             {
                 SongId = song.Id,
                 Song = song,
                 TrackId = track.Id,
                 Track = track
-            });
+            }, catalogItem, source);
             return (song, track);
         }
 

@@ -18,20 +18,19 @@ public sealed class TrackArtworkUpdaterTests
             0,
             0,
             TimeSpan.Zero);
-        var track = new Track
-        {
+        var track = new Track {
             Id = Guid.NewGuid(),
             UpdatedAt = previousUpdate
-        };
+         };
 
-        var changed = TrackArtworkUpdater.FillMissingCanonicalThumbnail(
+        var changed = CatalogFixture.SetArtwork(
             track,
             "https://example.test/art.jpg");
 
         Assert.True(changed);
-        Assert.True(track.UpdatedAt > previousUpdate);
-        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
-            track.CanonicalMetadata!);
+        Assert.Equal(previousUpdate, track.UpdatedAt);
+        var metadata = JsonSerializer.Deserialize<ProviderCatalogFacts>(
+            CatalogFixture.FactsJson(track)!);
         Assert.Equal("https://example.test/art.jpg", metadata?.ThumbnailUrl);
     }
 }

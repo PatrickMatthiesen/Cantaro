@@ -132,16 +132,14 @@ public class TrackMatchIdentityFamilyResolverTests
         Assert.Equal("GBCAD1801419", decision.AcceptedCandidate?.Candidate.Isrc);
     }
 
-    private static TrackObservation CreateObservation(string title, string artist, int duration) => new()
+    private static ObservationInput CreateObservation(string title, string artist, int duration) => new()
     {
-        Id = Guid.NewGuid(),
         SourceType = "youtube",
         ExternalId = Guid.NewGuid().ToString("N"),
         Title = title,
         Artist = artist,
         DurationSeconds = duration,
-        MatchStatus = TrackMatchingStatuses.Pending
-    };
+        };
 
     private static TrackMatchSearchCandidate CreateCandidate(
         string id,

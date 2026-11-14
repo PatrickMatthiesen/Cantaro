@@ -146,25 +146,24 @@ public class TrackMetadataParserTests
     [Fact]
     public void ParseObservation_UsesOriginalProviderTitleForVersionSemantics()
     {
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "CH_oVqS6iss",
             Title = "Guy.exe",
             Artist = "Superfruit",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
             {
                 OriginalTitle = "Superfruit - Guy.exe speed up",
                 Artist = "Superfruit",
-                SearchArtist = "Superfruit"
+
             }),
             MatchStatus = TrackMatchingStatuses.Ambiguous,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
-        };
+         };
 
-        var parsed = TrackObservationParser.Parse(observation);
+        var parsed = TrackObservationParser.Parse(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
 
         Assert.Equal("Guy.exe", parsed.DisplayTitle);
         Assert.Equal("Superfruit", parsed.DisplayArtist);
@@ -174,24 +173,23 @@ public class TrackMetadataParserTests
     [Fact]
     public void ParseObservation_ExtractsNestedFeaturedArtistsFromOriginalProviderTitle()
     {
-        var observation = new TrackObservation
-        {
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "pop-stars-video",
             Title = "POP/STARS I-DLE, Jaira Burns)",
             Artist = "K/DA, Madison Beer",
-            RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+            PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
             {
                 OriginalTitle = "K/DA - POP/STARS (ft. Madison Beer, (G)I-DLE, Jaira Burns) | Music Video - League of Legends",
                 OriginalArtist = "League of Legends",
-                SearchTitle = "POP/STARS I-DLE, Jaira Burns)",
-                SearchArtist = "K/DA, Madison Beer"
+
+
             }),
             MatchStatus = TrackMatchingStatuses.Pending
-        };
+         };
 
-        var parsed = TrackObservationParser.Parse(observation);
+        var parsed = TrackObservationParser.Parse(ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow)!);
 
         Assert.Equal("POP/STARS", parsed.SearchTitle);
         Assert.Equal("K/DA, Madison Beer, (G)I-DLE, Jaira Burns", parsed.DisplayArtist);

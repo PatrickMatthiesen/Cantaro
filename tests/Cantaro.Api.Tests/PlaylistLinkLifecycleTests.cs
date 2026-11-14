@@ -40,11 +40,10 @@ public sealed class PlaylistLinkLifecycleTests
         {
             Id = "remote-playlist", Title = "CAFÉ SONGS", ItemCount = 2
         }];
-        var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube",
-            ExternalId = "song-1", Title = "Song", MatchStatus = TrackMatchingStatuses.Pending };
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), SourceType = "youtube",
+            ExternalId = "song-1", Title = "Song", MatchStatus = TrackMatchingStatuses.Pending  };
         scope.Db.TrackObservations.Add(observation);
-        scope.Db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        scope.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scope.Playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
             TrackObservationId = observation.Id, Position = 0
         });
@@ -115,11 +114,10 @@ public sealed class PlaylistLinkLifecycleTests
     public async Task Create_QueuesFirstSyncAndDoesNotCreateAgainForActiveLink()
     {
         await using var scope = await Scope.CreateAsync("youtube");
-        var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube",
-            ExternalId = "song-1", Title = "Song", MatchStatus = TrackMatchingStatuses.Pending };
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), SourceType = "youtube",
+            ExternalId = "song-1", Title = "Song", MatchStatus = TrackMatchingStatuses.Pending  };
         scope.Db.TrackObservations.Add(observation);
-        scope.Db.PlaylistEntries.Add(new PlaylistEntry
-        {
+        scope.Db.PlaylistEntries.Add(new PlaylistEntry { OwnerUserId = scope.Playlist.UserId,
             Id = Guid.NewGuid(), PlaylistId = scope.Playlist.Id,
             TrackObservationId = observation.Id, Position = 0
         });
@@ -475,8 +473,8 @@ public sealed class PlaylistLinkLifecycleTests
     public async Task Attach_UnavailableVideoDoesNotBlockReadableTracks()
     {
         await using var scope = await Scope.CreateAsync("youtube");
-        var observation = new TrackObservation { Id = Guid.NewGuid(), SourceType = "youtube",
-            ExternalId = "readable", Title = "Song", MatchStatus = TrackMatchingStatuses.Pending };
+        var observation = new TrackObservation { OwnerUserId = 1,  InputKind = ObservationInputKind.Private, Id = Guid.NewGuid(), SourceType = "youtube",
+            ExternalId = "readable", Title = "Song", MatchStatus = TrackMatchingStatuses.Pending  };
         scope.Db.TrackObservations.Add(observation);
         await scope.Db.SaveChangesAsync();
         scope.Provider.SnapshotOverride = new PlaylistRemoteSnapshot("remote-playlist", "Remote songs",
@@ -511,7 +509,7 @@ public sealed class PlaylistLinkLifecycleTests
     }
 
     [Fact]
-    public async Task Attach_ReusesOwnUnlinkedCopyAndDropsDifferentOldTombstone()
+    public async Task Attach_ReusesOwnUnlinkedCopyAndRetainsDifferentOldTombstone()
     {
         await using var scope = await Scope.CreateAsync("youtube");
         var old = scope.AddMapping();
@@ -527,7 +525,8 @@ public sealed class PlaylistLinkLifecycleTests
             "youtube", "remote-playlist", "bidirectional", "combine", preview.PreviewToken, default);
 
         Assert.Equal(same.Id, Assert.Single(status.Links).MappingId);
-        Assert.Equal("active", (await scope.Db.ServicePlaylistMappings.SingleAsync()).State);
+        Assert.Equal("active", (await scope.Db.ServicePlaylistMappings.SingleAsync(link => link.Id == same.Id)).State);
+        Assert.Equal("unlinked", (await scope.Db.ServicePlaylistMappings.SingleAsync(link => link.Id == old.Id)).State);
         Assert.Equal(0, scope.Writer.Creates);
     }
 

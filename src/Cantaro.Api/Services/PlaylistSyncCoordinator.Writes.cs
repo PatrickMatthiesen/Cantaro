@@ -7,7 +7,7 @@ namespace Cantaro.Api.Services;
 public sealed partial class PlaylistSyncCoordinator
 {
     private async Task CreateMissingLinksAsync(Playlist playlist, List<LinkRead> reads,
-        CancellationToken ct, string? service = null, bool skipDuplicateNameCheck = false)
+        CancellationToken ct, string? service = null, bool skipDuplicateNameCheck = false, bool ignoreUnlinked = false)
     {
         var accounts = await db.ConnectedServiceAccounts.AsNoTracking().Where(account => account.UserId == playlist.UserId
             && account.ConnectionState == "connected" && (account.Service == "youtube" || account.Service == "spotify")
@@ -15,7 +15,8 @@ public sealed partial class PlaylistSyncCoordinator
         foreach (var account in accounts)
         {
             var existing = await db.ServicePlaylistMappings.Where(link => link.PlaylistId == playlist.Id && link.Service == account.Service
-                && (link.ExternalAccountId == account.ExternalAccountId || (link.ExternalAccountId == "" && link.ConnectedServiceAccountId == account.Id))).ToListAsync(ct);
+                && (link.ExternalAccountId == account.ExternalAccountId || (link.ExternalAccountId == "" && link.ConnectedServiceAccountId == account.Id))
+                && (!ignoreUnlinked || link.State != "unlinked")).ToListAsync(ct);
             if (existing.Any(link => link.State != "creation_failed" || link.AttemptCount >= 5 || link.NextAttemptAt > clock.GetUtcNow())) continue;
             if (!skipDuplicateNameCheck)
             {
@@ -36,7 +37,19 @@ public sealed partial class PlaylistSyncCoordinator
                 }
             }
             var attempt = existing.Select(link => link.AttemptCount).DefaultIfEmpty(0).Max();
-            db.ServicePlaylistMappings.RemoveRange(existing);
+            // Only a rejected, unwritten creation marker is disposable. Retain
+            // any real remote receipt while releasing its active unique indexes.
+            foreach (var failed in existing)
+            {
+                if (IsUnwrittenCreation(failed))
+                {
+                    db.ServicePlaylistMappings.Remove(failed);
+                    continue;
+                }
+                failed.State = "unlinked";
+                failed.NextAttemptAt = null;
+            }
+            await db.SaveChangesAsync(ct);
             var context = new PlatformAccountContext(playlist.UserId, account.Id, account.ExternalAccountId);
             var writer = Writer(account.Service);
             var link = new ServicePlaylistMapping
@@ -50,6 +63,7 @@ public sealed partial class PlaylistSyncCoordinator
             {
                 db.ServicePlaylistMappings.Add(link);
                 await db.SaveChangesAsync(ct); // reserve before the non-idempotent provider POST
+                await db.Entry(link).Reference(item => item.ConnectedServiceAccount).LoadAsync(ct);
                 try { await writer.ValidateCreationAsync(context, ct); }
                 catch { link.State = "creation_failed"; throw; }
                 var pendingId = link.ServicePlaylistId;
@@ -92,6 +106,10 @@ public sealed partial class PlaylistSyncCoordinator
         }
     }
 
+    private static bool IsUnwrittenCreation(ServicePlaylistMapping link)
+        => link.State == "creation_failed" && link.ServicePlaylistId.StartsWith("pending:", StringComparison.Ordinal)
+            && link.BaselineJson is null && link.PendingWriteJson is null && link.MatchingProgressJson is null;
+
     private async Task WriteLinkAsync(Playlist playlist, LinkRead read, CancellationToken ct)
     {
         var link = read.Link;
@@ -100,37 +118,73 @@ public sealed partial class PlaylistSyncCoordinator
         link.LastError = null;
         await db.SaveChangesAsync(ct);
         var entries = await db.PlaylistEntries.Where(item => item.PlaylistId == playlist.Id)
-            .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
+            .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
             .Include(item => item.TrackObservation).ThenInclude(observation => observation!.Track)
-                .ThenInclude(track => track!.SourceIds)
+                .ThenInclude(track => track!.ProviderItems)
             .OrderBy(item => item.Position).ToListAsync(ct);
         var resolutions = new Dictionary<Guid, string?>();
         var available = read.Items.ToList();
         var progress = PlaylistMatchingProgress.Read(link.MatchingProgressJson);
         var entryIds = entries.Select(entry => entry.Id).ToHashSet();
         foreach (var obsolete in progress.Keys.Where(id => !entryIds.Contains(id)).ToList()) progress.Remove(obsolete);
-        var completed = entries.Where(entry => KnownDestinationId(entry, link.Service) is not null
-            || progress.TryGetValue(entry.Id, out var saved) && saved.Fingerprint == PlaylistMatchingProgress.Fingerprint(entry))
+        // A selected provider key assigned to another canonical track invalidates
+        // the scoped choice, whether it came from search or manual confirmation.
+        foreach (var saved in progress.ToArray())
+        {
+            var trackId = entries.Single(entry => entry.Id == saved.Key).TrackId;
+            var assigned = await db.ProviderCatalogItems.AsNoTracking()
+                .SingleOrDefaultAsync(source => source.SourceType == link.Service && source.ExternalId == saved.Value.ExternalId, ct);
+            if (assigned is not null && ProviderCatalogPolicy.IsVerified(assigned, clock.GetUtcNow()) && assigned.TrackId != trackId)
+                progress.Remove(saved.Key);
+        }
+        link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(progress);
+        var completed = entries.Where(entry => AttachedDestinationId(entry, link.Service, playlist.UserId) is not null
+            || progress.TryGetValue(entry.Id, out var saved)
+                && PlaylistMatchingProgress.CanReuse(saved, entry, link))
             .Select(entry => entry.Id).ToHashSet();
         link.MatchingTotalCount = entries.Count;
         link.MatchingProcessedCount = completed.Count;
         await db.SaveChangesAsync(ct);
         var batchStarted = clock.GetTimestamp();
         var searched = 0;
+        var remainingEntries = entries.Select(entry => entry.Id).ToHashSet();
+        var retainedAcknowledgements = new HashSet<Guid>();
         foreach (var entry in entries)
         {
+            remainingEntries.Remove(entry.Id);
             string? id;
-            var fingerprint = PlaylistMatchingProgress.Fingerprint(entry);
+            var acknowledgedOnly = false;
             try
             {
                 var identity = PlaylistSyncItem.From(entry).Identity;
+                // Revalidate durable choices through the resolver before any read/attached
+                // shortcut. An automatic search checkpoint has no such precedence.
+                var manualChoice = progress.TryGetValue(entry.Id, out var confirmed)
+                    && confirmed.ManualConfirmation && PlaylistMatchingProgress.CanReuse(confirmed, entry, link);
+                var confirmedId = manualChoice ? await provider.ResolveAsync(read.Account, entry, ct) : null;
+                bool CanConsume(PlaylistSyncItem item) => item.DestinationBinding is not { } binding
+                    || binding.EntryId == entry.Id || !remainingEntries.Contains(binding.EntryId);
+                // A different ID's occurrence belongs to a later duplicate entry.
+                // Consume a matching occurrence when the manual choice is already present.
                 var occurrence = available.FirstOrDefault(item => item.Identity == identity
-                    && item.ObservationId == entry.TrackObservationId)
-                    ?? available.FirstOrDefault(item => item.Identity == identity);
+                    && item.DestinationBinding?.EntryId == entry.Id
+                    && (!manualChoice || item.ExternalId == confirmedId))
+                    ?? available.FirstOrDefault(item => item.Identity == identity
+                    && CanConsume(item)
+                    && entry.TrackObservationId is { } observationId && item.ObservationId == observationId
+                    && (!manualChoice || item.ExternalId == confirmedId))
+                    ?? available.FirstOrDefault(item => item.Identity == identity
+                        && CanConsume(item)
+                        && (!manualChoice || item.ExternalId == confirmedId));
                 if (occurrence is not null) available.Remove(occurrence);
-                if (occurrence is not null) id = occurrence.ExternalId;
-                else if (KnownDestinationId(entry, link.Service) is { } knownId) id = knownId;
-                else if (progress.TryGetValue(entry.Id, out var saved) && saved.Fingerprint == fingerprint)
+                acknowledgedOnly = occurrence?.DestinationBinding is not null && !manualChoice
+                    && (!progress.TryGetValue(entry.Id, out var reusable) || !PlaylistMatchingProgress.CanReuse(reusable, entry, link));
+                if (acknowledgedOnly) retainedAcknowledgements.Add(entry.Id);
+                if (manualChoice) id = confirmedId;
+                else if (occurrence is not null) id = occurrence.ExternalId;
+                else if (AttachedDestinationId(entry, link.Service, playlist.UserId) is { } knownId) id = knownId;
+                else if (progress.TryGetValue(entry.Id, out var saved)
+                    && PlaylistMatchingProgress.CanReuse(saved, entry, link))
                     id = saved.ExternalId;
                 else
                 {
@@ -154,11 +208,16 @@ public sealed partial class PlaylistSyncCoordinator
             // Resolution may have attached a canonical track and enriched its metadata.
             // Checkpoint that saved state so our own update does not invalidate the result.
             var resolvedEntry = await db.PlaylistEntries.AsNoTracking()
-                .Include(item => item.Track).ThenInclude(track => track!.SourceIds)
-                .Include(item => item.TrackObservation).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
+                .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
+                .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem).SingleOrDefaultAsync(item => item.Id == entry.Id, ct);
             if (resolvedEntry is not null)
             {
-                progress[entry.Id] = new(PlaylistMatchingProgress.Fingerprint(resolvedEntry), id);
+                // An acknowledged read cannot refresh stale outbound permission.
+                // Keep its old proof until a fresh resolution authorizes a new export.
+                if (!acknowledgedOnly && (!progress.TryGetValue(entry.Id, out var confirmed) || !confirmed.ManualConfirmation
+                    || !PlaylistMatchingProgress.CanReuse(confirmed, resolvedEntry, link)
+                    || confirmed.ExternalId != id))
+                    progress[entry.Id] = PlaylistMatchingProgress.Create(link, resolvedEntry, id);
                 completed.Add(entry.Id);
             }
             else
@@ -173,7 +232,7 @@ public sealed partial class PlaylistSyncCoordinator
         // Matching can unify observations and remove duplicate entries. Export the resulting
         // membership rather than the list that existed before destination lookup.
         entries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == playlist.Id)
-            .Include(item => item.TrackObservation).OrderBy(item => item.Position).ToListAsync(ct);
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem).OrderBy(item => item.Position).ToListAsync(ct);
         var ids = new List<string>();
         var exported = new List<PlaylistSyncItem>();
         var unresolved = 0;
@@ -183,7 +242,8 @@ public sealed partial class PlaylistSyncCoordinator
                 throw new PlatformApiException("remote_changed", "The Cantaro playlist changed during matching. Cantaro will refresh before writing.", 409);
             if (string.IsNullOrWhiteSpace(id)) { unresolved++; continue; }
             ids.Add(id);
-            exported.Add(PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service });
+            exported.Add(PlaylistSyncItem.From(entry) with { ExternalId = id, Service = link.Service,
+                DestinationBinding = PlaylistDestinationBinding.From(link, entry) });
         }
 
         // Search and metadata resolution can take time. Refuse to overwrite an edit made since the read phase.
@@ -196,6 +256,30 @@ public sealed partial class PlaylistSyncCoordinator
         if (revision != playlist.SyncRevision)
             throw new PlatformApiException("remote_changed", "The Cantaro playlist changed during sync. The platform was not overwritten.", 409);
 
+        // Recheck the exact source and catalog revisions after the potentially
+        // slow remote read. An expired or withdrawn shared association cannot
+        // authorize a new outbound write using an earlier matching checkpoint.
+        var finalEntries = await db.PlaylistEntries.AsNoTracking().Where(item => item.PlaylistId == playlist.Id)
+            .Include(item => item.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
+            .Include(item => item.Track).ThenInclude(track => track!.ProviderItems)
+            .ToListAsync(ct);
+        foreach (var entry in finalEntries)
+        {
+            if (resolutions.GetValueOrDefault(entry.Id) is null || retainedAcknowledgements.Contains(entry.Id)) continue;
+            if (!progress.TryGetValue(entry.Id, out var proof) || !PlaylistMatchingProgress.CanReuse(proof, entry, link))
+            {
+                var id = resolutions[entry.Id];
+                // Keeping a scoped occurrence that is still present does not
+                // renew permission to recreate it after removal.
+                if (fresh.Tracks.Any(item => item.ExternalId == id && item.TrackId == entry.TrackId
+                    && item.ObservationId == entry.TrackObservationId && item.ReadScope is { } scope
+                    && scope.UserId == playlist.UserId && scope.ConnectedServiceAccountId == link.ConnectedServiceAccountId
+                    && scope.ExternalAccountId == link.ExternalAccountId && scope.Service == link.Service
+                    && scope.ServicePlaylistId == link.ServicePlaylistId)) continue;
+                throw new PlatformApiException("remote_changed", "Track evidence changed during sync. Cantaro will refresh before writing.", 409);
+            }
+        }
+
         link.PendingWriteJson = new PlaylistSyncBaseline(exported).Serialize();
         await db.SaveChangesAsync(ct);
         var unavailableIds = fresh.Tracks.Where(item => !item.IsAvailable)
@@ -203,6 +287,9 @@ public sealed partial class PlaylistSyncCoordinator
         var writableIds = ids.Where(id => !unavailableIds.Contains(id)).ToList();
         var changesTracks = !writableIds.SequenceEqual(fresh.Tracks.Where(item => item.IsAvailable).Select(item => item.ExternalId));
         var changesName = link.DesiredName is { } && link.DesiredName != fresh.Name;
+        // Even an approved export requiring no HTTP mutation creates a scoped
+        // acknowledgement. Retain its suppression before that receipt can go away.
+        await PlaylistExportAttemptStore.RecordAsync(db, read.Account, link.Service, link.ServicePlaylistId, ids, ct);
         if (changesTracks)
             await Writer(link.Service).ReconcileAsync(read.Account, link.ServicePlaylistId, ids, ct);
         if (changesName)
@@ -222,7 +309,9 @@ public sealed partial class PlaylistSyncCoordinator
         link.PendingWriteJson = null;
         link.BaselineName = verified.Name;
         link.BaselineJson = new PlaylistSyncBaseline(
-            await NormalizeIdentitiesAsync(KnownTracks(verified).Select(item => PlaylistSyncItem.From(item, link.Service)), ct),
+            await BindDestinationChoicesAsync(link, read.Account,
+                await NormalizeIdentitiesAsync(KnownTracks(verified).Select(item => PlaylistSyncItem.From(item, link.Service)), ct), ct,
+                acknowledged: exported),
             verified.Revision).Serialize();
         link.CanonicalRevision = playlist.SyncRevision;
         link.UnresolvedCount = unresolved;
@@ -231,19 +320,19 @@ public sealed partial class PlaylistSyncCoordinator
         link.NextAttemptAt = null; // unresolved identities are looked up again on the next daily run
         link.AttemptCount = 0;
         link.LastError = null;
-        link.MatchingProgressJson = null;
+        link.MatchingProgressJson = PlaylistMatchingProgress.Serialize(progress
+            .Where(item => item.Value.ExternalId is not null).ToDictionary());
         link.MatchingProcessedCount = 0;
         link.MatchingTotalCount = 0;
     }
 
-    private static string? KnownDestinationId(PlaylistEntry entry, string service)
+    private static string? AttachedDestinationId(PlaylistEntry entry, string service, int userId)
     {
         var observation = entry.TrackObservation;
-        var track = entry.Track ?? observation?.Track;
-        if (observation?.SourceType == service && (track is null || observation.TrackId == track.Id))
+        var track = entry.Track;
+        if (observation?.SourceType == service && ProviderCatalogPolicy.HasOwnedInput(observation, userId)
+            && (track is null || observation.TrackId == track.Id))
             return observation.ExternalId;
-        return track?.SourceIds.Where(source => source.SourceType == service)
-            .OrderByDescending(source => source.Confidence).ThenByDescending(source => source.LastVerifiedAt)
-            .FirstOrDefault()?.ExternalId;
+        return null;
     }
 }

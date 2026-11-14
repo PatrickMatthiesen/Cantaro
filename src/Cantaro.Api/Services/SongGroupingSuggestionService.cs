@@ -18,8 +18,8 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         var tracks = (await _dbContext.Tracks
             .AsNoTracking()
             .Include(track => track.SongMemberships)
-            .Include(track => track.ArtistCredits)
-                .ThenInclude(credit => credit.Artist)
+            .Include(track => track.ProviderItems)
+
             .ToListAsync(cancellationToken))
             .OrderBy(track => track.CreatedAt)
             .ThenBy(track => track.Id)
@@ -235,35 +235,26 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         out TrackGroupingDescription description)
     {
         description = default!;
-        if (track.SongMemberships.Count != 1
-            || (track.VersionFlags & UnsafeAutomaticGroupingFlags) != 0
-            || string.IsNullOrWhiteSpace(track.CanonicalMetadata))
+        if (track.SongMemberships.Count != 1)
         {
             return false;
         }
 
-        TrackCanonicalMetadata? metadata;
-        try
-        {
-            metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
-                track.CanonicalMetadata);
-        }
-        catch (JsonException)
+        var facts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
+        if (facts is null || (facts.VersionFlags & UnsafeAutomaticGroupingFlags) != 0)
         {
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(metadata?.Title))
+        if (string.IsNullOrWhiteSpace(facts.Title))
         {
             return false;
         }
 
-        var parsed = TrackMetadataParser.Parse(metadata.Title, metadata.Artist);
+        var parsed = TrackMetadataParser.Parse(facts.Title, facts.Artist);
         var credits = TrackMetadataParser.NormalizeArtistCredits(
-            track.ArtistCredits.Count > 0
-                ? track.ArtistCredits
-                    .OrderBy(credit => credit.Position)
-                    .Select(credit => credit.CreditedName ?? credit.Artist?.Name)
+            facts.ArtistCredits.Count > 0
+                ? facts.ArtistCredits.Select(credit => credit.Name)
                 : parsed.ArtistCredits.Cast<string?>());
         if (credits.Count == 0)
         {
@@ -273,8 +264,9 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         description = new TrackGroupingDescription(
             parsed,
             credits,
-            TrackIdentityResolver.NormalizeIsrc(track.Isrc),
-            NormalizeStableId(track.MbidRecording));
+            TrackIdentityResolver.NormalizeIsrc(facts.Isrc),
+            NormalizeStableId(facts.MusicBrainzRecordingId),
+            facts.VersionFlags);
         return true;
     }
 
@@ -316,7 +308,7 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
 
     private static bool HasVersionIdentity(TrackGroupingCandidate candidate) =>
         candidate.Description.VersionMarkers.Count > 0
-        || candidate.Track.VersionFlags != TrackVersionFlags.None;
+        || candidate.Description.VersionFlags != TrackVersionFlags.None;
 
     private static bool HasDistinctVersionEvidence(
         TrackGroupingCandidate candidate,
@@ -325,7 +317,7 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         && (!candidate.Description.VersionMarkers.SequenceEqual(
                 anchor.Description.VersionMarkers,
                 StringComparer.Ordinal)
-            || candidate.Track.VersionFlags != anchor.Track.VersionFlags);
+            || candidate.Description.VersionFlags != anchor.Description.VersionFlags);
 
     private static object Evidence(
         Track track,
@@ -338,7 +330,7 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         isrc = description.Isrc,
         musicBrainzRecordingId = description.MusicBrainzRecordingId,
         versionMarkers = description.Metadata.VersionMarkers,
-        versionFlags = track.VersionFlags.ToString()
+        versionFlags = description.VersionFlags.ToString()
     };
 
     private static string? NormalizeStableId(string? value) =>
@@ -357,7 +349,8 @@ public sealed class SongGroupingSuggestionService(ApplicationDbContext dbContext
         ParsedTrackMetadata Metadata,
         IReadOnlyList<string> ArtistCredits,
         string? Isrc,
-        string? MusicBrainzRecordingId)
+        string? MusicBrainzRecordingId,
+        TrackVersionFlags VersionFlags)
     {
         public IReadOnlyList<string> VersionMarkers => Metadata.VersionMarkers;
     }

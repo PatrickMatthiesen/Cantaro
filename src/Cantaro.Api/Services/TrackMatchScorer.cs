@@ -5,7 +5,7 @@ namespace Cantaro.Api.Services;
 internal static class TrackMatchScorer
 {
     public static TrackMatchScoredCandidate Score(
-        Cantaro.Api.Models.TrackObservation observation,
+        ObservationInput observation,
         TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options)
         => TrackObservationParser.ParseSearchHypotheses(observation)
@@ -15,7 +15,7 @@ internal static class TrackMatchScorer
             .First();
 
     private static TrackMatchScoredCandidate Score(
-        Cantaro.Api.Models.TrackObservation observation,
+        ObservationInput observation,
         TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options,
         ParsedTrackMetadata parsedObservation)
@@ -28,17 +28,16 @@ internal static class TrackMatchScorer
     {
         if (candidate.CandidateSource != "youtube")
             return [TrackMetadataParser.Parse(candidate.Title, candidate.Artist, parseArtistFromTitle: false)];
-        var rawMetadata = TrackMatchCandidateStoredMetadata.ReadProviderMetadata(candidate.RawMetadata);
-        return TrackObservationParser.ParseSearchHypotheses(new Models.TrackObservation
+        return TrackObservationParser.ParseSearchHypotheses(new ObservationInput
         {
             SourceType = "youtube", ExternalId = candidate.ExternalId, Title = candidate.Title,
             Artist = candidate.Artist, DurationSeconds = candidate.DurationSeconds,
-            RawMetadata = rawMetadata, MatchStatus = TrackMatchingStatuses.Pending
+            Metadata = ObservationInput.ReadOperationMetadata(candidate.RawMetadata)
         });
     }
 
     private static TrackMatchScoredCandidate Score(
-        Models.TrackObservation observation, TrackMatchSearchCandidate candidate,
+        ObservationInput observation, TrackMatchSearchCandidate candidate,
         TrackMatchingOptions options, ParsedTrackMetadata parsedObservation, ParsedTrackMetadata parsedCandidate)
     {
         if (candidate.CandidateSource == "youtube")
@@ -50,7 +49,9 @@ internal static class TrackMatchScorer
                 ArtistCredits = parsedCandidate.ArtistCredits, DurationSeconds = candidate.DurationSeconds,
                 Isrc = candidate.Isrc, MbidRecording = candidate.MbidRecording,
                 ArtistMusicBrainzId = candidate.ArtistMusicBrainzId, ArtistSortName = candidate.ArtistSortName,
-                Explanation = candidate.Explanation, RawMetadata = candidate.RawMetadata
+                ArtistIdentities = candidate.ArtistIdentities,
+                Explanation = candidate.Explanation, RawMetadata = candidate.RawMetadata,
+                ProviderCatalogItemId = candidate.ProviderCatalogItemId, ProviderCatalogRevision = candidate.ProviderCatalogRevision
             };
         }
         var titleSimilarity = BestSimilarity(candidate.Title, observation.Title, parsedObservation.DisplayTitle, parsedObservation.SearchTitle);
@@ -99,13 +100,18 @@ internal static class TrackMatchScorer
             : (titleSimilarity * 0.55m) + (artistSimilarity * 0.30m) + (durationScore * 0.15m) + semanticAdjustment;
         var compatibleDuration = durationDifference.HasValue
             && Math.Abs(durationDifference.Value) <= options.AutoMatchDurationToleranceSeconds;
-        var isAutoMatchEligible = !conflictingCredits
+        var sourceMetadata = TrackObservationParser.ReadMetadata(observation);
+        var sourceIsrc = TrackIdentityResolver.NormalizeIsrc(sourceMetadata?.Isrc);
+        var candidateIsrc = TrackIdentityResolver.NormalizeIsrc(candidate.Isrc);
+        var sourceMbid = NormalizeStableId(sourceMetadata?.MbidRecording);
+        var candidateMbid = NormalizeStableId(candidate.MbidRecording);
+        var conflictingRecordingId = sourceIsrc is not null && candidateIsrc is not null && sourceIsrc != candidateIsrc
+            || sourceMbid is not null && candidateMbid is not null && sourceMbid != candidateMbid;
+        var isAutoMatchEligible = !conflictingCredits && !conflictingRecordingId
             && compatibleCredits && compatibleSemantics
             && (strongIdentity || compatibleDuration);
-        var sourceIsrc = TrackIdentityResolver.NormalizeIsrc(TrackObservationParser.ReadMetadata(observation)?.Isrc);
-        var confirmedRecordingIdentity = sourceIsrc is not null
-            && sourceIsrc == TrackIdentityResolver.NormalizeIsrc(candidate.Isrc)
-            && strongIdentity;
+        var confirmedRecordingIdentity = (sourceIsrc is not null && sourceIsrc == candidateIsrc
+            || sourceMbid is not null && sourceMbid == candidateMbid) && strongIdentity;
         return new TrackMatchScoredCandidate
         {
             Candidate = candidate,
@@ -127,6 +133,8 @@ internal static class TrackMatchScorer
             HasConfirmedRecordingIdentity = confirmedRecordingIdentity,
             AutoMatchEligibilityReason = conflictingCredits
                 ? "The source has conflicting artist credits."
+                : conflictingRecordingId
+                    ? "Stable recording identifiers conflict."
                 : isAutoMatchEligible
                     ? strongIdentity
                         ? "Matching title, artist credits and version; duration is not required."
@@ -240,4 +248,7 @@ internal static class TrackMatchScorer
         return left.OrderBy(marker => marker, StringComparer.Ordinal)
             .SequenceEqual(right.OrderBy(marker => marker, StringComparer.Ordinal), StringComparer.Ordinal);
     }
+
+    private static string? NormalizeStableId(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
 }

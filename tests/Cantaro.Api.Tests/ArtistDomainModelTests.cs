@@ -41,7 +41,7 @@ public sealed class ArtistDomainModelTests
         db.ChangeTracker.Clear();
 
         var credits = await db.TrackArtistCredits
-            .Include(credit => credit.Artist)
+            .Include(credit => credit.Artist).ThenInclude(artist => artist!.ProviderLinks)
             .Where(credit => credit.TrackId == track.Id)
             .OrderBy(credit => credit.Position)
             .ToListAsync();
@@ -52,7 +52,7 @@ public sealed class ArtistDomainModelTests
             {
                 Assert.Equal(TrackArtistRole.Primary, credit.Role);
                 Assert.Equal("Alpha", credit.CreditedName);
-                Assert.Equal(primary.MusicBrainzArtistId, credit.Artist?.MusicBrainzArtistId);
+                Assert.Equal(primary.ProviderLinks.Single(link => link.Provider == "musicbrainz").ExternalId, credit.Artist?.ProviderLinks.Single(link => link.Provider == "musicbrainz").ExternalId);
             },
             credit =>
             {
@@ -119,7 +119,7 @@ public sealed class ArtistDomainModelTests
     private static Track NewTrack()
     {
         var now = DateTimeOffset.UtcNow;
-        return new Track { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now };
+        return new Track {  Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now  };
     }
 
     private static Artist NewArtist(string name, string? mbid = null)
@@ -127,7 +127,7 @@ public sealed class ArtistDomainModelTests
         var now = DateTimeOffset.UtcNow;
         return new Artist
         {
-            Id = Guid.NewGuid(), Name = name, MusicBrainzArtistId = mbid,
+            Id = Guid.NewGuid(), Name = name, ProviderLinks = mbid is null ? [] : [new ArtistProviderLink { Provider = "musicbrainz", ExternalId = mbid.ToLowerInvariant(), Id = Guid.NewGuid() }],
             CreatedAt = now, UpdatedAt = now
         };
     }

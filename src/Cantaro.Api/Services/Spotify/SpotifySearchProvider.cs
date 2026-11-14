@@ -8,13 +8,15 @@ public sealed class SpotifySearchProvider(
     SpotifyApiClient apiClient,
     SpotifyCatalogTokenProvider tokenProvider,
     IOptions<TrackMatchingOptions>? matchingOptions = null,
-    SpotifySearchCache? searchCache = null) : ITrackMetadataSearchProvider
+    SpotifySearchCache? searchCache = null,
+    TimeProvider? timeProvider = null,
+    ProviderCatalogAcquisition? catalogAcquisition = null) : ITrackMetadataSearchProvider
 {
     private const int ResultLimit = 10;
     private readonly TrackMatchingOptions _matchingOptions = matchingOptions?.Value ?? new();
 
     public async Task<IReadOnlyList<TrackMatchSearchCandidate>> SearchAsync(
-        TrackObservation observation,
+        ObservationInput observation,
         CancellationToken cancellationToken)
     {
         var hypotheses = TrackObservationParser.ParseSearchHypotheses(observation);
@@ -35,7 +37,7 @@ public sealed class SpotifySearchProvider(
                 .ToArray();
             if (isrcMatches.Length > 0)
             {
-                return ToCandidates(isrcMatches);
+                return await ToEnrichedCandidatesAsync(isrcMatches, cancellationToken);
             }
         }
 
@@ -62,7 +64,7 @@ public sealed class SpotifySearchProvider(
             if (accepted is not null && CanStopBeforeRemainingQueries(
                 observation, metadata, isrc, searchHypotheses, index, accepted))
             {
-                return candidates;
+                return await ToEnrichedCandidatesAsync(tracks.DistinctBy(track => track.Id).ToArray(), cancellationToken);
             }
         }
 
@@ -75,11 +77,11 @@ public sealed class SpotifySearchProvider(
             }
         }
 
-        return ToCandidates(tracks.DistinctBy(track => track.Id));
+        return await ToEnrichedCandidatesAsync(tracks.DistinctBy(track => track.Id).ToArray(), cancellationToken);
     }
 
     private static bool CanStopBeforeRemainingQueries(
-        TrackObservation observation,
+        ObservationInput observation,
         TrackObservationMetadata? metadata,
         string? isrc,
         IReadOnlyList<ParsedTrackMetadata> hypotheses,
@@ -113,12 +115,49 @@ public sealed class SpotifySearchProvider(
         {
             var token = await tokenProvider.GetAccessTokenAsync(ct)
                 ?? throw new InvalidOperationException("Spotify catalog token is unavailable.");
-            return await apiClient.SearchTracksAsync(token, query, ResultLimit, ct);
+            var tracks = await apiClient.SearchTrackCreditsAsync(token, query, ResultLimit, ct);
+            if (catalogAcquisition is null) return tracks;
+            var verified = new List<SpotifyTrackSnapshot>(tracks.Count);
+            foreach (var track in tracks)
+                verified.Add(await catalogAcquisition.RecordSpotifyApplicationResponseAsync(track, ct));
+            return verified;
         }
 
-        return searchCache is null
+        var tracks = searchCache is null
             ? await SearchCatalogAsync(cancellationToken)
             : await searchCache.GetOrSearchAsync(query, ResultLimit, SearchCatalogAsync, cancellationToken);
+        return catalogAcquisition is null
+            ? tracks
+            : await catalogAcquisition.ValidateSpotifySearchSnapshotsAsync(tracks, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<TrackMatchSearchCandidate>> ToEnrichedCandidatesAsync(
+        IReadOnlyList<SpotifyTrackSnapshot> tracks, CancellationToken cancellationToken)
+    {
+        if (tracks.Any(track => track.ArtistIdentities.Any(credit =>
+            credit.Provider == SpotifyService.ServiceName && !string.IsNullOrWhiteSpace(credit.ExternalId))))
+        {
+            try
+            {
+                // Bound optional preparation too: token refresh can wait on its
+                // semaphore or a long Retry-After even when tracks are cached.
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5), timeProvider ?? TimeProvider.System);
+                using var optional = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+                if (!await apiClient.IsCoolingDownAsync(optional.Token))
+                {
+                    var token = await tokenProvider.GetAccessTokenAsync(optional.Token);
+                    if (token is not null)
+                        tracks = await apiClient.EnrichArtistMetadataAsync(token, tracks, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (SpotifyApiClient.IsOptionalArtistFailure(ex, cancellationToken))
+            {
+                // A cached track search remains useful if optional enrichment
+                // cannot obtain a catalog token.
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return ToCandidates(tracks);
     }
 
     private static IReadOnlyList<TrackMatchSearchCandidate> ToCandidates(
@@ -129,8 +168,11 @@ public sealed class SpotifySearchProvider(
         Title = track.Name,
         Artist = track.Artist,
         ArtistCredits = track.ArtistNames,
+        ArtistIdentities = track.ArtistIdentities,
         Isrc = track.Isrc,
         DurationSeconds = track.DurationSeconds,
+        ProviderCatalogItemId = track.ProviderCatalogItemId,
+        ProviderCatalogRevision = track.ProviderCatalogRevision,
         Explanation = "Suggested by Spotify catalog search."
     }).ToArray();
 

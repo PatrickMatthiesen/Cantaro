@@ -132,34 +132,17 @@ public sealed class YouTubePlaylistAvailabilityTests
     }
 
     [Fact]
-    public void GetPreservedDescription_KeepsPreviouslyStoredDescriptionWhenCurrentReadOmitsIt()
+    public void PrivateDescriptionRemainsOwnedInput()
     {
-        const string rawMetadata = """{"Description":"Previously captured song credits"}""";
-
-        var description = YouTubePlaylistSyncProvider.GetPreservedDescription(null, rawMetadata);
-
-        Assert.Equal("Previously captured song credits", description);
-    }
-
-    [Fact]
-    public void GetPreservedDescription_PrefersDescriptionFromCurrentRead()
-    {
-        var description = YouTubePlaylistSyncProvider.GetPreservedDescription(
-            "Current song credits", """{"Description":"Old description"}""");
-
-        Assert.Equal("Current song credits", description);
-    }
-
-    [Fact]
-    public void LegacyImport_PreservesDescriptionWhenRefreshedReadOmitsIt()
-    {
-        const string previousRawMetadata = """{"Description":"Previously captured song credits"}""";
-        const string currentRawMetadata = """{"OriginalTitle":"Video title"}""";
-
-        var preserved = YouTubePlaylistSyncService.PreserveExistingDescription(
-            currentRawMetadata, previousRawMetadata);
-
-        Assert.Contains("Previously captured song credits", preserved);
+        var observation = new Cantaro.Api.Models.TrackObservation
+        {
+            Id = Guid.NewGuid(), OwnerUserId = 1, SourceType = "youtube", ExternalId = "video",
+            MatchStatus = "pending"
+        };
+        ObservationInput.SetPrivate(observation, "Song", "Artist", 180, null,
+            new TrackObservationMetadata { Description = "Previously captured song credits" });
+        Assert.Equal("Previously captured song credits", ObservationInput.Read(observation, 1, DateTimeOffset.UtcNow)!.Metadata.Description);
+        Assert.Null(ObservationInput.Read(observation, 2, DateTimeOffset.UtcNow));
     }
 
     [Fact]

@@ -6,6 +6,7 @@ namespace Cantaro.Api.Models;
 public class PlaylistEntry
 {
     public Guid Id { get; set; }
+    public int OwnerUserId { get; set; }
     
     /// <summary>
     /// Foreign key to Playlist

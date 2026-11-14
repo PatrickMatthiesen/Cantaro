@@ -107,6 +107,24 @@ public sealed class SpotifyPlaylistSyncProviderTests
         Assert.Empty(scope.Handler.ProfileRequests);
     }
 
+    [Fact]
+    public async Task AccountReadsKeepDifferentOwnersSnapshotsSeparate()
+    {
+        await using var scope = await TestScope.CreateAsync();
+        scope.Handler.TrackTitle = "Alice account title";
+        var alice = await scope.Provider.ReadAsync(scope.Account, "playlist1", default);
+        var bobAccount = await scope.AddSecondAccountAsync();
+        scope.Handler.ProfileId = "other-user";
+        scope.Handler.TrackTitle = "Bob account title";
+        var bob = await scope.Provider.ReadAsync(bobAccount, "playlist1", default);
+        var observations = await scope.Db.TrackObservations.AsNoTracking().OrderBy(x => x.OwnerUserId).ToArrayAsync();
+        Assert.Equal(2, observations.Length);
+        Assert.Equal("Alice account title", observations.Single(x => x.OwnerUserId == scope.Account.UserId).Title);
+        Assert.Equal("Bob account title", observations.Single(x => x.OwnerUserId == bobAccount.UserId).Title);
+        Assert.NotEqual(alice.Tracks.Single().ObservationId, bob.Tracks.Single().ObservationId);
+        Assert.Empty(await scope.Db.ProviderCatalogItems.ToArrayAsync());
+    }
+
     private sealed class TestScope : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -127,6 +145,7 @@ public sealed class SpotifyPlaylistSyncProviderTests
             Account = account;
         }
 
+        public ApplicationDbContext Db => _dbContext;
         public PlaylistHandler Handler { get; }
         public SpotifyPlaylistSyncProvider Provider { get; }
         public PlatformAccountContext Account { get; }
@@ -189,12 +208,14 @@ public sealed class SpotifyPlaylistSyncProviderTests
             {
                 var observation = new TrackObservation
                 {
-                    Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = $"video-{index}",
+            InputKind = ObservationInputKind.Private,
+                    Id = Guid.NewGuid(), OwnerUserId = Account.UserId,
+                    SourceType = "youtube", ExternalId = $"video-{index}",
                     Title = $"Song {index}", Artist = "Artist", MatchStatus = TrackMatchingStatuses.Pending
                 };
                 _dbContext.TrackObservations.Add(observation);
                 return new PlaylistEntry
-                {
+                { OwnerUserId = Account.UserId,
                     Id = Guid.NewGuid(), PlaylistId = playlist.Id, TrackObservationId = observation.Id,
                     Position = index, AddedAt = Now
                 };
@@ -247,7 +268,7 @@ public sealed class SpotifyPlaylistSyncProviderTests
                 new SpotifyCatalogTokenProvider(apiClient, spotifyOptions, TimeProvider.System,
                     new SpotifyCatalogTokenCache()));
             var provider = new SpotifyPlaylistSyncProvider(dbContext, apiClient, tokenManager,
-                new SpotifyTrackResolver(dbContext), [searchProvider], null!, null!,
+                [searchProvider], null!, null!,
                 Options.Create(new TrackMatchingOptions()));
             return new TestScope(connection, httpClient, dbContext, encryption, handler, provider,
                 new PlatformAccountContext(userId, account.Id));
@@ -263,6 +284,7 @@ public sealed class SpotifyPlaylistSyncProviderTests
 
     private sealed class PlaylistHandler : HttpMessageHandler
     {
+        public string? TrackTitle { get; set; }
         public string ProfileId { get; set; } = "spotify-user";
         public List<string> ProfileRequests { get; } = [];
         public List<(HttpMethod Method, string Path)> Requests { get; } = [];
@@ -283,6 +305,8 @@ public sealed class SpotifyPlaylistSyncProviderTests
             if (request.Method == HttpMethod.Get && path == "/v1/search")
                 return Task.FromResult(Json(HttpStatusCode.OK,
                     new { tracks = new { items = Array.Empty<object>() } }));
+            if (request.Method == HttpMethod.Get && path == "/v1/artists/artist")
+                return Task.FromResult(Json(HttpStatusCode.OK, new { id = "artist", name = "Artist" }));
             if (request.Method == HttpMethod.Get && path == "/v1/me/playlists")
                 return Task.FromResult(Json(HttpStatusCode.OK,
                     new { items = new[] { new { id = "playlist1", name = "Playlist" } }, next = (string?)null }));
@@ -294,7 +318,12 @@ public sealed class SpotifyPlaylistSyncProviderTests
                 }));
             if (request.Method == HttpMethod.Get && path == "/v1/playlists/playlist1/items")
                 return Task.FromResult(Json(HttpStatusCode.OK,
-                    new { items = Array.Empty<object>(), total = 0, next = (string?)null }));
+                    new { items = TrackTitle is null ? Array.Empty<object>() : new object[] { new {
+                        is_local = false, item = new { id = "same-provider-id", name = TrackTitle, type = "track", duration_ms = 180000,
+                            artists = new[] { new { id = "artist", name = "Artist" } },
+                            album = new { name = "Album", images = Array.Empty<object>() },
+                            external_urls = new { spotify = "https://open.spotify.com/track/same-provider-id" } }
+                    } }, total = TrackTitle is null ? 0 : 1, next = (string?)null }));
             if (request.Method == HttpMethod.Put && path == "/v1/playlists/playlist1")
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
             throw new InvalidOperationException($"Unexpected Spotify request: {request.Method} {request.RequestUri}");

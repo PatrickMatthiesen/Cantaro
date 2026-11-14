@@ -62,6 +62,23 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
 
+    services:
+      postgres:
+        image: postgres:18.3
+        env:
+          POSTGRES_DB: cantaro_test
+          POSTGRES_PASSWORD: cantaro-ci-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cantaro_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CANTARO_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=cantaro_test;Username=postgres;Password=cantaro-ci-test
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

@@ -17,8 +17,8 @@ public class SharedTrackMatchingTests
             CandidateSource = "spotify", ExternalId = "wrong-credits", Title = "Song",
             Artist = "Artist", ArtistCredits = ["Different Artist"], DurationSeconds = 160
         } };
-        Assert.Null(TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision.AcceptedCandidate);
-        Assert.Null(PlaylistDestinationIdentityResolver.Assess(source, candidates, new()).Accepted);
+        Assert.Null(TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision.AcceptedCandidate);
+        Assert.Null(PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Accepted);
     }
 
     [Fact]
@@ -30,10 +30,10 @@ public class SharedTrackMatchingTests
             Candidate("spotify", "one", "Song (Live Remix)", "Artist", 202),
             Candidate("spotify", "two", "Song (Remix Live)", "Artist", 220)
         };
-        var canonical = TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision;
+        var canonical = TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision;
         Assert.Equal(TrackMatchingStatuses.Matched, canonical.MatchStatus);
         Assert.Equal(canonical.AcceptedCandidate?.Candidate.ExternalId,
-            PlaylistDestinationIdentityResolver.Assess(source, candidates, new()).Accepted?.Candidate.ExternalId);
+            PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Accepted?.Candidate.ExternalId);
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class SharedTrackMatchingTests
     {
         const string originalTitle = "Everything Goes On - Porter Robinson (Official Music Video) | Star Guardian 2022";
         var source = Observation("Porter Robinson | Star Guardian 2022", "Everything Goes On", 160);
-        source.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        source.PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
         {
             OriginalTitle = originalTitle, OriginalArtist = "League of Legends",
             ChannelTitle = "League of Legends",
@@ -54,8 +54,8 @@ public class SharedTrackMatchingTests
             Candidate("spotify", "spanish", "Everything Goes On (Spanish Version)", "MegaMat", 202)
         };
 
-        var canonical = TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision;
-        var destination = PlaylistDestinationIdentityResolver.Assess(source, candidates, new());
+        var canonical = TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision;
+        var destination = PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new());
         Assert.Equal("4C4zy9kfjYjr6IcNAdV7ZD", canonical.AcceptedCandidate?.Candidate.ExternalId);
         Assert.Equal(canonical.AcceptedCandidate?.Candidate.ExternalId, destination.Accepted?.Candidate.ExternalId);
         Assert.Equal(42, canonical.AcceptedCandidate?.DurationDifferenceSeconds);
@@ -71,8 +71,8 @@ public class SharedTrackMatchingTests
     {
         var source = Observation("Everything Goes On", "Porter Robinson", 160);
         var candidates = new[] { Candidate(provider, "recording", "Everything Goes On", "Porter Robinson", duration) };
-        var canonical = TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision;
-        var playlist = PlaylistDestinationIdentityResolver.Assess(source, candidates, new());
+        var canonical = TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision;
+        var playlist = PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new());
 
         Assert.Equal(TrackMatchingStatuses.Matched, canonical.MatchStatus);
         Assert.Equal(canonical.AcceptedCandidate!.Candidate.ExternalId, playlist.Accepted?.Candidate.ExternalId);
@@ -93,8 +93,8 @@ public class SharedTrackMatchingTests
             Candidate(provider, "cover", "Mortals Funk Remix (Cover)", "LXNGVX, Warriyo", 147),
             Candidate(provider, "missing-credit", "Mortals Funk Remix", "LXNGVX", 147)
         };
-        Assert.Equal("normal", TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision.AcceptedCandidate?.Candidate.ExternalId);
-        Assert.Equal("normal", PlaylistDestinationIdentityResolver.Assess(source, candidates, new()).Accepted?.Candidate.ExternalId);
+        Assert.Equal("normal", TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision.AcceptedCandidate?.Candidate.ExternalId);
+        Assert.Equal("normal", PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Accepted?.Candidate.ExternalId);
         Assert.Equal("MrMoMMusic", source.Artist);
     }
 
@@ -106,15 +106,15 @@ public class SharedTrackMatchingTests
         var video = Mortals();
         var candidate = new TrackMatchSearchCandidate
         {
-            CandidateSource = "youtube", ExternalId = "dKmnejGmcjQ", Title = video.Title,
+            CandidateSource = "youtube", ExternalId = "dKmnejGmcjQ", Title = Assert.IsType<string>(video.Title),
             Artist = video.Artist, ArtistCredits = ["MrMoMMusic"], DurationSeconds = 147,
-            RawMetadata = video.RawMetadata
+            RawMetadata = video.PrivateInputJson ?? "{}"
         };
-        var accepted = TrackMatchDecisionEngine.Evaluate(source, [candidate], new()).Decision.AcceptedCandidate;
+        var accepted = TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, [candidate], new()).Decision.AcceptedCandidate;
         Assert.NotNull(accepted);
         Assert.Equal("LXNGVX, Warriyo", accepted.Candidate.Artist);
-        Assert.Equal("MrMoMMusic", TrackObservationParser.ReadMetadata(video)?.ChannelTitle);
-        Assert.Equal(video.RawMetadata, accepted.Candidate.RawMetadata);
+        Assert.Equal("MrMoMMusic", TrackObservationParser.ReadMetadata(ObservationInput.Read(video, video.OwnerUserId, DateTimeOffset.UtcNow)!)?.ChannelTitle);
+        Assert.Equal(video.PrivateInputJson, accepted.Candidate.RawMetadata);
     }
 
     [Fact]
@@ -122,8 +122,8 @@ public class SharedTrackMatchingTests
     {
         var source = Mortals("LXNGVX, Warriyo - Mortals Funk Remix\nOther Artist - Mortals Funk Remix");
         var candidates = new[] { Candidate("spotify", "normal", "Mortals Funk Remix", "LXNGVX, Warriyo", 147) };
-        Assert.Null(TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision.AcceptedCandidate);
-        Assert.Null(PlaylistDestinationIdentityResolver.Assess(source, candidates, new()).Accepted);
+        Assert.Null(TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision.AcceptedCandidate);
+        Assert.Null(PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Accepted);
     }
 
     [Theory]
@@ -135,28 +135,28 @@ public class SharedTrackMatchingTests
     {
         var source = Observation("Everything Goes On", "Porter Robinson", 160);
         var candidates = new[] { Candidate("spotify", "wrong", title, artist, 160) };
-        Assert.Null(TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision.AcceptedCandidate);
-        Assert.Null(PlaylistDestinationIdentityResolver.Assess(source, candidates, new()).Accepted);
+        Assert.Null(TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision.AcceptedCandidate);
+        Assert.Null(PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Accepted);
     }
 
     [Fact]
     public void KnownRecordingIdentifierResolvesCompetitionInBothPaths()
     {
         var source = Observation("Song", "Artist", 160);
-        source.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "us-abc-24-00002" });
+        source.PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata { Isrc = "us-abc-24-00002" });
         var candidates = new[]
         {
             Candidate("spotify", "other", "Song", "Artist", 160, "USABC2400001"),
             Candidate("spotify", "known", "Song", "Artist", 220, "USABC2400002")
         };
-        Assert.Equal("known", TrackMatchDecisionEngine.Evaluate(source, candidates, new()).Decision.AcceptedCandidate?.Candidate.ExternalId);
-        Assert.Equal("known", PlaylistDestinationIdentityResolver.Assess(source, candidates, new()).Accepted?.Candidate.ExternalId);
+        Assert.Equal("known", TrackMatchDecisionEngine.Evaluate(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Decision.AcceptedCandidate?.Candidate.ExternalId);
+        Assert.Equal("known", PlaylistDestinationIdentityResolver.Assess(ObservationInput.Read(source, source.OwnerUserId, DateTimeOffset.UtcNow)!, candidates, new()).Accepted?.Candidate.ExternalId);
     }
 
     private static TrackObservation Mortals(string description = "LXNGVX, Warriyo - Mortals Funk Remix\n\nFollow mommusic")
     {
         var observation = Observation("MORTALS FUNK REMIX // Victory Royale B**ch!", "MrMoMMusic", 147);
-        observation.RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        observation.PrivateInputJson = JsonSerializer.Serialize(new TrackObservationMetadata
         {
             OriginalTitle = observation.Title, OriginalArtist = observation.Artist,
             ChannelTitle = observation.Artist, Description = description
@@ -165,7 +165,7 @@ public class SharedTrackMatchingTests
     }
 
     private static TrackObservation Observation(string title, string artist, int? duration) => new()
-    {
+    { OwnerUserId = 1, InputKind = ObservationInputKind.Private,
         SourceType = "youtube", ExternalId = "video", Title = title, Artist = artist,
         DurationSeconds = duration, MatchStatus = TrackMatchingStatuses.Pending
     };

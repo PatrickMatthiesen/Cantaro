@@ -1,10 +1,16 @@
 namespace Cantaro.Api.Models;
 
+public enum ObservationInputKind { Reference, Public, Private }
+
 /// <summary>
 /// Represents an imported source item that has not necessarily been resolved to a canonical Track yet.
 /// </summary>
 public class TrackObservation
 {
+    public int OwnerUserId { get; set; }
+    public Guid? ProviderCatalogItemId { get; set; }
+    public ProviderCatalogItem? ProviderCatalogItem { get; set; }
+    public ObservationInputKind InputKind { get; set; }
     public Guid Id { get; set; }
 
     /// <summary>
@@ -18,14 +24,14 @@ public class TrackObservation
     public required string ExternalId { get; set; }
 
     /// <summary>
-    /// Raw provider payload or a normalized snapshot for debugging and replay.
+    /// Allowlisted owner-only matching input. Shared provider metadata lives on the catalog item.
     /// </summary>
-    public string? RawMetadata { get; set; }
+    public string? PrivateInputJson { get; set; }
 
     /// <summary>
     /// Human-readable title captured from the source.
     /// </summary>
-    public required string Title { get; set; }
+    public string? Title { get; set; }
 
     /// <summary>
     /// Human-readable artist/channel captured from the source.
@@ -36,16 +42,6 @@ public class TrackObservation
     /// Source thumbnail, if any.
     /// </summary>
     public string? ThumbnailUrl { get; set; }
-
-    /// <summary>
-    /// Normalized title used for candidate searches and scoring.
-    /// </summary>
-    public string? NormalizedTitle { get; set; }
-
-    /// <summary>
-    /// Normalized artist name used for candidate searches and scoring.
-    /// </summary>
-    public string? NormalizedArtist { get; set; }
 
     /// <summary>
     /// Duration in whole seconds when known.

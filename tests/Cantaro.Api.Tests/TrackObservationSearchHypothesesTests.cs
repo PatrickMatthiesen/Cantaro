@@ -75,23 +75,21 @@ public class TrackObservationSearchHypothesesTests
     public void ParseSearchHypotheses_OnlyAddsVariantsForYouTube()
     {
         var observation = YouTubeObservation("Song - Artist", "Song", "Artist");
-        observation.SourceType = "spotify";
+        observation = observation with { SourceType = "spotify" };
 
         Assert.Single(TrackObservationParser.ParseSearchHypotheses(observation));
     }
 
-    private static TrackObservation YouTubeObservation(string originalTitle, string title, string artist) => new()
+    private static ObservationInput YouTubeObservation(string originalTitle, string title, string artist) => new()
     {
-        Id = Guid.NewGuid(),
         SourceType = "youtube",
         ExternalId = Guid.NewGuid().ToString("N"),
         Title = title,
         Artist = artist,
-        RawMetadata = JsonSerializer.Serialize(new TrackObservationMetadata
+        Metadata = new TrackObservationMetadata
         {
             OriginalTitle = originalTitle,
             OriginalArtist = artist
-        }),
-        MatchStatus = TrackMatchingStatuses.Pending
-    };
+        },
+        };
 }

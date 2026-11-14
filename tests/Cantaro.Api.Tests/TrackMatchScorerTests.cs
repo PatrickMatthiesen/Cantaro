@@ -10,16 +10,14 @@ public class TrackMatchScorerTests
     [Fact]
     public void Score_DoesNotInventLiveSemanticMismatchFromBaseTitle()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "meant-to-live-video",
             Title = "Meant To Live (Jon Bellion Version)",
             Artist = "Jon Bellion",
             DurationSeconds = 205,
-            MatchStatus = TrackMatchingStatuses.Pending
-        };
+            };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "musicbrainz",
@@ -85,11 +83,10 @@ public class TrackMatchScorerTests
     [Fact]
     public void Score_AcceptsExactIdentityWhenDurationIsMissing()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
             SourceType = "youtube", ExternalId = "video", Title = "Rescue Me",
-            Artist = "OneRepublic", MatchStatus = TrackMatchingStatuses.Pending
-        };
+            Artist = "OneRepublic", };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "musicbrainz", ExternalId = "recording", Title = "Rescue Me",
@@ -118,12 +115,11 @@ public class TrackMatchScorerTests
     [Fact]
     public void Score_AcceptsEquivalentParentheticalAndDashSourceContext()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "nobody-video",
+            SourceType = "youtube", ExternalId = "nobody-video",
             Title = "Nobody (from Kaiju No. 8)", Artist = "OneRepublic", DurationSeconds = 154,
-            MatchStatus = TrackMatchingStatuses.Pending
-        };
+            };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify", ExternalId = "spotify-nobody",
@@ -141,16 +137,14 @@ public class TrackMatchScorerTests
     [Fact]
     public void Score_AllowsExactTitlePrimaryArtistToExpandToStronglyIdentifiedFullCredit()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "so-far-away-video",
             Title = "So Far Away",
             Artist = "Seven Lions",
             DurationSeconds = 249,
-            MatchStatus = TrackMatchingStatuses.Pending
-        };
+            };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify",
@@ -171,12 +165,11 @@ public class TrackMatchScorerTests
     [Fact]
     public void Score_DoesNotExpandCreditsWithoutAStableRecordingIdentifier()
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(), SourceType = "youtube", ExternalId = "video",
+            SourceType = "youtube", ExternalId = "video",
             Title = "Shared Song", Artist = "Artist", DurationSeconds = 200,
-            MatchStatus = TrackMatchingStatuses.Pending
-        };
+            };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "musicbrainz", ExternalId = "candidate",
@@ -197,11 +190,10 @@ public class TrackMatchScorerTests
     public void Score_RequiresCorroboratedCreditsForCatalogExpansion(
         string artist, string candidateArtist, int duration, int candidateDuration, bool expected)
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
             SourceType = "youtube", ExternalId = "video", Title = "Same Song",
-            Artist = artist, DurationSeconds = duration, MatchStatus = TrackMatchingStatuses.Pending
-        };
+            Artist = artist, DurationSeconds = duration, };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify", ExternalId = "track", Title = "Same Song",
@@ -217,11 +209,10 @@ public class TrackMatchScorerTests
     [InlineData("Same Song (Live)")]
     public void Score_CreditExpansionDoesNotOverrideVersionMismatch(string title)
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
             SourceType = "youtube", ExternalId = "video", Title = title,
-            Artist = "Artist, Guest", DurationSeconds = 203, MatchStatus = TrackMatchingStatuses.Pending
-        };
+            Artist = "Artist, Guest", DurationSeconds = 203, };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify", ExternalId = "track", Title = "Same Song",
@@ -236,12 +227,11 @@ public class TrackMatchScorerTests
     [InlineData("Stay Gold - from BEYBLADE X / Jax Jones Y2J! Remix", false)]
     public void Score_RecognizesJapaneseSoundtrackContextWithoutDroppingVersionDifferences(string title, bool expected)
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
             SourceType = "youtube", ExternalId = "video",
             Title = "【Jax Jones × Ado】Stay Gold〈『BEYBLADE X』アニメMV 〉",
-            Artist = "UNIVERSAL MUSIC JAPAN", DurationSeconds = 212, MatchStatus = TrackMatchingStatuses.Pending
-        };
+            Artist = "UNIVERSAL MUSIC JAPAN", DurationSeconds = 212, };
         var candidate = new TrackMatchSearchCandidate
         {
             CandidateSource = "spotify", ExternalId = "track", Title = title,
@@ -259,17 +249,13 @@ public class TrackMatchScorerTests
         string candidateTitle,
         TrackMatchingOptions? options = null)
     {
-        var observation = new TrackObservation
+        var observation = new ObservationInput
         {
-            Id = Guid.NewGuid(),
             SourceType = "youtube",
             ExternalId = "video",
             Title = "Rescue Me",
             Artist = "OneRepublic",
             DurationSeconds = observationSeconds,
-            MatchStatus = TrackMatchingStatuses.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
         };
         var candidate = new TrackMatchSearchCandidate
         {

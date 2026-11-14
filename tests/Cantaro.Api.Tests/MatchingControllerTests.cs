@@ -178,18 +178,74 @@ public sealed class MatchingControllerTests
         Assert.Null(queueItem.LeaseExpiresAt);
     }
 
+    [Fact]
+    public async Task MatchingEndpointsExposeAndMutateOnlyOwnedSnapshots()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        var alice = TestUserFactory.Create(910, "alice-matching@example.test");
+        var bob = TestUserFactory.Create(911, "bob-matching@example.test");
+        db.Users.AddRange(alice, bob);
+        var aliceObservation = AddObservation(db, "youtube", TrackMatchingStatuses.Pending, null, "Alice song", ownerUserId: alice.Id);
+        var referenceOnly = AddObservation(db, "youtube", TrackMatchingStatuses.NoMatch, null, "Legacy snapshot", ownerUserId: alice.Id);
+        referenceOnly.Title = null;
+        referenceOnly.InputKind = ObservationInputKind.Reference;
+        var bobObservation = AddObservation(db, "spotify", TrackMatchingStatuses.Ambiguous, "private error", "Bob song", ownerUserId: bob.Id);
+        db.TrackMatchQueueItems.AddRange(
+            new TrackMatchQueueItem { TrackObservationId = referenceOnly.Id, NextAttemptAt = DateTime.UtcNow },
+            new TrackMatchQueueItem { TrackObservationId = bobObservation.Id, NextAttemptAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        using var manager = CreateUserManager(db);
+        var aliceController = CreateController(db, manager, alice.Id);
+        var summary = Assert.IsType<MatchingSummaryResponse>(
+            Assert.IsType<OkObjectResult>((await aliceController.GetSummary(default)).Result).Value);
+        Assert.Equal(1, summary.AwaitingMatching);
+        Assert.Equal(0, summary.NeedsReview);
+
+        var queue = Assert.IsType<MatchingQueuePageResponse>(Assert.IsType<OkObjectResult>(
+            (await aliceController.GetQueue(status: TrackMatchingStatuses.Pending, cancellationToken: default)).Result).Value);
+        Assert.Equal(1, queue.TotalCount);
+        Assert.Equal("Alice song", Assert.Single(queue.Items).Title);
+
+        var work = Assert.IsType<TrackMatchWorkPageResponse>(Assert.IsType<OkObjectResult>(
+            (await aliceController.GetWorkQueue(cancellationToken: default)).Result).Value);
+        Assert.Equal(0, work.TotalCount);
+
+        Assert.IsType<NotFoundObjectResult>(await aliceController.Retry(bobObservation.Id, default));
+        Assert.IsType<NotFoundObjectResult>(await aliceController.Retry(referenceOnly.Id, default));
+        Assert.IsType<NotFoundObjectResult>((await aliceController.MarkNotMusic(bobObservation.Id, default)).Result);
+
+        var retry = await aliceController.RetryFiltered(new MatchingQueueFilterRequest
+        { Status = TrackMatchingStatuses.Pending }, default);
+        Assert.Equal(1, Assert.IsType<MatchingBulkRetryResponse>(Assert.IsType<AcceptedResult>(retry.Result).Value).QueuedCount);
+        Assert.Equal(TrackMatchingStatuses.Ambiguous,
+            (await db.TrackObservations.AsNoTracking().SingleAsync(item => item.Id == bobObservation.Id)).MatchStatus);
+        Assert.Equal(TrackMatchingStatuses.NoMatch,
+            (await db.TrackObservations.AsNoTracking().SingleAsync(item => item.Id == referenceOnly.Id)).MatchStatus);
+        Assert.True(await db.TrackMatchQueueItems.AnyAsync(item => item.TrackObservationId == bobObservation.Id));
+        Assert.True(await db.TrackMatchQueueItems.AnyAsync(item => item.TrackObservationId == referenceOnly.Id));
+        Assert.True(await db.TrackMatchQueueItems.AnyAsync(item => item.TrackObservationId == aliceObservation.Id));
+    }
+
     private static TrackObservation AddObservation(
         ApplicationDbContext db,
         string source,
         string status,
         string? error,
         string title,
-        Guid? trackId = null)
+        Guid? trackId = null,
+        int? ownerUserId = null)
     {
         var observation = new TrackObservation
         {
+            InputKind = ObservationInputKind.Private,
             Id = Guid.NewGuid(), SourceType = source, ExternalId = Guid.NewGuid().ToString("N"),
             Title = title, MatchStatus = status, LastMatchError = error, TrackId = trackId,
+            OwnerUserId = ownerUserId ?? db.Users.Local.Single().Id,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         };
         db.TrackObservations.Add(observation);

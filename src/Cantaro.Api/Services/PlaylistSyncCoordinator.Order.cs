@@ -9,7 +9,7 @@ public sealed partial class PlaylistSyncCoordinator
         {
             if (use is not ("cantaro" or "platform"))
                 throw new PlatformApiException("invalid_order", "Choose which playlist order to keep.", 400);
-            var link = await db.ServicePlaylistMappings.SingleOrDefaultAsync(item => item.Id == mappingId
+            var link = await db.ServicePlaylistMappings.Include(item => item.ConnectedServiceAccount).SingleOrDefaultAsync(item => item.Id == mappingId
                 && item.PlaylistId == playlistId && item.UserId == userId && item.State == "active", token)
                 ?? throw new PlatformApiException("link_not_found", "Playlist link not found.", 404);
             if (link.LastSyncStatus != "order_conflict")
@@ -17,7 +17,9 @@ public sealed partial class PlaylistSyncCoordinator
             var account = await RequireAccountAsync(playlist, link, token);
             var remote = await Provider(link.Service).ReadAsync(account, link.ServicePlaylistId, token);
             RequireComplete(remote);
+            var confirmedEntries = new HashSet<Guid>();
             var incoming = await NormalizeIdentitiesAsync(KnownTracks(remote).Select(item => PlaylistSyncItem.From(item, link.Service)), token);
+            incoming = await BindDestinationChoicesAsync(link, account, incoming, token, confirmedEntries);
             var baseline = PlaylistSyncBaseline.Parse(link.BaselineJson);
             var previous = baseline is null ? null : await NormalizeIdentitiesAsync(baseline.Items, token);
             var current = await ReadItemsAsync(playlistId, token);
@@ -26,7 +28,7 @@ public sealed partial class PlaylistSyncCoordinator
             if (use == "platform") merged = UseRemoteOrder(merged, incoming);
             await PersistAtomicallyAsync(async () =>
             {
-                await SaveItemsAsync(playlist, merged, token);
+                await SaveItemsAsync(playlist, merged, token, confirmedEntries);
                 link.BaselineJson = new PlaylistSyncBaseline(incoming, remote.Revision).Serialize();
                 link.LastSyncStatus = "pending";
                 link.LastError = null;

@@ -1,8 +1,8 @@
+using System.Text.Json;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Spotify;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -11,352 +11,495 @@ namespace Cantaro.Api.Tests;
 
 public sealed class SpotifyTrackResolverTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 28, 10, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    [Fact]
-    public async Task ResolveAsync_CreatesCanonicalIdentityAndStructuredArtistCredits()
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("expired")]
+    [InlineData("other-owner")]
+    public async Task ResolveAsync_RefreshedOwnedPublicInputReusesLocalRecordingOnlyForItsOwner(string access)
     {
         await using var fixture = await ResolverFixture.CreateAsync();
+        var db = fixture.DbContext;
+        db.Users.AddRange(TestUserFactory.Create(2101, "owner@example.test"),
+            TestUserFactory.Create(2102, "other@example.test"));
+        var track = fixture.AddTrackWithSong(null);
+        fixture.AddObservation(2101, track.Id, "spotify", "same-id", "Song", "Artist", 180);
+        await db.SaveChangesAsync();
+        var item = fixture.AddCatalogItem("spotify", "same-id", Facts("Song", "Artist", null));
+        var snapshot = Snapshot("same-id", null, title: "Song", artist: "Artist") with
+        { ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision };
+        // This first refresh still sees the account-only input. It must retain
+        // its recording without inventing an independently verified association.
+        var refreshed = await fixture.Resolver.ResolveAsync(snapshot, Now, default, 2101);
+        Assert.Equal(track.Id, refreshed.Id);
+        var observation = await db.TrackObservations.SingleAsync();
+        ObservationInput.SetPublic(observation, item);
+        if (access == "expired") item.RevalidateAfter = Now.AddMinutes(-1);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
 
-        var track = await fixture.Resolver.ResolveAsync(
-            Snapshot(
-                id: "spotify-track",
-                isrc: "us-sp0-26-00001",
-                artistNames: ["First artist", "Featured artist"]),
-            Now,
-            CancellationToken.None);
-        await fixture.DbContext.SaveChangesAsync();
+        var repeated = await fixture.Resolver.ResolveAsync(snapshot, Now, default,
+            access == "other-owner" ? 2102 : 2101);
+        await db.SaveChangesAsync();
 
-        fixture.DbContext.ChangeTracker.Clear();
-        var storedTrack = await fixture.DbContext.Tracks
-            .Include(candidate => candidate.SongMemberships)
-            .Include(candidate => candidate.SourceIds)
-            .Include(candidate => candidate.ArtistCredits)
-                .ThenInclude(credit => credit.Artist)
-            .SingleAsync(candidate => candidate.Id == track.Id);
-
-        Assert.Equal("USSP02600001", storedTrack.Isrc);
-        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
-            storedTrack.CanonicalMetadata!);
-        Assert.Equal("https://i.scdn.co/image/temporary", metadata?.ThumbnailUrl);
-        Assert.Single(storedTrack.SongMemberships);
-        var sourceId = Assert.Single(storedTrack.SourceIds);
-        Assert.Equal(SpotifyService.ServiceName, sourceId.SourceType);
-        Assert.Equal("spotify-track", sourceId.ExternalId);
-        Assert.Equal(1m, sourceId.Confidence);
-        Assert.True(sourceId.IsOfficial);
-        Assert.Equal(
-            ["First artist", "Featured artist"],
-            storedTrack.ArtistCredits
-                .OrderBy(credit => credit.Position)
-                .Select(credit => credit.Artist!.Name)
-                .ToArray());
+        if (access == "owner") Assert.Equal(track.Id, repeated.Id);
+        else Assert.NotEqual(track.Id, repeated.Id);
+        Assert.Equal(access == "owner" ? 1 : 2, await db.Tracks.CountAsync());
+        // A different user may establish a new provider-origin association,
+        // but must not inherit the first user's unverified recording choice.
+        Assert.Equal(access == "other-owner" ? repeated.Id : (Guid?)null,
+            (await db.ProviderCatalogItems.SingleAsync()).TrackId);
+        Assert.Null((await db.TrackObservations.SingleAsync()).Title);
     }
 
     [Fact]
-    public async Task ResolveAsync_ReusesTheOnlyTrackWithTheSameIsrc()
+    public async Task ResolveAsync_AccountSnapshotWithoutCatalogReferenceCreatesBlankCanonicalTrack()
     {
         await using var fixture = await ResolverFixture.CreateAsync();
-        var existing = fixture.AddTrackWithSong("us-sp0-26-00001");
+        var user = TestUserFactory.Create(2101, "spotify-private@example.com");
+        fixture.DbContext.Users.Add(user);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var track = await fixture.Resolver.ResolveAsync(
+            Snapshot("spotify-private", "USSP02600001", title: "Account title", artist: "Account artist"),
+            Now, CancellationToken.None, user.Id);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Null(ProviderCatalogPolicy.SharedSource(track, DateTimeOffset.UtcNow)?.Id);
+        Assert.Null(track.Isrc);
+        Assert.Null(track.MbidRecording);
+        Assert.Empty(track.ProviderItems);
+        Assert.Empty(track.ArtistCredits);
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.Where(item => item.AssociationState == RecordingAssociationState.Verified).ToListAsync());
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UsesFreshVerifiedCatalogFactsInsteadOfAccountPayload()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var facts = Facts("Catalog title", "Catalog artist", "USSP02600001", TrackVersionFlags.RadioEdit);
+        var item = fixture.AddCatalogItem("spotify", "spotify-public", facts);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var track = await fixture.Resolver.ResolveAsync(
+            Snapshot("spotify-public", "ACCOUNT-ISRC", title: "Account title", artist: "Account artist") with
+            {
+                ProviderCatalogItemId = item.Id,
+                ProviderCatalogRevision = item.Revision,
+                ArtistIdentities = [Credit("Account artist", "account-artist")]
+            },
+            Now, CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var stored = await fixture.DbContext.Tracks.Include(track => track.ProviderItems).AsNoTracking().SingleAsync(row => row.Id == track.Id);
+        Assert.Equal(item.Id, ProviderCatalogPolicy.SharedSource(stored, DateTimeOffset.UtcNow)?.Id);
+        Assert.Equal(item.FactsJson, CatalogFixture.FactsJson(stored));
+        Assert.Equal("Catalog title", CatalogFixture.Facts(stored)?.Title);
+        Assert.Equal("Catalog artist", CatalogFixture.Facts(stored)?.Artist);
+        var storedFacts = JsonSerializer.Deserialize<ProviderCatalogFacts>((await fixture.DbContext.ProviderCatalogItems
+            .SingleAsync()).FactsJson);
+        Assert.Equal("Catalog title", storedFacts?.Title);
+        Assert.Equal("Catalog artist", storedFacts?.Artist);
+        Assert.Equal("USSP02600001", stored.Isrc);
+        Assert.Equal(TrackVersionFlags.RadioEdit, stored.VersionFlags);
+        var association = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        Assert.Equal(RecordingAssociationState.Verified, association.AssociationState);
+        Assert.Equal(item.Id, association.Id);
+        Assert.Equal(item.Revision, association.AssociationFactsRevision);
+        Assert.Equal("spotify-public", association.ExternalId);
+        Assert.Equal("Catalog artist", (await fixture.DbContext.TrackArtistCredits.Include(row => row.Artist)
+            .SingleAsync()).Artist!.Name);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReusesExactVerifiedGlobalIdAcrossUsers()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var alice = TestUserFactory.Create(2102, "spotify-alice@example.com");
+        var bob = TestUserFactory.Create(2103, "spotify-bob@example.com");
+        fixture.DbContext.Users.AddRange(alice, bob);
+        var track = fixture.AddTrackWithPublicAssociation("spotify", "shared-id", Facts("Shared title", "Shared artist", "USSP02600001"));
+        fixture.AddObservation(alice.Id, track.Id, "spotify", "alice-private-id", "Alice title", "Alice artist", 180);
         await fixture.DbContext.SaveChangesAsync();
         fixture.DbContext.ChangeTracker.Clear();
 
         var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USSP02600001"),
-            Now,
-            CancellationToken.None);
+            Snapshot("shared-id", "OTHER-ISRC", title: "Bob's account title", artist: "Bob's artist"),
+            Now, CancellationToken.None, bob.Id);
         await fixture.DbContext.SaveChangesAsync();
 
-        Assert.Equal(existing.Id, resolved.Id);
+        Assert.Equal(track.Id, resolved.Id);
         Assert.Equal(1, await fixture.DbContext.Tracks.CountAsync());
-        var sourceId = await fixture.DbContext.TrackSourceIds.SingleAsync();
-        Assert.Equal(existing.Id, sourceId.TrackId);
+        Assert.Equal(CatalogFixture.FactsJson(track), CatalogFixture.FactsJson(resolved));
+        Assert.Equal("Shared title", CatalogFixture.Facts(resolved)?.Title);
+        Assert.NotEqual("Bob's account title", CatalogFixture.Facts(resolved)?.Title);
+        Assert.Equal("Shared title", JsonSerializer.Deserialize<ProviderCatalogFacts>((await fixture.DbContext.ProviderCatalogItems
+            .SingleAsync()).FactsJson)!.Title);
     }
 
     [Fact]
-    public async Task ResolveAsync_LinksDifferentSpotifyIdsWithTheSameUniqueIsrc()
+    public async Task ResolveAsync_PrivateObservationLinkDoesNotVerifyItsCanonicalAssociation()
     {
         await using var fixture = await ResolverFixture.CreateAsync();
+        var alice = TestUserFactory.Create(2191, "private-origin-alice@example.com");
+        var bob = TestUserFactory.Create(2192, "private-origin-bob@example.com");
+        fixture.DbContext.Users.AddRange(alice, bob);
+        var track = fixture.AddTrackWithSong(null);
+        fixture.AddObservation(alice.Id, track.Id, "youtube", "private-studio", "Alice private title", "Artist", 180);
+        fixture.AddObservation(bob.Id, track.Id, "spotify", "public-live", "Bob private title", "Artist", 180);
+        var item = fixture.AddCatalogItem("spotify", "public-live", Facts("Song (Live)", "Artist", "USLIVE260001", TrackVersionFlags.Live));
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
 
-        var first = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track-one", isrc: "USSP02600001"),
-            Now,
-            CancellationToken.None);
-        var second = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track-two", isrc: "USSP02600001"),
-            Now,
-            CancellationToken.None);
+        var resolved = await fixture.Resolver.ResolveAsync(Snapshot("public-live", "USLIVE260001") with
+        {
+            ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision
+        }, Now, default, bob.Id);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(track.Id, resolved.Id);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(resolved, DateTimeOffset.UtcNow)?.Id);
+        Assert.Null(resolved.Isrc);
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.Where(item => item.AssociationState == RecordingAssociationState.Verified).ToListAsync());
+        Assert.Equal("Alice private title", (await fixture.DbContext.TrackObservations.SingleAsync(row => row.OwnerUserId == alice.Id)).Title);
+        Assert.NotNull(ProviderCatalogPolicy.ReadFacts(await fixture.DbContext.ProviderCatalogItems.SingleAsync(), Now));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReusesCanonicalForDifferentVerifiedPublicIdsWithSameRecordingFacts()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var facts = Facts("Shared recording", "Shared artist", "USSP02600001");
+        var firstItem = fixture.AddCatalogItem("spotify", "spotify-version-one", facts);
+        await fixture.DbContext.SaveChangesAsync();
+        var first = await fixture.Resolver.ResolveAsync(Snapshot("spotify-version-one", "ignored", "Shared recording", "Shared artist") with
+        {
+            ProviderCatalogItemId = firstItem.Id, ProviderCatalogRevision = firstItem.Revision
+        }, Now, CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var secondItem = fixture.AddCatalogItem("spotify", "spotify-version-two", facts);
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+        var second = await fixture.Resolver.ResolveAsync(Snapshot("spotify-version-two", "USSP02600001", "Shared recording", "Shared artist") with
+        {
+            ProviderCatalogItemId = secondItem.Id, ProviderCatalogRevision = secondItem.Revision
+        }, Now, CancellationToken.None);
         await fixture.DbContext.SaveChangesAsync();
 
         Assert.Equal(first.Id, second.Id);
         Assert.Equal(1, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal(2, await fixture.DbContext.TrackSourceIds.CountAsync());
-        Assert.All(
-            await fixture.DbContext.TrackSourceIds.ToListAsync(),
-            sourceId => Assert.Equal(first.Id, sourceId.TrackId));
+        Assert.Equal(2, await fixture.DbContext.ProviderCatalogItems.CountAsync());
+        Assert.All(await fixture.DbContext.ProviderCatalogItems.Where(item => item.AssociationState == RecordingAssociationState.Verified).ToListAsync(), row =>
+        {
+            Assert.Equal(first.Id, row.TrackId);
+            Assert.Equal(RecordingAssociationState.Verified, row.AssociationState);
+        });
     }
 
     [Fact]
-    public async Task ResolveAsync_DoesNotGuessWhenSeveralTracksShareTheIsrc()
+    public async Task ResolveAsync_RevalidatesSameProviderOriginAfterCatalogArtworkRevision()
     {
         await using var fixture = await ResolverFixture.CreateAsync();
-        var first = fixture.AddTrackWithSong("USSP02600001");
-        var second = fixture.AddTrackWithSong("USSP02600001");
+        var originalFacts = Facts("Verified title", "Verified artist", "USSP02600001");
+        var item = fixture.AddCatalogItem("spotify", "stable-provider-id", originalFacts);
+        await fixture.DbContext.SaveChangesAsync();
+        var first = await fixture.Resolver.ResolveAsync(Snapshot("stable-provider-id", "USSP02600001",
+            "Verified title", "Verified artist") with
+        {
+            ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision
+        }, Now, CancellationToken.None);
         await fixture.DbContext.SaveChangesAsync();
 
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USSP02600001"),
-            Now,
-            CancellationToken.None);
-        await fixture.DbContext.SaveChangesAsync();
-
-        Assert.NotEqual(first.Id, resolved.Id);
-        Assert.NotEqual(second.Id, resolved.Id);
-        Assert.Equal(3, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal(resolved.Id, await fixture.DbContext.TrackSourceIds
-            .Where(sourceId => sourceId.SourceType == SpotifyService.ServiceName)
-            .Select(sourceId => sourceId.TrackId)
-            .SingleAsync());
-    }
-
-    [Fact]
-    public async Task ResolveAsync_ReusesExistingYouTubeTrackByMetadataAndPreservesItsArtwork()
-    {
-        await using var fixture = await ResolverFixture.CreateAsync();
-        var existing = fixture.AddTrackWithSong(
-            isrc: null,
-            new TrackCanonicalMetadata
-            {
-                Title = "Track title",
-                Artist = "Artist",
-                DurationSeconds = 180,
-                ThumbnailUrl = "https://i.ytimg.com/vi/fun-art/mqdefault.jpg"
-            });
-        fixture.AddObservation(
-            existing.Id,
-            "youtube",
-            "video-1",
-            "Track title",
-            "Artist",
-            180,
-            normalize: false);
+        var updatedFacts = CopyFacts(originalFacts, thumbnailUrl: "https://i.scdn.co/image/refreshed");
+        item.FactsJson = JsonSerializer.Serialize(updatedFacts);
+        item.Revision++;
+        item.VerifiedAt = Now;
+        item.RevalidateAfter = Now.AddDays(1);
         await fixture.DbContext.SaveChangesAsync();
         fixture.DbContext.ChangeTracker.Clear();
 
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USSP02600001"),
-            Now,
-            CancellationToken.None);
+        var refreshedItem = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        var refreshed = await fixture.Resolver.ResolveAsync(Snapshot("stable-provider-id", "ACCOUNT-ISRC",
+            "Account title changed", "Account artist changed") with
+        {
+            ProviderCatalogItemId = refreshedItem.Id, ProviderCatalogRevision = refreshedItem.Revision
+        }, Now, CancellationToken.None);
         await fixture.DbContext.SaveChangesAsync();
 
-        Assert.Equal(existing.Id, resolved.Id);
-        Assert.Equal(1, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal("USSP02600001", resolved.Isrc);
-        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
-            resolved.CanonicalMetadata!);
-        Assert.Equal(
-            "https://i.ytimg.com/vi/fun-art/mqdefault.jpg",
-            metadata?.ThumbnailUrl);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_FillsMissingArtworkOnExistingTrack()
-    {
-        await using var fixture = await ResolverFixture.CreateAsync();
-        var existing = fixture.AddTrackWithSong(
-            "USSP02600001",
-            new TrackCanonicalMetadata
-            {
-                Title = "Track title",
-                Artist = "Artist",
-                DurationSeconds = 180
-            });
-        await fixture.DbContext.SaveChangesAsync();
-
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USSP02600001"),
-            Now,
-            CancellationToken.None);
-        await fixture.DbContext.SaveChangesAsync();
-
-        Assert.Equal(existing.Id, resolved.Id);
-        var metadata = JsonSerializer.Deserialize<TrackCanonicalMetadata>(
-            resolved.CanonicalMetadata!);
-        Assert.Equal("https://i.scdn.co/image/temporary", metadata?.ThumbnailUrl);
-    }
-
-    [Fact]
-    public async Task ResolveAsync_DoesNotMergeDifferentVersionMarkers()
-    {
-        await using var fixture = await ResolverFixture.CreateAsync();
-        var existing = fixture.AddTrackWithSong(isrc: null);
-        fixture.AddObservation(
-            existing.Id,
-            "youtube",
-            "video-acoustic",
-            "Track title (Acoustic)",
-            "Artist",
-            180);
-        await fixture.DbContext.SaveChangesAsync();
-
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: null),
-            Now,
-            CancellationToken.None);
-        await fixture.DbContext.SaveChangesAsync();
-
-        Assert.NotEqual(existing.Id, resolved.Id);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
-    }
-
-    [Fact]
-    public async Task ResolveAsync_DoesNotGuessWhenMetadataMatchesSeveralTracks()
-    {
-        await using var fixture = await ResolverFixture.CreateAsync();
-        var first = fixture.AddTrackWithSong(isrc: null);
-        var second = fixture.AddTrackWithSong(isrc: null);
-        fixture.AddObservation(first.Id, "youtube", "video-1", "Track title", "Artist", 180);
-        fixture.AddObservation(second.Id, "youtube", "video-2", "Track title", "Artist", 180);
-        await fixture.DbContext.SaveChangesAsync();
-
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: null),
-            Now,
-            CancellationToken.None);
-        await fixture.DbContext.SaveChangesAsync();
-
-        Assert.NotEqual(first.Id, resolved.Id);
-        Assert.NotEqual(second.Id, resolved.Id);
-        Assert.Equal(3, await fixture.DbContext.Tracks.CountAsync());
-    }
-
-    [Fact]
-    public async Task ResolveAsync_DoesNotMergeMetadataWhenStableIsrcConflicts()
-    {
-        await using var fixture = await ResolverFixture.CreateAsync();
-        var existing = fixture.AddTrackWithSong("USOLD2600001");
-        fixture.AddObservation(existing.Id, "youtube", "video-1", "Track title", "Artist", 180);
-        await fixture.DbContext.SaveChangesAsync();
-
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USNEW2600001"),
-            Now,
-            CancellationToken.None);
-        await fixture.DbContext.SaveChangesAsync();
-
-        Assert.NotEqual(existing.Id, resolved.Id);
-        Assert.Equal("USNEW2600001", resolved.Isrc);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
+        Assert.Equal(first.Id, refreshed.Id);
+        Assert.Equal(item.Id, ProviderCatalogPolicy.SharedSource(refreshed, DateTimeOffset.UtcNow)?.Id);
+        var mapping = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        Assert.Equal(first.Id, mapping.TrackId);
+        Assert.Equal(refreshedItem.Revision, mapping.AssociationFactsRevision);
+        Assert.Equal(RecordingAssociationState.Verified, mapping.AssociationState);
+        var refreshedFacts = JsonSerializer.Deserialize<ProviderCatalogFacts>((await fixture.DbContext.ProviderCatalogItems
+            .SingleAsync()).FactsJson)!;
+        Assert.Equal("https://i.scdn.co/image/refreshed", refreshedFacts.ThumbnailUrl);
+        Assert.Equal("Verified title", refreshedFacts.Title);
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("USOLD2600001")]
-    public async Task ResolveAsync_RepointsStaleExactSpotifyMappingWhenIsrcAndMetadataCorroborateAnotherTrack(
-        string? mappedIsrc)
+    [InlineData("isrc", "none")]
+    [InlineData("isrc", "stored")]
+    [InlineData("isrc", "tracked")]
+    [InlineData("isrc", "manual-stored")]
+    [InlineData("isrc", "manual-tracked")]
+    [InlineData("version", "none")]
+    [InlineData("version", "stored")]
+    [InlineData("version", "tracked")]
+    [InlineData("version", "manual-stored")]
+    [InlineData("version", "manual-tracked")]
+    public async Task ResolveAsync_RejectsExactRevalidationWhenStableEvidenceChanges(string change, string ownerResult)
     {
         await using var fixture = await ResolverFixture.CreateAsync();
-        var staleTrack = fixture.AddTrackWithSong(mappedIsrc);
-        var correctTrack = fixture.AddTrackWithSong("USNEW2600001");
-        fixture.AddObservation(
-            correctTrack.Id,
-            "youtube",
-            "video-1",
-            "Track title",
-            "Artist",
-            180);
-        fixture.DbContext.TrackSourceIds.Add(new TrackSourceId
+        var originalFacts = Facts("Verified title", "Verified artist", "USSP02600001");
+        var item = fixture.AddCatalogItem("spotify", "stable-provider-id", originalFacts);
+        await fixture.DbContext.SaveChangesAsync();
+        var original = await fixture.Resolver.ResolveAsync(Snapshot("stable-provider-id", "USSP02600001",
+            "Verified title", "Verified artist") with
         {
-            Id = Guid.NewGuid(),
-            TrackId = staleTrack.Id,
-            SourceType = SpotifyService.ServiceName,
-            ExternalId = "spotify-track"
-        });
+            ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision
+        }, Now, CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        if (ownerResult != "none")
+        {
+            fixture.DbContext.Users.Add(TestUserFactory.Create(2101, "refresh-owner@example.test"));
+            var observation = new TrackObservation
+            {
+                Id = Guid.NewGuid(), OwnerUserId = 2101, SourceType = item.SourceType, ExternalId = item.ExternalId,
+                TrackId = original.Id, MatchStatus = TrackMatchingStatuses.Matched,
+                ResolutionNotes = ownerResult.StartsWith("manual", StringComparison.Ordinal)
+                    ? "Created canonical track from observation during manual review." : null
+            };
+            ObservationInput.SetPublic(observation, item);
+            fixture.DbContext.TrackObservations.Add(observation);
+            await fixture.DbContext.SaveChangesAsync();
+        }
+
+        var changedFacts = change == "isrc"
+            ? CopyFacts(originalFacts, isrc: "USSP02600002")
+            : CopyFacts(originalFacts, versionFlags: TrackVersionFlags.Acoustic);
+        item.FactsJson = JsonSerializer.Serialize(changedFacts);
+        item.Revision++;
+        item.VerifiedAt = Now;
+        item.RevalidateAfter = Now.AddDays(1);
         await fixture.DbContext.SaveChangesAsync();
         fixture.DbContext.ChangeTracker.Clear();
 
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USNEW2600001"),
-            Now,
-            CancellationToken.None);
+        var refreshedItem = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        if (ownerResult.EndsWith("tracked", StringComparison.Ordinal))
+        {
+            var loaded = await fixture.DbContext.TrackObservations.SingleAsync();
+            ObservationInput.SetPublic(loaded, refreshedItem);
+        }
+        var rejected = await fixture.Resolver.ResolveAsync(Snapshot("stable-provider-id", "ACCOUNT-ISRC",
+            "Account title changed", "Account artist changed") with
+        {
+            ProviderCatalogItemId = refreshedItem.Id, ProviderCatalogRevision = refreshedItem.Revision
+        }, Now, CancellationToken.None, ownerResult == "none" ? null : 2101);
         await fixture.DbContext.SaveChangesAsync();
 
-        Assert.Equal(correctTrack.Id, resolved.Id);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal(correctTrack.Id, await fixture.DbContext.TrackSourceIds
-            .Where(sourceId => sourceId.SourceType == SpotifyService.ServiceName
-                && sourceId.ExternalId == "spotify-track")
-            .Select(sourceId => sourceId.TrackId)
-            .SingleAsync());
-        Assert.Equal(mappedIsrc, await fixture.DbContext.Tracks
-            .Where(track => track.Id == staleTrack.Id)
-            .Select(track => track.Isrc)
-            .SingleAsync());
-        Assert.Equal(
-            1,
-            await fixture.DbContext.Tracks.CountAsync(
-                track => track.Isrc == "USNEW2600001"));
+        var explicitChoice = ownerResult.StartsWith("manual", StringComparison.Ordinal);
+        if (explicitChoice) Assert.Equal(original.Id, rejected.Id);
+        else Assert.NotEqual(original.Id, rejected.Id);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(rejected, DateTimeOffset.UtcNow)?.Id);
+        Assert.Equal(explicitChoice ? 1 : 2, await fixture.DbContext.Tracks.CountAsync());
+        var mapping = await fixture.DbContext.ProviderCatalogItems.SingleAsync();
+        Assert.Equal(original.Id, mapping.TrackId);
+        Assert.Equal(1, mapping.AssociationFactsRevision);
+        Assert.Equal(RecordingAssociationState.Verified, mapping.AssociationState);
     }
 
     [Fact]
-    public async Task ResolveAsync_KeepsExactSpotifyMappingWhenStableIdConflictLacksMetadataCorroboration()
+    public async Task ResolveAsync_IgnoresLegacyIsrcAndUnknownGlobalMapping()
     {
         await using var fixture = await ResolverFixture.CreateAsync();
-        var mappedTrack = fixture.AddTrackWithSong("USOLD2600001");
-        var unrelatedTrack = fixture.AddTrackWithSong("USNEW2600001");
-        fixture.AddObservation(
-            unrelatedTrack.Id,
-            "youtube",
-            "video-1",
-            "Different title",
-            "Different artist",
-            240);
-        fixture.DbContext.TrackSourceIds.Add(new TrackSourceId
-        {
-            Id = Guid.NewGuid(),
-            TrackId = mappedTrack.Id,
-            SourceType = SpotifyService.ServiceName,
-            ExternalId = "spotify-track"
-        });
+        var legacy = fixture.AddTrackWithSong("USSP02600001");
+        fixture.DbContext.ProviderCatalogItems.Add(new ProviderCatalogItem { Id = Guid.NewGuid(), TrackId = legacy.Id, SourceType = "spotify", ExternalId = "legacy-id", FactsJson = "{}" });
         await fixture.DbContext.SaveChangesAsync();
         fixture.DbContext.ChangeTracker.Clear();
 
-        var resolved = await fixture.Resolver.ResolveAsync(
-            Snapshot(id: "spotify-track", isrc: "USNEW2600001"),
-            Now,
-            CancellationToken.None);
+        var resolved = await fixture.Resolver.ResolveAsync(Snapshot("legacy-id", "USSP02600001"), Now, CancellationToken.None);
         await fixture.DbContext.SaveChangesAsync();
 
-        Assert.Equal(mappedTrack.Id, resolved.Id);
-        Assert.Equal(2, await fixture.DbContext.Tracks.CountAsync());
-        Assert.Equal(mappedTrack.Id, await fixture.DbContext.TrackSourceIds
-            .Where(sourceId => sourceId.SourceType == SpotifyService.ServiceName
-                && sourceId.ExternalId == "spotify-track")
-            .Select(sourceId => sourceId.TrackId)
-            .SingleAsync());
-        Assert.Equal("USOLD2600001", resolved.Isrc);
+        Assert.NotEqual(legacy.Id, resolved.Id);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(resolved, DateTimeOffset.UtcNow)?.Id);
+        Assert.Null(resolved.Isrc);
+        var legacyMapping = await fixture.DbContext.ProviderCatalogItems.SingleAsync(row => row.ExternalId == "legacy-id");
+        Assert.Equal(RecordingAssociationState.Unknown, legacyMapping.AssociationState);
+        Assert.Equal(legacy.Id, legacyMapping.TrackId);
     }
 
-    private static SpotifyTrackSnapshot Snapshot(
-        string id,
-        string? isrc,
-        IReadOnlyList<string>? artistNames = null)
+    [Fact]
+    public async Task ResolveAsync_ReusesOnlyTheRequestersPrivateObservation()
     {
-        artistNames ??= ["Artist"];
-        return new SpotifyTrackSnapshot(
-            id,
-            "Track title",
-            string.Join(", ", artistNames),
-            artistNames,
-            "Album",
-            "https://i.scdn.co/image/temporary",
-            $"https://open.spotify.com/track/{id}",
-            "https://open.spotify.com/album/album",
-            isrc,
-            180,
-            Now,
-            0);
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var alice = TestUserFactory.Create(2104, "spotify-observation-alice@example.com");
+        var bob = TestUserFactory.Create(2105, "spotify-observation-bob@example.com");
+        fixture.DbContext.Users.AddRange(alice, bob);
+        var aliceTrack = fixture.AddTrackWithSong(null);
+        var referenceTrack = fixture.AddTrackWithSong(null);
+        fixture.AddObservation(alice.Id, aliceTrack.Id, "spotify", "alice-id", "Private title", "Private artist", 180);
+        fixture.AddObservation(alice.Id, referenceTrack.Id, "spotify", "expired-id", "Expired title", "Expired artist", 180,
+            referenceOnly: true);
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+
+        var aliceResolved = await fixture.Resolver.ResolveAsync(
+            Snapshot("alice-id", null, title: "Private title", artist: "Private artist"), Now, CancellationToken.None, alice.Id);
+        var bobResolved = await fixture.Resolver.ResolveAsync(
+            Snapshot("alice-id", null, title: "Private title", artist: "Private artist"), Now, CancellationToken.None, bob.Id);
+        var referenceResolved = await fixture.Resolver.ResolveAsync(
+            Snapshot("expired-id", null, title: "Expired title", artist: "Expired artist"), Now, CancellationToken.None, alice.Id);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(aliceTrack.Id, aliceResolved.Id);
+        Assert.NotEqual(aliceTrack.Id, bobResolved.Id);
+        Assert.NotEqual(referenceTrack.Id, referenceResolved.Id);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(bobResolved, DateTimeOffset.UtcNow)?.Id);
+        Assert.Null(ProviderCatalogPolicy.SharedSource(referenceResolved, DateTimeOffset.UtcNow)?.Id);
     }
+
+    [Theory]
+    [InlineData("wrong-key")]
+    [InlineData("stale-revision")]
+    public async Task ResolveAsync_ForgedOrStaleCatalogReferenceCannotPromoteSnapshot(string referenceFault)
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var item = fixture.AddCatalogItem("spotify", "catalog-key", Facts("Catalog title", "Catalog artist", "USSP02600001"));
+        await fixture.DbContext.SaveChangesAsync();
+        var snapshot = Snapshot("account-key", "USSP02600001", title: "Account title", artist: "Account artist") with
+        {
+            ProviderCatalogItemId = item.Id,
+            ProviderCatalogRevision = referenceFault == "stale-revision" ? item.Revision - 1 : item.Revision
+        };
+
+        var track = await fixture.Resolver.ResolveAsync(snapshot, Now, CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Null(ProviderCatalogPolicy.SharedSource(track, DateTimeOffset.UtcNow)?.Id);
+        Assert.Null(track.Isrc);
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.Where(item => item.AssociationState == RecordingAssociationState.Verified).ToListAsync());
+        Assert.Equal(1, await fixture.DbContext.Tracks.CountAsync());
+        if (referenceFault == "wrong-key") Assert.Equal("catalog-key", item.ExternalId);
+    }
+
+    [Theory]
+    [InlineData("withdrawn")]
+    [InlineData("expired")]
+    public async Task ResolveAsync_WithdrawnOrExpiredCatalogItemCannotPromoteSnapshot(string catalogState)
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var item = fixture.AddCatalogItem("spotify", "spotify-id", Facts("Catalog title", "Catalog artist", "USSP02600001"));
+        if (catalogState == "withdrawn") item.VisibilityState = CatalogVisibility.Withdrawn;
+        else item.RevalidateAfter = Now.AddSeconds(-1);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var track = await fixture.Resolver.ResolveAsync(Snapshot("spotify-id", "ACCOUNT-ISRC" ) with
+        {
+            ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision
+        }, Now, CancellationToken.None);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Null(ProviderCatalogPolicy.SharedSource(track, DateTimeOffset.UtcNow)?.Id);
+        Assert.Null(track.Isrc);
+        Assert.Empty(await fixture.DbContext.ProviderCatalogItems.Where(item => item.AssociationState == RecordingAssociationState.Verified).ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("isrc")]
+    [InlineData("version")]
+    public async Task ResolveAsync_DoesNotAssociateCatalogItemWhenStableEvidenceConflicts(string conflictKind)
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var owner = TestUserFactory.Create(2106, $"spotify-conflict-{conflictKind}@example.com");
+        fixture.DbContext.Users.Add(owner);
+        var existingFacts = Facts("Same title", "Same artist", "USSP02600001", TrackVersionFlags.None);
+        var existing = fixture.AddTrackWithPublicAssociation("musicbrainz", "recording-one", existingFacts);
+        fixture.AddObservation(owner.Id, existing.Id, "spotify", "incoming-id", "Same title", "Same artist", 180);
+        var proposedFacts = conflictKind == "isrc"
+            ? Facts("Same title", "Same artist", "USSP02600002", TrackVersionFlags.None)
+            : Facts("Same title", "Same artist", "USSP02600001", TrackVersionFlags.Acoustic);
+        var proposedItem = fixture.AddCatalogItem("spotify", "incoming-id", proposedFacts);
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+
+        var resolved = await fixture.Resolver.ResolveAsync(Snapshot("incoming-id", "ACCOUNT-ISRC", title: "Same title", artist: "Same artist") with
+        {
+            ProviderCatalogItemId = proposedItem.Id, ProviderCatalogRevision = proposedItem.Revision
+        }, Now, CancellationToken.None, owner.Id);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(existing.Id, resolved.Id);
+        Assert.Equal("recording-one", Assert.Single(await fixture.DbContext.ProviderCatalogItems
+            .Where(row => row.TrackId == existing.Id).ToListAsync()).ExternalId);
+        Assert.Equal(ProviderCatalogPolicy.SharedSource(existing, DateTimeOffset.UtcNow)?.Id, ProviderCatalogPolicy.SharedSource(resolved, DateTimeOffset.UtcNow)?.Id);
+        Assert.Equal(2, await fixture.DbContext.ProviderCatalogItems.CountAsync());
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DoesNotSilentlyRepointAnExistingProviderMapping()
+    {
+        await using var fixture = await ResolverFixture.CreateAsync();
+        var owner = TestUserFactory.Create(2107, "spotify-no-repoint@example.com");
+        fixture.DbContext.Users.Add(owner);
+        var staleTrack = fixture.AddTrackWithSong(null);
+        var correctFacts = Facts("Same title", "Same artist", "USSP02600001");
+        var correctTrack = fixture.AddTrackWithPublicAssociation("musicbrainz", "recording-correct", correctFacts);
+        fixture.AddObservation(owner.Id, correctTrack.Id, "spotify", "spotify-existing-key", "Same title", "Same artist", 180);
+        var item = fixture.AddCatalogItem("spotify", "spotify-existing-key", correctFacts);
+        item.TrackId = staleTrack.Id;
+        item.AssociationState = RecordingAssociationState.Unknown;
+        await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+
+        var resolved = await fixture.Resolver.ResolveAsync(Snapshot("spotify-existing-key", "ACCOUNT-ISRC",
+            "Same title", "Same artist") with
+        {
+            ProviderCatalogItemId = item.Id, ProviderCatalogRevision = item.Revision
+        }, Now, CancellationToken.None, owner.Id);
+        await fixture.DbContext.SaveChangesAsync();
+
+        Assert.Equal(correctTrack.Id, resolved.Id);
+        var mapping = await fixture.DbContext.ProviderCatalogItems.SingleAsync(row => row.ExternalId == "spotify-existing-key");
+        Assert.Equal(staleTrack.Id, mapping.TrackId);
+        Assert.Equal(RecordingAssociationState.Conflicted, mapping.AssociationState);
+        Assert.Equal(staleTrack.Id, mapping.TrackId);
+        Assert.Equal(ProviderCatalogPolicy.SharedSource(correctTrack, DateTimeOffset.UtcNow)?.Id, ProviderCatalogPolicy.SharedSource(await fixture.DbContext.Tracks.Include(row => row.ProviderItems).SingleAsync(row => row.Id == correctTrack.Id), DateTimeOffset.UtcNow)?.Id);
+    }
+
+    private static SpotifyTrackSnapshot Snapshot(string id, string? isrc, string title = "Track title", string artist = "Artist") =>
+        new(id, title, artist, [artist], "Account album", "https://i.scdn.co/image/account", $"https://open.spotify.com/track/{id}",
+            "https://open.spotify.com/album/account", isrc, 180, Now, 0)
+        {
+            ArtistIdentities = [Credit(artist, $"account-{id}")]
+        };
+
+    private static ProviderCatalogFacts Facts(string title, string artist, string? isrc,
+        TrackVersionFlags flags = TrackVersionFlags.None) => new()
+    {
+        Title = title, Artist = artist, Albums = ["Catalog album"], ThumbnailUrl = "https://i.scdn.co/image/catalog",
+        ProviderUrl = "https://open.spotify.com/track/catalog", Isrc = isrc, DurationSeconds = 180,
+        ArtistCredits = [Credit(artist, "catalog-artist")], VersionFlags = flags
+    };
+
+    private static ProviderCatalogFacts CopyFacts(ProviderCatalogFacts source, string? thumbnailUrl = null,
+        string? isrc = null, TrackVersionFlags? versionFlags = null) => new()
+    {
+        Title = source.Title, Artist = source.Artist, Albums = source.Albums,
+        ThumbnailUrl = thumbnailUrl ?? source.ThumbnailUrl, ProviderUrl = source.ProviderUrl,
+        DurationSeconds = source.DurationSeconds, Isrc = isrc ?? source.Isrc,
+        MusicBrainzRecordingId = source.MusicBrainzRecordingId, ArtistCredits = source.ArtistCredits,
+        VersionFlags = versionFlags ?? source.VersionFlags
+    };
+
+    private static ArtistCreditMetadata Credit(string name, string externalId) => new()
+    {
+        Name = name, Provider = "spotify", ExternalId = externalId, Role = TrackArtistRole.Primary
+    };
 
     private sealed class ResolverFixture : IAsyncDisposable
     {
@@ -376,68 +519,54 @@ public sealed class SpotifyTrackResolverTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlite(connection)
-                .Options;
-            var dbContext = new ApplicationDbContext(options);
-            await dbContext.Database.EnsureCreatedAsync();
-            return new ResolverFixture(connection, dbContext);
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+            var db = new ApplicationDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            return new ResolverFixture(connection, db);
         }
 
-        public Track AddTrackWithSong(
-            string? isrc,
-            TrackCanonicalMetadata? canonicalMetadata = null)
+        public ProviderCatalogItem AddCatalogItem(string source, string id, ProviderCatalogFacts facts)
         {
-            var song = new Song
+            var item = new ProviderCatalogItem
             {
-                Id = Guid.NewGuid(),
-                CreatedAt = Now,
-                UpdatedAt = Now
+                Id = Guid.NewGuid(), SourceType = source, ExternalId = id, Revision = 1,
+                FactsJson = JsonSerializer.Serialize(facts), VerificationMethod = source == "spotify"
+                    ? CatalogVerificationMethods.SpotifyApplication : CatalogVerificationMethods.MusicBrainz,
+                VisibilityState = CatalogVisibility.Public, VerifiedAt = Now, RevalidateAfter = Now.AddDays(1)
             };
-            var track = new Track
-            {
-                Id = Guid.NewGuid(),
-                Isrc = isrc,
-                CanonicalMetadata = canonicalMetadata == null
-                    ? null
-                    : JsonSerializer.Serialize(canonicalMetadata),
-                CreatedAt = Now,
-                UpdatedAt = Now
-            };
-            DbContext.AddRange(song, track, new SongTrack
-            {
-                SongId = song.Id,
-                Song = song,
-                TrackId = track.Id,
-                Track = track
-            });
+            DbContext.ProviderCatalogItems.Add(item);
+            return item;
+        }
+
+        public Track AddTrackWithPublicAssociation(string source, string id, ProviderCatalogFacts facts)
+        {
+            var track = AddTrackWithSong(null);
+            var item = AddCatalogItem(source, id, facts);
+
+
+            track.Isrc = facts.Isrc;
+            track.VersionFlags = facts.VersionFlags;
+            track.ProviderItems.Add(CatalogFixture.Associate(item, track.Id, RecordingAssociationState.Verified, item.Revision));
             return track;
         }
 
-        public void AddObservation(
-            Guid trackId,
-            string sourceType,
-            string externalId,
-            string title,
-            string artist,
-            int durationSeconds,
-            bool normalize = true)
+        public Track AddTrackWithSong(string? isrc)
         {
-            DbContext.TrackObservations.Add(new TrackObservation
-            {
-                Id = Guid.NewGuid(),
-                SourceType = sourceType,
-                ExternalId = externalId,
-                Title = title,
-                Artist = artist,
-                NormalizedTitle = normalize ? TrackTextNormalizer.Normalize(title) : null,
-                NormalizedArtist = normalize ? TrackTextNormalizer.Normalize(artist) : null,
-                DurationSeconds = durationSeconds,
-                MatchStatus = TrackMatchingStatuses.Matched,
-                TrackId = trackId,
-                CreatedAt = Now,
-                UpdatedAt = Now
-            });
+            var song = new Song { Id = Guid.NewGuid(), CreatedAt = Now, UpdatedAt = Now };
+            var track = new Track {  Id = Guid.NewGuid(), Isrc = isrc, CreatedAt = Now, UpdatedAt = Now  };
+            DbContext.AddRange(song, track, new SongTrack { SongId = song.Id, Song = song, TrackId = track.Id, Track = track });
+            return track;
+        }
+
+        public void AddObservation(int ownerId, Guid trackId, string source, string id, string title, string artist,
+            int duration, bool referenceOnly = false)
+        {
+            DbContext.TrackObservations.Add(new TrackObservation {  InputKind = referenceOnly ? ObservationInputKind.Reference : ObservationInputKind.Private,
+                Id = Guid.NewGuid(), OwnerUserId = ownerId,
+                SourceType = source, ExternalId = id, Title = referenceOnly ? null : title, Artist = referenceOnly ? null : artist,
+                DurationSeconds = referenceOnly ? null : duration, MatchStatus = TrackMatchingStatuses.Matched, TrackId = trackId,
+                CreatedAt = Now, UpdatedAt = Now
+             });
         }
 
         public async ValueTask DisposeAsync()
