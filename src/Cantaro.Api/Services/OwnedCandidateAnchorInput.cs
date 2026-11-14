@@ -40,7 +40,7 @@ internal static class OwnedCandidateAnchorInput
     }
 
     internal static async Task<Dictionary<Guid, ObservationInput>> LoadAsync(ApplicationDbContext db, int owner,
-        IEnumerable<Guid> trackIds, CancellationToken ct)
+        IEnumerable<Guid> trackIds, CancellationToken ct, bool requireArtist = false)
     {
         var ids = trackIds.Distinct().ToArray();
         if (ids.Length == 0) return [];
@@ -51,7 +51,8 @@ internal static class OwnedCandidateAnchorInput
             .OrderBy(c => EF.Functions.Collate(c.CandidateSource, collation))
             .ThenBy(c => EF.Functions.Collate(c.ExternalId, collation)).ThenBy(c => c.Id).ToListAsync(ct);
         return candidates.Select(c => (Id: c.AnchorTrackId!.Value, Input: Read(c, now)))
-            .Where(c => c.Input is not null).GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First().Input!);
+            .Where(c => c.Input is not null && (!requireArtist || !string.IsNullOrWhiteSpace(c.Input.Artist)))
+            .GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First().Input!);
     }
 
     internal static async Task<List<Guid>> FindAnchorIdsAsync(ApplicationDbContext db, int? owner,

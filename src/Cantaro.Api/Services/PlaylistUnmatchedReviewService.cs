@@ -51,9 +51,10 @@ public sealed class PlaylistUnmatchedReviewService(
         var identities = await PlaylistDestinationIdentityEvidence.FindManyAsync(db,
             new PlatformAccountContext(link.UserId, link.ConnectedServiceAccountId, link.ExternalAccountId),
             link.Service, entries, link, ct);
+        var supporting = await LoadSupportingInputsAsync(userId, entries, ct);
         var unmatched = new List<PlaylistUnmatchedEntry>();
         foreach (var entry in entries)
-            if (!identities.ContainsKey(entry.Id)) unmatched.Add(ToDto(entry, userId));
+            if (!identities.ContainsKey(entry.Id)) unmatched.Add(ToDto(entry, userId, supporting.GetValueOrDefault(entry.TrackId ?? Guid.Empty)));
         return unmatched;
     }
 
@@ -70,7 +71,8 @@ public sealed class PlaylistUnmatchedReviewService(
 
         await RefreshSourceEvidenceAsync(entry,
             (videoId, token) => youtube.GetVideoMetadataAsync(userId, videoId, token), ct);
-        var evidence = BuildEvidence(entry, userId);
+        var supporting = (await LoadSupportingInputsAsync(userId, [entry], ct)).GetValueOrDefault(entry.TrackId ?? Guid.Empty);
+        var evidence = BuildEvidence(entry, userId, supporting);
         var parsed = TrackObservationParser.ParseSearchHypotheses(evidence)[0];
         var suggestedQuery = string.Join(" ", new[] { parsed.SearchTitle, parsed.SearchArtist }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
@@ -106,13 +108,14 @@ public sealed class PlaylistUnmatchedReviewService(
             var proof = new MatchProof(userId, playlistId, mappingId, entry.Id,
                 link.ConnectedServiceAccountId, link.ExternalAccountId, link.Service,
                 Fingerprint(entry), candidate, DateTimeOffset.UtcNow,
-                link.ServicePlaylistId, link.ConnectedServiceAccount!.TokenVersion);
+                link.ServicePlaylistId, link.ConnectedServiceAccount!.TokenVersion,
+                supporting is null ? null : SupportingFingerprint(supporting));
             return new PlaylistMatchCandidate(_protector.Protect(JsonSerializer.Serialize(proof)),
                 candidate.ExternalId, candidate.Title, candidate.Artist ?? "",
                 candidate.DurationSeconds, CandidateUrl(link.Service, candidate.ExternalId),
                 PlaylistDestinationIdentityResolver.DescribeCandidate(scored, _options));
         }).ToArray();
-        return new PlaylistMatchSearch(ToDto(entry, userId), assessment.Reason, result, suggestedQuery);
+        return new PlaylistMatchSearch(ToDto(entry, userId, supporting), assessment.Reason, result, suggestedQuery);
     }
 
     internal async Task RefreshSourceEvidenceAsync(PlaylistEntry entry,
@@ -192,6 +195,12 @@ public sealed class PlaylistUnmatchedReviewService(
             && confirmed.ExternalId == proof.Candidate.ExternalId
             && await HasDestinationIdentityAsync(entry, link, ct)) return;
         if (proof.Fingerprint != Fingerprint(entry)) throw StaleChoice();
+        if (proof.SupportingInputFingerprint is not null)
+        {
+            var current = (await LoadSupportingInputsAsync(userId, [entry], ct))
+                .GetValueOrDefault(entry.TrackId ?? Guid.Empty);
+            if (current is null || proof.SupportingInputFingerprint != SupportingFingerprint(current)) throw StaleChoice();
+        }
         if (await HasDestinationIdentityAsync(entry, link, ct))
             throw new PlatformApiException("unmatched_entry_not_found", "That playlist entry no longer needs a match.", 404);
 
@@ -352,10 +361,43 @@ public sealed class PlaylistUnmatchedReviewService(
             new PlatformAccountContext(link.UserId, link.ConnectedServiceAccountId, link.ExternalAccountId),
             link.Service, entry, ct, link) is not null;
 
-    private static PlaylistUnmatchedEntry ToDto(PlaylistEntry entry, int userId)
+    // Membership, rather than an observation's processing result, associates input with a recording.
+    // Load all missing recordings together so listing does not issue queries for each entry.
+    private async Task<Dictionary<Guid, ObservationInput>> LoadSupportingInputsAsync(
+        int userId, IEnumerable<PlaylistEntry> entries, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var ids = entries.Where(entry => entry.TrackId is not null
+                && ObservationInput.Read(entry.TrackObservation, userId, now) is null
+                && ProviderCatalogPolicy.SharedFacts(entry.Track, now) is null)
+            .Select(entry => entry.TrackId!.Value).Distinct().ToArray();
+        if (ids.Length == 0) return [];
+        var eligible = ObservationInput.Eligible(db.TrackObservations.AsNoTracking(), now)
+            .Where(input => input.OwnerUserId == userId).Select(input => input.Id);
+        var members = await db.PlaylistEntries.AsNoTracking()
+            .Where(entry => entry.TrackId != null && ids.Contains(entry.TrackId.Value)
+                && entry.Playlist!.UserId == userId && entry.TrackObservationId != null
+                && eligible.Contains(entry.TrackObservationId.Value))
+            .Include(entry => entry.TrackObservation).ThenInclude(input => input!.ProviderCatalogItem)
+            .OrderBy(entry => entry.Id).ToListAsync(ct);
+        var inputs = new Dictionary<Guid, ObservationInput>();
+        foreach (var member in members)
+        {
+            var input = ObservationInput.Read(member.TrackObservation, userId, now);
+            if (string.IsNullOrWhiteSpace(input?.Title) || string.IsNullOrWhiteSpace(input.Artist)) continue;
+            inputs.TryAdd(member.TrackId!.Value, input);
+        }
+        var anchors = await OwnedCandidateAnchorInput.LoadAsync(db, userId,
+            ids.Where(id => !inputs.ContainsKey(id)), ct, requireArtist: true);
+        foreach (var (id, input) in anchors) inputs.TryAdd(id, input);
+        return inputs;
+    }
+
+    private static PlaylistUnmatchedEntry ToDto(PlaylistEntry entry, int userId, ObservationInput? supporting = null)
     {
         var observation = ObservationInput.Read(entry.TrackObservation, userId, DateTimeOffset.UtcNow);
         var canonical = ProviderCatalogPolicy.SharedFacts(entry.Track, DateTimeOffset.UtcNow);
+        observation ??= canonical is null ? supporting : null;
         var metadata = observation is null ? null : observation.Metadata;
         var sourceUrl = observation is not null
             && System.Text.RegularExpressions.Regex.IsMatch(observation.ExternalId, "^[A-Za-z0-9_-]{1,128}$")
@@ -366,11 +408,12 @@ public sealed class PlaylistUnmatchedReviewService(
             canonical?.DurationSeconds ?? observation?.DurationSeconds, sourceUrl);
     }
 
-    private static ObservationInput BuildEvidence(PlaylistEntry entry, int userId)
+    private static ObservationInput BuildEvidence(PlaylistEntry entry, int userId, ObservationInput? supporting = null)
     {
         var source = ObservationInput.Read(entry.TrackObservation, userId, DateTimeOffset.UtcNow);
         if (source is not null) return source;
         var facts = ProviderCatalogPolicy.SharedFacts(entry.Track, DateTimeOffset.UtcNow);
+        if (facts is null && supporting is not null) return supporting;
         return ObservationInput.FromFacts("cantaro", entry.TrackId?.ToString() ?? "",
             facts ?? new ProviderCatalogFacts { Title = "Unknown track" });
     }
@@ -381,6 +424,9 @@ public sealed class PlaylistUnmatchedReviewService(
         "youtube" => $"https://www.youtube.com/watch?v={Uri.EscapeDataString(id)}",
         _ => ""
     };
+
+    private static string SupportingFingerprint(ObservationInput input) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input))));
 
     private static string Fingerprint(PlaylistEntry entry)
     {
@@ -416,5 +462,5 @@ public sealed class PlaylistUnmatchedReviewService(
     private sealed record MatchProof(int UserId, Guid PlaylistId, Guid MappingId, Guid EntryId,
         int ConnectedServiceAccountId, string ExternalAccountId, string Service,
         string Fingerprint, TrackMatchSearchCandidate Candidate, DateTimeOffset IssuedAt,
-        string ServicePlaylistId, long TokenVersion);
+        string ServicePlaylistId, long TokenVersion, string? SupportingInputFingerprint = null);
 }
