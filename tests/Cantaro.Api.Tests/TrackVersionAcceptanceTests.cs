@@ -64,8 +64,8 @@ public sealed class TrackVersionAcceptanceTests
         Assert.Single(memberships.Select(membership => membership.SongId).Distinct());
 
         Assert.Empty(await fixture.DbContext.ProviderCatalogItems.ToListAsync());
-        Assert.Equal(versionTrack.Id, setup.PlaylistEntry.TrackId);
-        Assert.True(setup.Candidate.IsAccepted);
+        Assert.Equal(versionTrack.Id, (await fixture.DbContext.PlaylistEntries.AsNoTracking().SingleAsync(e => e.Id == setup.PlaylistEntry.Id)).TrackId);
+        Assert.True((await fixture.DbContext.TrackResolutionCandidates.AsNoTracking().SingleAsync(c => c.Id == setup.Candidate.Id)).IsAccepted);
         Assert.Equal(setup.Candidate.Id, result.AcceptedCandidateId);
         Assert.Contains("sped-up version", result.ResolutionNotes!, StringComparison.OrdinalIgnoreCase);
     }

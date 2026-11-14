@@ -18,6 +18,7 @@ public sealed record ObservationInput
     public string? Artist { get; init; }
     public string? ThumbnailUrl { get; init; }
     public int? DurationSeconds { get; init; }
+    public IReadOnlyList<string> Albums { get; init; } = [];
     public TrackObservationMetadata Metadata { get; init; } = new();
 
     // SQL eligibility is shared by enqueue, recovery, claim and review queries.
@@ -105,7 +106,7 @@ public sealed record ObservationInput
     public static ObservationInput FromFacts(string sourceType, string externalId, ProviderCatalogFacts facts) => new()
     {
         SourceType = sourceType, ExternalId = externalId, Title = facts.Title,
-        Artist = facts.Artist, ThumbnailUrl = facts.ThumbnailUrl, DurationSeconds = facts.DurationSeconds,
+        Artist = facts.Artist, ThumbnailUrl = facts.ThumbnailUrl, DurationSeconds = facts.DurationSeconds, Albums = facts.Albums,
         Metadata = new TrackObservationMetadata
         {
             OriginalTitle = facts.OriginalTitle, ChannelTitle = facts.ChannelTitle,

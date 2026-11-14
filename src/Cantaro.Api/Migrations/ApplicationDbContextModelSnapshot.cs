@@ -2098,6 +2098,9 @@ namespace Cantaro.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AnchorTrackId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Artist")
                         .HasColumnType("text");
 
@@ -2148,6 +2151,8 @@ namespace Cantaro.Api.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AnchorTrackId");
 
                     b.HasIndex("TrackObservationId", "Score");
 
@@ -3015,6 +3020,11 @@ namespace Cantaro.Api.Migrations
 
             modelBuilder.Entity("Cantaro.Api.Models.TrackResolutionCandidate", b =>
                 {
+                    b.HasOne("Cantaro.Api.Models.Track", "AnchorTrack")
+                        .WithMany()
+                        .HasForeignKey("AnchorTrackId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Cantaro.Api.Models.TrackObservation", "TrackObservation")
                         .WithMany("Candidates")
                         .HasForeignKey("TrackObservationId")
@@ -3026,6 +3036,8 @@ namespace Cantaro.Api.Migrations
                         .HasForeignKey("ProviderCatalogItemId", "CandidateSource", "ExternalId")
                         .HasPrincipalKey("Id", "SourceType", "ExternalId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AnchorTrack");
 
                     b.Navigation("ProviderCatalogItem");
 

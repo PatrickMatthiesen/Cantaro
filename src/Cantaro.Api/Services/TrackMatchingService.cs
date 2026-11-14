@@ -111,6 +111,34 @@ public class TrackMatchingService
         CancellationToken cancellationToken)
     {
         ValidateVersionFlags(versionFlags);
+        if (_dbContext.Database.CurrentTransaction is not null || _dbContext.ChangeTracker.HasChanges())
+            throw new InvalidOperationException("Version acceptance requires a clean context without an active transaction.");
+        _dbContext.ChangeTracker.Clear();
+        return await new PlaylistSyncCoordinator.PlaylistTransactionStrategy(_dbContext).ExecuteAsync(async () =>
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await AcceptCandidateVersionCoreAsync(observationId, candidateId, versionFlags, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                _dbContext.ChangeTracker.Clear();
+                for (Exception? cause = exception; cause is not null; cause = cause.InnerException)
+                    if (cause is Npgsql.PostgresException { SqlState: "40001" or "40P01" })
+                        throw new InvalidOperationException("Concurrent version acceptance conflicted. Retry with a fresh request.", exception);
+                throw;
+            }
+        });
+    }
+
+    private async Task<TrackObservation> AcceptCandidateVersionCoreAsync(Guid observationId, Guid candidateId,
+        TrackVersionFlags versionFlags, CancellationToken cancellationToken)
+    {
 
         var observation = await _dbContext.TrackObservations
             .Include(o => o.ProviderCatalogItem)
@@ -118,7 +146,6 @@ public class TrackMatchingService
             .FirstOrDefaultAsync(item => item.Id == observationId, cancellationToken)
             ?? throw new InvalidOperationException(
                 $"Track observation {observationId} was not found.");
-        EnsureProcessable(observation);
         var candidate = observation.Candidates.FirstOrDefault(item => item.Id == candidateId)
             ?? throw new InvalidOperationException(
                 $"Candidate {candidateId} does not belong to observation {observationId}.");
@@ -139,6 +166,7 @@ public class TrackMatchingService
                 "This observation has already been resolved to a Track.");
         }
 
+        EnsureProcessable(observation);
         var originalUpdatedAt = observation.UpdatedAt;
         var claimedAt = DateTimeOffset.UtcNow;
         var claimed = await _dbContext.TrackObservations
@@ -203,6 +231,7 @@ public class TrackMatchingService
             versionEvidence,
             cancellationToken, artistIdentities: null);
 
+        candidate.AnchorTrackId = anchorTrack.Id;
         candidate.IsAccepted = true;
         observation.TrackId = versionTrack.Id;
         observation.MatchStatus = TrackMatchingStatuses.Matched;
@@ -787,7 +816,13 @@ public class TrackMatchingService
                 RawMetadata: input.RawMetadata,
                 OwnerUserId: ownerUserId),
             cancellationToken);
-        var anchorTrack = identityMatch?.Track ?? await CreateTrackAsync(
+        var ownedAnchorIds = await OwnedCandidateAnchorInput.FindAnchorIdsAsync(_dbContext,
+            ownerUserId, candidate.CandidateSource, candidate.ExternalId, cancellationToken);
+        if (identityMatch?.Kind != TrackIdentityMatchKind.ExactSource && ownedAnchorIds.Count > 1)
+            throw new InvalidOperationException("The selected candidate has conflicting original recordings and requires review.");
+        var retainedAnchor = identityMatch?.Kind != TrackIdentityMatchKind.ExactSource && ownedAnchorIds.Count == 1
+            ? await _dbContext.Tracks.SingleAsync(t => t.Id == ownedAnchorIds[0], cancellationToken) : null;
+        var anchorTrack = (identityMatch?.Kind == TrackIdentityMatchKind.ExactSource ? identityMatch.Track : retainedAnchor ?? identityMatch?.Track) ?? await CreateTrackAsync(
             mbidRecording: null,
             isrc: null,
             input.Title,

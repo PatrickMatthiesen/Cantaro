@@ -126,6 +126,9 @@ internal static class PlaylistDestinationIdentityResolver
                 break;
             }
         }
+        if (publicFacts is null && ownedInput is null && trackId is { } originalId)
+            ownedInput = (await OwnedCandidateAnchorInput.LoadAsync(dbContext, account.UserId, [originalId], cancellationToken))
+                .GetValueOrDefault(originalId);
         var title = publicFacts?.Title ?? (ownedInput?.Title);
         var artist = publicFacts?.Artist ?? (ownedInput?.Artist);
         if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))

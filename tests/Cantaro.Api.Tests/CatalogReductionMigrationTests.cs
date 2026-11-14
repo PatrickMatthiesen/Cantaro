@@ -14,6 +14,33 @@ namespace Cantaro.Api.Tests;
 public sealed class CatalogReductionMigrationTests
 {
     [PostgresFact]
+    public async Task EmptyUpgradeAddsNullableRestrictedAnchorWithoutLegacyBackfill()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync(); var db = schema.Db;
+        var name = new NpgsqlConnectionStringBuilder(db.Database.GetConnectionString()).SearchPath!;
+        Assert.Matches("^cantaro_sync_test_[a-f0-9]+$", name);
+        await db.Database.ExecuteSqlRawAsync($"DROP SCHEMA \"{name}\" CASCADE");
+        await db.Database.ExecuteSqlRawAsync($"CREATE SCHEMA \"{name}\"");
+        await CatalogReductionMigrator.ApplyAsync(db);
+        Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+        db.Users.Add(TestUserFactory.Create(42, "anchor-migration@example.test"));
+        var observation = new TrackObservation { Id = Guid.NewGuid(), OwnerUserId = 42,
+            SourceType = "private", ExternalId = "input", InputKind = ObservationInputKind.Private, Title = "Input", MatchStatus = TrackMatchingStatuses.Ambiguous };
+        var candidate = new TrackResolutionCandidate { Id = Guid.NewGuid(), TrackObservationId = observation.Id,
+            CandidateSource = "private", ExternalId = "candidate", Title = "Original" };
+        db.AddRange(observation, candidate); await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+        Assert.Null((await db.TrackResolutionCandidates.SingleAsync()).AnchorTrackId);
+        var missing = Guid.NewGuid();
+        var invalid = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE \"TrackResolutionCandidates\" SET \"AnchorTrackId\" = {missing} WHERE \"Id\" = {candidate.Id}"));
+        Assert.Equal("23503", invalid.SqlState);
+        var track = new Track { Id = Guid.NewGuid() }; db.Add(track); await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"TrackResolutionCandidates\" SET \"AnchorTrackId\" = {track.Id} WHERE \"Id\" = {candidate.Id}");
+        var restricted = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM \"Tracks\" WHERE \"Id\" = {track.Id}"));
+        Assert.Equal("23001", restricted.SqlState);
+    }
+
+    [PostgresFact]
     public async Task CurrentSchemaUpgradePreservesMembershipChoicesReceiptsAndPrivateInput()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
@@ -119,6 +146,7 @@ public sealed class CatalogReductionMigrationTests
         Assert.Equal(catalogId, candidate.ProviderCatalogItemId); Assert.Null(candidate.Title);
         Assert.DoesNotContain("ProviderRawMetadata", candidate.EvaluationJson);
         Assert.Equal(candidateId, observations[publicId].AcceptedCandidateId);
+        Assert.Null((await db.TrackResolutionCandidates.SingleAsync(c => c.Id == candidateId)).AnchorTrackId);
         Assert.Equal(3, (await db.TrackMatchQueueItems.SingleAsync()).RetryCount);
         var artistLink = Assert.Single(await db.ArtistProviderLinks.AsNoTracking().ToArrayAsync());
         Assert.Equal((artistId, "musicbrainz", mbid.ToLowerInvariant()), (artistLink.ArtistId, artistLink.Provider, artistLink.ExternalId));

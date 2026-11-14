@@ -441,6 +441,9 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         modelBuilder.Entity<TrackResolutionCandidate>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.HasOne(e => e.AnchorTrack).WithMany().HasForeignKey(e => e.AnchorTrackId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.AnchorTrackId);
             entity.HasAlternateKey(e => new { e.Id, e.TrackObservationId });
             entity.HasOne(e => e.ProviderCatalogItem).WithMany()
                 .HasForeignKey(e => new { e.ProviderCatalogItemId, e.CandidateSource, e.ExternalId })

@@ -89,18 +89,46 @@ public sealed class CantaroSearchService(
         var currentPublicSources = ProviderCatalogPolicy.CurrentSources(_dbContext.ProviderCatalogItems.AsNoTracking(), now);
         var ownedInputs = ObservationInput.Eligible(_dbContext.TrackObservations.AsNoTracking(), now)
             .Where(input => input.OwnerUserId == userId);
-        var ownedSources = from entry in _dbContext.PlaylistEntries.AsNoTracking()
+        var entrySources = from entry in _dbContext.PlaylistEntries.AsNoTracking()
             join input in ownedInputs on entry.TrackObservationId equals (Guid?)input.Id
             where entry.Playlist!.UserId == userId
             select new
             {
-                entry.Id, entry.TrackId,
+                entry.Id, entry.TrackId, Priority = 0, Source = "", ExternalId = "",
                 IsPublic = input.InputKind == ObservationInputKind.Public,
                 Title = input.InputKind == ObservationInputKind.Public ? input.ProviderCatalogItem!.NormalizedTitle : input.Title,
                 Artist = input.InputKind == ObservationInputKind.Public ? input.ProviderCatalogItem!.NormalizedArtist : input.Artist,
                 Artwork = input.InputKind == ObservationInputKind.Private ? input.ThumbnailUrl : null,
                 Facts = input.InputKind == ObservationInputKind.Public ? input.ProviderCatalogItem!.FactsJson : null
             };
+        var anchorSources = OwnedCandidateAnchorInput.Eligible(_dbContext, userId, now).Select(input => new
+        {
+            input.Id, TrackId = input.AnchorTrackId, Priority = 1, Source = input.CandidateSource, input.ExternalId,
+            IsPublic = input.ProviderCatalogItemId != null,
+            Title = input.ProviderCatalogItemId != null ? input.ProviderCatalogItem!.NormalizedTitle : input.Title,
+            Artist = input.ProviderCatalogItemId != null ? input.ProviderCatalogItem!.NormalizedArtist : input.Artist,
+            Artwork = (string?)null,
+            Facts = input.ProviderCatalogItemId != null ? input.ProviderCatalogItem!.FactsJson : null
+        });
+        var ownedSources = entrySources.Concat(anchorSources).Where(entry => entry.IsPublic
+            ? normalizedQuery.Length > 0 && ((entry.Title != null && entry.Title.Contains(normalizedQuery))
+                || (entry.Artist != null && entry.Artist.Contains(normalizedQuery))
+                || normalizedTokens.All(token => (entry.Title != null && entry.Title.Contains(token))
+                    || (entry.Artist != null && entry.Artist.Contains(token))))
+            : (entry.Title != null && entry.Title.ToLower().Contains(query))
+                || (entry.Artist != null && entry.Artist.ToLower().Contains(query))
+                || queryTokens.All(token => (entry.Title != null && entry.Title.ToLower().Contains(token))
+                    || (entry.Artist != null && entry.Artist.ToLower().Contains(token))))
+            .Select(entry => new
+            {
+                entry.Id, entry.TrackId, entry.Priority, entry.Source, entry.ExternalId,
+                entry.Title, entry.Artist, entry.Artwork, entry.Facts, entry.IsPublic,
+                Rank = entry.Title != null && entry.Title.ToLower() == (entry.IsPublic ? normalizedQuery : query) ? 0
+                    : entry.Title != null && entry.Title.ToLower().StartsWith(entry.IsPublic ? normalizedQuery : query) ? 1
+                    : entry.Title != null && entry.Title.ToLower().Contains(entry.IsPublic ? normalizedQuery : query) ? 2
+                    : entry.Artist != null && entry.Artist.ToLower() == (entry.IsPublic ? normalizedQuery : query) ? 3
+                    : entry.Artist != null && entry.Artist.ToLower().StartsWith(entry.IsPublic ? normalizedQuery : query) ? 4 : 5
+            });
         var candidates = await _dbContext.Tracks.AsNoTracking()
             .Where(track => track.PlaylistEntries.Any(entry => entry.Playlist!.UserId == userId))
             .Select(track => new
@@ -118,13 +146,21 @@ public sealed class CantaroSearchService(
                     .OrderBy(source => EF.Functions.Collate(source.SourceType, providerKeyCollation))
                     .ThenBy(source => EF.Functions.Collate(source.ExternalId, providerKeyCollation))
                     .Select(source => source.FactsJson).FirstOrDefault(),
-                OwnedTitle = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Id)
+                OwnedTitle = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Rank).ThenBy(entry => entry.Priority)
+                    .ThenBy(entry => EF.Functions.Collate(entry.Source, providerKeyCollation))
+                    .ThenBy(entry => EF.Functions.Collate(entry.ExternalId, providerKeyCollation)).ThenBy(entry => entry.Id)
                     .Select(entry => entry.Title).FirstOrDefault(),
-                OwnedArtist = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Id)
+                OwnedArtist = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Rank).ThenBy(entry => entry.Priority)
+                    .ThenBy(entry => EF.Functions.Collate(entry.Source, providerKeyCollation))
+                    .ThenBy(entry => EF.Functions.Collate(entry.ExternalId, providerKeyCollation)).ThenBy(entry => entry.Id)
                     .Select(entry => entry.Artist).FirstOrDefault(),
-                OwnedArtwork = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Id)
+                OwnedArtwork = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Rank).ThenBy(entry => entry.Priority)
+                    .ThenBy(entry => EF.Functions.Collate(entry.Source, providerKeyCollation))
+                    .ThenBy(entry => EF.Functions.Collate(entry.ExternalId, providerKeyCollation)).ThenBy(entry => entry.Id)
                     .Select(entry => entry.Artwork).FirstOrDefault(),
-                OwnedFacts = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Id)
+                OwnedFacts = ownedSources.Where(entry => entry.TrackId == track.Id).OrderBy(entry => entry.Rank).ThenBy(entry => entry.Priority)
+                    .ThenBy(entry => EF.Functions.Collate(entry.Source, providerKeyCollation))
+                    .ThenBy(entry => EF.Functions.Collate(entry.ExternalId, providerKeyCollation)).ThenBy(entry => entry.Id)
                     .Select(entry => entry.Facts).FirstOrDefault()
             })
             .Where(candidate =>
@@ -147,24 +183,21 @@ public sealed class CantaroSearchService(
             {
                 candidate.Id, candidate.PublicTitle, candidate.PublicArtist, candidate.PublicFacts,
                 candidate.OwnedTitle, candidate.OwnedArtist, candidate.OwnedArtwork, candidate.OwnedFacts,
+                PublicMatches = normalizedQuery.Length > 0 && ((candidate.PublicTitle != null && candidate.PublicTitle.Contains(normalizedQuery))
+                    || (candidate.PublicArtist != null && candidate.PublicArtist.Contains(normalizedQuery))
+                    || normalizedTokens.All(token => (candidate.PublicTitle != null && candidate.PublicTitle.Contains(token))
+                        || (candidate.PublicArtist != null && candidate.PublicArtist.Contains(token)))),
                 PublicRank = candidate.PublicTitle != null && candidate.PublicTitle == normalizedQuery ? 0
                     : candidate.PublicTitle != null && candidate.PublicTitle.StartsWith(normalizedQuery) ? 1
                     : candidate.PublicTitle != null && candidate.PublicTitle.Contains(normalizedQuery) ? 2
                     : candidate.PublicArtist != null && candidate.PublicArtist == normalizedQuery ? 3
                     : candidate.PublicArtist != null && candidate.PublicArtist.StartsWith(normalizedQuery) ? 4 : 5,
-                OwnedRank = ownedSources.Any(entry => entry.TrackId == candidate.Id
-                    && entry.Title != null && entry.Title.ToLower() == (entry.IsPublic ? normalizedQuery : query)) ? 0
-                    : ownedSources.Any(entry => entry.TrackId == candidate.Id
-                        && entry.Title != null && entry.Title.ToLower().StartsWith(entry.IsPublic ? normalizedQuery : query)) ? 1
-                    : ownedSources.Any(entry => entry.TrackId == candidate.Id
-                        && entry.Title != null && entry.Title.ToLower().Contains(entry.IsPublic ? normalizedQuery : query)) ? 2
-                    : ownedSources.Any(entry => entry.TrackId == candidate.Id
-                        && entry.Artist != null && entry.Artist.ToLower() == (entry.IsPublic ? normalizedQuery : query)) ? 3
-                    : ownedSources.Any(entry => entry.TrackId == candidate.Id
-                        && entry.Artist != null && entry.Artist.ToLower().StartsWith(entry.IsPublic ? normalizedQuery : query)) ? 4 : 5
+                OwnedRank = ownedSources.Where(entry => entry.TrackId == candidate.Id)
+                    .OrderBy(entry => entry.Rank).Select(entry => (int?)entry.Rank).FirstOrDefault() ?? 5
             })
             .OrderBy(candidate => candidate.PublicRank < candidate.OwnedRank ? candidate.PublicRank : candidate.OwnedRank)
-            .ThenBy(candidate => candidate.PublicTitle ?? candidate.OwnedTitle)
+            .ThenBy(candidate => !candidate.PublicMatches || candidate.OwnedRank < candidate.PublicRank
+                ? candidate.OwnedTitle : candidate.PublicTitle)
             .ThenBy(candidate => candidate.Id)
             .Take(limit + 1)
             .ToListAsync(cancellationToken);
@@ -172,10 +205,11 @@ public sealed class CantaroSearchService(
         var hasMore = candidates.Count > limit;
         var items = candidates.Take(limit).Select(candidate =>
         {
+            var useOwned = !candidate.PublicMatches || candidate.OwnedRank < candidate.PublicRank;
             ProviderCatalogFacts? facts = null;
             try
             {
-                var displayFacts = candidate.PublicFacts ?? candidate.OwnedFacts;
+                var displayFacts = useOwned ? candidate.OwnedFacts : candidate.PublicFacts;
                 if (displayFacts is not null)
                     facts = JsonSerializer.Deserialize<ProviderCatalogFacts>(displayFacts);
             }
@@ -185,11 +219,11 @@ public sealed class CantaroSearchService(
             {
                 EntityType = "song",
                 Id = $"track:{candidate.Id}",
-                Title = facts?.Title ?? candidate.OwnedTitle ?? "Unknown song",
+                Title = facts?.Title ?? (useOwned ? candidate.OwnedTitle : candidate.PublicTitle) ?? "Unknown song",
                 Subtitle = facts?.Artist ?? (facts?.ArtistCredits.Count > 0
-                    ? string.Join(", ", facts.ArtistCredits.Select(credit => credit.Name)) : null) ?? candidate.OwnedArtist,
+                    ? string.Join(", ", facts.ArtistCredits.Select(credit => credit.Name)) : null) ?? (useOwned ? candidate.OwnedArtist : candidate.PublicArtist),
                 Detail = facts?.Albums.FirstOrDefault(album => !string.IsNullOrWhiteSpace(album)),
-                ArtworkUrl = facts?.ThumbnailUrl ?? candidate.OwnedArtwork,
+                ArtworkUrl = facts?.ThumbnailUrl ?? (useOwned ? candidate.OwnedArtwork : null),
                 CanonicalRoute = $"/music/songs/{Uri.EscapeDataString($"track:{candidate.Id}")}"
             };
         }).ToList();

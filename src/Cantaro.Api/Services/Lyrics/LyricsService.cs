@@ -71,6 +71,11 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
     {
         var input = ObservationInput.Read(observation, observation.OwnerUserId, DateTimeOffset.UtcNow);
         if (input is null) return Unavailable("The source input is unavailable.");
+        return await GetInputLyricsAsync(observation.Id, input, cancellationToken);
+    }
+
+    private async Task<LyricsResult> GetInputLyricsAsync(Guid trackId, ObservationInput input, CancellationToken cancellationToken)
+    {
         var metadata = TrackObservationParser.Parse(input);
         if (string.IsNullOrWhiteSpace(metadata.SearchTitle) || string.IsNullOrWhiteSpace(metadata.SearchArtist))
         {
@@ -79,7 +84,7 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
 
         var sourceMetadata = input.Metadata;
         return await provider.GetLyricsAsync(new LyricsLookup(
-            observation.Id,
+            trackId,
             metadata.SearchTitle.Trim(),
             metadata.SearchArtist.Trim(),
             sourceMetadata?.Album?.Trim(),
@@ -104,9 +109,11 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
             .Include(entry => entry.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
             .Select(entry => entry.TrackObservation)
             .FirstOrDefaultAsync(cancellationToken);
-        return observation is null
+        var input = ObservationInput.Read(observation, userId, DateTimeOffset.UtcNow)
+            ?? (await OwnedCandidateAnchorInput.LoadAsync(dbContext, userId, [track.Id], cancellationToken)).GetValueOrDefault(track.Id);
+        return input is null
             ? Unavailable("The track has no current public facts or owned observation for a lyrics lookup.")
-            : await GetObservationLyricsAsync(observation, cancellationToken);
+            : await GetInputLyricsAsync(track.Id, input, cancellationToken);
     }
 
     private Task<LyricsResult> GetPublicLyricsAsync(Guid trackId, ProviderCatalogFacts facts,

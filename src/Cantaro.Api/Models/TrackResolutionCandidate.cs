@@ -9,6 +9,8 @@ public class TrackResolutionCandidate
     public Guid TrackObservationId { get; set; }
     public Guid? ProviderCatalogItemId { get; set; }
     public ProviderCatalogItem? ProviderCatalogItem { get; set; }
+    public Guid? AnchorTrackId { get; set; }
+    public Track? AnchorTrack { get; set; }
     public long? ProviderCatalogRevision { get; set; }
 
     /// <summary>
