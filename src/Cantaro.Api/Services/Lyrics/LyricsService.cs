@@ -94,11 +94,13 @@ public sealed class LyricsService(ApplicationDbContext dbContext, ILyricsProvide
         if (facts is not null)
             return await GetPublicLyricsAsync(track.Id, facts, cancellationToken);
 
+        var usableIds = ObservationInput.Eligible(dbContext.TrackObservations.AsNoTracking(), DateTimeOffset.UtcNow)
+            .Where(input => input.OwnerUserId == userId).Select(input => input.Id);
         var observation = await dbContext.PlaylistEntries.AsNoTracking()
             .Where(entry => entry.TrackId == track.Id && entry.Playlist != null && entry.Playlist.UserId == userId
                 && entry.TrackObservation != null && entry.TrackObservation.OwnerUserId == userId
-                && entry.TrackObservation.InputKind != ObservationInputKind.Reference)
-            .OrderBy(entry => entry.Position)
+                && usableIds.Contains(entry.TrackObservation.Id))
+            .OrderBy(entry => entry.Position).ThenBy(entry => entry.Id)
             .Include(entry => entry.TrackObservation).ThenInclude(observation => observation!.ProviderCatalogItem)
             .Select(entry => entry.TrackObservation)
             .FirstOrDefaultAsync(cancellationToken);

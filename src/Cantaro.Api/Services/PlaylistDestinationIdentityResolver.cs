@@ -106,10 +106,28 @@ internal static class PlaylistDestinationIdentityResolver
         if (authorizedId is not null) return authorizedId;
         if (trackId is null && exactObservation is null) return null;
 
-        var publicFacts = ProviderCatalogPolicy.SharedFacts(track, DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var publicFacts = ProviderCatalogPolicy.SharedFacts(track, now);
+        if (publicFacts is null && ownedInput is null && trackId is not null)
+        {
+            var usableIds = ObservationInput.Eligible(dbContext.TrackObservations.AsNoTracking(), now)
+                .Where(input => input.OwnerUserId == account.UserId).Select(input => input.Id);
+            var supportingInputs = dbContext.PlaylistEntries.AsNoTracking()
+                .Where(item => item.TrackId == trackId && item.Playlist!.UserId == account.UserId
+                    && item.TrackObservationId != null && usableIds.Contains(item.TrackObservationId.Value))
+                .OrderBy(item => item.Id)
+                .Include(item => item.TrackObservation).ThenInclude(input => input!.ProviderCatalogItem)
+                .Select(item => item.TrackObservation);
+            await foreach (var supporting in supportingInputs.AsAsyncEnumerable().WithCancellation(cancellationToken))
+            {
+                var input = ObservationInput.Read(supporting, account.UserId, now);
+                if (string.IsNullOrWhiteSpace(input?.Title) || string.IsNullOrWhiteSpace(input.Artist)) continue;
+                ownedInput = input;
+                break;
+            }
+        }
         var title = publicFacts?.Title ?? (ownedInput?.Title);
         var artist = publicFacts?.Artist ?? (ownedInput?.Artist);
-        var duration = publicFacts?.DurationSeconds ?? ownedInput?.DurationSeconds;
         if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
             return null;
 
