@@ -6,6 +6,8 @@ public class MediaProviderAccountStatusDto
 {
     public required string ProviderId { get; set; }
     public bool IsConnected { get; set; }
+    public string ConnectionState { get; set; } = "disconnected";
+    public bool NeedsReconnect { get; set; }
     public string? DisplayName { get; set; }
     public string? ExternalAccountId { get; set; }
     public DateTime? ConnectedAt { get; set; }

@@ -234,6 +234,8 @@ export interface MediaStreamingDestinationDto {
 }
 
 export interface MediaProviderAccountStatusDto {
+    connectionState?: string;
+    needsReconnect?: boolean;
     providerId: string;
     isConnected: boolean;
     displayName?: string;

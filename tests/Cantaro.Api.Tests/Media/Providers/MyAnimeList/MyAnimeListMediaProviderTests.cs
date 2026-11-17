@@ -182,6 +182,155 @@ public sealed class MyAnimeListMediaProviderTests
         Assert.Null(details.NextReleaseAt);
     }
 
+    [Theory]
+    [InlineData(400, "invalid_grant", true)]
+    [InlineData(401, "", true)]
+    [InlineData(400, "invalid_client", false)]
+    [InlineData(429, "invalid_grant", false)]
+    [InlineData(503, "unavailable", false)]
+    public async Task ExpiredAccess_PermanentRefreshRejectionRequiresReconnect(int status, string error, bool reconnect)
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(_ => new HttpResponseMessage((HttpStatusCode)status)
+        { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { error })) }, 601);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        account.TokenExpiresAt = DateTime.UtcNow.AddHours(-1);
+        await fixture.Db.SaveChangesAsync();
+        var failure = await Record.ExceptionAsync(() => fixture.Provider.ImportLibraryAsync(601, default));
+        Assert.NotNull(failure);
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal(reconnect ? "reconnect_required" : "connected", account.ConnectionState);
+        Assert.Equal(reconnect, failure is PlatformReconnectRequiredException);
+        var calls = fixture.Handler.Methods.Count;
+        if (reconnect)
+        {
+            await Assert.ThrowsAsync<PlatformReconnectRequiredException>(() => fixture.Provider.ImportLibraryAsync(601, default));
+            Assert.Equal(calls, fixture.Handler.Methods.Count);
+        }
+    }
+
+    [Fact]
+    public async Task KnownRefreshExpiry_PausesWithoutHttpAndSameAccountOAuthResumes()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+            request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal)
+                ? JsonResponse("{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"expires_in\":3600}")
+                : request.RequestUri.AbsolutePath.EndsWith("@me", StringComparison.Ordinal)
+                    ? JsonResponse("{\"id\":602,\"name\":\"same user\"}")
+                    : JsonResponse("{\"data\":[],\"paging\":{}}"), 602);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        var id = account.Id;
+        account.TokenExpiresAt = DateTime.UtcNow.AddHours(-1);
+        account.RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(-1);
+        await fixture.Db.SaveChangesAsync();
+        await Assert.ThrowsAsync<PlatformReconnectRequiredException>(() => fixture.Provider.ImportLibraryAsync(602, default));
+        Assert.Empty(fixture.Handler.Methods);
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal("reconnect_required", account.ConnectionState);
+        await fixture.Provider.ExchangeCodeAndSaveAsync(602, "code", "https://localhost/callback", "verifier", default);
+        var result = await fixture.Provider.ImportLibraryAsync(602, default);
+        Assert.Equal(id, account.Id);
+        Assert.Equal("connected", account.ConnectionState);
+        Assert.Empty(result.Items);
+        Assert.Null(account.ReconnectReason);
+    }
+
+    [Fact]
+    public async Task RefreshCancellation_DoesNotInvalidateAccount()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(_ => throw new OperationCanceledException(), 603);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        account.TokenExpiresAt = DateTime.UtcNow.AddHours(-1);
+        await fixture.Db.SaveChangesAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => fixture.Provider.ImportLibraryAsync(603, default));
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal("connected", account.ConnectionState);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnauthorizedAccess_RefreshesBeforeRequiringReconnect(bool rejectReplacement)
+    {
+        var reads = 0;
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal))
+                return JsonResponse("{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"expires_in\":3600}");
+            if (++reads == 1 || rejectReplacement)
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") };
+            return JsonResponse("{\"data\":[],\"paging\":{}}");
+        }, 604);
+        if (rejectReplacement)
+            await Assert.ThrowsAsync<PlatformReconnectRequiredException>(() => fixture.Provider.ImportLibraryAsync(604, default));
+        else
+            await fixture.Provider.ImportLibraryAsync(604, default);
+        var persisted = await fixture.Db.ConnectedServiceAccounts.AsNoTracking().SingleAsync();
+        Assert.Equal(rejectReplacement ? "reconnect_required" : "connected", persisted.ConnectionState);
+        Assert.Single(fixture.Handler.Paths, path => path.Contains("token", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OldRefreshFailure_CannotOverwriteNewOAuthSuccess()
+    {
+        ProviderFixture? current = null;
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal))
+            {
+                using var oauth = PlaylistReadIngestion.CreateContext(current!.Db);
+                oauth.ConnectedServiceAccounts.ExecuteUpdate(set => set
+                    .SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1)
+                    .SetProperty(item => item.TokenExpiresAt, DateTime.UtcNow.AddHours(1)));
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                { Content = new StringContent("{\"error\":\"invalid_grant\"}") };
+            }
+            return JsonResponse("{\"data\":[],\"paging\":{}}");
+        }, 605);
+        current = fixture;
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        account.TokenExpiresAt = DateTime.UtcNow.AddHours(-1);
+        await fixture.Db.SaveChangesAsync();
+        await fixture.Provider.ImportLibraryAsync(605, default);
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal("connected", account.ConnectionState);
+        Assert.Equal(1, account.TokenVersion);
+        Assert.Null(account.ReconnectRequiredAt);
+    }
+
+    [Theory]
+    [InlineData("connected", false)]
+    [InlineData("reconnect_required", true)]
+    public async Task OAuthWithoutReplacementRefresh_CannotReviveUnusableCredential(string state, bool rejected)
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+            request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal)
+                ? JsonResponse("{\"access_token\":\"oauth-access\",\"expires_in\":3600}")
+                : JsonResponse("{\"id\":606,\"name\":\"same account\"}"), 606);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        account.ConnectionState = state;
+        await fixture.Db.SaveChangesAsync();
+        var failure = await Record.ExceptionAsync(() => fixture.Provider.ExchangeCodeAndSaveAsync(
+            606, "code", "https://localhost/callback", "verifier", default));
+        Assert.Equal(rejected, failure is PlatformApiException);
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal(state, account.ConnectionState);
+    }
+
+    [Fact]
+    public async Task OAuthSuccess_AdvancesDatabaseVersionEvenWithStaleTrackedAccount()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+            request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal)
+                ? JsonResponse("{\"access_token\":\"oauth-access\",\"refresh_token\":\"oauth-refresh\",\"expires_in\":3600}")
+                : JsonResponse("{\"id\":607,\"name\":\"same account\"}"), 607);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        using var concurrent = PlaylistReadIngestion.CreateContext(fixture.Db);
+        await concurrent.ConnectedServiceAccounts.ExecuteUpdateAsync(set => set.SetProperty(item => item.TokenVersion, 3));
+        await fixture.Provider.ExchangeCodeAndSaveAsync(607, "code", "https://localhost/callback", "verifier", default);
+        Assert.Equal(4, account.TokenVersion);
+        Assert.Equal("connected", account.ConnectionState);
+    }
+
     private static string SearchResponse(
         int id,
         string title,

@@ -68,7 +68,9 @@ public class MediaProvidersController(
         return Ok(new MediaProviderAccountStatusDto
         {
             ProviderId = provider.ProviderId,
-            IsConnected = account is not null,
+            IsConnected = account is not null && account.ConnectionState != "disconnected",
+            ConnectionState = account?.ConnectionState ?? "disconnected",
+            NeedsReconnect = account?.ConnectionState == "reconnect_required",
             DisplayName = account?.DisplayName,
             ExternalAccountId = account?.ExternalAccountId,
             ConnectedAt = account?.CreatedAt

@@ -52,7 +52,13 @@ public sealed class PlaylistSyncScheduler(IServiceScopeFactory scopes, IConfigur
                 var link = await db.ServicePlaylistMappings.FindAsync([dueLink.Id], ct);
                 if (link is not null)
                 {
-                    if (ex is PlatformApiException { StatusCode: 429 } rateLimit)
+                    if (ex is PlatformReconnectRequiredException)
+                    {
+                        link.LastSyncStatus = "error";
+                        link.LastError = ex.Message;
+                        link.NextAttemptAt ??= clock.GetUtcNow();
+                    }
+                    else if (ex is PlatformApiException { StatusCode: 429 } rateLimit)
                     {
                         link.LastSyncStatus = IsSpotifyQuotaException(rateLimit) ? "quota_limited" : "rate_limited";
                         link.LastError = null;
@@ -80,7 +86,9 @@ public sealed class PlaylistSyncScheduler(IServiceScopeFactory scopes, IConfigur
         if (!configuration.GetValue("MusicPlaylistSync:AutomaticEnabled", true)) return false;
         var playlist = await db.Playlists.AsNoTracking().Where(item => item.SyncEnabled && item.NextSyncAt != null
             && item.NextSyncAt <= now && (item.SyncLeaseExpiresAt == null || item.SyncLeaseExpiresAt <= now)
-            && !item.ServiceMappings.Any(link => link.State == "active" && link.NextAttemptAt > now))
+            && !item.ServiceMappings.Any(link => link.State == "active" && link.NextAttemptAt > now)
+            && !item.ServiceMappings.Any(link => link.State == "active"
+                && link.ConnectedServiceAccount!.ConnectionState == "reconnect_required"))
             .OrderBy(item => item.NextSyncAt).Select(item => new { item.Id, item.UserId }).FirstOrDefaultAsync(ct);
         if (playlist is null) return false;
         try { await coordinator.RunAsync(playlist.UserId, playlist.Id, null, ct); }

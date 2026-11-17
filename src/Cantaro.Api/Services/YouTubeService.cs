@@ -619,6 +619,8 @@ public class YouTubeService : IYouTubePlaylistClient
             service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
             cancellationToken.ThrowIfCancellationRequested();
         }
+        catch (PlatformReconnectRequiredException) { throw; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             // ExecuteAsync has not started, so creation definitely did not happen.
@@ -828,8 +830,9 @@ public class YouTubeService : IYouTubePlaylistClient
 
         if (existingAccount != null)
         {
-            if (tokenResponse.RefreshToken == null
-                && (string.IsNullOrWhiteSpace(existingAccount.EncryptedRefreshToken)
+            if (string.IsNullOrWhiteSpace(tokenResponse.RefreshToken)
+                && (existingAccount.ConnectionState != "connected"
+                    || string.IsNullOrWhiteSpace(existingAccount.EncryptedRefreshToken)
                     || !string.Equals(existingAccount.ExternalAccountId, channel.Id, StringComparison.Ordinal)))
             {
                 throw new PlatformApiException("youtube_refresh_token_missing",
@@ -840,7 +843,7 @@ public class YouTubeService : IYouTubePlaylistClient
             existingAccount.ExternalAccountId = channel.Id;
             existingAccount.DisplayName = displayName;
             // Only update refresh token if we received a new one
-            if (tokenResponse.RefreshToken != null)
+            if (!string.IsNullOrWhiteSpace(tokenResponse.RefreshToken))
             {
                 existingAccount.EncryptedRefreshToken = _tokenEncryption.Encrypt(tokenResponse.RefreshToken);
                 _logger.LogInformation("Updated refresh token for YouTube account of user {UserId}", userId);
@@ -854,13 +857,30 @@ public class YouTubeService : IYouTubePlaylistClient
             existingAccount.ConnectionState = "connected";
             existingAccount.ReconnectRequiredAt = null;
             existingAccount.ReconnectReason = null;
-            existingAccount.TokenVersion++;
+            var expectedVersion = existingAccount.TokenVersion;
             existingAccount.UpdatedAt = DateTime.UtcNow;
+            var updated = await _dbContext.ConnectedServiceAccounts.Where(item => item.Id == existingAccount.Id
+                && (!string.IsNullOrWhiteSpace(tokenResponse.RefreshToken)
+                    || (item.TokenVersion == expectedVersion && item.ConnectionState == "connected")))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(item => item.ExternalAccountId, existingAccount.ExternalAccountId)
+                    .SetProperty(item => item.DisplayName, existingAccount.DisplayName)
+                    .SetProperty(item => item.EncryptedRefreshToken, existingAccount.EncryptedRefreshToken)
+                    .SetProperty(item => item.Scopes, existingAccount.Scopes)
+                    .SetProperty(item => item.TokenExpiresAt, existingAccount.TokenExpiresAt)
+                    .SetProperty(item => item.ConnectionState, "connected")
+                    .SetProperty(item => item.ReconnectRequiredAt, (DateTime?)null)
+                    .SetProperty(item => item.ReconnectReason, (string?)null)
+                    .SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1)
+                    .SetProperty(item => item.UpdatedAt, existingAccount.UpdatedAt));
+            if (updated != 1)
+                throw new PlatformReconnectRequiredException("YouTube did not provide a replacement refresh token. Reconnect YouTube to continue.");
+            await _dbContext.Entry(existingAccount).ReloadAsync();
         }
         else
         {
             // For new accounts, refresh token is required for background sync
-            if (tokenResponse.RefreshToken == null)
+            if (string.IsNullOrWhiteSpace(tokenResponse.RefreshToken))
             {
                 throw new InvalidOperationException("No refresh token received from Google. User may need to revoke access at https://myaccount.google.com/permissions and reconnect.");
             }
@@ -1247,14 +1267,45 @@ public class YouTubeService : IYouTubePlaylistClient
 
     internal sealed record AvailableVideoMetadata(int? DurationSeconds, string? Description);
 
-    private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(
+    internal async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(
         ConnectedServiceAccount account, CancellationToken cancellationToken = default,
         bool disableAutomaticRetries = false)
     {
-        if (_serviceFactory is not null) return await _serviceFactory(account, cancellationToken);
-        if (string.IsNullOrEmpty(account.EncryptedRefreshToken))
-            throw new InvalidOperationException("No refresh token available");
+        ProviderReconnectState.RequireUsable(account);
+        var expectedExternalId = account.ExternalAccountId;
+        try
+        {
+            return await CreateAuthorizedServiceAsync(account, cancellationToken, disableAutomaticRetries);
+        }
+        catch (TokenResponseException ex) when (ex.Error?.Error is "temporarily_unavailable" or "server_error"
+            || ex.StatusCode is System.Net.HttpStatusCode.TooManyRequests || (int?)ex.StatusCode >= 500)
+        {
+            throw new PlatformApiException("youtube_unavailable", "YouTube is temporarily unavailable. Retry the sync.",
+                ex.StatusCode is System.Net.HttpStatusCode.TooManyRequests ? 429 : 503, innerException: ex);
+        }
+        catch (TokenResponseException ex) when (ex.Error?.Error == "invalid_grant")
+        {
+            if (await ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_invalid", cancellationToken))
+                throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.", ex);
+            await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+            if (account.ExternalAccountId != expectedExternalId)
+                throw new PlatformApiException("platform_account_changed", "The connected YouTube account changed. Retry from the current account.", 409);
+            return await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries);
+        }
+    }
 
+    private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateAuthorizedServiceAsync(
+        ConnectedServiceAccount account, CancellationToken cancellationToken, bool disableAutomaticRetries)
+    {
+        if (_serviceFactory is not null) return await _serviceFactory(account, cancellationToken);
+        if (string.IsNullOrEmpty(account.EncryptedRefreshToken)
+            || account.RefreshTokenExpiresAt <= DateTime.UtcNow)
+        {
+            if (await ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_missing", cancellationToken))
+                throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+            await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+            return await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries);
+        }
         var clientId = _configuration["YouTube:ClientId"]
             ?? throw new InvalidOperationException("YouTube:ClientId is not configured");
         var clientSecret = _configuration["YouTube:ClientSecret"]
@@ -1264,11 +1315,7 @@ public class YouTubeService : IYouTubePlaylistClient
 
         using var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
         {
-            ClientSecrets = new ClientSecrets
-            {
-                ClientId = clientId,
-                ClientSecret = clientSecret
-            }
+            ClientSecrets = new ClientSecrets { ClientId = clientId, ClientSecret = clientSecret }
         });
 
         var token = new TokenResponse
@@ -1284,6 +1331,8 @@ public class YouTubeService : IYouTubePlaylistClient
             _logger.LogDebug("Successfully refreshed YouTube access token for user {UserId}", account.UserId);
         }
 
+        flow.HttpClient.MessageHandler.AddUnsuccessfulResponseHandler(new RefreshRejectionHandler(
+            ct => ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_invalid", ct)));
         var service = new Google.Apis.YouTube.v3.YouTubeService(new BaseClientService.Initializer
         {
             HttpClientInitializer = credential,
@@ -1294,10 +1343,44 @@ public class YouTubeService : IYouTubePlaylistClient
                 ? Google.Apis.Http.ExponentialBackOffPolicy.None
                 : Google.Apis.Http.ExponentialBackOffPolicy.UnsuccessfulResponse503
         });
-        // The credential's 401 handler can replay a POST too. Access is already
-        // refreshed above; a failed mutation must return to the caller once.
-        if (disableAutomaticRetries && credential is Google.Apis.Http.IHttpUnsuccessfulResponseHandler handler)
+        // Access is freshly refreshed above and refreshed by the interceptor on expiry.
+        // A rejected request must not replay a mutation through the SDK 401 handler.
+        if (credential is Google.Apis.Http.IHttpUnsuccessfulResponseHandler handler)
             service.HttpClient.MessageHandler.RemoveUnsuccessfulResponseHandler(handler);
+        service.HttpClient.MessageHandler.AddUnsuccessfulResponseHandler(new AccessRejectionHandler(
+            ct => ProviderReconnectState.MarkAsync(_dbContext, account, "access_token_rejected", ct)));
         return service;
+    }
+    internal sealed class AccessRejectionHandler(Func<CancellationToken, Task<bool>> markRejected)
+        : Google.Apis.Http.IHttpUnsuccessfulResponseHandler
+    {
+        public async Task<bool> HandleResponseAsync(Google.Apis.Http.HandleUnsuccessfulResponseArgs args)
+        {
+            if (args.Response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                && await markRejected(args.CancellationToken))
+                throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+            return false;
+        }
+    }
+
+    private sealed class RefreshRejectionHandler(Func<CancellationToken, Task<bool>> markRejected)
+        : Google.Apis.Http.IHttpUnsuccessfulResponseHandler
+    {
+        public async Task<bool> HandleResponseAsync(Google.Apis.Http.HandleUnsuccessfulResponseArgs args)
+        {
+            if (args.Response.StatusCode != System.Net.HttpStatusCode.BadRequest) return false;
+            var body = await args.Response.Content.ReadAsStringAsync(args.CancellationToken);
+            try
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(body);
+                if (json.RootElement.TryGetProperty("error", out var error)
+                    && error.ValueKind == System.Text.Json.JsonValueKind.String
+                    && error.GetString() == "invalid_grant"
+                    && await markRejected(args.CancellationToken))
+                    throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+            }
+            catch (System.Text.Json.JsonException) { }
+            return false;
+        }
     }
 }

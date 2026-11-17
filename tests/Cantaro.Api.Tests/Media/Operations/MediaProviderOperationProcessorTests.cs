@@ -15,6 +15,37 @@ namespace Cantaro.Api.Tests;
 
 public class MediaProviderOperationProcessorTests
 {
+    [PostgresFact]
+    public async Task BlockedOperations_RemainQueuedWithoutStarvingHealthyAccountAndResume()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var db = schema.Db;
+        var (blockedEntry, blockedBinding) = await SeedMediaEntryAsync(db, 901, "blocked@example.test");
+        var (healthyEntry, healthyBinding) = await SeedMediaEntryAsync(db, 902, "healthy@example.test", "140961");
+        var account = await db.ConnectedServiceAccounts.SingleAsync(item => item.UserId == 901);
+        account.ConnectionState = "reconnect_required";
+        await db.SaveChangesAsync();
+        var fake = new FakeMediaProvider("anilist");
+        var processor = new MediaProviderOperationProcessor(db, new MediaProviderRegistry([fake]),
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        for (var index = 0; index < 12; index++)
+            await processor.EnqueueProgressUpdateAsync(blockedEntry.UserId, blockedBinding,
+                new MediaProgressUpdateRequest { ProviderMediaId = "140960", ProgressEpisodes = 17 }, default);
+        await processor.EnqueueProgressUpdateAsync(healthyEntry.UserId, healthyBinding,
+            new MediaProgressUpdateRequest { ProviderMediaId = "140960", ProgressEpisodes = 17 }, default);
+        Assert.Equal(1, await processor.ProcessDueOperationsAsync(default));
+        Assert.Equal(1, fake.ProgressUpdateCallCount);
+        Assert.Equal(0, await processor.ProcessDueOperationsAsync(default));
+        var pending = await db.MediaProviderOperations.AsNoTracking().ToListAsync();
+        Assert.NotEmpty(pending);
+        Assert.All(pending, item => Assert.Equal(0, item.AttemptCount));
+        account.ConnectionState = "connected";
+        account.TokenVersion++;
+        await db.SaveChangesAsync();
+        Assert.True(await processor.ProcessDueOperationsAsync(default) > 0);
+        Assert.True(fake.ProgressUpdateCallCount > 1);
+    }
+
     [Fact]
     public async Task ProcessOperationAsync_LeavesLocallySavedProgressUnchangedOnSuccessfulProviderWrite()
     {
@@ -565,7 +596,7 @@ public class MediaProviderOperationProcessorTests
         };
     }
 
-    private static async Task<(MediaLibraryEntry Entry, MediaLibraryProviderBinding Binding)> SeedMediaEntryAsync(ApplicationDbContext dbContext, int userId, string email)
+    private static async Task<(MediaLibraryEntry Entry, MediaLibraryProviderBinding Binding)> SeedMediaEntryAsync(ApplicationDbContext dbContext, int userId, string email, string externalId = "140960")
     {
         var now = DateTimeOffset.UtcNow;
         var user = TestUserFactory.Create(userId, email);
@@ -602,7 +633,7 @@ public class MediaProviderOperationProcessorTests
         };
         var link = new MediaProviderLink
         {
-            Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "anilist", ExternalId = "140960",
+            Id = Guid.NewGuid(), MediaTitleId = title.Id, Provider = "anilist", ExternalId = externalId,
             LinkSource = MediaMappingSources.Imported, CreatedAt = now, UpdatedAt = now
         };
         var binding = new MediaLibraryProviderBinding

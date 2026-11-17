@@ -19,6 +19,43 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
     private const int UserId = 420042;
 
     [PostgresFact]
+    public async Task DailyScheduler_SkipsBlockedPlaylistPreservesReceiptsAndProcessesHealthyPlaylist()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var a = scenario.AddTrack("A");
+        var blocked = scenario.AddPlaylist("Blocked", [a, a]);
+        blocked.AllowDuplicateTracks = true;
+        var blockedLink = scenario.AddLink(blocked, "youtube", [a, a]);
+        blockedLink.PendingWriteJson = blockedLink.BaselineJson;
+        var receipt = blockedLink.PendingWriteJson;
+        var healthy = scenario.AddPlaylist("Healthy", [a]);
+        var healthyLink = scenario.AddLink(healthy, "spotify", [a]);
+        scenario.Db.ConnectedServiceAccounts.Local.Single(item => item.Service == "youtube").ConnectionState = "reconnect_required";
+        await scenario.SaveAsync();
+        var due = (await scenario.Db.Playlists.AsNoTracking().SingleAsync(item => item.Id == blocked.Id)).NextSyncAt;
+        var services = new ServiceCollection();
+        services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(scenario.Db.Database.GetConnectionString()));
+        services.AddScoped(_ => scenario.Coordinator);
+        await using var provider = services.BuildServiceProvider();
+        var scheduler = new PlaylistSyncScheduler(provider.GetRequiredService<IServiceScopeFactory>(),
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), TimeProvider.System,
+            NullLogger<PlaylistSyncScheduler>.Instance);
+        Assert.True(await scheduler.ProcessNextAsync(default));
+        Assert.False(await scheduler.ProcessNextAsync(default));
+        Assert.Equal("success", (await scenario.ReloadLinkAsync(healthyLink.Id)).LastSyncStatus);
+        Assert.Equal(receipt, (await scenario.ReloadLinkAsync(blockedLink.Id)).PendingWriteJson);
+        Assert.Equal(due, (await scenario.Db.Playlists.AsNoTracking().SingleAsync(item => item.Id == blocked.Id)).NextSyncAt);
+        Assert.Equal(new[] { "A", "A" }, await scenario.CanonicalTrackNamesAsync(blocked.Id));
+        var account = scenario.Db.ConnectedServiceAccounts.Local.Single(item => item.Service == "youtube");
+        account.ConnectionState = "connected";
+        account.TokenVersion++;
+        await scenario.SaveAsync();
+        Assert.True(await scheduler.ProcessNextAsync(default));
+        Assert.Equal("success", (await scenario.ReloadLinkAsync(blockedLink.Id)).LastSyncStatus);
+        Assert.Equal(new[] { "A", "A" }, await scenario.CanonicalTrackNamesAsync(blocked.Id));
+    }
+
+    [PostgresFact]
     public async Task SpotifySearchCache_PersistsAndRefreshesEvenIfExpiryCleanupRemovedItsRow()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();

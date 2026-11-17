@@ -17,6 +17,7 @@ public sealed class MediaLibraryImportWorker(
     {
         await foreach (var workItem in _importQueue.ReadAllAsync(stoppingToken))
         {
+            var paused = false;
             try
             {
                 await ProcessAsync(workItem, stoppingToken);
@@ -25,6 +26,12 @@ public sealed class MediaLibraryImportWorker(
             {
                 break;
             }
+            catch (PlatformReconnectRequiredException)
+            {
+                paused = true;
+                _importQueue.Pause(workItem);
+                Publish(workItem, "queued");
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Media library import worker failed for {ProviderId} import {ImportId}.", workItem.ProviderId, workItem.ImportId);
@@ -32,7 +39,7 @@ public sealed class MediaLibraryImportWorker(
             }
             finally
             {
-                _importQueue.Complete(workItem);
+                if (!paused) _importQueue.Complete(workItem);
             }
         }
     }
@@ -50,6 +57,11 @@ public sealed class MediaLibraryImportWorker(
         var account = await provider.GetConnectedAccountAsync(workItem.UserId, cancellationToken)
             ?? throw new InvalidOperationException($"{provider.ProviderId} is not connected.");
 
+        workItem.AccountId ??= account.Id;
+        workItem.ExternalAccountId ??= account.ExternalAccountId;
+        if (workItem.AccountId != account.Id || workItem.ExternalAccountId != account.ExternalAccountId)
+            throw new PlatformApiException("platform_account_changed", "The connected account changed. Start a new import for this account.", 409);
+        ProviderReconnectState.RequireUsable(account);
         var importResult = await provider.ImportLibraryAsync(workItem.UserId, cancellationToken);
         var persisted = await importService.ImportAsync(workItem.UserId, account, importResult, cancellationToken);
         if (provider is IMediaRelationGraphProvider relationProvider)

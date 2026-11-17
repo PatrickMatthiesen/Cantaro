@@ -78,6 +78,12 @@ public sealed class MyAnimeListMediaProvider(
             _dbContext.ConnectedServiceAccounts.Add(account);
         }
 
+        if (string.IsNullOrWhiteSpace(token.RefreshToken)
+            && (account.ConnectionState != "connected" || string.IsNullOrWhiteSpace(account.EncryptedRefreshToken)
+                || account.ExternalAccountId != viewer.Id.ToString(CultureInfo.InvariantCulture)))
+            throw new PlatformApiException("myanimelist_refresh_token_missing",
+                "MyAnimeList did not provide a refresh token. Reconnect MyAnimeList to continue.", 409);
+
         account.ExternalAccountId = viewer.Id.ToString(CultureInfo.InvariantCulture);
         account.DisplayName = viewer.Name;
         account.EncryptedAccessToken = _tokenEncryptionService.Encrypt(token.AccessToken);
@@ -91,10 +97,35 @@ public sealed class MyAnimeListMediaProvider(
         account.ConnectionState = "connected";
         account.ReconnectRequiredAt = null;
         account.ReconnectReason = null;
-        account.TokenVersion++;
+        var expectedVersion = account.TokenVersion;
         account.UpdatedAt = now;
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        if (_dbContext.Entry(account).State == EntityState.Added)
+        {
+            account.TokenVersion++;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            var updated = await _dbContext.ConnectedServiceAccounts.Where(item => item.Id == account.Id
+                && (!string.IsNullOrWhiteSpace(token.RefreshToken)
+                    || (item.TokenVersion == expectedVersion && item.ConnectionState == "connected")))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(item => item.ExternalAccountId, account.ExternalAccountId)
+                    .SetProperty(item => item.DisplayName, account.DisplayName)
+                    .SetProperty(item => item.EncryptedAccessToken, account.EncryptedAccessToken)
+                    .SetProperty(item => item.EncryptedRefreshToken, account.EncryptedRefreshToken)
+                    .SetProperty(item => item.RefreshTokenExpiresAt, account.RefreshTokenExpiresAt)
+                    .SetProperty(item => item.TokenExpiresAt, account.TokenExpiresAt)
+                    .SetProperty(item => item.Scopes, account.Scopes)
+                    .SetProperty(item => item.ConnectionState, "connected")
+                    .SetProperty(item => item.ReconnectRequiredAt, (DateTime?)null)
+                    .SetProperty(item => item.ReconnectReason, (string?)null)
+                    .SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1)
+                    .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+            if (updated != 1)
+                throw new PlatformReconnectRequiredException("MyAnimeList did not provide a replacement refresh token. Reconnect MyAnimeList to continue.");
+            await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+        }
         return account;
     }
 
@@ -134,28 +165,30 @@ public sealed class MyAnimeListMediaProvider(
         CancellationToken cancellationToken)
     {
         var account = await RequireConnectedAccountAsync(userId, cancellationToken);
-        var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
-        var anime = await ReadAllPagesAsync<MyAnimeListAnimeListEdge>(
-            "/users/@me/animelist",
-            accessToken,
-            $"{AnimeFields},list_status",
-            cancellationToken);
-        var manga = await ReadAllPagesAsync<MyAnimeListMangaListEdge>(
-            "/users/@me/mangalist",
-            accessToken,
-            $"{MangaFields},list_status",
-            cancellationToken);
-
-        return new MediaProviderLibraryImportResult
+        return await WithAuthorizationAsync(account, async accessToken =>
         {
-            ProviderId = ProviderName,
-            ImportedAt = DateTimeOffset.UtcNow,
-            Items = anime.Select(MapAnimeLibraryItem)
-                .Concat(manga.Select(MapMangaLibraryItem))
-                .Where(item => item is not null)
-                .Cast<MediaProviderLibraryItem>()
-                .ToList()
-        };
+            var anime = await ReadAllPagesAsync<MyAnimeListAnimeListEdge>(
+                "/users/@me/animelist",
+                accessToken,
+                $"{AnimeFields},list_status",
+                cancellationToken);
+            var manga = await ReadAllPagesAsync<MyAnimeListMangaListEdge>(
+                "/users/@me/mangalist",
+                accessToken,
+                $"{MangaFields},list_status",
+                cancellationToken);
+
+            return new MediaProviderLibraryImportResult
+            {
+                ProviderId = ProviderName,
+                ImportedAt = DateTimeOffset.UtcNow,
+                Items = anime.Select(MapAnimeLibraryItem)
+                    .Concat(manga.Select(MapMangaLibraryItem))
+                    .Where(item => item is not null)
+                    .Cast<MediaProviderLibraryItem>()
+                    .ToList()
+            };
+        }, cancellationToken);
     }
 
     public async Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(
@@ -361,34 +394,36 @@ public sealed class MyAnimeListMediaProvider(
         CancellationToken cancellationToken)
     {
         var account = await RequireConnectedAccountAsync(userId, cancellationToken);
-        var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
-        DateTimeOffset? updatedAt;
-        if (identity.MediaKind == MediaKinds.Anime)
+        return await WithAuthorizationAsync(account, async accessToken =>
         {
-            var result = await _apiClient.PutFormAsync<MyAnimeListAnimeListStatus>(
-                $"/anime/{identity.Id}/my_list_status",
-                accessToken,
-                form,
-                cancellationToken);
-            updatedAt = result.UpdatedAt;
-        }
-        else
-        {
-            var result = await _apiClient.PutFormAsync<MyAnimeListMangaListStatus>(
-                $"/manga/{identity.Id}/my_list_status",
-                accessToken,
-                form,
-                cancellationToken);
-            updatedAt = result.UpdatedAt;
-        }
+            DateTimeOffset? updatedAt;
+            if (identity.MediaKind == MediaKinds.Anime)
+            {
+                var result = await _apiClient.PutFormAsync<MyAnimeListAnimeListStatus>(
+                    $"/anime/{identity.Id}/my_list_status",
+                    accessToken,
+                    form,
+                    cancellationToken);
+                updatedAt = result.UpdatedAt;
+            }
+            else
+            {
+                var result = await _apiClient.PutFormAsync<MyAnimeListMangaListStatus>(
+                    $"/manga/{identity.Id}/my_list_status",
+                    accessToken,
+                    form,
+                    cancellationToken);
+                updatedAt = result.UpdatedAt;
+            }
 
-        return new MediaProviderMutationResult
-        {
-            ProviderId = ProviderName,
-            ProviderMediaId = identity.ProviderMediaId,
-            AppliedAt = DateTimeOffset.UtcNow,
-            LastRemoteUpdateAt = updatedAt
-        };
+            return new MediaProviderMutationResult
+            {
+                ProviderId = ProviderName,
+                ProviderMediaId = identity.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow,
+                LastRemoteUpdateAt = updatedAt
+            };
+        }, cancellationToken);
     }
 
     private async Task<IReadOnlyList<T>> ReadAllPagesAsync<T>(
@@ -428,12 +463,46 @@ public sealed class MyAnimeListMediaProvider(
             ?? throw new InvalidOperationException("MyAnimeList account not connected.");
     }
 
+    private async Task<T> WithAuthorizationAsync<T>(ConnectedServiceAccount account,
+        Func<string, Task<T>> operation, CancellationToken ct)
+    {
+        var expectedExternalId = account.ExternalAccountId;
+        async Task<T> ExecuteAsync(string token)
+        {
+            var current = await _dbContext.ConnectedServiceAccounts.AsNoTracking().SingleAsync(item => item.Id == account.Id, ct);
+            if (current.ExternalAccountId != expectedExternalId)
+                throw new PlatformApiException("platform_account_changed", "The connected MyAnimeList account changed. Retry from the current account.", 409);
+            ProviderReconnectState.RequireUsable(current);
+            var result = await operation(token);
+            if (!await _dbContext.ConnectedServiceAccounts.AsNoTracking().AnyAsync(item => item.Id == account.Id
+                && item.ExternalAccountId == expectedExternalId, ct))
+                throw new PlatformApiException("platform_account_changed", "The connected MyAnimeList account changed. Retry from the current account.", 409);
+            return result;
+        }
+        var access = await ResolveAccessTokenAsync(account, ct);
+        var version = account.TokenVersion;
+        try { return await ExecuteAsync(access); }
+        catch (MyAnimeListRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            await _dbContext.Entry(account).ReloadAsync(ct);
+            access = await ResolveAccessTokenAsync(account, ct, forceRefresh: account.TokenVersion == version);
+            try { return await ExecuteAsync(access); }
+            catch (MyAnimeListRequestException rejected) when (rejected.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                if (await ProviderReconnectState.MarkAsync(_dbContext, account, "access_token_rejected", ct))
+                    throw new PlatformReconnectRequiredException("Reconnect MyAnimeList to continue.", rejected);
+                throw;
+            }
+        }
+    }
+
     private async Task<string> ResolveAccessTokenAsync(
         ConnectedServiceAccount account,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool forceRefresh = false)
     {
+        ProviderReconnectState.RequireUsable(account);
         var now = DateTime.UtcNow;
-        if (!string.IsNullOrWhiteSpace(account.EncryptedAccessToken)
+        if (!forceRefresh && !string.IsNullOrWhiteSpace(account.EncryptedAccessToken)
             && (account.TokenExpiresAt is null || account.TokenExpiresAt > now.Add(AccessTokenRefreshMargin)))
         {
             return _tokenEncryptionService.Decrypt(account.EncryptedAccessToken);
@@ -441,8 +510,9 @@ public sealed class MyAnimeListMediaProvider(
 
         using var refreshLease = await _tokenRefreshGate.AcquireAsync(account.Id, cancellationToken);
         await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+        ProviderReconnectState.RequireUsable(account);
         now = DateTime.UtcNow;
-        if (!string.IsNullOrWhiteSpace(account.EncryptedAccessToken)
+        if (!forceRefresh && !string.IsNullOrWhiteSpace(account.EncryptedAccessToken)
             && (account.TokenExpiresAt is null || account.TokenExpiresAt > now.Add(AccessTokenRefreshMargin)))
         {
             return _tokenEncryptionService.Decrypt(account.EncryptedAccessToken);
@@ -451,23 +521,43 @@ public sealed class MyAnimeListMediaProvider(
         if (string.IsNullOrWhiteSpace(account.EncryptedRefreshToken)
             || account.RefreshTokenExpiresAt is { } refreshExpiresAt && refreshExpiresAt <= now)
         {
-            throw new InvalidOperationException("MyAnimeList access expired. Reconnect your MyAnimeList account.");
+            if (await ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_expired", cancellationToken))
+                throw new PlatformReconnectRequiredException("Reconnect MyAnimeList to continue.");
+            await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+            ProviderReconnectState.RequireUsable(account);
+            return _tokenEncryptionService.Decrypt(account.EncryptedAccessToken!);
         }
 
         var refreshToken = _tokenEncryptionService.Decrypt(account.EncryptedRefreshToken);
-        var token = await _apiClient.RefreshAccessTokenAsync(refreshToken, cancellationToken);
-        account.EncryptedAccessToken = _tokenEncryptionService.Encrypt(token.AccessToken);
-        if (!string.IsNullOrWhiteSpace(token.RefreshToken))
+        var version = account.TokenVersion;
+        MyAnimeListTokenResponse token;
+        try { token = await _apiClient.RefreshAccessTokenAsync(refreshToken, cancellationToken); }
+        catch (MyAnimeListRequestException ex) when ((ex.StatusCode == System.Net.HttpStatusCode.BadRequest && ex.ErrorCode == "invalid_grant")
+            || ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
-            account.EncryptedRefreshToken = _tokenEncryptionService.Encrypt(token.RefreshToken);
-            account.RefreshTokenExpiresAt = now.AddMonths(1);
+            if (await ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_invalid", cancellationToken))
+                throw new PlatformReconnectRequiredException("Reconnect MyAnimeList to continue.", ex);
+            await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+            // The refresh gate is already held. A newer OAuth result has a usable token.
+            ProviderReconnectState.RequireUsable(account);
+            return _tokenEncryptionService.Decrypt(account.EncryptedAccessToken!);
         }
-        account.TokenExpiresAt = now.AddSeconds(token.ExpiresIn);
-        account.TokenVersion++;
-        account.UpdatedAt = now;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Refreshed MyAnimeList access token for connected account {AccountId}.", account.Id);
+        await using var tokenDb = PlaylistReadIngestion.CreateContext(_dbContext);
+        var encryptedAccess = _tokenEncryptionService.Encrypt(token.AccessToken);
+        var encryptedRefresh = string.IsNullOrWhiteSpace(token.RefreshToken)
+            ? account.EncryptedRefreshToken : _tokenEncryptionService.Encrypt(token.RefreshToken);
+        var refreshExpiry = string.IsNullOrWhiteSpace(token.RefreshToken) ? account.RefreshTokenExpiresAt : now.AddMonths(1);
+        var saved = await tokenDb.ConnectedServiceAccounts.Where(item => item.Id == account.Id
+            && item.TokenVersion == version && item.ExternalAccountId == account.ExternalAccountId)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.EncryptedAccessToken, encryptedAccess)
+                .SetProperty(item => item.EncryptedRefreshToken, encryptedRefresh)
+                .SetProperty(item => item.RefreshTokenExpiresAt, refreshExpiry)
+                .SetProperty(item => item.TokenExpiresAt, now.AddSeconds(token.ExpiresIn))
+                .SetProperty(item => item.TokenVersion, version + 1)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+        await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+        ProviderReconnectState.RequireUsable(account);
+        if (saved == 0) return _tokenEncryptionService.Decrypt(account.EncryptedAccessToken!);
         return token.AccessToken;
     }
 

@@ -22,6 +22,8 @@ public sealed class MusicSyncJobProcessor(
     {
         var job = await _dbContext.MusicSyncJobs
             .Where(item => item.Status == MusicSyncJobStatuses.Queued || item.Status == MusicSyncJobStatuses.Running)
+            .Where(item => !_dbContext.ConnectedServiceAccounts.Any(account =>
+                account.Id == item.ConnectedServiceAccountId && account.ConnectionState == "reconnect_required"))
             .OrderBy(item => item.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
         if (job is null) return false;
@@ -134,6 +136,7 @@ public sealed class MusicSyncJobProcessor(
                 {
                     throw;
                 }
+                catch (PlatformReconnectRequiredException) { throw; }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Music sync job {JobId} failed playlist {PlaylistId}", jobId, playlist.Id);
@@ -199,6 +202,13 @@ public sealed class MusicSyncJobProcessor(
             job.UpdatedAt = DateTimeOffset.UtcNow;
             await _dbContext.SaveChangesAsync(CancellationToken.None);
             throw;
+        }
+        catch (PlatformReconnectRequiredException)
+        {
+            job = await ReloadJobAsync(jobId, cancellationToken);
+            job.Status = MusicSyncJobStatuses.Queued;
+            job.UpdatedAt = DateTimeOffset.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
