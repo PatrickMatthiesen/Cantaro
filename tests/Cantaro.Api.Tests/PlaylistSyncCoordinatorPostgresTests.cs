@@ -21,6 +21,55 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
     private const int UserId = 420042;
 
     [PostgresFact]
+    public async Task NewLinkExport_RealWriterSecondValidationReconnectPausesBeforeAnyCreationRequest()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var playlist = scenario.AddPlaylist("Road songs", []);
+        var client = new CreationClient();
+        client.BeforeValidation = async account =>
+        {
+            Assert.Equal("youtube-owner", account.ExpectedExternalAccountId);
+            if (client.Validations != 2) return;
+            await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+            throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+        };
+        var writer = new YouTubePlaylistWriter(client);
+        var coordinator = new PlaylistSyncCoordinator(scenario.Db, [scenario.Provider("youtube")], [writer],
+            TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance);
+        scenario.Db.MusicSyncJobs.Add(new MusicSyncJob
+        {
+            Id = Guid.NewGuid(), UserId = UserId, ConnectedServiceAccountId = 7, Service = "youtube",
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1,
+            PlaylistsJson = System.Text.Json.JsonSerializer.Serialize(new[] {
+                new MusicSyncJobPlaylist("", playlist.Name, 0, playlist.Id, "youtube-owner") }),
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await scenario.SaveAsync();
+        var processor = new MusicSyncJobProcessor(scenario.Db,
+            new PlatformRegistry([new MusicSyncJobProcessorTests.StubPlatformService("youtube")]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(scenario.Db, [writer], coordinator));
+        Assert.True(await processor.ProcessNextAsync(default));
+        var paused = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Queued, paused.Status);
+        Assert.Equal(0, paused.ProcessedPlaylistCount);
+        Assert.Null(paused.ResultsJson);
+        Assert.Equal(2, client.Validations);
+        Assert.Equal(0, client.Creations);
+        Assert.Empty(await scenario.Db.ServicePlaylistMappings.ToListAsync());
+        Assert.False(await processor.ProcessNextAsync(default));
+        await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        Assert.True(await processor.ProcessNextAsync(default));
+        var resumed = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Completed, resumed.Status);
+        Assert.Equal(1, resumed.ProcessedPlaylistCount);
+        Assert.Equal(1, client.Creations);
+        Assert.Equal(4, client.Validations);
+        Assert.Equal("youtube-created", (await scenario.Db.ServicePlaylistMappings.SingleAsync()).ServicePlaylistId);
+    }
+
+    [PostgresFact]
     public async Task InboundImport_ReconnectAfterPrecheckKeepsCheckpointAndResumesThroughCoordinator()
     {
         await using var scenario = await Scenario.CreateAsync();
@@ -614,6 +663,34 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
 
         public Task DeleteAsync(PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    private sealed class CreationClient : IYouTubePlaylistClient
+    {
+        public Func<PlatformAccountContext, Task>? BeforeValidation { get; set; }
+        public int Validations { get; private set; }
+        public int Creations { get; private set; }
+        public async Task ValidatePlaylistCreationAsync(PlatformAccountContext account, CancellationToken ct)
+        {
+            Validations++;
+            if (BeforeValidation is { } beforeValidation) await beforeValidation(account);
+        }
+        public Task<string> CreatePrivatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken ct)
+        {
+            Creations++;
+            return Task.FromResult("youtube-created");
+        }
+        public Task ValidateWritablePlaylistAsync(PlatformAccountContext account, string playlistId, CancellationToken ct)
+            => Task.CompletedTask;
+        public Task<IReadOnlyList<YouTubeWritablePlaylistItem>> GetRawPlaylistItemsAsync(
+            PlatformAccountContext account, string playlistId, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<YouTubeWritablePlaylistItem>>([]);
+        public Task<string> InsertPlaylistItemAsync(PlatformAccountContext account, string playlistId, string videoId, long position, CancellationToken ct)
+            => throw new NotSupportedException();
+        public Task MovePlaylistItemAsync(PlatformAccountContext account, string playlistId, YouTubeWritablePlaylistItem item, long position, CancellationToken ct)
+            => throw new NotSupportedException();
+        public Task DeletePlaylistItemAsync(PlatformAccountContext account, string itemId, CancellationToken ct)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeWriter(FakeProvider provider) : IPlaylistWriter

@@ -89,6 +89,8 @@ public sealed partial class PlaylistSyncCoordinator
                 {
                     link.State = "creation_failed";
                     await db.SaveChangesAsync(CancellationToken.None);
+                    if (ex.Code == "youtube_playlist_creation_rejected"
+                        && ex.InnerException is PlatformReconnectRequiredException reconnect) throw reconnect;
                     throw;
                 }
                 catch
