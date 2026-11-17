@@ -103,6 +103,26 @@ public sealed class ProviderReconnectTests
         Assert.Equal(reconnect ? "reconnect_required" : "connected", account.ConnectionState);
     }
 
+    [PostgresFact]
+    public async Task MissingCredentialReload_RejectsReplacementChannelBeforeCreatingClient()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var account = await AddAccountAsync(schema.Db);
+        account.EncryptedRefreshToken = null;
+        await schema.Db.SaveChangesAsync();
+        await using var replacement = PlaylistReadIngestion.CreateContext(schema.Db);
+        await replacement.ConnectedServiceAccounts.Where(item => item.Id == account.Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ExternalAccountId, "other-channel")
+                .SetProperty(item => item.EncryptedRefreshToken, "new-refresh")
+                .SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1));
+        var service = new YouTubeService(new ConfigurationBuilder().Build(), schema.Db,
+            new TokenEncryptionService(new EphemeralDataProtectionProvider()), NullLogger<YouTubeService>.Instance);
+        var failure = await Assert.ThrowsAsync<PlatformApiException>(() => service.CreateYouTubeServiceAsync(account));
+        Assert.Equal("platform_account_changed", failure.Code);
+        Assert.Equal("other-channel", account.ExternalAccountId);
+        Assert.Equal("connected", account.ConnectionState);
+    }
+
     private static YouTubeService Service(ApplicationDbContext db,
         Func<ConnectedServiceAccount, CancellationToken, Task<Google.Apis.YouTube.v3.YouTubeService>> factory)
         => new(new ConfigurationBuilder().Build(), db,

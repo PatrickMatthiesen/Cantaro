@@ -216,7 +216,7 @@ public sealed partial class PlaylistSyncCoordinator
     {
         if (exception is PlatformReconnectRequiredException)
         {
-            link.LastSyncStatus = "error";
+            link.LastSyncStatus = "reconnect_required";
             link.LastError = exception.Message;
             link.NextAttemptAt ??= clock.GetUtcNow();
             return;

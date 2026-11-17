@@ -60,6 +60,8 @@ public sealed class OutboundPlaylistSyncService(
                 throw new PlatformApiException("playlist_sync_failed",
                     "The linked playlist is unavailable. Review its connection before retrying.", 409);
             ThrowIfCooldown(linked, service);
+            if (linked.LastSyncStatus == "reconnect_required")
+                throw new PlatformReconnectRequiredException(linked.LastError ?? "Reconnect the provider to resume.");
             if (linked.LastSyncStatus == "partial")
                 throw new PlatformApiException("unmatched_tracks",
                     $"{linked.UnresolvedCount} tracks remain unmatched. Matched tracks were synced; resolve the remaining matches.", 422);

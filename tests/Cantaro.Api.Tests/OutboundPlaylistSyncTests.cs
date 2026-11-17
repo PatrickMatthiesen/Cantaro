@@ -370,7 +370,7 @@ public sealed class OutboundPlaylistSyncTests
             Id = Guid.NewGuid(), UserId = 42, ConnectedServiceAccountId = 99, Service = "youtube",
             Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist("destination", playlist.Name, 1, playlist.Id) })
+            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist("destination", playlist.Name, 1, playlist.Id, "original-account") })
         };
         db.MusicSyncJobs.Add(job);
         await db.SaveChangesAsync();

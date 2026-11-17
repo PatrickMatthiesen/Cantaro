@@ -56,6 +56,32 @@ public sealed class MusicSyncJobProcessor(
             foreach (var playlist in playlists.Skip(job.ProcessedPlaylistCount))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var dispatchAccount = account with { ExpectedExternalAccountId = playlist.ExternalAccountId };
+                if (job.Service is "youtube" or "spotify")
+                {
+                    var expected = playlist.ExternalAccountId;
+                    if (string.IsNullOrWhiteSpace(expected))
+                    {
+                        // Legacy jobs may recover their original identity from a
+                        // retained link, never from the currently signed-in account.
+                        expected = await _dbContext.ServicePlaylistMappings.AsNoTracking()
+                            .Where(link => link.UserId == job.UserId && link.Service == job.Service
+                                && link.ConnectedServiceAccountId == connectedServiceAccountId
+                                && link.ServicePlaylistId == playlist.Id && link.State != "unlinked")
+                            .Select(link => link.ExternalAccountId).SingleOrDefaultAsync(cancellationToken);
+                    }
+                    if (string.IsNullOrWhiteSpace(expected))
+                        throw new PlatformApiException("sync_account_unverified",
+                            "The original account for this queued sync cannot be verified. Start a new sync from the current account.", 409);
+                    var current = await _dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(item =>
+                        item.Id == connectedServiceAccountId && item.UserId == job.UserId && item.Service == job.Service,
+                        cancellationToken);
+                    if (current is null || current.ExternalAccountId != expected)
+                        throw new PlatformApiException("platform_account_changed",
+                            "The connected account changed. Start a new sync from the current account.", 409);
+                    ProviderReconnectState.RequireUsable(current);
+                    dispatchAccount = account with { ExpectedExternalAccountId = expected };
+                }
                 var processedBeforePlaylist = job.ProcessedSongCount;
                 var lastPersistedSongCount = -1;
                 string? lastPersistedSongName = null;
@@ -73,7 +99,7 @@ public sealed class MusicSyncJobProcessor(
                     if (playlist.CantaroPlaylistId is { } sourcePlaylistId)
                     {
                         cantaroPlaylistId = await outboundSync.SyncAsync(
-                            account with { ExpectedExternalAccountId = playlist.ExternalAccountId },
+                            dispatchAccount,
                             job.Service,
                             sourcePlaylistId,
                             string.IsNullOrWhiteSpace(playlist.Id) ? null : playlist.Id,
@@ -82,7 +108,7 @@ public sealed class MusicSyncJobProcessor(
                             .Where(mapping => mapping.PlaylistId == sourcePlaylistId
                                 && mapping.ConnectedServiceAccountId == connectedServiceAccountId
                                 && mapping.Service == job.Service && mapping.State == "active"
-                                && mapping.ExternalAccountId == playlist.ExternalAccountId
+                                && mapping.ExternalAccountId == dispatchAccount.ExpectedExternalAccountId
                                 && mapping.SyncMode != "import_only")
                             .Select(mapping => mapping.ServicePlaylistId)
                             .SingleAsync(cancellationToken);
@@ -90,7 +116,7 @@ public sealed class MusicSyncJobProcessor(
                     else
                     {
                         cantaroPlaylistId = await platform.SyncPlaylistAsync(
-                            account,
+                            dispatchAccount,
                             playlist.Id,
                             async (progress, progressCancellationToken) =>
                             {

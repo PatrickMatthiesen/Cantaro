@@ -3,6 +3,7 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Spotify;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -17,6 +18,88 @@ namespace Cantaro.Api.Tests;
 public sealed class PlaylistSyncCoordinatorPostgresTests
 {
     private const int UserId = 420042;
+
+    [PostgresFact]
+    public async Task ExistingLinkExport_ReconnectKeepsJobCheckpointAndResumesSamePlaylist()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var a = scenario.AddTrack("A");
+        var playlist = scenario.AddPlaylist("Road songs", [a]);
+        var link = scenario.AddLink(playlist, "youtube", [a]);
+        link.SyncMode = "from_cantaro";
+        link.PendingWriteJson = link.BaselineJson;
+        var pending = link.PendingWriteJson;
+        var job = new MusicSyncJob
+        {
+            Id = Guid.NewGuid(), UserId = UserId, ConnectedServiceAccountId = 7, Service = "youtube",
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
+            PlaylistsJson = System.Text.Json.JsonSerializer.Serialize(new[] {
+                new MusicSyncJobPlaylist(link.ServicePlaylistId, playlist.Name, 1, playlist.Id, link.ExternalAccountId) }),
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        scenario.Db.MusicSyncJobs.Add(job);
+        var remote = scenario.Provider("youtube");
+        remote.BeforeRead = async () =>
+        {
+            await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+            throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+        };
+        await scenario.SaveAsync();
+        var outbound = new OutboundPlaylistSyncService(scenario.Db, [new FakeWriter(remote)], scenario.Coordinator);
+        var processor = new MusicSyncJobProcessor(scenario.Db,
+            new PlatformRegistry([new MusicSyncJobProcessorTests.StubPlatformService("youtube")]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, outbound);
+        Assert.True(await processor.ProcessNextAsync(default));
+        var paused = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Queued, paused.Status);
+        Assert.Equal(0, paused.ProcessedPlaylistCount);
+        Assert.Null(paused.ResultsJson);
+        Assert.Equal(pending, (await scenario.ReloadLinkAsync(link.Id)).PendingWriteJson);
+        Assert.False(await processor.ProcessNextAsync(default));
+        await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        remote.BeforeRead = null;
+        Assert.True(await processor.ProcessNextAsync(default));
+        var resumed = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Completed, resumed.Status);
+        Assert.Equal(1, resumed.ProcessedPlaylistCount);
+    }
+
+    [PostgresFact]
+    public async Task PausedInitialization_RateLimitThenReconnectRemainsDueAfterRecovery()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var a = scenario.AddTrack("A");
+        var playlist = scenario.AddPlaylist("Road songs", [a]);
+        var link = scenario.AddLink(playlist, "youtube", [a], state: "paused");
+        link.InitialMode = "combine";
+        link.LastSyncStatus = "rate_limited";
+        link.NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        scenario.Provider("youtube").BeforeRead = async () =>
+        {
+            await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+            throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+        };
+        await scenario.SaveAsync();
+        var services = new ServiceCollection();
+        services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(scenario.Db.Database.GetConnectionString()));
+        services.AddScoped(_ => scenario.Coordinator);
+        await using var provider = services.BuildServiceProvider();
+        var scheduler = new PlaylistSyncScheduler(provider.GetRequiredService<IServiceScopeFactory>(),
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?> { ["MusicPlaylistSync:AutomaticEnabled"] = "false" }).Build(), TimeProvider.System,
+            NullLogger<PlaylistSyncScheduler>.Instance);
+        Assert.True(await scheduler.ProcessNextAsync(default));
+        Assert.Equal("reconnect_required", (await scenario.ReloadLinkAsync(link.Id)).LastSyncStatus);
+        Assert.False(await scheduler.ProcessNextAsync(default));
+        await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        scenario.Provider("youtube").BeforeRead = null;
+        Assert.True(await scheduler.ProcessNextAsync(default));
+        Assert.Equal("active", (await scenario.ReloadLinkAsync(link.Id)).State);
+    }
 
     [PostgresFact]
     public async Task DailyScheduler_SkipsBlockedPlaylistPreservesReceiptsAndProcessesHealthyPlaylist()
@@ -329,6 +412,7 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
 
     private sealed class FakeProvider(string service, Dictionary<string, Guid> tracks) : IPlaylistSyncProvider
     {
+        public Func<Task>? BeforeRead { get; set; }
         private readonly Dictionary<string, Guid> _remoteTracks = new(StringComparer.Ordinal);
         public string PlatformId => service;
         public Task<IReadOnlyList<PlaylistRemoteCatalogItem>> ListPlaylistsAsync(
@@ -352,12 +436,13 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
         public PlaylistSyncItem SyncItem(string externalId)
             => new(_remoteTracks.GetValueOrDefault(externalId), null, externalId, service);
 
-        public Task<PlaylistRemoteSnapshot> ReadAsync(PlatformAccountContext account, string playlistId,
+        public async Task<PlaylistRemoteSnapshot> ReadAsync(PlatformAccountContext account, string playlistId,
             CancellationToken cancellationToken)
         {
+            if (BeforeRead is { } beforeRead) await beforeRead();
             var items = RemoteIds.Select((id, position) => new PlaylistRemoteTrack(id,
                 _remoteTracks.GetValueOrDefault(id), null, id, position)).ToArray();
-            return Task.FromResult(new PlaylistRemoteSnapshot(playlistId, Name, items, $"revision-{_revision}"));
+            return new PlaylistRemoteSnapshot(playlistId, Name, items, $"revision-{_revision}");
         }
 
         public Task<string?> ResolveAsync(PlatformAccountContext account, PlaylistEntry entry,

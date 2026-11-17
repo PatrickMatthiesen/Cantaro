@@ -135,7 +135,7 @@ public sealed partial class PlaylistSyncCoordinator(
             {
                 RecordFailure(link, ex);
                 await db.SaveChangesAsync(ct);
-                if (readOnly) throw;
+                if (readOnly || service is not null && ex is PlatformReconnectRequiredException) throw;
             }
         }
 

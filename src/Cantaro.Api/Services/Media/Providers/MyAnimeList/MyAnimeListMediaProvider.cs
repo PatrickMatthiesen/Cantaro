@@ -32,13 +32,19 @@ public sealed class MyAnimeListMediaProvider(
     public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge)
         => _apiClient.BuildAuthorizationUrl(redirectUri, state, codeChallenge);
 
-    public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(
+    public async Task<ConnectedServiceAccount?> GetConnectedAccountAsync(
         int userId,
         CancellationToken cancellationToken = default)
     {
-        return _dbContext.ConnectedServiceAccounts.FirstOrDefaultAsync(
+        var account = await _dbContext.ConnectedServiceAccounts.FirstOrDefaultAsync(
             account => account.UserId == userId && account.Service == ProviderName,
             cancellationToken);
+        if (account is { ConnectionState: "connected", RefreshTokenExpiresAt: { } expires } && expires <= DateTime.UtcNow)
+        {
+            await ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_expired", cancellationToken);
+            await _dbContext.Entry(account).ReloadAsync(cancellationToken);
+        }
+        return account;
     }
 
     public async Task<ConnectedServiceAccount> ExchangeCodeAndSaveAsync(
@@ -65,6 +71,9 @@ public sealed class MyAnimeListMediaProvider(
 
         var now = DateTime.UtcNow;
         var account = await GetConnectedAccountAsync(userId, cancellationToken);
+        if (account is not null && account.ExternalAccountId != viewer.Id.ToString(CultureInfo.InvariantCulture))
+            throw new PlatformApiException("platform_account_changed",
+                "Reconnect the same MyAnimeList account to resume pending work.", 409);
         if (account is null)
         {
             account = new ConnectedServiceAccount
@@ -80,6 +89,7 @@ public sealed class MyAnimeListMediaProvider(
 
         if (string.IsNullOrWhiteSpace(token.RefreshToken)
             && (account.ConnectionState != "connected" || string.IsNullOrWhiteSpace(account.EncryptedRefreshToken)
+                || account.RefreshTokenExpiresAt <= now
                 || account.ExternalAccountId != viewer.Id.ToString(CultureInfo.InvariantCulture)))
             throw new PlatformApiException("myanimelist_refresh_token_missing",
                 "MyAnimeList did not provide a refresh token. Reconnect MyAnimeList to continue.", 409);
@@ -423,7 +433,7 @@ public sealed class MyAnimeListMediaProvider(
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = updatedAt
             };
-        }, cancellationToken);
+        }, cancellationToken, retryRead: false);
     }
 
     private async Task<IReadOnlyList<T>> ReadAllPagesAsync<T>(
@@ -464,7 +474,7 @@ public sealed class MyAnimeListMediaProvider(
     }
 
     private async Task<T> WithAuthorizationAsync<T>(ConnectedServiceAccount account,
-        Func<string, Task<T>> operation, CancellationToken ct)
+        Func<string, Task<T>> operation, CancellationToken ct, bool retryRead = true)
     {
         var expectedExternalId = account.ExternalAccountId;
         async Task<T> ExecuteAsync(string token)
@@ -486,6 +496,10 @@ public sealed class MyAnimeListMediaProvider(
         {
             await _dbContext.Entry(account).ReloadAsync(ct);
             access = await ResolveAccessTokenAsync(account, ct, forceRefresh: account.TokenVersion == version);
+            if (!retryRead)
+                throw new PlatformApiException("provider_authorization_refreshed",
+                    "MyAnimeList authorization was refreshed. Retry the operation.", 503,
+                    retryAfter: TimeSpan.FromSeconds(1), innerException: ex);
             try { return await ExecuteAsync(access); }
             catch (MyAnimeListRequestException rejected) when (rejected.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {

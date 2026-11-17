@@ -1269,13 +1269,13 @@ public class YouTubeService : IYouTubePlaylistClient
 
     internal async Task<Google.Apis.YouTube.v3.YouTubeService> CreateYouTubeServiceAsync(
         ConnectedServiceAccount account, CancellationToken cancellationToken = default,
-        bool disableAutomaticRetries = false)
+        bool disableAutomaticRetries = false, bool allowCredentialReload = true)
     {
         ProviderReconnectState.RequireUsable(account);
         var expectedExternalId = account.ExternalAccountId;
         try
         {
-            return await CreateAuthorizedServiceAsync(account, cancellationToken, disableAutomaticRetries);
+            return await CreateAuthorizedServiceAsync(account, cancellationToken, disableAutomaticRetries, allowCredentialReload);
         }
         catch (TokenResponseException ex) when (ex.Error?.Error is "temporarily_unavailable" or "server_error"
             || ex.StatusCode is System.Net.HttpStatusCode.TooManyRequests || (int?)ex.StatusCode >= 500)
@@ -1290,21 +1290,28 @@ public class YouTubeService : IYouTubePlaylistClient
             await _dbContext.Entry(account).ReloadAsync(cancellationToken);
             if (account.ExternalAccountId != expectedExternalId)
                 throw new PlatformApiException("platform_account_changed", "The connected YouTube account changed. Retry from the current account.", 409);
-            return await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries);
+            if (!allowCredentialReload)
+                throw new PlatformApiException("youtube_credentials_changed", "YouTube credentials changed. Retry the sync.", 503);
+            return await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries, allowCredentialReload: false);
         }
     }
 
     private async Task<Google.Apis.YouTube.v3.YouTubeService> CreateAuthorizedServiceAsync(
-        ConnectedServiceAccount account, CancellationToken cancellationToken, bool disableAutomaticRetries)
+        ConnectedServiceAccount account, CancellationToken cancellationToken, bool disableAutomaticRetries, bool allowCredentialReload)
     {
         if (_serviceFactory is not null) return await _serviceFactory(account, cancellationToken);
         if (string.IsNullOrEmpty(account.EncryptedRefreshToken)
             || account.RefreshTokenExpiresAt <= DateTime.UtcNow)
         {
+            var expectedExternalId = account.ExternalAccountId;
             if (await ProviderReconnectState.MarkAsync(_dbContext, account, "refresh_token_missing", cancellationToken))
                 throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
             await _dbContext.Entry(account).ReloadAsync(cancellationToken);
-            return await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries);
+            if (account.ExternalAccountId != expectedExternalId)
+                throw new PlatformApiException("platform_account_changed", "The connected YouTube account changed. Retry from the current account.", 409);
+            if (!allowCredentialReload)
+                throw new PlatformApiException("youtube_credentials_changed", "YouTube credentials changed. Retry the sync.", 503);
+            return await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries, allowCredentialReload: false);
         }
         var clientId = _configuration["YouTube:ClientId"]
             ?? throw new InvalidOperationException("YouTube:ClientId is not configured");

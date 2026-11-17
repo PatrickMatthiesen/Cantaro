@@ -331,6 +331,67 @@ public sealed class MyAnimeListMediaProviderTests
         Assert.Equal("connected", account.ConnectionState);
     }
 
+    [Fact]
+    public async Task FirstStatusRead_MarksKnownExpiredRefreshAndRejectsOAuthWithoutReplacement()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+            request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal)
+                ? JsonResponse("{\"access_token\":\"new-access\",\"expires_in\":3600}")
+                : JsonResponse("{\"id\":608,\"name\":\"same account\"}"), 608);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        account.RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(-1);
+        await fixture.Db.SaveChangesAsync();
+        var status = await fixture.Provider.GetConnectedAccountAsync(608);
+        Assert.Equal("reconnect_required", status!.ConnectionState);
+        Assert.Empty(fixture.Handler.Methods);
+        await Assert.ThrowsAsync<PlatformApiException>(() => fixture.Provider.ExchangeCodeAndSaveAsync(
+            608, "code", "https://localhost/callback", "verifier", default));
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal("reconnect_required", account.ConnectionState);
+    }
+
+    [Fact]
+    public async Task RetainedAccount_RejectsDifferentViewerAndResumesScoreForOriginalViewer()
+    {
+        var viewer = 610;
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+            request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal)
+                ? JsonResponse("{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"expires_in\":3600}")
+                : request.Method == HttpMethod.Put ? JsonResponse("{\"score\":8}")
+                : JsonResponse($"{{\"id\":{viewer},\"name\":\"account\"}}"), 609);
+        var account = await fixture.Db.ConnectedServiceAccounts.SingleAsync();
+        account.ConnectionState = "reconnect_required";
+        await fixture.Db.SaveChangesAsync();
+        var pending = new MediaScoreUpdateRequest { ProviderMediaId = "anime:9", Score = 80m };
+        var failure = await Assert.ThrowsAsync<PlatformApiException>(() => fixture.Provider.ExchangeCodeAndSaveAsync(
+            609, "code", "https://localhost/callback", "verifier", default));
+        Assert.Equal("platform_account_changed", failure.Code);
+        await Assert.ThrowsAsync<PlatformReconnectRequiredException>(() => fixture.Provider.UpdateScoreAsync(609, pending, default));
+        Assert.DoesNotContain(HttpMethod.Put, fixture.Handler.Methods);
+        await fixture.Db.Entry(account).ReloadAsync();
+        Assert.Equal("609", account.ExternalAccountId);
+        viewer = 609;
+        await fixture.Provider.ExchangeCodeAndSaveAsync(609, "code", "https://localhost/callback", "verifier", default);
+        await fixture.Provider.UpdateScoreAsync(609, pending, default);
+        Assert.Single(fixture.Handler.Methods, method => method == HttpMethod.Put);
+        Assert.Equal("609", account.ExternalAccountId);
+    }
+
+    [Fact]
+    public async Task UnauthorizedMutation_RefreshesCredentialsWithoutReplayingPut()
+    {
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+            request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal)
+                ? JsonResponse("{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"expires_in\":3600}")
+                : new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") }, 611);
+        var failure = await Assert.ThrowsAsync<PlatformApiException>(() => fixture.Provider.UpdateScoreAsync(
+            611, new MediaScoreUpdateRequest { ProviderMediaId = "anime:9", Score = 80m }, default));
+        Assert.Equal("provider_authorization_refreshed", failure.Code);
+        Assert.Single(fixture.Handler.Methods, method => method == HttpMethod.Put);
+        Assert.Single(fixture.Handler.Paths, path => path.Contains("token", StringComparison.Ordinal));
+        Assert.Equal("connected", (await fixture.Provider.GetConnectedAccountAsync(611))!.ConnectionState);
+    }
+
     private static string SearchResponse(
         int id,
         string title,

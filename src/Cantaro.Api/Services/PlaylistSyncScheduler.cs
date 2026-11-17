@@ -30,7 +30,8 @@ public sealed class PlaylistSyncScheduler(IServiceScopeFactory scopes, IConfigur
         var now = clock.GetUtcNow();
         var dueLink = await db.ServicePlaylistMappings.AsNoTracking().Where(link =>
             (link.State == "active" || (link.State == "paused" && link.InitialMode != null
-                && (link.LastSyncStatus == "rate_limited" || link.LastSyncStatus == "quota_limited")))
+                && (link.LastSyncStatus == "rate_limited" || link.LastSyncStatus == "quota_limited"
+                    || link.LastSyncStatus == "reconnect_required")))
             && link.NextAttemptAt != null && link.NextAttemptAt <= now
             && (link.Playlist!.SyncLeaseExpiresAt == null || link.Playlist.SyncLeaseExpiresAt <= now)
             && link.ConnectedServiceAccount!.ConnectionState == "connected"
@@ -54,7 +55,7 @@ public sealed class PlaylistSyncScheduler(IServiceScopeFactory scopes, IConfigur
                 {
                     if (ex is PlatformReconnectRequiredException)
                     {
-                        link.LastSyncStatus = "error";
+                        link.LastSyncStatus = "reconnect_required";
                         link.LastError = ex.Message;
                         link.NextAttemptAt ??= clock.GetUtcNow();
                     }
