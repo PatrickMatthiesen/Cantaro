@@ -44,17 +44,17 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.3
+          bun-version: 1.4.4
 
       - name: Install Aspire CLI
         run: |
@@ -71,7 +71,7 @@ jobs:
           aspire publish --output-path ./aspire-output --non-interactive
 
       - name: Upload Aspire publish output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cantaro-aspire-output
           path: ./aspire-output/
@@ -134,7 +134,19 @@ jobs:
           DEPLOY_HOST: ${{ secrets.SSH_HOST }}
           DEPLOY_USER: ${{ secrets.SSH_USER }}
         run: |
-          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "docker ps --filter label=com.docker.compose.project=cantaro --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+          projects=$(docker ps -a --filter label=com.docker.compose.service=api --format '{{.Label "com.docker.compose.project"}}' | grep -E '^(cantaro|aspire-cantaro-compose-[a-z0-9]+)$' | sort -u)
+          if [ "$(printf '%s\n' "$projects" | grep -c .)" -ne 1 ]; then
+            echo "Expected exactly one Cantaro Compose project with an API service."
+            exit 1
+          fi
+          api=$(docker ps --filter "label=com.docker.compose.project=$projects" --filter label=com.docker.compose.service=api --format '{{.ID}}')
+          if [ -z "$api" ]; then
+            echo "The API service is not running in Compose project $projects."
+            exit 1
+          fi
+          docker ps --filter "label=com.docker.compose.project=$projects" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          REMOTE
 
       - name: Remove temporary Docker context
         if: always()

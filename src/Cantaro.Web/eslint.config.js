@@ -15,7 +15,7 @@ export default defineConfig([
       tseslint.configs.recommended,
       reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
-      ...tailwindcss.configs['flat/recommended'],
+      tailwindcss.configs.recommended,
     ],
     languageOptions: {
       ecmaVersion: 2020,
@@ -23,13 +23,10 @@ export default defineConfig([
     },
     settings: {
       tailwindcss: {
-        config: {},
+        cssConfigPath: 'src/index.css',
       },
     },
     rules: {
-      // The current beta plugin does not load Cantaro's CSS-first Tailwind v4
-      // theme correctly. Use the official Tailwind formatter for ordering once
-      // it is introduced instead of emitting hundreds of unreliable warnings.
       'tailwindcss/classnames-order': 'off',
       'tailwindcss/no-custom-classname': 'off',
       'tailwindcss/no-contradicting-classname': 'error',

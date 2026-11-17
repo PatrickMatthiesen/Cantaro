@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Dotnet" Version="14.0.0-preview.1.26473.3" />
+    <PackageReference Include="MessagePack" Version="2.5.307" />
     <PackageReference Include="Subjective.Aspire.Hosting.Garage" Version="0.1.0-preview.6" />
     <PackageReference Include="Aspire.Hosting.Docker" Version="14.0.0-preview.1.26473.3" />
     <PackageReference Include="Aspire.Hosting.JavaScript" Version="14.0.0-preview.1.26473.3" />
