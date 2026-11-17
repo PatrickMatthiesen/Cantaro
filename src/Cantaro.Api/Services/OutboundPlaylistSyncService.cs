@@ -48,7 +48,7 @@ public sealed class OutboundPlaylistSyncService(
                 requestedDestinationId, cancellationToken);
             ThrowIfCooldown(linked, service);
             if (linked is null)
-                await coordinator.CreateLinkAsync(account.UserId, playlistId, service, cancellationToken);
+                await coordinator.CreateLinkAsync(account, playlistId, service, cancellationToken);
             await coordinator.QueueAsync(account.UserId, playlistId, service, cancellationToken);
             await coordinator.RunAsync(account.UserId, playlistId, service, cancellationToken);
             linked = await dbContext.ServicePlaylistMappings.AsNoTracking().SingleOrDefaultAsync(item =>

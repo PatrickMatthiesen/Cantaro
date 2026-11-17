@@ -2,6 +2,7 @@ using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Cantaro.Api.Services.Spotify;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +19,136 @@ namespace Cantaro.Api.Tests;
 public sealed class PlaylistSyncCoordinatorPostgresTests
 {
     private const int UserId = 420042;
+
+    [PostgresFact]
+    public async Task InboundImport_ReconnectAfterPrecheckKeepsCheckpointAndResumesThroughCoordinator()
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var track = scenario.AddTrack("A");
+        scenario.Provider("youtube").SetTracks(("A", track));
+        scenario.Provider("youtube").SetRemoteItems("A");
+        var job = new MusicSyncJob
+        {
+            Id = Guid.NewGuid(), UserId = UserId, ConnectedServiceAccountId = 7, Service = "youtube",
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
+            PlaylistsJson = System.Text.Json.JsonSerializer.Serialize(new[] {
+                new MusicSyncJobPlaylist("youtube-playlist", "Road songs", 1, ExternalAccountId: "youtube-owner") }),
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        scenario.Db.MusicSyncJobs.Add(job);
+        await scenario.SaveAsync();
+        var saves = 0;
+        scenario.Db.SavedChanges += (_, _) =>
+        {
+            if (++saves == 2) scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                .ExecuteUpdate(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+        };
+        var platform = new YouTubePlatformService(new YouTubeService(new ConfigurationBuilder().Build(), scenario.Db,
+            new TokenEncryptionService(new EphemeralDataProtectionProvider()), NullLogger<YouTubeService>.Instance),
+            new YouTubePlaylistSyncService(scenario.Coordinator));
+        var processor = new MusicSyncJobProcessor(scenario.Db, new PlatformRegistry([platform]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(scenario.Db, [], scenario.Coordinator));
+        Assert.True(await processor.ProcessNextAsync(default));
+        var paused = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Queued, paused.Status);
+        Assert.Equal(0, paused.ProcessedPlaylistCount);
+        Assert.Null(paused.ResultsJson);
+        Assert.Empty(await scenario.Db.Playlists.ToListAsync());
+        Assert.False(await processor.ProcessNextAsync(default));
+        await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        Assert.True(await processor.ProcessNextAsync(default));
+        var resumed = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Completed, resumed.Status);
+        Assert.Equal(1, resumed.ProcessedPlaylistCount);
+        Assert.Equal(track, (await scenario.Db.PlaylistEntries.SingleAsync()).TrackId);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExplicitCreation_ChecksPinnedIdentityBeforeReconnectState(bool replacement)
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var playlist = scenario.AddPlaylist("Road songs", []);
+        await scenario.SaveAsync();
+        await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7).ExecuteUpdateAsync(set => set
+            .SetProperty(item => item.ConnectionState, "reconnect_required")
+            .SetProperty(item => item.ExternalAccountId, replacement ? "replacement" : "youtube-owner"));
+        var account = new PlatformAccountContext(UserId, 7, "youtube-owner");
+        var error = await Record.ExceptionAsync(() => scenario.Coordinator.CreateLinkAsync(account, playlist.Id, "youtube", default));
+        if (replacement) Assert.Equal("account_changed", Assert.IsType<PlatformApiException>(error).Code);
+        else Assert.IsType<PlatformReconnectRequiredException>(error);
+        Assert.Empty(await scenario.Db.ServicePlaylistMappings.ToListAsync());
+        Assert.Equal(0, scenario.Provider("youtube").Creations);
+    }
+
+    [PostgresTheory]
+    [InlineData("account_recheck")]
+    [InlineData("duplicate_lookup")]
+    [InlineData("validation")]
+    [InlineData("after_create")]
+    [InlineData("uncertain_post")]
+    public async Task NewLinkExport_ReconnectPreservesWorkUntilPostOutcomeIsUnknown(string phase)
+    {
+        await using var scenario = await Scenario.CreateAsync();
+        var playlist = scenario.AddPlaylist("Road songs", []);
+        var remote = scenario.Provider("youtube");
+        var job = new MusicSyncJob
+        {
+            Id = Guid.NewGuid(), UserId = UserId, ConnectedServiceAccountId = 7, Service = "youtube",
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1,
+            PlaylistsJson = System.Text.Json.JsonSerializer.Serialize(new[] {
+                new MusicSyncJobPlaylist("", playlist.Name, 0, playlist.Id, "youtube-owner") }),
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        scenario.Db.MusicSyncJobs.Add(job);
+        await scenario.SaveAsync();
+        async Task Reconnect()
+        {
+            await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+            throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+        }
+        if (phase == "duplicate_lookup") remote.BeforeList = Reconnect;
+        if (phase == "validation") remote.BeforeCreateValidation = Reconnect;
+        if (phase == "after_create") remote.BeforeRead = Reconnect;
+        if (phase == "uncertain_post") remote.BeforeCreate = Reconnect;
+        var saves = 0;
+        scenario.Db.SavedChanges += (_, _) =>
+        {
+            if (phase == "account_recheck" && ++saves == 3)
+                scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                    .ExecuteUpdate(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+        };
+        var processor = new MusicSyncJobProcessor(scenario.Db,
+            new PlatformRegistry([new MusicSyncJobProcessorTests.StubPlatformService("youtube")]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance,
+            new OutboundPlaylistSyncService(scenario.Db, [new FakeWriter(remote)], scenario.Coordinator));
+        Assert.True(await processor.ProcessNextAsync(default));
+        var paused = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        if (phase == "uncertain_post")
+        {
+            Assert.Equal(MusicSyncJobStatuses.Failed, paused.Status);
+            Assert.Equal("creation_uncertain", (await scenario.Db.ServicePlaylistMappings.SingleAsync()).State);
+            Assert.Equal(1, remote.Creations);
+            return;
+        }
+        Assert.Equal(MusicSyncJobStatuses.Queued, paused.Status);
+        Assert.Equal(0, paused.ProcessedPlaylistCount);
+        Assert.Null(paused.ResultsJson);
+        Assert.Equal(phase == "after_create" ? 1 : 0, remote.Creations);
+        Assert.False(await processor.ProcessNextAsync(default));
+        await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        remote.BeforeList = remote.BeforeRead = remote.BeforeCreateValidation = null;
+        Assert.True(await processor.ProcessNextAsync(default));
+        var resumed = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(MusicSyncJobStatuses.Completed, resumed.Status);
+        Assert.Equal(1, resumed.ProcessedPlaylistCount);
+        Assert.Equal(1, remote.Creations);
+        Assert.Equal("youtube-owner", (await scenario.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync()).ExternalAccountId);
+    }
 
     [PostgresTheory]
     [InlineData(0)]
@@ -427,11 +558,18 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
     private sealed class FakeProvider(string service, Dictionary<string, Guid> tracks) : IPlaylistSyncProvider
     {
         public Func<Task>? BeforeRead { get; set; }
+        public Func<Task>? BeforeList { get; set; }
+        public Func<Task>? BeforeCreateValidation { get; set; }
+        public Func<Task>? BeforeCreate { get; set; }
+        public int Creations { get; set; }
         private readonly Dictionary<string, Guid> _remoteTracks = new(StringComparer.Ordinal);
         public string PlatformId => service;
-        public Task<IReadOnlyList<PlaylistRemoteCatalogItem>> ListPlaylistsAsync(
+        public async Task<IReadOnlyList<PlaylistRemoteCatalogItem>> ListPlaylistsAsync(
             PlatformAccountContext account, CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<PlaylistRemoteCatalogItem>>([]);
+        {
+            if (BeforeList is { } beforeList) await beforeList();
+            return [];
+        }
         public string Name { get; private set; } = "Road songs";
         public IReadOnlyList<string> RemoteIds { get; private set; } = [];
         private int _revision;
@@ -481,9 +619,14 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
     private sealed class FakeWriter(FakeProvider provider) : IPlaylistWriter
     {
         public string PlatformId => provider.PlatformId;
-        public Task ValidateCreationAsync(PlatformAccountContext account, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken cancellationToken)
-            => Task.FromResult($"{PlatformId}-created");
+        public Task ValidateCreationAsync(PlatformAccountContext account, CancellationToken cancellationToken)
+            => provider.BeforeCreateValidation?.Invoke() ?? Task.CompletedTask;
+        public async Task<string> CreatePlaylistAsync(PlatformAccountContext account, string name, CancellationToken cancellationToken)
+        {
+            provider.Creations++;
+            if (provider.BeforeCreate is { } beforeCreate) await beforeCreate();
+            return $"{PlatformId}-created";
+        }
         public Task ValidateDestinationAsync(PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
             => Task.CompletedTask;
         public Task ReconcileAsync(PlatformAccountContext account, string playlistId, IReadOnlyList<string> trackIds,

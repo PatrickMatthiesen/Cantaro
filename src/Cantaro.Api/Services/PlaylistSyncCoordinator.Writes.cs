@@ -7,13 +7,21 @@ namespace Cantaro.Api.Services;
 public sealed partial class PlaylistSyncCoordinator
 {
     private async Task CreateMissingLinksAsync(Playlist playlist, List<LinkRead> reads,
-        CancellationToken ct, string? service = null, bool skipDuplicateNameCheck = false, bool ignoreUnlinked = false)
+        CancellationToken ct, string? service = null, bool skipDuplicateNameCheck = false, bool ignoreUnlinked = false,
+        PlatformAccountContext? expectedAccount = null)
     {
+        var expectedAccountId = expectedAccount?.ConnectedServiceAccountId;
+        var expectedExternalId = expectedAccount?.ExpectedExternalAccountId;
         var accounts = await db.ConnectedServiceAccounts.AsNoTracking().Where(account => account.UserId == playlist.UserId
-            && account.ConnectionState == "connected" && (account.Service == "youtube" || account.Service == "spotify")
+            && (expectedAccountId == null ? account.ConnectionState == "connected"
+                : account.Id == expectedAccountId && account.ExternalAccountId == expectedExternalId)
+            && (account.Service == "youtube" || account.Service == "spotify")
             && (service == null || account.Service == service)).ToListAsync(ct);
+        if (expectedAccount is not null && accounts.Count != 1)
+            throw new PlatformApiException("account_changed", "The connected platform account changed.", 409);
         foreach (var account in accounts)
         {
+            ProviderReconnectState.RequireUsable(account);
             var existing = await db.ServicePlaylistMappings.Where(link => link.PlaylistId == playlist.Id && link.Service == account.Service
                 && (link.ExternalAccountId == account.ExternalAccountId || (link.ExternalAccountId == "" && link.ConnectedServiceAccountId == account.Id))
                 && (!ignoreUnlinked || link.State != "unlinked")).ToListAsync(ct);
@@ -29,6 +37,7 @@ public sealed partial class PlaylistSyncCoordinator
                         continue;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (PlatformReconnectRequiredException) when (expectedAccount is not null) { throw; }
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "Could not check existing {Service} playlists before automatic creation for {PlaylistId}",
@@ -99,9 +108,18 @@ public sealed partial class PlaylistSyncCoordinator
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Could not create {Service} counterpart for playlist {PlaylistId}", account.Service, playlist.Id);
+                if (expectedAccount is not null && ex is PlatformReconnectRequiredException && IsUnwrittenCreation(link))
+                {
+                    // Validation failed before any POST. Release only this unwritten reservation.
+                    db.ServicePlaylistMappings.Remove(link);
+                    await db.SaveChangesAsync(ct);
+                    throw;
+                }
                 if (db.Entry(link).State != EntityState.Detached && link.State != "creation_uncertain")
                     RecordFailure(link, ex);
                 await db.SaveChangesAsync(ct);
+                if (expectedAccount is not null && ex is PlatformReconnectRequiredException
+                    && link.State != "creation_uncertain") throw;
             }
         }
     }
