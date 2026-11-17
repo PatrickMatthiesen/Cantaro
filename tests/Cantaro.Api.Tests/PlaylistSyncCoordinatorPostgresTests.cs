@@ -19,8 +19,11 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
 {
     private const int UserId = 420042;
 
-    [PostgresFact]
-    public async Task ExistingLinkExport_ReconnectKeepsJobCheckpointAndResumesSamePlaylist()
+    [PostgresTheory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task ExistingLinkExport_ReconnectKeepsJobCheckpointAndResumesSamePlaylist(int reconnectAfterSave)
     {
         await using var scenario = await Scenario.CreateAsync();
         var a = scenario.AddTrack("A");
@@ -39,18 +42,29 @@ public sealed class PlaylistSyncCoordinatorPostgresTests
         };
         scenario.Db.MusicSyncJobs.Add(job);
         var remote = scenario.Provider("youtube");
-        remote.BeforeRead = async () =>
+        var triggered = false;
+        if (reconnectAfterSave == 0) remote.BeforeRead = async () =>
         {
+            triggered = true;
             await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
                 .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
             throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
         };
         await scenario.SaveAsync();
+        var saves = 0;
+        scenario.Db.SavedChanges += (_, _) =>
+        {
+            if (++saves != reconnectAfterSave) return;
+            triggered = true;
+            scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+                .ExecuteUpdate(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
+        };
         var outbound = new OutboundPlaylistSyncService(scenario.Db, [new FakeWriter(remote)], scenario.Coordinator);
         var processor = new MusicSyncJobProcessor(scenario.Db,
             new PlatformRegistry([new MusicSyncJobProcessorTests.StubPlatformService("youtube")]), new MusicSyncThrottleService(),
             NullLogger<MusicSyncJobProcessor>.Instance, outbound);
         Assert.True(await processor.ProcessNextAsync(default));
+        Assert.True(triggered);
         var paused = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
         Assert.Equal(MusicSyncJobStatuses.Queued, paused.Status);
         Assert.Equal(0, paused.ProcessedPlaylistCount);

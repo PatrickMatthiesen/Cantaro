@@ -178,14 +178,15 @@ public sealed class OutboundPlaylistSyncService(
             item => item.Id == playlistId && item.UserId == account.UserId, cancellationToken)
             ?? throw new PlatformApiException("playlist_not_found", "Cantaro playlist not found.", 404);
 
-        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().AnyAsync(
+        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(
             item => item.Id == account.ConnectedServiceAccountId && item.UserId == account.UserId
-                && item.Service == service && item.ConnectionState == "connected"
+                && item.Service == service
                 && (account.ExpectedExternalAccountId == null || item.ExternalAccountId == account.ExpectedExternalAccountId), cancellationToken);
-        if (!connected)
+        if (connected is null)
         {
             throw new PlatformApiException("account_changed", "Reconnect the original destination account before syncing.", 409);
         }
+        ProviderReconnectState.RequireUsable(connected);
 
         var mapping = await dbContext.ServicePlaylistMappings.SingleOrDefaultAsync(
             item => item.PlaylistId == playlistId
@@ -315,14 +316,15 @@ public sealed class OutboundPlaylistSyncService(
         var playlist = await dbContext.Playlists.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == playlistId && item.UserId == account.UserId, ct)
             ?? throw new PlatformApiException("playlist_not_found", "Cantaro playlist not found.", 404);
-        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().AnyAsync(item =>
+        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == account.ConnectedServiceAccountId && item.UserId == account.UserId
-            && item.Service == service && item.ConnectionState == "connected"
+            && item.Service == service
             && account.ExpectedExternalAccountId != null
             && item.ExternalAccountId == account.ExpectedExternalAccountId, ct);
-        if (!connected)
+        if (connected is null)
             throw new PlatformApiException("account_changed",
                 "Reconnect the original destination account before syncing.", 409);
+        ProviderReconnectState.RequireUsable(connected);
 
         var links = await dbContext.ServicePlaylistMappings.AsNoTracking().Where(item =>
             item.PlaylistId == playlistId && item.UserId == account.UserId && item.Service == service

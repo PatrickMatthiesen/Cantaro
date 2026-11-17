@@ -60,16 +60,7 @@ public sealed class MusicSyncJobProcessor(
                 if (job.Service is "youtube" or "spotify")
                 {
                     var expected = playlist.ExternalAccountId;
-                    if (string.IsNullOrWhiteSpace(expected))
-                    {
-                        // Legacy jobs may recover their original identity from a
-                        // retained link, never from the currently signed-in account.
-                        expected = await _dbContext.ServicePlaylistMappings.AsNoTracking()
-                            .Where(link => link.UserId == job.UserId && link.Service == job.Service
-                                && link.ConnectedServiceAccountId == connectedServiceAccountId
-                                && link.ServicePlaylistId == playlist.Id && link.State != "unlinked")
-                            .Select(link => link.ExternalAccountId).SingleOrDefaultAsync(cancellationToken);
-                    }
+                    // A current mapping cannot prove which account selected a legacy job.
                     if (string.IsNullOrWhiteSpace(expected))
                         throw new PlatformApiException("sync_account_unverified",
                             "The original account for this queued sync cannot be verified. Start a new sync from the current account.", 409);

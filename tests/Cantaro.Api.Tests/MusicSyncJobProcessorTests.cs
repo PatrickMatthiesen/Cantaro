@@ -12,11 +12,12 @@ namespace Cantaro.Api.Tests;
 public sealed class MusicSyncJobProcessorTests
 {
     [PostgresTheory]
-    [InlineData("original", "replacement", false)]
-    [InlineData(null, "replacement", false)]
-    [InlineData("original", "original", true)]
+    [InlineData("original", "replacement", false, false)]
+    [InlineData(null, "replacement", false, false)]
+    [InlineData(null, "replacement", true, false)]
+    [InlineData("original", "original", false, true)]
     public async Task InboundJob_UsesOriginalAccountOrStopsWithoutConsumingPlaylist(
-        string? selectedExternalId, string currentExternalId, bool succeeds)
+        string? selectedExternalId, string currentExternalId, bool hasReplacementMapping, bool succeeds)
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
         var db = schema.Db;
@@ -32,6 +33,17 @@ public sealed class MusicSyncJobProcessorTests
                 ExternalAccountId: selectedExternalId) }), CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
         };
         db.MusicSyncJobs.Add(job);
+        if (hasReplacementMapping)
+        {
+            var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 704, Name = "Replacement account playlist" };
+            db.Playlists.Add(playlist);
+            db.ServicePlaylistMappings.Add(new ServicePlaylistMapping
+            {
+                Id = Guid.NewGuid(), UserId = 704, PlaylistId = playlist.Id,
+                ConnectedServiceAccountId = account.Id, ExternalAccountId = currentExternalId,
+                Service = "youtube", ServicePlaylistId = "selected", State = "active", SyncMode = "bidirectional"
+            });
+        }
         await db.SaveChangesAsync();
         var platform = new StubPlatformService("youtube");
         var processor = new MusicSyncJobProcessor(db, new PlatformRegistry([platform]), new MusicSyncThrottleService(),
@@ -43,6 +55,8 @@ public sealed class MusicSyncJobProcessorTests
         Assert.Equal(job.PlaylistsJson, saved.PlaylistsJson);
         Assert.Equal(succeeds ? new[] { "original" } : Array.Empty<string?>(), platform.ExpectedAccountIds);
         Assert.Equal(succeeds ? 1 : 0, platform.SyncedPlaylistIds.Count);
+        if (selectedExternalId is null)
+            Assert.Contains("original account", saved.ErrorMessage);
     }
 
     [PostgresFact]

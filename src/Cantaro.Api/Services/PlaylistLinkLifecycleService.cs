@@ -239,7 +239,13 @@ public sealed class PlaylistLinkLifecycleService(
                 CancellationToken.None);
             if (pending is { InitialMode: not null })
             {
-                if (ex is PlatformApiException { StatusCode: 429 } rateLimit)
+                if (ex is PlatformReconnectRequiredException)
+                {
+                    pending.LastSyncStatus = "reconnect_required";
+                    pending.LastError = ex.Message;
+                    pending.NextAttemptAt ??= DateTimeOffset.UtcNow;
+                }
+                else if (ex is PlatformApiException { StatusCode: 429 } rateLimit)
                 {
                     pending.LastSyncStatus = IsSpotifyQuotaExceeded(rateLimit) ? "quota_limited" : "rate_limited";
                     pending.LastError = null;
