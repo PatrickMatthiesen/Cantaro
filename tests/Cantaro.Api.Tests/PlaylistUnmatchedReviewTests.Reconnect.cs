@@ -12,8 +12,14 @@ namespace Cantaro.Api.Tests;
 
 public sealed partial class PlaylistUnmatchedReviewTests
 {
-    [PostgresFact]
-    public async Task SpotifySearch_ContinuesWhenOptionalYouTubeEnrichmentRequiresReconnect()
+    [PostgresTheory]
+    [InlineData("invalid_grant", null, true)]
+    [InlineData("temporarily_unavailable", null, false)]
+    [InlineData("server_error", null, false)]
+    [InlineData("other", 429, false)]
+    [InlineData("other", 503, false)]
+    public async Task SpotifySearch_ContinuesWhenOptionalYouTubeAuthorizationIsUnavailable(
+        string error, int? statusCode, bool requiresReconnect)
     {
         await using var scope = await Scope.CreateAsync("spotify", postgres: true);
         var credentialAttempts = 0;
@@ -22,7 +28,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             (_, _) =>
             {
                 credentialAttempts++;
-                throw new TokenResponseException(new TokenErrorResponse { Error = "invalid_grant" });
+                throw new TokenResponseException(new TokenErrorResponse { Error = error },
+                    statusCode is { } status ? (System.Net.HttpStatusCode)status : null);
             });
         using var handler = new CanonicalInputHandler();
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.spotify.com") };
@@ -39,9 +46,11 @@ public sealed partial class PlaylistUnmatchedReviewTests
         scope.Db.ConnectedServiceAccounts.Add(account);
         await scope.Db.SaveChangesAsync();
 
-        // Exercise the initial rejection and the subsequent persisted reconnect state.
+        // Exercise both the initial failure and the next request's account state.
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            // Supply the owned playlist on each request so optional enrichment remains eligible.
+            await scope.Db.Playlists.SingleAsync(item => item.Id == scope.Playlist.Id);
             var result = await review.SearchAsync(scope.UserId, scope.Playlist.Id, scope.Link.Id,
                 scope.Entry.Id, "Everything Goes On Porter Robinson", default);
             Assert.Equal("chosen-id", Assert.Single(result.Candidates).ExternalId);
@@ -50,8 +59,8 @@ public sealed partial class PlaylistUnmatchedReviewTests
             // The next HTTP request starts with a fresh scoped tracker.
             scope.Db.ChangeTracker.Clear();
         }
-        Assert.Equal(1, credentialAttempts);
-        Assert.Equal("reconnect_required", (await scope.Db.ConnectedServiceAccounts.AsNoTracking()
+        Assert.Equal(requiresReconnect ? 1 : 2, credentialAttempts);
+        Assert.Equal(requiresReconnect ? "reconnect_required" : "connected", (await scope.Db.ConnectedServiceAccounts.AsNoTracking()
             .SingleAsync(item => item.Id == account.Id)).ConnectionState);
         Assert.Equal("connected", (await scope.Db.ConnectedServiceAccounts.AsNoTracking()
             .SingleAsync(item => item.Service == "spotify")).ConnectionState);

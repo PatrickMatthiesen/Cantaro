@@ -149,9 +149,10 @@ public class YouTubeService : IYouTubePlaylistClient
             request.MaxResults = 1;
             response = await request.ExecuteAsync(cancellationToken);
         }
-        catch (Exception ex) when (ex is Google.Apis.Auth.OAuth2.Responses.TokenResponseException or PlatformReconnectRequiredException)
+        catch (Exception ex) when (ex is TokenResponseException or PlatformReconnectRequiredException
+            or PlatformApiException { Code: "youtube_unavailable" })
         {
-            _logger.LogWarning(ex, "YouTube metadata is unavailable because the account for user {UserId} needs reconnecting", userId);
+            _logger.LogWarning(ex, "Optional YouTube metadata is unavailable for user {UserId}", userId);
             return null;
         }
         var video = response.Items?.FirstOrDefault();

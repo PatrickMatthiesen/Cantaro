@@ -13,6 +13,21 @@ namespace Cantaro.Api.Tests;
 public sealed class ProviderReconnectTests
 {
     [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OptionalMetadata_DoesNotHideCancellationOrUnrelatedPlatformErrors(bool cancelled)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var account = await AddAccountAsync(schema.Db);
+        Exception expected = cancelled ? new OperationCanceledException()
+            : new PlatformApiException("platform_account_changed", "The account changed.", 409);
+        var service = Service(schema.Db, (_, _) => throw expected);
+        Assert.Same(expected, await Record.ExceptionAsync(() => service.GetVideoMetadataAsync(701, "video", default)));
+        await schema.Db.Entry(account).ReloadAsync();
+        Assert.Equal("connected", account.ConnectionState);
+    }
+
+    [PostgresTheory]
     [InlineData("invalid_grant", true)]
     [InlineData("temporarily_unavailable", false)]
     [InlineData("invalid_client", false)]
