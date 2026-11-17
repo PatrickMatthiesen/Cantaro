@@ -16,7 +16,7 @@ namespace Cantaro.Api.Tests;
 /// loopback connection. Each test creates and drops a private schema inside it.
 /// No connected provider in this fixture makes network calls.
 /// </summary>
-public sealed class PlaylistSyncCoordinatorPostgresTests
+public sealed partial class PlaylistSyncCoordinatorPostgresTests
 {
     private const int UserId = 420042;
 

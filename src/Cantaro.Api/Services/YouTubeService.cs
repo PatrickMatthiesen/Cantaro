@@ -149,7 +149,7 @@ public class YouTubeService : IYouTubePlaylistClient
             request.MaxResults = 1;
             response = await request.ExecuteAsync(cancellationToken);
         }
-        catch (Google.Apis.Auth.OAuth2.Responses.TokenResponseException ex)
+        catch (Exception ex) when (ex is Google.Apis.Auth.OAuth2.Responses.TokenResponseException or PlatformReconnectRequiredException)
         {
             _logger.LogWarning(ex, "YouTube metadata is unavailable because the account for user {UserId} needs reconnecting", userId);
             return null;
@@ -619,7 +619,6 @@ public class YouTubeService : IYouTubePlaylistClient
             service = await CreateYouTubeServiceAsync(account, cancellationToken, disableAutomaticRetries: true);
             cancellationToken.ThrowIfCancellationRequested();
         }
-        catch (PlatformReconnectRequiredException) { throw; }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
