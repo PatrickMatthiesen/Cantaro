@@ -634,7 +634,14 @@ public class YouTubeService : IYouTubePlaylistClient
             Snippet = new PlaylistSnippet { Title = name },
             Status = new PlaylistStatus { PrivacyStatus = "private" }
         };
-        var created = await service.Playlists.Insert(playlist, "snippet,status").ExecuteAsync(cancellationToken);
+        Google.Apis.YouTube.v3.Data.Playlist created;
+        try { created = await service.Playlists.Insert(playlist, "snippet,status").ExecuteAsync(cancellationToken); }
+        catch (PlatformReconnectRequiredException ex) when (ex.InnerException is HttpRequestException
+            { StatusCode: System.Net.HttpStatusCode.Unauthorized })
+        {
+            throw new PlatformApiException("youtube_playlist_creation_rejected", ex.Message,
+                StatusCodes.Status401Unauthorized, innerException: ex);
+        }
         return !string.IsNullOrWhiteSpace(created.Id)
             && created.Status?.PrivacyStatus == "private"
             ? created.Id
@@ -1364,7 +1371,8 @@ public class YouTubeService : IYouTubePlaylistClient
         {
             if (args.Response.StatusCode == System.Net.HttpStatusCode.Unauthorized
                 && await markRejected(args.CancellationToken))
-                throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+                throw new PlatformReconnectRequiredException("Reconnect YouTube to continue.",
+                    new HttpRequestException("YouTube rejected the request as unauthorized.", null, args.Response.StatusCode));
             return false;
         }
     }

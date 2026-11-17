@@ -99,6 +99,8 @@ public sealed class ProviderReconnectTests
         var args = new Google.Apis.Http.HandleUnsuccessfulResponseArgs { Response = response, CancellationToken = default };
         var failure = await Record.ExceptionAsync(() => handler.HandleResponseAsync(args));
         Assert.Equal(reconnect, failure is PlatformReconnectRequiredException);
+        if (reconnect) Assert.Equal(System.Net.HttpStatusCode.Unauthorized,
+            Assert.IsType<HttpRequestException>(failure!.InnerException).StatusCode);
         await schema.Db.Entry(account).ReloadAsync();
         Assert.Equal(reconnect ? "reconnect_required" : "connected", account.ConnectionState);
     }

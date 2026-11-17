@@ -15,24 +15,38 @@ namespace Cantaro.Api.Tests;
 
 public sealed partial class PlaylistSyncCoordinatorPostgresTests
 {
-    [PostgresFact]
-    public async Task NewLinkExport_RealClientCreationCredentialRejectionPausesBeforePost()
+    [PostgresTheory]
+    [InlineData("credential")]
+    [InlineData("unauthorized")]
+    [InlineData("unknown")]
+    public async Task NewLinkExport_RealClientRecoversKnownRejectionsWithoutReplayingUnknownOutcomes(string failure)
     {
         await using var scenario = await Scenario.CreateAsync();
         var playlist = scenario.AddPlaylist("Road songs", []);
         var account = await scenario.Db.ConnectedServiceAccounts.SingleAsync(item => item.Id == 7);
         account.EncryptedRefreshToken = "refresh";
         account.Scopes = "https://www.googleapis.com/auth/youtube";
-        using var handler = new CreationAuthHandler();
+        using var handler = new CreationAuthHandler
+        {
+            CreationFailure = failure == "unauthorized" ? HttpStatusCode.Unauthorized
+                : failure == "unknown" ? HttpStatusCode.ServiceUnavailable : null
+        };
         var clients = 0;
         var youtube = new YouTubeService(new ConfigurationBuilder().Build(), scenario.Db,
             new TokenEncryptionService(new EphemeralDataProtectionProvider()), NullLogger<YouTubeService>.Instance,
-            (_, _) =>
+            (connected, _) =>
             {
                 // Both writer validations succeed. Credential acquisition for the POST then fails.
-                if (++clients == 3) throw new TokenResponseException(new TokenErrorResponse { Error = "invalid_grant" });
-                return Task.FromResult(new Google.Apis.YouTube.v3.YouTubeService(new Google.Apis.Services.BaseClientService.Initializer
-                    { HttpClientFactory = handler, ApplicationName = "Cantaro.Test" }));
+                if (++clients == 3 && failure == "credential")
+                    throw new TokenResponseException(new TokenErrorResponse { Error = "invalid_grant" });
+                var sdk = new Google.Apis.YouTube.v3.YouTubeService(new Google.Apis.Services.BaseClientService.Initializer
+                {
+                    HttpClientFactory = handler, ApplicationName = "Cantaro.Test",
+                    DefaultExponentialBackOffPolicy = ExponentialBackOffPolicy.None
+                });
+                sdk.HttpClient.MessageHandler.AddUnsuccessfulResponseHandler(new YouTubeService.AccessRejectionHandler(
+                    ct => ProviderReconnectState.MarkAsync(scenario.Db, connected, "access_token_rejected", ct)));
+                return Task.FromResult(sdk);
             });
         var writer = new YouTubePlaylistWriter(youtube);
         var coordinator = new PlaylistSyncCoordinator(scenario.Db, [scenario.Provider("youtube")], [writer],
@@ -51,11 +65,20 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
 
         Assert.True(await processor.ProcessNextAsync(default));
         var paused = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        if (failure == "unknown")
+        {
+            Assert.Equal(MusicSyncJobStatuses.Failed, paused.Status);
+            Assert.Equal("creation_uncertain", (await scenario.Db.ServicePlaylistMappings.SingleAsync()).State);
+            Assert.Equal(1, handler.Posts);
+            Assert.False(await processor.ProcessNextAsync(default));
+            Assert.Equal(1, handler.Posts);
+            return;
+        }
         Assert.Equal(MusicSyncJobStatuses.Queued, paused.Status);
         Assert.Equal(0, paused.ProcessedPlaylistCount);
         Assert.Null(paused.ResultsJson);
         Assert.Equal(3, clients);
-        Assert.Equal(0, handler.Posts);
+        Assert.Equal(failure == "credential" ? 0 : 1, handler.Posts);
         Assert.Empty(await scenario.Db.ServicePlaylistMappings.ToListAsync());
         Assert.False(await processor.ProcessNextAsync(default));
         await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7).ExecuteUpdateAsync(set => set
@@ -65,13 +88,14 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
         var resumed = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
         Assert.Equal(MusicSyncJobStatuses.Completed, resumed.Status);
         Assert.Equal(1, resumed.ProcessedPlaylistCount);
-        Assert.Equal(1, handler.Posts);
+        Assert.Equal(failure == "credential" ? 1 : 2, handler.Posts);
         Assert.Equal("youtube-created", (await scenario.Db.ServicePlaylistMappings.SingleAsync()).ServicePlaylistId);
     }
 
     private sealed class CreationAuthHandler : HttpMessageHandler, Google.Apis.Http.IHttpClientFactory
     {
         public int Posts { get; private set; }
+        public HttpStatusCode? CreationFailure { get; init; }
         public ConfigurableHttpClient CreateHttpClient(CreateHttpClientArgs args)
             => new(new ConfigurableMessageHandler(this));
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -82,6 +106,10 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
             {
                 Assert.EndsWith("/playlists", path);
                 Posts++;
+                if (Posts == 1 && CreationFailure is { } failure)
+                    return Task.FromResult(new HttpResponseMessage(failure)
+                    { Content = new StringContent(JsonSerializer.Serialize(new { error = new { code = (int)failure, message = "Rejected" } }),
+                        Encoding.UTF8, "application/json") });
                 body = "{\"id\":\"youtube-created\",\"status\":{\"privacyStatus\":\"private\"}}";
             }
             else
