@@ -126,7 +126,27 @@ jobs:
         run: |
           docker context create "$DOCKER_CONTEXT_NAME" --docker "host=ssh://$DEPLOY_USER@$DEPLOY_HOST"
           docker context use "$DOCKER_CONTEXT_NAME"
-          aspire deploy --environment Production --non-interactive
+          apphost="$GITHUB_WORKSPACE/src/Cantaro.AppHost/Cantaro.AppHost.csproj"
+          # The pinned Aspire SDK hashes the lower-case absolute AppHost path.
+          project="aspire-cantaro-compose-$(printf '%s' "${apphost,,}" | sha256sum | cut -c1-8)"
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" bash -se -- "$project" <<'REMOTE'
+          expected_project=$1
+          projects=$(docker ps -a --filter label=com.docker.compose.service=api --format '{{.Label "com.docker.compose.project"}}' | grep -E '^(cantaro|aspire-cantaro-compose-[a-z0-9]+)$' | sort -u || true)
+          if [ -n "$projects" ]; then
+            if [ "$projects" != "$expected_project" ]; then
+              echo "Deployment would select a different Cantaro project; refusing to create a second database."
+              exit 1
+            fi
+            for service in postgres garage; do
+              container=$(docker ps -a --filter "label=com.docker.compose.project=$expected_project" --filter "label=com.docker.compose.service=$service" --format '{{.ID}}')
+              if [ -z "$container" ] || ! docker inspect "$container" --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' | grep -Fx "${expected_project}_cantaro-${service}-data"; then
+                echo "Existing Cantaro $service data volume does not match the deployment target."
+                exit 1
+              fi
+            done
+          fi
+          REMOTE
+          aspire deploy --apphost "$apphost" --environment Production --non-interactive
 
       - name: Verify remote containers
         if: always()
