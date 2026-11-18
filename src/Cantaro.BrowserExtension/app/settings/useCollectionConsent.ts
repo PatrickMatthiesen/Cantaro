@@ -8,7 +8,7 @@ import {
 } from '../../platform/consent/runtimeConsentClient';
 import type { CollectionChoices } from './CollectionConsent';
 
-export function useCollectionConsent(baseUrl: string, configured: boolean) {
+export function useCollectionConsent(baseUrl: string, configured: boolean, settingsReady: boolean) {
   const [status, setStatus] = useState<ConsentStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -28,6 +28,7 @@ export function useCollectionConsent(baseUrl: string, configured: boolean) {
   }, [baseUrl]);
 
   useEffect(() => {
+    if (!settingsReady) return;
     let active = true;
     const stop = subscribeRuntimeConsent(next => {
       revision.current++;
@@ -40,7 +41,7 @@ export function useCollectionConsent(baseUrl: string, configured: boolean) {
       if (active && revision.current === initialRevision) setError('Could not load collection choices. Reopen the popup to retry; collection stays off.');
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; stop(); };
-  }, [baseUrl, configured]);
+  }, [baseUrl, configured, settingsReady]);
 
   const save = useCallback(async (choices: CollectionChoices) => {
     // A sign-in can finish after the user has switched Cantaro servers.

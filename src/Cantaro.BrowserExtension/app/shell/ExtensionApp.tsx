@@ -21,7 +21,7 @@ export function ExtensionApp({ services = browserPopupServices }: ExtensionAppPr
   const { notice, showNotice } = usePopupNotice();
   const navigation = usePopupNavigation();
   const settings = useSettings(showNotice);
-  const consent = useCollectionConsent(settings.savedSettings.baseUrl, settings.configured);
+  const consent = useCollectionConsent(settings.savedSettings.baseUrl, settings.configured, !settings.loading);
   const consentProps = createConsentProps(settings, consent);
   const anyCollection = consentProps.choices.watchTracking || consentProps.choices.catalogCollection;
   const activeTabContext = useActiveTabContext(services, anyCollection);
@@ -86,7 +86,7 @@ function PopupContent({ settings, consentLoading, navigation, consentProps, cons
     return <MusicPage configured={settings.configured} isSigningIn={settings.isSigningIn}
       activeTabContext={activeTabContext.state} onSignIn={settings.signIn} />;
   }
-  if (consentProps.needsReview) return <div className="mx-auto max-w-2xl px-5">{collectionConsent}</div>;
+  if (consentProps.needsReview) return <div className="mx-auto max-w-3xl px-5">{collectionConsent}</div>;
   return <MediaPage configured={settings.configured} watchCollectionAllowed={consentProps.choices.watchTracking}
     isSigningIn={settings.isSigningIn} activeTabContext={activeTabContext.state} onSignIn={settings.signIn}
     disabledWatchProviders={settings.disabledWatchProviders} onOpenSettings={navigation.openSettings} onNotice={showNotice} />;
