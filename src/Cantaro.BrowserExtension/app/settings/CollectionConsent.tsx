@@ -27,12 +27,12 @@ export function CollectionConsent(props: CollectionConsentProps) {
     || draft.musicLyrics !== props.choices.musicLyrics;
   const enabling = draft.watchTracking || draft.catalogCollection || draft.musicLyrics;
   return (
-    <section className="space-y-4 py-5" aria-labelledby="collection-consent-title">
+    <section className="space-y-2.5 py-2" aria-labelledby="collection-consent-title">
       <div>
         <h2 id="collection-consent-title" className="text-lg font-bold text-content">
           {props.needsReview ? 'Choose website features' : 'Website collection'}
         </h2>
-        <p className="mt-2 text-sm leading-6 text-content-muted">
+        <p className="mt-1 text-sm leading-5 text-content-muted">
           Choose what Cantaro can read on Crunchyroll and YouTube. Nothing is collected until
           you sign in and allow it.
         </p>
@@ -60,7 +60,7 @@ export function CollectionConsent(props: CollectionConsentProps) {
           onChange={musicLyrics => setDraft(current => ({ ...current, musicLyrics }))}
         />
       </div>
-      <section aria-labelledby="collection-information-title" className="space-y-2 text-xs leading-5 text-content-muted">
+      <section aria-labelledby="collection-information-title" className="space-y-1.5 text-xs leading-4 text-content-muted">
         <h3 id="collection-information-title" className="font-semibold text-content">Where your information goes</h3>
         <p>To your Cantaro server: <strong className="break-all font-medium text-content">{props.baseUrl}</strong>.</p>
         <ul className="list-disc space-y-1 pl-4">
@@ -69,7 +69,7 @@ export function CollectionConsent(props: CollectionConsentProps) {
         </ul>
         <p>You can turn any feature off anytime. This stops new collection; it does not delete information already saved.</p>
       </section>
-      <p className="text-xs leading-5 text-content-muted">
+      <p className="text-xs leading-4 text-content-muted">
         Music library and playlist features do not read music websites. Opening a library song's lyrics sends its title and artist directly to LRCLIB, independently of the YouTube option.
         {' '}<a href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md" target="_blank" rel="noreferrer"
           className="font-semibold text-personal-accent-strong underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Read the privacy policy</a>.
@@ -112,12 +112,12 @@ function ConsentChoice({ label, detail, checked, disabled, onChange }: {
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 py-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus">
+    <label className="flex cursor-pointer items-start gap-3 py-2 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus">
       <input type="checkbox" checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)}
         className="mt-1 size-4 shrink-0 accent-personal-accent" />
       <span>
         <span className="block text-sm font-semibold text-content">{label}</span>
-        <span className="mt-1 block text-xs leading-5 text-content-muted">{detail}</span>
+        <span className="mt-0.5 block text-xs leading-4 text-content-muted">{detail}</span>
       </span>
     </label>
   );
