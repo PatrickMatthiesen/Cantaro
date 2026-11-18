@@ -33,47 +33,42 @@ export function CollectionConsent(props: CollectionConsentProps) {
           {props.needsReview ? 'Choose website features' : 'Website collection'}
         </h2>
         <p className="mt-1 text-sm leading-5 text-content-muted">
-          Choose what Cantaro can read on Crunchyroll and YouTube. Nothing is collected until
-          you sign in and allow it.
+          Cantaro reads pages only after you sign in and opt in.
         </p>
       </div>
       <div className="divide-y divide-border-subtle border-y border-border-subtle">
         <ConsentChoice
-          label="Automatically track what I watch"
-          detail="Read episode information and playback progress to save watched episodes and sync with services I connect."
+          label="Track what I watch"
+          detail="Read Crunchyroll episode details and playback progress to update your library and connected services."
           checked={draft.watchTracking}
           disabled={props.busy}
           onChange={watchTracking => setDraft(current => ({ ...current, watchTracking }))}
         />
         <ConsentChoice
-          label="Help Cantaro find episodes and watch links"
-          detail="Read episode lists and links while I browse, even when I’m not watching, to improve Cantaro’s shared catalog."
+          label="Improve the shared episode catalog"
+          detail="Read Crunchyroll episode lists and links as you browse."
           checked={draft.catalogCollection}
           disabled={props.busy}
           onChange={catalogCollection => setDraft(current => ({ ...current, catalogCollection }))}
         />
         <ConsentChoice
           label="YouTube lyrics"
-          detail="Read the video's ID and match it to a song already in your Cantaro library. YouTube lyrics lookups send the song's title and artist directly to LRCLIB. Album and duration help rank results and stay in the extension. The YouTube page title can prefill manual search locally; those terms are sent only when you submit the search."
+          detail="Find lyrics on LRCLIB for YouTube songs in your library."
           checked={draft.musicLyrics}
           disabled={props.busy}
           onChange={musicLyrics => setDraft(current => ({ ...current, musicLyrics }))}
         />
       </div>
-      <section aria-labelledby="collection-information-title" className="space-y-1.5 text-xs leading-4 text-content-muted">
-        <h3 id="collection-information-title" className="font-semibold text-content">Where your information goes</h3>
-        <p>To your Cantaro server: <strong className="break-all font-medium text-content">{props.baseUrl}</strong>.</p>
-        <ul className="list-disc space-y-1 pl-4">
-          <li>Watch progress stays in your library. Temporary matching details are deleted once processed; unfinished matches stay until you resolve or dismiss them.</li>
-          <li>Shared episode and watch-link facts can remain after account deletion, without keeping your browsing history.</li>
-        </ul>
-        <p>You can turn any feature off anytime. This stops new collection; it does not delete information already saved.</p>
-      </section>
-      <p className="text-xs leading-4 text-content-muted">
-        Music library and playlist features do not read music websites. Opening a library song's lyrics sends its title and artist directly to LRCLIB, independently of the YouTube option.
-        {' '}<a href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md" target="_blank" rel="noreferrer"
-          className="font-semibold text-personal-accent-strong underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Read the privacy policy</a>.
-      </p>
+      <div className="space-y-1.5 text-xs leading-4 text-content-muted">
+        <p>Watch and catalog data go to <strong className="break-all font-medium text-content">{props.baseUrl}</strong>.</p>
+        <p>Watch progress stays in your library. Matching details are deleted when resolved or dismissed.
+          Shared episode data can stay after account deletion.</p>
+        <p>Turning a feature off stops new collection. Saved data stays.</p>
+        <p>Library lyrics send titles and artists to LRCLIB even with YouTube lyrics off.
+          {' '}<a href="https://github.com/PatrickMatthiesen/Cantaro/blob/main/PRIVACY.md" target="_blank" rel="noreferrer"
+            className="font-semibold text-personal-accent-strong underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Privacy policy</a>
+        </p>
+      </div>
       {props.error ? <p role="alert" className="text-sm text-content">{props.error}</p> : null}
       <ConsentActions {...props} draft={draft} changed={changed} enabling={enabling} />
     </section>
