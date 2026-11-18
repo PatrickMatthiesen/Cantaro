@@ -202,6 +202,11 @@ public class MediaProvidersController(
             return BadRequest(new { error = $"{provider.ProviderId} is not connected." });
         }
 
+        if (account.ConnectionState == "reconnect_required")
+        {
+            return Conflict(new { code = "platform_reconnect_required" });
+        }
+
         var workItem = await _mediaLibraryImportQueue.EnqueueAsync(userId, provider.ProviderId, cancellationToken);
 
         return Accepted(new MediaImportRequestDto
@@ -277,7 +282,7 @@ public class MediaProvidersController(
 
     private static bool IsTerminalImportStatus(string status)
     {
-        return status is "completed" or "failed";
+        return status is "completed" or "failed" or "reconnect_required";
     }
 
     [HttpGet("providers/{providerId}/search")]

@@ -1,9 +1,11 @@
 import {
   MediaEntryDetailPage,
   MediaLibraryPage,
+  mediaProviderPanelId,
 } from '@cantaro/client-shared/media';
 import { startTransition, useState } from 'react';
 import type { ActiveTabContextState } from '../shell/extensionAppTypes';
+import { openCantaroPage } from '../shell/openCantaroPage';
 import { EpisodeTrackingControls } from './EpisodeTrackingControls';
 import { MediaSetup } from './MediaSetup';
 import { useEpisodeTracking } from './useEpisodeTracking';
@@ -54,6 +56,11 @@ export function MediaPage(props: MediaPageProps) {
             embedded
             density="compact"
             onHeadingChange={suppressEmbeddedHeading}
+            onNavigateProviders={(providerId) => {
+              const hash = providerId ? `#${mediaProviderPanelId(providerId)}` : '';
+              void openCantaroPage(`/media/providers${hash}`)
+                .catch(() => props.onNotice('Could not open connections.', 'error'));
+            }}
             onNavigateEntry={(id) => startTransition(() => setRoute({ kind: 'title', id }))}
           />
         ) : (

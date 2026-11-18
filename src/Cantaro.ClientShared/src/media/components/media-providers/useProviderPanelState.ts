@@ -24,6 +24,17 @@ function clearConnectSearchParams(): void {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
+function toMediaImportDto(event: MediaLibraryImportEventDto): MediaImportDto {
+  return {
+    providerId: event.providerId,
+    importedCount: event.importedCount,
+    createdTitles: event.createdTitles,
+    createdEntries: event.createdEntries,
+    updatedEntries: event.updatedEntries,
+    importedAt: event.occurredAt,
+  };
+}
+
 function useProviderStatus(providerId: string) {
   const [status, setStatus] = useState<MediaProviderAccountStatusDto | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
@@ -59,6 +70,8 @@ function useProviderStatus(providerId: string) {
 function useProviderImport(providerId: string, setError: (error: string | null) => void) {
   const [isImporting, setIsImporting] = useState(false);
   const [lastImport, setLastImport] = useState<MediaImportDto | null>(null);
+  const mountedRef = useRef(true);
+  const importAbortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let eventSource: EventSource | null = null;
@@ -78,15 +91,7 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
         }
 
         if (event.status === 'completed') {
-          const result = {
-            providerId: event.providerId,
-            importedCount: event.importedCount,
-            createdTitles: event.createdTitles,
-            createdEntries: event.createdEntries,
-            updatedEntries: event.updatedEntries,
-            importedAt: event.occurredAt,
-          };
-          setLastImport(result);
+          setLastImport(toMediaImportDto(event));
           writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
           setIsImporting(false);
           return;
@@ -94,6 +99,12 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
 
         if (event.status === 'failed') {
           setError('The provider could not be refreshed. Try again when the provider is available.');
+          setIsImporting(false);
+          return;
+        }
+
+        if (event.status === 'reconnect_required') {
+          setError('Reconnect this provider in Settings to refresh its library.');
           setIsImporting(false);
         }
       },
@@ -103,7 +114,13 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
         }
       },
     ).then((source) => {
-      eventSource = source;
+      if (isMounted) eventSource = source;
+      else source.close();
+    }).catch(() => {
+      if (isMounted) {
+        setError('Cantaro couldn’t check this provider’s refresh status.');
+        setIsImporting(false);
+      }
     });
 
     return () => {
@@ -112,16 +129,40 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
     };
   }, [providerId, setError]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      importAbortControllerRef.current?.abort();
+      importAbortControllerRef.current = null;
+    };
+  }, []);
+
   const handleImport = useCallback(async (): Promise<MediaImportRequestDto | null> => {
+    if (importAbortControllerRef.current) return null;
+    const abortController = new AbortController();
+    importAbortControllerRef.current = abortController;
     setIsImporting(true);
     setError(null);
 
     try {
-      return await mediaApi.importLibrary(providerId);
-    } catch {
-      setError('The provider could not be refreshed. Try again when the provider is available.');
-      setIsImporting(false);
+      const event = await mediaApi.importLibraryAndWait(providerId, abortController.signal);
+      if (!mountedRef.current) return null;
+      setLastImport(toMediaImportDto(event));
+      writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
+      return { providerId, importId: event.importId, status: event.status };
+    } catch (error) {
+      if (mountedRef.current && !abortController.signal.aborted) {
+        setError((error as { code?: string } | null)?.code === 'platform_reconnect_required'
+          ? 'Reconnect this provider in Settings to refresh its library.'
+          : 'The provider could not be refreshed. Try again when the provider is available.');
+      }
       return null;
+    } finally {
+      if (importAbortControllerRef.current === abortController) {
+        importAbortControllerRef.current = null;
+        if (mountedRef.current) setIsImporting(false);
+      }
     }
   }, [providerId, setError]);
 

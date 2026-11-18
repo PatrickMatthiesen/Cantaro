@@ -2,7 +2,7 @@ import {
     normalizeMediaApiBaseUrl,
     resolveMediaApiRuntimeConfig,
 } from './mediaApi.runtime';
-import { createMediaApiConnectionError, mediaApiErrorFromStatus } from './mediaApi.errors';
+import { createMediaApiConnectionError, MediaApiError, mediaApiErrorFromStatus } from './mediaApi.errors';
 import { mediaProviderCatalog } from './mediaProviders';
 import type {
     MediaApiRuntimeConfig,
@@ -32,6 +32,8 @@ import type {
     ResolveMediaObservationDto,
     MediaStatusUpdateDto,
 } from './mediaApi.types';
+
+const libraryImportTimeoutMs = 120_000;
 
 export class MediaApiClient {
     private async getRuntimeConfig(): Promise<MediaApiRuntimeConfig> {
@@ -244,12 +246,66 @@ export class MediaApiClient {
         return response.json() as Promise<MediaInitialSyncApplyResultDto>;
     }
 
-    async importLibrary(providerId: string): Promise<MediaImportRequestDto> {
+    async importLibrary(providerId: string, signal?: AbortSignal): Promise<MediaImportRequestDto> {
         const response = await this.request(`/api/media/providers/${encodeURIComponent(providerId)}/import`, {
             method: 'POST',
+            signal,
         });
         await this.ensureOk(response, 'Failed to import media library');
         return response.json() as Promise<MediaImportRequestDto>;
+    }
+
+    importLibraryAndWait(providerId: string, signal?: AbortSignal): Promise<MediaLibraryImportEventDto> {
+        return new Promise((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(signal.reason);
+                return;
+            }
+
+            const requestController = new AbortController();
+            const providerName = mediaProviderCatalog.find(provider => provider.id === providerId)?.name ?? 'the provider';
+            let eventSource: EventSource | undefined;
+            let settled = false;
+            const settle = (finish: () => void) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                signal?.removeEventListener('abort', abort);
+                requestController.abort();
+                eventSource?.close();
+                finish();
+            };
+            const abort = () => settle(() => reject(signal?.reason));
+            const timeout = setTimeout(
+                () => settle(() => reject(new Error('Reload is taking longer than expected. Try again.'))),
+                libraryImportTimeoutMs,
+            );
+            signal?.addEventListener('abort', abort, { once: true });
+
+            const reconnect = () => settle(() => reject(new MediaApiError(
+                'request', `Reconnect ${providerName} in Settings to refresh its library.`,
+                { code: 'platform_reconnect_required', retryable: false },
+            )));
+
+            void this.importLibrary(providerId, requestController.signal)
+                .then(async ({ importId }) => {
+                    if (settled) return;
+                    const source = await this.subscribeToImportEvents(providerId, importId, (event) => {
+                        if (event.status === 'completed') settle(() => resolve(event));
+                        if (event.status === 'failed') {
+                            settle(() => reject(new Error(`Could not refresh ${providerName}. Try again.`)));
+                        }
+                        if (event.status === 'reconnect_required') reconnect();
+                    }, () => settle(() => reject(createMediaApiConnectionError())));
+
+                    if (settled) source.close();
+                    else eventSource = source;
+                })
+                .catch((error: unknown) => {
+                    if (error instanceof MediaApiError && error.code === 'platform_reconnect_required') reconnect();
+                    else settle(() => reject(error));
+                });
+        });
     }
 
     async subscribeToImportEvents(

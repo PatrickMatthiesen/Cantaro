@@ -38,6 +38,10 @@ export const mediaProviderCatalog: MediaProviderCatalogEntry[] = [
 
 export const mainMediaProviderId = mediaProviderCatalog[0]?.id ?? 'anilist';
 
+export function mediaProviderPanelId(providerId: string): string {
+  return `media-provider-${providerId}`;
+}
+
 export function mediaProviderIconId(providerId?: string): MediaProviderId | undefined {
   if (!providerId) {
     return undefined;

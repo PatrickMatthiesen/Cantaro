@@ -5,6 +5,7 @@ import {
   MediaEntryDetailPage,
   MediaLibraryPage,
   MediaObservationReviewPage,
+  mediaProviderPanelId,
   type DetailTabId,
   type MediaLibraryQueryParams,
 } from '@cantaro/client-shared/media';
@@ -99,7 +100,10 @@ export function MediaLibraryRoutePage() {
       filterDefaults={filterDefaults}
       onFiltersChange={updateFilters}
       onHeadingChange={setHeading}
-      onNavigateProviders={() => void navigate({ to: '/media/providers' })}
+      onNavigateProviders={(providerId) => void navigate({
+        to: '/media/providers',
+        hash: providerId ? mediaProviderPanelId(providerId) : undefined,
+      })}
       onNavigateEntry={(id) => void navigate({ to: '/media/$mediaTitleId', params: { mediaTitleId: id } })}
     />
   );
@@ -107,6 +111,7 @@ export function MediaLibraryRoutePage() {
 
 export function MediaProvidersRoutePage() {
   const navigate = useNavigate();
+  const hash = useRouterState({ select: (state) => state.location.hash });
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
     title: 'Media providers',
@@ -118,6 +123,7 @@ export function MediaProvidersRoutePage() {
     <RequireAuth>
       <MediaProvidersPage
         embedded
+        hash={hash}
         onNavigateLibrary={() => void navigate({ to: '/media/library' })}
       />
     </RequireAuth>

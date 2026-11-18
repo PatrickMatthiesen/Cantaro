@@ -8,7 +8,7 @@ import type { MediaLibraryFilterDefaults } from '../components/media-library/use
 import type { MediaLibraryQueryParams } from '../services/mediaApi';
 
 interface MediaLibraryPageProps {
-  onNavigateProviders?: () => void;
+  onNavigateProviders?: (providerId?: string) => void;
   onNavigateEntry: (id: string) => void;
   onHeadingChange?: (heading: MediaPageHeading) => void;
   density?: MediaLibraryDensity;
@@ -59,15 +59,19 @@ export function MediaLibraryPage({
       <LibraryFiltersPanel
         searchQuery={search.searchQuery}
         filters={library.filters}
-        providerStatus={library.providerStatus}
-        isRefreshing={library.isRefreshing}
+        refreshAction={{
+          canRefresh: library.canRefresh,
+          syncingProviderIds: library.syncingProviderIds,
+          reconnectProviderId: library.reconnectProviderId,
+          onReconnect: onNavigateProviders,
+          onRefresh: library.refreshFromRemote,
+        }}
         onSearchQueryChange={search.setSearchQuery}
         onUpdateFilter={library.updateFilter}
         onCollectionChange={library.updateCollection}
         onClearAdvancedFilters={library.clearAdvancedFilters}
         onUpdateProviderFilter={library.updateProviderFilter}
         onToggleSortDir={library.toggleSortDir}
-        onRefreshFromRemote={library.refreshFromRemote}
       />
       <LibraryContentSection
         error={library.error}
@@ -79,7 +83,7 @@ export function MediaLibraryPage({
         totalPages={library.totalPages}
         onRetry={() => library.loadLibrary(library.filters)}
         onNavigateEntry={onNavigateEntry}
-        onNavigateProviders={onNavigateProviders}
+        onNavigateProviders={onNavigateProviders ? () => onNavigateProviders() : undefined}
         onPreviousPage={library.goToPreviousPage}
         onNextPage={library.goToNextPage}
         density={density}
