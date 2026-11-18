@@ -1362,7 +1362,7 @@ public class YouTubeService : IYouTubePlaylistClient
         if (credential is Google.Apis.Http.IHttpUnsuccessfulResponseHandler handler)
             service.HttpClient.MessageHandler.RemoveUnsuccessfulResponseHandler(handler);
         service.HttpClient.MessageHandler.AddUnsuccessfulResponseHandler(new AccessRejectionHandler(
-            ct => ProviderReconnectState.MarkAsync(_dbContext, account, "access_token_rejected", ct)));
+            ct => ProviderReconnectState.MarkOrAlreadyRequiredAsync(_dbContext, account, "access_token_rejected", ct)));
         return service;
     }
     internal sealed class AccessRejectionHandler(Func<CancellationToken, Task<bool>> markRejected)

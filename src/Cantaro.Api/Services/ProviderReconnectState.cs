@@ -28,4 +28,14 @@ internal static class ProviderReconnectState
         if (account.ConnectionState != "connected")
             throw new PlatformReconnectRequiredException($"Reconnect {account.Service} to continue.");
     }
+
+    internal static async Task<bool> MarkOrAlreadyRequiredAsync(ApplicationDbContext caller,
+        ConnectedServiceAccount account, string reason, CancellationToken ct)
+    {
+        if (await MarkAsync(caller, account, reason, ct)) return true;
+        await using var db = PlaylistReadIngestion.CreateContext(caller);
+        return await db.ConnectedServiceAccounts.AnyAsync(item => item.Id == account.Id
+            && item.UserId == account.UserId && item.Service == account.Service
+            && item.ExternalAccountId == account.ExternalAccountId && item.ConnectionState == "reconnect_required", ct);
+    }
 }

@@ -69,8 +69,10 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
         Assert.Equal("youtube-created", (await scenario.Db.ServicePlaylistMappings.SingleAsync()).ServicePlaylistId);
     }
 
-    [PostgresFact]
-    public async Task InboundImport_ReconnectAfterPrecheckKeepsCheckpointAndResumesThroughCoordinator()
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InboundImport_ReconnectAfterPrecheckKeepsCheckpointAndResumesThroughCoordinator(bool concurrentRejection)
     {
         await using var scenario = await Scenario.CreateAsync();
         var track = scenario.AddTrack("A");
@@ -86,10 +88,22 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
         };
         scenario.Db.MusicSyncJobs.Add(job);
         await scenario.SaveAsync();
+        if (concurrentRejection)
+        {
+            var stale = await scenario.Db.ConnectedServiceAccounts.AsNoTracking().SingleAsync(item => item.Id == 7);
+            scenario.Provider("youtube").BeforeRead = async () =>
+            {
+                Assert.True(await ProviderReconnectState.MarkAsync(scenario.Db, stale, "access_token_rejected", default));
+                var rejection = new YouTubeService.AccessRejectionHandler(ct =>
+                    ProviderReconnectState.MarkOrAlreadyRequiredAsync(scenario.Db, stale, "access_token_rejected", ct));
+                using var response = new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized);
+                await rejection.HandleResponseAsync(new() { Response = response, CancellationToken = default });
+            };
+        }
         var saves = 0;
         scenario.Db.SavedChanges += (_, _) =>
         {
-            if (++saves == 2) scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
+            if (++saves == 2 && !concurrentRejection) scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
                 .ExecuteUpdate(set => set.SetProperty(item => item.ConnectionState, "reconnect_required"));
         };
         var platform = new YouTubePlatformService(new YouTubeService(new ConfigurationBuilder().Build(), scenario.Db,
@@ -106,6 +120,7 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
         Assert.False(await processor.ProcessNextAsync(default));
         await scenario.Db.ConnectedServiceAccounts.Where(item => item.Id == 7)
             .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        scenario.Provider("youtube").BeforeRead = null;
         Assert.True(await processor.ProcessNextAsync(default));
         var resumed = await scenario.Db.MusicSyncJobs.AsNoTracking().SingleAsync();
         Assert.Equal(MusicSyncJobStatuses.Completed, resumed.Status);

@@ -45,7 +45,7 @@ public sealed partial class PlaylistSyncCoordinatorPostgresTests
                     DefaultExponentialBackOffPolicy = ExponentialBackOffPolicy.None
                 });
                 sdk.HttpClient.MessageHandler.AddUnsuccessfulResponseHandler(new YouTubeService.AccessRejectionHandler(
-                    ct => ProviderReconnectState.MarkAsync(scenario.Db, connected, "access_token_rejected", ct)));
+                    ct => ProviderReconnectState.MarkOrAlreadyRequiredAsync(scenario.Db, connected, "access_token_rejected", ct)));
                 return Task.FromResult(sdk);
             });
         var writer = new YouTubePlaylistWriter(youtube);

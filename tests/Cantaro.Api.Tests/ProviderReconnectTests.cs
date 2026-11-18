@@ -13,6 +13,35 @@ namespace Cantaro.Api.Tests;
 public sealed class ProviderReconnectTests
 {
     [PostgresTheory]
+    [InlineData("already_rejected", true)]
+    [InlineData("recovered", false)]
+    [InlineData("replacement", false)]
+    public async Task ConcurrentAccessRejection_ObservesBlockedIdentityWithoutChangingNewCredentials(string state, bool reconnect)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var account = await AddAccountAsync(schema.Db);
+        Assert.True(await ProviderReconnectState.MarkAsync(schema.Db, account, "access_token_rejected", default));
+        if (state != "already_rejected")
+            await schema.Db.ConnectedServiceAccounts.Where(item => item.Id == account.Id).ExecuteUpdateAsync(set => set
+                .SetProperty(item => item.ConnectionState, state == "recovered" ? "connected" : "reconnect_required")
+                .SetProperty(item => item.ExternalAccountId, state == "replacement" ? "replacement" : account.ExternalAccountId)
+                .SetProperty(item => item.EncryptedRefreshToken, "new-refresh")
+                .SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1));
+        var before = await schema.Db.ConnectedServiceAccounts.AsNoTracking().SingleAsync();
+        var handler = new YouTubeService.AccessRejectionHandler(
+            ct => ProviderReconnectState.MarkOrAlreadyRequiredAsync(schema.Db, account, "access_token_rejected", ct));
+        using var response = new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized);
+        var failure = await Record.ExceptionAsync(() => handler.HandleResponseAsync(new()
+            { Response = response, CancellationToken = default }));
+        Assert.Equal(reconnect, failure is PlatformReconnectRequiredException);
+        var after = await schema.Db.ConnectedServiceAccounts.AsNoTracking().SingleAsync();
+        Assert.Equal(before.TokenVersion, after.TokenVersion);
+        Assert.Equal(before.ConnectionState, after.ConnectionState);
+        Assert.Equal(before.ExternalAccountId, after.ExternalAccountId);
+        Assert.Equal(before.EncryptedRefreshToken, after.EncryptedRefreshToken);
+    }
+
+    [PostgresTheory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task OptionalMetadata_DoesNotHideCancellationOrUnrelatedPlatformErrors(bool cancelled)
@@ -109,7 +138,7 @@ public sealed class ProviderReconnectTests
         await using var schema = await PostgresTestSchema.CreateAsync();
         var account = await AddAccountAsync(schema.Db);
         var handler = new YouTubeService.AccessRejectionHandler(
-            ct => ProviderReconnectState.MarkAsync(schema.Db, account, "access_token_rejected", ct));
+            ct => ProviderReconnectState.MarkOrAlreadyRequiredAsync(schema.Db, account, "access_token_rejected", ct));
         using var response = new HttpResponseMessage((System.Net.HttpStatusCode)status);
         var args = new Google.Apis.Http.HandleUnsuccessfulResponseArgs { Response = response, CancellationToken = default };
         var failure = await Record.ExceptionAsync(() => handler.HandleResponseAsync(args));
