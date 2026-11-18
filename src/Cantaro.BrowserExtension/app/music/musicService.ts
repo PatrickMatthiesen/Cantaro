@@ -1,9 +1,10 @@
 import type { MusicLibraryResponse, MusicLibrarySong } from '@cantaro/client-shared/music';
 import { cantaroApiClient } from '../../platform/api/cantaroApiClient';
-import { browserSettingsRepository } from '../../platform/settings/settingsRepository';
 import type { LyricsResult } from './musicLyrics';
 
 import { getLocalLyrics } from '../../features/music/musicLyricsProvider';
+
+export { openCantaroPage } from '../shell/openCantaroPage';
 
 function playlistMutationQuery(youtubeVideoId?: string, entryId?: string) {
   const query = new URLSearchParams();
@@ -34,9 +35,4 @@ export async function removeSongFromPlaylist(trackId: string, playlistId: string
 
 export async function loadSongLyrics(song: MusicLibrarySong, signal?: AbortSignal): Promise<LyricsResult> {
   return getLocalLyrics(song, signal);
-}
-
-export async function openCantaroPage(path: string) {
-  const settings = await browserSettingsRepository.read();
-  await browser.tabs.create({ url: `${settings.baseUrl}${path}` });
 }

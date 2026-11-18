@@ -30,7 +30,7 @@ public sealed class MediaLibraryImportWorker(
             {
                 paused = true;
                 _importQueue.Pause(workItem);
-                Publish(workItem, "queued");
+                Publish(workItem, "reconnect_required");
             }
             catch (Exception ex)
             {
@@ -46,8 +46,6 @@ public sealed class MediaLibraryImportWorker(
 
     private async Task ProcessAsync(MediaLibraryImportWorkItem workItem, CancellationToken cancellationToken)
     {
-        Publish(workItem, "running");
-
         using var scope = _serviceScopeFactory.CreateScope();
         var registry = scope.ServiceProvider.GetRequiredService<IMediaProviderRegistry>();
         var importService = scope.ServiceProvider.GetRequiredService<MediaLibraryImportService>();
@@ -62,6 +60,7 @@ public sealed class MediaLibraryImportWorker(
         if (workItem.AccountId != account.Id || workItem.ExternalAccountId != account.ExternalAccountId)
             throw new PlatformApiException("platform_account_changed", "The connected account changed. Start a new import for this account.", 409);
         ProviderReconnectState.RequireUsable(account);
+        Publish(workItem, "running");
         var importResult = await provider.ImportLibraryAsync(workItem.UserId, cancellationToken);
         var persisted = await importService.ImportAsync(workItem.UserId, account, importResult, cancellationToken);
         if (provider is IMediaRelationGraphProvider relationProvider)

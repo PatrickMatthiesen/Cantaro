@@ -29,12 +29,10 @@ export function useSessionVerification({ settings, session, onSession, onEmail, 
       .then((result) => {
         if (!active) return;
         onSession(result.session);
-        onEmail(result.user?.email ?? null);
+        onEmail(result.session ? (result.user?.email ?? result.session.email) || null : null);
       })
       .catch(() => {
-        if (!active) return;
-        onSession(null);
-        onEmail(null);
+        // A failed request leaves the saved session available for the next check.
       })
       .finally(() => {
         if (active) onChecking(false);

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { runtimeAccessTokenProvider } from '../../platform/auth/runtimeAuthClient';
 import type { ExtensionSettings } from '../../platform/settings/extensionSettings';
+import { applyPopupTheme } from './popupTheme';
 
 type ProfilePreferencesResponse = {
   preferences?: {
@@ -13,7 +14,7 @@ type ProfilePreferencesResponse = {
 type ExtensionProfilePreferences = {
   blurEmailAddress: boolean;
   disabledWatchProviders: string[];
-  theme: 'light' | 'dark';
+  theme: 'system' | 'light' | 'dark';
 };
 
 const defaultProfilePreferences = {
@@ -21,11 +22,6 @@ const defaultProfilePreferences = {
   disabledWatchProviders: [] as string[],
   theme: 'system' as const,
 };
-
-function resolveTheme(preference: 'system' | 'light' | 'dark'): 'light' | 'dark' {
-  if (preference !== 'system') return preference;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
 
 async function loadProfilePreferences(settings: ExtensionSettings) {
   const accessToken = await runtimeAccessTokenProvider.getAccessToken(settings.baseUrl);
@@ -39,24 +35,16 @@ async function loadProfilePreferences(settings: ExtensionSettings) {
   return {
     blurEmailAddress: preferences.blurEmailAddress,
     disabledWatchProviders: preferences.disabledWatchProviders,
-    theme: resolveTheme(preferences.theme),
+    theme: preferences.theme,
   };
 }
 
-async function applyProfilePreferences(preferences: ExtensionProfilePreferences) {
-  await browser.storage.local.set({
-    blurEmailAddress: preferences.blurEmailAddress,
-    cantaroTheme: preferences.theme,
-  });
-  document.documentElement.dataset.theme = preferences.theme;
-}
-
 async function readStoredBlurPreference() {
-  const stored = await browser.storage.local.get('blurEmailAddress');
+  const stored: Record<string, unknown> = await browser.storage.local.get('blurEmailAddress').catch(() => ({}));
   return typeof stored.blurEmailAddress === 'boolean' ? stored.blurEmailAddress : true;
 }
 
-export function useProfilePreferences(settings: ExtensionSettings, configured: boolean, onPreferences: (preferences: ExtensionProfilePreferences) => void) {
+export function useProfilePreferences(settings: ExtensionSettings, configured: boolean, onPreferences: (preferences: Omit<ExtensionProfilePreferences, 'theme'>) => void) {
   useEffect(() => {
     if (!configured) return;
     let active = true;
@@ -65,11 +53,15 @@ export function useProfilePreferences(settings: ExtensionSettings, configured: b
       .then((preferences) => {
         if (!active) return;
         onPreferences(preferences);
-        void applyProfilePreferences(preferences);
+        applyPopupTheme(preferences.theme);
+        void browser.storage.local.set({
+          blurEmailAddress: preferences.blurEmailAddress,
+          cantaroTheme: preferences.theme,
+        }).catch(() => undefined);
       })
       .catch(() => {
         void readStoredBlurPreference().then((blur) => {
-          if (active) onPreferences({ blurEmailAddress: blur, disabledWatchProviders: [], theme: 'light' });
+          if (active) onPreferences({ blurEmailAddress: blur, disabledWatchProviders: [] });
         });
       });
 

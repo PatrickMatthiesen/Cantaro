@@ -17,8 +17,12 @@ const allowed = { ...denied, needsReview: false, watchTrackingAllowed: true };
 let root: Root;
 let current: ReturnType<typeof useCollectionConsent>;
 let notify: (status: ConsentStatus) => void;
-function Harness({ url, configured = true }: { url: string; configured?: boolean }) {
-  current = useCollectionConsent(url, configured);
+function Harness({ url, configured = true, settingsReady = true }: {
+  url: string;
+  configured?: boolean;
+  settingsReady?: boolean;
+}) {
+  current = useCollectionConsent(url, configured, settingsReady);
   return null;
 }
 
@@ -35,6 +39,19 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
 
 describe('collection consent popup state', () => {
+  it('waits for the saved server before asking for collection choices on open', async () => {
+    await act(async () => root.render(createElement(Harness, {
+      url: 'https://default.example', configured: false, settingsReady: false,
+    })));
+    expect(current.loading).toBe(true);
+    expect(runtime.getRuntimeConsentStatus).not.toHaveBeenCalled();
+
+    runtime.getRuntimeConsentStatus.mockResolvedValue(allowed);
+    await act(async () => root.render(createElement(Harness, { url: 'https://saved.example' })));
+    expect(runtime.getRuntimeConsentStatus).toHaveBeenCalledExactlyOnceWith('https://saved.example');
+    expect(current.status).toEqual(allowed);
+  });
+
   it('keeps the consent form mounted while refreshing status after sign-in', async () => {
     const url = 'https://api.example';
     runtime.getRuntimeConsentStatus.mockResolvedValue({ ...denied, authenticated: false });

@@ -86,13 +86,18 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Install Aspire CLI
+        run: |
+          curl -fsSL https://aspire.dev/install.sh | bash -s -- --version 17.0.0
+          echo "$HOME/.aspire/bin" >> "$GITHUB_PATH"
 
       - name: Restore
         run: dotnet restore
 
       - name: Build
-        run: dotnet build --configuration Release --no-restore -p:AspireUseCliBundle=false
+        run: dotnet build --configuration Release --no-restore
 
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal

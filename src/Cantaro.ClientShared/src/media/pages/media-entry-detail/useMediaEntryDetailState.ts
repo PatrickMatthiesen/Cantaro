@@ -18,7 +18,6 @@ import {
 } from '../../services/mediaRefreshCache';
 import type {
   MediaEntryDetailModel,
-  MediaLibraryImportEventDto,
   MediaProviderLinkSummaryDto,
   MediaProviderTitleDetailsDto,
   MediaTitleDetailDto,
@@ -28,11 +27,14 @@ import type {
 import type { ContinueWatchingState, EpisodeCatalogState, StatusDraft } from './mediaEntryDetailTypes';
 import { mergeTitleMetadata } from './mediaEntryDetailModel';
 
-function getErrorMessage(error: unknown, fallbackMessage: string): string {
-  return error instanceof Error ? error.message : fallbackMessage;
-}
-function getPrefixedErrorMessage(error: unknown, fallbackMessage: string): string {
-  return `Error: ${getErrorMessage(error, fallbackMessage)}`;
+const getErrorMessage = (error: unknown, fallbackMessage: string) =>
+  error instanceof Error ? error.message : fallbackMessage;
+const getPrefixedErrorMessage = (error: unknown, fallbackMessage: string) =>
+  `Error: ${getErrorMessage(error, fallbackMessage)}`;
+function getImportErrorMessage(error: unknown, fallbackMessage: string): string {
+  const errorCode = (error as { code?: string } | null)?.code;
+  return errorCode === 'platform_reconnect_required'
+    ? 'Reconnect this provider in Settings to refresh its library.' : fallbackMessage;
 }
 
 function buildAvailabilityMap(
@@ -506,84 +508,40 @@ export function useRemoteEntryRefresh(
   showSnackbar: ShowSnackbar,
 ) {
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
-  const refreshInFlightRef = useRef(false);
   const entryId = entry?.id;
   const entryProvider = entry?.provider;
   const entryIsConnected = entry?.isConnected;
 
   useEffect(() => {
-    if (!entryId || !entryIsConnected || refreshInFlightRef.current) {
-      return;
-    }
-
     const refreshProviderId = entryProvider || mainMediaProviderId;
-    if (!isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(refreshProviderId)))) {
+    if (!entryId || !entryIsConnected
+      || !isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(refreshProviderId)))) {
+      setIsRefreshingRemote(false);
       return;
     }
 
-    let isCancelled = false;
-    let eventSource: EventSource | null = null;
+    const abortController = new AbortController();
 
     const refreshFromRemote = async () => {
-      refreshInFlightRef.current = true;
       setIsRefreshingRemote(true);
 
       try {
-        const importRequest = await mediaApi.importLibrary(refreshProviderId);
-        if (isCancelled) return;
-
-        eventSource = await mediaApi.subscribeToImportEvents(
-          refreshProviderId,
-          importRequest.importId,
-          (event: MediaLibraryImportEventDto) => {
-            if (isCancelled) {
-              return;
-            }
-
-            if (event.status === 'completed') {
-              writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
-              void reloadEntry();
-              refreshInFlightRef.current = false;
-              setIsRefreshingRemote(false);
-              eventSource?.close();
-              return;
-            }
-
-            if (event.status === 'failed') {
-              showSnackbar({
-                message: event.errorMessage || 'Failed to refresh entry',
-                variant: 'error',
-              });
-              refreshInFlightRef.current = false;
-              setIsRefreshingRemote(false);
-              eventSource?.close();
-            }
-          },
-          () => {
-            if (!isCancelled) {
-              refreshInFlightRef.current = false;
-              setIsRefreshingRemote(false);
-            }
-          },
-        );
+        const event = await mediaApi.importLibraryAndWait(refreshProviderId, abortController.signal);
+        if (abortController.signal.aborted) return;
+        writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
+        await reloadEntry();
       } catch (refreshError) {
-        if (!isCancelled) {
-          showSnackbar({
-            message: getPrefixedErrorMessage(refreshError, 'Failed to refresh entry'),
-            variant: 'error',
-          });
-          refreshInFlightRef.current = false;
-          setIsRefreshingRemote(false);
-        }
+        if (!abortController.signal.aborted) showSnackbar({
+          message: getImportErrorMessage(refreshError, 'Could not refresh this entry. Try again.'),
+          variant: 'error',
+        });
+      } finally {
+        if (!abortController.signal.aborted) setIsRefreshingRemote(false);
       }
     };
 
     void refreshFromRemote();
-
-    return () => {
-      isCancelled = true;
-      eventSource?.close();
-    };
+    return () => abortController.abort();
   }, [entryId, entryIsConnected, entryProvider, reloadEntry, showSnackbar]);
 
   return isRefreshingRemote;
@@ -595,48 +553,43 @@ export function useManualRemoteRefresh(
   showSnackbar: ShowSnackbar,
 ) {
   const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const entryId = entry?.id;
+
+  useEffect(() => {
+    setIsRefreshingRemote(false);
+    return () => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    };
+  }, [entryId]);
 
   const handleRefreshFromProvider = useCallback(async () => {
-    if (!entry?.isConnected) {
+    if (!entry?.isConnected || abortControllerRef.current) {
       return;
     }
 
     const refreshProviderId = entry.provider || mainMediaProviderId;
-    let eventSource: EventSource | null = null;
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     setIsRefreshingRemote(true);
 
     try {
-      const importRequest = await mediaApi.importLibrary(refreshProviderId);
-      eventSource = await mediaApi.subscribeToImportEvents(
-        refreshProviderId,
-        importRequest.importId,
-        (event: MediaLibraryImportEventDto) => {
-          if (event.status === 'completed') {
-            writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
-            void reloadEntry();
-            showSnackbar({ message: 'Status refreshed from provider', variant: 'success' });
-            setIsRefreshingRemote(false);
-            eventSource?.close();
-            return;
-          }
-
-          if (event.status === 'failed') {
-            showSnackbar({
-              message: event.errorMessage || 'Failed to refresh from provider',
-              variant: 'error',
-            });
-            setIsRefreshingRemote(false);
-            eventSource?.close();
-          }
-        },
-        () => setIsRefreshingRemote(false),
-      );
+      const event = await mediaApi.importLibraryAndWait(refreshProviderId, abortController.signal);
+      if (abortController.signal.aborted) return;
+      writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
+      await reloadEntry();
+      if (!abortController.signal.aborted) showSnackbar({ message: 'Status refreshed from provider', variant: 'success' });
     } catch (refreshError) {
-      showSnackbar({
-        message: getPrefixedErrorMessage(refreshError, 'Failed to refresh from provider'),
+      if (!abortController.signal.aborted) showSnackbar({
+        message: getImportErrorMessage(refreshError, 'Could not refresh from this provider. Try again.'),
         variant: 'error',
       });
-      setIsRefreshingRemote(false);
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+        setIsRefreshingRemote(false);
+      }
     }
   }, [entry, reloadEntry, showSnackbar]);
 

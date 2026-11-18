@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 
@@ -16,7 +17,7 @@ public static class AniListHttpClientRegistration
             client.Timeout = RequestTimeout;
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
-        });
+        }).UseSocketsHttpHandler((handler, _) => handler.AutomaticDecompression = DecompressionMethods.GZip);
 
         // Every physical GraphQL request must pass through AniListRequestGate. Retrying
         // below the gate defeats both its burst pacing and provider-wide cooldown.

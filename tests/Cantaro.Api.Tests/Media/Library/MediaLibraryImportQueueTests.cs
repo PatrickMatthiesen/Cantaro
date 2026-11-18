@@ -55,4 +55,30 @@ public class MediaLibraryImportQueueTests
 
         Assert.Equal(firstWorkItem.ImportId, secondWorkItem.ImportId);
     }
+
+    [Fact]
+    public async Task EnqueueAsync_RequeuesPausedImportWithTheSameId()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var queue = new MediaLibraryImportQueue();
+        var first = await queue.EnqueueAsync(123, "myanimelist", timeout.Token);
+        await using var queued = queue.ReadAllAsync(timeout.Token).GetAsyncEnumerator();
+        Assert.True(await queued.MoveNextAsync());
+        queue.Pause(queued.Current);
+        queue.Publish(123, new MediaLibraryImportEventDto
+        {
+            ProviderId = first.ProviderId,
+            ImportId = first.ImportId,
+            Status = "reconnect_required",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        var resumed = await queue.EnqueueAsync(123, "myanimelist", timeout.Token);
+
+        Assert.Same(first, resumed);
+        Assert.True(queue.TryGetLatestEvent(first.ImportId, out var latestEvent));
+        Assert.Equal("queued", latestEvent?.Status);
+        Assert.True(await queued.MoveNextAsync());
+        Assert.Same(first, queued.Current);
+    }
 }

@@ -1,6 +1,6 @@
 {
   "name": "cantaro-browser-extension",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Cantaro extension for music sync and rendered episode URL collection",
   "private": true,
   "type": "module",
@@ -32,7 +32,7 @@
     "@wxt-dev/module-react": "^1.2.2",
     "linkedom": "^0.18.15",
     "typescript": "~6.0.3",
-    "vitest": "^5.1.0",
+    "vitest": "^5.1.1",
     "wxt": "^0.21.5"
   }
 }

@@ -22,23 +22,38 @@ public sealed class MediaLibraryImportQueue
     {
         var key = GetImportKey(userId, providerId);
         var importId = Guid.NewGuid();
-        if (!_activeImports.TryAdd(key, importId))
+        while (!_activeImports.TryAdd(key, importId))
         {
-            return ValueTask.FromResult(new MediaLibraryImportWorkItem(_activeImports[key], userId, providerId));
+            if (!_activeImports.TryGetValue(key, out var activeId))
+            {
+                continue;
+            }
+
+            if (_paused.TryRemove(activeId, out var paused))
+            {
+                Queue(paused);
+                return ValueTask.FromResult(paused);
+            }
+
+            return ValueTask.FromResult(new MediaLibraryImportWorkItem(activeId, userId, providerId));
         }
 
         var workItem = new MediaLibraryImportWorkItem(importId, userId, providerId);
-        _latestEvents[importId] = new MediaLibraryImportEventDto
+        Queue(workItem);
+        return ValueTask.FromResult(workItem);
+    }
+
+    private void Queue(MediaLibraryImportWorkItem workItem)
+    {
+        Publish(workItem.UserId, new MediaLibraryImportEventDto
         {
-            ProviderId = providerId,
-            ImportId = importId,
+            ProviderId = workItem.ProviderId,
+            ImportId = workItem.ImportId,
             Status = "queued",
             OccurredAt = DateTimeOffset.UtcNow
-        };
+        });
 
         _queue.Writer.TryWrite(workItem);
-
-        return ValueTask.FromResult(workItem);
     }
 
     public async IAsyncEnumerable<MediaLibraryImportWorkItem> ReadAllAsync(

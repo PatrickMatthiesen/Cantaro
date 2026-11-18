@@ -1,4 +1,6 @@
-import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowDown, ArrowUp, RefreshCw, TriangleAlert } from 'lucide-react';
+import { mediaProviderCatalog } from '../../services/mediaProviders';
 
 export interface FilterOption {
   value: string;
@@ -91,25 +93,56 @@ export function LibraryProviderControl({
 }
 
 export interface LibraryRefreshActionProps {
-  isConnected: boolean;
-  isRefreshing: boolean;
+  canRefresh: boolean;
+  syncingProviderIds: readonly string[];
+  reconnectProviderId?: string;
+  onReconnect?: (providerId: string) => void;
   onRefresh: () => Promise<void>;
 }
 
-export function LibraryRefreshAction({ isConnected, isRefreshing, onRefresh }: LibraryRefreshActionProps) {
-  if (!isConnected) return null;
+function providerName(providerId: string): string {
+  return mediaProviderCatalog.find(provider => provider.id === providerId)?.name ?? providerId;
+}
 
+export function LibraryRefreshAction({ canRefresh, syncingProviderIds, reconnectProviderId, onReconnect, onRefresh }: LibraryRefreshActionProps) {
+  const [cycle, setCycle] = useState(0);
+  const pendingCount = syncingProviderIds.length;
+  useEffect(() => {
+    if (pendingCount < 2) return;
+    const timer = window.setInterval(() => setCycle(current => current + 1), 2_000);
+    return () => window.clearInterval(timer);
+  }, [pendingCount]);
+
+  const buttonClassName = 'inline-flex h-9 shrink-0 items-center gap-2 px-2 text-sm font-semibold transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
+  if (pendingCount > 0) {
+    const pendingNames = syncingProviderIds.map(providerName);
+    return (
+      <span className={`${buttonClassName} text-content-muted`}>
+        <RefreshCw className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden />
+        <span aria-hidden>Syncing {pendingNames[cycle % pendingCount]}…</span>
+        <span className="sr-only" role="status">Syncing {pendingNames.join(', ')}</span>
+      </span>
+    );
+  }
+  if (reconnectProviderId && onReconnect) {
+    const label = `Reconnect ${providerName(reconnectProviderId)}`;
+    return (
+      <button type="button" className={`${buttonClassName} w-9 justify-center text-warning-content`}
+        onClick={() => onReconnect(reconnectProviderId)} aria-label={label} title={label}>
+        <TriangleAlert className="size-4" aria-hidden />
+      </button>
+    );
+  }
+  if (!canRefresh) return null;
   return (
     <button
       type="button"
-      className="inline-flex h-9 items-center gap-2 px-2 text-sm font-semibold text-content-muted transition-colors hover:bg-surface-hover hover:text-content focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-45"
+      className={`${buttonClassName} text-content-muted hover:text-content`}
       onClick={() => void onRefresh()}
-      disabled={isRefreshing}
-      aria-busy={isRefreshing}
-      title="Reload the primary provider library"
+      title="Reload connected provider libraries"
     >
-      <RefreshCw className={`size-4 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden />
-      {isRefreshing ? 'Reloading…' : 'Reload'}
+      <RefreshCw className="size-4" aria-hidden />
+      Reload
     </button>
   );
 }

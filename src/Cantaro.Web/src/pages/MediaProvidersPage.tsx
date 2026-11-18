@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { MediaProviderIcon, ProviderPanel } from '@cantaro/client-shared/media';
+import { useEffect, type ReactNode } from 'react';
+import { MediaProviderIcon, mediaProviderPanelId, ProviderPanel } from '@cantaro/client-shared/media';
 import { ActionButton } from '@cantaro/client-shared/ui';
 import { mediaProviderCatalog } from '@cantaro/client-shared/media';
 
@@ -7,6 +7,7 @@ interface MediaProvidersPageProps {
   onNavigateLibrary?: () => void;
   navigation?: ReactNode;
   embedded?: boolean;
+  hash?: string;
 }
 
 function MediaProvidersHeader({
@@ -36,7 +37,28 @@ function MediaProvidersHeader({
   );
 }
 
-export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = false }: MediaProvidersPageProps) {
+export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = false, hash = '' }: MediaProvidersPageProps) {
+  useEffect(() => {
+    const encodedId = hash.startsWith('#') ? hash.slice(1) : hash;
+    if (!encodedId) return;
+
+    let panelId: string;
+    try {
+      panelId = decodeURIComponent(encodedId);
+    } catch {
+      return;
+    }
+
+    const provider = mediaProviderCatalog.find((item) => mediaProviderPanelId(item.id) === panelId);
+    if (!provider) return;
+
+    const target = document.getElementById(panelId);
+    if (!(target instanceof HTMLElement)) return;
+
+    target.scrollIntoView({ block: 'start', behavior: 'instant' });
+    target.focus({ preventScroll: true });
+  }, [hash]);
+
   const content = (
     <>
       {embedded && navigation ? (
@@ -50,13 +72,21 @@ export function MediaProvidersPage({ onNavigateLibrary, navigation, embedded = f
 
       <section className="divide-y divide-border-subtle border-b border-border-subtle" aria-label="Media provider accounts">
         {mediaProviderCatalog.map((provider) => (
-          <ProviderPanel
+          <div
             key={provider.id}
-            providerId={provider.id}
-            name={provider.name}
-            icon={<MediaProviderIcon providerId={provider.iconId} className="h-12 w-12" aria-hidden />}
-            description={provider.description}
-          />
+            id={mediaProviderPanelId(provider.id)}
+            tabIndex={-1}
+            role="region"
+            aria-label={`${provider.name} connection`}
+            className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            <ProviderPanel
+              providerId={provider.id}
+              name={provider.name}
+              icon={<MediaProviderIcon providerId={provider.iconId} className="h-12 w-12" aria-hidden />}
+              description={provider.description}
+            />
+          </div>
         ))}
       </section>
     </>

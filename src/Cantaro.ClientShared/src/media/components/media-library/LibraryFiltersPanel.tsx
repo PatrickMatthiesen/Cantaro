@@ -8,11 +8,11 @@ import {
   LibrarySortControls,
   LibraryStatusControl,
 } from './LibraryFilterControls';
-import type { FilterOption } from './LibraryFilterControls';
+import type { FilterOption, LibraryRefreshActionProps } from './LibraryFilterControls';
 import { mediaLibraryStatusLabel } from './mediaLibraryStatus';
 import { mediaFormatLabel } from '../../services/mediaFormatting';
 import { mediaProviderCatalog } from '../../services/mediaProviders';
-import type { MediaLibraryQueryParams, MediaProviderAccountStatusDto } from '../../services/mediaApi';
+import type { MediaLibraryQueryParams } from '../../services/mediaApi';
 
 const COLLECTION_OPTIONS = [
   { value: 'film-tv', label: 'Film & TV' },
@@ -51,23 +51,21 @@ function formatOptions(collection: string): FilterOption[] {
 export interface LibraryFiltersPanelProps {
   searchQuery: string;
   filters: MediaLibraryQueryParams;
-  providerStatus: MediaProviderAccountStatusDto | null;
-  isRefreshing: boolean;
+  refreshAction: LibraryRefreshActionProps;
   onSearchQueryChange: (query: string) => void;
   onUpdateFilter: <K extends keyof MediaLibraryQueryParams>(key: K, value: MediaLibraryQueryParams[K]) => void;
   onCollectionChange: (collection: string) => void;
   onClearAdvancedFilters: () => void;
   onUpdateProviderFilter: (provider: string | undefined) => void;
   onToggleSortDir: () => void;
-  onRefreshFromRemote: () => Promise<void>;
 }
 
 const filtersOpenKey = 'cantaro.media.library.filtersOpen';
 
 export function LibraryFiltersPanel({
-  searchQuery, filters, providerStatus, isRefreshing, onSearchQueryChange,
+  searchQuery, filters, refreshAction, onSearchQueryChange,
   onUpdateFilter, onCollectionChange, onClearAdvancedFilters,
-  onUpdateProviderFilter, onToggleSortDir, onRefreshFromRemote,
+  onUpdateProviderFilter, onToggleSortDir,
 }: LibraryFiltersPanelProps) {
   const collection = filters.collection ?? 'film-tv';
   const [filtersOpen, setFiltersOpen] = useState(() => readStoredValue(filtersOpenKey) === 'true');
@@ -88,7 +86,7 @@ export function LibraryFiltersPanel({
 
   return (
     <section aria-label="Library filters" className="@container/library border-y border-border-subtle py-2">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <label className="@min-[28rem]/library:hidden">
           <span className="sr-only">Collection</span>
           <select value={collection} onChange={(event) => onCollectionChange(event.target.value)} className="h-9 w-30 border border-border-strong bg-surface px-2 text-sm font-semibold text-content">
@@ -104,6 +102,9 @@ export function LibraryFiltersPanel({
           ))}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {!filtersOpen && (refreshAction.syncingProviderIds.length > 0 || refreshAction.reconnectProviderId) ? (
+            <LibraryRefreshAction {...refreshAction} />
+          ) : null}
           {!filtersOpen ? (
             <>
               <div className="hidden @min-[36rem]/library:contents">{statusControl}</div>
@@ -133,7 +134,7 @@ export function LibraryFiltersPanel({
             {formatControl}
             {sortControls}
             <LibraryProviderControl providerValue={filters.provider ?? ''} providerOptions={providerOptions} onProviderChange={onUpdateProviderFilter} />
-            <LibraryRefreshAction isConnected={Boolean(providerStatus?.isConnected)} isRefreshing={isRefreshing} onRefresh={onRefreshFromRemote} />
+            <LibraryRefreshAction {...refreshAction} />
             <button type="button" onClick={() => { onSearchQueryChange(''); onClearAdvancedFilters(); }} className="ml-auto h-9 px-2 text-sm text-content-muted hover:text-content focus-visible:outline-2 focus-visible:outline-focus">Clear filters</button>
           </div>
         </div>
