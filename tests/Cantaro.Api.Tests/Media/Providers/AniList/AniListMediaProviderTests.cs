@@ -631,8 +631,15 @@ public class AniListMediaProviderTests
         Assert.Equal(0, clearRequest.RootElement.GetProperty("variables").GetProperty("scoreRaw").GetInt32());
     }
 
-    [Fact]
-    public async Task ImportLibraryAsync_AggregatesDuplicateGroupsAndKeepsOnlyCustomLists()
+    [Theory]
+    [InlineData(1, 1, null)]
+    [InlineData(2, 3, null)]
+    [InlineData(3, 2, null)]
+    [InlineData(2, 3, """{"data":{}}""")]
+    [InlineData(2, 3, """{"data":{"manga":{"hasNextChunk":false,"lists":[{"name":"Favorites","isCustomList":true}]}}}""")]
+    [InlineData(2, 3, """{"data":{"manga":{"hasNextChunk":false,"lists":[{"name":"Favorites","isCustomList":true,"entries":null}]}}}""")]
+    public async Task ImportLibraryAsync_CombinesChunksAndPreservesListMembership(
+        int animeChunks, int mangaChunks, string? invalidLastManga)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -662,68 +669,141 @@ public class AniListMediaProviderTests
         });
         await dbContext.SaveChangesAsync();
 
-        const string graphQlResponse = """
-            {
-              "data": {
-                "MediaListCollection": {
-                  "lists": [
-                    {
-                      "name": "Watching",
-                      "isCustomList": false,
-                      "entries": [{
-                        "id": 42,
-                        "status": "REPEATING",
-                        "score": 82.3,
-                        "progress": 6,
-                        "progressVolumes": null,
-                        "updatedAt": 1780776000,
-                        "media": {
-                          "id": 154587,
-                          "type": "ANIME",
-                          "description": "An elf revisits old memories.",
-                          "episodes": 28,
-                          "title": { "romaji": "Sousou no Frieren", "english": "Frieren", "native": "葬送のフリーレン" }
-                        }
-                      }]
-                    },
-                    {
-                      "name": "Favorites",
-                      "isCustomList": true,
-                      "entries": [{
-                        "id": 42,
-                        "status": "REPEATING",
-                        "score": 82.3,
-                        "progress": 6,
-                        "progressVolumes": null,
-                        "updatedAt": 1780776000,
-                        "media": {
-                          "id": 154587,
-                          "type": "ANIME",
-                          "description": "An elf revisits old memories.",
-                          "episodes": 28,
-                          "title": { "romaji": "Sousou no Frieren", "english": "Frieren", "native": "葬送のフリーレン" }
-                        }
-                      }]
-                    }
-                  ]
-                }
+        const string animeLists = """
+            [
+              {
+                "name": "Watching",
+                "isCustomList": false,
+                "entries": [{
+                  "id": 42,
+                  "status": "CURRENT",
+                  "score": 82.3,
+                  "progress": 3,
+                  "progressVolumes": null,
+                  "updatedAt": 1780775999,
+                  "media": {
+                    "id": 154587,
+                    "type": "ANIME",
+                    "description": "An elf revisits old memories.",
+                    "episodes": 28,
+                    "title": { "romaji": "Sousou no Frieren", "english": "Frieren", "native": "葬送のフリーレン" }
+                  }
+                }]
+              },
+              {
+                "name": "Favorites",
+                "isCustomList": true,
+                "entries": [{
+                  "id": 42,
+                  "status": "REPEATING",
+                  "score": 82.3,
+                  "progress": 6,
+                  "progressVolumes": null,
+                  "updatedAt": 1780776000,
+                  "media": {
+                    "id": 154587,
+                    "type": "ANIME",
+                    "description": "An elf revisits old memories.",
+                    "episodes": 28,
+                    "title": { "romaji": "Sousou no Frieren", "english": "Frieren", "native": "葬送のフリーレン" }
+                  }
+                }]
               }
-            }
+            ]
             """;
+        const string mangaLists = """
+            [{
+              "name": "Reading",
+              "isCustomList": false,
+              "entries": [{
+                "id": 43,
+                "status": "CURRENT",
+                "progress": 9,
+                "progressVolumes": 2,
+                "media": { "id": 154588, "type": "MANGA", "title": { "romaji": "Manga" } }
+              }]
+            }]
+            """;
+        using var anime = JsonDocument.Parse(animeLists);
+        using var manga = JsonDocument.Parse(mangaLists);
+        var chunkCount = Math.Max(animeChunks, mangaChunks);
+        var responses = Enumerable.Range(1, chunkCount).Select(chunk =>
+        {
+            if (chunk == chunkCount && invalidLastManga is not null)
+            {
+                return invalidLastManga;
+            }
 
-        var handler = new StubHttpMessageHandler(graphQlResponse);
+            var data = new Dictionary<string, object>();
+            if (chunk <= animeChunks)
+            {
+                JsonElement[] lists = (chunk == 1, chunk == animeChunks) switch
+                {
+                    (true, true) => [anime.RootElement[0], anime.RootElement[1]],
+                    (true, false) => [anime.RootElement[0]],
+                    (false, true) => [anime.RootElement[1]],
+                    _ => []
+                };
+                data["anime"] = new { hasNextChunk = chunk < animeChunks, lists };
+            }
+
+            if (chunk <= mangaChunks)
+            {
+                data["manga"] = new
+                {
+                    hasNextChunk = chunk < mangaChunks,
+                    lists = chunk == mangaChunks ? new[] { manga.RootElement[0] } : []
+                };
+            }
+
+            return JsonSerializer.Serialize(new { data });
+        }).ToArray();
+
+        var handler = new QueueHttpMessageHandler(responses);
         var provider = CreateProvider(
             dbContext,
             handler,
             dataProtectionProvider);
 
-        var import = await provider.ImportLibraryAsync(user.Id, CancellationToken.None);
+        if (invalidLastManga is not null)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                provider.ImportLibraryAsync(user.Id, CancellationToken.None));
+            Assert.Contains("incomplete manga media list chunk 3", error.Message);
+        }
+        else
+        {
+            var import = await provider.ImportLibraryAsync(user.Id, CancellationToken.None);
+            Assert.Collection(import.Items,
+                item =>
+                {
+                    Assert.Equal(MediaLibraryStatuses.Repeating, item.Status);
+                    Assert.Equal(82.3m, item.Score);
+                    Assert.Equal(6, item.ProgressEpisodes);
+                    Assert.Equal(28, item.EpisodeCount);
+                    Assert.Equal("An elf revisits old memories.", item.Synopsis);
+                    Assert.Equal(["Favorites"], item.ProviderListNames);
+                },
+                item =>
+                {
+                    Assert.Equal(9, item.ProgressChapters);
+                    Assert.Equal(2, item.ProgressVolumes);
+                });
+        }
 
-        var item = Assert.Single(import.Items);
-        Assert.Equal(MediaLibraryStatuses.Repeating, item.Status);
-        Assert.Equal(82.3m, item.Score);
-        Assert.Equal(["Favorites"], item.ProviderListNames);
-        Assert.Contains("score(format: POINT_100)", handler.LastRequestBody);
+        Assert.Equal(chunkCount, handler.RequestBodies.Count);
+        for (var index = 0; index < handler.RequestBodies.Count; index++)
+        {
+            using var request = JsonDocument.Parse(handler.RequestBodies[index]);
+            var variables = request.RootElement.GetProperty("variables");
+            var chunk = index + 1;
+            Assert.Equal(user.Id, variables.GetProperty("userId").GetInt32());
+            Assert.Equal(chunk, variables.GetProperty("chunk").GetInt32());
+            Assert.Equal(500, variables.GetProperty("perChunk").GetInt32());
+            Assert.Equal(chunk <= animeChunks, variables.GetProperty("includeAnime").GetBoolean());
+            Assert.Equal(chunk <= mangaChunks, variables.GetProperty("includeManga").GetBoolean());
+            Assert.Contains("score(format: POINT_100)", request.RootElement.GetProperty("query").GetString());
+        }
     }
 
     private static AniListMediaProvider CreateProvider(

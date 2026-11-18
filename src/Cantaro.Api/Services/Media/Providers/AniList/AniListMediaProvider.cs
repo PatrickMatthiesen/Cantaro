@@ -15,6 +15,8 @@ public class AniListMediaProvider(
 {
     private const string ProviderName = "anilist";
     private const int MaxContinuityGraphNodes = 50;
+    private const int MediaListCollectionPerChunk = 500;
+    private const int MaximumMediaListCollectionChunks = 100;
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly AniListApiClient _apiClient = apiClient;
     private readonly TokenEncryptionService _tokenEncryptionService = tokenEncryptionService;
@@ -128,28 +130,67 @@ public class AniListMediaProvider(
         var viewerId = int.Parse(account.ExternalAccountId, CultureInfo.InvariantCulture);
         var importedAt = DateTimeOffset.UtcNow;
 
-        var animeCollection = await _apiClient.SendGraphQlAsync<AniListMediaListCollectionData>(
-            accessToken,
-            MediaListCollectionQuery,
-            new { userId = viewerId, type = "ANIME" },
-            cancellationToken);
-
-        var mangaCollection = await _apiClient.SendGraphQlAsync<AniListMediaListCollectionData>(
-            accessToken,
-            MediaListCollectionQuery,
-            new { userId = viewerId, type = "MANGA" },
-            cancellationToken);
-
-        var lists = (animeCollection.MediaListCollection?.Lists ?? [])
-            .Concat(mangaCollection.MediaListCollection?.Lists ?? []);
-        var items = MapLibraryItems(lists);
+        var lists = await GetMediaListCollectionsAsync(accessToken, viewerId, cancellationToken);
 
         return new MediaProviderLibraryImportResult
         {
             ProviderId = ProviderName,
             ImportedAt = importedAt,
-            Items = items
+            Items = MapLibraryItems(lists)
         };
+    }
+
+    private async Task<IReadOnlyList<AniListMediaListGroup>> GetMediaListCollectionsAsync(
+        string accessToken,
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        var lists = new List<AniListMediaListGroup>();
+        var includeAnime = true;
+        var includeManga = true;
+        for (var chunk = 1; chunk <= MaximumMediaListCollectionChunks; chunk++)
+        {
+            var data = await _apiClient.SendGraphQlAsync<AniListMediaListCollectionData>(
+                accessToken,
+                MediaListCollectionQuery,
+                new { userId, chunk, perChunk = MediaListCollectionPerChunk, includeAnime, includeManga },
+                cancellationToken);
+
+            if (includeAnime)
+            {
+                includeAnime = AppendMediaListChunk(data.Anime, lists, "anime", chunk);
+            }
+
+            if (includeManga)
+            {
+                includeManga = AppendMediaListChunk(data.Manga, lists, "manga", chunk);
+            }
+
+            if (!includeAnime && !includeManga)
+            {
+                return lists;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"AniList media list collection exceeded the limit of {MaximumMediaListCollectionChunks} chunks.");
+    }
+
+    private static bool AppendMediaListChunk(
+        AniListMediaListCollection? collection,
+        List<AniListMediaListGroup> lists,
+        string mediaType,
+        int chunk)
+    {
+        if (collection?.HasNextChunk is not bool hasNextChunk
+            || collection.Lists is not { } chunkLists
+            || chunkLists.Any(list => list?.Entries is null))
+        {
+            throw new InvalidOperationException($"AniList returned an incomplete {mediaType} media list chunk {chunk}.");
+        }
+
+        lists.AddRange(chunkLists);
+        return hasNextChunk;
     }
 
     public async Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken)
@@ -1016,48 +1057,56 @@ public class AniListMediaProvider(
         """;
 
     private const string MediaListCollectionQuery = """
-        query ($userId: Int, $type: MediaType) {
-          MediaListCollection(userId: $userId, type: $type) {
-            lists {
-              name
-              isCustomList
-              entries {
+        query ($userId: Int, $chunk: Int!, $perChunk: Int!, $includeAnime: Boolean!, $includeManga: Boolean!) {
+          anime: MediaListCollection(userId: $userId, type: ANIME, chunk: $chunk, perChunk: $perChunk) @include(if: $includeAnime) {
+            ...LibraryCollection
+          }
+          manga: MediaListCollection(userId: $userId, type: MANGA, chunk: $chunk, perChunk: $perChunk) @include(if: $includeManga) {
+            ...LibraryCollection
+          }
+        }
+
+        fragment LibraryCollection on MediaListCollection {
+          hasNextChunk
+          lists {
+            name
+            isCustomList
+            entries {
+              id
+              status
+              score(format: POINT_100)
+              progress
+              progressVolumes
+              updatedAt
+              media {
                 id
+                idMal
+                type
+                format
                 status
-                score(format: POINT_100)
-                progress
-                progressVolumes
-                updatedAt
-                media {
-                  id
-                  idMal
-                  type
-                  format
-                  status
-                  siteUrl
-                  description(asHtml: true)
-                  episodes
-                  chapters
-                  volumes
-                  bannerImage
-                  startDate {
-                    year
-                  }
-                  title {
-                    romaji
-                    english
-                    native
-                  }
-                  synonyms
-                  coverImage {
-                    extraLarge
-                    medium
-                    large
-                  }
-                  nextAiringEpisode {
-                    episode
-                    airingAt
-                  }
+                siteUrl
+                description(asHtml: true)
+                episodes
+                chapters
+                volumes
+                bannerImage
+                startDate {
+                  year
+                }
+                title {
+                  romaji
+                  english
+                  native
+                }
+                synonyms
+                coverImage {
+                  extraLarge
+                  medium
+                  large
+                }
+                nextAiringEpisode {
+                  episode
+                  airingAt
                 }
               }
             }
@@ -1244,12 +1293,18 @@ public class AniListMediaData
 
 public class AniListMediaListCollectionData
 {
-    [JsonPropertyName("MediaListCollection")]
-    public AniListMediaListCollection? MediaListCollection { get; set; }
+    [JsonPropertyName("anime")]
+    public AniListMediaListCollection? Anime { get; set; }
+
+    [JsonPropertyName("manga")]
+    public AniListMediaListCollection? Manga { get; set; }
 }
 
 public class AniListMediaListCollection
 {
+    [JsonPropertyName("hasNextChunk")]
+    public bool? HasNextChunk { get; set; }
+
     [JsonPropertyName("lists")]
     public List<AniListMediaListGroup>? Lists { get; set; }
 }
