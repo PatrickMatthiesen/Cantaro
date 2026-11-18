@@ -33,7 +33,7 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
       - name: Restore benchmark
         run: dotnet restore benchmarks/Cantaro.Benchmarks/Cantaro.Benchmarks.csproj

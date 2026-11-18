@@ -3,7 +3,6 @@
     "path": "src/Cantaro.AppHost/Cantaro.AppHost.csproj"
   },
   "sdk": {
-    "version": "14.0.0-preview.1.26473.3"
-  },
-  "channel": "daily"
+    "version": "17.0.0"
+  }
 }

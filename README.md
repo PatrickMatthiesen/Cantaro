@@ -12,13 +12,13 @@ Cantaro acts as the canonical vessel that holds your music graph and pours it in
 - **Frontend**: React + TypeScript + Vite (Bun)
 - **Extension**: React + TypeScript + WXT (Bun)
 - **Database**: PostgreSQL
-- **Orchestration**: .NET Aspire 13
+- **Orchestration**: Aspire 17
 - **Package Manager**: Bun
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- [.NET Aspire 13](https://learn.microsoft.com/dotnet/aspire/)
+- [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0)
+- [Aspire 17](https://aspire.dev/)
 - [Bun](https://bun.sh/) 1.3+
 - [Node.js](https://nodejs.org/) (for tooling/VS Code integrations)
 - [Docker](https://www.docker.com/) (for PostgreSQL and local development)
@@ -34,7 +34,7 @@ The easiest way to get started with Cantaro is using GitHub Codespaces, which pr
 3. Click **Create codespace on main** (or your desired branch)
 
 The environment will automatically install all required dependencies:
-- .NET 10 SDK
+- .NET 11 SDK
 - Node.js 24
 - Bun 1.3
 - .NET Aspire CLI
@@ -56,8 +56,8 @@ Once the setup is complete, you can start developing immediately!
 
    Either run the [post-create script](.devcontainer/post-create.sh) or install manually:
 
-   - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-   - [.NET Aspire 13](https://aspire.dev/)
+   - [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0)
+   - [Aspire 17](https://aspire.dev/)
    - [Node.js](https://nodejs.org/) (Latest version recommended)
    - [Bun](https://bun.sh/) 1.3+
    - Container runtime supported by Aspire, for example:
@@ -81,8 +81,7 @@ Once the setup is complete, you can start developing immediately!
 The easiest way to run Cantaro locally is using .NET Aspire, which orchestrates all services:
 
 ```bash
-cd src/Cantaro.AppHost
-dotnet run
+aspire start
 ```
 
 This will:

@@ -33,4 +33,4 @@ bun install
 cd ../..
 
 echo "✅ Development environment setup complete!"
-echo "🚀 Run 'cd src/Cantaro.AppHost && dotnet run' to start Cantaro with Aspire"
+echo "🚀 Run 'aspire start' from the repository root to start Cantaro"

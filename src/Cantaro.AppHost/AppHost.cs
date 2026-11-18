@@ -1,6 +1,3 @@
-// #:sdk Aspire.AppHost.Sdk@13.5.0-preview.1.26319.13
-// #:package Aspire.Hosting.JavaScript@13.5.0-preview.1.26319.13
-
 using Garage.Hosting;
 
 #pragma warning disable ASPIREDOTNETPROJECT001 // Opt into experimental Project Resource v2 coordinated builds.
@@ -27,11 +24,11 @@ var simklClientId = builder.AddParameter("SimklClientId", secret: true);
 var simklClientSecret = builder.AddParameter("SimklClientSecret", secret: true);
 var animeScheduleId = builder.AddParameter("AnimeScheduleId");
 var animeScheduleToken = builder.AddParameter("AnimeScheduleToken", secret: true);
-var aioStreamsBaseUrl = builder.AddParameter("AioStreamsBaseUrl", () => builder.Configuration["Parameters:AioStreamsBaseUrl"] ?? "");
+var aioStreamsBaseUrl = builder.AddParameter("AioStreamsBaseUrl", () => builder.Configuration["Parameters:AioStreamsBaseUrl"] ?? "").AsOptional();
 var turnstileMode = builder.AddParameter("TurnstileMode", () => builder.Configuration["Parameters:TurnstileMode"] ?? "Auto");
-var turnstileSiteKey = builder.AddParameter("TurnstileSiteKey", () => builder.Configuration["Parameters:TurnstileSiteKey"] ?? "");
-var turnstileSecret = builder.AddParameter("TurnstileSecret", () => builder.Configuration["Parameters:TurnstileSecret"] ?? "", secret: true);
-var turnstileHostname = builder.AddParameter("TurnstileHostname", () => builder.Configuration["Parameters:TurnstileHostname"] ?? "");
+var turnstileSiteKey = builder.AddParameter("TurnstileSiteKey", () => builder.Configuration["Parameters:TurnstileSiteKey"] ?? "").AsOptional();
+var turnstileSecret = builder.AddParameter("TurnstileSecret", () => builder.Configuration["Parameters:TurnstileSecret"] ?? "", secret: true).AsOptional();
+var turnstileHostname = builder.AddParameter("TurnstileHostname", () => builder.Configuration["Parameters:TurnstileHostname"] ?? "").AsOptional();
 #pragma warning disable ASPIREINTERACTION001
 var authenticationMode = builder.AddParameter("AuthenticationMode", () => builder.Configuration["Parameters:AuthenticationMode"] ?? "Local")
     .WithCustomInput(parameter => new()
@@ -50,6 +47,7 @@ var authenticationMode = builder.AddParameter("AuthenticationMode", () => builde
     });
 #pragma warning restore ASPIREINTERACTION001
 var trustedProxyIp = builder.AddParameter("TrustedProxyIp", () => builder.Configuration["Parameters:TrustedProxyIp"] ?? "", secret: true)
+    .AsOptional()
     .WithDescription("Comma-separated IP addresses of the proxies connecting directly to the API. Leave empty to disable forwarded-header trust.");
 var extensionAuthJwtSigningKey = builder.ExecutionContext.IsRunMode
     ? builder.AddParameter("ExtensionAuthJwtSigningKey", "Cantaro.ExtensionAuth.Development.Signing.Key.2026.04.26", true)
@@ -71,6 +69,7 @@ if (builder.ExecutionContext.IsRunMode) {
 
 var db = postgres.AddDatabase("cantaro-db");
 
+#pragma warning disable ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var garage = builder.AddGarage("garage", new GarageResourceOptions { ConfigPath = "Garage/garage.toml" })
     // Clean up the development container on shutdown; the named volume retains its data.
     .WithLifetime(ContainerLifetime.Session)
@@ -79,6 +78,7 @@ var garage = builder.AddGarage("garage", new GarageResourceOptions { ConfigPath 
     {
         service.Restart = "unless-stopped";
     });
+#pragma warning restore ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 var avatars = garage.AddBucket("avatars", "cantaro-avatars");
 
 // Optionally, add pgAdmin for database management (runs in a separate container)
@@ -203,7 +203,8 @@ if (builder.ExecutionContext.IsRunMode)
         // https://github.com/wxt-dev/wxt/pull/2563
         .WithTerminal()
         .WithReference(api)
-        .WithReference(frontend);
+        .WithReference(frontend)
+        .WaitFor(frontend);
 }
 #pragma warning restore ASPIRETERMINAL001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 

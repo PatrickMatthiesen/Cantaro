@@ -6,7 +6,7 @@ This directory contains the configuration for GitHub Codespaces and VS Code Dev 
 
 The dev container is configured to match the agent setup workflow and includes:
 
-- **Base Image**: Official Microsoft .NET 10.0 dev container
+- **Base Image**: Official Microsoft .NET 11.0 dev container
 - **Node.js 24**: For frontend and browser extension development
 - **Docker-in-Docker**: For running PostgreSQL and other containerized services
 - **Aspire CLI**: For orchestrating the application services
@@ -53,8 +53,7 @@ The following ports are automatically forwarded:
 Once the dev container is ready, start the application with:
 
 ```bash
-cd src/Cantaro.AppHost
-dotnet run
+aspire start
 ```
 
 This will launch the Aspire dashboard where you can monitor all services.
