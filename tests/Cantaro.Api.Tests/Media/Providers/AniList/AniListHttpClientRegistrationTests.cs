@@ -1,7 +1,12 @@
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
 using Xunit;
@@ -10,6 +15,46 @@ namespace Cantaro.Api.Tests;
 
 public sealed class AniListHttpClientRegistrationTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AniListClient_NegotiatesGzipAndReadsTheResponse(bool compressed)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var server = builder.Build();
+        string? acceptEncoding = null;
+        server.MapPost("/", async (HttpContext context) =>
+        {
+            acceptEncoding = context.Request.Headers.AcceptEncoding.ToString();
+            context.Response.ContentType = "application/json";
+            var body = """{"data":{"Viewer":{"id":42}}}"""u8.ToArray();
+            if (compressed)
+            {
+                context.Response.Headers.ContentEncoding = "gzip";
+                await using var gzip = new GZipStream(context.Response.Body, CompressionLevel.Fastest, leaveOpen: true);
+                await gzip.WriteAsync(body, context.RequestAborted);
+                return;
+            }
+
+            await context.Response.Body.WriteAsync(body, context.RequestAborted);
+        });
+        await server.StartAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.Configure<AniListOptions>(options => options.GraphQlUrl = server.Urls.Single());
+        services.AddAniListApiClient();
+        await using var serviceProvider = services.BuildServiceProvider();
+        var client = serviceProvider.GetRequiredService<AniListApiClient>();
+
+        var result = await client.SendGraphQlAsync<JsonElement>(
+            "test-token", "query { Viewer { id } }", null, CancellationToken.None);
+
+        Assert.Contains("gzip", acceptEncoding);
+        Assert.Equal(42, result.GetProperty("Viewer").GetProperty("id").GetInt32());
+    }
+
     [Fact]
     public async Task AniListClient_DoesNotRetryBelowTheGlobalRequestGate()
     {
