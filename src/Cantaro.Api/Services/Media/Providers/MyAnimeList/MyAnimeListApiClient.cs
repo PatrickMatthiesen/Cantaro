@@ -156,7 +156,15 @@ public sealed class MyAnimeListApiClient(
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("MyAnimeList token request failed with status {StatusCode}.", response.StatusCode);
-            throw new MyAnimeListRequestException(response.StatusCode, ReadRetryAfter(response));
+            string? errorCode = null;
+            try
+            {
+                using var error = JsonDocument.Parse(responseBody);
+                if (error.RootElement.TryGetProperty("error", out var value) && value.ValueKind == JsonValueKind.String)
+                    errorCode = value.GetString();
+            }
+            catch (JsonException) { }
+            throw new MyAnimeListRequestException(response.StatusCode, ReadRetryAfter(response), errorCode);
         }
 
         return JsonSerializer.Deserialize<MyAnimeListTokenResponse>(responseBody, SerializerOptions)
@@ -225,9 +233,10 @@ public sealed class MyAnimeListApiClient(
 
 public sealed class MyAnimeListRequestException(
     HttpStatusCode statusCode,
-    TimeSpan? retryAfter) : InvalidOperationException(
+    TimeSpan? retryAfter, string? errorCode = null) : InvalidOperationException(
         $"MyAnimeList request failed with status {(int)statusCode}.")
 {
+    public string? ErrorCode { get; } = errorCode;
     public HttpStatusCode StatusCode { get; } = statusCode;
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }

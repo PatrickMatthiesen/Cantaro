@@ -116,7 +116,7 @@ public sealed class SyncJobsController(
             return BadRequest(new { error = $"Reconnect {service} before starting a sync." });
         }
 
-        var accountContext = new PlatformAccountContext(userId, connectedAccount.Id);
+        var accountContext = new PlatformAccountContext(userId, connectedAccount.Id, connectedAccount.ExternalAccountId);
         IReadOnlyList<PlatformPlaylistDto> available;
         try
         {
@@ -193,7 +193,8 @@ public sealed class SyncJobsController(
         }
 
         var playlists = selected
-            .Select(item => new MusicSyncJobPlaylist(item.Id, item.Title, Math.Max(0, item.ItemCount)))
+            .Select(item => new MusicSyncJobPlaylist(item.Id, item.Title, Math.Max(0, item.ItemCount),
+                ExternalAccountId: connectedAccount.ExternalAccountId))
             .ToList();
         var now = DateTimeOffset.UtcNow;
         var job = new MusicSyncJob

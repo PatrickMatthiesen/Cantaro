@@ -193,6 +193,52 @@ public sealed class PlaylistLinkLifecycleTests
     }
 
     [Fact]
+    public async Task FirstAttach_ReconnectPreservesInitializationAndResumesAfterRecovery()
+    {
+        await using var scope = await Scope.CreateAsync("youtube");
+        var preview = await scope.Lifecycle.PreviewAttachAsync(scope.UserId, scope.Playlist.Id,
+            "youtube", "remote-playlist", default);
+        scope.Provider.ReadFailureNumber = 3;
+        scope.Provider.ReadFailureAtNumber = new PlatformReconnectRequiredException("Reconnect YouTube to continue.");
+        scope.Provider.OnRead = () =>
+        {
+            if (scope.Provider.Reads != 2) return;
+            scope.Account.ConnectionState = "reconnect_required";
+            scope.Db.SaveChanges();
+        };
+
+        await Assert.ThrowsAsync<PlatformReconnectRequiredException>(() => scope.Lifecycle.AttachAsync(
+            scope.UserId, scope.Playlist.Id, "youtube", "remote-playlist",
+            "import_only", "platform", preview.PreviewToken, default));
+
+        var mapping = await scope.Db.ServicePlaylistMappings.SingleAsync();
+        Assert.Equal("paused", mapping.State);
+        Assert.Equal("platform", mapping.InitialMode);
+        Assert.Equal("reconnect_required", mapping.LastSyncStatus);
+        Assert.NotNull(mapping.NextAttemptAt);
+        using var services = new ServiceCollection().AddSingleton(scope.Db).AddSingleton(scope.Coordinator)
+            .BuildServiceProvider();
+        var scheduler = new PlaylistSyncScheduler(services.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                { ["MusicPlaylistSync:AutomaticEnabled"] = "false" }).Build(),
+            TimeProvider.System, NullLogger<PlaylistSyncScheduler>.Instance);
+        Assert.False(await scheduler.ProcessNextAsync(default));
+        var account = await scope.Db.ConnectedServiceAccounts.SingleAsync();
+        Assert.Equal("remote-account", account.ExternalAccountId);
+        account.ConnectionState = "connected";
+        await scope.Db.SaveChangesAsync();
+        scope.Provider.OnRead = null;
+        scope.Provider.ReadFailureAtNumber = null;
+
+        Assert.True(await scheduler.ProcessNextAsync(default));
+        var resumed = await scope.Db.ServicePlaylistMappings.AsNoTracking().SingleAsync();
+        Assert.Equal(mapping.Id, resumed.Id);
+        Assert.Equal("active", resumed.State);
+        Assert.Null(resumed.InitialMode);
+        Assert.Equal("success", resumed.LastSyncStatus);
+    }
+
+    [Fact]
     public async Task AttachQuotaLimit_PreservesApprovedChoicesAndSchedulerResumesInitialization()
     {
         await using var scope = await Scope.CreateAsync("spotify");

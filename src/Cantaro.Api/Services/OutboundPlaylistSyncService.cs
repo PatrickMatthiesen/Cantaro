@@ -48,7 +48,7 @@ public sealed class OutboundPlaylistSyncService(
                 requestedDestinationId, cancellationToken);
             ThrowIfCooldown(linked, service);
             if (linked is null)
-                await coordinator.CreateLinkAsync(account.UserId, playlistId, service, cancellationToken);
+                await coordinator.CreateLinkAsync(account, playlistId, service, cancellationToken);
             await coordinator.QueueAsync(account.UserId, playlistId, service, cancellationToken);
             await coordinator.RunAsync(account.UserId, playlistId, service, cancellationToken);
             linked = await dbContext.ServicePlaylistMappings.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -60,6 +60,8 @@ public sealed class OutboundPlaylistSyncService(
                 throw new PlatformApiException("playlist_sync_failed",
                     "The linked playlist is unavailable. Review its connection before retrying.", 409);
             ThrowIfCooldown(linked, service);
+            if (linked.LastSyncStatus == "reconnect_required")
+                throw new PlatformReconnectRequiredException(linked.LastError ?? "Reconnect the provider to resume.");
             if (linked.LastSyncStatus == "partial")
                 throw new PlatformApiException("unmatched_tracks",
                     $"{linked.UnresolvedCount} tracks remain unmatched. Matched tracks were synced; resolve the remaining matches.", 422);
@@ -176,14 +178,15 @@ public sealed class OutboundPlaylistSyncService(
             item => item.Id == playlistId && item.UserId == account.UserId, cancellationToken)
             ?? throw new PlatformApiException("playlist_not_found", "Cantaro playlist not found.", 404);
 
-        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().AnyAsync(
+        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(
             item => item.Id == account.ConnectedServiceAccountId && item.UserId == account.UserId
-                && item.Service == service && item.ConnectionState == "connected"
+                && item.Service == service
                 && (account.ExpectedExternalAccountId == null || item.ExternalAccountId == account.ExpectedExternalAccountId), cancellationToken);
-        if (!connected)
+        if (connected is null)
         {
             throw new PlatformApiException("account_changed", "Reconnect the original destination account before syncing.", 409);
         }
+        ProviderReconnectState.RequireUsable(connected);
 
         var mapping = await dbContext.ServicePlaylistMappings.SingleOrDefaultAsync(
             item => item.PlaylistId == playlistId
@@ -313,14 +316,15 @@ public sealed class OutboundPlaylistSyncService(
         var playlist = await dbContext.Playlists.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == playlistId && item.UserId == account.UserId, ct)
             ?? throw new PlatformApiException("playlist_not_found", "Cantaro playlist not found.", 404);
-        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().AnyAsync(item =>
+        var connected = await dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == account.ConnectedServiceAccountId && item.UserId == account.UserId
-            && item.Service == service && item.ConnectionState == "connected"
+            && item.Service == service
             && account.ExpectedExternalAccountId != null
             && item.ExternalAccountId == account.ExpectedExternalAccountId, ct);
-        if (!connected)
+        if (connected is null)
             throw new PlatformApiException("account_changed",
                 "Reconnect the original destination account before syncing.", 409);
+        ProviderReconnectState.RequireUsable(connected);
 
         var links = await dbContext.ServicePlaylistMappings.AsNoTracking().Where(item =>
             item.PlaylistId == playlistId && item.UserId == account.UserId && item.Service == service

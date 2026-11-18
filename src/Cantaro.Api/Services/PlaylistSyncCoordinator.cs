@@ -135,7 +135,7 @@ public sealed partial class PlaylistSyncCoordinator(
             {
                 RecordFailure(link, ex);
                 await db.SaveChangesAsync(ct);
-                if (readOnly) throw;
+                if (readOnly || service is not null && ex is PlatformReconnectRequiredException) throw;
             }
         }
 
@@ -224,9 +224,10 @@ public sealed partial class PlaylistSyncCoordinator(
     {
         var account = await db.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(item => item.Id == link.ConnectedServiceAccountId
             && item.UserId == playlist.UserId && item.Service == link.Service, ct);
-        if (account is null || account.ConnectionState != "connected"
+        if (account is null
             || (!string.IsNullOrEmpty(link.ExternalAccountId) && account.ExternalAccountId != link.ExternalAccountId))
             throw new PlatformApiException("account_changed", "Reconnect the linked platform account before syncing.", 409);
+        ProviderReconnectState.RequireUsable(account);
         link.UserId = playlist.UserId;
         link.ExternalAccountId = account.ExternalAccountId;
         return new(playlist.UserId, account.Id, account.ExternalAccountId);

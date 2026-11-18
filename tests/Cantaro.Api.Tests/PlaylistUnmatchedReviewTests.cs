@@ -679,7 +679,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             return entry;
         }
 
-        public async Task<PlaylistUnmatchedReviewService> SearchReviewAsync(HttpClient http)
+        public async Task<PlaylistUnmatchedReviewService> SearchReviewAsync(HttpClient http, YouTubeService? youtube = null)
         {
             var encryption = new TokenEncryptionService(_protector);
             var account = await Db.ConnectedServiceAccounts.SingleAsync();
@@ -700,7 +700,7 @@ public sealed partial class PlaylistUnmatchedReviewTests
             var search = new Cantaro.Api.Services.Spotify.SpotifySearchProvider(api,
                 new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenProvider(api, options,
                     TimeProvider.System, new Cantaro.Api.Services.Spotify.SpotifyCatalogTokenCache()));
-            return new PlaylistUnmatchedReviewService(Db, api, tokens, [search], null!,
+            return new PlaylistUnmatchedReviewService(Db, api, tokens, [search], youtube!,
                 new TrackMatchingService(Db, [], NullLogger<TrackMatchingService>.Instance),
                 new PlaylistCanonicalReconciliationService(Db), Options.Create(new TrackMatchingOptions()), _protector,
                 new PlaylistSyncCoordinator(Db, [], [], TimeProvider.System, NullLogger<PlaylistSyncCoordinator>.Instance));

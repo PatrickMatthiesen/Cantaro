@@ -99,6 +99,7 @@ export function ProviderPanel({ providerId, name, icon, description }: ProviderP
                     isLoadingStatus={isLoadingStatus}
                     hasStatus={status !== null}
                     isConnected={Boolean(status?.isConnected)}
+                    needsReconnect={Boolean(status?.needsReconnect)}
                     onConnect={handleConnect}
                     onRetryStatus={reloadStatus}
                     connectedActions={{

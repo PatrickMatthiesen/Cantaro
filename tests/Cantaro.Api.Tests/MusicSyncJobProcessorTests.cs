@@ -11,6 +11,149 @@ namespace Cantaro.Api.Tests;
 
 public sealed class MusicSyncJobProcessorTests
 {
+    [PostgresTheory]
+    [InlineData("spotify", MusicSyncJobStatuses.Queued)]
+    [InlineData("youtube", MusicSyncJobStatuses.Running)]
+    public async Task DisconnectedAccount_FailsOldestJobWithoutBlockingAnotherUser(string service, string status)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var db = schema.Db;
+        db.Users.AddRange(TestUserFactory.Create(705, "disconnected@example.test"),
+            TestUserFactory.Create(706, "another-user@example.test"));
+        var disconnected = new ConnectedServiceAccount
+        {
+            UserId = 705, Service = service, ExternalAccountId = "original", ConnectionState = "disconnected"
+        };
+        var healthy = new ConnectedServiceAccount { UserId = 706, Service = service, ExternalAccountId = "other" };
+        db.ConnectedServiceAccounts.AddRange(disconnected, healthy);
+        await db.SaveChangesAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        MusicSyncJob CreateJob(ConnectedServiceAccount account, string playlistId, DateTimeOffset createdAt) => new()
+        {
+            Id = Guid.NewGuid(), UserId = account.UserId, ConnectedServiceAccountId = account.Id, Service = service,
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
+            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist(playlistId, playlistId, 1,
+                ExternalAccountId: account.ExternalAccountId) }),
+            CreatedAt = createdAt, UpdatedAt = createdAt
+        };
+        var oldest = CreateJob(disconnected, "disconnected-playlist", now.AddMinutes(-1));
+        oldest.Status = status;
+        var next = CreateJob(healthy, "healthy-playlist", now);
+        db.MusicSyncJobs.AddRange(oldest, next);
+        await db.SaveChangesAsync();
+
+        var platform = new StubPlatformService(service);
+        var processor = new MusicSyncJobProcessor(db, new PlatformRegistry([platform]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(db, []));
+
+        Assert.True(await processor.ProcessNextAsync(default));
+        var failed = await db.MusicSyncJobs.AsNoTracking().SingleAsync(item => item.Id == oldest.Id);
+        Assert.Equal(MusicSyncJobStatuses.Failed, failed.Status);
+        Assert.NotNull(failed.CompletedAt);
+        Assert.Contains("start a new sync", failed.ErrorMessage);
+        Assert.Equal(0, failed.ProcessedPlaylistCount);
+        Assert.Empty(platform.SyncedPlaylistIds);
+
+        Assert.True(await processor.ProcessNextAsync(default));
+        Assert.Equal(MusicSyncJobStatuses.Completed,
+            await db.MusicSyncJobs.Where(item => item.Id == next.Id).Select(item => item.Status).SingleAsync());
+        Assert.Equal(new[] { "healthy-playlist" }, platform.SyncedPlaylistIds);
+        Assert.False(await processor.ProcessNextAsync(default));
+    }
+
+    [PostgresTheory]
+    [InlineData("original", "replacement", false, false)]
+    [InlineData(null, "replacement", false, false)]
+    [InlineData(null, "replacement", true, false)]
+    [InlineData("original", "original", false, true)]
+    public async Task InboundJob_UsesOriginalAccountOrStopsWithoutConsumingPlaylist(
+        string? selectedExternalId, string currentExternalId, bool hasReplacementMapping, bool succeeds)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var db = schema.Db;
+        db.Users.Add(TestUserFactory.Create(704, "account-pinning@example.test"));
+        var account = new ConnectedServiceAccount { UserId = 704, Service = "youtube", ExternalAccountId = currentExternalId };
+        db.ConnectedServiceAccounts.Add(account);
+        await db.SaveChangesAsync();
+        var job = new MusicSyncJob
+        {
+            Id = Guid.NewGuid(), UserId = 704, ConnectedServiceAccountId = account.Id, Service = "youtube",
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
+            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist("selected", "Selected", 1,
+                ExternalAccountId: selectedExternalId) }), CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        db.MusicSyncJobs.Add(job);
+        if (hasReplacementMapping)
+        {
+            var playlist = new Playlist { Id = Guid.NewGuid(), UserId = 704, Name = "Replacement account playlist" };
+            db.Playlists.Add(playlist);
+            db.ServicePlaylistMappings.Add(new ServicePlaylistMapping
+            {
+                Id = Guid.NewGuid(), UserId = 704, PlaylistId = playlist.Id,
+                ConnectedServiceAccountId = account.Id, ExternalAccountId = currentExternalId,
+                Service = "youtube", ServicePlaylistId = "selected", State = "active", SyncMode = "bidirectional"
+            });
+        }
+        await db.SaveChangesAsync();
+        var platform = new StubPlatformService("youtube");
+        var processor = new MusicSyncJobProcessor(db, new PlatformRegistry([platform]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(db, []));
+        await processor.ProcessNextAsync(default);
+        var saved = await db.MusicSyncJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(succeeds ? 1 : 0, saved.ProcessedPlaylistCount);
+        Assert.Equal(succeeds ? MusicSyncJobStatuses.Completed : MusicSyncJobStatuses.Failed, saved.Status);
+        Assert.Equal(job.PlaylistsJson, saved.PlaylistsJson);
+        Assert.Equal(succeeds ? new[] { "original" } : Array.Empty<string?>(), platform.ExpectedAccountIds);
+        Assert.Equal(succeeds ? 1 : 0, platform.SyncedPlaylistIds.Count);
+        if (selectedExternalId is null)
+            Assert.Contains("original account", saved.ErrorMessage);
+    }
+
+    [PostgresFact]
+    public async Task BlockedAccount_DoesNotStarveHealthyJobAndResumesWithProgressPreserved()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var db = schema.Db;
+        db.Users.Add(TestUserFactory.Create(702, "queue@example.test"));
+        var account = new ConnectedServiceAccount { UserId = 702, Service = "test", ExternalAccountId = "same",
+            ConnectionState = "reconnect_required", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        db.ConnectedServiceAccounts.Add(account);
+        await db.SaveChangesAsync();
+        MusicSyncJob Job(int? accountId, string id) => new()
+        {
+            Id = Guid.NewGuid(), UserId = 702, ConnectedServiceAccountId = accountId, Service = "test",
+            Status = MusicSyncJobStatuses.Queued, PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist(id, id, 1) }),
+            PlaylistCount = 1, SongCount = 1, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var blocked = Job(account.Id, "blocked");
+        db.Users.Add(TestUserFactory.Create(703, "healthy@example.test"));
+        var healthy = Job(null, "healthy");
+        healthy.UserId = 703;
+        // The stub requires a binding but does not read it. A second connected account provides one.
+        var second = new ConnectedServiceAccount { UserId = 703, Service = "other", ExternalAccountId = "healthy",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        db.ConnectedServiceAccounts.Add(second);
+        await db.SaveChangesAsync();
+        healthy.ConnectedServiceAccountId = second.Id;
+        db.MusicSyncJobs.AddRange(blocked, healthy);
+        await db.SaveChangesAsync();
+        var platform = new StubPlatformService();
+        var processor = new MusicSyncJobProcessor(db, new PlatformRegistry([platform]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(db, []));
+        Assert.True(await processor.ProcessNextAsync(default));
+        Assert.Equal(new[] { "healthy" }, platform.SyncedPlaylistIds);
+        Assert.False(await processor.ProcessNextAsync(default));
+        var pending = await db.MusicSyncJobs.AsNoTracking().SingleAsync(item => item.Id == blocked.Id);
+        Assert.Equal(MusicSyncJobStatuses.Queued, pending.Status);
+        Assert.Equal(0, pending.ProcessedPlaylistCount);
+        Assert.Equal(blocked.PlaylistsJson, pending.PlaylistsJson);
+        await db.ConnectedServiceAccounts.Where(item => item.Id == account.Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.ConnectionState, "connected"));
+        Assert.True(await processor.ProcessNextAsync(default));
+        Assert.Equal(new[] { "healthy", "blocked" }, platform.SyncedPlaylistIds);
+    }
+
     [Fact]
     public async Task ProcessNextAsync_PersistsProgressAndCompletion()
     {
@@ -243,14 +386,16 @@ public sealed class MusicSyncJobProcessorTests
         UpdatedAt = now
     };
 
-    private sealed class StubPlatformService : IPlatformService
+    internal sealed class StubPlatformService(string service = "test") : IPlatformService
     {
-        public string PlatformId => "test";
+        public string PlatformId => service;
         public List<string> SyncedPlaylistIds { get; } = [];
+        public List<string?> ExpectedAccountIds { get; } = [];
 
         public Task<Guid> SyncPlaylistAsync(PlatformAccountContext account, string playlistId, CancellationToken cancellationToken)
         {
             SyncedPlaylistIds.Add(playlistId);
+            ExpectedAccountIds.Add(account.ExpectedExternalAccountId);
             return Task.FromResult(Guid.NewGuid());
         }
 

@@ -95,6 +95,29 @@ public sealed class OutboundPlaylistSyncTests
     }
 
     [Fact]
+    public async Task Sync_SameAccountReconnectPreservesTypedOutcomeInBothExportPaths()
+    {
+        await using var db = CreateDb();
+        var playlist = await SeedAsync(db);
+        (await db.ConnectedServiceAccounts.SingleAsync()).ConnectionState = "reconnect_required";
+        await db.SaveChangesAsync();
+        var writer = new RecordingWriter();
+        var coordinator = new PlaylistSyncCoordinator(db, [new CoordinatorPlatform()], [writer], TimeProvider.System,
+            NullLogger<PlaylistSyncCoordinator>.Instance);
+        foreach (var service in new[] { new OutboundPlaylistSyncService(db, [writer]),
+            new OutboundPlaylistSyncService(db, [writer], coordinator) })
+        {
+            await Assert.ThrowsAsync<PlatformReconnectRequiredException>(() => service.SyncAsync(
+                new(42, 99, "original-account"), "youtube", playlist.Id, null, default));
+            var changed = await Assert.ThrowsAsync<PlatformApiException>(() => service.SyncAsync(
+                new(42, 99, "previous-account"), "youtube", playlist.Id, null, default));
+            Assert.Equal("account_changed", changed.Code);
+        }
+        Assert.Empty(writer.Writes);
+        Assert.Equal(0, writer.Validations);
+    }
+
+    [Fact]
     public async Task Sync_RejectsAnAccountReconnectedAsAnotherProviderUser()
     {
         await using var db = CreateDb();
@@ -370,7 +393,7 @@ public sealed class OutboundPlaylistSyncTests
             Id = Guid.NewGuid(), UserId = 42, ConnectedServiceAccountId = 99, Service = "youtube",
             Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
             CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist("destination", playlist.Name, 1, playlist.Id) })
+            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist("destination", playlist.Name, 1, playlist.Id, "original-account") })
         };
         db.MusicSyncJobs.Add(job);
         await db.SaveChangesAsync();

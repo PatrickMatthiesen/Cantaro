@@ -8,10 +8,11 @@ public sealed partial class PlaylistSyncCoordinator
     public async Task<Guid> ImportAsync(PlatformAccountContext account, string service, string remoteId, CancellationToken ct)
     {
         var connected = await db.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(item => item.Id == account.ConnectedServiceAccountId
-            && item.UserId == account.UserId && item.Service == service && item.ConnectionState == "connected", ct)
+            && item.UserId == account.UserId && item.Service == service, ct)
             ?? throw new PlatformApiException("account_changed", "Reconnect the original platform account before importing.", 409);
         if (account.ExpectedExternalAccountId is { } expected && connected.ExternalAccountId != expected)
             throw new PlatformApiException("account_changed", "The connected platform account changed.", 409);
+        ProviderReconnectState.RequireUsable(connected);
         var pinned = account with { ExpectedExternalAccountId = connected.ExternalAccountId };
         var existing = await db.ServicePlaylistMappings.SingleOrDefaultAsync(link => link.Service == service
             && link.ServicePlaylistId == remoteId && link.UserId == account.UserId && link.ExternalAccountId == connected.ExternalAccountId
@@ -59,19 +60,28 @@ public sealed partial class PlaylistSyncCoordinator
         => CreateLinkCoreAsync(userId, playlistId, service, _ => Task.CompletedTask,
             reviewedCreate: false, ct: ct);
 
+    public Task CreateLinkAsync(PlatformAccountContext account, Guid playlistId, string service, CancellationToken ct)
+        => CreateLinkCoreAsync(account.UserId, playlistId, service, _ => Task.CompletedTask,
+            reviewedCreate: false, ct: ct, expectedAccount: account);
+
     public Task CreateLinkAsync(int userId, Guid playlistId, string service,
         Func<CancellationToken, Task> validateBeforeCreate, CancellationToken ct)
         => CreateLinkCoreAsync(userId, playlistId, service, validateBeforeCreate,
             reviewedCreate: true, ct: ct);
 
     private Task CreateLinkCoreAsync(int userId, Guid playlistId, string service,
-        Func<CancellationToken, Task> validateBeforeCreate, bool reviewedCreate, CancellationToken ct)
+        Func<CancellationToken, Task> validateBeforeCreate, bool reviewedCreate, CancellationToken ct,
+        PlatformAccountContext? expectedAccount = null)
         => WithLeaseAsync(userId, playlistId, async (playlist, token) =>
         {
             if (service is not ("youtube" or "spotify")) throw new PlatformApiException("invalid_platform", "Choose YouTube or Spotify.", 400);
             var connected = await db.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(account => account.UserId == userId
-                && account.Service == service && account.ConnectionState == "connected", token);
+                && account.Service == service, token);
+            if (expectedAccount is not null && (connected is null || connected.Id != expectedAccount.ConnectedServiceAccountId
+                || connected.ExternalAccountId != expectedAccount.ExpectedExternalAccountId))
+                throw new PlatformApiException("account_changed", "The connected platform account changed.", 409);
             if (connected is null) throw new PlatformApiException("account_not_connected", "Connect this platform before creating its playlist.", 409);
+            ProviderReconnectState.RequireUsable(connected);
             var current = await db.ServicePlaylistMappings.FirstOrDefaultAsync(link =>
                 link.PlaylistId == playlistId && link.Service == service && link.State != "unlinked", token);
             if (current?.State == "active")
@@ -98,7 +108,8 @@ public sealed partial class PlaylistSyncCoordinator
             await db.SaveChangesAsync(token);
             var reads = new List<LinkRead>();
             await CreateMissingLinksAsync(playlist, reads, token, service,
-                skipDuplicateNameCheck: reviewedCreate, ignoreUnlinked: true);
+                skipDuplicateNameCheck: reviewedCreate, ignoreUnlinked: true,
+                expectedAccount: new(userId, connected.Id, connected.ExternalAccountId));
             if (reads.Count == 0)
             {
                 var existing = await db.ServicePlaylistMappings.FirstOrDefaultAsync(link => link.PlaylistId == playlistId

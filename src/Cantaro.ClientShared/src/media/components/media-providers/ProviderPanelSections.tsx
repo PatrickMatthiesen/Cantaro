@@ -21,6 +21,7 @@ interface ProviderPanelActionsProps {
     name: string;
     isLoadingStatus: boolean;
     hasStatus: boolean;
+    needsReconnect?: boolean;
     isConnected: boolean;
     onConnect: () => void;
     onRetryStatus: () => Promise<void>;
@@ -77,6 +78,8 @@ export function ProviderPanelHeader({
                     <span className="inline-flex items-center gap-2 text-sm text-content-muted">
                         <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> Checking connection…
                     </span>
+                ) : status?.needsReconnect ? (
+                    <span className="text-sm font-semibold text-danger-content">Reconnect required</span>
                 ) : status?.isConnected ? (
                     <span className="inline-flex items-center gap-2 text-sm font-semibold text-success-content">
                         <Check className="h-4 w-4" aria-hidden /> Connected
@@ -408,10 +411,10 @@ export function ProviderPanelActions(props: ProviderPanelActionsProps) {
         );
     }
 
-    if (!props.isConnected) {
+    if (!props.isConnected || props.needsReconnect) {
         return (
             <ActionButton tone="personal" onClick={props.onConnect}>
-                Connect {props.name}
+                {props.needsReconnect ? 'Reconnect' : 'Connect'} {props.name}
             </ActionButton>
         );
     }

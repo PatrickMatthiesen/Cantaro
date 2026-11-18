@@ -214,6 +214,13 @@ public sealed partial class PlaylistSyncCoordinator
 
     private void RecordFailure(ServicePlaylistMapping link, Exception exception)
     {
+        if (exception is PlatformReconnectRequiredException)
+        {
+            link.LastSyncStatus = "reconnect_required";
+            link.LastError = exception.Message;
+            link.NextAttemptAt ??= clock.GetUtcNow();
+            return;
+        }
         if (exception is PlatformApiException { StatusCode: 429 } rateLimit)
         {
             link.LastSyncStatus = IsSpotifyQuotaExceeded(rateLimit) ? "quota_limited" : "rate_limited";

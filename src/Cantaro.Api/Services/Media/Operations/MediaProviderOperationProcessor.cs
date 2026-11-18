@@ -148,6 +148,13 @@ public class MediaProviderOperationProcessor(
                 Outcome = MediaProviderOperationExecutionOutcome.Succeeded
             };
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            operation.Status = MediaProviderOperationStatuses.Retrying;
+            operation.AttemptCount = Math.Max(0, operation.AttemptCount - 1);
+            await _dbContext.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
         catch (Exception ex)
         {
             ApplyMutationFailure(operation, ex);
@@ -171,6 +178,8 @@ public class MediaProviderOperationProcessor(
                 (operation.Status == MediaProviderOperationStatuses.Pending
                     || operation.Status == MediaProviderOperationStatuses.Retrying)
                 && (operation.NextAttemptAt == null || operation.NextAttemptAt <= now))
+            .Where(operation => operation.MediaLibraryProviderBinding!.ConnectedServiceAccount == null
+                || operation.MediaLibraryProviderBinding.ConnectedServiceAccount.ConnectionState != "reconnect_required")
             .OrderBy(operation => operation.CreatedAt)
             .Select(operation => operation.Id)
             .Take(10)
@@ -202,6 +211,8 @@ public class MediaProviderOperationProcessor(
         var claimedCount = await _dbContext.MediaProviderOperations
             .Where(item =>
                 item.Id == operationId
+                && (item.MediaLibraryProviderBinding!.ConnectedServiceAccount == null
+                    || item.MediaLibraryProviderBinding.ConnectedServiceAccount.ConnectionState != "reconnect_required")
                 && (item.Status == MediaProviderOperationStatuses.Pending
                     || item.Status == MediaProviderOperationStatuses.Retrying))
             .ExecuteUpdateAsync(
@@ -540,6 +551,15 @@ public class MediaProviderOperationProcessor(
     private void ApplyMutationFailure(MediaProviderOperation operation, Exception exception)
     {
         var now = DateTimeOffset.UtcNow;
+        if (exception is PlatformReconnectRequiredException)
+        {
+            operation.Status = MediaProviderOperationStatuses.Retrying;
+            operation.AttemptCount = Math.Max(0, operation.AttemptCount - 1);
+            operation.NextAttemptAt = null;
+            operation.LastError = "Reconnect the provider to resume.";
+            operation.UpdatedAt = now;
+            return;
+        }
         var maxAttempts = 4;
         var shouldRetry = operation.AttemptCount < maxAttempts;
 

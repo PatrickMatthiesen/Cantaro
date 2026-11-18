@@ -167,12 +167,12 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
   );
 }
 
-function ConnectionCard({ name, detail, icon, implemented, connected, busy, onAction }: { name: string; detail: string; icon: ReactNode; implemented: boolean; connected: boolean; busy: boolean; onAction: () => void }) {
+function ConnectionCard({ name, detail, icon, implemented, connected, reconnect, busy, onAction }: { name: string; detail: string; icon: ReactNode; implemented: boolean; connected: boolean; reconnect: boolean; busy: boolean; onAction: () => void }) {
   return (
     <article className="flex items-center gap-4 border-t border-border-subtle py-4">
       {icon}
       <span className="min-w-0 flex-1"><strong className="block text-sm text-content">{name}</strong><span className="block truncate text-xs text-content-muted">{implemented ? detail : 'Coming later'}</span></span>
-      {implemented ? <button type="button" disabled={busy} onClick={onAction} className={`min-h-9 px-4 text-xs font-bold transition-colors ${connected ? 'bg-success-surface text-success-content hover:bg-danger-surface hover:text-danger-content' : 'bg-personal-accent text-personal-accent-content hover:bg-personal-accent-hover'}`}>{busy ? 'Working…' : connected ? 'Connected' : 'Connect'}</button> : <span className="bg-surface-subtle px-3 py-1.5 text-[10px] font-bold text-content-muted">Coming soon</span>}
+      {implemented ? <button type="button" disabled={busy} onClick={onAction} className={`min-h-9 px-4 text-xs font-bold transition-colors ${connected && !reconnect ? 'bg-success-surface text-success-content hover:bg-danger-surface hover:text-danger-content' : 'bg-personal-accent text-personal-accent-content hover:bg-personal-accent-hover'}`}>{busy ? 'Working…' : reconnect ? 'Reconnect' : connected ? 'Connected' : 'Connect'}</button> : <span className="bg-surface-subtle px-3 py-1.5 text-[10px] font-bold text-content-muted">Coming soon</span>}
     </article>
   );
 }
@@ -180,13 +180,13 @@ function ConnectionCard({ name, detail, icon, implemented, connected, busy, onAc
 function MusicConnectionCard({ item, status, busyKey, onAction }: { item: (typeof platformCatalog)[number]; status?: PlatformAccountStatus; busyKey: string | null; onAction: () => void }) {
   const connected = Boolean(status?.isConnected);
   const detail = status?.displayName || (connected ? 'Account connected' : 'Music platform');
-  return <ConnectionCard name={item.name} detail={detail} icon={<MusicPlatformIcon platformId={item.id} className="h-10 w-10 shrink-0" />} implemented={item.implemented} connected={connected} busy={busyKey === `music-${item.id}`} onAction={onAction} />;
+  return <ConnectionCard name={item.name} detail={detail} icon={<MusicPlatformIcon platformId={item.id} className="h-10 w-10 shrink-0" />} implemented={item.implemented} connected={connected} reconnect={Boolean(status?.needsReconnect || status?.connectionState === "reconnect_required")} busy={busyKey === `music-${item.id}`} onAction={onAction} />;
 }
 
 function MediaConnectionCard({ item, status, busyKey, onAction }: { item: (typeof mediaProviderCatalog)[number]; status?: MediaProviderAccountStatusDto; busyKey: string | null; onAction: () => void }) {
   const connected = Boolean(status?.isConnected);
   const detail = status?.displayName || (connected ? 'Account connected' : 'Media provider');
-  return <ConnectionCard name={item.name} detail={detail} icon={<MediaProviderIcon providerId={item.iconId} className="h-10 w-10 shrink-0" aria-hidden />} implemented={item.implemented} connected={connected} busy={busyKey === `media-${item.id}`} onAction={onAction} />;
+  return <ConnectionCard name={item.name} detail={detail} icon={<MediaProviderIcon providerId={item.iconId} className="h-10 w-10 shrink-0" aria-hidden />} implemented={item.implemented} connected={connected} reconnect={Boolean(status?.needsReconnect || status?.connectionState === "reconnect_required")} busy={busyKey === `media-${item.id}`} onAction={onAction} />;
 }
 
 function ConnectionsSection() {
@@ -202,7 +202,7 @@ function ConnectionsSection() {
   useEffect(() => { void load(); }, []);
 
   const handleMusicAction = async (item: (typeof platformCatalog)[number]) => {
-    if (!music[item.id]?.isConnected) {
+    if (!music[item.id]?.isConnected || music[item.id]?.needsReconnect || music[item.id]?.connectionState === "reconnect_required") {
       await platformManager.connect(item.id, { route: '/settings#connections', trigger: 'settings' });
       return;
     }
@@ -217,7 +217,7 @@ function ConnectionsSection() {
   };
 
   const handleMediaAction = async (item: (typeof mediaProviderCatalog)[number]) => {
-    if (!media[item.id]?.isConnected) {
+    if (!media[item.id]?.isConnected || media[item.id]?.needsReconnect || media[item.id]?.connectionState === "reconnect_required") {
       await mediaApi.connectProvider(item.id, { route: '/settings', trigger: 'settings' });
       return;
     }

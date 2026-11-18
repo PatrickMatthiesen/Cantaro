@@ -22,6 +22,8 @@ public sealed class MusicSyncJobProcessor(
     {
         var job = await _dbContext.MusicSyncJobs
             .Where(item => item.Status == MusicSyncJobStatuses.Queued || item.Status == MusicSyncJobStatuses.Running)
+            .Where(item => !_dbContext.ConnectedServiceAccounts.Any(account =>
+                account.Id == item.ConnectedServiceAccountId && account.ConnectionState == "reconnect_required"))
             .OrderBy(item => item.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
         if (job is null) return false;
@@ -54,6 +56,26 @@ public sealed class MusicSyncJobProcessor(
             foreach (var playlist in playlists.Skip(job.ProcessedPlaylistCount))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var dispatchAccount = account with { ExpectedExternalAccountId = playlist.ExternalAccountId };
+                if (job.Service is "youtube" or "spotify")
+                {
+                    var expected = playlist.ExternalAccountId;
+                    // A current mapping cannot prove which account selected a legacy job.
+                    if (string.IsNullOrWhiteSpace(expected))
+                        throw new PlatformApiException("sync_account_unverified",
+                            "The original account for this queued sync cannot be verified. Start a new sync from the current account.", 409);
+                    var current = await _dbContext.ConnectedServiceAccounts.AsNoTracking().SingleOrDefaultAsync(item =>
+                        item.Id == connectedServiceAccountId && item.UserId == job.UserId && item.Service == job.Service,
+                        cancellationToken);
+                    if (current is null || current.ExternalAccountId != expected)
+                        throw new PlatformApiException("platform_account_changed",
+                            "The connected account changed. Start a new sync from the current account.", 409);
+                    if (current.ConnectionState == "disconnected")
+                        throw new PlatformApiException("account_not_connected",
+                            $"Connect {job.Service} and start a new sync.", 409);
+                    ProviderReconnectState.RequireUsable(current);
+                    dispatchAccount = account with { ExpectedExternalAccountId = expected };
+                }
                 var processedBeforePlaylist = job.ProcessedSongCount;
                 var lastPersistedSongCount = -1;
                 string? lastPersistedSongName = null;
@@ -71,7 +93,7 @@ public sealed class MusicSyncJobProcessor(
                     if (playlist.CantaroPlaylistId is { } sourcePlaylistId)
                     {
                         cantaroPlaylistId = await outboundSync.SyncAsync(
-                            account with { ExpectedExternalAccountId = playlist.ExternalAccountId },
+                            dispatchAccount,
                             job.Service,
                             sourcePlaylistId,
                             string.IsNullOrWhiteSpace(playlist.Id) ? null : playlist.Id,
@@ -80,7 +102,7 @@ public sealed class MusicSyncJobProcessor(
                             .Where(mapping => mapping.PlaylistId == sourcePlaylistId
                                 && mapping.ConnectedServiceAccountId == connectedServiceAccountId
                                 && mapping.Service == job.Service && mapping.State == "active"
-                                && mapping.ExternalAccountId == playlist.ExternalAccountId
+                                && mapping.ExternalAccountId == dispatchAccount.ExpectedExternalAccountId
                                 && mapping.SyncMode != "import_only")
                             .Select(mapping => mapping.ServicePlaylistId)
                             .SingleAsync(cancellationToken);
@@ -88,7 +110,7 @@ public sealed class MusicSyncJobProcessor(
                     else
                     {
                         cantaroPlaylistId = await platform.SyncPlaylistAsync(
-                            account,
+                            dispatchAccount,
                             playlist.Id,
                             async (progress, progressCancellationToken) =>
                             {
@@ -134,6 +156,7 @@ public sealed class MusicSyncJobProcessor(
                 {
                     throw;
                 }
+                catch (PlatformReconnectRequiredException) { throw; }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Music sync job {JobId} failed playlist {PlaylistId}", jobId, playlist.Id);
@@ -199,6 +222,13 @@ public sealed class MusicSyncJobProcessor(
             job.UpdatedAt = DateTimeOffset.UtcNow;
             await _dbContext.SaveChangesAsync(CancellationToken.None);
             throw;
+        }
+        catch (PlatformReconnectRequiredException)
+        {
+            job = await ReloadJobAsync(jobId, cancellationToken);
+            job.Status = MusicSyncJobStatuses.Queued;
+            job.UpdatedAt = DateTimeOffset.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {

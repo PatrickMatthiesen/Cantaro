@@ -4,10 +4,15 @@ using Cantaro.Api.Models;
 
 namespace Cantaro.Api.Services;
 
-public sealed record MediaLibraryImportWorkItem(Guid ImportId, int UserId, string ProviderId);
+public sealed record MediaLibraryImportWorkItem(Guid ImportId, int UserId, string ProviderId)
+{
+    internal int? AccountId { get; set; }
+    internal string? ExternalAccountId { get; set; }
+}
 
 public sealed class MediaLibraryImportQueue
 {
+    private readonly ConcurrentDictionary<Guid, MediaLibraryImportWorkItem> _paused = new();
     private readonly Channel<MediaLibraryImportWorkItem> _queue = Channel.CreateUnbounded<MediaLibraryImportWorkItem>();
     private readonly ConcurrentDictionary<string, Guid> _activeImports = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, MediaLibraryImportEventDto> _latestEvents = new();
@@ -36,10 +41,32 @@ public sealed class MediaLibraryImportQueue
         return ValueTask.FromResult(workItem);
     }
 
-    public IAsyncEnumerable<MediaLibraryImportWorkItem> ReadAllAsync(CancellationToken cancellationToken)
+    public async IAsyncEnumerable<MediaLibraryImportWorkItem> ReadAllAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        return _queue.Reader.ReadAllAsync(cancellationToken);
+        var nextPausedReview = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (DateTimeOffset.UtcNow >= nextPausedReview)
+            {
+                nextPausedReview = DateTimeOffset.UtcNow.AddSeconds(30);
+                foreach (var entry in _paused.ToArray())
+                    if (_paused.TryRemove(entry.Key, out var paused)) yield return paused;
+            }
+            if (_queue.Reader.TryRead(out var item))
+            {
+                yield return item;
+                continue;
+            }
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var delay = nextPausedReview - DateTimeOffset.UtcNow;
+            idle.CancelAfter(delay > TimeSpan.Zero ? delay : TimeSpan.Zero);
+            try { await _queue.Reader.WaitToReadAsync(idle.Token); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        }
     }
+
+    public void Pause(MediaLibraryImportWorkItem item) => _paused[item.ImportId] = item;
 
     public ChannelReader<MediaLibraryImportEventDto> Subscribe(int userId, out Guid subscriptionId)
     {
