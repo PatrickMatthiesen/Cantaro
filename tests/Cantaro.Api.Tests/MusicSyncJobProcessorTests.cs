@@ -12,6 +12,57 @@ namespace Cantaro.Api.Tests;
 public sealed class MusicSyncJobProcessorTests
 {
     [PostgresTheory]
+    [InlineData("spotify", MusicSyncJobStatuses.Queued)]
+    [InlineData("youtube", MusicSyncJobStatuses.Running)]
+    public async Task DisconnectedAccount_FailsOldestJobWithoutBlockingAnotherUser(string service, string status)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var db = schema.Db;
+        db.Users.AddRange(TestUserFactory.Create(705, "disconnected@example.test"),
+            TestUserFactory.Create(706, "another-user@example.test"));
+        var disconnected = new ConnectedServiceAccount
+        {
+            UserId = 705, Service = service, ExternalAccountId = "original", ConnectionState = "disconnected"
+        };
+        var healthy = new ConnectedServiceAccount { UserId = 706, Service = service, ExternalAccountId = "other" };
+        db.ConnectedServiceAccounts.AddRange(disconnected, healthy);
+        await db.SaveChangesAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        MusicSyncJob CreateJob(ConnectedServiceAccount account, string playlistId, DateTimeOffset createdAt) => new()
+        {
+            Id = Guid.NewGuid(), UserId = account.UserId, ConnectedServiceAccountId = account.Id, Service = service,
+            Status = MusicSyncJobStatuses.Queued, PlaylistCount = 1, SongCount = 1,
+            PlaylistsJson = JsonSerializer.Serialize(new[] { new MusicSyncJobPlaylist(playlistId, playlistId, 1,
+                ExternalAccountId: account.ExternalAccountId) }),
+            CreatedAt = createdAt, UpdatedAt = createdAt
+        };
+        var oldest = CreateJob(disconnected, "disconnected-playlist", now.AddMinutes(-1));
+        oldest.Status = status;
+        var next = CreateJob(healthy, "healthy-playlist", now);
+        db.MusicSyncJobs.AddRange(oldest, next);
+        await db.SaveChangesAsync();
+
+        var platform = new StubPlatformService(service);
+        var processor = new MusicSyncJobProcessor(db, new PlatformRegistry([platform]), new MusicSyncThrottleService(),
+            NullLogger<MusicSyncJobProcessor>.Instance, new OutboundPlaylistSyncService(db, []));
+
+        Assert.True(await processor.ProcessNextAsync(default));
+        var failed = await db.MusicSyncJobs.AsNoTracking().SingleAsync(item => item.Id == oldest.Id);
+        Assert.Equal(MusicSyncJobStatuses.Failed, failed.Status);
+        Assert.NotNull(failed.CompletedAt);
+        Assert.Contains("start a new sync", failed.ErrorMessage);
+        Assert.Equal(0, failed.ProcessedPlaylistCount);
+        Assert.Empty(platform.SyncedPlaylistIds);
+
+        Assert.True(await processor.ProcessNextAsync(default));
+        Assert.Equal(MusicSyncJobStatuses.Completed,
+            await db.MusicSyncJobs.Where(item => item.Id == next.Id).Select(item => item.Status).SingleAsync());
+        Assert.Equal(new[] { "healthy-playlist" }, platform.SyncedPlaylistIds);
+        Assert.False(await processor.ProcessNextAsync(default));
+    }
+
+    [PostgresTheory]
     [InlineData("original", "replacement", false, false)]
     [InlineData(null, "replacement", false, false)]
     [InlineData(null, "replacement", true, false)]

@@ -70,6 +70,9 @@ public sealed class MusicSyncJobProcessor(
                     if (current is null || current.ExternalAccountId != expected)
                         throw new PlatformApiException("platform_account_changed",
                             "The connected account changed. Start a new sync from the current account.", 409);
+                    if (current.ConnectionState == "disconnected")
+                        throw new PlatformApiException("account_not_connected",
+                            $"Connect {job.Service} and start a new sync.", 409);
                     ProviderReconnectState.RequireUsable(current);
                     dispatchAccount = account with { ExpectedExternalAccountId = expected };
                 }
