@@ -298,6 +298,46 @@ public sealed class MyAnimeListMediaProviderTests
     }
 
     [Theory]
+    [InlineData("already_rejected", true)]
+    [InlineData("recovered", false)]
+    [InlineData("replacement", false)]
+    public async Task ConcurrentReadRejection_PreservesReconnectClassificationAndNewCredentialFence(string state, bool reconnect)
+    {
+        ProviderFixture? current = null;
+        var reads = 0;
+        await using var fixture = await ProviderFixture.CreateAsync(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("token", StringComparison.Ordinal))
+                return JsonResponse("{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"expires_in\":3600}");
+            if (++reads == 2)
+            {
+                using var concurrent = PlaylistReadIngestion.CreateContext(current!.Db);
+                concurrent.ConnectedServiceAccounts.ExecuteUpdate(set => set
+                    .SetProperty(item => item.ConnectionState, state == "recovered" ? "connected" : "reconnect_required")
+                    .SetProperty(item => item.ExternalAccountId, state == "replacement" ? "replacement" : "612")
+                    .SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1));
+            }
+            return reads <= 2 ? new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("{}") }
+                : JsonResponse("{\"data\":[],\"paging\":{}}");
+        }, 612);
+        current = fixture;
+        var failure = await Record.ExceptionAsync(() => fixture.Provider.ImportLibraryAsync(612, default));
+        Assert.Equal(reconnect, failure is PlatformReconnectRequiredException);
+        if (!reconnect) Assert.IsType<MyAnimeListRequestException>(failure);
+        var account = await fixture.Db.ConnectedServiceAccounts.AsNoTracking().SingleAsync();
+        Assert.Equal(2, account.TokenVersion);
+        Assert.Equal(state == "recovered" ? "connected" : "reconnect_required", account.ConnectionState);
+        Assert.Equal(state == "replacement" ? "replacement" : "612", account.ExternalAccountId);
+        Assert.Equal(2, reads);
+        if (reconnect)
+        {
+            await fixture.Db.ConnectedServiceAccounts.ExecuteUpdateAsync(set => set
+                .SetProperty(item => item.ConnectionState, "connected").SetProperty(item => item.TokenVersion, item => item.TokenVersion + 1));
+            Assert.Empty((await fixture.Provider.ImportLibraryAsync(612, default)).Items);
+        }
+    }
+
+    [Theory]
     [InlineData("connected", false)]
     [InlineData("reconnect_required", true)]
     public async Task OAuthWithoutReplacementRefresh_CannotReviveUnusableCredential(string state, bool rejected)

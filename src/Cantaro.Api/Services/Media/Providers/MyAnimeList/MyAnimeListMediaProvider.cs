@@ -503,7 +503,7 @@ public sealed class MyAnimeListMediaProvider(
             try { return await ExecuteAsync(access); }
             catch (MyAnimeListRequestException rejected) when (rejected.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
-                if (await ProviderReconnectState.MarkAsync(_dbContext, account, "access_token_rejected", ct))
+                if (await ProviderReconnectState.MarkOrAlreadyRequiredAsync(_dbContext, account, "access_token_rejected", ct))
                     throw new PlatformReconnectRequiredException("Reconnect MyAnimeList to continue.", rejected);
                 throw;
             }
