@@ -6,6 +6,7 @@ import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds } from './
 import { MusicPlaylistOutboundSync } from './MusicPlaylistOutboundSync';
 import { MusicPlaylistRename } from './MusicPlaylistRename';
 import { usePlaylistSyncDetails } from './usePlaylistSyncDetails';
+import { useLibraryPlayback } from './playback/useLibraryPlayback';
 
 function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
   return library.songs
@@ -57,6 +58,7 @@ export function MusicPlaylistDetailPage({
 }) {
   const playlist = library.playlists.find((item) => item.id === playlistId);
   const sync = usePlaylistSyncDetails(playlistId);
+  const { queueProps, trackActions, playCollection } = useLibraryPlayback(library.songs);
   const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
   const baseTracks = playlistSongEntries.map(({ song, entryId }, index) => mapSongToCollectionTrack(song, index, entryId));
 
@@ -78,6 +80,9 @@ export function MusicPlaylistDetailPage({
         backLabel="Back to playlists"
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}
         tracks={baseTracks}
+        {...queueProps}
+        {...trackActions}
+        onPlayAll={() => playCollection(playlistSongEntries.map(({ song }) => song))}
         emptyTrackLabel="This playlist has no songs yet"
         actionSlot={<PlaylistRenameAction playlist={playlist} sync={sync} />}
         afterHeroSlot={<MusicPlaylistOutboundSync state={sync} />}

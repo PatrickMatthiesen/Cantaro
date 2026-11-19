@@ -17,6 +17,8 @@ import { formatDuration, isPlatformId, platformName, songArtist } from './musicP
 import { requestPlaylistSyncDataRefresh } from './playlistSyncProgress';
 import { canAddSongToPlaylist, withoutPlaylistEntry } from './musicPlaylistMemberships';
 import { SongCreditsSection } from './SongCreditsSection';
+import { useMusicPlayback } from './playback/musicPlaybackContextValue';
+import { playbackTrackFromSong } from './playback/playbackSources';
 
 interface SongDerivedMetadata {
   platformIds: PlatformId[];
@@ -124,11 +126,17 @@ function SongMetrics({ song }: { song: MusicLibrarySong }) {
 }
 
 function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
+  const { dispatch } = useMusicPlayback();
   const primaryLink = song.platformLinks.find((link) => link.platform === 'spotify' || link.platform === 'youtube-music' || link.platform === 'youtube') ?? song.platformLinks[0];
-  if (!primaryLink && metadata.matchTone !== 'warning') return null;
 
   return (
     <div className="mt-7 flex flex-wrap gap-3">
+      <ActionButton tone="personal" onClick={() => dispatch({ type: 'enqueue', track: playbackTrackFromSong(song), play: true })}>
+        <MusicUiIcon name="play" className="size-4" aria-hidden /> Play
+      </ActionButton>
+      <ActionButton tone="secondary" onClick={() => dispatch({ type: 'enqueue', track: playbackTrackFromSong(song) })}>
+        Add to queue
+      </ActionButton>
       {primaryLink ? (
         <a href={primaryLink.url} target="_blank" rel="noreferrer" className={actionClassName({ tone: 'personal' })}>
           <MusicUiIcon name="externalLink" className="h-4 w-4" />

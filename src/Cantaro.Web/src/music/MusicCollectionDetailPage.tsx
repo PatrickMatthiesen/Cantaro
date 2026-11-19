@@ -62,6 +62,7 @@ interface MusicCollectionDetailPageProps {
   onPlayTrack?: (track: MusicCollectionTrack) => void;
   onQueueTrack?: (track: MusicCollectionTrack) => void;
   onClearQueue?: () => void;
+  onPlayQueuedTrack?: (index: number) => void;
 }
 
 function CollectionArtwork({
@@ -212,7 +213,7 @@ function TrackHoverControls({
   onPlayTrack?: (track: MusicCollectionTrack) => void;
 }) {
   return (
-    <span className="absolute left-0 flex items-center gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
+    <span className="absolute left-0 flex items-center gap-1 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
       {onPlayTrack ? (
         <button
           type="button"
@@ -240,7 +241,7 @@ function TrackNumber({
 
   return (
     <span className="relative flex h-9 items-center">
-      <span className={`font-mono text-xs transition group-focus-within:opacity-0 group-hover:opacity-0 ${track.isPlaying ? 'font-black text-accent' : 'text-content-muted'}`}>
+      <span className={`font-mono text-xs transition ${hasTrackControls ? 'group-focus-within:opacity-0 group-hover:opacity-0 [@media(hover:none)]:opacity-0' : ''} ${track.isPlaying ? 'font-black text-accent' : 'text-content-muted'}`}>
         {track.isPlaying ? '||' : index + 1}
       </span>
       {hasTrackControls ? <TrackHoverControls track={track} onPlayTrack={onPlayTrack} /> : null}
@@ -536,12 +537,14 @@ function RightRail({
   rightRailTitle,
   suggestions,
   onClearQueue,
+  onPlayQueuedTrack,
 }: {
   activeTrack?: MusicCollectionTrack;
   queuedTracks?: MusicCollectionTrack[];
   rightRailTitle?: string;
   suggestions?: MusicCollectionSuggestion[];
   onClearQueue?: () => void;
+  onPlayQueuedTrack?: (index: number) => void;
 }) {
   return (
     <aside className="space-y-4">
@@ -551,6 +554,7 @@ function RightRail({
           queuedTracks={queuedTracks}
           title={rightRailTitle}
           onClearQueue={onClearQueue}
+          onPlayQueuedTrack={onPlayQueuedTrack}
         />
       ) : null}
       <SuggestionsPanel suggestions={suggestions} className="hidden 2xl:block" />
@@ -726,6 +730,7 @@ export function MusicCollectionDetailPage(props: MusicCollectionDetailPageProps)
           rightRailTitle={props.rightRailTitle}
           suggestions={props.suggestions}
           onClearQueue={props.onClearQueue}
+          onPlayQueuedTrack={props.onPlayQueuedTrack}
         />
       </div>
 

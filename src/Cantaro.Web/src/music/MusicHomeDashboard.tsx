@@ -8,6 +8,8 @@ import {
 import { actionClassName } from '@cantaro/client-shared/ui';
 import { Link } from '@tanstack/react-router';
 import { MusicTrackTable, type MusicCollectionTrack } from './MusicCollectionDetailPage';
+import { MusicUpNextPanel } from './MusicUpNextPanel';
+import { useLibraryPlayback } from './playback/useLibraryPlayback';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
 import {
@@ -104,6 +106,7 @@ function PlaylistStrip({ playlists }: { playlists: MusicLibraryPlaylist[] }) {
 
 export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse }) {
   const tracks = library.songs.map(mapSongToTrack);
+  const { hasQueue, queueProps, trackActions } = useLibraryPlayback(library.songs);
 
   return (
     <MusicPageShell library={library}>
@@ -127,6 +130,7 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
 
         <ArchiveSummary library={library} />
         <PlaylistStrip playlists={library.playlists} />
+        {hasQueue ? <MusicUpNextPanel {...queueProps} /> : null}
 
         <section className="py-8" aria-labelledby="song-library-title">
           <div className="mb-5 flex items-end justify-between gap-4">
@@ -136,7 +140,11 @@ export function MusicHomeDashboard({ library }: { library: MusicLibraryResponse 
             </div>
           </div>
           {tracks.length > 0 ? (
-            <MusicTrackTable tracks={tracks} emptyTrackLabel="No songs found" />
+            <MusicTrackTable
+              tracks={tracks}
+              emptyTrackLabel="No songs found"
+              {...trackActions}
+            />
           ) : (
             <MusicEmptyPanel title="No songs yet" detail={`Connect a platform or import a playlist to begin building Cantaro's canonical music archive.`} />
           )}
