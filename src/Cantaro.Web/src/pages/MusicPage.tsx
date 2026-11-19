@@ -13,12 +13,19 @@ import { MusicPlaylistsDirectory } from '../music/MusicPlaylistsDirectory';
 import { MusicPlatformsPage } from '../music/MusicPlatformsPage';
 import { MusicSongDetailPage } from '../music/MusicSongPages';
 import { useConnectedMusicPlatforms } from '../music/useConnectedMusicPlatforms';
+import { MusicPlaybackProvider } from '../music/playback/MusicPlaybackContext';
+import { MusicBottomPlayer } from '../music/playback/MusicBottomPlayer';
 
 export function MusicLayout() {
   return (
     <RequireAuth>
       <MusicLibraryProvider>
-        <Outlet />
+        <MusicPlaybackProvider>
+          <div>
+            <Outlet />
+            <MusicBottomPlayer />
+          </div>
+        </MusicPlaybackProvider>
       </MusicLibraryProvider>
     </RequireAuth>
   );

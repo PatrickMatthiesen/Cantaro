@@ -13,10 +13,13 @@ import {
 import { ActionButton, SelectField, actionClassName } from '@cantaro/client-shared/ui';
 import { MusicPageShell } from './MusicPageShell';
 import { lyricsForDisplay } from './musicLyrics';
-import { formatDuration, isPlatformId, platformName, songArtist } from './musicPresentation';
+import { formatDuration, isPlatformId, platformName, songArtist, songArtwork } from './musicPresentation';
+import { MusicArtwork } from './MusicArtwork';
 import { requestPlaylistSyncDataRefresh } from './playlistSyncProgress';
 import { canAddSongToPlaylist, withoutPlaylistEntry } from './musicPlaylistMemberships';
 import { SongCreditsSection } from './SongCreditsSection';
+import { useMusicPlayback } from './playback/musicPlaybackContextValue';
+import { playbackTrackFromSong } from './playback/playbackSources';
 
 interface SongDerivedMetadata {
   platformIds: PlatformId[];
@@ -81,18 +84,6 @@ function SectionHeader({ title, detail, action }: { title: string; detail?: stri
   );
 }
 
-function SongArtwork({ song, className = '' }: { song: MusicLibrarySong; className?: string }) {
-  if (!song.thumbnailUrl) {
-    return (
-      <div className={`flex aspect-square items-center justify-center bg-surface-subtle text-content-subtle ${className}`}>
-        <MusicUiIcon name="music" className="h-12 w-12" />
-      </div>
-    );
-  }
-
-  return <img src={song.thumbnailUrl} alt="" className={`aspect-square object-cover ${className}`} />;
-}
-
 function SongIdentityStatus({ metadata }: { metadata: SongDerivedMetadata }) {
   const icon = metadata.matchTone === 'ready' ? 'checkCircle' : metadata.matchTone === 'warning' ? 'warning' : 'database';
   return (
@@ -124,11 +115,17 @@ function SongMetrics({ song }: { song: MusicLibrarySong }) {
 }
 
 function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
+  const { dispatch } = useMusicPlayback();
   const primaryLink = song.platformLinks.find((link) => link.platform === 'spotify' || link.platform === 'youtube-music' || link.platform === 'youtube') ?? song.platformLinks[0];
-  if (!primaryLink && metadata.matchTone !== 'warning') return null;
 
   return (
     <div className="mt-7 flex flex-wrap gap-3">
+      <ActionButton tone="personal" onClick={() => dispatch({ type: 'enqueue', track: playbackTrackFromSong(song), play: true })}>
+        <MusicUiIcon name="play" className="size-4" aria-hidden /> Play
+      </ActionButton>
+      <ActionButton tone="secondary" onClick={() => dispatch({ type: 'enqueue', track: playbackTrackFromSong(song) })}>
+        Add to queue
+      </ActionButton>
       {primaryLink ? (
         <a href={primaryLink.url} target="_blank" rel="noreferrer" className={actionClassName({ tone: 'personal' })}>
           <MusicUiIcon name="externalLink" className="h-4 w-4" />
@@ -147,15 +144,14 @@ function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata:
 
 function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
   const canGoBack = useCanGoBack();
+  const { artworkUrl, artworkFallbacks } = songArtwork(song);
 
   return (
     <section className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content">
-      {song.thumbnailUrl ? (
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-50 dark:opacity-65"
-          style={{ backgroundImage: `url(${song.thumbnailUrl})` }}
-          aria-hidden
-        />
+      {artworkUrl ? (
+        <div className="absolute inset-0 opacity-50 dark:opacity-65">
+          <MusicArtwork src={artworkUrl} fallbacks={artworkFallbacks} className="size-full" backdrop />
+        </div>
       ) : null}
       <div className="absolute inset-0 bg-linear-to-r from-immersive-scrim-strong via-immersive-scrim-medium to-immersive-scrim-soft" aria-hidden />
       <div className="absolute inset-0 bg-linear-to-t from-immersive-scrim-base via-transparent to-immersive-scrim-soft" aria-hidden />
@@ -174,7 +170,7 @@ function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: 
       </Link>
 
       <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
-        <SongArtwork song={song} className="hidden w-56 shrink-0 bg-surface md:block xl:w-64" />
+        <MusicArtwork src={artworkUrl} fallbacks={artworkFallbacks} className="hidden aspect-square w-56 md:block xl:w-64" />
         <div className="min-w-0 max-w-4xl">
           {metadata.isObservation ? <SongIdentityStatus metadata={metadata} /> : null}
           <h1 className="mt-4 max-w-[22ch] text-3xl leading-[1.06] font-black tracking-[-0.03em] text-balance sm:text-4xl xl:text-5xl">

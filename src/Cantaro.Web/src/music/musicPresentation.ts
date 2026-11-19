@@ -65,8 +65,27 @@ export function visiblePlatformIds(song: MusicLibrarySong): PlatformId[] {
   return song.sourcePlatforms.filter(isPlatformId);
 }
 
-export function songArtwork(song: MusicLibrarySong, index = 0): string {
-  return song.thumbnailUrl || fallbackArtwork[index % fallbackArtwork.length];
+export function isYouTubeVideoId(value: string): boolean {
+  return /^[A-Za-z0-9_-]{11}$/.test(value);
+}
+
+export function youtubeSongArtworkUrls(song: MusicLibrarySong): string[] {
+  return song.sourceIdentities
+    .filter(({ source, externalId }) => (source === 'youtube' || source === 'youtube-music') && isYouTubeVideoId(externalId))
+    .map(({ externalId }) => `https://i.ytimg.com/vi/${externalId}/mqdefault.jpg`);
+}
+
+export function songArtwork(song: MusicLibrarySong): { artworkUrl?: string; artworkFallbacks?: string[] } {
+  const urls = youtubeSongArtworkUrls(song);
+  if (song.thumbnailUrl) urls.push(song.thumbnailUrl);
+  const [artworkUrl, ...fallbacks] = [...new Set(urls)];
+  return { artworkUrl, artworkFallbacks: fallbacks.length ? fallbacks : undefined };
+}
+
+export function isYouTubeThumbnailPlaceholder(src: string, width: number, height: number): boolean {
+  // YouTube serves a decodable 120×90 placeholder with a 404 for missing medium thumbnails.
+  return width === 120 && height === 90
+    && /^https:\/\/i\.ytimg\.com\/vi\/[A-Za-z0-9_-]{11}\/mqdefault\.jpg$/.test(src);
 }
 
 export function playlistArtwork(playlist: MusicLibraryPlaylist, index = 0): string {

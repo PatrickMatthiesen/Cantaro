@@ -3,7 +3,6 @@ import {
   MusicUiIcon,
   platformCatalog,
   type MusicLibraryResponse,
-  type MusicLibrarySong,
 } from '@cantaro/client-shared/music';
 import { Link, useRouterState } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
@@ -87,8 +86,6 @@ function MusicSidebar({ library }: { library?: MusicLibraryResponse }) {
 export function MusicPageShell(props: {
   children: ReactNode;
   library?: MusicLibraryResponse;
-  activeSong?: MusicLibrarySong;
-  onStopActiveSong?: () => void;
 }) {
   const { library: sharedLibrary } = useMusicLibraryContext();
   const sidebarLibrary = props.library ?? sharedLibrary ?? undefined;

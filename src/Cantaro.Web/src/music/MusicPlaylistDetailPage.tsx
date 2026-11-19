@@ -2,10 +2,11 @@ import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrary
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
+import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds, youtubeSongArtworkUrls } from './musicPresentation';
 import { MusicPlaylistOutboundSync } from './MusicPlaylistOutboundSync';
 import { MusicPlaylistRename } from './MusicPlaylistRename';
 import { usePlaylistSyncDetails } from './usePlaylistSyncDetails';
+import { useLibraryPlayback } from './playback/useLibraryPlayback';
 
 function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
   return library.songs
@@ -15,7 +16,7 @@ function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
     .sort((left, right) => left.position - right.position);
 }
 
-function mapSongToCollectionTrack(song: MusicLibrarySong, index: number, entryId: string): MusicCollectionTrack {
+function mapSongToCollectionTrack(song: MusicLibrarySong, entryId: string): MusicCollectionTrack {
   return {
     id: song.id,
     entryId,
@@ -23,7 +24,7 @@ function mapSongToCollectionTrack(song: MusicLibrarySong, index: number, entryId
     title: song.title,
     artist: songArtist(song),
     albums: song.albums,
-    artworkUrl: songArtwork(song, index),
+    ...songArtwork(song),
     durationSeconds: song.durationSeconds,
     addedLabel: song.playlists[0]?.playlistName,
     platformIds: visiblePlatformIds(song),
@@ -57,8 +58,14 @@ export function MusicPlaylistDetailPage({
 }) {
   const playlist = library.playlists.find((item) => item.id === playlistId);
   const sync = usePlaylistSyncDetails(playlistId);
+  const { queueProps, trackActions, playCollection } = useLibraryPlayback(library.songs);
   const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
-  const baseTracks = playlistSongEntries.map(({ song, entryId }, index) => mapSongToCollectionTrack(song, index, entryId));
+  const baseTracks = playlistSongEntries.map(({ song, entryId }) => mapSongToCollectionTrack(song, entryId));
+  const orderedSongs = playlistSongEntries.map(({ song }) => song);
+  const [cover, ...coverFallbacks] = [...new Set([
+    ...orderedSongs.flatMap(youtubeSongArtworkUrls),
+    ...orderedSongs.map((song) => song.thumbnailUrl),
+  ].filter((url): url is string => Boolean(url)))];
 
   if (!playlist) {
     return (
@@ -73,11 +80,15 @@ export function MusicPlaylistDetailPage({
       <MusicCollectionDetailPage
         title={playlist.name}
         description={playlist.description}
-        artworkUrl={playlistArtwork(playlist)}
+        artworkUrl={cover}
+        artworkFallbacks={coverFallbacks}
         backTo="/music/playlists"
         backLabel="Back to playlists"
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}
         tracks={baseTracks}
+        {...queueProps}
+        {...trackActions}
+        onPlayAll={() => playCollection(orderedSongs)}
         emptyTrackLabel="This playlist has no songs yet"
         actionSlot={<PlaylistRenameAction playlist={playlist} sync={sync} />}
         afterHeroSlot={<MusicPlaylistOutboundSync state={sync} />}

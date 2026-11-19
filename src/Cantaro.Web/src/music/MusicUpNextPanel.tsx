@@ -1,18 +1,13 @@
-import type { MusicQueueTrack } from './useMusicQueue';
+import type { PlaybackTrack } from './playback/playbackState';
 import { formatDuration } from './musicPresentation';
+import { MusicArtwork } from './MusicArtwork';
 
-function QueueArtwork({ track }: { track: MusicQueueTrack }) {
-  if (track.artworkUrl) {
-    return <img src={track.artworkUrl} alt="" className="h-11 w-11 object-cover" />;
-  }
-
-  return <div className="h-11 w-11 bg-surface-subtle" aria-hidden />;
-}
+type MusicQueueTrack = Pick<PlaybackTrack, 'id' | 'title' | 'artist' | 'artworkUrl' | 'artworkFallbacks' | 'durationSeconds'>;
 
 function QueueRow({ track, label, active }: { track: MusicQueueTrack; label: string; active?: boolean }) {
   return (
     <div className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3">
-      <QueueArtwork track={track} />
+      <MusicArtwork src={track.artworkUrl} fallbacks={track.artworkFallbacks} className="size-11" />
       <div className="min-w-0">
         <p className={`text-[0.66rem] font-black tracking-[0.14em] uppercase ${active ? 'text-personal-accent-strong' : 'text-content-muted'}`}>
           {label}
@@ -30,11 +25,13 @@ export function MusicUpNextPanel({
   queuedTracks,
   title = 'Up Next',
   onClearQueue,
+  onPlayQueuedTrack,
 }: {
   activeTrack?: MusicQueueTrack;
   queuedTracks: MusicQueueTrack[];
   title?: string;
   onClearQueue?: () => void;
+  onPlayQueuedTrack?: (index: number) => void;
 }) {
   const hasContent = Boolean(activeTrack || queuedTracks.length > 0);
 
@@ -55,9 +52,21 @@ export function MusicUpNextPanel({
       </div>
       <div className="max-h-[420px] space-y-3 overflow-y-auto">
         {activeTrack ? <QueueRow track={activeTrack} label="Now playing" active /> : null}
-        {queuedTracks.map((track, index) => (
-          <QueueRow key={track.id} track={track} label={index === 0 ? 'Up next' : `Later ${index + 1}`} />
-        ))}
+        {queuedTracks.map((track, index) => {
+          const key = `${track.id}:${index}`;
+          const label = index === 0 ? 'Up next' : `Later ${index + 1}`;
+          return onPlayQueuedTrack ? (
+            <button
+              key={key}
+              type="button"
+              aria-label={`Play queued track ${track.title}`}
+              className="block w-full text-left hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus"
+              onClick={() => onPlayQueuedTrack(index)}
+            >
+              <QueueRow track={track} label={label} />
+            </button>
+          ) : <QueueRow key={key} track={track} label={label} />;
+        })}
         {!hasContent ? <p className="text-sm font-medium text-content-muted">Play a track or add one to the queue.</p> : null}
       </div>
     </section>
