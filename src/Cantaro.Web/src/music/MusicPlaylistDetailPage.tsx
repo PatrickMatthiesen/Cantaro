@@ -2,7 +2,7 @@ import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrary
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds, youtubeSongArtwork } from './musicPresentation';
+import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds, youtubeSongArtworkUrls } from './musicPresentation';
 import { MusicPlaylistOutboundSync } from './MusicPlaylistOutboundSync';
 import { MusicPlaylistRename } from './MusicPlaylistRename';
 import { usePlaylistSyncDetails } from './usePlaylistSyncDetails';
@@ -63,7 +63,7 @@ export function MusicPlaylistDetailPage({
   const baseTracks = playlistSongEntries.map(({ song, entryId }) => mapSongToCollectionTrack(song, entryId));
   const orderedSongs = playlistSongEntries.map(({ song }) => song);
   const [cover, ...coverFallbacks] = [...new Set([
-    ...orderedSongs.map(youtubeSongArtwork),
+    ...orderedSongs.flatMap(youtubeSongArtworkUrls),
     ...orderedSongs.map((song) => song.thumbnailUrl),
   ].filter((url): url is string => Boolean(url)))];
 

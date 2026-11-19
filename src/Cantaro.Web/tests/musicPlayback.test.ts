@@ -226,20 +226,23 @@ function song(overrides: Partial<MusicLibrarySong>): MusicLibrarySong {
 }
 
 describe('canonical playback sources', () => {
-  test('song rows and playback prefer the selected YouTube thumbnail and keep saved artwork as a fallback', () => {
+  test('song rows and playback try each YouTube thumbnail in order before saved artwork', () => {
     const mappedSong = song({
       sourceIdentities: [
         { source: 'youtube', externalId: 'invalid' },
-        { source: 'youtube-music', externalId: 'M7lc1UVf-VE' },
+        { source: 'youtube-music', externalId: 'aBcDeFgH000' },
         { source: 'youtube', externalId: 'aqz-KE-bpKQ' },
       ],
     });
-    const videoThumbnail = 'https://i.ytimg.com/vi/M7lc1UVf-VE/mqdefault.jpg';
+    const videoThumbnail = 'https://i.ytimg.com/vi/aBcDeFgH000/mqdefault.jpg';
     expect(songArtwork(mappedSong).artworkUrl).toBe(videoThumbnail);
     expect(playbackTrackFromSong(mappedSong).artworkUrl).toBe(videoThumbnail);
 
     const withArtwork = { ...mappedSong, thumbnailUrl: 'https://example.com/album.jpg' };
-    const expected = { artworkUrl: videoThumbnail, artworkFallbacks: [withArtwork.thumbnailUrl] };
+    const expected = {
+      artworkUrl: videoThumbnail,
+      artworkFallbacks: ['https://i.ytimg.com/vi/aqz-KE-bpKQ/mqdefault.jpg', withArtwork.thumbnailUrl],
+    };
     expect(songArtwork(withArtwork)).toEqual(expected);
     expect(playbackTrackFromSong(withArtwork)).toMatchObject(expected);
     expect(songArtwork({ ...withArtwork, sourceIdentities: [] }).artworkUrl).toBe(withArtwork.thumbnailUrl);

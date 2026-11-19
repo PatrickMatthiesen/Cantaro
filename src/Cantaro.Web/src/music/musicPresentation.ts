@@ -69,19 +69,17 @@ export function isYouTubeVideoId(value: string): boolean {
   return /^[A-Za-z0-9_-]{11}$/.test(value);
 }
 
-export function youtubeSongArtwork(song: MusicLibrarySong): string | undefined {
-  const video = song.sourceIdentities.find(({ source, externalId }) =>
-    (source === 'youtube' || source === 'youtube-music') && isYouTubeVideoId(externalId),
-  );
-  return video ? `https://i.ytimg.com/vi/${video.externalId}/mqdefault.jpg` : undefined;
+export function youtubeSongArtworkUrls(song: MusicLibrarySong): string[] {
+  return song.sourceIdentities
+    .filter(({ source, externalId }) => (source === 'youtube' || source === 'youtube-music') && isYouTubeVideoId(externalId))
+    .map(({ externalId }) => `https://i.ytimg.com/vi/${externalId}/mqdefault.jpg`);
 }
 
 export function songArtwork(song: MusicLibrarySong): { artworkUrl?: string; artworkFallbacks?: string[] } {
-  const videoArtwork = youtubeSongArtwork(song);
-  return {
-    artworkUrl: videoArtwork ?? song.thumbnailUrl,
-    artworkFallbacks: videoArtwork && song.thumbnailUrl ? [song.thumbnailUrl] : undefined,
-  };
+  const urls = youtubeSongArtworkUrls(song);
+  if (song.thumbnailUrl) urls.push(song.thumbnailUrl);
+  const [artworkUrl, ...fallbacks] = [...new Set(urls)];
+  return { artworkUrl, artworkFallbacks: fallbacks.length ? fallbacks : undefined };
 }
 
 export function isYouTubeThumbnailPlaceholder(src: string, width: number, height: number): boolean {
