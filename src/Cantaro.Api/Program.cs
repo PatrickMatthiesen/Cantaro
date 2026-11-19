@@ -29,6 +29,15 @@ var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(e
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
+builder.Services.Configure<AioStreamsWatchStateOptions>(
+    builder.Configuration.GetSection(AioStreamsWatchStateOptions.SectionName));
+builder.Services.PostConfigure<OpenTelemetry.Instrumentation.AspNetCore.AspNetCoreTraceInstrumentationOptions>(options =>
+{
+    var existingFilter = options.Filter;
+    options.Filter = context =>
+        !context.Request.Path.StartsWithSegments(AioStreamsWatchStateOptions.Route)
+        && (existingFilter?.Invoke(context) ?? true);
+});
 
 // Add PostgreSQL database context via Aspire defaults.
 builder.Configuration.ConfigurePostgresConnection("cantaro-db");

@@ -23,6 +23,49 @@ namespace Cantaro.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsWatchEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("At")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid>("MediaEpisodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MediaLibraryEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Played")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("PositionMs")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaEpisodeId");
+
+                    b.HasIndex("MediaLibraryEntryId", "MediaEpisodeId", "EventId")
+                        .IsUnique();
+
+                    b.HasIndex("MediaLibraryEntryId", "MediaEpisodeId", "At", "Id");
+
+                    b.ToTable("AioStreamsWatchEvents", (string)null);
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.Artist", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2523,6 +2566,21 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsWatchEvent", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaEpisode", null)
+                        .WithMany()
+                        .HasForeignKey("MediaEpisodeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("MediaLibraryEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.ArtistProviderLink", b =>

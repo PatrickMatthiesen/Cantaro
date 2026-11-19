@@ -46,6 +46,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderEpisode> MediaProviderEpisodes => Set<MediaProviderEpisode>();
     public DbSet<MediaProviderEpisodeMapping> MediaProviderEpisodeMappings => Set<MediaProviderEpisodeMapping>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
+    internal DbSet<AioStreamsWatchEvent> AioStreamsWatchEvents => Set<AioStreamsWatchEvent>();
     public DbSet<MediaLibraryProviderBinding> MediaLibraryProviderBindings => Set<MediaLibraryProviderBinding>();
     public DbSet<MediaProviderLibrarySnapshot> MediaProviderLibrarySnapshots => Set<MediaProviderLibrarySnapshot>();
     public DbSet<MediaProviderListMembership> MediaProviderListMemberships => Set<MediaProviderListMembership>();
@@ -809,6 +810,16 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(t => t.LibraryEntries)
                 .HasForeignKey(e => e.MediaTitleId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AioStreamsWatchEvent>(entity =>
+        {
+            entity.ToTable("AioStreamsWatchEvents");
+            entity.Property(e => e.EventId).HasMaxLength(512);
+            entity.HasIndex(e => new { e.MediaLibraryEntryId, e.MediaEpisodeId, e.EventId }).IsUnique();
+            entity.HasIndex(e => new { e.MediaLibraryEntryId, e.MediaEpisodeId, e.At, e.Id });
+            entity.HasOne<MediaLibraryEntry>().WithMany().HasForeignKey(e => e.MediaLibraryEntryId);
+            entity.HasOne<MediaEpisode>().WithMany().HasForeignKey(e => e.MediaEpisodeId);
         });
 
         modelBuilder.Entity<MediaProviderLibrarySnapshot>(entity =>
