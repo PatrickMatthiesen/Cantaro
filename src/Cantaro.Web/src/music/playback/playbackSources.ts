@@ -6,13 +6,23 @@ export type SourceResolver = (
   link: MusicLibrarySongPlatformLink | undefined,
 ) => PlaybackSource;
 
-const sourceResolvers: Record<string, SourceResolver> = {
-  youtube: (identity, link) => ({
-    id: `youtube:${identity.externalId}`,
+function youtubeSource(identity: MusicLibrarySongSourceIdentity, link?: MusicLibrarySongPlatformLink): PlaybackSource {
+  const mediaId = identity.externalId;
+  const validId = /^[A-Za-z0-9_-]{11}$/.test(mediaId);
+  const externalUrl = link?.url ?? (validId ? `https://www.youtube.com/watch?v=${mediaId}` : undefined);
+  return {
+    id: `youtube:${mediaId}`,
     providerId: 'youtube',
-    label: 'YouTube',
-    capability: { kind: 'embed', mediaId: identity.externalId, externalUrl: link?.url ?? `https://www.youtube.com/watch?v=${encodeURIComponent(identity.externalId)}` },
-  }),
+    label: link?.platform === 'youtube-music' ? 'YouTube Music' : 'YouTube',
+    capability: validId && externalUrl
+      ? { kind: 'embed', mediaId, externalUrl }
+      : { kind: 'unavailable', reason: 'This track has no valid YouTube video ID.', externalUrl },
+  };
+}
+
+const sourceResolvers: Record<string, SourceResolver> = {
+  youtube: youtubeSource,
+  'youtube-music': youtubeSource,
   spotify: (identity, link) => ({
     id: `spotify:${identity.externalId}`,
     providerId: 'spotify',
@@ -24,6 +34,12 @@ const sourceResolvers: Record<string, SourceResolver> = {
     },
   }),
 };
+
+const platformLabels = new Map([
+  ['youtube', 'YouTube'],
+  ['youtube-music', 'YouTube Music'],
+  ['spotify', 'Spotify'],
+]);
 
 function sourceFromIdentity(
   identity: MusicLibrarySongSourceIdentity,
@@ -43,11 +59,12 @@ function sourceFromIdentity(
 }
 
 function sourceFromLink(link: MusicLibrarySongPlatformLink): PlaybackSource {
+  const label = platformLabels.get(link.platform) ?? link.label;
   return {
     id: `${link.platform}:${link.url}`,
     providerId: link.platform,
-    label: link.label,
-    capability: { kind: 'external', url: link.url, reason: `${link.label} opens outside Cantaro.` },
+    label,
+    capability: { kind: 'external', url: link.url, reason: `${label} opens outside Cantaro.` },
   };
 }
 
@@ -56,7 +73,9 @@ function linkForIdentity(
   links: MusicLibrarySongPlatformLink[],
 ): MusicLibrarySongPlatformLink | undefined {
   const encodedId = encodeURIComponent(identity.externalId);
-  return links.find((link) => link.platform === identity.source && link.url.split(/[/?=&#]/).includes(encodedId));
+  return links.find((link) => link.platform === identity.source
+    && (link.source === identity.source && link.externalId === identity.externalId
+      || link.url.split(/[/?=&#]/).includes(encodedId)));
 }
 
 /** Resolve source identities without tying session state to any provider's API shape. */

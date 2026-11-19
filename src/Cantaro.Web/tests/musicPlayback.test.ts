@@ -36,6 +36,35 @@ function apply(...actions: PlaybackAction[]) {
 }
 
 describe('playback session', () => {
+  test('playing a song preserves the manually queued tracks and the active track remains in history', () => {
+    const queued = apply({ type: 'enqueue', track: spotify }, { type: 'enqueue', track: unavailable });
+    const playing = playbackReducer(queued, { type: 'enqueue', play: true, track: youtube });
+    expect(currentPlaybackTrack(playing)).toBe(youtube);
+    expect(playing.status).toBe('playing');
+    expect(playing.queue).toEqual([youtube, spotify, unavailable]);
+
+    const next = playbackReducer(playing, { type: 'enqueue', play: true, track: spotify });
+    expect(next.queue).toEqual([youtube, spotify, spotify, unavailable]);
+    expect(next.currentIndex).toBe(1);
+    expect(next.status).toBe('paused');
+  });
+
+  test('playing a collection selects its first track and end advances only the matching selection', () => {
+    const first = apply({ type: 'replaceQueue', play: true, tracks: [youtube, youtube] });
+    expect(first.currentIndex).toBe(0);
+    expect(first.status).toBe('playing');
+    const end: PlaybackAction = { type: 'ended', selectionVersion: first.selectionVersion };
+    const second = playbackReducer(first, end);
+    expect(second.currentIndex).toBe(1);
+    expect(second.status).toBe('playing');
+    expect(playbackReducer(second, end)).toBe(second);
+    expect(playbackReducer(second, { type: 'pause', selectionVersion: first.selectionVersion })).toBe(second);
+    const finished = playbackReducer(second, { type: 'ended', selectionVersion: second.selectionVersion });
+    expect(finished.currentIndex).toBe(1);
+    expect(finished.status).toBe('paused');
+    expect(isPlayerVisible(finished)).toBe(true);
+  });
+
   test('queueing does not reveal the player; selection does', () => {
     const queued = apply({ type: 'enqueue', track: youtube });
     expect(queued.currentIndex).toBeNull();
@@ -136,7 +165,6 @@ describe('playback session', () => {
     for (const session of [
       selected,
       playbackReducer(selected, { type: 'pause' }),
-      playbackReducer(selected, { type: 'stop' }),
     ]) {
       const cleared = playbackReducer(session, { type: 'clearQueue' });
       expect(cleared).toEqual({ ...session, queue: [spotify, active] });
@@ -172,7 +200,7 @@ describe('playback session', () => {
     const embedded = playbackReducer(external, { type: 'selectSource', sourceId: 'youtube:one' });
     const paused = playbackReducer(playbackReducer(embedded, { type: 'play' }), { type: 'pause' });
     expect(paused.status).toBe('paused');
-    expect(playbackReducer(paused, { type: 'stop' }).status).toBe('stopped');
+    expect(playbackReducer(paused, { type: 'stop' })).toEqual(initialPlaybackState);
     expect(isPlayerVisible(paused)).toBe(true);
     expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [spotify] }).currentIndex).toBeNull();
     expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [] })).toEqual(initialPlaybackState);
@@ -188,20 +216,54 @@ function song(overrides: Partial<MusicLibrarySong>): MusicLibrarySong {
 }
 
 describe('canonical playback sources', () => {
+  test('a YouTube Music link without a video identity stays an attributed external fallback', () => {
+    const url = 'https://music.youtube.com/watch?v=M7lc1UVf-VE';
+    const track = playbackTrackFromSong(song({
+      platformLinks: [{ platform: 'youtube-music', source: 'youtube', externalId: 'M7lc1UVf-VE', label: 'Open in YouTube Music', url }],
+    }));
+    expect(playbackAvailability(apply({ type: 'enqueue', play: true, track }))).toEqual({
+      canPlayInApp: false, reason: 'YouTube Music opens outside Cantaro.', externalUrl: url, externalLabel: 'YouTube Music',
+    });
+  });
+
+  test('an invalid YouTube identity uses the attributed external mapping when available', () => {
+    const invalid = song({ sourceIdentities: [{ source: 'youtube', externalId: 'broken' }] });
+    const withoutLink = apply({ type: 'enqueue', play: true, track: playbackTrackFromSong(invalid) });
+    expect(playbackAvailability(withoutLink)).toMatchObject({
+      canPlayInApp: false, reason: 'This track has no valid YouTube video ID.', externalUrl: undefined,
+    });
+
+    const url = 'https://www.youtube.com/watch?v=broken';
+    const track = playbackTrackFromSong({
+      ...invalid,
+      platformLinks: [{ platform: 'youtube', source: 'youtube', externalId: 'broken', label: 'Watch on YouTube', url }],
+    });
+    expect(playbackAvailability(apply({ type: 'enqueue', play: true, track }))).toMatchObject({
+      canPlayInApp: false, externalUrl: url, externalLabel: 'YouTube',
+    });
+  });
+
+  test('a known YouTube Music video identity embeds with a YouTube fallback', () => {
+    const track = playbackTrackFromSong(song({ sourceIdentities: [{ source: 'youtube-music', externalId: 'M7lc1UVf-VE' }] }));
+    expect(selectedPlaybackSource(apply({ type: 'enqueue', play: true, track }))?.capability).toEqual({
+      kind: 'embed', mediaId: 'M7lc1UVf-VE', externalUrl: 'https://www.youtube.com/watch?v=M7lc1UVf-VE',
+    });
+  });
+
   test('YouTube embeds while Spotify remains an external fallback', () => {
     const track = playbackTrackFromSong(song({
       sourceIdentities: [
         { source: 'spotify', externalId: 'sp1' },
-        { source: 'youtube', externalId: 'yt1' },
+        { source: 'youtube', externalId: 'M7lc1UVf-VE' },
       ],
       platformLinks: [
         { platform: 'spotify', label: 'Listen on Spotify', url: 'https://open.spotify.com/track/sp1' },
-        { platform: 'youtube', label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=yt1' },
+        { platform: 'youtube', label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=M7lc1UVf-VE' },
       ],
     }));
     const selected = apply({ type: 'replaceQueue', tracks: [track] }, { type: 'select', index: 0, play: true });
     expect(selectedPlaybackSource(selected)?.capability).toEqual({
-      kind: 'embed', mediaId: 'yt1', externalUrl: 'https://www.youtube.com/watch?v=yt1',
+      kind: 'embed', mediaId: 'M7lc1UVf-VE', externalUrl: 'https://www.youtube.com/watch?v=M7lc1UVf-VE',
     });
     expect(track.sources).toHaveLength(2);
     expect(selected.status).toBe('playing');
@@ -231,17 +293,17 @@ describe('canonical playback sources', () => {
   test('multiple identities for one provider keep their own external links', () => {
     const track = playbackTrackFromSong(song({
       sourceIdentities: [
-        { source: 'youtube', externalId: 'video-a' },
-        { source: 'youtube', externalId: 'video-ab' },
+        { source: 'youtube', externalId: 'M7lc1UVf-VE' },
+        { source: 'youtube', externalId: 'aqz-KE-bpKQ' },
       ],
       platformLinks: [
-        { platform: 'youtube', label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=video-a' },
-        { platform: 'youtube', label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=video-ab' },
+        { platform: 'youtube', label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=M7lc1UVf-VE' },
+        { platform: 'youtube', label: 'Watch on YouTube', url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' },
       ],
     }));
     expect(track.sources.map((source) => source.capability)).toEqual([
-      { kind: 'embed', mediaId: 'video-a', externalUrl: 'https://www.youtube.com/watch?v=video-a' },
-      { kind: 'embed', mediaId: 'video-ab', externalUrl: 'https://www.youtube.com/watch?v=video-ab' },
+      { kind: 'embed', mediaId: 'M7lc1UVf-VE', externalUrl: 'https://www.youtube.com/watch?v=M7lc1UVf-VE' },
+      { kind: 'embed', mediaId: 'aqz-KE-bpKQ', externalUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' },
     ]);
   });
 });
