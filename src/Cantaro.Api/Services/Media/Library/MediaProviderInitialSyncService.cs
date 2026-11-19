@@ -237,6 +237,7 @@ public sealed class MediaProviderInitialSyncService(
             matches.Add(CreateMatch(entry, providerId, account.ExternalAccountId, remoteItem: null));
         }
 
+        await VerifyImportedExportsAsync(userId, account, providerId, matches, cancellationToken);
         return new InitialSyncPlan
         {
             ProviderId = providerId,
@@ -244,8 +245,83 @@ public sealed class MediaProviderInitialSyncService(
             Matches = matches,
             ProviderOnlyItems = providerOnlyItems,
             UnresolvedEntries = unresolvedEntries,
-            Fingerprint = CreateFingerprint(entries, snapshot, account)
+            Fingerprint = CreateFingerprint(entries, snapshot, account, matches)
         };
+    }
+
+    private async Task VerifyImportedExportsAsync(
+        int userId, ConnectedServiceAccount targetAccount, string targetProviderId,
+        IReadOnlyList<InitialSyncMatch> matches, CancellationToken cancellationToken)
+    {
+        var sources = new Dictionary<int, IReadOnlyDictionary<string, MediaProviderLibraryItem>>();
+        foreach (var match in matches.Where(match =>
+                     match.KeepsRemote && !match.ImportsRemote
+                     && match.RemoteItem?.LastRemoteUpdateAt is not null
+                     && match.Entry.LastMutationSource == MediaMutationSources.ProviderImport))
+        {
+            var targetVersion = match.RemoteItem!.LastRemoteUpdateAt!.Value;
+            if (match.Entry.ProviderBindings.Any(binding =>
+                binding.ProviderAccountId == targetAccount.ExternalAccountId
+                && binding.MediaProviderLink?.Provider == targetProviderId
+                && binding.MediaProviderLink.ExternalId == match.Request.ProviderMediaId
+                && binding.LastRemoteUpdateAt > targetVersion))
+            {
+                continue;
+            }
+
+            var source = match.Entry.ProviderBindings
+                .Where(binding => binding.ConnectedServiceAccountId.HasValue
+                    && binding.MediaProviderLink?.Provider is "anilist" or "myanimelist"
+                    && binding.MediaProviderLink.Provider != targetProviderId
+                    && MediaLibraryStateSyncRequest.IsNewerVersion(binding.LastRemoteUpdateAt, targetVersion))
+                .OrderByDescending(binding => binding.LastRemoteUpdateAt)
+                .ThenBy(binding => binding.Id)
+                .FirstOrDefault();
+            if (source?.ConnectedServiceAccountId is not { } accountId)
+            {
+                continue;
+            }
+
+            if (!sources.TryGetValue(accountId, out var items))
+            {
+                items = await ReadSourceItemsAsync(userId, source, cancellationToken);
+                sources.Add(accountId, items);
+            }
+
+            // A binding can record a version that Cantaro never applied.
+            // Require the source to still have that version and the saved state.
+            if (items.TryGetValue(source.MediaProviderLink!.ExternalId, out var item)
+                && item.LastRemoteUpdateAt == source.LastRemoteUpdateAt
+                && !MediaLibraryImportService.HasRemoteStateChange(match.Entry, source, item, preserveScore: false))
+            {
+                match.Request.VerifiedSourceBindingId = source.Id;
+                match.Request.VerifiedSourceVersion = source.LastRemoteUpdateAt;
+                match.KeepsRemote = false;
+                match.RequiresWrite = true;
+            }
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, MediaProviderLibraryItem>> ReadSourceItemsAsync(
+        int userId, MediaLibraryProviderBinding source, CancellationToken cancellationToken)
+    {
+        var provider = _mediaProviderRegistry.GetRequired(source.MediaProviderLink!.Provider);
+        var account = await provider.GetConnectedAccountAsync(userId, cancellationToken);
+        if (account is null || account.Id != source.ConnectedServiceAccountId || account.ExternalAccountId != source.ProviderAccountId)
+        {
+            return new Dictionary<string, MediaProviderLibraryItem>();
+        }
+
+        try
+        {
+            var snapshot = await provider.ReadLibraryForSyncAsync(userId, cancellationToken);
+            return snapshot.Items.DistinctBy(item => item.ProviderMediaId).ToDictionary(item => item.ProviderMediaId, StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is PlatformApiException or AniListRequestException
+            or MyAnimeListRequestException or HttpRequestException)
+        {
+            return new Dictionary<string, MediaProviderLibraryItem>();
+        }
     }
 
     private async Task<int> QueuePlanAsync(
@@ -472,7 +548,7 @@ public sealed class MediaProviderInitialSyncService(
         var hasChanges = request.UpdateStatus || request.UpdateProgress || request.UpdateScore;
         var keepsRemote = importsRemote || hasChanges && (remoteItem is not null
             ? remoteItem.LastRemoteUpdateAt is not { } remoteUpdateAt
-                || !MediaLibraryStateSyncRequest.LocalEditIsNewer(entry.LastLocalEditAt, remoteUpdateAt)
+                || !MediaLibraryStateSyncRequest.IsNewerVersion(entry.LastLocalEditAt, remoteUpdateAt)
                 || binding?.LastRemoteUpdateAt > remoteUpdateAt
             : binding?.LastRemoteUpdateAt is not null || binding?.LastSyncedAt is not null);
 
@@ -490,7 +566,8 @@ public sealed class MediaProviderInitialSyncService(
     private static string CreateFingerprint(
         IReadOnlyList<MediaLibraryEntry> entries,
         MediaProviderLibraryImportResult snapshot,
-        ConnectedServiceAccount account)
+        ConnectedServiceAccount account,
+        IReadOnlyList<InitialSyncMatch> matches)
     {
         var canonical = entries
             .OrderBy(entry => entry.Id)
@@ -543,7 +620,9 @@ public sealed class MediaProviderInitialSyncService(
             AccountId = account.Id,
             account.ExternalAccountId,
             Canonical = canonical,
-            Remote = remote
+            Remote = remote,
+            VerifiedExports = matches.Where(match => match.Request.VerifiedSourceBindingId.HasValue)
+                .Select(match => new { match.Entry.Id, match.Request.VerifiedSourceBindingId, match.Request.VerifiedSourceVersion })
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
@@ -655,8 +734,8 @@ public sealed class MediaProviderInitialSyncService(
         public required MediaLibraryEntry Entry { get; init; }
         public required MediaProviderLibraryItem? RemoteItem { get; init; }
         public required MediaLibraryStateSyncRequest Request { get; init; }
-        public required bool RequiresWrite { get; init; }
-        public required bool KeepsRemote { get; init; }
+        public required bool RequiresWrite { get; set; }
+        public required bool KeepsRemote { get; set; }
         public required bool ImportsRemote { get; init; }
     }
 

@@ -59,6 +59,67 @@ public sealed class MediaProviderInitialSyncServiceTests
     }
 
     [Theory]
+    [InlineData("confirmed")]
+    [InlineData("source-was-only-seen")]
+    [InlineData("source-changed-after-apply")]
+    [InlineData("target-version-regressed")]
+    public async Task ApplyAsync_ExportsImportedStateOnlyWithVerifiedSource(string scenario)
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync(includeExistingProvider: true);
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true, includeExistingLink: true);
+        entry.LastLocalEditAt = null;
+        entry.LastMutationSource = MediaMutationSources.ProviderImport;
+        entry.ProgressEpisodes = 18;
+        var source = await fixture.SeedExistingBindingAsync(entry);
+        var sourceVersion = fixture.Now.AddHours(-1);
+        var targetVersion = fixture.Now.AddHours(-2);
+        source.LastRemoteUpdateAt = sourceVersion;
+        if (scenario == "target-version-regressed")
+        {
+            var target = await fixture.SeedTargetBindingAsync(entry);
+            target.LastRemoteUpdateAt = fixture.Now;
+        }
+        await fixture.Db.SaveChangesAsync();
+        fixture.Provider.Snapshot = Snapshot(RemoteItem(
+            progressEpisodes: 4, score: entry.Score, remoteUpdatedAt: targetVersion));
+        fixture.ExistingProvider!.Snapshot = SnapshotFor(InitialSyncFixture.ExistingProviderId, RemoteItem(
+            providerMediaId: InitialSyncFixture.ExistingMediaId, score: entry.Score, remoteUpdatedAt: sourceVersion,
+            progressEpisodes: scenario == "source-was-only-seen" ? 20 : 18));
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id, fixture.Provider.ProviderId, CancellationToken.None);
+        var result = await fixture.Service.ApplyAsync(fixture.User.Id, fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint), CancellationToken.None);
+        if (scenario is "source-was-only-seen" or "target-version-regressed")
+        {
+            Assert.Equal(0, preview.WillUpdate);
+            Assert.Equal(0, result.QueuedOperations);
+            return;
+        }
+
+        Assert.Equal(1, preview.WillUpdate);
+        var operation = await fixture.Db.MediaProviderOperations.SingleAsync();
+        if (scenario == "source-changed-after-apply")
+        {
+            source.LastRemoteUpdateAt = sourceVersion.AddMinutes(1);
+            await fixture.Db.SaveChangesAsync();
+        }
+        var worker = new MediaProviderOperationProcessor(fixture.Db,
+            new MediaProviderRegistry([fixture.Provider]), NullLogger<MediaProviderOperationProcessor>.Instance);
+        var execution = await worker.ProcessOperationAsync(operation.Id, CancellationToken.None);
+        if (scenario == "source-changed-after-apply")
+        {
+            Assert.Equal(MediaProviderOperationExecutionOutcome.Failed, execution.Outcome);
+            Assert.Null(fixture.Provider.LastWrite);
+        }
+        else
+        {
+            Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, execution.Outcome);
+            Assert.Equal(18, fixture.Provider.LastWrite!.ProgressEpisodes);
+        }
+    }
+
+    [Theory]
     [InlineData(true, false)]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -984,6 +1045,7 @@ public sealed class MediaProviderInitialSyncServiceTests
         public string ProviderId => _providerId;
         public required MediaProviderLibraryImportResult Snapshot { get; set; }
         public int ImportCallCount { get; private set; }
+        public MediaLibraryStateSyncRequest? LastWrite { get; private set; }
         public IReadOnlySet<string>? SupportedMediaKinds { get; set; }
 
         public bool SupportsMediaKind(string mediaKind)
@@ -1047,6 +1109,18 @@ public sealed class MediaProviderInitialSyncServiceTests
             MediaScoreUpdateRequest request,
             CancellationToken cancellationToken)
             => throw new NotSupportedException();
+
+        public Task<MediaProviderMutationResult> SyncLibraryStateAsync(
+            int userId, MediaLibraryStateSyncRequest request, CancellationToken cancellationToken)
+        {
+            LastWrite = request;
+            return Task.FromResult(new MediaProviderMutationResult
+            {
+                ProviderId = ProviderId,
+                ProviderMediaId = request.ProviderMediaId,
+                AppliedAt = DateTimeOffset.UtcNow
+            });
+        }
 
         public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(
             int userId,

@@ -315,13 +315,15 @@ public class MediaLibraryStateSyncRequest
     public DateTimeOffset? LastKnownRemoteUpdateAt { get; set; }
     public bool ExpectMissingRemote { get; set; }
     public SimklWatchWriteCheckpoint? SimklWatchWrite { get; set; }
+    public Guid? VerifiedSourceBindingId { get; set; }
+    public DateTimeOffset? VerifiedSourceVersion { get; set; }
 
     internal Func<CancellationToken, Task>? SaveCheckpointAsync { get; set; }
 
     // Providers such as AniList return whole seconds. A same-second change
     // does not establish that Cantaro was edited later.
-    internal static bool LocalEditIsNewer(DateTimeOffset? localEditAt, DateTimeOffset remoteUpdateAt)
-        => localEditAt?.ToUnixTimeSeconds() > remoteUpdateAt.ToUnixTimeSeconds();
+    internal static bool IsNewerVersion(DateTimeOffset? sourceVersion, DateTimeOffset targetVersion)
+        => sourceVersion?.ToUnixTimeSeconds() > targetVersion.ToUnixTimeSeconds();
 }
 
 public sealed record SimklWatchWriteCheckpoint(DateTimeOffset RemoteVersion, string? AppliedStatus);

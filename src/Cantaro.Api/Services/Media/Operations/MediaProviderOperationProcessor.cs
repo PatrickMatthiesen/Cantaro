@@ -393,9 +393,19 @@ public class MediaProviderOperationProcessor(
         }
 
         var request = DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson);
+        var sourceVersion = request.VerifiedSourceBindingId.HasValue ? null : binding.MediaLibraryEntry.LastLocalEditAt;
+        if (request.VerifiedSourceBindingId is { } sourceBindingId && request.VerifiedSourceVersion.HasValue
+            && binding.MediaLibraryEntry.LastMutationSource == MediaMutationSources.ProviderImport
+            && await _dbContext.MediaLibraryProviderBindings.AnyAsync(candidate =>
+                candidate.Id == sourceBindingId && candidate.MediaLibraryEntryId == binding.MediaLibraryEntryId
+                && candidate.ConnectedServiceAccountId.HasValue
+                && candidate.LastRemoteUpdateAt == request.VerifiedSourceVersion, cancellationToken))
+        {
+            sourceVersion = request.VerifiedSourceVersion;
+        }
         if (request.LastKnownRemoteUpdateAt is { } expectedVersion
             ? binding.LastRemoteUpdateAt > expectedVersion
-                || !MediaLibraryStateSyncRequest.LocalEditIsNewer(binding.MediaLibraryEntry.LastLocalEditAt, expectedVersion)
+                || !MediaLibraryStateSyncRequest.IsNewerVersion(sourceVersion, expectedVersion)
             : binding.LastRemoteUpdateAt.HasValue || binding.LastSyncedAt.HasValue || !request.ExpectMissingRemote)
         {
             throw new PlatformApiException(
