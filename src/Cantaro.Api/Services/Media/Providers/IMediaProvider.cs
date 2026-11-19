@@ -28,6 +28,8 @@ public interface IMediaProvider
     Task DisconnectAsync(int userId, CancellationToken cancellationToken);
 
     Task<MediaProviderLibraryImportResult> ImportLibraryAsync(int userId, CancellationToken cancellationToken);
+    Task<MediaProviderLibraryImportResult> ReadLibraryForSyncAsync(int userId, CancellationToken cancellationToken)
+        => ImportLibraryAsync(userId, cancellationToken);
 
     Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken);
 

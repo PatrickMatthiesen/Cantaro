@@ -502,8 +502,12 @@ public class AniListMediaProviderTests
         Assert.Equal("REPEATING", document.RootElement.GetProperty("variables").GetProperty("status").GetString());
     }
 
-    [Fact]
-    public async Task SyncLibraryStateAsync_UpsertsCompleteStateWithOneMediaIdMutation()
+    [Theory]
+    [InlineData("new")]
+    [InlineData("score-only")]
+    [InlineData("changed")]
+    [InlineData("appeared")]
+    public async Task SyncLibraryStateAsync_WritesOnlySelectedFieldsWhenTheRemoteVersionMatches(string scenario)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -539,36 +543,59 @@ public class AniListMediaProviderTests
               "media": { "id": 87610 }
             } } }
             """;
-        var handler = new StubHttpMessageHandler(graphQlResponse);
+        var currentEntry = scenario switch
+        {
+            "new" => """{"data":{"MediaList":null}}""",
+            "changed" or "appeared" => """{"data":{"MediaList":{"updatedAt":1780776001}}}""",
+            _ => """{"data":{"MediaList":{"updatedAt":1780776000}}}"""
+        };
+        var handler = new QueueHttpMessageHandler(currentEntry, graphQlResponse);
         var provider = CreateProvider(dbContext, handler, dataProtectionProvider);
 
-        var result = await provider.SyncLibraryStateAsync(
-            user.Id,
-            new MediaLibraryStateSyncRequest
-            {
-                ProviderMediaId = "87610",
-                Status = MediaLibraryStatuses.Completed,
-                Score = null,
-                ProgressChapters = 168,
-                ProgressVolumes = 23
-            },
-            CancellationToken.None);
+        var request = new MediaLibraryStateSyncRequest
+        {
+            ProviderMediaId = "87610",
+            Status = MediaLibraryStatuses.Completed,
+            Score = null,
+            ProgressChapters = 168,
+            ProgressVolumes = 23,
+            UpdateStatus = scenario == "new",
+            UpdateProgress = scenario == "new",
+            LastKnownRemoteUpdateAt = scenario is "new" or "appeared"
+                ? null
+                : DateTimeOffset.FromUnixTimeSeconds(1780776000),
+            ExpectMissingRemote = scenario is "new" or "appeared"
+        };
+        if (scenario is "changed" or "appeared")
+        {
+            await Assert.ThrowsAsync<PlatformApiException>(() =>
+                provider.SyncLibraryStateAsync(user.Id, request, CancellationToken.None));
+            Assert.DoesNotContain("mutation", Assert.Single(handler.RequestBodies));
+            return;
+        }
 
+        var result = await provider.SyncLibraryStateAsync(user.Id, request, CancellationToken.None);
         Assert.Equal("87610", result.ProviderMediaId);
-        Assert.NotNull(handler.LastRequestBody);
-        using var document = JsonDocument.Parse(handler.LastRequestBody);
+        Assert.Equal(2, handler.RequestBodies.Count);
+        using var document = JsonDocument.Parse(handler.RequestBodies[^1]);
         var root = document.RootElement;
         var query = root.GetProperty("query").GetString();
         var variables = root.GetProperty("variables");
         Assert.Contains("SaveMediaListEntry", query);
-        Assert.Contains("progress: $progress", query);
-        Assert.Contains("progressVolumes: $progressVolumes", query);
-        Assert.Contains("status: $status", query);
         Assert.Contains("scoreRaw: $scoreRaw", query);
         Assert.Equal(87610, variables.GetProperty("mediaId").GetInt32());
-        Assert.Equal(168, variables.GetProperty("progress").GetInt32());
-        Assert.Equal(23, variables.GetProperty("progressVolumes").GetInt32());
-        Assert.Equal("COMPLETED", variables.GetProperty("status").GetString());
+        if (scenario == "new")
+        {
+            Assert.Equal(168, variables.GetProperty("progress").GetInt32());
+            Assert.Equal(23, variables.GetProperty("progressVolumes").GetInt32());
+            Assert.Equal("COMPLETED", variables.GetProperty("status").GetString());
+        }
+        else
+        {
+            Assert.False(variables.TryGetProperty("progress", out _));
+            Assert.False(variables.TryGetProperty("progressVolumes", out _));
+            Assert.False(variables.TryGetProperty("status", out _));
+        }
         Assert.Equal(0, variables.GetProperty("scoreRaw").GetInt32());
         Assert.False(variables.TryGetProperty("id", out _));
     }

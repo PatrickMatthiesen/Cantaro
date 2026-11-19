@@ -349,20 +349,24 @@ public sealed class MyAnimeListMediaProvider(
                 decimal.ToInt32(decimal.Round(request.Score.Value / 10m, 0, MidpointRounding.AwayFromZero)),
                 1,
                 10);
-        var form = new Dictionary<string, string?>
+        var form = new Dictionary<string, string?>();
+        if (request.UpdateStatus)
         {
-            ["status"] = ToMyAnimeListStatus(request.Status, isAnime),
-            [isAnime ? "is_rewatching" : "is_rereading"] = request.Status == MediaLibraryStatuses.Repeating
+            form["status"] = ToMyAnimeListStatus(request.Status, isAnime);
+            form[isAnime ? "is_rewatching" : "is_rereading"] = request.Status == MediaLibraryStatuses.Repeating
                 ? "true"
-                : "false",
-            ["score"] = score.ToString(CultureInfo.InvariantCulture)
-        };
+                : "false";
+        }
+        if (request.UpdateScore)
+        {
+            form["score"] = score.ToString(CultureInfo.InvariantCulture);
+        }
 
-        if (isAnime && request.ProgressEpisodes is { } episodes)
+        if (request.UpdateProgress && isAnime && request.ProgressEpisodes is { } episodes)
         {
             form["num_watched_episodes"] = episodes.ToString(CultureInfo.InvariantCulture);
         }
-        else if (!isAnime)
+        else if (request.UpdateProgress && !isAnime)
         {
             if (request.ProgressChapters is { } chapters)
             {
@@ -374,7 +378,7 @@ public sealed class MyAnimeListMediaProvider(
             }
         }
 
-        return await UpdateListStatusAsync(userId, identity, form, cancellationToken);
+        return await UpdateListStatusAsync(userId, identity, form, cancellationToken, request);
     }
 
     public async Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(
@@ -401,11 +405,28 @@ public sealed class MyAnimeListMediaProvider(
         int userId,
         MyAnimeListIdentity identity,
         IReadOnlyDictionary<string, string?> form,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MediaLibraryStateSyncRequest? expectedState = null)
     {
         var account = await RequireConnectedAccountAsync(userId, cancellationToken);
         return await WithAuthorizationAsync(account, async accessToken =>
         {
+            if (expectedState is not null
+                && (expectedState.LastKnownRemoteUpdateAt.HasValue || expectedState.ExpectMissingRemote))
+            {
+                var current = await _apiClient.GetAsync<MyAnimeListMedia>(
+                    $"/{identity.PathKind}/{identity.Id}",
+                    accessToken,
+                    new Dictionary<string, string?> { ["fields"] = "my_list_status" },
+                    cancellationToken);
+                if (expectedState.ExpectMissingRemote ? current.MyListStatus is not null
+                    : current.MyListStatus?.UpdatedAt != expectedState.LastKnownRemoteUpdateAt)
+                {
+                    throw new PlatformApiException(
+                        "platform_sync_conflict", "MyAnimeList changed after the sync preview. Create a new preview.", 409);
+                }
+            }
+
             DateTimeOffset? updatedAt;
             if (identity.MediaKind == MediaKinds.Anime)
             {

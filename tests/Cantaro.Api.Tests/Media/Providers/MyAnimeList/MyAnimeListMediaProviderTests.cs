@@ -106,28 +106,49 @@ public sealed class MyAnimeListMediaProviderTests
         Assert.Contains("score=8", Assert.Single(fixture.Handler.Bodies));
     }
 
-    [Fact]
-    public async Task SyncLibraryStateAsync_UpsertsCompleteAnimeStateWithOneMediaIdRequest()
+    [Theory]
+    [InlineData("unchanged")]
+    [InlineData("missing")]
+    [InlineData("changed")]
+    [InlineData("appeared")]
+    public async Task SyncLibraryStateAsync_ChecksLiveAnimeStateBeforeUpserting(string scenario)
     {
+        var existingEntry = scenario switch
+        {
+            "missing" => """{"id":52991}""",
+            "unchanged" => """{"id":52991,"my_list_status":{"updated_at":"2026-08-23T11:00:00Z"}}""",
+            _ => """{"id":52991,"my_list_status":{"updated_at":"2026-08-23T11:30:00Z"}}"""
+        };
         await using var fixture = await ProviderFixture.CreateAsync(
-            _ => JsonResponse("{\"updated_at\":\"2026-08-23T12:00:00Z\"}"),
+            request => request.Method == HttpMethod.Get
+                ? JsonResponse(existingEntry)
+                : JsonResponse("""{"updated_at":"2026-08-23T12:00:00Z"}"""),
             connectedUserId: 104);
+        var request = new MediaLibraryStateSyncRequest
+        {
+            ProviderMediaId = "anime:52991",
+            Status = MediaLibraryStatuses.Repeating,
+            Score = 84m,
+            ProgressEpisodes = 17,
+            LastKnownRemoteUpdateAt = scenario is "missing" or "appeared"
+                ? null
+                : new DateTimeOffset(2026, 8, 23, 11, 0, 0, TimeSpan.Zero),
+            ExpectMissingRemote = scenario is "missing" or "appeared"
+        };
+        if (scenario is "changed" or "appeared")
+        {
+            var exception = await Assert.ThrowsAsync<PlatformApiException>(() =>
+                fixture.Provider.SyncLibraryStateAsync(104, request, CancellationToken.None));
+            Assert.Equal("platform_sync_conflict", exception.Code);
+            Assert.Equal(HttpMethod.Get, Assert.Single(fixture.Handler.Methods));
+            return;
+        }
 
-        var result = await fixture.Provider.SyncLibraryStateAsync(
-            104,
-            new MediaLibraryStateSyncRequest
-            {
-                ProviderMediaId = "anime:52991",
-                Status = MediaLibraryStatuses.Repeating,
-                Score = 84m,
-                ProgressEpisodes = 17
-            },
-            CancellationToken.None);
-
+        var result = await fixture.Provider.SyncLibraryStateAsync(104, request, CancellationToken.None);
         Assert.Equal("anime:52991", result.ProviderMediaId);
-        Assert.Equal(HttpMethod.Put, Assert.Single(fixture.Handler.Methods));
-        Assert.Equal("/v2/anime/52991/my_list_status", Assert.Single(fixture.Handler.Paths));
-        var body = Assert.Single(fixture.Handler.Bodies);
+        Assert.Equal([HttpMethod.Get, HttpMethod.Put], fixture.Handler.Methods);
+        Assert.Equal(["/v2/anime/52991", "/v2/anime/52991/my_list_status"], fixture.Handler.Paths);
+        var body = fixture.Handler.Bodies[^1];
         Assert.Contains("status=watching", body);
         Assert.Contains("is_rewatching=true", body);
         Assert.Contains("score=8", body);

@@ -118,10 +118,17 @@ public sealed class SimklMediaProvider(
     public async Task<MediaProviderLibraryImportResult> ImportLibraryAsync(int userId, CancellationToken cancellationToken)
     {
         using var lease = await importGate.AcquireAsync(userId, cancellationToken);
-        return await ImportLibraryCoreAsync(userId, cancellationToken);
+        return await ImportLibraryCoreAsync(userId, persistSnapshot: true, cancellationToken);
     }
 
-    private async Task<MediaProviderLibraryImportResult> ImportLibraryCoreAsync(int userId, CancellationToken cancellationToken)
+    public async Task<MediaProviderLibraryImportResult> ReadLibraryForSyncAsync(int userId, CancellationToken cancellationToken)
+    {
+        using var lease = await importGate.AcquireAsync(userId, cancellationToken);
+        return await ImportLibraryCoreAsync(userId, persistSnapshot: false, cancellationToken);
+    }
+
+    private async Task<MediaProviderLibraryImportResult> ImportLibraryCoreAsync(
+        int userId, bool persistSnapshot, CancellationToken cancellationToken)
     {
         var account = await RequireAccountAsync(userId, cancellationToken);
         using var activities = await GetAuthenticatedAsync(userId, "/sync/activities", null, cancellationToken);
@@ -176,12 +183,15 @@ public sealed class SimklMediaProvider(
                     foreach (var stale in items.Keys.Where(x => !live.Contains(x)).ToArray()) items.Remove(stale);
                 }
             }
-            snapshot ??= new MediaProviderLibrarySnapshot { ConnectedServiceAccountId = account.Id };
-            if (db.Entry(snapshot).State == EntityState.Detached) db.MediaProviderLibrarySnapshots.Add(snapshot);
-            snapshot.ItemsJson = JsonSerializer.Serialize(items, JsonOptions);
-            snapshot.Cursor = JsonSerializer.Serialize(new SimklCursor { FormatVersion = 1, All = activityAll, Removed = removed }, JsonOptions);
-            snapshot.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
+            if (persistSnapshot)
+            {
+                snapshot ??= new MediaProviderLibrarySnapshot { ConnectedServiceAccountId = account.Id };
+                if (db.Entry(snapshot).State == EntityState.Detached) db.MediaProviderLibrarySnapshots.Add(snapshot);
+                snapshot.ItemsJson = JsonSerializer.Serialize(items, JsonOptions);
+                snapshot.Cursor = JsonSerializer.Serialize(new SimklCursor { FormatVersion = 1, All = activityAll, Removed = removed }, JsonOptions);
+                snapshot.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(cancellationToken);
+            }
         }
         return new MediaProviderLibraryImportResult
         {
@@ -316,23 +326,69 @@ public sealed class SimklMediaProvider(
     public async Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken)
     {
         if (request.ProgressEpisodes is not { } count) throw new InvalidOperationException("SIMKL progress requires an episode count.");
-        return await WriteProgressAsync(userId, request.ProviderMediaId, count, null, cancellationToken);
+        var (result, _) = await WriteProgressAsync(userId, request.ProviderMediaId, count, null, cancellationToken);
+        return result;
     }
 
     public async Task<MediaProviderMutationResult> SyncLibraryStateAsync(int userId, MediaLibraryStateSyncRequest request, CancellationToken cancellationToken)
     {
-        MediaProviderMutationResult result;
+        MediaProviderLibraryItem? remoteItem = null;
+        var expectedVersion = request.SimklWatchWrite?.RemoteVersion ?? request.LastKnownRemoteUpdateAt;
+        var expectMissing = request.ExpectMissingRemote && request.SimklWatchWrite is null;
+        var checkVersion = expectedVersion.HasValue || expectMissing;
+        if (checkVersion || request.UpdateStatus && !request.UpdateProgress)
+        {
+            var library = await ReadLibraryForSyncAsync(userId, cancellationToken);
+            remoteItem = library.Items.FirstOrDefault(item => item.ProviderMediaId == request.ProviderMediaId);
+            if (checkVersion && (expectMissing ? remoteItem is not null
+                : remoteItem?.LastRemoteUpdateAt != expectedVersion))
+            {
+                throw new PlatformApiException(
+                    "platform_sync_conflict", "SIMKL changed after the sync preview. Create a new preview.", 409);
+            }
+        }
+
+        if (request.SimklWatchWrite is { } checkpoint)
+        {
+            await WriteScoreAsync(userId, request.ProviderMediaId, request.Score, cancellationToken);
+            return Result(request.ProviderMediaId, checkpoint.AppliedStatus);
+        }
+
+        var result = Result(request.ProviderMediaId);
+        var expectedEpisodes = remoteItem?.WatchedEpisodes;
         if (request.UpdateProgress && (request.WatchedEpisodes is not null || request.ProgressEpisodes is not null))
-            result = await WriteProgressAsync(userId, request.ProviderMediaId, request.ProgressEpisodes, request.WatchedEpisodes, cancellationToken);
-        else
-            result = Result(request.ProviderMediaId);
+        {
+            (result, expectedEpisodes) = await WriteProgressAsync(userId, request.ProviderMediaId,
+                request.ProgressEpisodes, request.WatchedEpisodes, cancellationToken);
+        }
         var historyResolvedCompletedToCurrent = request.Status == MediaLibraryStatuses.Completed
             && result.AppliedStatus == MediaLibraryStatuses.Current;
         if (request.UpdateStatus && !historyResolvedCompletedToCurrent
             && result.AppliedStatus != request.Status
-            && (request.UpdateProgress || !await StatusMatchesSnapshotAsync(userId, request.ProviderMediaId, request.Status, cancellationToken)))
+            && (request.UpdateProgress || remoteItem?.Status != request.Status))
             result = await WriteStatusAsync(userId, request.ProviderMediaId, request.Status, cancellationToken);
-        await WriteScoreAsync(userId, request.ProviderMediaId, request.Score, cancellationToken);
+        if (request.UpdateScore && (!expectMissing || request.Score is not null))
+        {
+            if (checkVersion && request.SaveCheckpointAsync is not null && (request.UpdateStatus || request.UpdateProgress))
+            {
+                // Record the version left by these writes so a score retry can
+                // skip completed steps and still reject an intervening edit.
+                var library = await ReadLibraryForSyncAsync(userId, cancellationToken);
+                var current = library.Items.FirstOrDefault(item => item.ProviderMediaId == request.ProviderMediaId);
+                var observedEpisodes = (current?.WatchedEpisodes ?? []).Select(SimklJson.EpisodeKey).ToHashSet();
+                if (current?.LastRemoteUpdateAt is not { } version
+                    || current.Score != remoteItem?.Score
+                    || current.Status != (result.AppliedStatus ?? remoteItem?.Status)
+                    || !observedEpisodes.SetEquals((expectedEpisodes ?? []).Select(SimklJson.EpisodeKey)))
+                {
+                    throw new PlatformApiException(
+                        "platform_sync_conflict", "SIMKL changed while syncing or could not confirm the update. Create a new preview.", 409);
+                }
+                request.SimklWatchWrite = new SimklWatchWriteCheckpoint(version, result.AppliedStatus);
+                await request.SaveCheckpointAsync(cancellationToken);
+            }
+            await WriteScoreAsync(userId, request.ProviderMediaId, request.Score, cancellationToken);
+        }
         return result;
     }
 
@@ -359,7 +415,7 @@ public sealed class SimklMediaProvider(
         return Result(providerMediaId);
     }
 
-    private async Task<MediaProviderMutationResult> WriteProgressAsync(int userId, string providerMediaId, int? progress,
+    private async Task<(MediaProviderMutationResult Result, IReadOnlyList<MediaProviderWatchedEpisode>? Episodes)> WriteProgressAsync(int userId, string providerMediaId, int? progress,
         IReadOnlyList<MediaProviderWatchedEpisode>? exactEpisodes, CancellationToken cancellationToken)
     {
         var id = SimklJson.ParseId(providerMediaId);
@@ -370,9 +426,9 @@ public sealed class SimklMediaProvider(
                 using var response = await PostAuthenticatedAsync(userId, "/sync/history",
                     SimklJson.Envelope(id.Type, new { ids = new { simkl = id.Id } }), cancellationToken);
                 SimklJson.ThrowIfNotFound(response.RootElement, id.Type);
-                return Result(providerMediaId, MediaLibraryStatuses.Completed);
+                return (Result(providerMediaId, MediaLibraryStatuses.Completed), null);
             }
-            return Result(providerMediaId);
+            return (Result(providerMediaId), null);
         }
         var current = await ReadWatchedEpisodesAsync(userId, id, cancellationToken);
         IReadOnlyList<MediaProviderWatchedEpisode> target;
@@ -404,9 +460,9 @@ public sealed class SimklMediaProvider(
             using var response = await PostAuthenticatedAsync(userId, "/sync/history?skip_auto_watching=yes",
                 SimklJson.EpisodeEnvelope(id, toAdd), cancellationToken);
             SimklJson.ThrowIfNotFound(response.RootElement, id.Type);
-            return Result(providerMediaId, SimklJson.ResolvedHistoryStatus(response.RootElement), progress);
+            return (Result(providerMediaId, SimklJson.ResolvedHistoryStatus(response.RootElement), progress), target);
         }
-        return Result(providerMediaId, appliedProgress: progress);
+        return (Result(providerMediaId, appliedProgress: progress), target);
     }
 
     private async Task<IReadOnlyList<MediaProviderWatchedEpisode>> ReadWatchedEpisodesAsync(int userId, SimklIdentity id, CancellationToken cancellationToken)
@@ -422,17 +478,6 @@ public sealed class SimklMediaProvider(
         var id = SimklJson.ParseId(item.ProviderMediaId);
         var catalog = await ReadEpisodeCatalogAsync(userId, id, cancellationToken);
         SimklJson.ApplyCatalog(item, catalog);
-    }
-
-    private async Task<bool> StatusMatchesSnapshotAsync(int userId, string providerMediaId, string requested, CancellationToken cancellationToken)
-    {
-        var account = await RequireAccountAsync(userId, cancellationToken);
-        var snapshot = await db.MediaProviderLibrarySnapshots.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ConnectedServiceAccountId == account.Id, cancellationToken);
-        if (snapshot is null) return false;
-        var items = JsonSerializer.Deserialize<Dictionary<string, MediaProviderLibraryItem>>(snapshot.ItemsJson, JsonOptions);
-        if (items is null || !items.TryGetValue(providerMediaId, out var item)) return false;
-        return item.Status == requested;
     }
 
     private async Task<IReadOnlyList<MediaProviderWatchedEpisode>> ReadEpisodeCatalogAsync(int userId, SimklIdentity id, CancellationToken cancellationToken)

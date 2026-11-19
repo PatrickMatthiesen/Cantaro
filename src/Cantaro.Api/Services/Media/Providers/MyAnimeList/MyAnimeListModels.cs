@@ -84,6 +84,15 @@ public sealed class MyAnimeListMedia
 
     [JsonPropertyName("num_volumes")]
     public int NumVolumes { get; set; }
+
+    [JsonPropertyName("my_list_status")]
+    public MyAnimeListListVersion? MyListStatus { get; set; }
+}
+
+public sealed class MyAnimeListListVersion
+{
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
 }
 
 public sealed class MyAnimeListPicture

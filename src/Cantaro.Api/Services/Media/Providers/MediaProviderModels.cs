@@ -290,6 +290,7 @@ public class MediaScoreUpdateRequest
 public class MediaLibraryStateSyncRequest
 {
     public bool UpdateStatus { get; set; } = true;
+    public bool UpdateScore { get; set; } = true;
 
     /// <summary>False when only status or score changed, preserving the provider's episode history.</summary>
     public bool UpdateProgress { get; set; } = true;
@@ -312,7 +313,20 @@ public class MediaLibraryStateSyncRequest
     public int? ProgressVolumes { get; set; }
 
     public DateTimeOffset? LastKnownRemoteUpdateAt { get; set; }
+    public bool ExpectMissingRemote { get; set; }
+    public SimklWatchWriteCheckpoint? SimklWatchWrite { get; set; }
+    public Guid? VerifiedSourceBindingId { get; set; }
+    public DateTimeOffset? VerifiedSourceVersion { get; set; }
+
+    internal Func<CancellationToken, Task>? SaveCheckpointAsync { get; set; }
+
+    // Providers such as AniList return whole seconds. A same-second change
+    // does not establish that Cantaro was edited later.
+    internal static bool IsNewerVersion(DateTimeOffset? sourceVersion, DateTimeOffset targetVersion)
+        => sourceVersion?.ToUnixTimeSeconds() > targetVersion.ToUnixTimeSeconds();
 }
+
+public sealed record SimklWatchWriteCheckpoint(DateTimeOffset RemoteVersion, string? AppliedStatus);
 
 public class MediaProviderMutationResult
 {
