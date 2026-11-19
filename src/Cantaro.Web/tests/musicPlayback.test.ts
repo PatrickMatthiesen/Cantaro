@@ -11,7 +11,7 @@ import {
   type PlaybackTrack,
 } from '../src/music/playback/playbackState';
 import { playbackTrackFromSong } from '../src/music/playback/playbackSources';
-import { songArtwork } from '../src/music/musicPresentation';
+import { isYouTubeThumbnailPlaceholder, songArtwork } from '../src/music/musicPresentation';
 
 const youtube: PlaybackTrack = {
   id: 'first', title: 'First', sources: [{
@@ -37,6 +37,15 @@ function apply(...actions: PlaybackAction[]) {
 }
 
 describe('playback session', () => {
+  test('a stopped session cannot advance a later selection with a stale end event', () => {
+    const first = apply({ type: 'replaceQueue', play: true, tracks: [youtube, spotify] });
+    const stopped = playbackReducer(first, { type: 'stop' });
+    const restarted = playbackReducer(stopped, { type: 'replaceQueue', play: true, tracks: [youtube, spotify] });
+    expect(restarted.selectionVersion).toBeGreaterThan(first.selectionVersion);
+    expect(playbackReducer(restarted, { type: 'ended', selectionVersion: first.selectionVersion })).toBe(restarted);
+    expect(playbackReducer(restarted, { type: 'ended', selectionVersion: restarted.selectionVersion }).currentIndex).toBe(1);
+  });
+
   test('playing a song preserves the manually queued tracks and the active track remains in history', () => {
     const queued = apply({ type: 'enqueue', track: spotify }, { type: 'enqueue', track: unavailable });
     const playing = playbackReducer(queued, { type: 'enqueue', play: true, track: youtube });
@@ -183,7 +192,7 @@ describe('playback session', () => {
 
     const playing = playbackReducer(queued, { type: 'select', index: 0, play: true });
     const reset = playbackReducer(playing, { type: 'replaceQueue', tracks: [] });
-    expect(reset).toEqual(initialPlaybackState);
+    expect(reset).toEqual({ ...initialPlaybackState, selectionVersion: playing.selectionVersion });
     expect(isPlayerVisible(reset)).toBe(false);
   });
 
@@ -201,10 +210,10 @@ describe('playback session', () => {
     const embedded = playbackReducer(external, { type: 'selectSource', sourceId: 'youtube:one' });
     const paused = playbackReducer(playbackReducer(embedded, { type: 'play' }), { type: 'pause' });
     expect(paused.status).toBe('paused');
-    expect(playbackReducer(paused, { type: 'stop' })).toEqual(initialPlaybackState);
+    expect(playbackReducer(paused, { type: 'stop' })).toEqual({ ...initialPlaybackState, selectionVersion: paused.selectionVersion });
     expect(isPlayerVisible(paused)).toBe(true);
     expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [spotify] }).currentIndex).toBeNull();
-    expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [] })).toEqual(initialPlaybackState);
+    expect(playbackReducer(paused, { type: 'replaceQueue', tracks: [] })).toEqual({ ...initialPlaybackState, selectionVersion: paused.selectionVersion });
     expect(playbackReducer(paused, { type: 'select', index: -1 })).toEqual(paused);
   });
 });
@@ -217,7 +226,7 @@ function song(overrides: Partial<MusicLibrarySong>): MusicLibrarySong {
 }
 
 describe('canonical playback sources', () => {
-  test('song rows and playback share catalog artwork and fall back to the selected YouTube video thumbnail', () => {
+  test('song rows and playback prefer the selected YouTube thumbnail and keep saved artwork as a fallback', () => {
     const mappedSong = song({
       sourceIdentities: [
         { source: 'youtube', externalId: 'invalid' },
@@ -226,12 +235,14 @@ describe('canonical playback sources', () => {
       ],
     });
     const videoThumbnail = 'https://i.ytimg.com/vi/M7lc1UVf-VE/mqdefault.jpg';
-    expect(songArtwork(mappedSong)).toBe(videoThumbnail);
+    expect(songArtwork(mappedSong).artworkUrl).toBe(videoThumbnail);
     expect(playbackTrackFromSong(mappedSong).artworkUrl).toBe(videoThumbnail);
 
     const withArtwork = { ...mappedSong, thumbnailUrl: 'https://example.com/album.jpg' };
-    expect(songArtwork(withArtwork)).toBe(withArtwork.thumbnailUrl);
-    expect(playbackTrackFromSong(withArtwork).artworkUrl).toBe(withArtwork.thumbnailUrl);
+    const expected = { artworkUrl: videoThumbnail, artworkFallbacks: [withArtwork.thumbnailUrl] };
+    expect(songArtwork(withArtwork)).toEqual(expected);
+    expect(playbackTrackFromSong(withArtwork)).toMatchObject(expected);
+    expect(songArtwork({ ...withArtwork, sourceIdentities: [] }).artworkUrl).toBe(withArtwork.thumbnailUrl);
   });
 
   test('songs without a valid YouTube video or catalog artwork have no thumbnail URL', () => {
@@ -241,8 +252,16 @@ describe('canonical playback sources', () => {
         { source: 'youtube', externalId: 'invalid' },
       ],
     });
-    expect(songArtwork(missingArtwork)).toBeUndefined();
+    expect(songArtwork(missingArtwork).artworkUrl).toBeUndefined();
     expect(playbackTrackFromSong(missingArtwork).artworkUrl).toBeUndefined();
+  });
+
+  test('rejects a decodable YouTube 404 placeholder without rejecting normal thumbnails or other hosts', () => {
+    const url = 'https://i.ytimg.com/vi/aBcDeFgH000/mqdefault.jpg';
+    expect(isYouTubeThumbnailPlaceholder(url, 120, 90)).toBe(true);
+    expect(isYouTubeThumbnailPlaceholder(url, 320, 180)).toBe(false);
+    expect(isYouTubeThumbnailPlaceholder('https://example.com/artwork.jpg', 120, 90)).toBe(false);
+    expect(isYouTubeThumbnailPlaceholder(url.replace('mqdefault', 'default'), 120, 90)).toBe(false);
   });
 
   test('a YouTube Music link without a video identity stays an attributed external fallback', () => {

@@ -28,7 +28,7 @@ function mapSongToTrack(song: MusicLibrarySong): MusicCollectionTrack {
     title: song.title,
     artist: songArtist(song),
     albums: song.albums,
-    artworkUrl: songArtwork(song),
+    ...songArtwork(song),
     durationSeconds: song.durationSeconds,
     platformIds: visiblePlatformIds(song),
   };

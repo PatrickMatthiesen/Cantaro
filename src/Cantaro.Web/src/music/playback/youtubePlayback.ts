@@ -150,7 +150,6 @@ export function mountYouTubePlayback(
     play,
     pause() {
       if (!ready || disposed) return;
-      clearTimeout(timeout);
       player?.pauseVideo();
     },
     seek(positionSeconds: number) {

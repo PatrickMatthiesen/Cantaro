@@ -3,6 +3,7 @@ export interface PlaybackTrack {
   title: string;
   artist?: string;
   artworkUrl?: string;
+  artworkFallbacks?: string[];
   durationSeconds?: number;
   sources: PlaybackSource[];
 }
@@ -132,9 +133,13 @@ function applyTransportIntent(state: PlaybackState, action: Extract<PlaybackActi
   return action.type === 'play' ? play(state) : pause(state);
 }
 
+function resetSession(state: PlaybackState): PlaybackState {
+  return { ...initialPlaybackState, selectionVersion: state.selectionVersion };
+}
+
 function replaceQueue(state: PlaybackState, { tracks, play: start }: Extract<PlaybackAction, { type: 'replaceQueue' }>) {
-  const replacement = { ...initialPlaybackState, queue: [...tracks] };
-  return start ? selectIndex({ ...replacement, selectionVersion: state.selectionVersion }, 0, true) : replacement;
+  const replacement = { ...resetSession(state), queue: [...tracks] };
+  return start ? selectIndex(replacement, 0, true) : replacement;
 }
 
 function playNow(state: PlaybackState, track: PlaybackTrack): PlaybackState {
@@ -156,7 +161,7 @@ function ended(state: PlaybackState, action: Extract<PlaybackAction, { type: 'en
 }
 
 function clearQueue(state: PlaybackState): PlaybackState {
-  if (state.currentIndex === null) return initialPlaybackState;
+  if (state.currentIndex === null) return resetSession(state);
   if (state.currentIndex === state.queue.length - 1) return state;
   return { ...state, queue: state.queue.slice(0, state.currentIndex + 1) };
 }
@@ -173,7 +178,7 @@ export function playbackReducer(state: PlaybackState, action: PlaybackAction): P
     case 'pause':
       return applyTransportIntent(state, action);
     case 'stop':
-      return initialPlaybackState;
+      return resetSession(state);
     case 'next':
       return moveIndex(state, 1);
     case 'previous':

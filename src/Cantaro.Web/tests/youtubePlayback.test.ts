@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { YouTubeIframeApi, YouTubeIframePlayer } from '../src/music/playback/youtubeIframeApi';
 import { mountYouTubePlayback, type YouTubePlaybackSnapshot } from '../src/music/playback/youtubePlayback';
 
@@ -62,6 +62,30 @@ afterEach(() => {
 });
 
 describe('YouTube iframe transport', () => {
+  test('a pause with no response during startup still times out to the fallback', async () => {
+    const fixture = setup();
+    const schedule = spyOn(globalThis, 'setTimeout');
+    const cancel = spyOn(globalThis, 'clearTimeout');
+    const player = mountYouTubePlayback(fixture.container, mediaId, fixture.callbacks, async () => fixture.api);
+    try {
+      await Promise.resolve();
+      fixture.ready();
+      expect(fixture.latest()?.phase).toBe('starting');
+      const deadline = schedule.mock.lastCall?.[0];
+      if (typeof deadline !== 'function') throw new Error('Expected the playback start timeout');
+      cancel.mockClear();
+      player.pause();
+      expect(fixture.rawPlayer.pauseVideo).toHaveBeenCalledTimes(1);
+      expect(cancel).not.toHaveBeenCalled();
+      deadline();
+      expect(fixture.latest()).toMatchObject({ phase: 'error', error: 'YouTube playback did not start.' });
+    } finally {
+      player.dispose();
+      schedule.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
   test('waits for ready, reflects actual state and progress, clamps seek, and signals end once', async () => {
     const fixture = setup();
     const player = mountYouTubePlayback(fixture.container, mediaId, fixture.callbacks, async () => fixture.api);

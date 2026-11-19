@@ -69,12 +69,25 @@ export function isYouTubeVideoId(value: string): boolean {
   return /^[A-Za-z0-9_-]{11}$/.test(value);
 }
 
-export function songArtwork(song: MusicLibrarySong): string | undefined {
-  if (song.thumbnailUrl) return song.thumbnailUrl;
+export function youtubeSongArtwork(song: MusicLibrarySong): string | undefined {
   const video = song.sourceIdentities.find(({ source, externalId }) =>
     (source === 'youtube' || source === 'youtube-music') && isYouTubeVideoId(externalId),
   );
   return video ? `https://i.ytimg.com/vi/${video.externalId}/mqdefault.jpg` : undefined;
+}
+
+export function songArtwork(song: MusicLibrarySong): { artworkUrl?: string; artworkFallbacks?: string[] } {
+  const videoArtwork = youtubeSongArtwork(song);
+  return {
+    artworkUrl: videoArtwork ?? song.thumbnailUrl,
+    artworkFallbacks: videoArtwork && song.thumbnailUrl ? [song.thumbnailUrl] : undefined,
+  };
+}
+
+export function isYouTubeThumbnailPlaceholder(src: string, width: number, height: number): boolean {
+  // YouTube serves a decodable 120×90 placeholder with a 404 for missing medium thumbnails.
+  return width === 120 && height === 90
+    && /^https:\/\/i\.ytimg\.com\/vi\/[A-Za-z0-9_-]{11}\/mqdefault\.jpg$/.test(src);
 }
 
 export function playlistArtwork(playlist: MusicLibraryPlaylist, index = 0): string {

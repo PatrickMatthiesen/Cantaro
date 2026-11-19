@@ -144,16 +144,14 @@ function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata:
 
 function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
   const canGoBack = useCanGoBack();
-  const artworkUrl = songArtwork(song);
+  const { artworkUrl, artworkFallbacks } = songArtwork(song);
 
   return (
     <section className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content">
       {artworkUrl ? (
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-50 dark:opacity-65"
-          style={{ backgroundImage: `url(${artworkUrl})` }}
-          aria-hidden
-        />
+        <div className="absolute inset-0 opacity-50 dark:opacity-65">
+          <MusicArtwork src={artworkUrl} fallbacks={artworkFallbacks} className="size-full" backdrop />
+        </div>
       ) : null}
       <div className="absolute inset-0 bg-linear-to-r from-immersive-scrim-strong via-immersive-scrim-medium to-immersive-scrim-soft" aria-hidden />
       <div className="absolute inset-0 bg-linear-to-t from-immersive-scrim-base via-transparent to-immersive-scrim-soft" aria-hidden />
@@ -172,7 +170,7 @@ function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: 
       </Link>
 
       <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
-        <MusicArtwork src={artworkUrl} className="hidden aspect-square w-56 md:block xl:w-64" />
+        <MusicArtwork src={artworkUrl} fallbacks={artworkFallbacks} className="hidden aspect-square w-56 md:block xl:w-64" />
         <div className="min-w-0 max-w-4xl">
           {metadata.isObservation ? <SongIdentityStatus metadata={metadata} /> : null}
           <h1 className="mt-4 max-w-[22ch] text-3xl leading-[1.06] font-black tracking-[-0.03em] text-balance sm:text-4xl xl:text-5xl">

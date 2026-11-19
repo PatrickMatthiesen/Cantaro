@@ -20,9 +20,9 @@ function PlayerButton({ label, disabled, onClick, children }: {
       type="button"
       aria-label={label}
       title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="inline-flex size-11 shrink-0 items-center justify-center text-content hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-40"
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onClick}
+      className="inline-flex size-11 shrink-0 items-center justify-center text-content hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus aria-disabled:opacity-40"
     >
       {children}
     </button>
@@ -51,8 +51,9 @@ const pausablePhases = new Set<PlaybackPhase>(['playing', 'buffering', 'starting
 
 function useYouTubeTransport(source: PlaybackSource | null) {
   const { state, dispatch } = useMusicPlayback();
+  const { selectionVersion } = state;
   const mediaId = source?.providerId === 'youtube' && source.capability.kind === 'embed' ? source.capability.mediaId : undefined;
-  const [snapshot, setSnapshot] = useState(loadingYouTubePlayback);
+  const [observed, setObserved] = useState<{ selectionVersion: number; snapshot: YouTubePlaybackSnapshot }>();
   const mount = useRef<HTMLDivElement>(null);
   const transport = useRef<ReturnType<typeof mountYouTubePlayback> | null>(null);
 
@@ -61,13 +62,13 @@ function useYouTubeTransport(source: PlaybackSource | null) {
     return mountYouTubePlayback(container, videoId, {
       autoPlay: state.status === 'playing',
       onSnapshot: (update) => {
-        setSnapshot(update);
+        setObserved({ selectionVersion, snapshot: update });
         if (phase === update.phase) return;
         phase = update.phase;
         const intent = phaseIntents[phase];
-        if (intent) dispatch({ type: intent, selectionVersion: state.selectionVersion });
+        if (intent) dispatch({ type: intent, selectionVersion });
       },
-      onEnded: () => dispatch({ type: 'ended', selectionVersion: state.selectionVersion }),
+      onEnded: () => dispatch({ type: 'ended', selectionVersion }),
     });
   });
 
@@ -79,8 +80,9 @@ function useYouTubeTransport(source: PlaybackSource | null) {
       player.dispose();
       transport.current = null;
     };
-  }, [mediaId]);
+  }, [mediaId, selectionVersion]);
 
+  const snapshot = observed?.selectionVersion === selectionVersion ? observed.snapshot : loadingYouTubePlayback;
   return { mediaId, snapshot, mount, transport };
 }
 
@@ -188,7 +190,7 @@ function ActiveMusicPlayer({ track, source, index }: {
       ) : null}
       <div className="mx-auto flex max-w-360 flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 sm:px-4">
         <div className="flex min-w-0 grow basis-36 items-center gap-3">
-          <MusicArtwork src={track.artworkUrl} className="size-10" />
+          <MusicArtwork src={track.artworkUrl} fallbacks={track.artworkFallbacks} className="size-10" />
           <div className="min-w-0">
             <p className="truncate text-sm font-bold">{track.title}</p>
             <p className="truncate text-xs text-content-muted">
@@ -226,7 +228,6 @@ export function MusicBottomPlayer() {
 
   return (
     <ActiveMusicPlayer
-      key={state.selectionVersion}
       track={track}
       source={source}
       index={state.currentIndex}

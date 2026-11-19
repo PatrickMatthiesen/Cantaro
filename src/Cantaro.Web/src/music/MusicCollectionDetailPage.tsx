@@ -14,6 +14,7 @@ export interface MusicCollectionTrack {
   artist?: string;
   albums?: string[];
   artworkUrl?: string;
+  artworkFallbacks?: string[];
   artworkExternalUrl?: string;
   preserveArtworkAspectRatio?: boolean;
   durationSeconds?: number;
@@ -39,6 +40,7 @@ interface MusicCollectionDetailPageProps {
   title: string;
   description?: string;
   artworkUrl?: string;
+  artworkFallbacks?: string[];
   artworkExternalUrl?: string;
   preserveArtworkAspectRatio?: boolean;
   backTo: '/music/playlists' | '/music/platforms/$platformId';
@@ -68,11 +70,13 @@ interface MusicCollectionDetailPageProps {
 
 function CollectionArtwork({
   artworkUrl,
+  artworkFallbacks,
   artworkExternalUrl,
   preserveArtworkAspectRatio,
   title,
 }: {
   artworkUrl?: string;
+  artworkFallbacks?: string[];
   artworkExternalUrl?: string;
   preserveArtworkAspectRatio?: boolean;
   title: string;
@@ -81,6 +85,7 @@ function CollectionArtwork({
     const artwork = (
       <MusicArtwork
         src={artworkUrl}
+        fallbacks={artworkFallbacks}
         className="aspect-square w-full"
         contain={preserveArtworkAspectRatio}
       />
@@ -174,7 +179,9 @@ function HeaderActions({
 }
 
 function TrackArtwork({ track }: { track: MusicCollectionTrack }) {
-  const artwork = <MusicArtwork src={track.artworkUrl} className="size-10" contain={track.preserveArtworkAspectRatio} />;
+  const artwork = (
+    <MusicArtwork src={track.artworkUrl} fallbacks={track.artworkFallbacks} className="size-10" contain={track.preserveArtworkAspectRatio} />
+  );
   return track.artworkUrl && track.artworkExternalUrl ? (
     <a
       href={track.artworkExternalUrl}
@@ -626,6 +633,7 @@ function CollectionHero(props: CollectionHeroProps) {
       <div className="grid grid-cols-[112px_minmax(0,1fr)] items-start gap-3 sm:gap-4 md:grid-cols-[180px_minmax(0,1fr)] md:gap-5">
         <CollectionArtwork
           artworkUrl={props.artworkUrl}
+          artworkFallbacks={props.artworkFallbacks}
           artworkExternalUrl={props.artworkExternalUrl}
           preserveArtworkAspectRatio={props.preserveArtworkAspectRatio}
           title={props.title}
@@ -683,6 +691,7 @@ export function MusicCollectionDetailPage(props: MusicCollectionDetailPageProps)
             title={props.title}
             description={props.description}
             artworkUrl={props.artworkUrl}
+            artworkFallbacks={props.artworkFallbacks}
             artworkExternalUrl={props.artworkExternalUrl}
             preserveArtworkAspectRatio={props.preserveArtworkAspectRatio}
             ownerLabel={props.ownerLabel}

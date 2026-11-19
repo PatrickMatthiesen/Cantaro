@@ -101,7 +101,7 @@ export function playbackTrackFromSong(song: MusicLibrarySong, resolvers: Record<
     id: song.id,
     title: song.title,
     artist: song.artist,
-    artworkUrl: songArtwork(song),
+    ...songArtwork(song),
     durationSeconds: song.durationSeconds,
     sources,
   };

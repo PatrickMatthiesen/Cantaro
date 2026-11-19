@@ -2,7 +2,7 @@ import { type MusicLibraryPlaylist, type MusicLibraryResponse, type MusicLibrary
 import { MusicCollectionDetailPage, type MusicCollectionSuggestion, type MusicCollectionTrack } from './MusicCollectionDetailPage';
 import { MusicEmptyPanel } from './MusicEmptyPanel';
 import { MusicPageShell } from './MusicPageShell';
-import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds } from './musicPresentation';
+import { playlistArtwork, songArtist, songArtwork, visiblePlatformIds, youtubeSongArtwork } from './musicPresentation';
 import { MusicPlaylistOutboundSync } from './MusicPlaylistOutboundSync';
 import { MusicPlaylistRename } from './MusicPlaylistRename';
 import { usePlaylistSyncDetails } from './usePlaylistSyncDetails';
@@ -24,7 +24,7 @@ function mapSongToCollectionTrack(song: MusicLibrarySong, entryId: string): Musi
     title: song.title,
     artist: songArtist(song),
     albums: song.albums,
-    artworkUrl: songArtwork(song),
+    ...songArtwork(song),
     durationSeconds: song.durationSeconds,
     addedLabel: song.playlists[0]?.playlistName,
     platformIds: visiblePlatformIds(song),
@@ -61,6 +61,11 @@ export function MusicPlaylistDetailPage({
   const { queueProps, trackActions, playCollection } = useLibraryPlayback(library.songs);
   const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
   const baseTracks = playlistSongEntries.map(({ song, entryId }) => mapSongToCollectionTrack(song, entryId));
+  const orderedSongs = playlistSongEntries.map(({ song }) => song);
+  const [cover, ...coverFallbacks] = [...new Set([
+    ...orderedSongs.map(youtubeSongArtwork),
+    ...orderedSongs.map((song) => song.thumbnailUrl),
+  ].filter((url): url is string => Boolean(url)))];
 
   if (!playlist) {
     return (
@@ -75,14 +80,15 @@ export function MusicPlaylistDetailPage({
       <MusicCollectionDetailPage
         title={playlist.name}
         description={playlist.description}
-        artworkUrl={baseTracks.find((track) => track.artworkUrl)?.artworkUrl}
+        artworkUrl={cover}
+        artworkFallbacks={coverFallbacks}
         backTo="/music/playlists"
         backLabel="Back to playlists"
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}
         tracks={baseTracks}
         {...queueProps}
         {...trackActions}
-        onPlayAll={() => playCollection(playlistSongEntries.map(({ song }) => song))}
+        onPlayAll={() => playCollection(orderedSongs)}
         emptyTrackLabel="This playlist has no songs yet"
         actionSlot={<PlaylistRenameAction playlist={playlist} sync={sync} />}
         afterHeroSlot={<MusicPlaylistOutboundSync state={sync} />}
