@@ -315,10 +315,8 @@ public class MediaProviderOperationProcessor(
                 operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
                 DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson),
                 cancellationToken),
-            MediaProviderOperationTypes.SyncLibraryState => await provider.SyncLibraryStateAsync(
-                operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
-                DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson),
-                cancellationToken),
+            MediaProviderOperationTypes.SyncLibraryState => await ExecuteLibraryStateSyncAsync(
+                provider, operation, cancellationToken),
             MediaProviderOperationTypes.AutoProgressUpdate => await ExecuteAutoProgressAsync(
                 provider,
                 operation,
@@ -361,7 +359,7 @@ public class MediaProviderOperationProcessor(
             MediaProviderOperationTypes.UpdateProgress or MediaProviderOperationTypes.ImportFanOutProgress
                 => ProgressDoesNotMatch(entry,
                     DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson), isImportFanOut),
-            MediaProviderOperationTypes.SyncLibraryState => SyncStateDoesNotMatch(
+            MediaProviderOperationTypes.SyncLibraryState => operation.BatchId is null || SyncStateDoesNotMatch(
                 entry, DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson)),
             _ => false
         };
@@ -375,10 +373,42 @@ public class MediaProviderOperationProcessor(
 
     private static bool SyncStateDoesNotMatch(MediaLibraryEntry entry, MediaLibraryStateSyncRequest request)
         => request.UpdateStatus && request.Status != entry.Status
-            || request.Score != entry.Score
-            || request.UpdateProgress && (request.ProgressEpisodes != entry.ProgressEpisodes
-                || request.ProgressChapters != entry.ProgressChapters
-                || request.ProgressVolumes != entry.ProgressVolumes);
+            || request.UpdateScore && request.Score != entry.Score
+            || request.UpdateProgress && (
+                request.ProgressEpisodes is { } episodes && episodes != (entry.ProgressEpisodes ?? 0)
+                || request.ProgressChapters is { } chapters && chapters != (entry.ProgressChapters ?? 0)
+                || request.ProgressVolumes is { } volumes && volumes != (entry.ProgressVolumes ?? 0));
+
+    private async Task<MediaProviderMutationResult> ExecuteLibraryStateSyncAsync(
+        IMediaProvider provider, MediaProviderOperation operation, CancellationToken cancellationToken)
+    {
+        var binding = operation.MediaLibraryProviderBinding!;
+        var userId = binding.MediaLibraryEntry!.UserId;
+        var account = await provider.GetConnectedAccountAsync(userId, cancellationToken);
+        if (account is null || account.Id != binding.ConnectedServiceAccountId
+            || account.ExternalAccountId != binding.ProviderAccountId)
+        {
+            throw new PlatformApiException(
+                "platform_account_changed", "The connected account changed. Create a new sync preview.", 409);
+        }
+
+        var request = DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson);
+        if (request.LastKnownRemoteUpdateAt is { } expectedVersion
+            ? binding.LastRemoteUpdateAt > expectedVersion
+                || !MediaLibraryStateSyncRequest.LocalEditIsNewer(binding.MediaLibraryEntry.LastLocalEditAt, expectedVersion)
+            : binding.LastRemoteUpdateAt.HasValue || binding.LastSyncedAt.HasValue || !request.ExpectMissingRemote)
+        {
+            throw new PlatformApiException(
+                "platform_sync_conflict", "The provider entry changed. Create a new sync preview.", 409);
+        }
+
+        request.SaveCheckpointAsync = async token =>
+        {
+            operation.PayloadJson = JsonSerializer.Serialize(request, SerializerOptions);
+            await _dbContext.SaveChangesAsync(token);
+        };
+        return await provider.SyncLibraryStateAsync(userId, request, cancellationToken);
+    }
 
     private async Task<MediaProviderMutationResult> ExecuteProgressUpdateAsync(
         IMediaProvider provider,
@@ -511,13 +541,16 @@ public class MediaProviderOperationProcessor(
                 break;
         }
 
-        if (result.AppliedStatus is not null)
+        var librarySyncRequest = operation.OperationType == MediaProviderOperationTypes.SyncLibraryState
+            ? DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson)
+            : null;
+        if (result.AppliedStatus is not null && librarySyncRequest?.UpdateStatus != false)
         {
             binding.LastRequestedStatus = operation.OperationType switch
             {
                 MediaProviderOperationTypes.UpdateStatus => DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson).Status,
                 MediaProviderOperationTypes.ImportFanOutStatus => DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson).Status,
-                MediaProviderOperationTypes.SyncLibraryState => DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson).Status,
+                MediaProviderOperationTypes.SyncLibraryState => librarySyncRequest!.Status,
                 _ => null
             };
             binding.LastAppliedStatus = result.AppliedStatus;
@@ -538,7 +571,11 @@ public class MediaProviderOperationProcessor(
             entry.UpdatedAt = now;
         }
         binding.LastSyncedAt = now;
-        binding.LastRemoteUpdateAt = result.LastRemoteUpdateAt ?? now;
+        var remoteUpdateAt = result.LastRemoteUpdateAt ?? (librarySyncRequest is null ? now : null);
+        if (remoteUpdateAt.HasValue && (binding.LastRemoteUpdateAt is null || remoteUpdateAt > binding.LastRemoteUpdateAt))
+        {
+            binding.LastRemoteUpdateAt = remoteUpdateAt;
+        }
         binding.UpdatedAt = now;
         _logger.LogInformation(
             "Media provider operation {OperationId} ({OperationType}) succeeded for user {UserId} on provider {Provider}.",
@@ -561,7 +598,8 @@ public class MediaProviderOperationProcessor(
             return;
         }
         var maxAttempts = 4;
-        var shouldRetry = operation.AttemptCount < maxAttempts;
+        var shouldRetry = operation.AttemptCount < maxAttempts
+            && exception is not PlatformApiException { Code: "platform_sync_conflict" or "platform_account_changed" };
 
         operation.Status = shouldRetry
             ? MediaProviderOperationStatuses.Retrying

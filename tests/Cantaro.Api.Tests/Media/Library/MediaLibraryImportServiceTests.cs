@@ -93,7 +93,43 @@ public class MediaLibraryImportServiceTests
 
         Assert.Equal(11, (await db.MediaLibraryEntries.SingleAsync()).ProgressEpisodes);
         var binding = await db.MediaLibraryProviderBindings.SingleAsync();
-        Assert.Equal(now.AddMinutes(-1), binding.LastRemoteUpdateAt);
+        Assert.Equal(now, binding.LastRemoteUpdateAt);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task ImportAsync_AppliesNewerAniListProgressEvenIfVersionWasAlreadySeen(bool previouslySeen, bool hasLocalEdit)
+    {
+        var (db, connection) = await CreateDbAsync();
+        await using var _ = connection;
+        await using var __ = db;
+        var (user, account) = await SeedAccountAsync(db, 214);
+        var service = MakeService(db);
+        var oldEdit = DateTimeOffset.UtcNow.AddDays(-10);
+        var remoteEdit = oldEdit.AddDays(2);
+        await service.ImportAsync(user.Id, account, MakeImport(oldEdit, 0, oldEdit), CancellationToken.None);
+        var entry = await db.MediaLibraryEntries.SingleAsync();
+        entry.Status = MediaLibraryStatuses.Planned;
+        entry.LastLocalEditAt = hasLocalEdit ? oldEdit : null;
+        var binding = await db.MediaLibraryProviderBindings.SingleAsync();
+        if (previouslySeen)
+            binding.LastRemoteUpdateAt = remoteEdit;
+        else
+            db.MediaLibraryProviderBindings.Remove(binding);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var appliedAt = remoteEdit.AddHours(2);
+        await service.ImportAsync(user.Id, account, MakeImport(appliedAt, 18, remoteEdit), CancellationToken.None);
+        await service.ImportAsync(user.Id, account, MakeImport(appliedAt.AddHours(1), 18, remoteEdit), CancellationToken.None);
+
+        var persisted = await db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Current, persisted.Status);
+        Assert.Equal(18, persisted.ProgressEpisodes);
+        Assert.Equal(appliedAt, persisted.UpdatedAt);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
     }
 
     [Fact]

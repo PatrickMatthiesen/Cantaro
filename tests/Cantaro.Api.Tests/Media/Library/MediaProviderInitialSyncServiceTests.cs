@@ -15,10 +15,69 @@ public sealed class MediaProviderInitialSyncServiceTests
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
-    public async Task ApplyAsync_TargetNewerOverlap_PreservesCantaroAndQueuesOneCompositeTargetOperation()
+    public async Task SyncAsync_StaleExistingAniListEntry_RecoversBeforePublishingProgress()
     {
-        await using var fixture = await InitialSyncFixture.CreateAsync();
-        var entry = await fixture.SeedEntryAsync(includeTargetLink: true);
+        await using var fixture = await InitialSyncFixture.CreateAsync(includeExistingProvider: true);
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true, includeExistingLink: true);
+        entry.Status = MediaLibraryStatuses.Planned;
+        entry.ProgressEpisodes = 0;
+        var binding = await fixture.SeedExistingBindingAsync(entry);
+        var remoteUpdate = fixture.Now.AddDays(1);
+        binding.LastRemoteUpdateAt = remoteUpdate;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        fixture.ExistingProvider!.Snapshot = SnapshotFor(
+            InitialSyncFixture.ExistingProviderId,
+            RemoteItem(providerMediaId: InitialSyncFixture.ExistingMediaId,
+                status: MediaLibraryStatuses.Current, progressEpisodes: 18, remoteUpdatedAt: remoteUpdate));
+        fixture.Provider.Snapshot = Snapshot();
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id, fixture.Provider.ProviderId, CancellationToken.None);
+
+        Assert.Equal("ready", preview.Status);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+        var persisted = await fixture.Db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(MediaLibraryStatuses.Planned, persisted.Status);
+        Assert.Equal(0, persisted.ProgressEpisodes);
+
+        var aniListPreview = await fixture.Service.PreviewAsync(
+            fixture.User.Id, InitialSyncFixture.ExistingProviderId, CancellationToken.None);
+        await fixture.Service.ApplyAsync(fixture.User.Id, InitialSyncFixture.ExistingProviderId,
+            Assert.IsType<string>(aniListPreview.Fingerprint), CancellationToken.None);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+        fixture.Db.ChangeTracker.Clear();
+
+        var malPreview = await fixture.Service.PreviewAsync(
+            fixture.User.Id, fixture.Provider.ProviderId, CancellationToken.None);
+        await fixture.Service.ApplyAsync(fixture.User.Id, fixture.Provider.ProviderId,
+            Assert.IsType<string>(malPreview.Fingerprint), CancellationToken.None);
+        var operation = await fixture.Db.MediaProviderOperations.SingleAsync();
+        var request = JsonSerializer.Deserialize<MediaLibraryStateSyncRequest>(operation.PayloadJson, SerializerOptions);
+        Assert.Equal(MediaLibraryStatuses.Current, request!.Status);
+        Assert.Equal(18, request.ProgressEpisodes);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task ApplyAsync_TargetNewerOverlap_ImportsInsteadOfOverwriting(bool hasLocalEdit, bool onlyFillsProgress)
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync(includeExistingProvider: true);
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true, includeExistingLink: true);
+        await fixture.SeedExistingBindingAsync(entry);
+        if (!hasLocalEdit)
+        {
+            entry.LastLocalEditAt = null;
+        }
+        if (onlyFillsProgress)
+        {
+            entry.Status = MediaLibraryStatuses.Completed;
+            entry.Score = 90m;
+            entry.ProgressEpisodes = null;
+        }
+        await fixture.Db.SaveChangesAsync();
         fixture.Provider.Snapshot = Snapshot(RemoteItem(
             status: MediaLibraryStatuses.Completed,
             score: 90m,
@@ -32,36 +91,78 @@ public sealed class MediaProviderInitialSyncServiceTests
 
         Assert.Equal("ready", preview.Status);
         Assert.Equal(1, preview.WillUpdate);
-        Assert.Equal(MediaLibraryStatuses.Current, entry.Status);
-        Assert.Equal(80m, entry.Score);
-        Assert.Equal(4, entry.ProgressEpisodes);
+        Assert.Equal(onlyFillsProgress ? (int?)null : 4, entry.ProgressEpisodes);
 
         var result = await fixture.Service.ApplyAsync(
-            fixture.User.Id,
-            fixture.Provider.ProviderId,
-            Assert.IsType<string>(preview.Fingerprint),
-            CancellationToken.None);
+            fixture.User.Id, fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint), CancellationToken.None);
 
-        Assert.Equal("queued", result.Status);
-        Assert.Equal(1, result.QueuedOperations);
-        var operation = await fixture.Db.MediaProviderOperations
-            .Include(candidate => candidate.MediaLibraryProviderBinding)
-                .ThenInclude(binding => binding!.MediaProviderLink)
-            .SingleAsync();
-        Assert.Equal(MediaProviderOperationTypes.SyncLibraryState, operation.OperationType);
-        Assert.Equal(fixture.Provider.ProviderId, operation.MediaLibraryProviderBinding!.MediaProviderLink!.Provider);
-        var request = JsonSerializer.Deserialize<MediaLibraryStateSyncRequest>(
-            operation.PayloadJson,
-            SerializerOptions);
-        Assert.NotNull(request);
-        Assert.Equal(MediaLibraryStatuses.Current, request.Status);
-        Assert.Equal(80m, request.Score);
-        Assert.Equal(4, request.ProgressEpisodes);
-
+        Assert.Equal(0, result.QueuedOperations);
+        Assert.Equal(1, result.Updated);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
         await fixture.Db.Entry(entry).ReloadAsync();
-        Assert.Equal(MediaLibraryStatuses.Current, entry.Status);
-        Assert.Equal(80m, entry.Score);
-        Assert.Equal(4, entry.ProgressEpisodes);
+        Assert.Equal(MediaLibraryStatuses.Completed, entry.Status);
+        Assert.Equal(90m, entry.Score);
+        Assert.Equal(28, entry.ProgressEpisodes);
+    }
+
+    [Theory]
+    [InlineData("older")]
+    [InlineData("missing-version")]
+    [InlineData("older-than-binding")]
+    [InlineData("removed-remotely")]
+    [InlineData("same-second")]
+    public async Task ApplyAsync_LocalReset_RequiresKnownOlderTarget(string scenario)
+    {
+        await using var fixture = await InitialSyncFixture.CreateAsync();
+        var entry = await fixture.SeedEntryAsync(includeTargetLink: true);
+        entry.Status = MediaLibraryStatuses.Planned;
+        entry.ProgressEpisodes = 0;
+        entry.LastLocalEditAt = fixture.Now.AddMilliseconds(100);
+        await fixture.Db.SaveChangesAsync();
+        var remoteItem = RemoteItem(progressEpisodes: 18);
+        if (scenario == "missing-version")
+        {
+            remoteItem.LastRemoteUpdateAt = null;
+        }
+        if (scenario == "same-second")
+        {
+            remoteItem.LastRemoteUpdateAt = fixture.Now;
+        }
+        if (scenario is "older-than-binding" or "removed-remotely")
+        {
+            var binding = await fixture.SeedTargetBindingAsync(entry);
+            binding.LastRemoteUpdateAt = scenario == "removed-remotely" ? null : fixture.Now.AddMinutes(-15);
+            binding.LastSyncedAt = fixture.Now;
+            await fixture.Db.SaveChangesAsync();
+        }
+        fixture.Provider.Snapshot = scenario == "removed-remotely" ? Snapshot() : Snapshot(remoteItem);
+
+        var preview = await fixture.Service.PreviewAsync(
+            fixture.User.Id, fixture.Provider.ProviderId, CancellationToken.None);
+        var result = await fixture.Service.ApplyAsync(fixture.User.Id, fixture.Provider.ProviderId,
+            Assert.IsType<string>(preview.Fingerprint), CancellationToken.None);
+
+        if (scenario != "older")
+        {
+            Assert.Equal(0, preview.WillAdd);
+            Assert.Equal(0, result.Added);
+            Assert.Equal(0, result.QueuedOperations);
+            Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+            if (scenario == "older-than-binding")
+            {
+                var binding = await fixture.Db.MediaLibraryProviderBindings.AsNoTracking().SingleAsync();
+                Assert.Equal(fixture.Now.AddMinutes(-15), binding.LastRemoteUpdateAt);
+            }
+            return;
+        }
+
+        var operation = await fixture.Db.MediaProviderOperations.SingleAsync();
+        var request = JsonSerializer.Deserialize<MediaLibraryStateSyncRequest>(operation.PayloadJson, SerializerOptions);
+        Assert.True(request!.UpdateStatus);
+        Assert.True(request.UpdateProgress);
+        Assert.Equal(MediaLibraryStatuses.Planned, request.Status);
+        Assert.Equal(0, request.ProgressEpisodes);
     }
 
     [Fact]
@@ -240,7 +341,7 @@ public sealed class MediaProviderInitialSyncServiceTests
     }
 
     [Fact]
-    public async Task PreviewAsync_RefreshesExistingProviderBeforeTargetAndPersistsNewerState()
+    public async Task PreviewAsync_WithNewerProviderState_DoesNotPersistIt()
     {
         await using var fixture = await InitialSyncFixture.CreateAsync(includeExistingProvider: true);
         var entry = await fixture.SeedEntryAsync(
@@ -270,20 +371,20 @@ public sealed class MediaProviderInitialSyncServiceTests
             CancellationToken.None);
 
         Assert.Equal("ready", preview.Status);
-        Assert.Equal([InitialSyncFixture.ExistingProviderId], preview.RefreshedProviderIds);
+        Assert.Empty(preview.RefreshedProviderIds);
         Assert.Equal(
-            [InitialSyncFixture.ExistingProviderId, InitialSyncFixture.TargetProviderId],
+            [InitialSyncFixture.TargetProviderId],
             fixture.ImportCallOrder);
-        Assert.Equal(1, preview.AlreadyAligned);
+        Assert.Equal(1, preview.WillUpdate);
         var persistedEntry = await fixture.Db.MediaLibraryEntries.AsNoTracking().SingleAsync();
-        Assert.Equal(MediaLibraryStatuses.Completed, persistedEntry.Status);
-        Assert.Equal(90m, persistedEntry.Score);
-        Assert.Equal(28, persistedEntry.ProgressEpisodes);
+        Assert.Equal(MediaLibraryStatuses.Current, persistedEntry.Status);
+        Assert.Equal(80m, persistedEntry.Score);
+        Assert.Equal(4, persistedEntry.ProgressEpisodes);
         Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
     }
 
     [Fact]
-    public async Task PreviewAsync_WhenExistingProviderNeedsReconciliation_ReturnsSettlingWithoutReadingTarget()
+    public async Task PreviewAsync_WhenExistingProviderNeedsReconciliation_QueuesNothing()
     {
         await using var fixture = await InitialSyncFixture.CreateAsync(includeExistingProvider: true);
         var entry = await fixture.SeedEntryAsync(
@@ -305,18 +406,10 @@ public sealed class MediaProviderInitialSyncServiceTests
             fixture.Provider.ProviderId,
             CancellationToken.None);
 
-        Assert.Equal("settling", preview.Status);
-        Assert.Equal(1, preview.PendingOperations);
-        Assert.Equal([InitialSyncFixture.ExistingProviderId], fixture.ImportCallOrder);
-        Assert.Equal(0, fixture.Provider.ImportCallCount);
-        var operation = await fixture.Db.MediaProviderOperations
-            .Include(candidate => candidate.MediaLibraryProviderBinding)
-                .ThenInclude(binding => binding!.MediaProviderLink)
-            .SingleAsync();
-        Assert.Equal(MediaProviderOperationTypes.SyncLibraryState, operation.OperationType);
-        Assert.Equal(
-            InitialSyncFixture.ExistingProviderId,
-            operation.MediaLibraryProviderBinding!.MediaProviderLink!.Provider);
+        Assert.Equal("ready", preview.Status);
+        Assert.Equal([InitialSyncFixture.TargetProviderId], fixture.ImportCallOrder);
+        Assert.Empty(await fixture.Db.MediaProviderOperations.ToListAsync());
+
         await fixture.Db.Entry(entry).ReloadAsync();
         Assert.Equal(MediaLibraryStatuses.Current, entry.Status);
         Assert.Equal(80m, entry.Score);
@@ -631,7 +724,7 @@ public sealed class MediaProviderInitialSyncServiceTests
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode,
             LastRemoteUpdateAt = remoteUpdatedAt
-                ?? new DateTimeOffset(2026, 8, 24, 11, 0, 0, TimeSpan.Zero)
+                ?? new DateTimeOffset(2026, 8, 24, 9, 0, 0, TimeSpan.Zero)
         };
 
     private sealed class InitialSyncFixture : IAsyncDisposable
@@ -748,8 +841,7 @@ public sealed class MediaProviderInitialSyncServiceTests
                 db,
                 registry,
                 importService,
-                new MediaProviderInitialSyncGate(),
-                NullLogger<MediaProviderInitialSyncService>.Instance);
+                new MediaProviderInitialSyncGate());
             return new InitialSyncFixture(
                 connection,
                 db,

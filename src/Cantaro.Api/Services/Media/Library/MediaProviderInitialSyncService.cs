@@ -21,8 +21,7 @@ public sealed class MediaProviderInitialSyncService(
     ApplicationDbContext dbContext,
     IMediaProviderRegistry mediaProviderRegistry,
     MediaLibraryImportService importService,
-    MediaProviderInitialSyncGate initialSyncGate,
-    ILogger<MediaProviderInitialSyncService> logger)
+    MediaProviderInitialSyncGate initialSyncGate)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] ActiveOperationStatuses =
@@ -36,7 +35,6 @@ public sealed class MediaProviderInitialSyncService(
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
     private readonly MediaLibraryImportService _importService = importService;
     private readonly MediaProviderInitialSyncGate _initialSyncGate = initialSyncGate;
-    private readonly ILogger<MediaProviderInitialSyncService> _logger = logger;
 
     public async Task<MediaProviderInitialSyncPreviewDto> PreviewAsync(
         int userId,
@@ -46,7 +44,7 @@ public sealed class MediaProviderInitialSyncService(
         using var syncLease = await _initialSyncGate.AcquireAsync(userId, cancellationToken);
         var normalizedProviderId = NormalizeProviderId(providerId);
         var targetProvider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
-        _ = await RequireAccountAsync(targetProvider, userId, cancellationToken);
+        var account = await RequireAccountAsync(targetProvider, userId, cancellationToken);
 
         var operationState = await ReadOperationStateAsync(userId, cancellationToken);
         if (operationState.Active > 0)
@@ -58,75 +56,8 @@ public sealed class MediaProviderInitialSyncService(
                 "Cantaro is finishing existing provider updates before comparing the new provider.");
         }
 
-        var refreshedProviderIds = new List<string>();
-        var existingSnapshots = new List<(ConnectedServiceAccount Account, MediaProviderLibraryImportResult Snapshot)>();
-        foreach (var existingProviderId in _mediaProviderRegistry.GetSupportedProviderIds()
-                     .Select(NormalizeProviderId)
-                     .Where(id => id != normalizedProviderId)
-                     .OrderBy(id => id, StringComparer.Ordinal))
-        {
-            var existingProvider = _mediaProviderRegistry.GetRequired(existingProviderId);
-            var account = await existingProvider.GetConnectedAccountAsync(userId, cancellationToken);
-            if (account is null)
-            {
-                continue;
-            }
-
-            try
-            {
-                var snapshot = await existingProvider.ImportLibraryAsync(userId, cancellationToken);
-                await _importService.ImportAsync(
-                    userId,
-                    account,
-                    snapshot,
-                    cancellationToken,
-                    fanOutChanges: false);
-                existingSnapshots.Add((account, snapshot));
-                refreshedProviderIds.Add(existingProviderId);
-            }
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-            {
-                _logger.LogWarning(
-                    exception,
-                    "Could not refresh existing media provider {ProviderId} before initial sync to {TargetProviderId} for user {UserId}.",
-                    existingProviderId,
-                    normalizedProviderId,
-                    userId);
-                return new MediaProviderInitialSyncPreviewDto
-                {
-                    ProviderId = normalizedProviderId,
-                    Status = "blocked",
-                    RefreshedProviderIds = refreshedProviderIds,
-                    Message = $"Cantaro could not refresh {existingProviderId}. Retry when that provider is available.",
-                    GeneratedAt = DateTimeOffset.UtcNow
-                };
-            }
-        }
-
-        var existingOperations = 0;
-        foreach (var (account, snapshot) in existingSnapshots)
-        {
-            var plan = await BuildPlanAsync(userId, snapshot, cancellationToken);
-            existingOperations += await QueuePlanAsync(account, plan, batchId: null, cancellationToken);
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        if (existingOperations > 0)
-        {
-            return new MediaProviderInitialSyncPreviewDto
-            {
-                ProviderId = normalizedProviderId,
-                Status = "settling",
-                RefreshedProviderIds = refreshedProviderIds,
-                PendingOperations = existingOperations,
-                Message = "Cantaro found newer changes and is finishing them across your existing providers.",
-                GeneratedAt = DateTimeOffset.UtcNow
-            };
-        }
-
-        var targetSnapshot = await targetProvider.ImportLibraryAsync(userId, cancellationToken);
-        var targetPlan = await BuildPlanAsync(userId, targetSnapshot, cancellationToken);
+        var targetSnapshot = await targetProvider.ReadLibraryForSyncAsync(userId, cancellationToken);
+        var targetPlan = await BuildPlanAsync(userId, account, targetSnapshot, cancellationToken);
         if (targetPlan.CantaroEntryCount == 0 && targetPlan.ProviderOnlyItems.Count > 0)
         {
             return new MediaProviderInitialSyncPreviewDto
@@ -138,7 +69,7 @@ public sealed class MediaProviderInitialSyncService(
                 GeneratedAt = DateTimeOffset.UtcNow
             };
         }
-        return MapPreview(targetPlan, refreshedProviderIds);
+        return MapPreview(targetPlan);
     }
 
     public async Task<MediaProviderInitialSyncResultDto> ApplyAsync(
@@ -158,13 +89,27 @@ public sealed class MediaProviderInitialSyncService(
 
         var provider = _mediaProviderRegistry.GetRequired(normalizedProviderId);
         var account = await RequireAccountAsync(provider, userId, cancellationToken);
-        var snapshot = await provider.ImportLibraryAsync(userId, cancellationToken);
-        var plan = await BuildPlanAsync(userId, snapshot, cancellationToken);
+        var snapshot = await provider.ReadLibraryForSyncAsync(userId, cancellationToken);
+        var plan = await BuildPlanAsync(userId, account, snapshot, cancellationToken);
         if (!CryptographicOperations.FixedTimeEquals(
                 Encoding.UTF8.GetBytes(plan.Fingerprint),
                 Encoding.UTF8.GetBytes(fingerprint)))
         {
             throw new MediaProviderInitialSyncChangedException();
+        }
+
+        var newerItems = plan.Matches
+            .Where(match => match.ImportsRemote)
+            .Select(match => match.RemoteItem!)
+            .ToList();
+        if (newerItems.Count > 0)
+        {
+            await _importService.ImportAsync(userId, account, new MediaProviderLibraryImportResult
+            {
+                ProviderId = snapshot.ProviderId,
+                ImportedAt = snapshot.ImportedAt,
+                Items = newerItems
+            }, cancellationToken, fanOutChanges: false);
         }
 
         var batchId = Guid.NewGuid();
@@ -220,6 +165,7 @@ public sealed class MediaProviderInitialSyncService(
 
     private async Task<InitialSyncPlan> BuildPlanAsync(
         int userId,
+        ConnectedServiceAccount account,
         MediaProviderLibraryImportResult snapshot,
         CancellationToken cancellationToken)
     {
@@ -274,7 +220,7 @@ public sealed class MediaProviderInitialSyncService(
                 continue;
             }
 
-            matches.Add(CreateMatch(resolvedEntries[0], providerId, item));
+            matches.Add(CreateMatch(resolvedEntries[0], providerId, account.ExternalAccountId, item));
         }
 
         var unresolvedEntries = new List<MediaLibraryEntry>();
@@ -288,7 +234,7 @@ public sealed class MediaProviderInitialSyncService(
                 continue;
             }
 
-            matches.Add(CreateMatch(entry, providerId, remoteItem: null));
+            matches.Add(CreateMatch(entry, providerId, account.ExternalAccountId, remoteItem: null));
         }
 
         return new InitialSyncPlan
@@ -298,7 +244,7 @@ public sealed class MediaProviderInitialSyncService(
             Matches = matches,
             ProviderOnlyItems = providerOnlyItems,
             UnresolvedEntries = unresolvedEntries,
-            Fingerprint = CreateFingerprint(entries, snapshot)
+            Fingerprint = CreateFingerprint(entries, snapshot, account)
         };
     }
 
@@ -317,6 +263,11 @@ public sealed class MediaProviderInitialSyncService(
 
         foreach (var match in plan.Matches)
         {
+            if (match.KeepsRemote)
+            {
+                continue;
+            }
+
             var link = EnsureProviderLink(match, plan.ProviderId, timestamp);
             var binding = EnsureProviderBinding(match, link, account, timestamp);
             ReplaceProviderListMemberships(binding, match.RemoteItem?.ProviderListNames ?? []);
@@ -324,7 +275,6 @@ public sealed class MediaProviderInitialSyncService(
             if (!match.RequiresWrite)
             {
                 binding.LastSyncedAt = timestamp;
-                binding.LastRemoteUpdateAt = match.RemoteItem?.LastRemoteUpdateAt;
                 binding.UpdatedAt = timestamp;
                 continue;
             }
@@ -429,8 +379,11 @@ public sealed class MediaProviderInitialSyncService(
             binding.ConnectedServiceAccount = account;
             binding.ProviderLibraryEntryId = match.RemoteItem?.ProviderLibraryEntryId
                 ?? binding.ProviderLibraryEntryId;
-            binding.LastRemoteUpdateAt = match.RemoteItem?.LastRemoteUpdateAt
-                ?? binding.LastRemoteUpdateAt;
+            if (match.RemoteItem?.LastRemoteUpdateAt is { } remoteUpdateAt
+                && (binding.LastRemoteUpdateAt is null || remoteUpdateAt > binding.LastRemoteUpdateAt))
+            {
+                binding.LastRemoteUpdateAt = remoteUpdateAt;
+            }
             binding.UpdatedAt = timestamp;
         }
 
@@ -468,6 +421,7 @@ public sealed class MediaProviderInitialSyncService(
     private static InitialSyncMatch CreateMatch(
         MediaLibraryEntry entry,
         string providerId,
+        string providerAccountId,
         MediaProviderLibraryItem? remoteItem)
     {
         var title = entry.MediaTitle!;
@@ -475,12 +429,12 @@ public sealed class MediaProviderInitialSyncService(
             ?? title.ProviderLinks.First(link =>
                 string.Equals(link.Provider, providerId, StringComparison.OrdinalIgnoreCase)).ExternalId;
         int? progressEpisodes = title.PrimaryProgressDimension == MediaProgressDimensions.Episode
-            ? entry.ProgressEpisodes ?? 0
+            ? entry.ProgressEpisodes ?? (remoteItem is null ? 0 : null)
             : null;
         var tracksReadingProgress = title.MediaKind == MediaKinds.Manga
             || title.PrimaryProgressDimension is MediaProgressDimensions.Chapter or MediaProgressDimensions.Volume;
-        int? progressChapters = tracksReadingProgress ? entry.ProgressChapters ?? 0 : null;
-        int? progressVolumes = tracksReadingProgress ? entry.ProgressVolumes ?? 0 : null;
+        int? progressChapters = tracksReadingProgress ? entry.ProgressChapters ?? (remoteItem is null ? 0 : null) : null;
+        int? progressVolumes = tracksReadingProgress ? entry.ProgressVolumes ?? (remoteItem is null ? 0 : null) : null;
         var progressChanged = remoteItem is null
             || progressEpisodes.HasValue && progressEpisodes != (remoteItem.ProgressEpisodes ?? 0)
             || progressChapters.HasValue && progressChapters != (remoteItem.ProgressChapters ?? 0)
@@ -490,7 +444,8 @@ public sealed class MediaProviderInitialSyncService(
         var updateProgress = progressChanged && remoteItem?.HasNonContiguousProgress != true;
         var binding = entry.ProviderBindings.FirstOrDefault(candidate =>
             candidate.MediaProviderLink?.Provider == providerId
-            && candidate.MediaProviderLink.ExternalId == providerMediaId);
+            && candidate.MediaProviderLink.ExternalId == providerMediaId
+            && candidate.ProviderAccountId == providerAccountId);
         var statusAligned = remoteItem is not null && (
             string.Equals(entry.Status, remoteItem.Status, StringComparison.Ordinal)
             || binding?.LastRequestedStatus == entry.Status
@@ -499,32 +454,43 @@ public sealed class MediaProviderInitialSyncService(
         {
             UpdateStatus = !statusAligned,
             UpdateProgress = updateProgress,
+            UpdateScore = remoteItem is null || ProjectProviderScore(providerId, entry.Score) != NormalizeScore(remoteItem.Score),
             ProviderMediaId = providerMediaId,
             Status = entry.Status,
             Score = entry.Score,
             ProgressEpisodes = progressEpisodes,
             ProgressChapters = progressChapters,
             ProgressVolumes = progressVolumes,
-            LastKnownRemoteUpdateAt = remoteItem?.LastRemoteUpdateAt
+            LastKnownRemoteUpdateAt = remoteItem?.LastRemoteUpdateAt,
+            ExpectMissingRemote = remoteItem is null
         };
 
-        var requiresWrite = remoteItem is null || (
-            !statusAligned
-            || ProjectProviderScore(providerId, entry.Score) != NormalizeScore(remoteItem.Score)
-            || updateProgress);
+        var importsRemote = remoteItem?.LastRemoteUpdateAt is not null
+            && MediaLibraryImportService.ShouldApplyRemoteLibraryState(
+                entry, binding, remoteItem, providerId, out var recoveringSeenState)
+            && MediaLibraryImportService.HasRemoteStateChange(entry, binding, remoteItem, recoveringSeenState);
+        var hasChanges = request.UpdateStatus || request.UpdateProgress || request.UpdateScore;
+        var keepsRemote = importsRemote || hasChanges && (remoteItem is not null
+            ? remoteItem.LastRemoteUpdateAt is not { } remoteUpdateAt
+                || !MediaLibraryStateSyncRequest.LocalEditIsNewer(entry.LastLocalEditAt, remoteUpdateAt)
+                || binding?.LastRemoteUpdateAt > remoteUpdateAt
+            : binding?.LastRemoteUpdateAt is not null || binding?.LastSyncedAt is not null);
 
         return new InitialSyncMatch
         {
             Entry = entry,
             RemoteItem = remoteItem,
             Request = request,
-            RequiresWrite = requiresWrite
+            RequiresWrite = hasChanges && !keepsRemote,
+            KeepsRemote = keepsRemote,
+            ImportsRemote = importsRemote
         };
     }
 
     private static string CreateFingerprint(
         IReadOnlyList<MediaLibraryEntry> entries,
-        MediaProviderLibraryImportResult snapshot)
+        MediaProviderLibraryImportResult snapshot,
+        ConnectedServiceAccount account)
     {
         var canonical = entries
             .OrderBy(entry => entry.Id)
@@ -536,6 +502,14 @@ public sealed class MediaProviderInitialSyncService(
                 entry.ProgressEpisodes,
                 entry.ProgressChapters,
                 entry.ProgressVolumes,
+                entry.LastLocalEditAt,
+                Bindings = entry.ProviderBindings
+                    .OrderBy(binding => binding.Id)
+                    .Select(binding => new
+                    {
+                        binding.MediaProviderLinkId, binding.ProviderAccountId, binding.LastRemoteUpdateAt,
+                        WasSynced = binding.LastSyncedAt.HasValue, binding.LastRequestedStatus, binding.LastAppliedStatus
+                    }),
                 ProviderLinks = entry.MediaTitle!.ProviderLinks
                     .OrderBy(link => link.Provider, StringComparer.Ordinal)
                     .ThenBy(link => link.ExternalId, StringComparer.Ordinal)
@@ -566,22 +540,21 @@ public sealed class MediaProviderInitialSyncService(
         var json = JsonSerializer.Serialize(new
         {
             ProviderId = NormalizeProviderId(snapshot.ProviderId),
+            AccountId = account.Id,
+            account.ExternalAccountId,
             Canonical = canonical,
             Remote = remote
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
-    private static MediaProviderInitialSyncPreviewDto MapPreview(
-        InitialSyncPlan plan,
-        IReadOnlyList<string> refreshedProviderIds)
+    private static MediaProviderInitialSyncPreviewDto MapPreview(InitialSyncPlan plan)
     {
         return new MediaProviderInitialSyncPreviewDto
         {
             ProviderId = plan.ProviderId,
             Status = "ready",
             Fingerprint = plan.Fingerprint,
-            RefreshedProviderIds = refreshedProviderIds,
             WillAdd = plan.AddCount,
             WillUpdate = plan.UpdateCount,
             AlreadyAligned = plan.AlignedCount,
@@ -672,9 +645,9 @@ public sealed class MediaProviderInitialSyncService(
         public required IReadOnlyList<MediaLibraryEntry> UnresolvedEntries { get; init; }
         public required string Fingerprint { get; init; }
 
-        public int AddCount => Matches.Count(match => match.RemoteItem is null);
-        public int UpdateCount => Matches.Count(match => match.RemoteItem is not null && match.RequiresWrite);
-        public int AlignedCount => Matches.Count(match => !match.RequiresWrite);
+        public int AddCount => Matches.Count(match => match.RequiresWrite && match.RemoteItem is null);
+        public int UpdateCount => Matches.Count(match => match.ImportsRemote || match.RemoteItem is not null && match.RequiresWrite);
+        public int AlignedCount => Matches.Count(match => !match.RequiresWrite && !match.KeepsRemote);
     }
 
     private sealed class InitialSyncMatch
@@ -683,6 +656,8 @@ public sealed class MediaProviderInitialSyncService(
         public required MediaProviderLibraryItem? RemoteItem { get; init; }
         public required MediaLibraryStateSyncRequest Request { get; init; }
         public required bool RequiresWrite { get; init; }
+        public required bool KeepsRemote { get; init; }
+        public required bool ImportsRemote { get; init; }
     }
 
     private sealed record ProviderOperationState(int Active);

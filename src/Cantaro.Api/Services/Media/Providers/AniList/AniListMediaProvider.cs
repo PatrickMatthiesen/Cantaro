@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Cantaro.Api.Data;
@@ -430,14 +431,38 @@ public class AniListMediaProvider(
         var account = await RequireConnectedAccountAsync(userId, cancellationToken);
         var accessToken = await ResolveAccessTokenAsync(account, cancellationToken);
         var mediaId = ParseProviderMediaId(request.ProviderMediaId);
-        var scoreRaw = request.Score is null
+        if (request.LastKnownRemoteUpdateAt.HasValue || request.ExpectMissingRemote)
+        {
+            AniListSavedMediaListEntry? currentEntry;
+            try
+            {
+                var current = await _apiClient.SendGraphQlAsync<AniListCurrentMediaListEntryData>(
+                    accessToken,
+                    CurrentMediaListEntryQuery,
+                    new { userId = int.Parse(account.ExternalAccountId, CultureInfo.InvariantCulture), mediaId },
+                    cancellationToken);
+                currentEntry = current.MediaList;
+            }
+            catch (AniListRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+            {
+                currentEntry = null;
+            }
+
+            if (request.ExpectMissingRemote ? currentEntry is not null
+                : ToDateTimeOffset(currentEntry?.UpdatedAt) != request.LastKnownRemoteUpdateAt)
+            {
+                throw new PlatformApiException(
+                    "platform_sync_conflict", "AniList changed after the sync preview. Review the latest values and try again.", 409);
+            }
+        }
+        int? scoreRaw = !request.UpdateScore ? null : request.Score is null
             ? 0
             : decimal.ToInt32(decimal.Round(request.Score.Value, 0, MidpointRounding.AwayFromZero));
         var mutation = BuildSaveMediaListEntryMutation(
             mediaId,
-            progress: request.ProgressEpisodes ?? request.ProgressChapters,
-            progressVolumes: request.ProgressVolumes,
-            status: ToAniListStatus(request.Status),
+            progress: request.UpdateProgress ? request.ProgressEpisodes ?? request.ProgressChapters : null,
+            progressVolumes: request.UpdateProgress ? request.ProgressVolumes : null,
+            status: request.UpdateStatus ? ToAniListStatus(request.Status) : null,
             scoreRaw);
 
         var data = await _apiClient.SendGraphQlAsync<AniListSavedMediaListEntryData>(
@@ -1114,6 +1139,14 @@ public class AniListMediaProvider(
         }
         """;
 
+    private const string CurrentMediaListEntryQuery = """
+        query ($userId: Int!, $mediaId: Int!) {
+          MediaList(userId: $userId, mediaId: $mediaId) {
+            updatedAt
+          }
+        }
+        """;
+
     private const string SearchMediaQuery = """
         query ($search: String, $perPage: Int, $type: MediaType) {
           Page(page: 1, perPage: $perPage) {
@@ -1349,6 +1382,12 @@ public class AniListSavedMediaListEntryData
 {
     [JsonPropertyName("SaveMediaListEntry")]
     public AniListSavedMediaListEntry? SaveMediaListEntry { get; set; }
+}
+
+internal sealed class AniListCurrentMediaListEntryData
+{
+    [JsonPropertyName("MediaList")]
+    public AniListSavedMediaListEntry? MediaList { get; set; }
 }
 
 public class AniListSavedMediaListEntry

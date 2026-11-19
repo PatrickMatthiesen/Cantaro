@@ -203,8 +203,12 @@ public class MediaProviderOperationProcessorTests
         Assert.Empty(await dbContext.MediaProviderOperations.ToListAsync());
     }
 
-    [Fact]
-    public async Task ProcessOperationAsync_SyncLibraryState_UpdatesOnlyProviderBinding()
+    [Theory]
+    [InlineData("confirmed")]
+    [InlineData("unconfirmed")]
+    [InlineData("newer-remote")]
+    [InlineData("account-changed")]
+    public async Task ProcessOperationAsync_SyncLibraryState_RequiresConfirmedFreshBatch(string scenario)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -213,15 +217,23 @@ public class MediaProviderOperationProcessorTests
         await dbContext.Database.EnsureCreatedAsync();
 
         var (entry, binding) = await SeedMediaEntryAsync(dbContext, 414, "whole-state@example.com");
-        var originalLocalEditAt = DateTimeOffset.UtcNow.AddHours(-2);
-        var originalEntryUpdatedAt = DateTimeOffset.UtcNow.AddHours(-1);
+        var originalLocalEditAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var originalEntryUpdatedAt = originalLocalEditAt;
         entry.Score = 82.5m;
         entry.LastLocalEditAt = originalLocalEditAt;
         entry.LastMutationSource = MediaMutationSources.ProviderImport;
         entry.UpdatedAt = originalEntryUpdatedAt;
         await dbContext.SaveChangesAsync();
 
-        var provider = new FakeMediaProvider("anilist", appliedStatus: MediaLibraryStatuses.Completed);
+        var connectedAccount = await dbContext.ConnectedServiceAccounts.AsNoTracking().SingleAsync();
+        if (scenario == "account-changed")
+        {
+            connectedAccount.ExternalAccountId = "different";
+        }
+        var provider = new FakeMediaProvider("anilist", appliedStatus: MediaLibraryStatuses.Completed)
+        {
+            ConnectedAccount = connectedAccount
+        };
         var processor = new MediaProviderOperationProcessor(
             dbContext,
             new MediaProviderRegistry([provider]),
@@ -240,12 +252,35 @@ public class MediaProviderOperationProcessorTests
             binding,
             request,
             CancellationToken.None);
+        if (scenario != "unconfirmed")
+        {
+            operation.BatchId = Guid.NewGuid();
+        }
+        if (scenario == "newer-remote")
+        {
+            binding.LastRemoteUpdateAt = originalLocalEditAt.AddSeconds(1);
+        }
+        await dbContext.SaveChangesAsync();
+
         var processed = await processor.ProcessOperationAsync(operation.Id, CancellationToken.None);
+
+        if (scenario is "newer-remote" or "account-changed")
+        {
+            Assert.Equal(0, provider.LibraryStateSyncCallCount);
+            Assert.Equal(MediaProviderOperationStatuses.Failed, (await dbContext.MediaProviderOperations.SingleAsync()).Status);
+            return;
+        }
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, processed.Outcome);
+        Assert.Equal(scenario == "confirmed" ? 1 : 0, provider.LibraryStateSyncCallCount);
+        Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+        if (scenario == "unconfirmed")
+        {
+            return;
+        }
 
         var persistedEntry = await dbContext.MediaLibraryEntries.SingleAsync();
         var persistedBinding = await dbContext.MediaLibraryProviderBindings.SingleAsync();
-        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, processed.Outcome);
-        Assert.Equal(1, provider.LibraryStateSyncCallCount);
         Assert.Equal(request.ProviderMediaId, provider.LastLibraryStateSyncRequest!.ProviderMediaId);
         Assert.Equal(originalLocalEditAt, persistedEntry.LastLocalEditAt);
         Assert.Equal(originalEntryUpdatedAt, persistedEntry.UpdatedAt);
@@ -258,7 +293,6 @@ public class MediaProviderOperationProcessorTests
         Assert.NotNull(persistedBinding.LastRemoteUpdateAt);
         Assert.NotNull(request.LastKnownRemoteUpdateAt);
         Assert.True(persistedBinding.LastRemoteUpdateAt.Value > request.LastKnownRemoteUpdateAt.Value);
-        Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
     }
 
     [Fact]
@@ -682,10 +716,11 @@ public class MediaProviderOperationProcessorTests
         public int LibraryStateSyncCallCount { get; private set; }
 
         public MediaLibraryStateSyncRequest? LastLibraryStateSyncRequest { get; private set; }
+        public ConnectedServiceAccount? ConnectedAccount { get; init; }
 
         public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            return Task.FromResult(ConnectedAccount);
         }
 
         public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge)

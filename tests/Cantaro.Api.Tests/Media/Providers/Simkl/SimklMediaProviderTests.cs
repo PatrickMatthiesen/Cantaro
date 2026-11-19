@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
@@ -331,6 +332,129 @@ public sealed class SimklMediaProviderTests
         }, CancellationToken.None);
         Assert.Equal(MediaLibraryStatuses.Current, result.AppliedStatus);
         Assert.DoesNotContain("/sync/add-to-list", fixture.Handler.Paths);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StatusOnlySyncUsesLiveStateInsteadOfTheSavedSnapshot(bool changedAfterApply)
+    {
+        var version = 1;
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/sync/activities" => Json($$$$"""{"all":"2026-09-0{{{{version}}}}T00:00:00Z","movies":{}}"""),
+            "/sync/all-items/movies" => Json("""
+                {"movies":[{"status":"plantowatch","updated_at":"2026-09-01T00:00:00Z","movie":{"title":"Movie","ids":{"simkl":123}}}]}
+                """),
+            "/sync/all-items" => Json($$$$"""
+                {"movies":[{"status":"completed","updated_at":"2026-09-0{{{{version}}}}T00:00:00Z","movie":{"title":"Movie","ids":{"simkl":123}}}]}
+                """),
+            "/sync/all-items/shows" or "/sync/all-items/anime" => Json("{}"),
+            "/sync/add-to-list" => Json("""{"not_found":{"movies":[]}}"""),
+            _ => throw new InvalidOperationException(request.RequestUri!.AbsolutePath)
+        });
+        await fixture.Provider.ImportLibraryAsync(1, CancellationToken.None);
+        version = changedAfterApply ? 3 : 2;
+        var request = new MediaLibraryStateSyncRequest
+        {
+            ProviderMediaId = "movie:123", Status = MediaLibraryStatuses.Planned,
+            UpdateProgress = false, UpdateScore = false,
+            LastKnownRemoteUpdateAt = new DateTimeOffset(2026, 9, 2, 0, 0, 0, TimeSpan.Zero)
+        };
+        if (changedAfterApply)
+        {
+            var exception = await Assert.ThrowsAsync<PlatformApiException>(() =>
+                fixture.Provider.SyncLibraryStateAsync(1, request, CancellationToken.None));
+            Assert.Equal("platform_sync_conflict", exception.Code);
+            Assert.DoesNotContain("/sync/add-to-list", fixture.Handler.Paths);
+            return;
+        }
+
+        var result = await fixture.Provider.SyncLibraryStateAsync(1, request, CancellationToken.None);
+        Assert.Equal(MediaLibraryStatuses.Planned, result.AppliedStatus);
+        Assert.Equal("/sync/add-to-list", fixture.Handler.Paths[^1]);
+        Assert.Contains("\"to\":\"plantowatch\"", fixture.Handler.Bodies[^1]);
+    }
+
+    [Theory]
+    [InlineData("retry")]
+    [InlineData("changed-before-retry")]
+    [InlineData("episode-edit")]
+    [InlineData("unversioned")]
+    public async Task SyncResumesScoreOnlyAfterAVerifiedWatchWrite(string scenario)
+    {
+        var remoteVersion = 0;
+        var scoreAttempts = 0;
+        HttpResponseMessage AddToList()
+        {
+            remoteVersion = 2;
+            return Json("""{"not_found":{"anime":[]}}""");
+        }
+
+        HttpResponseMessage ReadAnime()
+        {
+            if (scenario == "unversioned")
+            {
+                return Json("""{"anime":[{"status":"plantowatch","show":{"title":"Anime","ids":{"simkl":123}}}]}""");
+            }
+            var episodes = scenario == "episode-edit" ? """{"number":2}""" : "";
+            return Json($$$$"""
+                {"anime":[{"status":"plantowatch","updated_at":"2026-09-0{{{{remoteVersion}}}}T00:00:00Z",
+                  "show":{"title":"Anime","ids":{"simkl":123}},
+                  "seasons":[{"number":1,"episodes":[{{{{episodes}}}}]}]}]}
+                """);
+        }
+
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/sync/activities" => Json($$$"""{"all":"2026-09-0{{{remoteVersion + 1}}}T00:00:00Z"}"""),
+            "/sync/all-items/anime" when remoteVersion > 0 => ReadAnime(),
+            "/sync/all-items/shows" or "/sync/all-items/movies" or "/sync/all-items/anime" => Json("{}"),
+            "/sync/add-to-list" => AddToList(),
+            "/sync/ratings" when ++scoreAttempts == 1 => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+            "/sync/ratings" => Json("""{"not_found":{"anime":[]}}"""),
+            _ => throw new InvalidOperationException(request.RequestUri!.AbsolutePath)
+        });
+        string? persisted = null;
+        var request = new MediaLibraryStateSyncRequest
+        {
+            ProviderMediaId = "anime:123", Status = MediaLibraryStatuses.Planned,
+            UpdateProgress = false, Score = 80m, ExpectMissingRemote = true
+        };
+        request.SaveCheckpointAsync = _ =>
+        {
+            persisted = JsonSerializer.Serialize(request);
+            return Task.CompletedTask;
+        };
+
+        if (scenario is "episode-edit" or "unversioned")
+        {
+            var exception = await Assert.ThrowsAsync<PlatformApiException>(() =>
+                fixture.Provider.SyncLibraryStateAsync(1, request, CancellationToken.None));
+            Assert.Equal("platform_sync_conflict", exception.Code);
+            Assert.Equal(0, scoreAttempts);
+            Assert.Null(persisted);
+            return;
+        }
+
+        await Assert.ThrowsAsync<SimklRequestException>(() =>
+            fixture.Provider.SyncLibraryStateAsync(1, request, CancellationToken.None));
+        var retry = JsonSerializer.Deserialize<MediaLibraryStateSyncRequest>(Assert.IsType<string>(persisted))!;
+        if (scenario == "changed-before-retry")
+        {
+            remoteVersion = 3;
+            var exception = await Assert.ThrowsAsync<PlatformApiException>(() =>
+                fixture.Provider.SyncLibraryStateAsync(1, retry, CancellationToken.None));
+            Assert.Equal("platform_sync_conflict", exception.Code);
+            Assert.Equal(1, scoreAttempts);
+        }
+        else
+        {
+            var result = await fixture.Provider.SyncLibraryStateAsync(1, retry, CancellationToken.None);
+            Assert.Equal(MediaLibraryStatuses.Planned, result.AppliedStatus);
+            Assert.Equal(2, scoreAttempts);
+        }
+        Assert.Single(fixture.Handler.Paths, path => path == "/sync/add-to-list");
     }
 
     [Fact]

@@ -134,7 +134,8 @@ public class MediaLibraryImportService(
             var previousState = CaptureState(entry);
             existingBindings.TryGetValue(item.ProviderMediaId, out var binding);
             var sourceBindingExisted = binding is not null;
-            var previousSourceRemoteUpdateAt = binding?.LastRemoteUpdateAt;
+            var shouldApplyRemoteState = ShouldApplyRemoteLibraryState(
+                entry, binding, item, importResult.ProviderId, out var recoveringSeenState) || entryWasCreated;
             if (binding is null)
             {
                 binding = CreateProviderBinding(entry, link, account, item, importResult.ImportedAt);
@@ -149,14 +150,6 @@ public class MediaLibraryImportService(
                 updatedEntries++;
             }
 
-            // A newly connected provider contributes its binding and metadata, but
-            // cannot replace an existing viewer history during its first import.
-            var shouldApplyRemoteState = entryWasCreated || (sourceBindingExisted
-                && ShouldApplyRemoteLibraryState(
-                    entry,
-                    binding,
-                    item,
-                    previousSourceRemoteUpdateAt));
             var preserveNormalizedStatus = shouldApplyRemoteState
                 && ShouldPreserveNormalizedStatus(entry, binding, item);
             if (shouldApplyRemoteState && sourceBindingExisted && !preserveNormalizedStatus
@@ -167,7 +160,7 @@ public class MediaLibraryImportService(
             }
             if (shouldApplyRemoteState)
             {
-                ApplyRemoteLibraryState(entry, item, importResult.ImportedAt, preserveNormalizedStatus);
+                ApplyRemoteLibraryState(entry, item, importResult.ImportedAt, preserveNormalizedStatus, recoveringSeenState);
                 if (!entryWasCreated && fanOutChanges)
                 {
                     fanOutOperations.AddRange(CreateFanOutOperations(
@@ -180,7 +173,10 @@ public class MediaLibraryImportService(
             }
 
             binding.LastSyncedAt = importResult.ImportedAt;
-            binding.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
+            if (item.LastRemoteUpdateAt > binding.LastRemoteUpdateAt || binding.LastRemoteUpdateAt is null)
+            {
+                binding.LastRemoteUpdateAt = item.LastRemoteUpdateAt;
+            }
             binding.UpdatedAt = importResult.ImportedAt;
 
             ReplaceProviderListMemberships(db, binding, item.ProviderListNames);
@@ -291,17 +287,33 @@ public class MediaLibraryImportService(
         }
     }
 
-    private static bool ShouldApplyRemoteLibraryState(
+    internal static bool ShouldApplyRemoteLibraryState(
         MediaLibraryEntry entry,
-        MediaLibraryProviderBinding binding,
+        MediaLibraryProviderBinding? binding,
         MediaProviderLibraryItem item,
-        DateTimeOffset? previousSourceRemoteUpdateAt)
+        string providerId,
+        out bool recoveringSeenState)
     {
+        // AniList and MyAnimeList have list-entry versions. A SIMKL activity
+        // timestamp alone cannot justify replacing existing state on first link.
+        var hasOrderedSource = providerId is "anilist" or "myanimelist"
+            && (entry.LastLocalEditAt.HasValue || entry.ProviderBindings.Any(candidate =>
+                candidate.Id != binding?.Id && candidate.LastRemoteUpdateAt.HasValue
+                && candidate.MediaProviderLink?.Provider is "anilist" or "myanimelist"));
+        var previousSourceRemoteUpdateAt = binding?.LastRemoteUpdateAt;
+        recoveringSeenState = binding is not null && (hasOrderedSource || providerId == "anilist")
+            && item.LastRemoteUpdateAt.HasValue
+            && item.LastRemoteUpdateAt == previousSourceRemoteUpdateAt
+            && CaptureState(entry) != ReadRemoteWatchState(entry, binding, item);
+        if (binding is null && !hasOrderedSource)
+        {
+            return false;
+        }
+
         var latestKnownUpdateAt = entry.ProviderBindings
-            .Where(candidate => candidate.Id != binding.Id)
+            .Where(candidate => candidate.Id != binding?.Id)
             .Select(candidate => candidate.LastRemoteUpdateAt)
             .Append(entry.LastLocalEditAt)
-            .Append(previousSourceRemoteUpdateAt)
             .Where(timestamp => timestamp.HasValue)
             .Select(timestamp => timestamp!.Value)
             .DefaultIfEmpty()
@@ -309,17 +321,29 @@ public class MediaLibraryImportService(
 
         if (item.LastRemoteUpdateAt is null)
         {
-            return latestKnownUpdateAt == default;
+            return latestKnownUpdateAt == default && previousSourceRemoteUpdateAt is null;
         }
 
-        return latestKnownUpdateAt == default || item.LastRemoteUpdateAt > latestKnownUpdateAt;
+        return item.LastRemoteUpdateAt > latestKnownUpdateAt
+            && (entry.LastLocalEditAt is not { } localEditAt
+                || item.LastRemoteUpdateAt.Value.ToUnixTimeSeconds() > localEditAt.ToUnixTimeSeconds())
+            && (previousSourceRemoteUpdateAt is null
+                || item.LastRemoteUpdateAt > previousSourceRemoteUpdateAt
+                || recoveringSeenState && item.LastRemoteUpdateAt == previousSourceRemoteUpdateAt);
     }
+
+    internal static bool HasRemoteStateChange(
+        MediaLibraryEntry entry, MediaLibraryProviderBinding? binding, MediaProviderLibraryItem item, bool preserveScore)
+        => CaptureState(entry) != ReadRemoteWatchState(entry, binding, item) with
+        {
+            Score = preserveScore ? entry.Score : NormalizeScore(item.Score)
+        };
 
     private static bool ShouldPreserveNormalizedStatus(
         MediaLibraryEntry entry,
-        MediaLibraryProviderBinding binding,
+        MediaLibraryProviderBinding? binding,
         MediaProviderLibraryItem item)
-        => binding.LastRequestedStatus is not null
+        => binding?.LastRequestedStatus is not null
             && binding.LastAppliedStatus is not null
             && string.Equals(entry.Status, binding.LastRequestedStatus, StringComparison.Ordinal)
             && string.Equals(item.Status, binding.LastAppliedStatus, StringComparison.Ordinal);
@@ -331,6 +355,15 @@ public class MediaLibraryImportService(
             entry.ProgressEpisodes,
             entry.ProgressChapters,
             entry.ProgressVolumes);
+
+    private static MediaLibraryEntryState ReadRemoteWatchState(
+        MediaLibraryEntry entry, MediaLibraryProviderBinding? binding, MediaProviderLibraryItem item)
+        => new(
+            ShouldPreserveNormalizedStatus(entry, binding, item) ? entry.Status : item.Status,
+            entry.Score,
+            ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount),
+            item.ProgressChapters,
+            item.ProgressVolumes);
 
     private static IReadOnlyList<MediaProviderOperation> CreateFanOutOperations(
         MediaLibraryEntry entry,
@@ -428,13 +461,19 @@ public class MediaLibraryImportService(
         MediaLibraryEntry entry,
         MediaProviderLibraryItem item,
         DateTimeOffset timestamp,
-        bool preserveNormalizedStatus)
+        bool preserveNormalizedStatus,
+        bool preserveScore)
     {
         if (!preserveNormalizedStatus)
         {
             entry.Status = item.Status;
         }
-        entry.Score = NormalizeScore(item.Score);
+        // A repeated provider version cannot establish whether its score was
+        // already acknowledged at a different precision.
+        if (!preserveScore)
+        {
+            entry.Score = NormalizeScore(item.Score);
+        }
         entry.ProgressEpisodes = ClampEpisodeProgress(item.ProgressEpisodes, item.EpisodeCount);
         entry.ProgressChapters = item.ProgressChapters;
         entry.ProgressVolumes = item.ProgressVolumes;
