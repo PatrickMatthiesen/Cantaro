@@ -413,6 +413,58 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
     }
 
     [PostgresFact]
+    public async Task ImportAsync_RechecksRemoteProgressAfterConcurrentTrackerCompletion()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        var user = TestUserFactory.Create(47812, "tracker-import-race@example.test");
+        var account = new ConnectedServiceAccount
+        {
+            UserId = user.Id, Service = "anilist", ExternalAccountId = "tracker-import-race",
+            ConnectionState = "connected", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
+        };
+        schema.Db.AddRange(user, account);
+        await schema.Db.SaveChangesAsync();
+
+        var importedAt = DateTimeOffset.FromUnixTimeSeconds(1_795_000_000);
+        var item = new MediaProviderLibraryItem
+        {
+            ProviderMediaId = "1", Title = "Tracker import fixture", MediaKind = MediaKinds.Anime,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode, ReleaseStatusDimension = MediaProgressDimensions.Episode,
+            Status = MediaLibraryStatuses.Current, ProgressEpisodes = 0, LastRemoteUpdateAt = importedAt
+        };
+        var service = new MediaLibraryImportService(schema.Db, new MediaLibraryEventHub(),
+            MakeService(schema.Options), NullLogger<MediaLibraryImportService>.Instance);
+        await service.ImportAsync(user.Id, account, new MediaProviderLibraryImportResult
+        {
+            ProviderId = "anilist", ImportedAt = importedAt, Items = [item]
+        }, default);
+
+        var completedAt = importedAt.AddMinutes(2);
+        var interleaved = new DetailUpdateBeforeSave(ct => schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+            .SetProperty(entry => entry.ProgressEpisodes, 1)
+            .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.AioStreamsWatchState)
+            .SetProperty(entry => entry.LastLocalEditAt, completedAt)
+            .SetProperty(entry => entry.UpdatedAt, completedAt), ct));
+        var racingOptions = new DbContextOptionsBuilder<ApplicationDbContext>(schema.Options)
+            .AddInterceptors(interleaved).Options;
+        await using var caller = new ApplicationDbContext(racingOptions);
+        service = new MediaLibraryImportService(caller, new MediaLibraryEventHub(),
+            MakeService(racingOptions), NullLogger<MediaLibraryImportService>.Instance);
+        item.ProgressEpisodes = 3;
+        item.LastRemoteUpdateAt = importedAt.AddMinutes(1);
+        await service.ImportAsync(user.Id, account, new MediaProviderLibraryImportResult
+        {
+            ProviderId = "anilist", ImportedAt = importedAt.AddMinutes(3), Items = [item]
+        }, default);
+
+        var persisted = await schema.Db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(1, persisted.ProgressEpisodes);
+        Assert.Equal(completedAt, persisted.LastLocalEditAt);
+        Assert.Equal(MediaMutationSources.AioStreamsWatchState, persisted.LastMutationSource);
+        Assert.Equal(2, interleaved.SaveAttempts);
+    }
+
+    [PostgresFact]
     public async Task CanonicalizeAsync_RetriesSummaryFillWhenDetailsChangeAfterPreload()
     {
         await using var schema = await SchemaContext.CreateAsync();

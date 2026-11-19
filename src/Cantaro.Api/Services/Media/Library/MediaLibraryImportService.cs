@@ -30,7 +30,7 @@ public class MediaLibraryImportService(
         // failed inserts out of the caller's tracker and preserves its pending work.
         for (var attempt = 0; ; attempt++)
         {
-            await using var db = new ApplicationDbContext(_options);
+            await using var db = new LibraryImportContext(_options);
             try
             {
                 return await ImportCoreAsync(db, userId, account, importResult, cancellationToken, fanOutChanges);
@@ -40,6 +40,20 @@ public class MediaLibraryImportService(
             {
                 _logger.LogDebug(exception, "Retrying media library import after a catalog identity race, attempt {Attempt}.", attempt + 1);
             }
+            catch (DbUpdateConcurrencyException exception) when (attempt < 2)
+            {
+                _logger.LogDebug(exception, "Retrying media library import after a concurrent local edit, attempt {Attempt}.", attempt + 1);
+            }
+        }
+    }
+
+    private sealed class LibraryImportContext(DbContextOptions<ApplicationDbContext> options) : ApplicationDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);
+            // The import's freshness decision must still hold when it writes.
+            builder.Entity<MediaLibraryEntry>().Property(entry => entry.LastLocalEditAt).IsConcurrencyToken();
         }
     }
 

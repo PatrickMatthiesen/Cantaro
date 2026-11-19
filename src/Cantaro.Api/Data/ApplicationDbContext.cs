@@ -816,6 +816,10 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         {
             entity.ToTable("AioStreamsWatchEvents");
             entity.Property(e => e.EventId).HasMaxLength(512);
+            entity.Property(e => e.Type).HasMaxLength(16);
+            entity.Property(e => e.MetaId).HasMaxLength(256);
+            entity.Property(e => e.VideoId).HasMaxLength(64);
+            entity.HasIndex(e => new { e.UserId, e.EventId }).IsUnique();
             entity.HasIndex(e => new { e.MediaLibraryEntryId, e.MediaEpisodeId, e.EventId }).IsUnique();
             entity.HasIndex(e => new { e.MediaLibraryEntryId, e.MediaEpisodeId, e.At, e.Id });
             entity.HasOne<MediaLibraryEntry>().WithMany().HasForeignKey(e => e.MediaLibraryEntryId);

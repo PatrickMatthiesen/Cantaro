@@ -37,6 +37,9 @@ namespace Cantaro.Api.Migrations
                     b.Property<long?>("DurationMs")
                         .HasColumnType("bigint");
 
+                    b.Property<int?>("Episode")
+                        .HasColumnType("integer");
+
                     b.Property<string>("EventId")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -48,15 +51,36 @@ namespace Cantaro.Api.Migrations
                     b.Property<Guid>("MediaLibraryEntryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("MetaId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<bool>("Played")
                         .HasColumnType("boolean");
 
                     b.Property<long?>("PositionMs")
                         .HasColumnType("bigint");
 
+                    b.Property<int?>("Season")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("VideoId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MediaEpisodeId");
+
+                    b.HasIndex("UserId", "EventId")
+                        .IsUnique();
 
                     b.HasIndex("MediaLibraryEntryId", "MediaEpisodeId", "EventId")
                         .IsUnique();

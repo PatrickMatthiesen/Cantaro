@@ -122,7 +122,8 @@ builder.Services.AddHttpClient(AioStreamsAnimeEnricher.HttpClientName, client =>
     client.Timeout = AioStreamsAnimeEnricher.RequestTimeout;
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
 });
-builder.Services.AddSingleton<IAioStreamsAnimeEnricher, AioStreamsAnimeEnricher>();
+builder.Services.AddSingleton<AioStreamsAnimeEnricher>();
+builder.Services.AddSingleton<IAioStreamsAnimeEnricher>(services => services.GetRequiredService<AioStreamsAnimeEnricher>());
 builder.Services.AddHttpClient<AnimeScheduleApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {

@@ -43,7 +43,7 @@ public sealed class AioStreamsAnimeEnricher(
 
         if (!_options.TryGetBaseUri(out var baseUri)) return;
 
-        var entry = await GetEntryAsync(baseUri, source, cancellationToken);
+        var (entry, _, _) = await GetEntryAsync(baseUri, source, cancellationToken);
         if (entry is null || !HasExactSourceIdentity(entry, source)) return;
 
         var candidates = BuildCandidates(details, entry);
@@ -57,7 +57,16 @@ public sealed class AioStreamsAnimeEnricher(
         details.StremioTargets = MergeTargets(currentTargets, candidates);
     }
 
-    private async Task<AioStreamsAnimeEntry?> GetEntryAsync(
+    internal async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable)> LookupKitsuAsync(
+        int kitsuId, CancellationToken cancellationToken)
+    {
+        if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
+        var (entry, unavailable, stale) = await GetEntryAsync(baseUri, new("kitsuId", kitsuId), cancellationToken);
+        return (!stale && entry?.Mappings?.KitsuId == kitsuId && HasConsistentImdbIdentity(entry)
+            ? entry : null, unavailable);
+    }
+
+    private async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable, bool Stale)> GetEntryAsync(
         Uri baseUri,
         SourceIdentity source,
         CancellationToken cancellationToken)
@@ -68,14 +77,14 @@ public sealed class AioStreamsAnimeEnricher(
             && cached is not null
             && now - cached.FetchedAt < FreshDuration)
         {
-            return cached.Entry;
+            return (cached.Entry, false, false);
         }
 
         var stale = cached is not null && now - cached.FetchedAt <= StaleDuration
             ? cached.Entry
             : null;
         var failureKey = cacheKey + ":failure";
-        if (cache.TryGetValue(failureKey, out _)) return stale;
+        if (cache.TryGetValue(failureKey, out bool unavailable)) return (stale, unavailable, true);
 
         var gateKey = cacheKey + ":gate";
         var gate = cache.GetOrCreate(gateKey, cacheEntry =>
@@ -92,13 +101,13 @@ public sealed class AioStreamsAnimeEnricher(
                 && cached is not null
                 && now - cached.FetchedAt < FreshDuration)
             {
-                return cached.Entry;
+                return (cached.Entry, false, false);
             }
 
             stale = cached is not null && now - cached.FetchedAt <= StaleDuration
                 ? cached.Entry
                 : null;
-            if (cache.TryGetValue(failureKey, out _)) return stale;
+            if (cache.TryGetValue(failureKey, out unavailable)) return (stale, unavailable, true);
 
             try
             {
@@ -116,8 +125,9 @@ public sealed class AioStreamsAnimeEnricher(
                     timeoutSource.Token);
                 if (envelope?.Success != true || envelope.Data is null)
                 {
-                    RecordFailure(failureKey);
-                    return stale;
+                    unavailable = envelope?.Success != true;
+                    RecordFailure(failureKey, unavailable);
+                    return (stale, unavailable, true);
                 }
 
                 var refreshed = new CacheEntry(envelope.Data, now);
@@ -126,7 +136,7 @@ public sealed class AioStreamsAnimeEnricher(
                     refreshed,
                     new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = StaleDuration });
                 cache.Remove(failureKey);
-                return refreshed.Entry;
+                return (refreshed.Entry, false, false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -137,8 +147,8 @@ public sealed class AioStreamsAnimeEnricher(
                                               or JsonException
                                               or NotSupportedException)
             {
-                RecordFailure(failureKey);
-                return stale;
+                RecordFailure(failureKey, unavailable: true);
+                return (stale, true, true);
             }
         }
         finally
@@ -147,10 +157,10 @@ public sealed class AioStreamsAnimeEnricher(
         }
     }
 
-    private void RecordFailure(string failureKey)
+    private void RecordFailure(string failureKey, bool unavailable)
         => cache.Set(
             failureKey,
-            true,
+            unavailable,
             new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = FailureCooldown });
 
     private static IReadOnlyList<MediaProviderStremioTarget> GetOriginalTargets(MediaProviderTitleDetails details)
@@ -201,11 +211,7 @@ public sealed class AioStreamsAnimeEnricher(
         var isMovie = string.Equals(details.Format, MediaFormats.Movie, StringComparison.Ordinal);
         if (mappings is null
             || mappings.KitsuId.HasValue && mappings.KitsuId is not > 0
-            || mappings.ImdbId is not null && !IsValidImdbId(mappings.ImdbId)
-            || entry.Imdb?.Id is not null && !IsValidImdbId(entry.Imdb.Id)
-            || IsValidImdbId(mappings.ImdbId)
-            && IsValidImdbId(entry.Imdb?.Id)
-            && !string.Equals(mappings.ImdbId, entry.Imdb!.Id, StringComparison.Ordinal)
+            || !HasConsistentImdbIdentity(entry)
             || !isMovie && entry.Imdb?.SeasonNumber is <= 0
             || !isMovie && entry.Imdb?.FromEpisode is <= 0)
         {
@@ -338,6 +344,15 @@ public sealed class AioStreamsAnimeEnricher(
         => value.StartsWith("kitsu:", StringComparison.Ordinal)
            && TryParsePositiveInteger(value["kitsu:".Length..], out _);
 
+    private static bool HasConsistentImdbIdentity(AioStreamsAnimeEntry entry)
+    {
+        var mappedId = entry.Mappings?.ImdbId;
+        var hintedId = entry.Imdb?.Id;
+        return (mappedId is null || IsValidImdbId(mappedId))
+            && (hintedId is null || IsValidImdbId(hintedId))
+            && (mappedId is null || hintedId is null || mappedId == hintedId);
+    }
+
     private static bool IsValidImdbId(string? value)
         => value is { Length: > 2 }
            && value.StartsWith("tt", StringComparison.Ordinal)
@@ -379,14 +394,15 @@ public sealed class AioStreamsAnimeEnricher(
         public AioStreamsAnimeEntry? Data { get; set; }
     }
 
-    private sealed class AioStreamsAnimeEntry
+    internal sealed class AioStreamsAnimeEntry
     {
+        public string? Type { get; set; }
         public AioStreamsMappings? Mappings { get; set; }
 
         public AioStreamsImdbMapping? Imdb { get; set; }
     }
 
-    private sealed class AioStreamsMappings
+    internal sealed class AioStreamsMappings
     {
         public int? SimklId { get; set; }
 
@@ -401,7 +417,7 @@ public sealed class AioStreamsAnimeEnricher(
         public string? ImdbId { get; set; }
     }
 
-    private sealed class AioStreamsImdbMapping
+    internal sealed class AioStreamsImdbMapping
     {
         public string? Id { get; set; }
 
