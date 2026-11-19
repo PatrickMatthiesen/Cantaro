@@ -21,14 +21,14 @@ import {
   visiblePlatformIds,
 } from './musicPresentation';
 
-function mapSongToTrack(song: MusicLibrarySong, index: number): MusicCollectionTrack {
+function mapSongToTrack(song: MusicLibrarySong): MusicCollectionTrack {
   return {
     id: song.id,
     detailSongId: song.id,
     title: song.title,
     artist: songArtist(song),
     albums: song.albums,
-    artworkUrl: songArtwork(song, index),
+    artworkUrl: songArtwork(song),
     durationSeconds: song.durationSeconds,
     platformIds: visiblePlatformIds(song),
   };

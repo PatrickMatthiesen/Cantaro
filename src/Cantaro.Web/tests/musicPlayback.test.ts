@@ -11,6 +11,7 @@ import {
   type PlaybackTrack,
 } from '../src/music/playback/playbackState';
 import { playbackTrackFromSong } from '../src/music/playback/playbackSources';
+import { songArtwork } from '../src/music/musicPresentation';
 
 const youtube: PlaybackTrack = {
   id: 'first', title: 'First', sources: [{
@@ -216,6 +217,34 @@ function song(overrides: Partial<MusicLibrarySong>): MusicLibrarySong {
 }
 
 describe('canonical playback sources', () => {
+  test('song rows and playback share catalog artwork and fall back to the selected YouTube video thumbnail', () => {
+    const mappedSong = song({
+      sourceIdentities: [
+        { source: 'youtube', externalId: 'invalid' },
+        { source: 'youtube-music', externalId: 'M7lc1UVf-VE' },
+        { source: 'youtube', externalId: 'aqz-KE-bpKQ' },
+      ],
+    });
+    const videoThumbnail = 'https://i.ytimg.com/vi/M7lc1UVf-VE/mqdefault.jpg';
+    expect(songArtwork(mappedSong)).toBe(videoThumbnail);
+    expect(playbackTrackFromSong(mappedSong).artworkUrl).toBe(videoThumbnail);
+
+    const withArtwork = { ...mappedSong, thumbnailUrl: 'https://example.com/album.jpg' };
+    expect(songArtwork(withArtwork)).toBe(withArtwork.thumbnailUrl);
+    expect(playbackTrackFromSong(withArtwork).artworkUrl).toBe(withArtwork.thumbnailUrl);
+  });
+
+  test('songs without a valid YouTube video or catalog artwork have no thumbnail URL', () => {
+    const missingArtwork = song({
+      sourceIdentities: [
+        { source: 'spotify', externalId: 'M7lc1UVf-VE' },
+        { source: 'youtube', externalId: 'invalid' },
+      ],
+    });
+    expect(songArtwork(missingArtwork)).toBeUndefined();
+    expect(playbackTrackFromSong(missingArtwork).artworkUrl).toBeUndefined();
+  });
+
   test('a YouTube Music link without a video identity stays an attributed external fallback', () => {
     const url = 'https://music.youtube.com/watch?v=M7lc1UVf-VE';
     const track = playbackTrackFromSong(song({

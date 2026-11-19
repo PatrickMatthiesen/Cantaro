@@ -16,7 +16,7 @@ function getPlaylistSongs(library: MusicLibraryResponse, playlistId: string) {
     .sort((left, right) => left.position - right.position);
 }
 
-function mapSongToCollectionTrack(song: MusicLibrarySong, index: number, entryId: string): MusicCollectionTrack {
+function mapSongToCollectionTrack(song: MusicLibrarySong, entryId: string): MusicCollectionTrack {
   return {
     id: song.id,
     entryId,
@@ -24,7 +24,7 @@ function mapSongToCollectionTrack(song: MusicLibrarySong, index: number, entryId
     title: song.title,
     artist: songArtist(song),
     albums: song.albums,
-    artworkUrl: songArtwork(song, index),
+    artworkUrl: songArtwork(song),
     durationSeconds: song.durationSeconds,
     addedLabel: song.playlists[0]?.playlistName,
     platformIds: visiblePlatformIds(song),
@@ -60,7 +60,7 @@ export function MusicPlaylistDetailPage({
   const sync = usePlaylistSyncDetails(playlistId);
   const { queueProps, trackActions, playCollection } = useLibraryPlayback(library.songs);
   const playlistSongEntries = playlist ? getPlaylistSongs(library, playlistId) : [];
-  const baseTracks = playlistSongEntries.map(({ song, entryId }, index) => mapSongToCollectionTrack(song, index, entryId));
+  const baseTracks = playlistSongEntries.map(({ song, entryId }) => mapSongToCollectionTrack(song, entryId));
 
   if (!playlist) {
     return (
@@ -75,7 +75,7 @@ export function MusicPlaylistDetailPage({
       <MusicCollectionDetailPage
         title={playlist.name}
         description={playlist.description}
-        artworkUrl={playlistArtwork(playlist)}
+        artworkUrl={baseTracks.find((track) => track.artworkUrl)?.artworkUrl}
         backTo="/music/playlists"
         backLabel="Back to playlists"
         songsLabel={`${playlist.entryCount.toLocaleString()} songs`}

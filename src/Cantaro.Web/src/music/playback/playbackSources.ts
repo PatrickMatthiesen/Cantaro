@@ -1,4 +1,5 @@
 import type { MusicLibrarySong, MusicLibrarySongPlatformLink, MusicLibrarySongSourceIdentity } from '@cantaro/client-shared/music';
+import { isYouTubeVideoId, songArtwork } from '../musicPresentation';
 import type { PlaybackSource, PlaybackTrack } from './playbackState';
 
 export type SourceResolver = (
@@ -8,7 +9,7 @@ export type SourceResolver = (
 
 function youtubeSource(identity: MusicLibrarySongSourceIdentity, link?: MusicLibrarySongPlatformLink): PlaybackSource {
   const mediaId = identity.externalId;
-  const validId = /^[A-Za-z0-9_-]{11}$/.test(mediaId);
+  const validId = isYouTubeVideoId(mediaId);
   const externalUrl = link?.url ?? (validId ? `https://www.youtube.com/watch?v=${mediaId}` : undefined);
   return {
     id: `youtube:${mediaId}`,
@@ -100,7 +101,7 @@ export function playbackTrackFromSong(song: MusicLibrarySong, resolvers: Record<
     id: song.id,
     title: song.title,
     artist: song.artist,
-    artworkUrl: song.thumbnailUrl,
+    artworkUrl: songArtwork(song),
     durationSeconds: song.durationSeconds,
     sources,
   };

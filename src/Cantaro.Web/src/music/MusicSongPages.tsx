@@ -13,7 +13,8 @@ import {
 import { ActionButton, SelectField, actionClassName } from '@cantaro/client-shared/ui';
 import { MusicPageShell } from './MusicPageShell';
 import { lyricsForDisplay } from './musicLyrics';
-import { formatDuration, isPlatformId, platformName, songArtist } from './musicPresentation';
+import { formatDuration, isPlatformId, platformName, songArtist, songArtwork } from './musicPresentation';
+import { MusicArtwork } from './MusicArtwork';
 import { requestPlaylistSyncDataRefresh } from './playlistSyncProgress';
 import { canAddSongToPlaylist, withoutPlaylistEntry } from './musicPlaylistMemberships';
 import { SongCreditsSection } from './SongCreditsSection';
@@ -83,18 +84,6 @@ function SectionHeader({ title, detail, action }: { title: string; detail?: stri
   );
 }
 
-function SongArtwork({ song, className = '' }: { song: MusicLibrarySong; className?: string }) {
-  if (!song.thumbnailUrl) {
-    return (
-      <div className={`flex aspect-square items-center justify-center bg-surface-subtle text-content-subtle ${className}`}>
-        <MusicUiIcon name="music" className="h-12 w-12" />
-      </div>
-    );
-  }
-
-  return <img src={song.thumbnailUrl} alt="" className={`aspect-square object-cover ${className}`} />;
-}
-
 function SongIdentityStatus({ metadata }: { metadata: SongDerivedMetadata }) {
   const icon = metadata.matchTone === 'ready' ? 'checkCircle' : metadata.matchTone === 'warning' ? 'warning' : 'database';
   return (
@@ -155,13 +144,14 @@ function SongHeroActions({ song, metadata }: { song: MusicLibrarySong; metadata:
 
 function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: SongDerivedMetadata }) {
   const canGoBack = useCanGoBack();
+  const artworkUrl = songArtwork(song);
 
   return (
     <section className="relative isolate overflow-hidden bg-immersive-canvas text-immersive-content">
-      {song.thumbnailUrl ? (
+      {artworkUrl ? (
         <div
           className="absolute inset-0 bg-cover bg-center opacity-50 dark:opacity-65"
-          style={{ backgroundImage: `url(${song.thumbnailUrl})` }}
+          style={{ backgroundImage: `url(${artworkUrl})` }}
           aria-hidden
         />
       ) : null}
@@ -182,7 +172,7 @@ function SongDetailHero({ song, metadata }: { song: MusicLibrarySong; metadata: 
       </Link>
 
       <div className="relative z-20 flex min-h-[31rem] items-end gap-8 px-4 pb-9 pt-44 sm:px-7 md:pt-24 xl:px-9">
-        <SongArtwork song={song} className="hidden w-56 shrink-0 bg-surface md:block xl:w-64" />
+        <MusicArtwork src={artworkUrl} className="hidden aspect-square w-56 md:block xl:w-64" />
         <div className="min-w-0 max-w-4xl">
           {metadata.isObservation ? <SongIdentityStatus metadata={metadata} /> : null}
           <h1 className="mt-4 max-w-[22ch] text-3xl leading-[1.06] font-black tracking-[-0.03em] text-balance sm:text-4xl xl:text-5xl">

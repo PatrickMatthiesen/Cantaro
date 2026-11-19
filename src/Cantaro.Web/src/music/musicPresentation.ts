@@ -65,8 +65,16 @@ export function visiblePlatformIds(song: MusicLibrarySong): PlatformId[] {
   return song.sourcePlatforms.filter(isPlatformId);
 }
 
-export function songArtwork(song: MusicLibrarySong, index = 0): string {
-  return song.thumbnailUrl || fallbackArtwork[index % fallbackArtwork.length];
+export function isYouTubeVideoId(value: string): boolean {
+  return /^[A-Za-z0-9_-]{11}$/.test(value);
+}
+
+export function songArtwork(song: MusicLibrarySong): string | undefined {
+  if (song.thumbnailUrl) return song.thumbnailUrl;
+  const video = song.sourceIdentities.find(({ source, externalId }) =>
+    (source === 'youtube' || source === 'youtube-music') && isYouTubeVideoId(externalId),
+  );
+  return video ? `https://i.ytimg.com/vi/${video.externalId}/mqdefault.jpg` : undefined;
 }
 
 export function playlistArtwork(playlist: MusicLibraryPlaylist, index = 0): string {

@@ -1,20 +1,13 @@
 import type { PlaybackTrack } from './playback/playbackState';
 import { formatDuration } from './musicPresentation';
+import { MusicArtwork } from './MusicArtwork';
 
 type MusicQueueTrack = Pick<PlaybackTrack, 'id' | 'title' | 'artist' | 'artworkUrl' | 'durationSeconds'>;
-
-function QueueArtwork({ track }: { track: MusicQueueTrack }) {
-  if (track.artworkUrl) {
-    return <img src={track.artworkUrl} alt="" className="h-11 w-11 object-cover" />;
-  }
-
-  return <div className="h-11 w-11 bg-surface-subtle" aria-hidden />;
-}
 
 function QueueRow({ track, label, active }: { track: MusicQueueTrack; label: string; active?: boolean }) {
   return (
     <div className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3">
-      <QueueArtwork track={track} />
+      <MusicArtwork src={track.artworkUrl} className="size-11" />
       <div className="min-w-0">
         <p className={`text-[0.66rem] font-black tracking-[0.14em] uppercase ${active ? 'text-personal-accent-strong' : 'text-content-muted'}`}>
           {label}

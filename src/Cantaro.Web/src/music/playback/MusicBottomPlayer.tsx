@@ -1,6 +1,7 @@
 import { Pause, Play, SkipBack, SkipForward, Square } from 'lucide-react';
 import { useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { formatDuration } from '../musicPresentation';
+import { MusicArtwork } from '../MusicArtwork';
 import { useMusicPlayback } from './musicPlaybackContextValue';
 import {
   currentPlaybackTrack, isPlayerVisible, playbackAvailability, selectedPlaybackSource,
@@ -187,7 +188,7 @@ function ActiveMusicPlayer({ track, source, index }: {
       ) : null}
       <div className="mx-auto flex max-w-360 flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 sm:px-4">
         <div className="flex min-w-0 grow basis-36 items-center gap-3">
-          {track.artworkUrl ? <img src={track.artworkUrl} alt="" className="size-10 shrink-0 object-cover" /> : null}
+          <MusicArtwork src={track.artworkUrl} className="size-10" />
           <div className="min-w-0">
             <p className="truncate text-sm font-bold">{track.title}</p>
             <p className="truncate text-xs text-content-muted">

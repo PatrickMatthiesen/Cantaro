@@ -3,6 +3,7 @@ import { type ReactNode } from 'react';
 import { MusicPlatformIcon, type PlatformId } from '@cantaro/client-shared/music';
 import { MusicUpNextPanel } from './MusicUpNextPanel';
 import { MusicRelativeTime } from './MusicRelativeTime';
+import { MusicArtwork } from './MusicArtwork';
 import { formatDuration, platformName } from './musicPresentation';
 
 export interface MusicCollectionTrack {
@@ -78,12 +79,10 @@ function CollectionArtwork({
 }) {
   if (artworkUrl) {
     const artwork = (
-      <img
+      <MusicArtwork
         src={artworkUrl}
-        alt=""
-        className={`aspect-square w-full bg-surface ${
-          preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'
-        }`}
+        className="aspect-square w-full"
+        contain={preserveArtworkAspectRatio}
       />
     );
 
@@ -174,35 +173,19 @@ function HeaderActions({
   );
 }
 
-function TrackArtwork({ track, index }: { track: MusicCollectionTrack; index: number }) {
-  if (track.artworkUrl) {
-    const artwork = (
-      <img
-        src={track.artworkUrl}
-        alt=""
-        className={`h-10 w-10 shrink-0 bg-surface ${track.preserveArtworkAspectRatio ? 'object-contain' : 'object-cover'}`}
-      />
-    );
-
-    return track.artworkExternalUrl ? (
-      <a
-        href={track.artworkExternalUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="shrink-0 focus-visible:outline-2 focus-visible:outline-focus"
-        aria-label={`Open artwork for ${track.title}`}
-      >
-        {artwork}
-      </a>
-    ) : artwork;
-  }
-
-  return (
-    <div
-      className="h-10 w-10 shrink-0 bg-surface-subtle"
-      aria-label={`Track ${index + 1}`}
-    />
-  );
+function TrackArtwork({ track }: { track: MusicCollectionTrack }) {
+  const artwork = <MusicArtwork src={track.artworkUrl} className="size-10" contain={track.preserveArtworkAspectRatio} />;
+  return track.artworkUrl && track.artworkExternalUrl ? (
+    <a
+      href={track.artworkExternalUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="shrink-0 focus-visible:outline-2 focus-visible:outline-focus"
+      aria-label={`Open artwork for ${track.title}`}
+    >
+      {artwork}
+    </a>
+  ) : artwork;
 }
 
 function TrackHoverControls({
@@ -282,10 +265,10 @@ function MoreTrackActions({
   );
 }
 
-function TrackIdentity({ track, index, artist }: { track: MusicCollectionTrack; index: number; artist: string }) {
+function TrackIdentity({ track, artist }: { track: MusicCollectionTrack; artist: string }) {
   const content = (
     <>
-      <TrackArtwork track={track} index={index} />
+      <TrackArtwork track={track} />
       <span className="min-w-0 flex-1">
         {track.externalUrl && !track.detailSongId ? (
           <a
@@ -388,7 +371,7 @@ function TrackRow({
       className={`group grid grid-cols-[2rem_minmax(0,1fr)_3.25rem_2rem] items-center gap-2 px-3 py-3 text-sm text-content transition-colors sm:grid-cols-[56px_minmax(0,1fr)_72px_40px] sm:gap-3 sm:px-5 ${trackGridClassName(showAlbums)} ${rowStateClassName}`}
     >
       <TrackNumber track={track} index={index} onPlayTrack={onPlayTrack} />
-      <TrackIdentity track={track} index={index} artist={artist} />
+      <TrackIdentity track={track} artist={artist} />
       <span className="truncate font-medium max-xl:hidden">{artist}</span>
       {showAlbums ? (
         <span className="truncate font-medium max-xl:hidden" title={albums}>
