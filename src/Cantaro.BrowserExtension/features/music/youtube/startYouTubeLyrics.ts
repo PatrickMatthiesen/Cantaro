@@ -14,7 +14,6 @@ export function startYouTubeLyrics(ctx: ContentContext): void {
   let enabled = false;
   let activeVideoId: string | null = null;
   let drawer: YouTubeLyricsDrawer | null = null;
-  let hostObserver: MutationObserver | null = null;
   let locationTimer: ReturnType<typeof setInterval> | null = null;
 
   const stopPageListeners = () => {
@@ -23,13 +22,7 @@ export function startYouTubeLyrics(ctx: ContentContext): void {
     locationTimer = null;
   };
 
-  const stopHostObserver = () => {
-    hostObserver?.disconnect();
-    hostObserver = null;
-  };
-
   const removeDrawer = () => {
-    stopHostObserver();
     drawer?.dispose();
     drawer = null;
     activeVideoId = null;
@@ -38,36 +31,29 @@ export function startYouTubeLyrics(ctx: ContentContext): void {
   const syncLocation = () => {
     if (disposed || !enabled) return;
     // Read page URL only after the authenticated lyrics-consent gate opens.
-    const nextVideoId = youtubeVideoId(window.location.href);
+    const url = window.location.href;
+    const nextVideoId = youtubeVideoId(url);
     if (!nextVideoId) {
       removeDrawer();
       return;
     }
+    const isMusic = new URL(url).hostname === 'music.youtube.com';
+    // Keep the launcher in the watch details or queue, outside the player.
+    const container = document.querySelector(isMusic ? 'ytmusic-player-page #side-panel' : 'ytd-watch-metadata');
     if (!drawer) {
+      if (!container) return;
       activeVideoId = nextVideoId;
       drawer = mountYouTubeLyricsDrawer({
         document,
+        container,
         getCurrentVideoId: () => activeVideoId,
         requestLyrics: requestYouTubeLyrics,
-        getSearchHints: () => lyricsSearchHints(document.title),
+        // YouTube Music's page title may describe an ad.
+        getSearchHints: isMusic ? undefined : () => lyricsSearchHints(document.title),
       });
-      hostObserver = new MutationObserver(() => {
-        const host = document.querySelector('[data-cantaro-youtube-lyrics]');
-        if (!host && drawer && document.documentElement) {
-          // Reattach only our host. This observer does not inspect the page subtree.
-          const replacement = mountYouTubeLyricsDrawer({
-            document,
-            getCurrentVideoId: () => activeVideoId,
-            requestLyrics: requestYouTubeLyrics,
-            getSearchHints: () => lyricsSearchHints(document.title),
-          });
-          drawer.dispose();
-          drawer = replacement;
-        }
-      });
-      hostObserver.observe(document.documentElement, { childList: true });
       return;
     }
+    drawer.placeIn(container);
     if (activeVideoId !== nextVideoId) {
       activeVideoId = nextVideoId;
       drawer.refreshForCurrentVideo();

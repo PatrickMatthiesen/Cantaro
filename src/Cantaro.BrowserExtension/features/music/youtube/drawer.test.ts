@@ -27,6 +27,39 @@ function getDrawerRoot(document: Document): ShadowRoot {
 }
 
 describe('YouTube lyrics drawer', () => {
+  it('hides in video fullscreen and restores the open drawer on exit', () => {
+    const { document, window } = parseHTML('<html><body><video></video></body></html>');
+    const video = document.querySelector('video');
+    let fullscreenElement: Element | null = video;
+    Object.defineProperty(document, 'fullscreenElement', { get: () => fullscreenElement });
+    const drawer = mountYouTubeLyricsDrawer({
+      document,
+      shadowMode: 'open',
+      getCurrentVideoId: () => 'abcdefghijk',
+      requestLyrics: vi.fn(async () => response('Sample lyrics')),
+    });
+    const host = document.querySelector<HTMLElement>('[data-cantaro-youtube-lyrics]')!;
+    const root = getDrawerRoot(document);
+    const changeFullscreen = (element: Element | null) => {
+      fullscreenElement = element;
+      document.dispatchEvent(new window.Event('fullscreenchange'));
+    };
+
+    expect(host.hidden).toBe(true);
+    changeFullscreen(null);
+    expect(host.hidden).toBe(false);
+    root.querySelector('.launcher')!.dispatchEvent(new window.Event('click'));
+    changeFullscreen(video);
+    expect(host.hidden).toBe(true);
+    changeFullscreen(null);
+    expect(host.hidden).toBe(false);
+    expect(root.querySelector('.panel')!.hasAttribute('open')).toBe(true);
+
+    drawer.dispose();
+    changeFullscreen(video);
+    expect(host.hidden).toBe(false);
+  });
+
   it('waits until opened, displays lyrics as text, and closes with Escape', async () => {
     const { document, window } = parseHTML('<html><body></body></html>');
     const requestLyrics = vi.fn(async () => response('<script>unsafe</script>\nSecond line'));
@@ -213,7 +246,7 @@ describe('YouTube lyrics drawer', () => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
     const drawer = mountYouTubeLyricsDrawer({ document: document as unknown as Document, shadowMode: 'open', getCurrentVideoId: () => 'abcdefghijk', requestLyrics: async () => response('Words') });
     const root = getDrawerRoot(document as unknown as Document);
-    const host = document.querySelector('[data-cantaro-youtube-lyrics]') as unknown as HTMLElement;
+    const panel = root.querySelector<HTMLElement>('.panel')!;
     const pointer = (type: string, x: number, y: number) => {
       const event = new window.Event(type, { bubbles: true, cancelable: true });
       Object.assign(event, { button: 0, clientX: x, clientY: y });
@@ -221,17 +254,17 @@ describe('YouTube lyrics drawer', () => {
     };
     root.querySelector('.heading')!.dispatchEvent(pointer('pointerdown', 800, 400));
     window.dispatchEvent(pointer('pointermove', 700, 300));
-    expect(host.style.right).toBe('116px');
-    expect(host.style.bottom).toBe('116px');
-    expect((root.querySelector('.panel') as HTMLElement).style.width).toBe('380px');
+    expect(panel.style.right).toBe('116px');
+    expect(panel.style.bottom).toBe('116px');
+    expect(panel.style.width).toBe('380px');
     window.dispatchEvent(pointer('pointerup', 700, 300));
     window.dispatchEvent(pointer('pointermove', 500, 200));
-    expect(host.style.right).toBe('116px');
+    expect(panel.style.right).toBe('116px');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 420 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 560 });
     window.dispatchEvent(new window.Event('resize'));
-    expect(host.style.right).toBe('24px');
-    expect(host.style.bottom).toBe('24px');
+    expect(panel.style.right).toBe('24px');
+    expect(panel.style.bottom).toBe('24px');
     drawer.dispose();
   });
 

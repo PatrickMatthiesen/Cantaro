@@ -13,8 +13,8 @@ vi.mock('../../platform/consent/runtimeConsentClient', () => ({
   getRuntimeConsentStatus: mocks.getStatus,
   subscribeRuntimeConsent: mocks.subscribe,
 }));
-vi.mock('../../features/music/youtube/youtubeLyrics', () => ({
-  youtubeVideoId: (url: string) => new URL(url).searchParams.get('v'),
+vi.mock('../../features/music/youtube/youtubeLyrics', async importOriginal => ({
+  ...await importOriginal<typeof import('../../features/music/youtube/youtubeLyrics')>(),
   requestYouTubeLyrics: mocks.requestLyrics,
 }));
 
@@ -24,8 +24,9 @@ const allowed: ConsentStatus = { ...denied, musicLyricsAllowed: true };
 let root: Root;
 let current: CurrentYouTubeState;
 let notifyConsent: (status: ConsentStatus) => void;
-let notifyUpdated: (tabId: number, change: { status?: string; url?: string }) => void;
+let notifyUpdated: (tabId: number, change: { status?: string; url?: string; title?: string }) => void;
 let activeUrl = 'https://www.youtube.com/watch?v=abcdefghijk';
+let tabTitle: string;
 
 function Harness({ enabled = true }: { enabled?: boolean }) {
   current = useYouTubeLyrics(enabled);
@@ -39,10 +40,11 @@ beforeEach(() => {
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   activeUrl = 'https://www.youtube.com/watch?v=abcdefghijk';
+  tabTitle = 'Song - YouTube';
   const listener = { addListener: vi.fn(), removeListener: vi.fn() };
   listener.addListener.mockImplementation((callback: typeof notifyUpdated) => { notifyUpdated = callback; });
   const activated = { addListener: vi.fn(), removeListener: vi.fn() };
-  const queried = vi.fn(async () => [{ id: 7, url: activeUrl }]);
+  const queried = vi.fn(async () => [{ id: 7, url: activeUrl, title: tabTitle }]);
   vi.stubGlobal('browser', { tabs: { query: queried, onActivated: activated, onUpdated: listener } });
   root = createRoot(dom.document.getElementById('root') as unknown as HTMLElement);
   mocks.getStatus.mockResolvedValue(allowed);
@@ -74,6 +76,22 @@ describe('current YouTube lyrics hook', () => {
     expect(current.kind).toBe('disabled');
     await act(async () => finishLookup({ song: { id: 'stale', title: 'Stale' }, lyrics: null }));
     expect(current.kind).toBe('disabled');
+  });
+
+  it('displays only the linked library song while YouTube Music replaces its tab title with ad metadata', async () => {
+    activeUrl = 'https://music.youtube.com/watch?v=abcdefghijk';
+    tabTitle = 'Advertisement - Sensodyne - YouTube Music';
+    const song = { id: 'track:dai-dai', title: 'Dai Dai', artist: 'Shakira and Burna Boy' };
+    mocks.requestLyrics.mockResolvedValue({ song, lyrics: null });
+
+    await act(async () => root.render(createElement(Harness)));
+    expect(mocks.requestLyrics.mock.calls).toEqual([['abcdefghijk']]);
+    expect(current).toEqual({ kind: 'song', videoId: 'abcdefghijk', song, lyrics: null });
+
+    tabTitle = 'Dai Dai - YouTube Music';
+    await act(async () => notifyUpdated(7, { title: tabTitle }));
+    expect(mocks.requestLyrics).toHaveBeenCalledOnce();
+    expect(current).toEqual({ kind: 'song', videoId: 'abcdefghijk', song, lyrics: null });
   });
 
   it('ignores a lookup from the previous video after active tab navigation', async () => {
