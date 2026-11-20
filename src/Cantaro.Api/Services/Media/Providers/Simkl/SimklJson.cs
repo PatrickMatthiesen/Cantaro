@@ -157,9 +157,7 @@ internal static class SimklJson
             ExternalUrl = ExternalUrl(type, id),
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
-            CrossReferences = type is "tv" or "movie" && stremioTargets.FirstOrDefault() is { } target
-                ? [new() { ProviderId = "imdb", ProviderMediaId = target.Id, ExternalUrl = $"https://www.imdb.com/title/{target.Id}/" }]
-                : CrossReferences(type, ids),
+            CrossReferences = CrossReferences(type, ids),
             StartYear = Int(media, "year"),
             StremioTargets = stremioTargets,
             StremioTarget = stremioTargets.FirstOrDefault(),
@@ -183,14 +181,17 @@ internal static class SimklJson
             });
         }
 
-        var imdb = String(ids, "imdb")?.Trim();
-        if (imdb is not null && imdb.Length > 2 && imdb.StartsWith("tt", StringComparison.Ordinal)
-            && imdb.AsSpan(2).ContainsOnlyAsciiDigits())
-        {
+        if (ImdbId(ids) is { } imdb)
             targets.Add(new MediaProviderStremioTarget { Type = stremioType, Id = imdb });
-        }
 
         return targets;
+    }
+
+    private static string? ImdbId(JsonElement ids)
+    {
+        var imdb = String(ids, "imdb")?.Trim();
+        return imdb is { Length: > 2 } && imdb.StartsWith("tt", StringComparison.Ordinal)
+            && imdb.AsSpan(2).ContainsOnlyAsciiDigits() ? imdb : null;
     }
 
     private static bool ContainsOnlyAsciiDigits(this ReadOnlySpan<char> value)
@@ -371,7 +372,10 @@ internal static class SimklJson
 
     private static IReadOnlyList<MediaProviderCrossReference> CrossReferences(string type, JsonElement ids)
     {
-        if (type != "anime") return [];
+        if (type != "anime")
+            return ImdbId(ids) is { } imdb
+                ? [new() { ProviderId = "imdb", ProviderMediaId = imdb, ExternalUrl = $"https://www.imdb.com/title/{imdb}/" }]
+                : [];
         var references = new List<MediaProviderCrossReference>();
         if (String(ids, "mal") is { Length: > 0 } mal)
             references.Add(new MediaProviderCrossReference { ProviderId = "myanimelist", ProviderMediaId = $"anime:{mal}", ExternalUrl = $"https://myanimelist.net/anime/{mal}" });

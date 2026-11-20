@@ -28,12 +28,12 @@ public sealed class AioStreamsPairingController(ApplicationDbContext db, UserMan
     {
         if (!int.TryParse(users.GetUserId(User), out var userId)) return Unauthorized();
         var token = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
-        var hash = AioStreamsWatchStateOptions.HashToken(token);
+        var hash = AioStreamsWatchState.HashToken(token);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "AioStreamsPairings" ("UserId", "TokenHash") VALUES ({userId}, {hash})
             ON CONFLICT ("UserId") DO UPDATE SET "TokenHash" = EXCLUDED."TokenHash"
             """, cancellationToken);
-        return Ok(new { manifestPath = $"{AioStreamsWatchStateOptions.Route}/manifest.json?token={token}" });
+        return Ok(new { manifestPath = $"{AioStreamsWatchState.Route}/manifest.json?token={token}" });
     }
 
     [HttpDelete]

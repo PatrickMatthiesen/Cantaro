@@ -16,7 +16,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -28,7 +27,7 @@ public sealed class AioStreamsWatchStateTests
 {
     private const string MetaId = "tt0213338";
     private const string VideoId = "kitsu:1:1";
-    private const string Route = AioStreamsWatchStateOptions.Route;
+    private const string Route = AioStreamsWatchState.Route;
     private const string PushRoute = $"{Route}/watch_state/push/anime/kitsu%3A1%3A1.json";
     private const string PullRoute = $"{Route}/watch_state/pull.json";
     private const long At = 1_794_000_000;
@@ -40,8 +39,12 @@ public sealed class AioStreamsWatchStateTests
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
         await using var fixture = await Fixture.StartAsync(schema.Db);
-        using var manifestResponse = await fixture.Client.GetAsync(fixture.Authorize($"{Route}/manifest.json"));
+        using var previewRequest = new HttpRequestMessage(HttpMethod.Get, fixture.Authorize($"{Route}/manifest.json"));
+        previewRequest.Headers.Add("Origin", "https://aiostreams.example.test");
+        using var manifestResponse = await fixture.Client.SendAsync(previewRequest);
         manifestResponse.EnsureSuccessStatusCode();
+        Assert.Equal("*", Assert.Single(manifestResponse.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.False(manifestResponse.Headers.Contains("Access-Control-Allow-Credentials"));
         Assert.True(manifestResponse.Headers.CacheControl?.NoStore);
         var manifest = await manifestResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, manifest.GetProperty("watchState").GetProperty("version").GetInt32());
@@ -146,6 +149,18 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresFact]
+    public async Task RefusesAPlaybackWriteWhenThePairingIsRevokedBeforeTheTransaction()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var revocation = new RevokeBeforePairingLock(async ct =>
+            await schema.Db.Set<AioStreamsPairing>().ExecuteDeleteAsync(ct));
+        await using var fixture = await Fixture.StartAsync(schema.Db, interceptor: revocation);
+        await fixture.ExpectPushAsync(Event("revoked", "played", At), HttpStatusCode.Unauthorized);
+        Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+        Assert.Null(await schema.Db.MediaLibraryEntries.Select(e => e.ProgressEpisodes).SingleAsync());
+    }
+
+    [PostgresFact]
     public async Task TracksImdbMoviesAndTvEpisodesThroughVerifiedLibraryLinks()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
@@ -222,12 +237,7 @@ public sealed class AioStreamsWatchStateTests
         await fixture.ExpectPushAsync(stop with { VideoId = "kitsu:9:1" }, HttpStatusCode.ServiceUnavailable, EpisodeRoute(9, 1));
         await fixture.ExpectPushAsync(stop with { Scope = "season" }, HttpStatusCode.BadRequest);
 
-        fixture.App.Configuration[$"{AioStreamsWatchStateOptions.SectionName}:UserId"] = "2";
-        ((IConfigurationRoot)fixture.App.Configuration).Reload();
-        await fixture.ExpectPushAsync(stop, HttpStatusCode.NotFound);
-        fixture.App.Configuration[$"{AioStreamsWatchStateOptions.SectionName}:TokenHash"] =
-            AioStreamsWatchStateOptions.HashToken(NewToken());
-        ((IConfigurationRoot)fixture.App.Configuration).Reload();
+        await schema.Db.Set<AioStreamsPairing>().ExecuteDeleteAsync();
         await fixture.ExpectPushAsync(stop, HttpStatusCode.Unauthorized);
         Assert.Equal(0, await schema.Db.AioStreamsWatchEvents.CountAsync());
     }
@@ -369,7 +379,6 @@ public sealed class AioStreamsWatchStateTests
 
     private sealed class Fixture(WebApplication app, HttpClient client, string token) : IAsyncDisposable
     {
-        public WebApplication App => app;
         public HttpClient Client => client;
 
         public static async Task<Fixture> StartAsync(ApplicationDbContext db, string animeType = "TV",
@@ -396,10 +405,10 @@ public sealed class AioStreamsWatchStateTests
             builder.Logging.ClearProviders();
             builder.WebHost.UseUrls("http://127.0.0.1:0");
             var token = NewToken();
-            var section = AioStreamsWatchStateOptions.SectionName;
-            builder.Configuration[$"{section}:UserId"] = "1";
-            builder.Configuration[$"{section}:TokenHash"] = AioStreamsWatchStateOptions.HashToken(token);
-            builder.Services.Configure<AioStreamsWatchStateOptions>(builder.Configuration.GetSection(section));
+            db.Set<AioStreamsPairing>().Add(new() { UserId = user.Id, TokenHash = AioStreamsWatchState.HashToken(token) });
+            await db.SaveChangesAsync();
+            builder.Services.AddCors(cors => cors.AddPolicy(AioStreamsWatchState.ManifestCorsPolicy,
+                policy => policy.AllowAnyOrigin().WithMethods("GET")));
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
             {
                 options.UseNpgsql(db.Database.GetConnectionString(), npgsql => npgsql.EnableRetryOnFailure(1));
@@ -419,6 +428,7 @@ public sealed class AioStreamsWatchStateTests
             builder.Services.AddControllers().AddApplicationPart(typeof(AioStreamsWatchStateController).Assembly);
 
             var app = builder.Build();
+            app.UseCors();
             app.MapControllers();
             await app.StartAsync();
             return new Fixture(app, new HttpClient { BaseAddress = new Uri(app.Urls.Single()) }, token);
@@ -488,6 +498,18 @@ public sealed class AioStreamsWatchStateTests
             if (command.CommandText.StartsWith("UPDATE \"AioStreamsWatchEvents\"", StringComparison.Ordinal))
                 await write(cancellationToken);
 
+            return result;
+        }
+    }
+
+    private sealed class RevokeBeforePairingLock(Func<CancellationToken, Task> revoke) : DbCommandInterceptor
+    {
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("AioStreamsPairings", StringComparison.Ordinal)
+                && command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
+                await revoke(cancellationToken);
             return result;
         }
     }

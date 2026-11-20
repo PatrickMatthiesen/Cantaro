@@ -26,7 +26,7 @@ public sealed class SimklJsonTests
     {
         using var json = JsonDocument.Parse("""
             {"shows":[{"status":"watching","watched_episodes_count":4,"total_episodes_count":20,
-              "user_rating":8,"show":{"title":"Example","year":2020,"ids":{"simkl":123}},
+              "user_rating":8,"show":{"title":"Example","year":2020,"ids":{"simkl":123,"imdb":"tt1234567"}},
               "seasons":[{"number":0,"episodes":[{"number":1}]},
                          {"number":1,"episodes":[{"number":1},{"number":2}]},
                          {"number":2,"episodes":[{"number":3}]}]}]}
@@ -34,6 +34,7 @@ public sealed class SimklJsonTests
         var item = Assert.Single(SimklJson.MapLibraryItems(json.RootElement));
         Assert.Equal("tv:123", item.ProviderMediaId);
         Assert.Equal(MediaKinds.Series, item.MediaKind);
+        Assert.Contains(item.CrossReferences, reference => reference.ProviderId == "imdb" && reference.ProviderMediaId == "tt1234567");
         Assert.Equal(80m, item.Score);
         Assert.Contains(item.WatchedEpisodes!, x => x.SeasonNumber == 0 && x.EpisodeNumber == 1);
         Assert.Contains(item.WatchedEpisodes!, x => x.SeasonNumber == 2 && x.EpisodeNumber == 3);

@@ -29,13 +29,11 @@ var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(e
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
-builder.Services.Configure<AioStreamsWatchStateOptions>(
-    builder.Configuration.GetSection(AioStreamsWatchStateOptions.SectionName));
 builder.Services.PostConfigure<OpenTelemetry.Instrumentation.AspNetCore.AspNetCoreTraceInstrumentationOptions>(options =>
 {
     var existingFilter = options.Filter;
     options.Filter = context =>
-        !context.Request.Path.StartsWithSegments(AioStreamsWatchStateOptions.Route)
+        !context.Request.Path.StartsWithSegments(AioStreamsWatchState.Route)
         && (existingFilter?.Invoke(context) ?? true);
 });
 
@@ -315,6 +313,7 @@ builder.Services.AddOpenApi();
 // Add CORS for frontend communication
 builder.Services.AddCors(options =>
 {
+    options.AddPolicy(AioStreamsWatchState.ManifestCorsPolicy, policy => policy.AllowAnyOrigin().WithMethods("GET"));
     options.AddDefaultPolicy(policy =>
     {
         var frontendOptions = builder.Configuration

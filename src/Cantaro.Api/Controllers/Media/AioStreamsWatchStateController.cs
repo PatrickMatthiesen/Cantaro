@@ -5,21 +5,20 @@ using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace Cantaro.Api.Controllers;
 
 [ApiController]
 [AllowAnonymous]
-[Route(AioStreamsWatchStateOptions.Route)]
+[Route(AioStreamsWatchState.Route)]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class AioStreamsWatchStateController(
     ApplicationDbContext db,
-    IOptionsMonitor<AioStreamsWatchStateOptions> options,
     AioStreamsAnimeEnricher anime,
     MediaLibraryEventHub eventHub,
     TimeProvider clock) : ControllerBase
@@ -27,6 +26,7 @@ public sealed class AioStreamsWatchStateController(
     private static readonly string[] Types = ["anime", "series", "movie"];
 
     [HttpGet("manifest.json")]
+    [EnableCors(AioStreamsWatchState.ManifestCorsPolicy)]
     public async Task<IActionResult> Manifest(CancellationToken cancellationToken)
     {
         if (Request.Query.ContainsKey("viewer")) return NotFound();
@@ -92,9 +92,15 @@ public sealed class AioStreamsWatchStateController(
         if (episode is null) return NotFound();
 
         var played = payload.Event == "played" || payload.Event == "stop" && payload.Played == true;
-        var (accepted, progressChanged) = await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        var hash = ReadTokenHash()!;
+        var (accepted, progressChanged, authorized) = await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            // Rotation and disconnect update this row, so neither can finish before an authorized write commits.
+            var pairing = await db.Set<AioStreamsPairing>().FromSqlInterpolated($"""
+                SELECT * FROM "AioStreamsPairings" WHERE "UserId" = {userId} AND "TokenHash" = {hash} FOR UPDATE
+                """).AsNoTracking().ToListAsync(cancellationToken);
+            if (pairing.Count == 0) return (false, false, false);
             // Serialize played events for a title so a simultaneous completion cannot leave a gap.
             if (played)
             {
@@ -122,9 +128,10 @@ public sealed class AioStreamsWatchStateController(
                 && (movie ? await CompleteMovieAsync(episode.EntryId, cancellationToken)
                     : await AdvanceProgressAsync(episode.EntryId, cancellationToken));
             await transaction.CommitAsync(cancellationToken);
-            return (accepted, progressChanged);
+            return (accepted, progressChanged, true);
         });
 
+        if (!authorized) return Unauthorized();
         if (progressChanged) eventHub.Publish(userId);
         return accepted ? NoContent() : NotFound();
     }
@@ -166,7 +173,7 @@ public sealed class AioStreamsWatchStateController(
             .Select(e => new ResumeItem(e.Type!, e.MetaId!, e.VideoId!, e.Season, e.Episode,
                 e.At, e.PositionMs!.Value, e.DurationMs)).ToArray();
 
-        var version = AioStreamsWatchStateOptions.HashToken(string.Join('\n', watched));
+        var version = AioStreamsWatchState.HashToken(string.Join('\n', watched));
         return since == version
             ? Ok(new { version, items })
             : Ok(new { version, items, watched = new {
@@ -174,15 +181,17 @@ public sealed class AioStreamsWatchStateController(
                 episodes = watched.Where(id => id.Contains(':')).ToArray() } });
     }
 
-    private async Task<int?> ResolveUserAsync(CancellationToken cancellationToken)
+    private Task<int?> ResolveUserAsync(CancellationToken cancellationToken)
+    {
+        var hash = ReadTokenHash();
+        return hash is null ? Task.FromResult<int?>(null) : db.Set<AioStreamsPairing>().Where(p => p.TokenHash == hash)
+            .Select(p => (int?)p.UserId).SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private string? ReadTokenHash()
     {
         var token = Request.Query["token"];
-        if (token.Count != 1 || token[0] is not { Length: 43 } value) return null;
-        var hash = AioStreamsWatchStateOptions.HashToken(value);
-        var userId = await db.Set<AioStreamsPairing>().Where(p => p.TokenHash == hash)
-            .Select(p => (int?)p.UserId).SingleOrDefaultAsync(cancellationToken);
-        var fallback = options.CurrentValue;
-        return userId ?? (fallback.IsConfigured && fallback.AcceptsToken(value) ? fallback.UserId : null);
+        return token.Count == 1 && token[0] is { Length: 43 } value ? AioStreamsWatchState.HashToken(value) : null;
     }
 
     private Task<bool?> ReceiptMatchesAsync(int userId, string type, PlaybackEvent payload, int? number,
