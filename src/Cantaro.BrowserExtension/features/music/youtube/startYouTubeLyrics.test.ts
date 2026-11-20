@@ -7,8 +7,17 @@ const consentMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../platform/consent/runtimeConsentClient', () => consentMocks);
+vi.mock('./drawer', async importOriginal => {
+  const drawer = await importOriginal<typeof import('./drawer')>();
+  return {
+    ...drawer,
+    mountYouTubeLyricsDrawer: (options: Parameters<typeof drawer.mountYouTubeLyricsDrawer>[0]) =>
+      drawer.mountYouTubeLyricsDrawer({ ...options, shadowMode: 'open' }),
+  };
+});
 
 import { startYouTubeLyrics } from './startYouTubeLyrics';
+import type { YouTubeLyricsRequest } from './youtubeLyrics';
 
 function createContext() {
   const invalidated: Array<() => void> = [];
@@ -22,8 +31,8 @@ function consent(authenticated: boolean, musicLyricsAllowed: boolean) {
   return { authenticated, musicLyricsAllowed } as Parameters<Parameters<typeof consentMocks.subscribeRuntimeConsent>[0]>[0];
 }
 
-function setupPage(initialUrl: string) {
-  const page = parseHTML('<html><body></body></html>');
+function setupPage(initialUrl: string, html = '<html><body></body></html>') {
+  const page = parseHTML(html);
   let currentUrl = initialUrl;
   let reads = 0;
   Object.defineProperty(page.window, 'location', {
@@ -71,11 +80,32 @@ describe('YouTube lyrics content entrypoint', () => {
 
     notifyConsent(consent(true, true));
     expect(page.reads).toBe(1);
-    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).not.toBeNull();
+    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
+    // Sanitized narrow watch-page structure captured on Snowfall.
+    page.document.body.innerHTML = `
+      <ytd-watch-flexy>
+        <div id="player-full-bleed-container"><ytd-player><video></video></ytd-player></div>
+        <div id="primary-inner"><div id="below"><div>
+          <ytd-watch-metadata><div id="title"><h1>Video title</h1></div></ytd-watch-metadata>
+        </div></div></div>
+      </ytd-watch-flexy>
+    `;
+    const metadata = page.document.querySelector('ytd-watch-metadata')!;
 
     page.setUrl('https://www.youtube.com/watch?v=lmnopqrstuv');
     await vi.advanceTimersByTimeAsync(500);
     expect(page.reads).toBe(2);
+    const host = metadata.querySelector('[data-cantaro-youtube-lyrics]');
+    expect(host).not.toBeNull();
+    expect(page.document.querySelector('#player-full-bleed-container [data-cantaro-youtube-lyrics]')).toBeNull();
+
+    metadata.remove();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
+    const newMetadata = page.document.createElement('ytd-watch-metadata');
+    page.document.body.append(newMetadata);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(newMetadata.querySelector('[data-cantaro-youtube-lyrics]')).toBe(host);
 
     notifyConsent(consent(true, false));
     expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
@@ -108,5 +138,72 @@ describe('YouTube lyrics content entrypoint', () => {
     expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
     notifyConsent(consent(true, true));
     expect(page.reads).toBe(1);
+  });
+
+  it('keeps ad metadata out of lyrics lookups and updates on same-document navigation', async () => {
+    vi.useFakeTimers();
+    // Player and queue structure captured on Snowfall. Ad metadata is simulated.
+    const page = setupPage('https://music.youtube.com/watch?v=abcdefghijk', `
+      <html><head><title>Sensodyne - Advertisement - YouTube Music</title></head><body>
+        <ytmusic-player-page player-ui-state="PLAYER_PAGE_OPEN"><div>
+          <div id="main-panel"><ytmusic-player>
+            <div id="movie_player" class="html5-video-player ad-showing"><div class="html5-video-container">
+              <video class="video-stream html5-main-video"></video>
+            </div></div>
+          </ytmusic-player></div>
+          <div id="side-panel"><tp-yt-paper-tabs></tp-yt-paper-tabs><ytmusic-tab-renderer></ytmusic-tab-renderer></div>
+        </div></ytmusic-player-page>
+        <ytmusic-player-bar><div class="content-info-wrapper">
+          <yt-formatted-string class="title">Advertisement</yt-formatted-string>
+          <yt-formatted-string class="byline">Sensodyne</yt-formatted-string>
+        </div></ytmusic-player-bar>
+      </body></html>
+    `);
+    consentMocks.getRuntimeConsentStatus.mockResolvedValue(consent(true, true));
+    consentMocks.subscribeRuntimeConsent.mockReturnValue(() => undefined);
+    const sendMessage = vi.fn(async ({ payload }: YouTubeLyricsRequest) => ({
+      ok: true,
+      value: payload.videoId === 'abcdefghijk'
+        ? { song: null, lyrics: null }
+        : {
+          song: { id: 'track:next', title: 'Next song', artist: 'Next artist' },
+          lyrics: { state: 'available', plainLyrics: 'Next lyrics', attribution: 'LRCLIB' },
+        },
+    }));
+    vi.stubGlobal('browser', { runtime: { sendMessage } });
+    const ctx = createContext();
+    startYouTubeLyrics(ctx);
+    await vi.advanceTimersByTimeAsync(0);
+    const host = page.document.querySelector<HTMLElement>('#side-panel > [data-cantaro-youtube-lyrics]')!;
+    const drawer = host.shadowRoot!;
+    let fullscreenElement: Element | null = page.document.documentElement;
+    Object.defineProperty(page.document, 'fullscreenElement', { get: () => fullscreenElement });
+    page.document.dispatchEvent(new page.window.Event('fullscreenchange'));
+    expect(host.hidden).toBe(true);
+    fullscreenElement = null;
+    page.document.dispatchEvent(new page.window.Event('fullscreenchange'));
+    expect(host.hidden).toBe(false);
+    drawer.querySelector('.launcher')!.dispatchEvent(new page.window.Event('click'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drawer.querySelector<HTMLInputElement>('input[aria-label="Song title"]')!.value ?? '').toBe('');
+    expect(drawer.querySelector<HTMLInputElement>('input[aria-label="Artist"]')!.value ?? '').toBe('');
+    drawer.querySelector('form')!.dispatchEvent(new page.window.Event('submit', { cancelable: true }));
+    expect(sendMessage.mock.calls.map(([request]) => request.payload)).toEqual([{ videoId: 'abcdefghijk' }]);
+
+    page.document.querySelector('#movie_player')!.classList.remove('ad-showing');
+    page.document.querySelector('.title')!.textContent = 'Dai Dai';
+    page.document.querySelector('.byline')!.textContent = 'Shakira and Burna Boy';
+    page.document.title = 'Dai Dai - YouTube Music';
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(drawer.querySelector('.notice-title')?.textContent).toBe('No lyrics found');
+
+    page.setUrl('https://music.youtube.com/watch?v=lmnopqrstuv');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sendMessage.mock.calls.map(([request]) => request.payload)).toEqual([
+      { videoId: 'abcdefghijk' }, { videoId: 'lmnopqrstuv' },
+    ]);
+    expect(drawer.querySelector('.title')?.textContent).toBe('Next song');
+    ctx.invalidate();
   });
 });

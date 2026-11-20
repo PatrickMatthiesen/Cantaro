@@ -68,6 +68,7 @@ function fixtureDoc(html: string): Document {
 }
 
 class FakeVideo {
+  readonly isConnected = true;
   currentTime = 0;
   duration = 100;
   paused = false;

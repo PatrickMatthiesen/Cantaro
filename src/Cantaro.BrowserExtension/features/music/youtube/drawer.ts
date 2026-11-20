@@ -12,6 +12,7 @@ type LyricsView =
 
 interface DrawerOptions {
   document: Document;
+  container?: Element | null;
   /** Open mode lets the in-app preview and component tests inspect the shipped drawer. */
   shadowMode?: ShadowRootMode;
   getCurrentVideoId: () => string | null;
@@ -20,15 +21,19 @@ interface DrawerOptions {
 }
 
 const styles = `
-:host{all:initial;color-scheme:dark;font-family:Roboto,Arial,sans-serif;position:fixed;z-index:2147483646;right:16px;bottom:16px;--bg:var(--yt-spec-base-background,#0f0f0f);--text:var(--yt-spec-text-primary,#f1f1f1);--muted:var(--yt-spec-text-secondary,#aaa);--line:var(--yt-spec-10-percent-layer,rgba(255,255,255,.1));--hover:var(--yt-spec-badge-chip-background,rgba(255,255,255,.1));color:var(--text);font-size:14px;line-height:1.45}
+:host{all:initial;color-scheme:dark;font-family:Roboto,Arial,sans-serif;display:block;--bg:var(--yt-spec-base-background,#0f0f0f);--text:var(--yt-spec-text-primary,#f1f1f1);--muted:var(--yt-spec-text-secondary,#aaa);--line:var(--yt-spec-10-percent-layer,rgba(255,255,255,.1));--hover:var(--yt-spec-badge-chip-background,rgba(255,255,255,.1));color:var(--text);font-size:14px;line-height:1.45}
 *{box-sizing:border-box}
 button{font:inherit;color:inherit}
 button:focus-visible,select:focus-visible,input:focus-visible,.heading:focus-visible{outline:2px solid var(--text);outline-offset:2px}
-.launcher{border:0;background:var(--yt-spec-raised-background,#212121);border-radius:18px;padding:9px 16px;cursor:pointer;font-weight:500}
+.launcher{display:block;margin:12px 0 12px auto;border:0;background:var(--yt-spec-raised-background,#212121);border-radius:18px;padding:9px 16px;cursor:pointer;font-weight:500}
 .launcher:hover{background:color-mix(in srgb,var(--bg) 85%,var(--text))}
 .launcher:focus-visible{outline:1px solid var(--muted);outline-offset:-3px}
+:host([hidden]),.launcher[hidden]{display:none}
+@media (max-width:700px), (max-height:480px){
+  .launcher{padding:7px 12px}
+}
 .icon-button:hover,.resize:hover,.size-controls button:hover{background:var(--hover)}
-.panel{display:none;width:380px;height:520px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);min-width:min(280px,calc(100vw - 32px));min-height:min(260px,calc(100vh - 32px));overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.panel{display:none;position:fixed;z-index:2147483646;width:380px;height:520px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);min-width:min(280px,calc(100vw - 32px));min-height:min(260px,calc(100vh - 32px));overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
 .panel[open]{display:flex;flex-direction:column}
 .header{cursor:grab;touch-action:none;user-select:none;display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--line)}
 .resize,.icon-button,.size-controls button{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer}
@@ -60,6 +65,7 @@ button svg{display:block;flex:none;width:20px;height:20px;pointer-events:none}
 `;
 
 export interface YouTubeLyricsDrawer {
+  placeIn(container: Element | null): void;
   refreshForCurrentVideo(): void;
   dispose(): void;
 }
@@ -317,7 +323,12 @@ export function mountYouTubeLyricsDrawer(options: DrawerOptions): YouTubeLyricsD
   panel.append(header, searchForm.form, body, footer);
   root.append(panel);
 
-  doc.documentElement.append(host);
+  const placeIn = (container: Element | null) => {
+    if (host.parentElement === container) return;
+    if (container) container.append(host);
+    else host.remove();
+  };
+  placeIn(options.container === undefined ? doc.body : options.container);
 
   let open = false;
   let disposed = false;
@@ -336,8 +347,8 @@ export function mountYouTubeLyricsDrawer(options: DrawerOptions): YouTubeLyricsD
     const height = doc.defaultView?.innerHeight ?? 768;
     right = Math.max(16, Math.min(nextRight, width - panelWidth - 16));
     bottom = Math.max(16, Math.min(nextBottom, height - panelHeight - 16));
-    host.style.right = `${right}px`;
-    host.style.bottom = `${bottom}px`;
+    panel.style.right = `${right}px`;
+    panel.style.bottom = `${bottom}px`;
   };
   let drag: { x: number; y: number; width: number; height: number } | null = null;
 
@@ -478,6 +489,10 @@ export function mountYouTubeLyricsDrawer(options: DrawerOptions): YouTubeLyricsD
     changeSize(...increment);
   };
   const onViewportResize = () => setSize(panelWidth, panelHeight);
+  const syncFullscreen = () => {
+    host.hidden = Boolean(doc.fullscreenElement);
+    if (host.hidden) onPointerUp();
+  };
 
   launcher.addEventListener('click', openDrawer);
   close.addEventListener('click', closeDrawer);
@@ -490,12 +505,15 @@ export function mountYouTubeLyricsDrawer(options: DrawerOptions): YouTubeLyricsD
   doc.defaultView?.addEventListener('pointerup', onPointerUp);
   doc.defaultView?.addEventListener('pointercancel', onPointerUp);
   doc.defaultView?.addEventListener('resize', onViewportResize);
+  doc.addEventListener('fullscreenchange', syncFullscreen);
   smaller.addEventListener('click', () => changeSize(-40));
   larger.addEventListener('click', () => changeSize(40));
   setSize(panelWidth, panelHeight);
+  syncFullscreen();
   render();
 
   return {
+    placeIn,
     refreshForCurrentVideo() {
       if (disposed) return;
       const nextVideoId = options.getCurrentVideoId();
@@ -526,6 +544,7 @@ export function mountYouTubeLyricsDrawer(options: DrawerOptions): YouTubeLyricsD
       doc.defaultView?.removeEventListener('pointerup', onPointerUp);
       doc.defaultView?.removeEventListener('pointercancel', onPointerUp);
       doc.defaultView?.removeEventListener('resize', onViewportResize);
+      doc.removeEventListener('fullscreenchange', syncFullscreen);
       host.remove();
     },
   };

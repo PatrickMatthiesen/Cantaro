@@ -61,6 +61,7 @@ export interface CrunchyrollWatchMetadata {
 }
 
 export interface VideoProgressTracker {
+  readonly video: HTMLVideoElement;
   dispose(): void;
 }
 
@@ -159,7 +160,7 @@ export function trackVideoProgress(
   let fired = false;
 
   const evaluate = () => {
-    if (fired) return;
+    if (fired || !video.isConnected) return;
     const snapshot = readWatchProgress(video);
     if (!snapshot) {
       reportUnavailableProgress(options.onStatus, video);
@@ -177,6 +178,7 @@ export function trackVideoProgress(
   video.addEventListener('seeked', evaluate);
   evaluate();
   return {
+    video,
     dispose() {
       video.removeEventListener('timeupdate', evaluate);
       video.removeEventListener('ended', evaluate);

@@ -217,7 +217,7 @@ export function createCrunchyrollWatchController(
       });
       return;
     }
-    if (decision === 'stale') return;
+    if (decision === 'stale' || submittedWatchIds.has(watchId)) return;
     if (!collectionAllowed || generation !== collectionGate.getState().generation
       || catalogGeneration !== catalogGate.getState().generation) return;
     submittedWatchIds.add(watchId);
@@ -372,7 +372,9 @@ export function createCrunchyrollWatchController(
   const observer = new MutationObserver((mutations) => {
     if (!collectionAllowed) return;
     observePlayerSelection(readSelectedPlayerTracks(document));
-    if (mutations.some(hasRelevantPageChange)) requestRestart();
+    const videoDetached = tracker?.video.isConnected === false;
+    if (videoDetached) tracker = disposeTracker(tracker);
+    if (videoDetached || mutations.some(hasRelevantPageChange)) requestRestart();
   });
   const attachObserver = () => {
     if (!collectionAllowed || ctx.isInvalid) return;
@@ -571,7 +573,7 @@ function isAlreadyTracking(
   currentWatchId: string | undefined,
   tracker: VideoProgressTracker | null,
 ): boolean {
-  return watchId === currentWatchId && tracker !== null;
+  return watchId === currentWatchId && tracker?.video.isConnected === true;
 }
 
 function hasVideo(doc: Document): boolean {
