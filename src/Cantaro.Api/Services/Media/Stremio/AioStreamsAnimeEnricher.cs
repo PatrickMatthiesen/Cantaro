@@ -243,20 +243,19 @@ public sealed class AioStreamsAnimeEnricher(
             {
                 Type = type,
                 Id = imdbId!,
-                EpisodeMapping = type == "series"
-                    && entry.Imdb?.SeasonNumber is > 0
-                    && entry.Imdb.FromEpisode is > 0
-                    ? new MediaProviderStremioEpisodeMapping
-                {
-                    SeasonNumber = entry.Imdb.SeasonNumber,
-                    EpisodeOffset = entry.Imdb.FromEpisode.Value - 1
-                }
-                    : null
+                EpisodeMapping = type == "series" ? GetImdbEpisodeMapping(entry.Imdb) : null
             });
         }
 
         return candidates;
     }
+
+    internal static MediaProviderStremioEpisodeMapping? GetImdbEpisodeMapping(AioStreamsImdbMapping? imdb)
+        => imdb is { SeasonNumber: > 0, FromEpisode: > 0 } ? new MediaProviderStremioEpisodeMapping
+        {
+            SeasonNumber = imdb.SeasonNumber,
+            EpisodeOffset = imdb.FromEpisode.Value - 1
+        } : null;
 
     private static bool HasConflict(
         IReadOnlyList<MediaProviderStremioTarget> currentTargets,

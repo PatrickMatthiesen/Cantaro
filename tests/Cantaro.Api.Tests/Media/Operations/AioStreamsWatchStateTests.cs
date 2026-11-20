@@ -243,11 +243,44 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresFact]
+    public async Task RejectsConflictingKitsuCoordinatesAndPreservesVerifiedImdbOffsets()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10);
+        var path = EpisodeRoute(1, 2);
+        var pause = Event("second", "pause", At, position: 2_500) with { VideoId = "kitsu:1:2", Episode = 2 };
+        var kitsuParent = pause with { MetaId = "kitsu:1" };
+        await fixture.ExpectPushAsync(kitsuParent with { Episode = 11 }, HttpStatusCode.NotFound, path);
+        await fixture.ExpectPushAsync(kitsuParent with { Season = 2 }, HttpStatusCode.NotFound, path);
+        await fixture.ExpectPushAsync(pause with { Season = 2, Episode = 99 }, HttpStatusCode.NotFound, path);
+        await fixture.ExpectPushAsync(pause with { Season = 3, Episode = 11 }, HttpStatusCode.NotFound, path);
+        await fixture.ExpectPushAsync(pause with { Episode = 11 }, HttpStatusCode.NotFound, path);
+        Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+
+        await fixture.ExpectPushAsync(kitsuParent with { Id = "local", Season = null, Episode = null }, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(pause with { Id = "mixed-local" }, HttpStatusCode.NoContent, path);
+        var mapped = pause with { At = At + 1, Season = 2, Episode = 11 };
+        await fixture.ExpectPushAsync(mapped, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(mapped, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(mapped with { Episode = 12 }, HttpStatusCode.NotFound, path);
+
+        var item = Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+        Assert.Equal(MetaId, item.GetProperty("metaId").GetString());
+        Assert.Equal("kitsu:1:2", item.GetProperty("videoId").GetString());
+        Assert.Equal(2, item.GetProperty("season").GetInt32());
+        Assert.Equal(11, item.GetProperty("episode").GetInt32());
+        var episodeId = await schema.Db.MediaEpisodes.Where(e => e.EpisodeNumber == 2).Select(e => e.Id).SingleAsync();
+        var receipts = await schema.Db.AioStreamsWatchEvents.ToListAsync();
+        Assert.Equal(3, receipts.Count);
+        Assert.All(receipts, receipt => Assert.Equal(episodeId, receipt.MediaEpisodeId));
+    }
+
+    [PostgresFact]
     public async Task ResolvesFromKitsuEpisodeAndOnlyAdvancesConsecutiveCompletions()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
         await using var fixture = await Fixture.StartAsync(schema.Db);
-        var second = Event("second", "played", At) with { VideoId = "kitsu:1:2", Episode = 11, Season = null };
+        var second = Event("second", "played", At) with { VideoId = "kitsu:1:2", Episode = 2, Season = null };
         await fixture.ExpectPushAsync(second, HttpStatusCode.NoContent, EpisodeRoute(1, 2, "series"));
         Assert.Null(await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
         var watched = (await fixture.PullAsync()).GetProperty("watched").GetProperty("episodes");
@@ -382,7 +415,7 @@ public sealed class AioStreamsWatchStateTests
         public HttpClient Client => client;
 
         public static async Task<Fixture> StartAsync(ApplicationDbContext db, string animeType = "TV",
-            string imdbHint = MetaId, DbCommandInterceptor? interceptor = null)
+            string imdbHint = MetaId, DbCommandInterceptor? interceptor = null, int? imdbSeason = null, int? imdbFromEpisode = null)
         {
             var title = new MediaTitle
             {
@@ -419,7 +452,7 @@ public sealed class AioStreamsWatchStateTests
             builder.Services.Configure<AioStreamsOptions>(options => options.BaseUrl = "https://aio.test");
             builder.Services.AddMemoryCache();
             builder.Services.AddHttpClient(AioStreamsAnimeEnricher.HttpClientName).ConfigurePrimaryHttpMessageHandler(
-                () => new AnimeApiFixture(animeType, imdbHint));
+                () => new AnimeApiFixture(animeType, imdbHint, imdbSeason, imdbFromEpisode));
             builder.Services.AddSingleton<AioStreamsAnimeEnricher>();
             builder.Services.AddIdentityCore<User>().AddEntityFrameworkStores<ApplicationDbContext>();
             builder.Services.AddAuthentication("Fixture")
@@ -515,7 +548,7 @@ public sealed class AioStreamsWatchStateTests
         }
     }
 
-    private sealed class AnimeApiFixture(string animeType, string imdbHint) : HttpMessageHandler
+    private sealed class AnimeApiFixture(string animeType, string imdbHint, int? imdbSeason, int? imdbFromEpisode) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -524,7 +557,7 @@ public sealed class AioStreamsWatchStateTests
             if (query["idValue"] == "9") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
             var data = query["idValue"] == "1"
-                ? new { type = animeType, imdb = new { id = imdbHint },
+                ? new { type = animeType, imdb = new { id = imdbHint, seasonNumber = imdbSeason, fromEpisode = imdbFromEpisode },
                     mappings = new { kitsuId = 1, simklId = 37089, anilistId = 1, malId = 1, imdbId = MetaId } }
                 : null;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

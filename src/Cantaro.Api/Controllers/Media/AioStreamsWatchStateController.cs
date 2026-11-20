@@ -71,6 +71,10 @@ public sealed class AioStreamsWatchStateController(
             || payload.At <= 0 || payload.PositionMs is < 0 || payload.DurationMs is <= 0
             || payload.PositionMs > payload.DurationMs) return BadRequest();
 
+        var kitsuParent = kitsu ? FormattableString.Invariant($"kitsu:{kitsuId}") : null;
+        var matchesKitsuNumbering = payload.Season is null or 1 && (payload.Episode ?? kitsuNumber) == kitsuNumber;
+        if (kitsu && payload.MetaId == kitsuParent && !matchesKitsuNumbering) return NotFound();
+
         // An acknowledged retry can be delivered while the metadata API is offline.
         if (await ReceiptMatchesAsync(userId, type, payload, number, cancellationToken) is { } matches)
             return matches ? NoContent() : NotFound();
@@ -80,9 +84,10 @@ public sealed class AioStreamsWatchStateController(
         {
             var (identity, unavailable) = await anime.LookupKitsuAsync(kitsuId, cancellationToken);
             if (unavailable) return StatusCode(StatusCodes.Status503ServiceUnavailable);
-            if (identity?.Mappings is not { } mappings || identity.Type is "SPECIAL" or "MOVIE"
-                || payload.MetaId != FormattableString.Invariant($"kitsu:{kitsuId}")
-                    && payload.MetaId != (identity.Imdb?.Id ?? mappings.ImdbId)) return NotFound();
+            if (identity?.Mappings is not { } mappings || identity.Type is "SPECIAL" or "MOVIE") return NotFound();
+            if (payload.MetaId != kitsuParent
+                && (payload.MetaId != (identity.Imdb?.Id ?? mappings.ImdbId)
+                    || !matchesKitsuNumbering && !MatchesImdbNumbering(payload, kitsuNumber, identity.Imdb))) return NotFound();
             episode = await FindEpisodeAsync(userId, kitsuNumber, mappings, cancellationToken);
         }
         else
@@ -226,6 +231,12 @@ public sealed class AioStreamsWatchStateController(
 
         return await ReceiptMatchesAsync(userId, type, payload, number, cancellationToken) == true;
     }
+
+    private static bool MatchesImdbNumbering(PlaybackEvent payload, int kitsuNumber,
+        AioStreamsAnimeEnricher.AioStreamsImdbMapping? imdb)
+        => AioStreamsAnimeEnricher.GetImdbEpisodeMapping(imdb) is { } mapping
+            && (payload.Season is null || payload.Season == mapping.SeasonNumber)
+            && (payload.Episode ?? kitsuNumber) == (long)kitsuNumber + mapping.EpisodeOffset;
 
     private static bool MatchesImdbRoute(string type, string videoId, PlaybackEvent payload)
     {
