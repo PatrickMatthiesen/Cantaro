@@ -8,14 +8,13 @@ import {
   useEntryDetailState,
   useEpisodeCatalog,
   useFranchiseGraph,
-  useManualRemoteRefresh,
   useProviderAvailability,
   useProviderUnlinkAction,
-  useRemoteEntryRefresh,
   useScoreSaveAction,
   useStatusSaveAction,
   useTimedSnackbar,
 } from './media-entry-detail/useMediaEntryDetailState';
+import { useManualRemoteRefresh, useRemoteEntryRefresh } from './media-entry-detail/useMediaEntryProviderRefresh';
 import type { DetailTabId } from './media-entry-detail/mediaEntryDetailTypes';
 
 interface MediaEntryDetailPageProps {

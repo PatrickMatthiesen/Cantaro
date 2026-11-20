@@ -35,6 +35,15 @@ function toMediaImportDto(event: MediaLibraryImportEventDto): MediaImportDto {
   };
 }
 
+const importFailedMessage = 'The provider could not be refreshed. Try again when the provider is available.';
+const importReconnectMessage = 'Reconnect this provider in Settings to refresh its library.';
+
+function providerImportError(error: unknown): string {
+  return (error as { code?: string } | null)?.code === 'platform_reconnect_required'
+    ? importReconnectMessage
+    : importFailedMessage;
+}
+
 function useProviderStatus(providerId: string) {
   const [status, setStatus] = useState<MediaProviderAccountStatusDto | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
@@ -70,7 +79,6 @@ function useProviderStatus(providerId: string) {
 function useProviderImport(providerId: string, setError: (error: string | null) => void) {
   const [isImporting, setIsImporting] = useState(false);
   const [lastImport, setLastImport] = useState<MediaImportDto | null>(null);
-  const mountedRef = useRef(true);
   const importAbortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -98,13 +106,13 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
         }
 
         if (event.status === 'failed') {
-          setError('The provider could not be refreshed. Try again when the provider is available.');
+          setError(importFailedMessage);
           setIsImporting(false);
           return;
         }
 
         if (event.status === 'reconnect_required') {
-          setError('Reconnect this provider in Settings to refresh its library.');
+          setError(importReconnectMessage);
           setIsImporting(false);
         }
       },
@@ -129,13 +137,9 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
     };
   }, [providerId, setError]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      importAbortControllerRef.current?.abort();
-      importAbortControllerRef.current = null;
-    };
+  useEffect(() => () => {
+    importAbortControllerRef.current?.abort();
+    importAbortControllerRef.current = null;
   }, []);
 
   const handleImport = useCallback(async (): Promise<MediaImportRequestDto | null> => {
@@ -147,21 +151,19 @@ function useProviderImport(providerId: string, setError: (error: string | null) 
 
     try {
       const event = await mediaApi.importLibraryAndWait(providerId, abortController.signal);
-      if (!mountedRef.current) return null;
+      if (abortController.signal.aborted) return null;
       setLastImport(toMediaImportDto(event));
       writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
       return { providerId, importId: event.importId, status: event.status };
     } catch (error) {
-      if (mountedRef.current && !abortController.signal.aborted) {
-        setError((error as { code?: string } | null)?.code === 'platform_reconnect_required'
-          ? 'Reconnect this provider in Settings to refresh its library.'
-          : 'The provider could not be refreshed. Try again when the provider is available.');
+      if (!abortController.signal.aborted) {
+        setError(providerImportError(error));
       }
       return null;
     } finally {
       if (importAbortControllerRef.current === abortController) {
         importAbortControllerRef.current = null;
-        if (mountedRef.current) setIsImporting(false);
+        setIsImporting(false);
       }
     }
   }, [providerId, setError]);

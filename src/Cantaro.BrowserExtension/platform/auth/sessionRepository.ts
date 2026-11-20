@@ -1,15 +1,10 @@
 import { normalizeBaseUrl } from '../settings/extensionSettings';
+import { browserStorage, type ExtensionStorage } from '../storage/browserStorage';
 import type { ExtensionSession } from './extensionSession';
 
 export const LEGACY_SESSION_STORAGE_KEY = 'cantaro.session.v1';
 export const PERSISTENT_SESSION_STORAGE_KEY = 'cantaro.refresh-session.v2';
 export const ACCESS_SESSION_STORAGE_KEY = 'cantaro.access-session.v2';
-
-interface StorageArea {
-  get(key: string): Promise<Record<string, unknown>>;
-  set(items: Record<string, unknown>): Promise<void>;
-  remove(key: string): Promise<void>;
-}
 
 interface PersistentSession {
   baseUrl: string;
@@ -85,8 +80,8 @@ function parseLegacy(value: unknown): ExtensionSession | null {
 }
 
 export function createSessionRepository(
-  persistentStorage: StorageArea,
-  accessStorage: StorageArea,
+  persistentStorage: ExtensionStorage,
+  accessStorage: ExtensionStorage,
 ): SessionRepository {
   const repository: SessionRepository = {
     async read() {
@@ -152,18 +147,7 @@ export function createSessionRepository(
   return repository;
 }
 
-export const browserSessionRepository = createSessionRepository(
-  {
-    get: (key) => browser.storage.local.get(key),
-    set: (items) => browser.storage.local.set(items),
-    remove: (key) => browser.storage.local.remove(key),
-  },
-  {
-    get: (key) => browser.storage.session.get(key),
-    set: (items) => browser.storage.session.set(items),
-    remove: (key) => browser.storage.session.remove(key),
-  },
-);
+export const browserSessionRepository = createSessionRepository(browserStorage('local'), browserStorage('session'));
 
 /**
  * Watches only persistent session identity changes. Access-token rotation is

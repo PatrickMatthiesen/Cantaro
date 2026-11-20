@@ -781,6 +781,8 @@ public class MediaObservationMatchingServiceTests
             """);
         observation.ProgressHint = "16";
         await fixture.DbContext.SaveChangesAsync();
+        fixture.DbContext.ChangeTracker.Clear();
+        var trackedTitle = await fixture.DbContext.MediaTitles.SingleAsync(item => item.Id == correctTitle.Id);
 
         await fixture.Service.ProcessObservationAsync(observation.Id, CancellationToken.None);
 
@@ -789,6 +791,9 @@ public class MediaObservationMatchingServiceTests
             .SingleAsync(item => item.Id == observation.Id);
         Assert.Equal(MediaObservationStatuses.Matched, persisted.MatchStatus);
         Assert.Equal(correctTitle.Id, persisted.MediaTitleId);
+        Assert.Same(trackedTitle, persisted.MediaTitle);
+        Assert.Empty(fixture.DbContext.ChangeTracker.Entries<MediaEpisodeProviderIdentity>());
+        Assert.Empty(fixture.DbContext.ChangeTracker.Entries<MediaEpisode>());
         Assert.Equal(16, persisted.ResolvedProgress);
         var accepted = Assert.Single(persisted.Candidates);
         Assert.Equal(MediaObservationCandidateSources.ProviderEpisodeIdentityExact, accepted.CandidateSource);

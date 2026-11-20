@@ -1,6 +1,8 @@
+using System.Data;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
 using System.Text.Json;
 
 namespace Cantaro.Api.Services;
@@ -20,7 +22,7 @@ public class MediaEpisodeIdentityService(
         bool allowTrustedIdentityRemap = false)
     {
         if (observation.MatchStatus != MediaObservationStatuses.Matched
-            || observation.MediaTitleId is null
+            || observation.MediaTitleId is not { } mediaTitleId
             || !string.Equals(
                 observation.SiteIdentifier,
                 MediaObservationSiteIdentifiers.Crunchyroll,
@@ -29,6 +31,19 @@ public class MediaEpisodeIdentityService(
             return;
         }
 
+        await WithEpisodeWriteLockAsync(
+            mediaTitleId,
+            observation,
+            () => RecordMatchedObservationAsync(observation, cancellationToken, isUserConfirmed, allowTrustedIdentityRemap),
+            cancellationToken);
+    }
+
+    private async Task<int> RecordMatchedObservationAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken,
+        bool isUserConfirmed,
+        bool allowTrustedIdentityRemap)
+    {
         var now = DateTimeOffset.UtcNow;
         var hasIdentityConflict = false;
         var canTrustIdentities = isUserConfirmed
@@ -82,7 +97,7 @@ public class MediaEpisodeIdentityService(
                     observation.ProviderSeriesId,
                     observation.ProviderSeasonId,
                     observation.SeasonNumber,
-                    observation.MediaTitleId.Value,
+                    observation.MediaTitleId!.Value,
                     observation.EpisodeOffset ?? 0,
                     MediaProviderSeasonMappingSources.ProviderEpisodeIdentity,
                     1m,
@@ -90,6 +105,7 @@ public class MediaEpisodeIdentityService(
             }
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
+        return recordedDestinationCount;
     }
 
     public async Task<int> RecordCatalogObservationAsync(
@@ -97,12 +113,23 @@ public class MediaEpisodeIdentityService(
         CancellationToken cancellationToken)
     {
         if (observation.MatchStatus != MediaObservationStatuses.Matched
-            || observation.MediaTitleId is null
+            || observation.MediaTitleId is not { } mediaTitleId
             || !observation.IsCatalogObservation)
         {
             return 0;
         }
 
+        return await WithEpisodeWriteLockAsync(
+            mediaTitleId,
+            observation,
+            () => RecordMatchedCatalogObservationAsync(observation, cancellationToken),
+            cancellationToken);
+    }
+
+    private async Task<int> RecordMatchedCatalogObservationAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken)
+    {
         var hasIdentityConflict = false;
         var recordedCount = await RecordCatalogEpisodesAsync(
             observation,
@@ -120,6 +147,48 @@ public class MediaEpisodeIdentityService(
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
         return recordedCount;
+    }
+
+    private async Task<int> WithEpisodeWriteLockAsync(
+        Guid mediaTitleId,
+        MediaObservation observation,
+        Func<Task<int>> record,
+        CancellationToken cancellationToken)
+    {
+        var database = _dbContext.Database;
+        if (!database.IsNpgsql())
+        {
+            return await record();
+        }
+
+        var provider = observation.SiteIdentifier.Trim().ToLowerInvariant();
+        var lockKeys = observation.Episodes.Select(episode => (string?)episode.ProviderEpisodeId)
+            .Append(observation.SiteMediaId)
+            .Append(observation.NextEpisodeProviderId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => $"cantaro:episode-identity:{provider}:{NormalizeEpisodeId(provider, id!)}")
+            .Append($"cantaro:episode-title:{mediaTitleId}")
+            .ToArray();
+
+        // Treat recording as one attempt. Replaying an individual command after
+        // reconnect would lose the locks, and replaying the same change tracker
+        // could reuse stale identity and trust state.
+        var strategy = new NpgsqlRetryingExecutionStrategy(_dbContext, maxRetryCount: 0);
+        return await strategy.ExecuteAsync(async token =>
+        {
+            await using var transaction = await database.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
+            await database.ExecuteSqlAsync($"""
+                SELECT pg_advisory_xact_lock(lock_id)
+                FROM (
+                    SELECT DISTINCT hashtextextended(key, 0) AS lock_id
+                    FROM unnest({lockKeys}) AS episode_keys(key)
+                    ORDER BY lock_id
+                ) AS ordered_locks
+                """, token);
+            var result = await record();
+            await transaction.CommitAsync(token);
+            return result;
+        }, cancellationToken);
     }
 
     private async Task<bool> WasMatchedByExactProviderEpisodeIdentityAsync(
@@ -843,7 +912,8 @@ public class MediaEpisodeIdentityService(
         IEnumerable<MediaEpisodeProviderContent> contents)
     {
         return contents
-            .Where(content => !string.IsNullOrWhiteSpace(content.ProviderSeriesId))
+            .Where(content => !string.IsNullOrWhiteSpace(content.ProviderSeriesId)
+                && content.Variants.Any(variant => !variant.HasConflict))
             .GroupBy(content => new { content.Provider, content.ProviderSeriesId })
             .Select(group =>
             {
@@ -913,10 +983,10 @@ public class MediaEpisodeIdentityService(
         string? releaseTrack = null,
         Action? onConflict = null)
     {
-        var episode = await _dbContext.MediaEpisodes
-            .FirstOrDefaultAsync(item =>
-                item.MediaTitleId == mediaTitleId
-                && item.EpisodeNumber == canonicalEpisodeNumber,
+        var episode = _dbContext.MediaEpisodes.Local.FirstOrDefault(item =>
+                item.MediaTitleId == mediaTitleId && item.EpisodeNumber == canonicalEpisodeNumber)
+            ?? await _dbContext.MediaEpisodes.FirstOrDefaultAsync(item =>
+                item.MediaTitleId == mediaTitleId && item.EpisodeNumber == canonicalEpisodeNumber,
                 cancellationToken);
         if (episode is null)
         {
@@ -955,22 +1025,20 @@ public class MediaEpisodeIdentityService(
         }
 
         var normalizedProvider = provider.Trim().ToLowerInvariant();
-        var normalizedEpisodeId = string.Equals(
-            normalizedProvider,
-            MediaObservationSiteIdentifiers.Crunchyroll,
-            StringComparison.Ordinal)
-            ? providerEpisodeId.Trim().ToUpperInvariant()
-            : providerEpisodeId.Trim();
+        var normalizedEpisodeId = NormalizeEpisodeId(normalizedProvider, providerEpisodeId);
         var variantIdentity = MediaProviderVariantIdentities.Parse(normalizedProvider, normalizedEpisodeId);
         var normalizedReleaseTrack = MediaReleaseTrackPreferences.TryNormalize(releaseTrack, out var parsedReleaseTrack)
             ? parsedReleaseTrack
             : null;
-        var identity = await _dbContext.MediaEpisodeProviderIdentities
-            .Include(item => item.Content)
-            .FirstOrDefaultAsync(item =>
-                item.Provider == normalizedProvider
-                && item.ProviderEpisodeId == normalizedEpisodeId,
-                cancellationToken);
+        var identity = _dbContext.MediaEpisodeProviderIdentities.Local.FirstOrDefault(item =>
+                item.Content is not null
+                && item.Provider == normalizedProvider
+                && item.ProviderEpisodeId == normalizedEpisodeId)
+            ?? await _dbContext.MediaEpisodeProviderIdentities
+                .Include(item => item.Content)
+                .FirstOrDefaultAsync(item =>
+                    item.Provider == normalizedProvider && item.ProviderEpisodeId == normalizedEpisodeId,
+                    cancellationToken);
 
         if (identity is null)
         {
@@ -1038,7 +1106,19 @@ public class MediaEpisodeIdentityService(
                 normalizedEpisodeId,
                 content.MediaEpisodeId,
                 episode.Id);
-            content.MediaEpisodeId = episode.Id;
+            // Only this variant has new evidence. Keep the source row available
+            // for sibling variants, including ones being attached concurrently.
+            content = await FindOrCreateProviderContentAsync(
+                episode,
+                normalizedProvider,
+                content.ProviderContentKey,
+                FirstNonBlank(providerSeriesId, content.ProviderSeriesId),
+                FirstNonBlank(providerSeasonId, content.ProviderSeasonId),
+                providerSeasonNumber ?? content.ProviderSeasonNumber,
+                providerEpisodeNumber ?? content.ProviderEpisodeNumber,
+                providerSequenceNumber ?? content.ProviderSequenceNumber,
+                cancellationToken);
+            _dbContext.Entry(identity).Reference(item => item.Content).CurrentValue = content;
             identity.HasConflict = false;
         }
 
@@ -1088,11 +1168,7 @@ public class MediaEpisodeIdentityService(
         int? providerSequenceNumber,
         CancellationToken cancellationToken)
     {
-        var content = await _dbContext.MediaEpisodeProviderContents.FirstOrDefaultAsync(item =>
-            item.MediaEpisodeId == episode.Id
-            && item.Provider == provider
-            && item.ProviderContentKey == providerContentKey,
-            cancellationToken);
+        var content = await FindProviderContentAsync(episode.Id, provider, providerContentKey, cancellationToken);
         if (content is not null)
         {
             return content;
@@ -1114,6 +1190,28 @@ public class MediaEpisodeIdentityService(
         return content;
     }
 
+    private async Task<MediaEpisodeProviderContent?> FindProviderContentAsync(
+        Guid episodeId,
+        string provider,
+        string? providerContentKey,
+        CancellationToken cancellationToken)
+    {
+        var content = _dbContext.MediaEpisodeProviderContents.Local.FirstOrDefault(item =>
+                item.MediaEpisodeId == episodeId
+                && item.Provider == provider
+                && item.ProviderContentKey == providerContentKey)
+            ?? await _dbContext.MediaEpisodeProviderContents.FirstOrDefaultAsync(item =>
+                item.MediaEpisodeId == episodeId
+                && item.Provider == provider
+                && item.ProviderContentKey == providerContentKey,
+                cancellationToken);
+        return content is not null
+            && content.MediaEpisodeId == episodeId
+            && _dbContext.Entry(content).State != EntityState.Deleted
+                ? content
+                : null;
+    }
+
     private static ObservedProviderEpisodeDto ToObservedProviderEpisode(MediaObservationEpisode episode) => new()
     {
         ProviderEpisodeId = episode.ProviderEpisodeId,
@@ -1130,6 +1228,11 @@ public class MediaEpisodeIdentityService(
 
     private static string? TrimToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string NormalizeEpisodeId(string provider, string episodeId) =>
+        provider == MediaObservationSiteIdentifiers.Crunchyroll
+            ? episodeId.Trim().ToUpperInvariant()
+            : episodeId.Trim();
 
     private static string[] NormalizeLanguageCodes(IEnumerable<string>? values) =>
         values?

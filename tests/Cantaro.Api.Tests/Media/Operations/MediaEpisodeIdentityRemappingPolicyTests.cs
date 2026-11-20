@@ -3,7 +3,9 @@ using Cantaro.Api.Models;
 using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -33,6 +35,204 @@ public class MediaEpisodeIdentityRemappingPolicyTests
         Assert.False(identity.IsTrusted);
         Assert.False(identity.HasConflict);
         Assert.Equal(MediaObservationStatuses.Matched, catalogObservation.MatchStatus);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CatalogRemapReusesContentForAnotherLocaleOnTheCorrectEpisode(bool submitCatalog)
+    {
+        await using var fixture = await RemappingFixture.CreateAsync();
+        await AssertCatalogRemapReusesContentAsync(fixture, submitCatalog);
+    }
+
+    [PostgresFact]
+    public async Task CatalogRemapReusesContentForAnotherLocaleOnPostgres()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = new RemappingFixture(schema.Db);
+        await AssertCatalogRemapReusesContentAsync(fixture, submitCatalog: false);
+    }
+
+    [PostgresFact]
+    public async Task ConcurrentLocaleRemapsShareOneNewDestinationOnPostgres()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = new RemappingFixture(schema.Db);
+        var title = fixture.AddTitle("Title");
+        const string englishId = "GE00375194ENUS";
+        const string japaneseId = "GE00375194JAJP";
+        await fixture.Service.RecordObservationAsync(fixture.MakeWatchObservation(title.Id, 1, englishId), CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(fixture.MakeWatchObservation(title.Id, 2, japaneseId), CancellationToken.None);
+        fixture.Db.ChangeTracker.Clear();
+
+        await using var otherDb = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(schema.Db.Database.GetConnectionString(), options => options.EnableRetryOnFailure(maxRetryCount: 1))
+            .Options);
+        await using var other = new RemappingFixture(otherDb);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        await Task.WhenAll(
+            fixture.Service.RecordObservationAsync(fixture.MakeCatalogObservation(title.Id, englishId, 3), timeout.Token),
+            other.Service.RecordCatalogObservationAsync(other.MakeCatalogObservation(title.Id, japaneseId, 3), timeout.Token));
+        fixture.Db.ChangeTracker.Clear();
+
+        var episode = await fixture.Db.MediaEpisodes
+            .Include(item => item.ProviderContents)
+                .ThenInclude(item => item.Variants)
+            .SingleAsync(item => item.MediaTitleId == title.Id && item.EpisodeNumber == 3);
+        var content = Assert.Single(episode.ProviderContents);
+        Assert.Equal("GE00375194", content.ProviderContentKey);
+        Assert.Equal(new[] { englishId, japaneseId }, content.Variants.Select(item => item.ProviderEpisodeId).OrderBy(id => id));
+    }
+
+    [PostgresFact]
+    public async Task AutomaticRemapWaitsForConcurrentManualConfirmationAcrossTitles()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = new RemappingFixture(schema.Db);
+        var original = fixture.AddTitle("Original title");
+        var confirmed = fixture.AddTitle("Confirmed title");
+        var automatic = fixture.AddTitle("Automatic title");
+        await fixture.Service.RecordObservationAsync(fixture.MakeWatchObservation(original.Id, 1), CancellationToken.None);
+        fixture.Db.ChangeTracker.Clear();
+
+        var connection = schema.Db.Database.GetConnectionString();
+        var automaticConnection = new NpgsqlConnectionStringBuilder(connection)
+        {
+            ApplicationName = $"cantaro-remap-test-{Guid.NewGuid():N}",
+        };
+        var holdManualSave = new HoldSaveChanges();
+        var holdAutomaticSave = new HoldSaveChanges();
+        await using var manualDb = CreateRecordingContext(connection, holdManualSave);
+        await using var automaticDb = CreateRecordingContext(automaticConnection.ConnectionString, holdAutomaticSave);
+        await using var manualRecorder = new RemappingFixture(manualDb);
+        await using var automaticRecorder = new RemappingFixture(automaticDb);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var manualWrite = manualRecorder.Service.RecordObservationAsync(
+            fixture.MakeWatchObservation(confirmed.Id, 1), timeout.Token,
+            isUserConfirmed: true, allowTrustedIdentityRemap: true);
+        var automaticObservation = fixture.MakeCatalogObservation(automatic.Id);
+        Task<int>? automaticWrite = null;
+        try
+        {
+            await holdManualSave.Started.Task.WaitAsync(timeout.Token);
+            automaticWrite = automaticRecorder.Service.RecordCatalogObservationAsync(automaticObservation, timeout.Token);
+            await WaitForAdvisoryLockOrSaveAsync(connection!, automaticConnection.ApplicationName!, holdAutomaticSave, timeout.Token);
+            holdManualSave.Release.TrySetResult();
+            await manualWrite;
+        }
+        finally
+        {
+            holdManualSave.Release.TrySetResult();
+            holdAutomaticSave.Release.TrySetResult();
+            await Task.WhenAll(manualWrite, automaticWrite ?? Task.CompletedTask);
+        }
+
+        var identity = await fixture.Db.MediaEpisodeProviderIdentities
+            .Include(item => item.Content).ThenInclude(content => content!.MediaEpisode)
+            .SingleAsync();
+        Assert.Equal(confirmed.Id, identity.Content!.MediaEpisode!.MediaTitleId);
+        Assert.True(identity.IsTrusted);
+        Assert.True(identity.HasConflict);
+        Assert.Equal(MediaObservationStatuses.Ambiguous, automaticObservation.MatchStatus);
+    }
+
+    private static ApplicationDbContext CreateRecordingContext(string? connection, HoldSaveChanges interceptor) =>
+        new(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(connection, options => options.EnableRetryOnFailure(maxRetryCount: 1))
+            .AddInterceptors(interceptor)
+            .Options);
+
+    private static async Task WaitForAdvisoryLockOrSaveAsync(
+        string connectionString, string applicationName, HoldSaveChanges save, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT EXISTS (
+                SELECT FROM pg_stat_activity WHERE application_name = @app AND wait_event = 'advisory'
+            )
+            """, connection);
+        command.Parameters.AddWithValue("app", applicationName);
+        while (!save.Started.Task.IsCompleted && await command.ExecuteScalarAsync(cancellationToken) is false)
+        {
+            await Task.Delay(20, cancellationToken);
+        }
+    }
+
+    private sealed class HoldSaveChanges : SaveChangesInterceptor
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return result;
+        }
+    }
+
+    private static async Task AssertCatalogRemapReusesContentAsync(RemappingFixture fixture, bool submitCatalog)
+    {
+        var title = fixture.AddTitle("Title");
+        const string englishId = "GE00375194ENUS";
+        const string japaneseId = "GE00375194JAJP";
+
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeWatchObservation(title.Id, 1, englishId),
+            CancellationToken.None);
+        await fixture.Service.RecordObservationAsync(
+            fixture.MakeWatchObservation(title.Id, 2, japaneseId),
+            CancellationToken.None,
+            isUserConfirmed: true);
+        fixture.Db.ChangeTracker.Clear();
+
+        var observation = fixture.MakeCatalogObservation(title.Id, englishId, episodeNumber: 2);
+        if (submitCatalog)
+        {
+            await fixture.Service.RecordCatalogObservationAsync(observation, CancellationToken.None);
+        }
+        else
+        {
+            await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
+        }
+        await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
+        fixture.Db.ChangeTracker.Clear();
+
+        var content = await fixture.Db.MediaEpisodeProviderContents
+            .Include(item => item.Variants)
+            .Include(item => item.MediaEpisode)
+            .SingleAsync(item => item.Variants.Any());
+        Assert.Equal(2, content.MediaEpisode!.EpisodeNumber);
+        Assert.Equal("GE00375194", content.ProviderContentKey);
+        Assert.Equal(
+            new[] { englishId, japaneseId },
+            content.Variants.Select(item => item.ProviderEpisodeId).OrderBy(id => id));
+        Assert.True(content.Variants.Single(item => item.ProviderEpisodeId == japaneseId).IsTrusted);
+        Assert.Equal(MediaObservationStatuses.Matched, observation.MatchStatus);
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(title.Id, CancellationToken.None);
+        Assert.Empty(catalog!.Episodes.Single(item => item.EpisodeNumber == 1).Destinations);
+        Assert.Equal(2, catalog.Episodes.Single(item => item.EpisodeNumber == 2).Destinations.Count);
+    }
+
+    [Fact]
+    public async Task CatalogObservationGroupsNewLocalesForTheSameEpisodeBeforeSaving()
+    {
+        await using var fixture = await RemappingFixture.CreateAsync();
+        var title = fixture.AddTitle("Title");
+        var observation = fixture.MakeCatalogObservation(title.Id, "GE00375194ENUS");
+        observation.Episodes.Add(RemappingFixture.MakeCatalogEpisode("GE00375194JAJP", 1));
+
+        await fixture.Service.RecordCatalogObservationAsync(observation, CancellationToken.None);
+        fixture.Db.ChangeTracker.Clear();
+
+        var content = await fixture.Db.MediaEpisodeProviderContents.Include(item => item.Variants).SingleAsync();
+        Assert.Equal("GE00375194", content.ProviderContentKey);
+        Assert.Equal(2, content.Variants.Count);
     }
 
     [Fact]
@@ -194,13 +394,16 @@ public class MediaEpisodeIdentityRemappingPolicyTests
 
     private sealed class RemappingFixture : IAsyncDisposable
     {
-        private readonly SqliteConnection _connection;
+        private readonly SqliteConnection? _connection;
 
-        private RemappingFixture(SqliteConnection connection, ApplicationDbContext db, MediaEpisodeIdentityService service)
+        public RemappingFixture(ApplicationDbContext db, SqliteConnection? connection = null)
         {
             _connection = connection;
             Db = db;
-            Service = service;
+            Service = new MediaEpisodeIdentityService(
+                db,
+                new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance),
+                NullLogger<MediaEpisodeIdentityService>.Instance);
         }
 
         public ApplicationDbContext Db { get; }
@@ -215,16 +418,7 @@ public class MediaEpisodeIdentityRemappingPolicyTests
                     .UseSqlite(connection)
                     .Options);
             await db.Database.EnsureCreatedAsync();
-            var mappingService = new MediaProviderSeasonMappingService(
-                db,
-                NullLogger<MediaProviderSeasonMappingService>.Instance);
-            return new RemappingFixture(
-                connection,
-                db,
-                new MediaEpisodeIdentityService(
-                    db,
-                    mappingService,
-                    NullLogger<MediaEpisodeIdentityService>.Instance));
+            return new RemappingFixture(db, connection);
         }
 
         public MediaTitle AddTitle(string title)
@@ -247,7 +441,7 @@ public class MediaEpisodeIdentityRemappingPolicyTests
             return mediaTitle;
         }
 
-        public MediaObservation MakeWatchObservation(Guid titleId, int episodeNumber)
+        public MediaObservation MakeWatchObservation(Guid titleId, int episodeNumber, string providerEpisodeId = "SAMEEPISODE")
         {
             var now = DateTimeOffset.UtcNow;
             return new MediaObservation
@@ -255,8 +449,8 @@ public class MediaEpisodeIdentityRemappingPolicyTests
                 Id = Guid.NewGuid(),
                 UserId = 1,
                 SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
-                SiteMediaId = "SAMEEPISODE",
-                ObservedUrl = "https://www.crunchyroll.com/watch/SAMEEPISODE/episode-1",
+                SiteMediaId = providerEpisodeId,
+                ObservedUrl = $"https://www.crunchyroll.com/watch/{providerEpisodeId}/episode-{episodeNumber}",
                 ObservedTitle = "A title - Episode 1",
                 ObservedAt = now,
                 MatchStatus = MediaObservationStatuses.Matched,
@@ -271,27 +465,34 @@ public class MediaEpisodeIdentityRemappingPolicyTests
             };
         }
 
-        public MediaObservation MakeCatalogObservation(Guid titleId)
+        public MediaObservation MakeCatalogObservation(Guid titleId, string providerEpisodeId = "SAMEEPISODE", int episodeNumber = 1)
         {
-            var observation = MakeWatchObservation(titleId, 1);
+            var observation = MakeWatchObservation(titleId, episodeNumber, providerEpisodeId);
             observation.IsCatalogObservation = true;
+            observation.ResolvedProgress = null;
             observation.SiteMediaId = "catalog:SERIES:SEASON:1";
             observation.ObservedUrl = "https://www.crunchyroll.com/series/SERIES/show";
-            observation.Episodes.Add(new MediaObservationEpisode
-            {
-                Id = Guid.NewGuid(),
-                ProviderEpisodeId = "SAMEEPISODE",
-                ProviderUrl = "https://www.crunchyroll.com/watch/SAMEEPISODE/episode-1",
-                EpisodeNumber = 1,
-                EpisodeTitle = "Episode 1"
-            });
+            observation.Episodes.Add(MakeCatalogEpisode(providerEpisodeId, episodeNumber));
             return observation;
         }
 
+        public static MediaObservationEpisode MakeCatalogEpisode(string providerEpisodeId, int episodeNumber) =>
+            new()
+            {
+                Id = Guid.NewGuid(),
+                ProviderEpisodeId = providerEpisodeId,
+                ProviderUrl = $"https://www.crunchyroll.com/watch/{providerEpisodeId}/episode-{episodeNumber}",
+                EpisodeNumber = episodeNumber,
+                EpisodeTitle = $"Episode {episodeNumber}"
+            };
+
         public async ValueTask DisposeAsync()
         {
-            await Db.DisposeAsync();
-            await _connection.DisposeAsync();
+            if (_connection is not null)
+            {
+                await Db.DisposeAsync();
+                await _connection.DisposeAsync();
+            }
         }
     }
 }

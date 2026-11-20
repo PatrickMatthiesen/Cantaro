@@ -132,17 +132,21 @@ public class MediaObservationMatchingService(
             ? observation.SiteMediaId.Trim().ToUpperInvariant()
             : observation.SiteMediaId.Trim();
         var identity = await _dbContext.MediaEpisodeProviderIdentities
+            .AsNoTracking()
             .Include(item => item.Content)
                 .ThenInclude(content => content!.MediaEpisode)
-                .ThenInclude(episode => episode!.MediaTitle)
             .FirstOrDefaultAsync(item =>
                 item.Provider == provider
                 && item.ProviderEpisodeId == providerEpisodeId,
                 cancellationToken);
         var episode = identity?.Content?.MediaEpisode;
-        var title = episode?.MediaTitle;
-        if (identity is null || episode is null || title is null
-            || !CanUseEpisodeIdentityForMatching(identity, observation))
+        if (identity is null || episode is null || !CanUseEpisodeIdentityForMatching(identity, observation))
+        {
+            return false;
+        }
+
+        var title = await _dbContext.MediaTitles.FindAsync([episode.MediaTitleId], cancellationToken);
+        if (title is null)
         {
             return false;
         }

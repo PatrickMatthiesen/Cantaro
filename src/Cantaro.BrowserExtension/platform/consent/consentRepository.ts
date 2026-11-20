@@ -1,4 +1,5 @@
 import { normalizeBaseUrl } from '../settings/extensionSettings';
+import { browserStorage, type ExtensionStorage } from '../storage/browserStorage';
 
 export const CONSENT_STORAGE_KEY = 'cantaro.consent.v2';
 export const LEGACY_CONSENT_STORAGE_KEY = 'cantaro.consent.v1';
@@ -15,12 +16,6 @@ export interface StoredConsent extends ConsentChoices {
   baseUrl: string;
   userEmail: string;
   consentedAt: string;
-}
-
-interface StorageArea {
-  get(key: string | string[]): Promise<Record<string, unknown>>;
-  set(items: Record<string, unknown>): Promise<void>;
-  remove(key: string): Promise<void>;
 }
 
 export interface ConsentRepository {
@@ -72,7 +67,7 @@ function parseConsent(value: unknown): StoredConsent | null {
   };
 }
 
-export function createConsentRepository(storage: StorageArea): ConsentRepository {
+export function createConsentRepository(storage: ExtensionStorage): ConsentRepository {
   return {
     async read() {
       const stored = await storage.get([CONSENT_STORAGE_KEY, LEGACY_CONSENT_STORAGE_KEY]);
@@ -100,8 +95,4 @@ export function createConsentRepository(storage: StorageArea): ConsentRepository
   };
 }
 
-export const browserConsentRepository = createConsentRepository({
-  get: key => browser.storage.local.get(key),
-  set: items => browser.storage.local.set(items),
-  remove: key => browser.storage.local.remove(key),
-});
+export const browserConsentRepository = createConsentRepository(browserStorage('local'));
