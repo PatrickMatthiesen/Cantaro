@@ -23,6 +23,24 @@ namespace Cantaro.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsPairing", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(43)
+                        .HasColumnType("character varying(43)");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("AioStreamsPairings", (string)null);
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.AioStreamsWatchEvent", b =>
                 {
                     b.Property<long>("Id")
@@ -45,7 +63,7 @@ namespace Cantaro.Api.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
-                    b.Property<Guid>("MediaEpisodeId")
+                    b.Property<Guid?>("MediaEpisodeId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("MediaLibraryEntryId")
@@ -2592,13 +2610,21 @@ namespace Cantaro.Api.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsPairing", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.AioStreamsWatchEvent", b =>
                 {
                     b.HasOne("Cantaro.Api.Models.MediaEpisode", null)
                         .WithMany()
                         .HasForeignKey("MediaEpisodeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", null)
                         .WithMany()

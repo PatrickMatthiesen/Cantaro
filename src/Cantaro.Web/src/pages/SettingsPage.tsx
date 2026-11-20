@@ -10,6 +10,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { AvatarCropDialog } from '../components/AvatarCropDialog';
 import { GoogleAccountPanel } from '../components/GoogleAccountPanel';
 import { DeleteAccountPanel } from '../components/DeleteAccountPanel';
+import { AioStreamsPairingPanel } from '../components/AioStreamsPairingPanel';
+import { ConnectionCard } from '../components/ConnectionCard';
 import { useSignInMethods } from '../hooks/useSignInMethods';
 import { useGoogleAccountStatus } from '../hooks/useGoogleAccountStatus';
 import { isWatchProviderVisible, setWatchProviderVisible, watchProviderOptions } from '../settings/watchProviderVisibility';
@@ -47,7 +49,7 @@ function SettingsSidebar() {
       footer={(
         <div className="border-t border-border-subtle pt-5 text-sm leading-6 text-content-muted">
           <Shield className="mb-3 h-5 w-5 text-personal-accent-strong" />
-        Service credentials stay encrypted on the Cantaro server and are never returned to this page.
+        Provider credentials stay encrypted on the Cantaro server.
         </div>
       )}
     />
@@ -167,43 +169,6 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
   );
 }
 
-type ConnectionState = 'connect' | 'connected' | 'reconnect';
-
-const connectionLabels: Record<ConnectionState, string> = {
-  connect: 'Connect',
-  connected: 'Connected',
-  reconnect: 'Reconnect',
-};
-
-function getConnectionState(status?: PlatformAccountStatus | MediaProviderAccountStatusDto): ConnectionState {
-  if (!status) return 'connect';
-  if (status.needsReconnect || status.connectionState === 'reconnect_required') return 'reconnect';
-  return status.isConnected ? 'connected' : 'connect';
-}
-
-function ConnectionButton({ state, busy, onAction }: { state: ConnectionState; busy: boolean; onAction: () => void }) {
-  const color = state === 'connected'
-    ? 'bg-success-surface text-success-content hover:bg-danger-surface hover:text-danger-content'
-    : 'bg-personal-accent text-personal-accent-content hover:bg-personal-accent-hover';
-  return (
-    <button type="button" disabled={busy} onClick={onAction} className={`min-h-9 px-4 text-xs font-bold transition-colors ${color}`}>
-      {busy ? 'Working…' : connectionLabels[state]}
-    </button>
-  );
-}
-
-function ConnectionCard({ name, detail, icon, implemented, state, busy, onAction }: { name: string; detail: string; icon: ReactNode; implemented: boolean; state: ConnectionState; busy: boolean; onAction: () => void }) {
-  return (
-    <article className="flex items-center gap-4 border-t border-border-subtle py-4">
-      {icon}
-      <span className="min-w-0 flex-1"><strong className="block text-sm text-content">{name}</strong><span className="block truncate text-xs text-content-muted">{implemented ? detail : 'Coming later'}</span></span>
-      {implemented
-        ? <ConnectionButton state={state} busy={busy} onAction={onAction} />
-        : <span className="bg-surface-subtle px-3 py-1.5 text-[10px] font-bold text-content-muted">Coming soon</span>}
-    </article>
-  );
-}
-
 function MusicConnectionCard({ item, status, busyKey, onAction }: { item: (typeof platformCatalog)[number]; status?: PlatformAccountStatus; busyKey: string | null; onAction: () => void }) {
   const connected = Boolean(status?.isConnected);
   const detail = status?.displayName || (connected ? 'Account connected' : 'Music platform');
@@ -259,10 +224,11 @@ function ConnectionsSection() {
   };
 
   return (
-    <SettingsSection id="connections" eyebrow="Your constellation" title="Connected services" description="Cantaro keeps provider credentials server-side while this page gives you one calm place to manage them.">
+    <SettingsSection id="connections" eyebrow="Your constellation" title="Connected services">
       <div className="grid gap-x-8 lg:grid-cols-2">
         {platformCatalog.map(item => <MusicConnectionCard key={item.id} item={item} status={music[item.id]} busyKey={busy} onAction={() => void handleMusicAction(item)} />)}
         {mediaProviderCatalog.map(item => <MediaConnectionCard key={item.id} item={item} status={media[item.id]} busyKey={busy} onAction={() => void handleMediaAction(item)} />)}
+        <AioStreamsPairingPanel />
       </div>
     </SettingsSection>
   );

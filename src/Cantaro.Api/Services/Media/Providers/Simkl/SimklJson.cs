@@ -157,7 +157,10 @@ internal static class SimklJson
             ExternalUrl = ExternalUrl(type, id),
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
-            CrossReferences = CrossReferences(type, ids), StartYear = Int(media, "year"),
+            CrossReferences = type is "tv" or "movie" && stremioTargets.FirstOrDefault() is { } target
+                ? [new() { ProviderId = "imdb", ProviderMediaId = target.Id, ExternalUrl = $"https://www.imdb.com/title/{target.Id}/" }]
+                : CrossReferences(type, ids),
+            StartYear = Int(media, "year"),
             StremioTargets = stremioTargets,
             StremioTarget = stremioTargets.FirstOrDefault(),
             EpisodeCount = total, TotalKnownCount = total,

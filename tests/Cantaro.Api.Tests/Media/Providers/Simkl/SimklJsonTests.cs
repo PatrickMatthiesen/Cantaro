@@ -150,6 +150,17 @@ public sealed class SimklJsonTests
     }
 
     [Theory]
+    [InlineData("tv")]
+    [InlineData("movie")]
+    public void DetailsExposeImdbAsACatalogCrossReference(string type)
+    {
+        using var json = JsonDocument.Parse("""{"title":"Example","ids":{"imdb":"tt0213338"}}""");
+        var reference = Assert.Single(SimklJson.MapDetails(json.RootElement, type, 123).CrossReferences);
+        Assert.Equal("imdb", reference.ProviderId);
+        Assert.Equal("tt0213338", reference.ProviderMediaId);
+    }
+
+    [Theory]
     [InlineData("{}")]
     [InlineData("{\"imdb\":\"tt123?autoplay=1\"}")]
     [InlineData("{\"imdb\":\"https://imdb.com/title/tt123\"}")]

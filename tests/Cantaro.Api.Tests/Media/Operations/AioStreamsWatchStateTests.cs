@@ -2,12 +2,15 @@ using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Cantaro.Api.Configuration;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
 using Cantaro.Api.Models;
 using Cantaro.Api.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.WebUtilities;
@@ -16,6 +19,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -42,7 +46,7 @@ public sealed class AioStreamsWatchStateTests
         var manifest = await manifestResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, manifest.GetProperty("watchState").GetProperty("version").GetInt32());
         Assert.False(manifest.GetProperty("watchState").TryGetProperty("viewers", out _));
-        Assert.Equal(new[] { "anime", "series" }, manifest.GetProperty("types").Deserialize<string[]>());
+        Assert.Equal(new[] { "anime", "series", "movie" }, manifest.GetProperty("types").Deserialize<string[]>());
 
         var initial = await fixture.PullAsync();
         var initialVersion = initial.GetProperty("version").GetString();
@@ -93,6 +97,106 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(VideoId, Assert.Single(rewatch.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
         await fixture.ExpectPushAsync(Event("rewatch-finish", "stop", At + 5, played: true), HttpStatusCode.NoContent);
         Assert.Empty((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+    }
+
+    [PostgresFact]
+    public async Task SignedInUsersManageTheirOwnTrackerCredentials()
+    {
+        const string pairingPath = "/api/media/aiostreams-pairing";
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        schema.Db.Users.Add(new User { Id = 2, UserName = "other-tracker-owner" });
+        await schema.Db.SaveChangesAsync();
+
+        async Task<HttpResponseMessage> ManageAsync(HttpMethod method, int account)
+        {
+            using var request = new HttpRequestMessage(method, pairingPath);
+            request.Headers.Add("X-Fixture-User", account.ToString());
+            return await fixture.Client.SendAsync(request);
+        }
+
+        async Task<string> PairAsync(int account)
+        {
+            using var response = await ManageAsync(HttpMethod.Put, account);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("manifestPath").GetString()!;
+        }
+
+        using var unauthorized = await fixture.Client.PutAsync(pairingPath, null);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        var first = await PairAsync(1);
+        var second = await PairAsync(2);
+        var firstPush = first.Replace("/manifest.json", "/watch_state/push/anime/kitsu%3A1%3A1.json");
+        using var push = await fixture.Client.PostAsJsonAsync(firstPush, Event("paired", "stop", At, 1_000));
+        Assert.Equal(HttpStatusCode.NoContent, push.StatusCode);
+        var secondPull = await fixture.Client.GetFromJsonAsync<JsonElement>(second.Replace("/manifest.json", "/watch_state/pull.json"));
+        Assert.Empty(secondPull.GetProperty("items").EnumerateArray());
+
+        var rotated = await PairAsync(1);
+        using var replaced = await fixture.Client.GetAsync(first);
+        Assert.Equal(HttpStatusCode.Unauthorized, replaced.StatusCode);
+        using var active = await fixture.Client.GetAsync(rotated);
+        Assert.Equal(HttpStatusCode.OK, active.StatusCode);
+        using var disconnected = await ManageAsync(HttpMethod.Delete, 1);
+        Assert.Equal(HttpStatusCode.NoContent, disconnected.StatusCode);
+        using var revoked = await fixture.Client.GetAsync(rotated);
+        Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
+        using var stillActive = await fixture.Client.GetAsync(second);
+        Assert.Equal(HttpStatusCode.OK, stillActive.StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task TracksImdbMoviesAndTvEpisodesThroughVerifiedLibraryLinks()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var movie = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Fixture movie", MediaKind = MediaKinds.Movie,
+            PrimaryProgressDimension = MediaProgressDimensions.CompletionOnly,
+            ReleaseStatusDimension = MediaProgressDimensions.CompletionOnly
+        };
+        var series = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Fixture series", MediaKind = MediaKinds.Series,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode, ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        AddLink(schema.Db, movie, "imdb", "tt1000001");
+        AddLink(schema.Db, series, "imdb", "tt1000002");
+        AddLink(schema.Db, series, "simkl", "tv:1000002");
+        var episode = new MediaEpisode { Id = Guid.NewGuid(), MediaTitle = series, EpisodeNumber = 1 };
+        schema.Db.Add(new MediaEpisodeProviderContent
+        {
+            Id = Guid.NewGuid(), MediaEpisode = episode, Provider = "simkl", ProviderSeriesId = "tv:1000002",
+            ProviderSeasonNumber = 2, ProviderEpisodeNumber = 3
+        });
+        foreach (var title in new[] { movie, series })
+            schema.Db.Add(new MediaLibraryEntry { Id = Guid.NewGuid(), UserId = 1, MediaTitle = title, Status = MediaLibraryStatuses.Current });
+        await schema.Db.SaveChangesAsync();
+
+        const string moviePath = Route + "/watch_state/push/movie/tt1000001.json";
+        const string seriesPath = Route + "/watch_state/push/series/tt1000002%3A2%3A3.json";
+        var movieStop = Event("imdb-movie", "stop", At, 2_000) with
+            { MetaId = "tt1000001", VideoId = "tt1000001", Scope = "movie", Season = null, Episode = null };
+        var tvStop = Event("imdb-tv", "stop", At, 3_000) with
+            { MetaId = "tt1000002", VideoId = "tt1000002:2:3", Season = 2, Episode = 3 };
+        await fixture.ExpectPushAsync(tvStop with { Episode = 4 }, HttpStatusCode.NotFound, seriesPath);
+        await fixture.ExpectPushAsync(movieStop, HttpStatusCode.NoContent, moviePath);
+        await fixture.ExpectPushAsync(tvStop, HttpStatusCode.NoContent, seriesPath);
+        Assert.Equal(2, (await fixture.PullAsync()).GetProperty("items").GetArrayLength());
+
+        await fixture.ExpectPushAsync(movieStop with { Id = "movie-played", Event = "played", At = At + 1 }, HttpStatusCode.NoContent, moviePath);
+        await fixture.ExpectPushAsync(tvStop with { Id = "tv-played", Event = "played", At = At + 1 }, HttpStatusCode.NoContent, seriesPath);
+        await fixture.ExpectPushAsync(movieStop, HttpStatusCode.NoContent, moviePath);
+        Assert.Equal(4, await schema.Db.AioStreamsWatchEvents.CountAsync());
+        var completed = await fixture.PullAsync();
+        Assert.Empty(completed.GetProperty("items").EnumerateArray());
+        Assert.Equal(new[] { "tt1000001" }, completed.GetProperty("watched").GetProperty("movies").Deserialize<string[]>());
+        Assert.Equal(new[] { "tt1000002:2:3" }, completed.GetProperty("watched").GetProperty("episodes").Deserialize<string[]>());
+        Assert.Equal(MediaLibraryStatuses.Completed, await schema.Db.MediaLibraryEntries.Where(e => e.MediaTitleId == movie.Id)
+            .Select(e => e.Status).SingleAsync());
+        Assert.Equal(1, await schema.Db.MediaLibraryEntries.Where(e => e.MediaTitleId == series.Id)
+            .Select(e => e.ProgressEpisodes).SingleAsync());
     }
 
     [PostgresFact]
@@ -308,6 +412,10 @@ public sealed class AioStreamsWatchStateTests
             builder.Services.AddHttpClient(AioStreamsAnimeEnricher.HttpClientName).ConfigurePrimaryHttpMessageHandler(
                 () => new AnimeApiFixture(animeType, imdbHint));
             builder.Services.AddSingleton<AioStreamsAnimeEnricher>();
+            builder.Services.AddIdentityCore<User>().AddEntityFrameworkStores<ApplicationDbContext>();
+            builder.Services.AddAuthentication("Fixture")
+                .AddScheme<AuthenticationSchemeOptions, FixtureAuthentication>("Fixture", _ => { });
+            builder.Services.AddAuthorization();
             builder.Services.AddControllers().AddApplicationPart(typeof(AioStreamsWatchStateController).Assembly);
 
             var app = builder.Build();
@@ -336,6 +444,18 @@ public sealed class AioStreamsWatchStateTests
             Client.Dispose();
             await app.StopAsync();
             await app.DisposeAsync();
+        }
+    }
+
+    private sealed class FixtureAuthentication(IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            if (!Request.Headers.TryGetValue("X-Fixture-User", out var id))
+                return Task.FromResult(AuthenticateResult.NoResult());
+            var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, id.ToString())], Scheme.Name);
+            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
         }
     }
 

@@ -4,7 +4,7 @@ internal sealed class AioStreamsWatchEvent
 {
     public long Id { get; set; }
     public Guid MediaLibraryEntryId { get; set; }
-    public Guid MediaEpisodeId { get; set; }
+    public Guid? MediaEpisodeId { get; set; }
     public required string EventId { get; set; }
     public int? UserId { get; set; }
     public string? Type { get; set; }

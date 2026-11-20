@@ -812,6 +812,15 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<AioStreamsPairing>(entity =>
+        {
+            entity.ToTable("AioStreamsPairings");
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.TokenHash).HasMaxLength(43);
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId);
+        });
+
         modelBuilder.Entity<AioStreamsWatchEvent>(entity =>
         {
             entity.ToTable("AioStreamsWatchEvents");
@@ -823,7 +832,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => new { e.MediaLibraryEntryId, e.MediaEpisodeId, e.EventId }).IsUnique();
             entity.HasIndex(e => new { e.MediaLibraryEntryId, e.MediaEpisodeId, e.At, e.Id });
             entity.HasOne<MediaLibraryEntry>().WithMany().HasForeignKey(e => e.MediaLibraryEntryId);
-            entity.HasOne<MediaEpisode>().WithMany().HasForeignKey(e => e.MediaEpisodeId);
+            entity.HasOne<MediaEpisode>().WithMany().HasForeignKey(e => e.MediaEpisodeId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MediaProviderLibrarySnapshot>(entity =>
