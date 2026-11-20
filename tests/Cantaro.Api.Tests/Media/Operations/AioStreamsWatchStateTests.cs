@@ -257,7 +257,15 @@ public sealed class AioStreamsWatchStateTests
         await fixture.ExpectPushAsync(pause with { Episode = 11 }, HttpStatusCode.NotFound, path);
         Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
 
-        await fixture.ExpectPushAsync(kitsuParent with { Id = "local", Season = null, Episode = null }, HttpStatusCode.NoContent, path);
+        var local = kitsuParent with { Id = "local", Season = null, Episode = null };
+        await fixture.ExpectPushAsync(local, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(local, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(local with { Episode = 2 }, HttpStatusCode.NotFound, path);
+        var localItem = Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+        Assert.Equal("kitsu:1:2", localItem.GetProperty("videoId").GetString());
+        Assert.False(localItem.TryGetProperty("season", out _));
+        Assert.False(localItem.TryGetProperty("episode", out _));
+
         await fixture.ExpectPushAsync(pause with { Id = "mixed-local" }, HttpStatusCode.NoContent, path);
         var mapped = pause with { At = At + 1, Season = 2, Episode = 11 };
         await fixture.ExpectPushAsync(mapped, HttpStatusCode.NoContent, path);

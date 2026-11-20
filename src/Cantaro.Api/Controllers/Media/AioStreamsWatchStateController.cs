@@ -59,7 +59,6 @@ public sealed class AioStreamsWatchStateController(
         if (payload.VideoId != videoId) return NotFound();
         var movie = type == "movie";
         var kitsu = TryParseKitsuEpisode(videoId, out var kitsuId, out var kitsuNumber);
-        int? number = kitsu ? kitsuNumber : payload.Episode;
         if (kitsu ? type is not ("anime" or "series")
             : !MatchesImdbRoute(type, videoId, payload)) return NotFound();
 
@@ -76,7 +75,7 @@ public sealed class AioStreamsWatchStateController(
         if (kitsu && payload.MetaId == kitsuParent && !matchesKitsuNumbering) return NotFound();
 
         // An acknowledged retry can be delivered while the metadata API is offline.
-        if (await ReceiptMatchesAsync(userId, type, payload, number, cancellationToken) is { } matches)
+        if (await ReceiptMatchesAsync(userId, type, payload, cancellationToken) is { } matches)
             return matches ? NoContent() : NotFound();
 
         BoundEpisode? episode;
@@ -119,15 +118,15 @@ public sealed class AioStreamsWatchStateController(
                     ("MediaLibraryEntryId", "MediaEpisodeId", "EventId", "UserId",
                      "Type", "MetaId", "VideoId", "Season", "Episode", "At", "PositionMs", "DurationMs", "Played")
                 VALUES ({episode.EntryId}, {episode.Id}, {payload.Id}, {userId},
-                    {type}, {payload.MetaId}, {videoId}, {payload.Season}, {payload.Episode ?? number}, {payload.At},
+                    {type}, {payload.MetaId}, {videoId}, {payload.Season}, {payload.Episode}, {payload.At},
                     {payload.PositionMs}, {payload.DurationMs}, {played})
                 ON CONFLICT DO NOTHING
                 """, cancellationToken);
 
             var accepted = inserted > 0;
             if (!accepted)
-                accepted = await ReceiptMatchesAsync(userId, type, payload, number, cancellationToken)
-                    ?? await AdoptLegacyReceiptAsync(transaction, episode, userId, type, payload, number, cancellationToken);
+                accepted = await ReceiptMatchesAsync(userId, type, payload, cancellationToken)
+                    ?? await AdoptLegacyReceiptAsync(transaction, episode, userId, type, payload, cancellationToken);
 
             var progressChanged = inserted > 0 && played
                 && (movie ? await CompleteMovieAsync(episode.EntryId, cancellationToken)
@@ -199,15 +198,15 @@ public sealed class AioStreamsWatchStateController(
         return token.Count == 1 && token[0] is { Length: 43 } value ? AioStreamsWatchState.HashToken(value) : null;
     }
 
-    private Task<bool?> ReceiptMatchesAsync(int userId, string type, PlaybackEvent payload, int? number,
+    private Task<bool?> ReceiptMatchesAsync(int userId, string type, PlaybackEvent payload,
         CancellationToken cancellationToken)
         => db.AioStreamsWatchEvents.Where(e => e.UserId == userId && e.EventId == payload.Id)
             .Select(e => (bool?)(e.Type == type && e.MetaId == payload.MetaId && e.VideoId == payload.VideoId
-                && e.Season == payload.Season && e.Episode == (payload.Episode ?? number)))
+                && e.Season == payload.Season && e.Episode == payload.Episode))
             .SingleOrDefaultAsync(cancellationToken);
 
     private async Task<bool> AdoptLegacyReceiptAsync(IDbContextTransaction transaction, BoundEpisode episode,
-        int userId, string type, PlaybackEvent payload, int? number, CancellationToken cancellationToken)
+        int userId, string type, PlaybackEvent payload, CancellationToken cancellationToken)
     {
         // A replay supplies routing for a legacy receipt without reapplying its progress.
         const string savepoint = "before_watch_receipt_upgrade";
@@ -219,7 +218,7 @@ public sealed class AioStreamsWatchStateController(
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(e => e.UserId, userId).SetProperty(e => e.Type, type)
                     .SetProperty(e => e.MetaId, payload.MetaId).SetProperty(e => e.VideoId, payload.VideoId)
-                    .SetProperty(e => e.Season, payload.Season).SetProperty(e => e.Episode, payload.Episode ?? number),
+                    .SetProperty(e => e.Season, payload.Season).SetProperty(e => e.Episode, payload.Episode),
                     cancellationToken);
             if (updated > 0) return true;
         }
@@ -229,7 +228,7 @@ public sealed class AioStreamsWatchStateController(
             await transaction.RollbackToSavepointAsync(savepoint, cancellationToken);
         }
 
-        return await ReceiptMatchesAsync(userId, type, payload, number, cancellationToken) == true;
+        return await ReceiptMatchesAsync(userId, type, payload, cancellationToken) == true;
     }
 
     private static bool MatchesImdbNumbering(PlaybackEvent payload, int kitsuNumber,
@@ -353,7 +352,11 @@ public sealed class AioStreamsWatchStateController(
     private sealed record BoundEpisode(Guid EntryId, Guid? Id);
 
     private sealed record ResumeItem(
-        string Type, string MetaId, string VideoId, int? Season, int? Episode, long At, long PositionMs,
+        string Type, string MetaId, string VideoId,
+        // AIOStreams falls back to the video ID for omitted coordinates.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Season,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Episode,
+        long At, long PositionMs,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? DurationMs)
     {
         public bool Played => false;
