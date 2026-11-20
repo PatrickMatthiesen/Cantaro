@@ -428,6 +428,7 @@ public sealed class AioStreamsWatchStateTests
             builder.Services.AddControllers().AddApplicationPart(typeof(AioStreamsWatchStateController).Assembly);
 
             var app = builder.Build();
+            app.UseRouting();
             app.UseCors();
             app.MapControllers();
             await app.StartAsync();

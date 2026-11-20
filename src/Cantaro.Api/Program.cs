@@ -369,7 +369,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseForwardedHeaders();
 app.UseMiddleware<SecurityHeadersMiddleware>();
-app.UseCors();
 app.UseHttpsRedirection();
 var hasWebRoot = Directory.Exists(app.Environment.WebRootPath);
 if (hasWebRoot)
@@ -379,6 +378,7 @@ if (hasWebRoot)
 }
 
 app.UseRouting();
+app.UseCors();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseMiddleware<AuthenticationModeGuardMiddleware>();
