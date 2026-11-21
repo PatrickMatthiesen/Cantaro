@@ -187,7 +187,35 @@ public sealed class MediaProviderSeasonMappingService(
         return await CompleteCoordinatesAsync(provider, episodeId, episode, observed, cancellationToken);
     }
 
-    internal async Task<ProviderEpisodeCoordinates> CompleteCoordinatesAsync(
+    internal async Task<(ProviderEpisodeCoordinates Inferred, ProviderEpisodeCoordinates Effective)?> GetSuccessorCoordinatesAsync(
+        MediaObservation observation, CancellationToken cancellationToken)
+    {
+        var provider = observation.SiteIdentifier;
+        var nextId = NormalizeId(observation.NextEpisodeProviderId);
+        if (observation.IsCatalogObservation || !IsSupported(provider)
+            || observation.EpisodeNumber is not > 0
+            || observation.NextEpisodeNumber != (long)observation.EpisodeNumber.Value + 1
+            || nextId == NormalizeId(observation.SiteMediaId)
+            || !MediaDestinationUrlPolicy.TryNormalizePath(provider, observation.NextEpisodeUrl, nextId, out _))
+        {
+            return null;
+        }
+
+        var current = await GetCoordinatesAsync(observation, cancellationToken);
+        if (current.ConflictsWithEpisode(GetObservedCoordinates(observation)))
+        {
+            return null;
+        }
+
+        var successor = await dbContext.MediaProviderEpisodes.AsNoTracking().SingleOrDefaultAsync(
+            row => row.Provider == provider && row.ProviderEpisodeId == nextId, cancellationToken);
+        var expected = current with { EpisodeNumber = observation.NextEpisodeNumber };
+        var next = await CompleteCoordinatesAsync(provider, nextId, successor,
+            new(null, null, null, null, null), cancellationToken);
+        return next.ConflictsWithEpisode(expected) ? null : (expected, FillMissing(next, expected));
+    }
+
+    private async Task<ProviderEpisodeCoordinates> CompleteCoordinatesAsync(
         string provider, string? episodeId, MediaProviderEpisode? episode, ProviderEpisodeCoordinates observed,
         CancellationToken cancellationToken)
     {
@@ -208,14 +236,74 @@ public sealed class MediaProviderSeasonMappingService(
     private static ProviderEpisodeCoordinates Coordinates(MediaProviderEpisode row) =>
         new(row.ProviderSeriesId, row.ProviderSeasonId, row.ProviderSeasonNumber, row.ProviderEpisodeNumber, row.NormalizedSeasonTitle);
 
+    internal async Task<Dictionary<string, ProviderEpisodeCoordinates>> GetAutomaticDirectCoordinatesAsync(
+        string provider, string episodeId, string? contentKey, DateTimeOffset observedAt,
+        CancellationToken cancellationToken)
+    {
+        var raw = dbContext.MediaProviderEpisodes.AsNoTracking().Where(row => row.Provider == provider);
+        var mappings = dbContext.MediaProviderEpisodeMappings.AsNoTracking()
+            .Where(row => row.Provider == provider && row.MappingSource == MediaProviderSeasonMappingSources.Automatic);
+        var candidates = await (
+            from episode in raw
+            join mapping in mappings on episode.ProviderEpisodeId equals mapping.ProviderEpisodeId
+            where episode.ProviderEpisodeId == episodeId
+                || (contentKey != null && episode.ContentKey == contentKey
+                    && (episode.ProviderSeriesId == null || episode.ProviderSeasonId == null
+                        || episode.ProviderEpisodeNumber == null))
+            select new { Episode = episode, mapping.LastObservedAt })
+            .ToListAsync(cancellationToken);
+
+        return await GetEffectiveCoordinatesAsync(provider, candidates
+            .Where(row => !HasNewerEvidence(row.LastObservedAt, observedAt))
+            .Select(row => row.Episode).ToList(), cancellationToken);
+    }
+
+    internal async Task RemoveContradictedDirectMappingsAsync(string provider,
+        IReadOnlyDictionary<string, ProviderEpisodeCoordinates> priorCoordinates, CancellationToken cancellationToken)
+    {
+        var ids = priorCoordinates.Keys.ToArray();
+        var episodes = await dbContext.MediaProviderEpisodes.AsNoTracking()
+            .Where(row => row.Provider == provider && ids.Contains(row.ProviderEpisodeId))
+            .ToListAsync(cancellationToken);
+        var current = await GetEffectiveCoordinatesAsync(provider, episodes, cancellationToken);
+        var contradicted = current.Where(pair => pair.Value.ConflictsWithContainer(priorCoordinates[pair.Key]))
+            .Select(pair => pair.Key).ToArray();
+        if (contradicted.Length > 0)
+        {
+            await dbContext.MediaProviderEpisodeMappings
+                .Where(row => row.Provider == provider && contradicted.Contains(row.ProviderEpisodeId)
+                    && row.MappingSource == MediaProviderSeasonMappingSources.Automatic)
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+    }
+
+    private async Task<Dictionary<string, ProviderEpisodeCoordinates>> GetEffectiveCoordinatesAsync(
+        string provider, List<MediaProviderEpisode> episodes, CancellationToken cancellationToken)
+    {
+        var keys = episodes.Where(row => NeedsSibling(Coordinates(row)))
+            .Select(row => row.ContentKey).OfType<string>().Distinct().ToArray();
+        var siblings = keys.Length == 0 ? [] : await dbContext.MediaProviderEpisodes.AsNoTracking()
+            .Where(row => row.Provider == provider && row.ContentKey != null && keys.Contains(row.ContentKey))
+            .ToListAsync(cancellationToken);
+        var byContentKey = siblings.ToLookup(row => row.ContentKey!);
+        return episodes.ToDictionary(row => row.ProviderEpisodeId, row => CoordinatesWithSibling(row, byContentKey));
+    }
+
+    private static ProviderEpisodeCoordinates CoordinatesWithSibling(
+        MediaProviderEpisode episode, ILookup<string, MediaProviderEpisode> siblingsByKey)
+    {
+        var coordinates = Coordinates(episode);
+        return episode.ContentKey is { } key && NeedsSibling(coordinates)
+            ? CompleteFromSibling(coordinates, episode.ProviderEpisodeId, siblingsByKey[key])
+            : coordinates;
+    }
+
     private static bool NeedsSibling(ProviderEpisodeCoordinates coordinates) =>
         coordinates.SeriesId is null || coordinates.SeasonId is null || coordinates.EpisodeNumber is null;
 
     private static ProviderEpisodeCoordinates FillMissing(ProviderEpisodeCoordinates primary, ProviderEpisodeCoordinates fallback)
     {
-        if (Disagree(primary.SeriesId, fallback.SeriesId)
-            || Disagree(primary.SeasonId, fallback.SeasonId)
-            || Disagree(primary.SeasonNumber, fallback.SeasonNumber))
+        if (primary.ConflictsWithContainer(fallback))
         {
             return primary;
         }
@@ -223,9 +311,6 @@ public sealed class MediaProviderSeasonMappingService(
         return new(primary.SeriesId ?? fallback.SeriesId, primary.SeasonId ?? fallback.SeasonId,
             primary.SeasonNumber ?? fallback.SeasonNumber, primary.EpisodeNumber ?? fallback.EpisodeNumber,
             primary.SeasonTitle ?? fallback.SeasonTitle);
-
-        static bool Disagree<T>(T left, T right) =>
-            left is not null && right is not null && !EqualityComparer<T>.Default.Equals(left, right);
     }
 
     private static ProviderEpisodeCoordinates CompleteFromSibling(ProviderEpisodeCoordinates coordinates, string? episodeId,
@@ -532,8 +617,7 @@ public sealed class MediaProviderSeasonMappingService(
             .Where(row => row.Provider == provider && ids.Contains(row.ProviderEpisodeId))
             .ToDictionaryAsync(row => row.ProviderEpisodeId, cancellationToken);
 
-        var seriesId = NormalizeId(observation.ProviderSeriesId);
-        var seasonId = NormalizeId(observation.ProviderSeasonId);
+        var observed = GetObservedCoordinates(observation);
         foreach (var (episode, id) in episodes)
         {
             var number = (long)episode.EpisodeNumber + offset;
@@ -544,11 +628,7 @@ public sealed class MediaProviderSeasonMappingService(
             }
 
             if (currentEpisodes.TryGetValue(id!, out var current) && current.LastSeenAt > observation.ObservedAt
-                && ((current.ProviderEpisodeNumber is { } currentNumber && currentNumber != episode.EpisodeNumber)
-                    || (seriesId is not null && current.ProviderSeriesId is { } currentSeries && currentSeries != seriesId)
-                    || (seasonId is not null && current.ProviderSeasonId is { } currentSeason && currentSeason != seasonId)
-                    || (observation.SeasonNumber is { } ordinal && current.ProviderSeasonNumber is { } currentOrdinal
-                        && currentOrdinal != ordinal)))
+                && Coordinates(current).ConflictsWithEpisode(observed with { EpisodeNumber = episode.EpisodeNumber }))
             {
                 continue;
             }
@@ -573,7 +653,8 @@ public sealed class MediaProviderSeasonMappingService(
             return false;
         }
 
-        if (!IsCompatibleTarget(title, episodeNumber.HasValue) || episodeNumber > title.EpisodeCount)
+        if (!IsCompatibleTarget(title, episodeNumber.HasValue)
+            || (episodeNumber.HasValue && !MediaObservationMatchingService.IsCanonicalEpisodeNumber(title, episodeNumber)))
         {
             throw new ArgumentException("The canonical episode number must match the title's progress type and episode count.");
         }
@@ -778,12 +859,7 @@ public sealed class MediaProviderSeasonMappingService(
         var destinations = new Dictionary<string, SeasonDestination>();
         foreach (var episode in episodes)
         {
-            var coordinates = Coordinates(episode);
-            if (episode.ContentKey is { } key && NeedsSibling(coordinates))
-            {
-                coordinates = CompleteFromSibling(coordinates, episode.ProviderEpisodeId, siblingsByKey[key]);
-            }
-
+            var coordinates = CoordinatesWithSibling(episode, siblingsByKey);
             var season = SelectSeason(seasonsBySeries[coordinates.SeriesId ?? string.Empty], coordinates,
                 allowSingleSeasonFallback: !multiSeasonSeries.Contains(coordinates.SeriesId),
                 row => CanonicalNumber(row, coordinates.EpisodeNumber).HasValue);
@@ -798,7 +874,19 @@ public sealed class MediaProviderSeasonMappingService(
 }
 
 internal sealed record ProviderEpisodeCoordinates(
-    string? SeriesId, string? SeasonId, int? SeasonNumber, int? EpisodeNumber, string? SeasonTitle);
+    string? SeriesId, string? SeasonId, int? SeasonNumber, int? EpisodeNumber, string? SeasonTitle)
+{
+    internal bool ConflictsWithContainer(ProviderEpisodeCoordinates other) =>
+        Disagree(SeriesId, other.SeriesId)
+        || Disagree(SeasonId, other.SeasonId)
+        || Disagree(SeasonNumber, other.SeasonNumber);
+
+    internal bool ConflictsWithEpisode(ProviderEpisodeCoordinates other) =>
+        ConflictsWithContainer(other) || Disagree(EpisodeNumber, other.EpisodeNumber);
+
+    private static bool Disagree<T>(T left, T right) =>
+        left is not null && right is not null && !EqualityComparer<T>.Default.Equals(left, right);
+}
 
 internal sealed record ProviderEpisodeResolution(
     MediaTitle Title, int? EpisodeNumber, int? EpisodeOffset, string Source, bool Direct);

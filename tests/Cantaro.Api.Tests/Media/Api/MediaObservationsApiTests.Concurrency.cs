@@ -577,6 +577,129 @@ public partial class MediaObservationsApiTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public Task Resolve_ConfirmedProviderAddVerifiesAssignmentAndCommitsProgressOnSqlite(bool conflictingAssignment) =>
+        WithSqliteObservationDatabaseAsync(db => AssertConfirmedProviderAddAtomicityAsync(db, conflictingAssignment));
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Resolve_ConfirmedProviderAddVerifiesAssignmentAndCommitsProgressOnPostgres(bool conflictingAssignment)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertConfirmedProviderAddAtomicityAsync(schema.Db, conflictingAssignment);
+    }
+
+    private static async Task AssertConfirmedProviderAddAtomicityAsync(ApplicationDbContext db, bool conflictingAssignment)
+    {
+        const int userId = MediaObservationFixture.TestUserId;
+        const string episodeId = "CONFIRMED4";
+        const string externalId = "90002";
+        var provider = new SearchOnlyMediaProvider(titleDetails: new MediaProviderTitleDetails
+        {
+            ProviderId = "anilist", ProviderMediaId = externalId, Title = "Confirmed provider title",
+            MediaKind = MediaKinds.Anime, EpisodeCount = 12,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        });
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(), UserId = userId, SiteIdentifier = "crunchyroll", SiteMediaId = episodeId,
+            ObservedUrl = conflictingAssignment ? "https://www.crunchyroll.com/watch/DIFFERENT4"
+                : $"https://www.crunchyroll.com/watch/{episodeId}",
+            ObservedAt = DateTimeOffset.UtcNow,
+            ObservedTitle = "Confirmed provider title", EpisodeNumber = 4, MatchStatus = MediaObservationStatuses.NoMatch
+        };
+        db.AddRange(observation, TestUserFactory.Create(userId, MediaObservationFixture.TestEmail),
+            (await provider.GetConnectedAccountAsync(userId))!);
+        await db.SaveChangesAsync();
+        var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var previousTitle = CreateReviewTitle("Previous shared assignment");
+        if (conflictingAssignment)
+        {
+            // The mismatched watch URL prevents this review from replacing the existing episode mapping.
+            db.MediaTitles.Add(previousTitle);
+            await db.SaveChangesAsync();
+            await mappings.EstablishDirectAsync("crunchyroll", episodeId, previousTitle.Id, 4,
+                MediaProviderSeasonMappingSources.Manual, default);
+        }
+
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await using var reviewDb = new ApplicationDbContext(options);
+        MediaObservation? committedObservation = null;
+        MediaLibraryEntry? committedEntry = null;
+        List<string>? committedOperationTypes = null;
+        IActionResult? deletion = null;
+        provider.BeforeStatusUpdate = async () =>
+        {
+            Assert.Null(reviewDb.Database.CurrentTransaction);
+            committedObservation = await db.MediaObservations.AsNoTracking().SingleAsync();
+            committedEntry = await db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+            committedOperationTypes = await db.MediaProviderOperations.AsNoTracking()
+                .Select(row => row.OperationType).ToListAsync();
+
+            // This edit previously landed between the resolution commit and the progress transaction.
+            deletion = await new MediaCrunchyrollMappingsController(db, mappings)
+                .DeleteEpisode(committedEntry.MediaTitleId, episodeId, default);
+        };
+
+        var controller = MediaObservationFixture.CreateController(reviewDb, new SingleProviderRegistry(provider));
+        var result = await controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            ProviderId = provider.ProviderId, ProviderMediaId = externalId, AddToLibraryConfirmed = true
+        }, default);
+
+        if (conflictingAssignment)
+        {
+            var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+            Assert.Contains("The provider episode assignment changed during review.", JsonSerializer.Serialize(conflict.Value));
+            Assert.Equal(0, provider.StatusUpdateCallCount);
+            var unchanged = await db.MediaObservations.AsNoTracking().SingleAsync();
+            Assert.Equal(MediaObservationStatuses.NoMatch, unchanged.MatchStatus);
+            Assert.Null(unchanged.MediaTitleId);
+            Assert.Null(unchanged.ResolvedLibraryEntryId);
+            Assert.Null(unchanged.ResolvedProgress);
+            Assert.Equal(previousTitle.Id, await db.MediaTitles.Select(row => row.Id).SingleAsync());
+            Assert.Equal(previousTitle.Id, await db.MediaProviderEpisodeMappings.Select(row => row.MediaTitleId).SingleAsync());
+            Assert.Empty(await db.MediaLibraryEntries.ToListAsync());
+            Assert.Empty(await db.MediaLibraryProviderBindings.ToListAsync());
+            Assert.Empty(await db.MediaProviderLinks.ToListAsync());
+            Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+            return;
+        }
+
+        Assert.IsType<NoContentResult>(deletion);
+        Assert.NotNull(committedObservation);
+        Assert.NotNull(committedEntry);
+        Assert.Equal(MediaObservationStatuses.Matched, committedObservation.MatchStatus);
+        Assert.Equal(committedEntry.Id, committedObservation.ResolvedLibraryEntryId);
+        Assert.Equal(4, committedObservation.ResolvedProgress);
+        Assert.Equal(4, committedEntry.ProgressEpisodes);
+        Assert.NotNull(committedOperationTypes);
+        Assert.Contains(MediaProviderOperationTypes.UpdateStatus, committedOperationTypes);
+        Assert.Contains(MediaProviderOperationTypes.AutoProgressUpdate, committedOperationTypes);
+
+        var response = Assert.IsType<MediaObservationDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(4, response.ResolvedProgress);
+        Assert.Equal(1, provider.StatusUpdateCallCount);
+        Assert.Equal(MediaLibraryStatuses.Current, provider.LastStatusUpdate);
+        Assert.Empty(await db.MediaProviderEpisodeMappings.ToListAsync());
+        Assert.Empty(await db.MediaObservations.ToListAsync());
+        Assert.Equal(4, await db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
+        var binding = await db.MediaLibraryProviderBindings.AsNoTracking().SingleAsync();
+        var queued = await db.MediaProviderOperations.AsNoTracking().SingleAsync();
+        Assert.Equal(binding.Id, queued.MediaLibraryProviderBindingId);
+        Assert.Equal(MediaProviderOperationTypes.AutoProgressUpdate, queued.OperationType);
+        var payload = JsonSerializer.Deserialize<AutoProgressUpdatePayload>(queued.PayloadJson,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.True(payload.LocalProgressCommitted);
+        Assert.Equal(4, payload.ProgressEpisodes);
+        Assert.NotNull(binding.LastRemoteUpdateAt);
+        Assert.Equal(binding.LastRemoteUpdateAt, payload.LastKnownRemoteUpdateAt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public Task RawEpisodeNumberDoesNotCrossSeasonsOnSqlite(bool newestFirst) =>
         WithSqliteObservationDatabaseAsync(db => AssertRawEpisodeNumberDoesNotCrossSeasonsAsync(db, newestFirst));
 

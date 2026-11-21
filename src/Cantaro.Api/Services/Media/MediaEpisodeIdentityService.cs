@@ -26,42 +26,17 @@ public class MediaEpisodeIdentityService(
             var watched = await RecordEpisodeAsync(observation, observation.SiteMediaId, observation.ObservedUrl,
                 observation.EpisodeNumber, observation.EpisodeTitle, observation.ReleaseTrack, [], [],
                 observation.ProviderSequenceNumber, false, countSeen, cancellationToken);
-            if (watched && HasConsecutiveNextEpisode(observation))
+            if (watched && await _seasonMappingService.GetSuccessorCoordinatesAsync(observation, cancellationToken)
+                is { } successor)
             {
-                var coordinates = await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
-                var nextId = MediaProviderSeasonMappingService.NormalizeId(observation.NextEpisodeProviderId);
-                var successor = await _dbContext.MediaProviderEpisodes.AsNoTracking().SingleOrDefaultAsync(
-                    row => row.Provider == observation.SiteIdentifier && row.ProviderEpisodeId == nextId, cancellationToken);
-                if ((coordinates.EpisodeNumber is null || coordinates.EpisodeNumber == observation.EpisodeNumber)
-                    && !HasConflictingSuccessorCoordinates(successor, coordinates, observation))
-                {
-                    await RecordEpisodeAsync(observation, observation.NextEpisodeProviderId, observation.NextEpisodeUrl,
-                        observation.NextEpisodeNumber, observation.NextEpisodeTitle, observation.NextEpisodeReleaseTrack,
-                        [], [], null, false, countSeen, cancellationToken, coordinates);
-                }
+                await RecordEpisodeAsync(observation, observation.NextEpisodeProviderId, observation.NextEpisodeUrl,
+                    observation.NextEpisodeNumber, observation.NextEpisodeTitle, observation.NextEpisodeReleaseTrack,
+                    [], [], null, false, countSeen, cancellationToken, successor.Inferred);
             }
 
             return watched;
         }, cancellationToken);
     }
-
-    internal static bool HasConsecutiveNextEpisode(MediaObservation observation) =>
-        observation.EpisodeNumber is > 0 && observation.NextEpisodeNumber is > 0
-        && observation.NextEpisodeNumber == (long)observation.EpisodeNumber.Value + 1
-        && !string.Equals(observation.NextEpisodeProviderId, observation.SiteMediaId, StringComparison.OrdinalIgnoreCase)
-        && MediaDestinationUrlPolicy.TryNormalizePath(observation.SiteIdentifier, observation.NextEpisodeUrl,
-            observation.NextEpisodeProviderId, out _);
-
-    internal static bool HasConflictingSuccessorCoordinates(MediaProviderEpisode? successor,
-        ProviderEpisodeCoordinates coordinates, MediaObservation observation) => successor is not null &&
-        ((successor.ProviderSeriesId is not null && coordinates.SeriesId is not null
-            && successor.ProviderSeriesId != coordinates.SeriesId)
-        || (successor.ProviderSeasonId is not null && coordinates.SeasonId is not null
-            && successor.ProviderSeasonId != coordinates.SeasonId)
-        || (successor.ProviderSeasonNumber is { } seasonNumber
-            && ((coordinates.SeasonNumber is { } currentSeason && seasonNumber != currentSeason)
-                || (observation.SeasonNumber is { } observedSeason && seasonNumber != observedSeason)))
-        || (successor.ProviderEpisodeNumber is not null && successor.ProviderEpisodeNumber != observation.NextEpisodeNumber));
 
     public async Task<int> RecordCatalogObservationAsync(
         MediaObservation observation, CancellationToken cancellationToken, bool countSeen = true)
@@ -137,6 +112,13 @@ public class MediaEpisodeIdentityService(
         var subtitleJson = JsonSerializer.Serialize(NormalizeLanguageCodes(subtitles));
         var audioJson = JsonSerializer.Serialize(NormalizeLanguageCodes(audio));
         var observedAt = observation.ObservedAt.ToUniversalTime();
+        // Capture coordinates for existing direct mappings before replacing provider facts.
+        var directCoordinates = countSeen && coordinates is null
+            && (series is not null || season is not null || seasonNumber.HasValue)
+            ? await _seasonMappingService.GetAutomaticDirectCoordinatesAsync(
+                provider, episodeId!, variant.ContentKey, observedAt, cancellationToken)
+            : [];
+
         // PostgreSQL stores primitive collections as arrays. SQLite stores them as JSON.
         FormattableString insert = _dbContext.Database.IsNpgsql()
             ? (FormattableString)$"""
@@ -240,6 +222,12 @@ public class MediaEpisodeIdentityService(
                 "LastSeenAt" = {lastSeen}
             """;
         await _dbContext.Database.ExecuteSqlInterpolatedAsync(System.Runtime.CompilerServices.FormattableStringFactory.Create(sql, insert.GetArguments()), cancellationToken);
+        if (directCoordinates.Count > 0)
+        {
+            await _seasonMappingService.RemoveContradictedDirectMappingsAsync(
+                provider, directCoordinates, cancellationToken);
+        }
+
         return true;
     }
 
