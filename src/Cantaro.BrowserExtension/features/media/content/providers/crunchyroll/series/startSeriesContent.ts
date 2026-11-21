@@ -3,10 +3,7 @@ import {
   readContentPreferences,
   watchContentPreferences,
 } from '../../../../../../platform/settings/contentPreferences';
-import {
-  readContentConsentStatus,
-  watchContentConsentStatus,
-} from '../../../../../../platform/consent/runtimeConsentClient';
+import { contentCollectionConsent } from '../../../../../../platform/consent/runtimeConsentClient';
 import type {
   CatalogSubmissionResult,
   SeriesCatalogObservation,
@@ -16,17 +13,13 @@ import type { MessageResult } from '../../../../../../platform/messaging/message
 import { createCrunchyrollSeriesController } from './seriesController';
 
 export function startCrunchyrollSeriesContent(ctx: ContentScriptContext): void {
+  const catalogConsent = contentCollectionConsent('catalog');
   createCrunchyrollSeriesController(ctx, {
-    submitCatalog: (observation, correlationId) => submitCatalog(observation, correlationId),
+    submitCatalog,
     readVerboseLogging: async () => (await readContentPreferences()).verboseLogging,
     watchVerboseLogging: listener => watchContentPreferences(preferences => listener(preferences.verboseLogging)),
-    readCollectionConsent: async () => {
-      const status = await readContentConsentStatus();
-      return status.authenticated && status.catalog;
-    },
-    watchCollectionConsent: listener => watchContentConsentStatus(status => {
-      listener(status.authenticated && status.catalog);
-    }),
+    readCollectionConsent: catalogConsent.read,
+    watchCollectionConsent: catalogConsent.watch,
   });
 }
 

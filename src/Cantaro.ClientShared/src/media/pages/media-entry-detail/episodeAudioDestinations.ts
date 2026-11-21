@@ -23,7 +23,12 @@ export function getDestinationAudioLanguages(destination: StreamingDestination) 
   const locales = [...(destination.availableAudioLanguageCodes ?? [])];
   if (destination.audioLocale) locales.push(destination.audioLocale);
   const track = destination.releaseTrack;
-  if (track?.startsWith("dub:") && track.length > 4) locales.push(track.slice(4));
+  const dubLocale = getDubAudioLocale(track);
+  if (dubLocale) locales.push(dubLocale);
   if (locales.length === 0 && track?.startsWith("sub:")) locales.push("ja");
   return locales.map(getLanguageCode);
+}
+
+function getDubAudioLocale(track: string | undefined) {
+  return track?.startsWith("dub:") && track.length > 4 ? track.slice(4) : undefined;
 }

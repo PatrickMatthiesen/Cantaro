@@ -102,3 +102,11 @@ export function watchContentConsentStatus(
 ): () => void {
   return subscribeRuntimeConsent(status => listener(toContentStatus(status)));
 }
+
+export function contentCollectionConsent(purpose: 'watch' | 'catalog') {
+  const isAllowed = (status: ContentConsentStatus) => status.authenticated && status[purpose];
+  return {
+    read: () => readContentConsentStatus().then(isAllowed),
+    watch: (listener: (allowed: boolean) => void) => watchContentConsentStatus(status => listener(isAllowed(status))),
+  };
+}

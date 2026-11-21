@@ -151,6 +151,37 @@ function EpisodeDestinationActions({
   );
 }
 
+const episodeRowLayout = {
+  withLinks: {
+    columns: "grid-cols-[max-content_minmax(0,1fr)] @2xl/episodes:grid-cols-[max-content_minmax(0,1fr)_minmax(0,auto)]",
+    actions: "col-start-2 min-w-0 @2xl/episodes:col-start-3 @2xl/episodes:row-start-1",
+  },
+  withoutLinks: {
+    columns: "grid-cols-[max-content_minmax(0,1fr)_auto]",
+    actions: "col-start-3 min-w-0",
+  },
+};
+
+function getEpisodeNumberLabels(
+  episodeNumber: number,
+  destination: MediaStreamingDestinations["episodes"][number] | undefined,
+  seasonSelection: SeasonSelection,
+) {
+  const episode: Parameters<typeof formatEpisodeNumber>[0] = destination ?? { episodeNumber };
+  const { primary, secondary } = formatEpisodeNumber(episode, seasonSelection);
+  const label = {
+    label: primary,
+    value: episode.seasonEpisodeNumber ?? episodeNumber,
+    season: seasonSelection === "all" ? episode.seasonNumber : undefined,
+  };
+  if (!secondary) return { ...label, streamingLabel: primary };
+  return {
+    ...label,
+    seriesNumber: episodeNumber,
+    streamingLabel: `${primary}, ${secondary.toLowerCase()}`,
+  };
+}
+
 function EpisodeRow({
   episodeNumber,
   destination,
@@ -168,37 +199,32 @@ function EpisodeRow({
   audioLanguage: string | null;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
-  const hasLinks = seriesDestinations.length > 0 || (destination?.destinations.length ?? 0) > 0;
-  const isNext = episodeNumber === watchedThrough + 1;
+  const episodeDestinations = destination?.destinations ?? [];
+  const hasLinks = seriesDestinations.length > 0 || episodeDestinations.length > 0;
+  const layout = hasLinks ? episodeRowLayout.withLinks : episodeRowLayout.withoutLinks;
   const progressLabel = getEpisodeProgressLabel(episodeNumber, watchedThrough);
-  const number = formatEpisodeNumber(
-    destination ?? { episodeNumber },
+  const isNext = episodeNumber === watchedThrough + 1;
+  const { streamingLabel, ...numberLabel } = getEpisodeNumberLabels(
+    episodeNumber,
+    destination,
     seasonSelection,
   );
 
   return (
     <li
-      className={`grid items-center gap-x-3 gap-y-2 border-t border-border-subtle px-2 py-3 first:border-t-0 ${hasLinks ? "grid-cols-[max-content_minmax(0,1fr)] @2xl/episodes:grid-cols-[max-content_minmax(0,1fr)_minmax(0,auto)]" : "grid-cols-[max-content_minmax(0,1fr)_auto]"} ${isNext ? "bg-personal-accent/10" : ""}`}
+      className={`grid items-center gap-x-3 gap-y-2 border-t border-border-subtle px-2 py-3 first:border-t-0 ${layout.columns} ${isNext ? "bg-personal-accent/10" : ""}`}
     >
-      <EpisodeNumberLabel
-        label={number.primary}
-        value={destination?.seasonEpisodeNumber ?? episodeNumber}
-        season={seasonSelection === "all" ? destination?.seasonNumber : undefined}
-        seriesNumber={number.secondary ? episodeNumber : undefined}
-      />
+      <EpisodeNumberLabel {...numberLabel} />
       <EpisodeDescription
-        title={destination?.title}
         progressLabel={progressLabel}
         destination={destination}
       />
-      <div className={hasLinks ? "col-start-2 min-w-0 @2xl/episodes:col-start-3 @2xl/episodes:row-start-1" : "col-start-3 min-w-0"}>
+      <div className={layout.actions}>
         <EpisodeDestinationActions
           episodeNumber={episodeNumber}
-          episodeLabel={number.secondary
-            ? `${number.primary}, ${number.secondary.toLowerCase()}`
-            : number.primary}
+          episodeLabel={streamingLabel}
           episodeDestinations={filterDestinationsByAudioLanguage(
-            destination?.destinations ?? [],
+            episodeDestinations,
             audioLanguage,
           )}
           seriesDestinations={seriesDestinations}
@@ -248,14 +274,13 @@ function EpisodeNumberLabel({
 }
 
 function EpisodeDescription({
-  title,
   progressLabel,
   destination,
 }: {
-  title?: string;
   progressLabel: string;
   destination?: MediaStreamingDestinations["episodes"][number];
 }) {
+  const title = destination?.title;
   return (
     <div className="min-w-0">
       {title ? (
@@ -272,60 +297,20 @@ function EpisodeDescription({
 }
 
 function EpisodeSectionContent({
-  entry,
   state,
-  rows,
-  specials,
-  seasonSelection,
-  totalRowCount,
-  windowStart,
-  seriesDestinations,
-  audioLanguage,
-  onSelectStreamingService,
   onRefresh,
-  onShowEarlier,
-  onShowLater,
-}: {
-  entry: MediaEntryDetailModel;
+  ...window
+}: EpisodeWindowProps & {
   state: EpisodeCatalogState;
-  rows: ReturnType<typeof getEpisodeRows>;
-  specials: readonly MediaSpecialEpisodeDestinationDto[];
-  seasonSelection: SeasonSelection;
-  totalRowCount: number;
-  windowStart: number;
-  seriesDestinations: readonly StreamingDestination[];
-  audioLanguage: string | null;
-  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
-  onShowEarlier: () => void;
-  onShowLater: () => void;
 }) {
-  if (state.status === "error") {
-    return <EpisodeError onRefresh={onRefresh} />;
+  if (state.status === "error") return <EpisodeError onRefresh={onRefresh} />;
+  if (window.rows.length > 0) return <EpisodeWindow {...window} />;
+  if (state.status !== "loaded") return null;
+  if (window.seasonSelection === "specials" && state.value.specials.length > 0) {
+    return <SpecialEpisodeWindow specials={state.value.specials} />;
   }
-
-  if (state.status === "loaded" && rows.length === 0) {
-    if (seasonSelection === "specials" && specials.length > 0) {
-      return <SpecialEpisodeWindow specials={specials} />;
-    }
-    return <EpisodeEmpty />;
-  }
-
-  if (rows.length === 0) return null;
-  return (
-    <EpisodeWindow
-      entry={entry}
-      rows={rows}
-      seasonSelection={seasonSelection}
-      totalRowCount={totalRowCount}
-      windowStart={windowStart}
-      seriesDestinations={seriesDestinations}
-      audioLanguage={audioLanguage}
-      onSelectStreamingService={onSelectStreamingService}
-      onShowEarlier={onShowEarlier}
-      onShowLater={onShowLater}
-    />
-  );
+  return <EpisodeEmpty />;
 }
 
 function SpecialEpisodeWindow({
@@ -387,6 +372,19 @@ function EpisodeEmpty() {
   );
 }
 
+interface EpisodeWindowProps {
+  entry: MediaEntryDetailModel;
+  rows: ReturnType<typeof getEpisodeRows>;
+  seasonSelection: SeasonSelection;
+  totalRowCount: number;
+  windowStart: number;
+  seriesDestinations: readonly StreamingDestination[];
+  audioLanguage: string | null;
+  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
+  onShowEarlier: () => void;
+  onShowLater: () => void;
+}
+
 function EpisodeWindow({
   entry,
   rows,
@@ -398,18 +396,7 @@ function EpisodeWindow({
   onSelectStreamingService,
   onShowEarlier,
   onShowLater,
-}: {
-  entry: MediaEntryDetailModel;
-  rows: ReturnType<typeof getEpisodeRows>;
-  seasonSelection: SeasonSelection;
-  totalRowCount: number;
-  windowStart: number;
-  seriesDestinations: readonly StreamingDestination[];
-  audioLanguage: string | null;
-  onSelectStreamingService: (serviceId: StreamingServiceId) => void;
-  onShowEarlier: () => void;
-  onShowLater: () => void;
-}) {
+}: EpisodeWindowProps) {
   return (
     <div className="mt-5">
       {windowStart > 0 ? (
@@ -448,14 +435,16 @@ function EpisodeWindow({
   );
 }
 
-function getEpisodeSectionData(
+function getSelectedEpisodeRows(
   entry: MediaEntryDetailModel,
   state: EpisodeCatalogState,
   streamingDestinations: MediaStreamingDestinations,
   seasonSelection: SeasonSelection,
 ) {
-  if (state.status !== "loaded") return { rows: [] };
+  if (state.status !== "loaded") return [];
   const allRows = getEpisodeRows(entry, streamingDestinations.episodes);
+  if (seasonSelection === "all") return allRows;
+
   const selectedEpisodes = getEpisodesForSeason(
     streamingDestinations.episodes,
     seasonSelection,
@@ -463,10 +452,29 @@ function getEpisodeSectionData(
   const selectedEpisodeNumbers = new Set(
     selectedEpisodes.map((episode) => episode.episodeNumber),
   );
+  return allRows.filter((row) => selectedEpisodeNumbers.has(row.episodeNumber));
+}
+
+function useEpisodeWindow(
+  rows: ReturnType<typeof getEpisodeRows>,
+  titleId: string,
+  watchedThrough: number,
+) {
+  const initialWindowStart = getInitialEpisodeWindowStart(rows, watchedThrough);
+  const [windowStart, setWindowStart] = useState(initialWindowStart);
+
+  useEffect(() => {
+    setWindowStart(initialWindowStart);
+  }, [titleId, initialWindowStart]);
+
   return {
-    rows: seasonSelection === "all"
-      ? allRows
-      : allRows.filter((row) => selectedEpisodeNumbers.has(row.episodeNumber)),
+    windowStart,
+    rows: rows.slice(windowStart, windowStart + EPISODE_WINDOW_SIZE),
+    totalRowCount: rows.length,
+    onShowEarlier: () => setWindowStart((current) =>
+      Math.max(0, current - EPISODE_WINDOW_SIZE)),
+    onShowLater: () => setWindowStart((current) =>
+      Math.min(Math.max(0, rows.length - EPISODE_WINDOW_SIZE), current + EPISODE_WINDOW_SIZE)),
   };
 }
 
@@ -480,6 +488,36 @@ function orderSeriesDestinations(
     if (right.serviceId === preferredServiceId) return 1;
     return 0;
   });
+}
+
+function EpisodeAudioSelector({
+  languages,
+  value,
+  onChange,
+}: {
+  languages: readonly string[];
+  value: string | null;
+  onChange: (language: string | null) => void;
+}) {
+  if (languages.length === 0) return null;
+
+  return (
+    <label className="grid gap-1 text-xs font-semibold text-content-muted">
+      Audio
+      <select
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value || null)}
+        className="min-h-10 border border-border-strong bg-surface px-3 text-sm font-medium text-content focus-visible:outline-2 focus-visible:outline-focus"
+      >
+        <option value="">Default</option>
+        {languages.map((language) => (
+          <option key={language} value={language}>
+            {formatAudioLanguage(language)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 export function EpisodesSection({
@@ -505,17 +543,8 @@ export function EpisodesSection({
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
 }) {
-  const { rows } = getEpisodeSectionData(
-    entry,
-    state,
-    streamingDestinations,
-    selectedSeason,
-  );
-  const initialWindowStart = useMemo(
-    () => getInitialEpisodeWindowStart(rows, entry.progressEpisodes ?? 0),
-    [entry.progressEpisodes, rows],
-  );
-  const [windowStart, setWindowStart] = useState(initialWindowStart);
+  const rows = getSelectedEpisodeRows(entry, state, streamingDestinations, selectedSeason);
+  const episodeWindow = useEpisodeWindow(rows, entry.title.id, entry.progressEpisodes ?? 0);
   const audioLanguages = useMemo(
     () => getAudioLanguages(streamingDestinations),
     [streamingDestinations],
@@ -527,10 +556,6 @@ export function EpisodesSection({
   const [audioLanguage, setAudioLanguage] = useState(preferredAudioLanguage);
 
   useEffect(() => {
-    setWindowStart(initialWindowStart);
-  }, [entry.title.id, initialWindowStart]);
-
-  useEffect(() => {
     setAudioLanguage((current) =>
       current && audioLanguages.includes(current)
         ? current
@@ -538,16 +563,11 @@ export function EpisodesSection({
     );
   }, [audioLanguages, preferredAudioLanguage]);
 
-  const visibleRows = rows.slice(
-    windowStart,
-    windowStart + EPISODE_WINDOW_SIZE,
-  );
   const orderedSeriesDestinations = orderSeriesDestinations(
     streamingDestinations.seriesDestinations,
     preferredServiceId,
   );
   const isLoading = state.status === "loading";
-  const specials = state.status === "loaded" ? state.value.specials : [];
 
   return (
     <section
@@ -559,58 +579,30 @@ export function EpisodesSection({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <SeasonSelector options={seasonOptions} value={selectedSeason} onChange={onSelectSeason} />
-          {audioLanguages.length > 0 ? (
-            <label className="grid gap-1 text-xs font-semibold text-content-muted">
-              Audio
-              <select
-                value={audioLanguage ?? ""}
-                onChange={(event) => setAudioLanguage(event.target.value || null)}
-                className="min-h-10 border border-border-strong bg-surface px-3 text-sm font-medium text-content focus-visible:outline-2 focus-visible:outline-focus"
-              >
-                <option value="">Default</option>
-                {audioLanguages.map((language) => (
-                  <option key={language} value={language}>
-                    {formatAudioLanguage(language)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
+          <EpisodeAudioSelector
+            languages={audioLanguages}
+            value={audioLanguage}
+            onChange={setAudioLanguage}
+          />
         </div>
-          <ActionButton tone="ghost" onClick={onRefresh} disabled={isLoading}>
-            <RefreshCcw
-              size={17}
-              className={isLoading ? "animate-spin" : ""}
-              aria-hidden
-            />
-            Check for updates
-          </ActionButton>
+        <ActionButton tone="ghost" onClick={onRefresh} disabled={isLoading}>
+          <RefreshCcw
+            size={17}
+            className={isLoading ? "animate-spin" : ""}
+            aria-hidden
+          />
+          Check for updates
+        </ActionButton>
       </div>
       <EpisodeSectionContent
         entry={entry}
         state={state}
-        rows={visibleRows}
-        specials={specials}
         seasonSelection={selectedSeason}
-        totalRowCount={rows.length}
-        windowStart={windowStart}
+        {...episodeWindow}
         seriesDestinations={orderedSeriesDestinations}
         audioLanguage={audioLanguage}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={onRefresh}
-        onShowEarlier={() =>
-          setWindowStart((current) =>
-            Math.max(0, current - EPISODE_WINDOW_SIZE),
-          )
-        }
-        onShowLater={() =>
-          setWindowStart((current) =>
-            Math.min(
-              Math.max(0, rows.length - EPISODE_WINDOW_SIZE),
-              current + EPISODE_WINDOW_SIZE,
-            ),
-          )
-        }
       />
     </section>
   );

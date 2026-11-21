@@ -3,10 +3,7 @@ import {
   readContentPreferences,
   watchContentPreferences,
 } from '../../../../../../platform/settings/contentPreferences';
-import {
-  readContentConsentStatus,
-  watchContentConsentStatus,
-} from '../../../../../../platform/consent/runtimeConsentClient';
+import { contentCollectionConsent } from '../../../../../../platform/consent/runtimeConsentClient';
 import type { MediaBackgroundRequest } from '../../../../contracts/mediaMessages';
 import type {
   ResolveWatchObservationRequest,
@@ -18,6 +15,8 @@ import { createCrunchyrollWatchController } from './watchController';
 import { showWatchResolutionOverlay } from './watchResolutionOverlay';
 
 export function startCrunchyrollWatchContent(ctx: ContentScriptContext): void {
+  const watchConsent = contentCollectionConsent('watch');
+  const catalogConsent = contentCollectionConsent('catalog');
   createCrunchyrollWatchController(ctx, {
     isTrackingPaused: async () => (await readContentPreferences()).trackingPaused,
     watchTrackingPause: listener => watchContentPreferences(() => listener()),
@@ -26,20 +25,10 @@ export function startCrunchyrollWatchContent(ctx: ContentScriptContext): void {
     showResolution: showWatchResolutionOverlay,
     readVerboseLogging: async () => (await readContentPreferences()).verboseLogging,
     watchVerboseLogging: listener => watchContentPreferences(preferences => listener(preferences.verboseLogging)),
-    readCollectionConsent: async () => {
-      const status = await readContentConsentStatus();
-      return status.authenticated && status.watch;
-    },
-    watchCollectionConsent: listener => watchContentConsentStatus(status => {
-      listener(status.authenticated && status.watch);
-    }),
-    readCatalogCollectionConsent: async () => {
-      const status = await readContentConsentStatus();
-      return status.authenticated && status.catalog;
-    },
-    watchCatalogCollectionConsent: listener => watchContentConsentStatus(status => {
-      listener(status.authenticated && status.catalog);
-    }),
+    readCollectionConsent: watchConsent.read,
+    watchCollectionConsent: watchConsent.watch,
+    readCatalogCollectionConsent: catalogConsent.read,
+    watchCatalogCollectionConsent: catalogConsent.watch,
   });
 }
 

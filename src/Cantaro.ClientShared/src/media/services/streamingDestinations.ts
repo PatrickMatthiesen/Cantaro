@@ -159,6 +159,12 @@ function destination(
     url: normalizeUrl(url),
     kind,
     displayName: definition.displayName,
+    ...getDestinationLanguageMetadata(source),
+  };
+}
+
+function getDestinationLanguageMetadata(source: DestinationSource) {
+  return {
     audioLocale: source.audioLocale ?? undefined,
     releaseTrack: source.releaseTrack ?? undefined,
     availableAudioLanguageCodes: source.availableAudioLanguageCodes,
