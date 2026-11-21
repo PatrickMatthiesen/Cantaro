@@ -10,7 +10,7 @@ import {
   type MediaLibraryQueryParams,
 } from '@cantaro/client-shared/media';
 import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
-import { aioStreamsPairingEndpoint } from '../components/AioStreamsPairingPanel';
+import { getAioStreamsPairingStatus } from '../media/aioStreamsPairing';
 import { MediaPageShell } from '../media/MediaPageShell';
 import { MediaProvidersPage } from './MediaProvidersPage';
 import { getMediaFilterDefaults, mediaLibraryFilterSearch } from '../media/mediaLibraryRouteFilters';
@@ -161,11 +161,9 @@ export function MediaTitleRoutePage({
   useEffect(() => {
     if (!userId) return;
     const controller = new AbortController();
-    void fetch(aioStreamsPairingEndpoint, { signal: controller.signal })
-      .then(async response => {
-        if (!response.ok) return;
-        const settings = await response.json() as { playbackInstanceUrl?: string };
-        if (!controller.signal.aborted) setAioStreamsPlayback({ userId, url: settings.playbackInstanceUrl });
+    void getAioStreamsPairingStatus(controller.signal)
+      .then(settings => {
+        if (!controller.signal.aborted) setAioStreamsPlayback({ userId, url: settings.playbackInstanceUrl ?? undefined });
       })
       .catch(() => {});
     return () => controller.abort();

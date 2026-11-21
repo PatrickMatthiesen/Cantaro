@@ -176,30 +176,39 @@ describe('AIOStreams playback destinations', () => {
 
   it('opens the verified IMDb episode at its provider coordinates', () => {
     const destinations = addAioStreamsDestinations(catalogDestinations(), instance,
-      [{ type: 'series', id: 'tt1000002' }], 'series', [15, 16], new Set());
+      [{ type: 'series', id: 'tt1000002' }], 'series', [15, 16]);
     expect(destinations.episodes[0]?.destinations.at(-1)?.url)
       .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=series&metaId=tt1000002&videoId=tt1000002%3A2%3A3');
     expect(destinations.episodes[1]?.destinations).toEqual([]);
     expect(destinations.seriesDestinations).toHaveLength(1);
   });
 
-  it('prefers an exact Kitsu video and skips flagged episode conflicts', () => {
+  it('prefers an exact Kitsu video', () => {
     const destinations = addAioStreamsDestinations(catalogDestinations(), instance, [
       { type: 'series', id: 'tt0213338', episodeMapping: { seasonNumber: 2, episodeOffset: 10 } },
       { type: 'series', id: 'kitsu:1', episodeMapping: { seasonNumber: null, episodeOffset: 0 } },
-    ], 'anime', [1, 15], new Set([15]));
+    ], 'anime', [1, 15]);
     expect(destinations.episodes[0]?.destinations[0]?.url)
       .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=anime&metaId=kitsu%3A1&videoId=kitsu%3A1%3A1');
-    expect(destinations.episodes[1]?.destinations.some(destination => destination.serviceId === 'aiostreams')).toBeFalse();
+    expect(destinations.episodes[1]?.destinations.at(-1)?.url)
+      .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=anime&metaId=kitsu%3A1&videoId=kitsu%3A1%3A15');
+  });
+
+  it('keeps provider links when two canonical episodes share the same IMDb coordinates', () => {
+    const original = catalogDestinations();
+    Object.assign(original.episodes[1]!, { seasonNumber: 2, seasonEpisodeNumber: 3 });
+    const destinations = addAioStreamsDestinations(original, instance,
+      [{ type: 'series', id: 'tt1000002' }], 'series', [15, 16]);
+    expect(destinations).toEqual(original);
   });
 
   it('opens a movie without a video ID and refuses an unsafe instance address', () => {
     const original = catalogDestinations();
     const targets = [{ type: 'movie', id: 'tt1000001' }];
-    const destinations = addAioStreamsDestinations(original, instance, targets, 'movie', [], new Set());
+    const destinations = addAioStreamsDestinations(original, instance, targets, 'movie', []);
     expect(destinations.seriesDestinations.at(-1)?.url)
       .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=movie&metaId=tt1000001');
-    expect(addAioStreamsDestinations(original, 'https://user:secret@aio.example/', targets, 'movie', [], new Set())).toBe(original);
+    expect(addAioStreamsDestinations(original, 'https://user:secret@aio.example/', targets, 'movie', [])).toBe(original);
   });
 });
 

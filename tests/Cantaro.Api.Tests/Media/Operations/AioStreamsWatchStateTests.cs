@@ -18,6 +18,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -196,14 +197,22 @@ public sealed class AioStreamsWatchStateTests
         AddLink(schema.Db, movie, "imdb", "tt1000001");
         AddLink(schema.Db, series, "imdb", "tt1000002");
         AddLink(schema.Db, series, "simkl", "tv:1000002");
-        var episode = new MediaEpisode { Id = Guid.NewGuid(), MediaTitle = series, EpisodeNumber = 1 };
-        schema.Db.Add(new MediaEpisodeProviderContent
-        {
-            Id = Guid.NewGuid(), MediaEpisode = episode, Provider = "simkl", ProviderSeriesId = "tv:1000002",
-            ProviderSeasonNumber = 2, ProviderEpisodeNumber = 3
-        });
         foreach (var title in new[] { movie, series })
-            schema.Db.Add(new MediaLibraryEntry { Id = Guid.NewGuid(), UserId = 1, MediaTitle = title, Status = MediaLibraryStatuses.Current });
+            schema.Db.Add(new MediaLibraryEntry
+            {
+                Id = Guid.NewGuid(), UserId = 1, MediaTitle = title, Status = MediaLibraryStatuses.Current,
+                ProgressEpisodes = title == series ? 3 : null
+            });
+        await schema.Db.SaveChangesAsync();
+        var mappings = new MediaProviderSeasonMappingService(schema.Db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var catalog = new MediaEpisodeIdentityService(schema.Db, mappings, NullLogger<MediaEpisodeIdentityService>.Instance);
+        await catalog.CacheProviderEpisodeCatalogAsync(series.Id, "simkl", "tv:1000002",
+            [
+                new() { SeasonNumber = 1, EpisodeNumber = 1 },
+                new() { SeasonNumber = 2, EpisodeNumber = 1 },
+                new() { SeasonNumber = 2, EpisodeNumber = 2 },
+                new() { SeasonNumber = 2, EpisodeNumber = 3 }
+            ], [], expectedEpisodeCount: 4, CancellationToken.None);
         await schema.Db.SaveChangesAsync();
 
         const string moviePath = Route + "/watch_state/push/movie/tt1000001.json";
@@ -213,6 +222,8 @@ public sealed class AioStreamsWatchStateTests
         var tvStop = Event("imdb-tv", "stop", At, 3_000) with
             { MetaId = "tt1000002", VideoId = "tt1000002:2:3", Season = 2, Episode = 3 };
         await fixture.ExpectPushAsync(tvStop with { Episode = 4 }, HttpStatusCode.NotFound, seriesPath);
+        await fixture.ExpectPushAsync(tvStop with { VideoId = "tt1000002:2:4", Episode = 4 }, HttpStatusCode.NotFound,
+            Route + "/watch_state/push/series/tt1000002%3A2%3A4.json");
         await fixture.ExpectPushAsync(movieStop, HttpStatusCode.NoContent, moviePath);
         await fixture.ExpectPushAsync(tvStop, HttpStatusCode.NoContent, seriesPath);
         Assert.Equal(2, (await fixture.PullAsync()).GetProperty("items").GetArrayLength());
@@ -227,7 +238,7 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(new[] { "tt1000002:2:3" }, completed.GetProperty("watched").GetProperty("episodes").Deserialize<string[]>());
         Assert.Equal(MediaLibraryStatuses.Completed, await schema.Db.MediaLibraryEntries.Where(e => e.MediaTitleId == movie.Id)
             .Select(e => e.Status).SingleAsync());
-        Assert.Equal(1, await schema.Db.MediaLibraryEntries.Where(e => e.MediaTitleId == series.Id)
+        Assert.Equal(4, await schema.Db.MediaLibraryEntries.Where(e => e.MediaTitleId == series.Id)
             .Select(e => e.ProgressEpisodes).SingleAsync());
     }
 
@@ -349,6 +360,54 @@ public sealed class AioStreamsWatchStateTests
         var first = finish with { Id = "imdb-first", VideoId = $"{MetaId}:2:10", Episode = 10 };
         await fixture.ExpectPushAsync(first, HttpStatusCode.NoContent, PathFor(first.VideoId!));
         Assert.Equal(2, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TracksAnimeEpisodeWithAnEffectiveProviderMappingAndRejectsAnOrphanMapping(bool imdb)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10);
+        var title = await schema.Db.MediaTitles.SingleAsync();
+        AddLink(schema.Db, title, "imdb", MetaId);
+        const string provider = MediaObservationSiteIdentifiers.Crunchyroll;
+        var now = DateTimeOffset.UtcNow;
+        schema.Db.MediaProviderEpisodes.Add(new MediaProviderEpisode
+        {
+            Provider = provider, ProviderEpisodeId = "CRTHIRD", ProviderEpisodeNumber = 3,
+            ProviderUrlPath = "/watch/CRTHIRD", SeenCount = 1, FirstSeenAt = now, LastSeenAt = now
+        });
+        var mappings = new MediaProviderSeasonMappingService(schema.Db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        await schema.Db.SaveChangesAsync();
+        await mappings.EstablishDirectAsync(provider, "CRTHIRD", title.Id, 3,
+            MediaProviderSeasonMappingSources.Manual, CancellationToken.None);
+        await mappings.EstablishDirectAsync(provider, "CRORPHAN", title.Id, 4,
+            MediaProviderSeasonMappingSources.Automatic, CancellationToken.None, observedAt: now);
+
+        var known = PauseFor("mapped-only", 3);
+        var unknown = PauseFor("orphan", 4);
+        await fixture.ExpectPushAsync(unknown, HttpStatusCode.NotFound, PathFor(unknown.VideoId!));
+        Assert.False(await schema.Db.MediaEpisodes.AnyAsync(episode => episode.EpisodeNumber > 2));
+        Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+
+        await fixture.ExpectPushAsync(known, HttpStatusCode.NoContent, PathFor(known.VideoId!));
+        await fixture.ExpectPushAsync(known, HttpStatusCode.NoContent, PathFor(known.VideoId!));
+        var canonical = await schema.Db.MediaEpisodes.SingleAsync(episode => episode.EpisodeNumber == 3);
+        var receipt = await schema.Db.AioStreamsWatchEvents.SingleAsync();
+        Assert.Equal(title.Id, canonical.MediaTitleId);
+        Assert.Equal(canonical.Id, receipt.MediaEpisodeId);
+        Assert.Equal(known.VideoId, receipt.VideoId);
+
+        AioStreamsWatchStateController.PlaybackEvent PauseFor(string id, int number)
+            => Event(id, "pause", At, position: 2_500) with
+            {
+                MetaId = imdb ? MetaId : "kitsu:1",
+                VideoId = imdb ? $"{MetaId}:2:{number + 9}" : $"kitsu:1:{number}",
+                Season = imdb ? 2 : 1,
+                Episode = imdb ? number + 9 : number
+            };
+        static string PathFor(string videoId) => $"{Route}/watch_state/push/anime/{Uri.EscapeDataString(videoId)}.json";
     }
 
     [PostgresFact]

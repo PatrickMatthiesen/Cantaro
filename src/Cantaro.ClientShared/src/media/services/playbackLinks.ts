@@ -90,7 +90,6 @@ export function addAioStreamsDestinations(
   targets: readonly unknown[],
   mediaKind: string,
   episodeNumbers: readonly number[],
-  conflictingEpisodes: ReadonlySet<number>,
 ): MediaStreamingDestinations {
   const base = parseAioStreamsInstance(instanceUrl);
   if (!base || !supportedMediaKinds.has(mediaKind)) return destinations;
@@ -100,13 +99,8 @@ export function addAioStreamsDestinations(
     return withAioStreamsMovie(destinations, base, candidates);
   }
 
-  const withAioStreams = (episode: EpisodeStreamingDestinations) => conflictingEpisodes.has(episode.episodeNumber)
-    ? episode
-    : withAioStreamsEpisode(episode, base, candidates, mediaKind);
-  const episodes = destinations.episodes.map(withAioStreams);
-  const missing = createMissingEpisodes(episodes, episodeNumbers).map(withAioStreams)
-    .filter(episode => episode.destinations.length > 0);
-  return { ...destinations, episodes: [...episodes, ...missing].sort((left, right) => left.episodeNumber - right.episodeNumber) };
+  const episodes = addAioStreamsEpisodes(destinations.episodes, episodeNumbers, base, candidates, mediaKind);
+  return { ...destinations, episodes: episodes.sort((left, right) => left.episodeNumber - right.episodeNumber) };
 }
 
 function withAioStreamsMovie(
@@ -122,12 +116,36 @@ function withAioStreamsMovie(
   };
 }
 
-function withAioStreamsEpisode(
+function addAioStreamsEpisodes(
+  existing: EpisodeStreamingDestinations[],
+  episodeNumbers: readonly number[],
+  base: URL,
+  candidates: StremioTarget[],
+  mediaKind: string,
+): EpisodeStreamingDestinations[] {
+  const episodes = [...existing, ...createMissingEpisodes(existing, episodeNumbers)];
+  // One provider video must not open from two different canonical episode rows.
+  const urlCounts = new Map<string, number>();
+  const routes = episodes.map(episode => {
+    const route = aioStreamsEpisodeDestination(episode, base, candidates, mediaKind);
+    if (route) urlCounts.set(route.url, (urlCounts.get(route.url) ?? 0) + 1);
+    return route;
+  });
+  return episodes.flatMap((episode, index) => {
+    const route = routes[index];
+    if (route && urlCounts.get(route.url) === 1) {
+      return [{ ...episode, destinations: [...episode.destinations, route] }];
+    }
+    return index < existing.length ? [episode] : [];
+  });
+}
+
+function aioStreamsEpisodeDestination(
   episode: EpisodeStreamingDestinations,
   base: URL,
   candidates: StremioTarget[],
   mediaKind: string,
-): EpisodeStreamingDestinations {
+): StreamingDestination | undefined {
   const routes = new Map<string, string>();
   for (const target of candidates) {
     const videoId = buildEpisodeVideoId(target, episode, mediaKind);
@@ -136,21 +154,24 @@ function withAioStreamsEpisode(
   // Prefer entry-numbered anime IDs when the provider supplies one.
   const kitsu = [...routes].filter(([videoId]) => videoId.startsWith('kitsu:'));
   const choices = kitsu.length ? kitsu : [...routes];
-  if (choices.length !== 1) return episode;
+  if (choices.length !== 1) return undefined;
   const [videoId, metaId] = choices[0]!;
   const type = kitsu.length ? 'anime' : 'series';
-  return { ...episode, destinations: [...episode.destinations, aioStreamsDestination(base, type, metaId, videoId)] };
+  return aioStreamsDestination(base, type, metaId, videoId);
 }
 
 function parseAioStreamsInstance(value: string | undefined): URL | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null;
-    return new URL('jellyfin/web/', `${url.href.replace(/\/$/, '')}/`);
+    return isAioStreamsInstance(url) ? new URL('jellyfin/web/', `${url.href.replace(/\/$/, '')}/`) : null;
   } catch {
     return null;
   }
+}
+
+function isAioStreamsInstance(url: URL): boolean {
+  return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
 }
 
 function aioStreamsDestination(

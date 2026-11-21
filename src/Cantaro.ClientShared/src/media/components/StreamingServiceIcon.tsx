@@ -12,6 +12,11 @@ function getDefaultFill(serviceId: StreamingServiceId, iconColor: string): strin
   return serviceId === 'stremio' ? 'none' : iconColor;
 }
 
+function getIconStyle(serviceId: StreamingServiceId, style?: CSSProperties): CSSProperties {
+  const iconColor = style?.color ?? STREAMING_SERVICES[serviceId].brandColor;
+  return { color: iconColor, fill: style?.fill ?? getDefaultFill(serviceId, iconColor), ...style };
+}
+
 export function StreamingServiceIcon({
   serviceId,
   className = 'h-5 w-5',
@@ -34,11 +39,10 @@ export function StreamingServiceIcon({
       </span>
     );
   }
-  const iconColor = style?.color ?? service.brandColor;
   return (
     <Icon
       className={`${className}${getOpticalClassName(serviceId)}`}
-      style={{ color: iconColor, fill: style?.fill ?? getDefaultFill(serviceId, iconColor), ...style }}
+      style={getIconStyle(serviceId, style)}
       {...props}
     />
   );

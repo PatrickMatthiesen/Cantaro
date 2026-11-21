@@ -11,7 +11,7 @@ import { AvatarCropDialog } from '../components/AvatarCropDialog';
 import { GoogleAccountPanel } from '../components/GoogleAccountPanel';
 import { DeleteAccountPanel } from '../components/DeleteAccountPanel';
 import { AioStreamsPairingPanel } from '../components/AioStreamsPairingPanel';
-import { ConnectionCard } from '../components/ConnectionCard';
+import { ConnectionCard, type ConnectionState } from '../components/ConnectionCard';
 import { useSignInMethods } from '../hooks/useSignInMethods';
 import { useGoogleAccountStatus } from '../hooks/useGoogleAccountStatus';
 import { isWatchProviderVisible, setWatchProviderVisible, watchProviderOptions } from '../settings/watchProviderVisibility';
@@ -167,6 +167,12 @@ function ProfileSection({ profile, onProfile }: { profile: User; onProfile: (pro
       {cropSource ? <AvatarCropDialog file={cropSource.file} imageUrl={cropSource.imageUrl} isSaving={isUploading} onCancel={closeCropper} onConfirm={confirmAvatar} /> : null}
     </>
   );
+}
+
+function getConnectionState(status?: PlatformAccountStatus | MediaProviderAccountStatusDto): ConnectionState {
+  if (!status) return 'connect';
+  if (status.needsReconnect || status.connectionState === 'reconnect_required') return 'reconnect';
+  return status.isConnected ? 'connected' : 'connect';
 }
 
 function MusicConnectionCard({ item, status, busyKey, onAction }: { item: (typeof platformCatalog)[number]; status?: PlatformAccountStatus; busyKey: string | null; onAction: () => void }) {

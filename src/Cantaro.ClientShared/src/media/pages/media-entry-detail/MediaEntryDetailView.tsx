@@ -11,7 +11,7 @@ import {
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
 import { addAioStreamsDestinations, addStremioDestinations } from "../../services/playbackLinks";
-import { providerAvailabilityKey, type ProviderAvailabilityMap } from "../../components/media-entry-detail/providerAvailability";
+import { providerAvailabilityKey, type ProviderAvailabilityState } from "../../components/media-entry-detail/providerAvailability";
 import { getEpisodeRows } from "./episodeRows";
 import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
@@ -242,6 +242,46 @@ function MediaDetailTabPanel({
   return panels[activeTab];
 }
 
+function getStremioTargets(state: ProviderAvailabilityState | undefined) {
+  return state?.stremioTargets?.length ? state.stremioTargets : [state?.stremioTarget];
+}
+
+function getAioStreamsTargets({ entry, availabilityByProviderLink }: MediaEntryDetailContentProps) {
+  const verifiedLinks = entry.providerLinks.filter(link => link.lastVerifiedAt);
+  const mediaKind = entry.title.mediaKind;
+  const targets = verifiedLinks.flatMap(link =>
+    getStremioTargets(availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]));
+  if (mediaKind !== "series" && mediaKind !== "movie") return targets;
+  const imdbTargets = verifiedLinks.filter(link => link.provider === "imdb")
+    .map(link => ({ id: link.externalId, type: mediaKind }));
+  return [...targets, ...imdbTargets];
+}
+
+function getPlaybackDestinations(
+  props: MediaEntryDetailContentProps,
+  episodeCatalog: MediaEpisodeCatalogDto | null,
+  preferredServiceId: StreamingServiceId | null,
+) {
+  const mediaKind = props.entry.title.mediaKind;
+  const availabilityStates = Object.values(props.availabilityByProviderLink);
+  const availabilityLinks = availabilityStates.flatMap((state) =>
+    state.status !== "loading" ? state.links : []);
+  const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
+  const stremioTargets = availabilityStates.flatMap(getStremioTargets);
+  const episodeNumbers = getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
+    .map((row) => row.episodeNumber);
+  return filterWatchProviders(
+    addAioStreamsDestinations(
+      addStremioDestinations(providerDestinations, stremioTargets, mediaKind, episodeNumbers),
+      props.aioStreamsInstanceUrl,
+      getAioStreamsTargets(props),
+      mediaKind,
+      episodeNumbers,
+    ),
+    props.disabledWatchProviders,
+  );
+}
+
 function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
   const activeTab = props.activeTab;
   const mediaKind = props.entry.title.mediaKind;
@@ -252,40 +292,9 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.progressVolumes,
   );
   const hasStatusChanged = getEntryStatusChanged(props);
-  const [preferredServiceId, setPreferredServiceId] =
-    useStreamingServicePreference();
-  const availabilityStates = Object.values(
-    props.availabilityByProviderLink,
-  );
-  const availabilityLinks = availabilityStates.flatMap((state) =>
-    state.status !== "loading" ? state.links : []);
-  const episodeCatalog =
-    props.episodeCatalog.status === "loaded"
-      ? props.episodeCatalog.value
-      : null;
-  const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
-  const targetsFor = (state: ProviderAvailabilityMap[string] | undefined) =>
-    state?.stremioTargets?.length ? state.stremioTargets : [state?.stremioTarget];
-  const stremioTargets = availabilityStates.flatMap(targetsFor);
-  const episodeNumbers = getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
-    .map((row) => row.episodeNumber);
-  const verifiedLinks = props.entry.providerLinks.filter(link => link.lastVerifiedAt);
-  const verifiedTargets = verifiedLinks.flatMap(link =>
-    targetsFor(props.availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]));
-  const imdb = verifiedLinks.find(link => link.provider === "imdb");
-  const playbackTargets = imdb && (mediaKind === "series" || mediaKind === "movie")
-    ? [...verifiedTargets, { id: imdb.externalId, type: mediaKind }] : verifiedTargets;
-  const streamingDestinations = filterWatchProviders(
-    addAioStreamsDestinations(
-      addStremioDestinations(providerDestinations, stremioTargets, mediaKind, episodeNumbers),
-      props.aioStreamsInstanceUrl,
-      playbackTargets,
-      mediaKind,
-      episodeNumbers,
-      new Set(episodeCatalog?.episodes.filter(episode => episode.hasConflict).map(episode => episode.episodeNumber)),
-    ),
-    props.disabledWatchProviders,
-  );
+  const [preferredServiceId, setPreferredServiceId] = useStreamingServicePreference();
+  const episodeCatalog = props.episodeCatalog.status === "loaded" ? props.episodeCatalog.value : null;
+  const streamingDestinations = getPlaybackDestinations(props, episodeCatalog, preferredServiceId);
   const specials = getSpecials(episodeCatalog);
   const season = useSeasonView(
     streamingDestinations.episodes,
