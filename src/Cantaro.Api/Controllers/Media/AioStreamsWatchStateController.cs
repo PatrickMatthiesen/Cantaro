@@ -85,10 +85,14 @@ public sealed class AioStreamsWatchStateController(
             if (unavailable) return StatusCode(StatusCodes.Status503ServiceUnavailable);
             if (identity?.Mappings is not { } mappings || identity.Type is "SPECIAL" or "MOVIE") return NotFound();
             var imdbId = identity.Imdb?.Id ?? mappings.ImdbId;
-            if (payload.MetaId != kitsuParent
-                && (payload.MetaId != imdbId
-                    || !matchesKitsuNumbering && MapImdbEpisode(payload.Season, payload.Episode ?? kitsuNumber, identity.Imdb) != kitsuNumber))
-                return NotFound();
+            if (payload.MetaId != kitsuParent)
+            {
+                var imdbMapping = AioStreamsAnimeEnricher.GetImdbEpisodeMapping(identity.Imdb);
+                var matchesNumbering = imdbMapping is not null && payload.Season == imdbMapping.SeasonNumber
+                    ? MapImdbEpisode(payload.Season, payload.Episode ?? kitsuNumber, identity.Imdb) == kitsuNumber
+                    : matchesKitsuNumbering;
+                if (payload.MetaId != imdbId || !matchesNumbering) return NotFound();
+            }
             episode = await FindEpisodeAsync(userId, kitsuNumber, mappings, imdbId, cancellationToken);
         }
         else
@@ -156,26 +160,33 @@ public sealed class AioStreamsWatchStateController(
                               && watch.VideoId != null && (episode.MediaTitleId == entry.MediaTitleId
                                   || watch.MediaEpisodeId == null && watch.Type == "movie")
                           group watch by new { watch.MediaLibraryEntryId, watch.MediaEpisodeId, watch.VideoId,
-                              EpisodeNumber = (int?)episode.EpisodeNumber, entry.ProgressEpisodes, entry.Status }
+                              EpisodeNumber = (int?)episode.EpisodeNumber, entry.ProgressEpisodes, entry.Status,
+                              entry.UpdatedAt, entry.LastMutationSource }
                           into events
                           select new
                           {
                               events.Key.MediaEpisodeId,
                               events.Key.MediaLibraryEntryId,
                               VideoId = events.Key.VideoId!,
-                              Played = (events.Key.MediaEpisodeId == null
+                              events.Key.UpdatedAt,
+                              events.Key.LastMutationSource,
+                              LibraryPlayed = events.Key.MediaEpisodeId == null
                                   ? events.Key.Status == MediaLibraryStatuses.Completed
-                                  : events.Key.ProgressEpisodes >= events.Key.EpisodeNumber) || events.Any(e => e.Played),
+                                  : events.Key.ProgressEpisodes >= events.Key.EpisodeNumber,
+                              TrackerPlayed = events.Any(e => e.Played),
                               Latest = events.Where(e => e.Played || e.PositionMs != null)
                                   .OrderByDescending(e => e.At).ThenByDescending(e => e.Id).FirstOrDefault()
                           }).ToListAsync(cancellationToken);
         var media = rows.ToLookup(row => (row.MediaLibraryEntryId, row.MediaEpisodeId));
-        var watched = media.Where(item => item.Any(row => row.Played))
+        var watched = media.Where(item => item.Any(row => row.LibraryPlayed || row.TrackerPlayed))
             .SelectMany(item => item.Select(row => row.VideoId))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        var items = media.Select(item => item.Select(row => row.Latest).OfType<AioStreamsWatchEvent>()
-                .OrderByDescending(e => e.At).ThenByDescending(e => e.Id).FirstOrDefault())
-            .OfType<AioStreamsWatchEvent>().Where(e => !e.Played && e.PositionMs > 0)
+        var items = media.Select(item => item.OrderByDescending(row => row.Latest?.At)
+                .ThenByDescending(row => row.Latest?.Id).First())
+            .Where(row => row.Latest is { Played: false, PositionMs: > 0 } e
+                && (!row.LibraryPlayed || !IsLibraryPlaybackMutation(row.LastMutationSource, row.MediaEpisodeId is null)
+                    || e.At >= row.UpdatedAt.ToUnixTimeSeconds()))
+            .Select(row => row.Latest!)
             .OrderByDescending(e => e.At).ThenByDescending(e => e.Id).Take(50)
             .Select(e => new ResumeItem(e.Type!, e.MetaId!, e.VideoId!, e.Season, e.Episode,
                 e.At, e.PositionMs!.Value, e.DurationMs)).ToArray();
@@ -187,6 +198,11 @@ public sealed class AioStreamsWatchStateController(
                 movies = watched.Where(id => !id.Contains(':')).ToArray(),
                 episodes = watched.Where(id => id.Contains(':')).ToArray() } });
     }
+
+    private static bool IsLibraryPlaybackMutation(string? source, bool movie)
+        => source == MediaMutationSources.ProviderImport
+            || (movie ? source == MediaMutationSources.UserStatusUpdate
+                : source is MediaMutationSources.UserProgressUpdate or MediaMutationSources.ObservationAutoProgress);
 
     private Task<int?> ResolveUserAsync(CancellationToken cancellationToken)
     {
@@ -261,43 +277,47 @@ public sealed class AioStreamsWatchStateController(
     private async Task<(BoundEpisode? Episode, bool Unavailable)> FindImdbMediaAsync(int userId, string type, PlaybackEvent payload,
         CancellationToken cancellationToken)
     {
-        if (type == "anime") return await FindImdbAnimeEpisodeAsync(userId, payload, cancellationToken);
-
-        var kind = type == "movie" ? MediaKinds.Movie : MediaKinds.Series;
         var entries = from link in db.MediaProviderLinks
                       join entry in db.MediaLibraryEntries on link.MediaTitleId equals entry.MediaTitleId
                       where link.Provider == "imdb" && link.ExternalId == payload.MetaId && link.LastVerifiedAt != null
-                          && entry.UserId == userId && entry.MediaTitle!.MediaKind == kind
+                          && entry.UserId == userId
                       select entry;
-        if (type == "movie") return (await entries.Select(entry => new BoundEpisode(entry.Id, null))
-            .SingleOrDefaultAsync(cancellationToken), false);
+        var linked = await entries.Select(entry => new { entry.Id, entry.MediaTitleId, entry.MediaTitle!.MediaKind })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (linked is null) return (null, false);
+        if (type == "movie") return (linked.MediaKind == MediaKinds.Movie ? new BoundEpisode(linked.Id, null) : null, false);
+        if (linked.MediaKind == MediaKinds.Anime)
+            return await FindImdbAnimeEpisodeAsync(userId, linked.Id, linked.MediaTitleId, payload, cancellationToken);
+        if (type != "series" || linked.MediaKind != MediaKinds.Series) return (null, false);
 
-        var matches = await (from entry in entries
-                             join episode in db.MediaEpisodes on entry.MediaTitleId equals episode.MediaTitleId
+        var matches = await (from episode in db.MediaEpisodes
                              from content in episode.ProviderContents
-                             where content.Provider == "simkl" && content.ProviderSeasonNumber == payload.Season
+                             where episode.MediaTitleId == linked.MediaTitleId && content.Provider == "simkl"
+                                 && content.ProviderSeasonNumber == payload.Season
                                  && content.ProviderEpisodeNumber == payload.Episode
-                                 && entry.MediaTitle!.ProviderLinks.Any(link => link.Provider == "simkl"
+                                 && episode.MediaTitle!.ProviderLinks.Any(link => link.Provider == "simkl"
                                      && link.LastVerifiedAt != null && link.ExternalId == content.ProviderSeriesId)
-                             select new BoundEpisode(entry.Id, episode.Id)).Distinct().Take(2).ToListAsync(cancellationToken);
-        if (matches.Count == 1) return (matches[0], false);
-        if (matches.Count > 1 || await entries.AnyAsync(cancellationToken)) return (null, false);
-        return await FindImdbAnimeEpisodeAsync(userId, payload, cancellationToken);
+                             select episode.Id).Distinct().Take(2).ToListAsync(cancellationToken);
+        return (matches.Count == 1 ? new BoundEpisode(linked.Id, matches[0]) : null, false);
     }
 
     private async Task<(BoundEpisode? Episode, bool Unavailable)> FindImdbAnimeEpisodeAsync(int userId,
-        PlaybackEvent payload, CancellationToken cancellationToken)
+        Guid entryId, Guid titleId, PlaybackEvent payload, CancellationToken cancellationToken)
     {
-        if (!await db.MediaLibraryEntries.AnyAsync(entry => entry.UserId == userId
-            && entry.MediaTitle!.MediaKind == MediaKinds.Anime, cancellationToken)) return (null, false);
+        var link = await db.MediaProviderLinks.Where(link => link.MediaTitleId == titleId && link.LastVerifiedAt != null
+                && (link.Provider == "simkl" || link.Provider == "anilist" || link.Provider == "myanimelist"))
+            .OrderBy(link => link.Provider != "simkl").ThenBy(link => link.Provider)
+            .Select(link => new { link.Provider, link.ExternalId }).FirstOrDefaultAsync(cancellationToken);
+        if (link is null) return (null, false);
 
-        var (identity, unavailable) = await anime.LookupImdbEpisodeAsync(payload.MetaId!, payload.Season!.Value,
-            payload.Episode!.Value, cancellationToken);
+        var (identity, unavailable) = await anime.LookupLinkedAnimeAsync(link.Provider, link.ExternalId, cancellationToken);
         if (identity?.Mappings is not { } mappings || identity.Type is "SPECIAL" or "MOVIE"
-            || MapImdbEpisode(payload.Season, payload.Episode.Value, identity.Imdb) is not { } number)
+            || payload.MetaId != (identity.Imdb?.Id ?? mappings.ImdbId)
+            || MapImdbEpisode(payload.Season, payload.Episode!.Value, identity.Imdb) is not { } number)
             return (null, unavailable);
 
-        return (await FindEpisodeAsync(userId, number, mappings, payload.MetaId, cancellationToken), false);
+        var match = await FindEpisodeAsync(userId, number, mappings, payload.MetaId, cancellationToken);
+        return (match?.EntryId == entryId ? match : null, false);
     }
 
     private async Task<bool> CompleteMovieAsync(Guid entryId, CancellationToken cancellationToken)

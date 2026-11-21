@@ -29,7 +29,7 @@ public sealed class AioStreamsAnimeEnricher(
         cancellationToken.ThrowIfCancellationRequested();
 
         if (!string.Equals(details.MediaKind, MediaKinds.Anime, StringComparison.Ordinal)
-            || !TryGetSourceIdentity(details, out var source))
+            || !TryGetSourceIdentity(details.ProviderId, details.ProviderMediaId, out var source))
         {
             return;
         }
@@ -43,8 +43,7 @@ public sealed class AioStreamsAnimeEnricher(
 
         if (!_options.TryGetBaseUri(out var baseUri)) return;
 
-        var (entry, _, _) = await GetEntryAsync(baseUri, source.IdType,
-            source.IdValue.ToString(CultureInfo.InvariantCulture), cancellationToken);
+        var (entry, _, _) = await GetEntryAsync(baseUri, source, cancellationToken);
         if (entry is null || !HasExactSourceIdentity(entry, source)) return;
 
         var candidates = BuildCandidates(details, entry);
@@ -62,31 +61,27 @@ public sealed class AioStreamsAnimeEnricher(
         int kitsuId, CancellationToken cancellationToken)
     {
         if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
-        var (entry, unavailable, stale) = await GetEntryAsync(baseUri, "kitsuId",
-            kitsuId.ToString(CultureInfo.InvariantCulture), cancellationToken);
+        var (entry, unavailable, stale) = await GetEntryAsync(baseUri, new("kitsuId", kitsuId), cancellationToken);
         return (!stale && entry?.Mappings?.KitsuId == kitsuId && HasConsistentImdbIdentity(entry)
             ? entry : null, unavailable);
     }
 
-    internal async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable)> LookupImdbEpisodeAsync(
-        string imdbId, int season, int episode, CancellationToken cancellationToken)
+    internal async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable)> LookupLinkedAnimeAsync(
+        string provider, string externalId, CancellationToken cancellationToken)
     {
+        if (!TryGetSourceIdentity(provider, externalId, out var source)) return (null, false);
         if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
-        var (candidate, unavailable, stale) = await GetEntryAsync(baseUri, "imdbId", imdbId,
-            cancellationToken, season, episode);
-        if (stale || candidate?.Mappings?.KitsuId is not > 0) return (null, unavailable);
-
-        // The reverse lookup can return a fallback entry and restate the queried IMDb ID.
-        // Read its own Kitsu record to check the explicit IMDb mapping before using it.
-        var (entry, kitsuUnavailable) = await LookupKitsuAsync(candidate.Mappings.KitsuId.Value, cancellationToken);
-        return ((entry?.Imdb?.Id ?? entry?.Mappings?.ImdbId) == imdbId ? entry : null, kitsuUnavailable);
+        var (entry, unavailable, stale) = await GetEntryAsync(baseUri, source, cancellationToken);
+        return (!stale && entry is not null && HasExactSourceIdentity(entry, source)
+            && HasConsistentImdbIdentity(entry) ? entry : null, unavailable);
     }
 
     private async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable, bool Stale)> GetEntryAsync(
-        Uri baseUri, string idType, string idValue, CancellationToken cancellationToken,
-        int? season = null, int? episode = null)
+        Uri baseUri,
+        SourceIdentity source,
+        CancellationToken cancellationToken)
     {
-        var cacheKey = $"aiostreams:anime:{baseUri.AbsoluteUri}:{idType}:{idValue}:{season}:{episode}";
+        var cacheKey = $"aiostreams:anime:{baseUri.AbsoluteUri}:{source.IdType}:{source.IdValue.ToString(CultureInfo.InvariantCulture)}";
         var now = timeProvider.GetUtcNow();
         if (cache.TryGetValue<CacheEntry>(cacheKey, out var cached)
             && cached is not null
@@ -128,10 +123,9 @@ public sealed class AioStreamsAnimeEnricher(
             {
                 using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeoutSource.CancelAfter(RequestTimeout);
-                var path = $"api/v1/anime?idType={idType}&idValue={Uri.EscapeDataString(idValue)}";
-                if (season is not null && episode is not null)
-                    path += FormattableString.Invariant($"&season={season}&episode={episode}");
-                var requestUri = new Uri(baseUri, path);
+                var requestUri = new Uri(
+                    baseUri,
+                    $"api/v1/anime?idType={source.IdType}&idValue={source.IdValue.ToString(CultureInfo.InvariantCulture)}");
                 using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
                 using var response = await httpClientFactory.CreateClient(HttpClientName)
                     .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
@@ -318,10 +312,9 @@ public sealed class AioStreamsAnimeEnricher(
         return merged;
     }
 
-    private static bool TryGetSourceIdentity(MediaProviderTitleDetails details, out SourceIdentity source)
+    private static bool TryGetSourceIdentity(string provider, string providerMediaId, out SourceIdentity source)
     {
-        var providerMediaId = details.ProviderMediaId;
-        switch (details.ProviderId)
+        switch (provider)
         {
             case MediaObservationSiteIdentifiers.Simkl:
                 if (!providerMediaId.StartsWith("anime:", StringComparison.Ordinal)
