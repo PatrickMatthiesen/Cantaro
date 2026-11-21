@@ -104,6 +104,25 @@ public sealed class AioStreamsWatchStateTests
         Assert.Empty((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
     }
 
+    [Theory]
+    [InlineData("https://aio.test/hosted/private/manifest.json")]
+    [InlineData("https://aio.test/hosted/private/%6danifest%2ejson")]
+    [InlineData("https://aio.test/hosted/stremio/852a2fb0-764b-43ef-870e-054724c98f08")]
+    [InlineData("https://aio.test/hosted/stremio/u/private")]
+    [InlineData("https://aio.test/hosted/%73tremio%2fu%2fprivate/configure")]
+    public void PlaybackInstanceRejectsPrivateInstallUrls(string url)
+    {
+        Assert.Null(AioStreamsPairingController.NormalizePlaybackInstance(url));
+    }
+
+    [Theory]
+    [InlineData("https://aio.test:8452/deployment/", "https://aio.test:8452/deployment")]
+    [InlineData("https://aio.test/hosted/stremio/custom/", "https://aio.test/hosted/stremio/custom")]
+    public void PlaybackInstanceAcceptsDeploymentSubpaths(string url, string normalized)
+    {
+        Assert.Equal(normalized, AioStreamsPairingController.NormalizePlaybackInstance(url));
+    }
+
     [PostgresFact]
     public async Task SignedInUsersManageTheirOwnTrackerCredentials()
     {
@@ -421,7 +440,7 @@ public sealed class AioStreamsWatchStateTests
     public async Task TracksAnImdbVideoOfAnAnimeEpisodeThroughTheVerifiedOffset(string type)
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
-        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10);
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10, nonImdbEpisodes: []);
         var pause = Event("imdb-anime", "pause", At, position: 2_500)
             with { VideoId = $"{MetaId}:2:11", Season = 2, Episode = 11 };
         string PathFor(string videoId) => $"{Route}/watch_state/push/{type}/{Uri.EscapeDataString(videoId)}.json";
@@ -471,7 +490,8 @@ public sealed class AioStreamsWatchStateTests
     public async Task TracksAnimeEpisodeWithAnEffectiveProviderMappingAndRejectsAnOrphanMapping(bool imdb)
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
-        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10);
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10,
+            nonImdbEpisodes: imdb ? [] : null);
         var title = await schema.Db.MediaTitles.SingleAsync();
         AddLink(schema.Db, title, "imdb", MetaId);
         const string provider = MediaObservationSiteIdentifiers.Crunchyroll;
@@ -529,6 +549,24 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresFact]
+    public async Task RejectsDirectImdbAnimeOffsetWithoutGapEvidence()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 2, imdbFromEpisode: 10);
+        AddLink(schema.Db, await schema.Db.MediaTitles.SingleAsync(), "imdb", MetaId);
+        await schema.Db.SaveChangesAsync();
+
+        var pause = Event("imdb-without-gap-data", "pause", At, position: 2_500) with
+            { VideoId = $"{MetaId}:2:11", Season = 2, Episode = 11 };
+        await fixture.ExpectPushAsync(pause, HttpStatusCode.NotFound, $"{Route}/watch_state/push/anime/{MetaId}%3A2%3A11.json");
+        Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+
+        await fixture.ExpectPushAsync(pause with { VideoId = "kitsu:1:2" }, HttpStatusCode.NoContent, EpisodeRoute(1, 2));
+        var item = Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+        Assert.Equal("kitsu:1:2", item.GetProperty("videoId").GetString());
+    }
+
+    [PostgresFact]
     public async Task MixedImdbParentUsesItsVerifiedSeasonWhenNumberingOverlaps()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
@@ -564,7 +602,7 @@ public sealed class AioStreamsWatchStateTests
     public async Task PullKeepsLibraryCompletionAcrossRouteAliasesAndScoreEdits()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
-        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 1, imdbFromEpisode: 1);
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 1, imdbFromEpisode: 1, nonImdbEpisodes: []);
         AddLink(schema.Db, await schema.Db.MediaTitles.SingleAsync(), "imdb", MetaId);
         await schema.Db.SaveChangesAsync();
         await fixture.ExpectPushAsync(Event("before-external", "pause", At, position: 1_250), HttpStatusCode.NoContent);
@@ -715,27 +753,54 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(2_000, item.GetProperty("positionMs").GetInt64());
     }
 
-    [PostgresFact]
-    public async Task PullUsesLibraryCompletionRecordedOnAnUnroutedReceipt()
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PullSuppressesTheFirstDelayedPauseAfterExternalCompletionAndKeepsARewatch(bool movie)
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
         await using var fixture = await Fixture.StartAsync(schema.Db);
-        schema.Db.AioStreamsWatchEvents.Add(new AioStreamsWatchEvent
-        {
-            MediaLibraryEntryId = await schema.Db.MediaLibraryEntries.Select(entry => entry.Id).SingleAsync(),
-            MediaEpisodeId = await schema.Db.MediaEpisodes.Where(ep => ep.EpisodeNumber == 1).Select(ep => ep.Id).SingleAsync(),
-            EventId = "legacy", At = At, PositionMs = 1_000
-        });
-        await schema.Db.SaveChangesAsync();
-
+        var pause = Event("delayed-first-pause", "pause", At + 1, position: 2_000);
+        var path = PushRoute;
         var completionTime = DateTimeOffset.FromUnixTimeSeconds(At + 2);
-        await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters.SetProperty(e => e.ProgressEpisodes, 1)
-            .SetProperty(e => e.LastMutationSource, MediaMutationSources.UserProgressUpdate)
-            .SetProperty(e => e.LastLocalEditAt, completionTime).SetProperty(e => e.UpdatedAt, completionTime));
-        await fixture.ExpectPushAsync(Event("delayed", "pause", At + 1, position: 2_000), HttpStatusCode.NoContent);
+
+        if (movie)
+        {
+            var title = await schema.Db.MediaTitles.SingleAsync();
+            title.Format = MediaFormats.Movie;
+            title.PrimaryProgressDimension = MediaProgressDimensions.CompletionOnly;
+            title.ReleaseStatusDimension = MediaProgressDimensions.CompletionOnly;
+            title.SupportsEpisodeProgress = false;
+            AddLink(schema.Db, title, "imdb", MetaId);
+            await schema.Db.SaveChangesAsync();
+
+            path = $"{Route}/watch_state/push/movie/{MetaId}.json";
+            pause = pause with { Scope = "movie", VideoId = MetaId, Season = null, Episode = null };
+            await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+                .SetProperty(e => e.Status, MediaLibraryStatuses.Completed)
+                .SetProperty(e => e.LastMutationSource, MediaMutationSources.UserProgressUpdate)
+                .SetProperty(e => e.UpdatedAt, completionTime));
+        }
+        else
+        {
+            await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+                .SetProperty(e => e.ProgressEpisodes, 1)
+                .SetProperty(e => e.LastMutationSource, MediaMutationSources.UserProgressUpdate)
+                .SetProperty(e => e.UpdatedAt, completionTime));
+        }
+
+        Assert.False(await schema.Db.AioStreamsWatchEvents.AnyAsync());
+        await fixture.ExpectPushAsync(pause, HttpStatusCode.NoContent, path);
         var state = await fixture.PullAsync();
         Assert.Empty(state.GetProperty("items").EnumerateArray());
-        Assert.Equal(VideoId, Assert.Single(state.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
+        var watchedType = movie ? "movies" : "episodes";
+        Assert.Equal(pause.VideoId, Assert.Single(state.GetProperty("watched").GetProperty(watchedType).EnumerateArray()).GetString());
+
+        await fixture.ExpectPushAsync(pause with { Id = "first-rewatch", At = At + 3, PositionMs = 2_500 },
+            HttpStatusCode.NoContent, path);
+        var rewatch = await fixture.PullAsync();
+        Assert.Equal(2_500, Assert.Single(rewatch.GetProperty("items").EnumerateArray()).GetProperty("positionMs").GetInt64());
+        Assert.Equal(pause.VideoId, Assert.Single(rewatch.GetProperty("watched").GetProperty(watchedType).EnumerateArray()).GetString());
     }
 
     [PostgresFact]

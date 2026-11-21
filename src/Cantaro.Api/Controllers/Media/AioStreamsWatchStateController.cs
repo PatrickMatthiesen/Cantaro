@@ -136,13 +136,10 @@ public sealed class AioStreamsWatchStateController(
                 if (bound is null) return (false, false, true);
             }
 
-            // Serialize played events for a title so a simultaneous completion cannot leave a gap.
-            if (played)
-            {
-                await db.Database.ExecuteSqlInterpolatedAsync($"""
-                    SELECT "Id" FROM "MediaLibraryEntries" WHERE "Id" = {bound.EntryId} FOR NO KEY UPDATE
-                    """, cancellationToken);
-            }
+            // Order every receipt against progress updates, which record the last receipt seen on completion.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                SELECT "Id" FROM "MediaLibraryEntries" WHERE "Id" = {bound.EntryId} FOR NO KEY UPDATE
+                """, cancellationToken);
 
             var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "AioStreamsWatchEvents"
@@ -171,17 +168,16 @@ public sealed class AioStreamsWatchStateController(
     {
         if (Request.Query.ContainsKey("viewer")) return NotFound();
         if (await ResolveUserAsync(cancellationToken) is not { } userId) return Unauthorized();
-        // An unrouted legacy receipt can carry a completion timestamp while it awaits replay.
         var rows = await (from watch in db.AioStreamsWatchEvents.AsNoTracking()
                           join entry in db.MediaLibraryEntries on watch.MediaLibraryEntryId equals entry.Id
                           join episode in db.MediaEpisodes on watch.MediaEpisodeId equals (Guid?)episode.Id into episodeRows
                           from episode in episodeRows.DefaultIfEmpty()
                           where entry.UserId == userId
-                              && (watch.UserId == userId && watch.VideoId != null
-                                  || watch.UserId == null && watch.VideoId == null && watch.ExternalCompletionAt != null)
+                              && watch.UserId == userId && watch.VideoId != null
                               && (episode.MediaTitleId == entry.MediaTitleId
                                   || watch.MediaEpisodeId == null && watch.Type == "movie")
-                          group watch by new { watch.MediaLibraryEntryId, watch.MediaEpisodeId, watch.VideoId,
+                          group new { Watch = watch, EpisodeNumber = (int?)episode.EpisodeNumber }
+                          by new { watch.MediaLibraryEntryId, watch.MediaEpisodeId, watch.VideoId,
                               EpisodeNumber = (int?)episode.EpisodeNumber, entry.ProgressEpisodes, entry.Status }
                           into events
                           select new
@@ -192,25 +188,30 @@ public sealed class AioStreamsWatchStateController(
                               LibraryPlayed = events.Key.MediaEpisodeId == null
                                   ? events.Key.Status == MediaLibraryStatuses.Completed
                                   : events.Key.ProgressEpisodes >= events.Key.EpisodeNumber,
-                              TrackerPlayed = events.Key.VideoId != null && events.Any(e => e.Played),
-                              ExternalCompletionAt = events.Max(e => e.ExternalCompletionAt),
-                              Latest = events.Where(e => e.VideoId != null && (e.Played || e.PositionMs != null))
-                                  .OrderByDescending(e => e.At).ThenByDescending(e => e.Id).FirstOrDefault()
+                              TrackerPlayed = events.Any(e => e.Watch.Played),
+                              Latest = events.Where(e => e.Watch.Played || e.Watch.PositionMs != null)
+                                  .OrderByDescending(e => e.Watch.At).ThenByDescending(e => e.Watch.Id)
+                                  .Select(e => new
+                                  {
+                                      Event = e.Watch,
+                                      ExternallyCompleted = db.AioStreamsExternalCompletions.Any(completion =>
+                                          completion.MediaLibraryEntryId == e.Watch.MediaLibraryEntryId
+                                          && (e.Watch.MediaEpisodeId == null
+                                              ? completion.FirstEpisode == null && completion.LastEpisode == null
+                                              : completion.FirstEpisode <= e.EpisodeNumber
+                                                  && e.EpisodeNumber <= completion.LastEpisode)
+                                          && (completion.At > e.Watch.At
+                                              || completion.At == e.Watch.At && completion.LastReceiptId >= e.Watch.Id))
+                                  }).FirstOrDefault()
                           }).ToListAsync(cancellationToken);
         var media = rows.ToLookup(row => (row.MediaLibraryEntryId, row.MediaEpisodeId));
         var watched = media.Where(item => item.Any(row => row.LibraryPlayed || row.TrackerPlayed))
-            .SelectMany(item => item.Where(row => row.VideoId != null).Select(row => row.VideoId!))
+            .SelectMany(item => item.Select(row => row.VideoId!))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        var items = media.Select(item => new
-            {
-                Latest = item.OrderByDescending(row => row.Latest?.At)
-                    .ThenByDescending(row => row.Latest?.Id).First().Latest,
-                ExternalCompletionAt = item.Max(row => row.ExternalCompletionAt)
-            })
-            .Where(item => item.Latest is { Played: false, PositionMs: > 0 } e
-                && (item.ExternalCompletionAt is not { } completedAt || e.At > completedAt
-                    || e.At == completedAt && e.ExternalCompletionAt != completedAt))
-            .Select(item => item.Latest!)
+        var items = media.Select(item => item.OrderByDescending(row => row.Latest?.Event.At)
+                .ThenByDescending(row => row.Latest?.Event.Id).First().Latest)
+            .Where(latest => latest is { ExternallyCompleted: false, Event: { Played: false, PositionMs: > 0 } })
+            .Select(latest => latest!.Event)
             .OrderByDescending(e => e.At).ThenByDescending(e => e.Id).Take(50)
             .Select(e => new ResumeItem(e.Type!, e.MetaId!, e.VideoId!, e.Season, e.Episode,
                 e.At, e.PositionMs!.Value, e.DurationMs)).ToArray();
@@ -334,6 +335,7 @@ public sealed class AioStreamsWatchStateController(
         var (identity, unavailable) = await anime.LookupLinkedAnimeAsync(link.Provider, link.ExternalId, cancellationToken);
         if (identity?.Mappings is not { } mappings || identity.Type is "SPECIAL" or "MOVIE"
             || payload.MetaId != (identity.Imdb?.Id ?? mappings.ImdbId)
+            || identity.Imdb?.NonImdbEpisodes is null
             || MapImdbEpisode(payload.Season, payload.Episode!.Value, identity.Imdb) is not { } number)
             return (null, unavailable);
 

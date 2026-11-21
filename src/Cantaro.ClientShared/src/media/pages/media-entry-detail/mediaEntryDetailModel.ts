@@ -1,9 +1,34 @@
+import { providerAvailabilityKey, type ProviderAvailabilityState } from "../../components/media-entry-detail/providerAvailability";
 import type { MediaEntryDetailModel, MediaTitleDetailDto } from "../../services/mediaApi";
 import { mediaFormatLabel } from "../../services/mediaFormatting";
 import type {
   MediaEntryDetailContentProps,
   ProgressSummary,
 } from "./mediaEntryDetailTypes";
+
+export function getStremioTargets(state: ProviderAvailabilityState | undefined) {
+  return state?.stremioTargets?.length ? state.stremioTargets : [state?.stremioTarget];
+}
+
+export function getAioStreamsTargets({
+  entry,
+  availabilityByProviderLink,
+}: Pick<MediaEntryDetailContentProps, "entry" | "availabilityByProviderLink">) {
+  const { mediaKind, format, providerLinks } = entry.title;
+  const type = mediaKind === "anime" && format === "movie" ? "movie" : mediaKind;
+  switch (type) {
+    case "movie":
+    case "series":
+      return providerLinks.filter(link => link.provider === "imdb" && link.lastVerifiedAt)
+        .map(link => ({ id: link.externalId, type }));
+    case "anime":
+      return entry.providerLinks.filter(link => link.lastVerifiedAt)
+        .flatMap(link => getStremioTargets(availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]))
+        .filter(target => target?.type === "series");
+    default:
+      return [];
+  }
+}
 
 export function mergeTitleMetadata(
   current: MediaEntryDetailModel | null,

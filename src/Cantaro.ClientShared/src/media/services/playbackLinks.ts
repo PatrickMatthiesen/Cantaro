@@ -162,7 +162,7 @@ function addAioStreamsEpisodes(
 }
 
 function parseAioStreamsInstance(value: string | undefined): URL | null {
-  if (!value) return null;
+  if (!value || /[?#\\]/.test(value)) return null;
   try {
     const url = new URL(value);
     return isAioStreamsInstance(url) ? new URL('jellyfin/web/', `${url.href.replace(/\/$/, '')}/`) : null;
@@ -172,7 +172,16 @@ function parseAioStreamsInstance(value: string | undefined): URL | null {
 }
 
 function isAioStreamsInstance(url: URL): boolean {
-  return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
+  if (url.protocol !== 'https:' || url.username || url.password) return false;
+
+  const segments = decodeURIComponent(url.pathname).toLowerCase().split('/').filter(Boolean);
+  const stremioUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+  return !segments.includes('jellyfin') && !segments.includes('manifest.json')
+    && !segments.some((segment, index) => {
+      if (segment !== 'stremio') return false;
+      const credential = segments[index + 1] ?? '';
+      return stremioUuid.test(credential) || (credential === 'u' && index + 2 < segments.length);
+    });
 }
 
 function aioStreamsDestination(

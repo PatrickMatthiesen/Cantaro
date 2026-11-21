@@ -33,18 +33,40 @@ public sealed class AioStreamsPairingController(ApplicationDbContext db, UserMan
         string? normalized = null;
         if (!string.IsNullOrEmpty(value))
         {
-            if (value.Length > 2048 || value.Contains('?') || value.Contains('#') || value.Contains('\\')
-                || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
-                || uri.Scheme != Uri.UriSchemeHttps || string.IsNullOrEmpty(uri.Host) || uri.UserInfo.Length != 0
-                || uri.AbsolutePath.Split('/').Any(segment => segment.Equals("jellyfin", StringComparison.OrdinalIgnoreCase)))
+            normalized = NormalizePlaybackInstance(value);
+            if (normalized is null)
                 return BadRequest(new { error = "Enter the HTTPS address of your AIOStreams instance." });
-            normalized = uri.AbsoluteUri.TrimEnd('/');
-            if (normalized.Length > 2048) return BadRequest();
         }
 
         var updated = await db.Set<AioStreamsPairing>().Where(p => p.UserId == userId)
             .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.PlaybackInstanceUrl, normalized), cancellationToken);
         return updated == 0 ? Conflict() : Ok(new { playbackInstanceUrl = normalized });
+    }
+
+    internal static string? NormalizePlaybackInstance(string value)
+    {
+        if (value.Length > 2048 || value.Contains('?') || value.Contains('#') || value.Contains('\\')
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps || string.IsNullOrEmpty(uri.Host) || uri.UserInfo.Length != 0)
+            return null;
+
+        var segments = Uri.UnescapeDataString(uri.AbsolutePath).Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (var index = 0; index < segments.Length; index++)
+        {
+            var segment = segments[index];
+            if (segment.Equals("jellyfin", StringComparison.OrdinalIgnoreCase)
+                || segment.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            if (segment.Equals("stremio", StringComparison.OrdinalIgnoreCase)
+                && index + 1 < segments.Length
+                && (Guid.TryParseExact(segments[index + 1], "D", out _)
+                    || (segments[index + 1].Equals("u", StringComparison.OrdinalIgnoreCase) && index + 2 < segments.Length)))
+                return null;
+        }
+
+        var normalized = uri.AbsoluteUri.TrimEnd('/');
+        return normalized.Length <= 2048 ? normalized : null;
     }
 
     [HttpPut]

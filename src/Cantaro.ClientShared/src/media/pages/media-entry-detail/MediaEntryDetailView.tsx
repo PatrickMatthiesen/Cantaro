@@ -11,7 +11,6 @@ import {
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
 import { addAioStreamsDestinations, addStremioDestinations } from "../../services/playbackLinks";
-import { providerAvailabilityKey, type ProviderAvailabilityState } from "../../components/media-entry-detail/providerAvailability";
 import { getEpisodeRows } from "./episodeRows";
 import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
@@ -34,8 +33,10 @@ import {
 import { FranchiseSection } from "./FranchiseSection";
 import { FranchiseExplorer } from "../FranchiseExplorer";
 import {
+  getAioStreamsTargets,
   getEntryStatusChanged,
   getPrimaryProgressSummary,
+  getStremioTargets,
 } from "./mediaEntryDetailModel";
 import { DetailTabs } from "./DetailTabs";
 import {
@@ -240,21 +241,6 @@ function MediaDetailTabPanel({
   };
 
   return panels[activeTab];
-}
-
-function getStremioTargets(state: ProviderAvailabilityState | undefined) {
-  return state?.stremioTargets?.length ? state.stremioTargets : [state?.stremioTarget];
-}
-
-function getAioStreamsTargets({ entry, availabilityByProviderLink }: MediaEntryDetailContentProps) {
-  const verifiedLinks = entry.providerLinks.filter(link => link.lastVerifiedAt);
-  const mediaKind = entry.title.mediaKind;
-  const targets = verifiedLinks.flatMap(link =>
-    getStremioTargets(availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]));
-  if (mediaKind !== "series" && mediaKind !== "movie") return targets;
-  const imdbTargets = verifiedLinks.filter(link => link.provider === "imdb")
-    .map(link => ({ id: link.externalId, type: mediaKind }));
-  return [...targets, ...imdbTargets];
 }
 
 function getPlaybackDestinations(

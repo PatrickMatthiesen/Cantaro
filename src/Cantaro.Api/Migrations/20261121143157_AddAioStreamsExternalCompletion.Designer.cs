@@ -26,6 +26,36 @@ namespace Cantaro.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsExternalCompletion", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("At")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("FirstEpisode")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LastEpisode")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("LastReceiptId")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("MediaLibraryEntryId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaLibraryEntryId");
+
+                    b.ToTable("AioStreamsExternalCompletions", (string)null);
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.AioStreamsPairing", b =>
                 {
                     b.Property<int>("UserId")
@@ -69,9 +99,6 @@ namespace Cantaro.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
-
-                    b.Property<long?>("ExternalCompletionAt")
-                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("MediaEpisodeId")
                         .HasColumnType("uuid");
@@ -2618,6 +2645,15 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsExternalCompletion", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("MediaLibraryEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.AioStreamsPairing", b =>

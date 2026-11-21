@@ -46,6 +46,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderEpisode> MediaProviderEpisodes => Set<MediaProviderEpisode>();
     public DbSet<MediaProviderEpisodeMapping> MediaProviderEpisodeMappings => Set<MediaProviderEpisodeMapping>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
+    internal DbSet<AioStreamsExternalCompletion> AioStreamsExternalCompletions => Set<AioStreamsExternalCompletion>();
     internal DbSet<AioStreamsWatchEvent> AioStreamsWatchEvents => Set<AioStreamsWatchEvent>();
     public DbSet<MediaLibraryProviderBinding> MediaLibraryProviderBindings => Set<MediaLibraryProviderBinding>();
     public DbSet<MediaProviderLibrarySnapshot> MediaProviderLibrarySnapshots => Set<MediaProviderLibrarySnapshot>();
@@ -810,6 +811,14 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .WithMany(t => t.LibraryEntries)
                 .HasForeignKey(e => e.MediaTitleId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AioStreamsExternalCompletion>(entity =>
+        {
+            entity.ToTable("AioStreamsExternalCompletions");
+            entity.HasIndex(e => e.MediaLibraryEntryId);
+            entity.HasOne<MediaLibraryEntry>().WithMany().HasForeignKey(e => e.MediaLibraryEntryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AioStreamsPairing>(entity =>

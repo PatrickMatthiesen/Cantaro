@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -11,25 +12,38 @@ namespace Cantaro.Api.Migrations
             CREATE FUNCTION "MarkAioStreamsExternalCompletion"() RETURNS trigger
             LANGUAGE plpgsql AS $function$
             DECLARE
+                previous_progress integer := GREATEST(OLD."ProgressEpisodes", 0);
+                episode_progress_increased boolean := COALESCE(NEW."ProgressEpisodes", 0) > previous_progress;
+                movie_completed boolean;
                 completion_at bigint := floor(extract(epoch FROM NEW."UpdatedAt"))::bigint;
+                last_receipt_id bigint;
             BEGIN
-                IF NEW."ProgressEpisodes" > COALESCE(OLD."ProgressEpisodes", 0) THEN
-                    UPDATE "AioStreamsWatchEvents" AS receipt
-                    SET "ExternalCompletionAt" = GREATEST(receipt."ExternalCompletionAt", completion_at)
-                    FROM "MediaEpisodes" AS episode
-                    WHERE receipt."MediaLibraryEntryId" = NEW."Id"
-                        AND receipt."MediaEpisodeId" = episode."Id"
-                        AND episode."MediaTitleId" = NEW."MediaTitleId"
-                        AND episode."EpisodeNumber" > COALESCE(OLD."ProgressEpisodes", 0)
-                        AND episode."EpisodeNumber" <= NEW."ProgressEpisodes";
+                IF NOT EXISTS (SELECT 1 FROM "AioStreamsPairings" WHERE "UserId" = NEW."UserId") THEN
+                    RETURN NULL;
                 END IF;
 
-                IF NEW."Status" = 'completed' AND OLD."Status" IS DISTINCT FROM 'completed' THEN
-                    UPDATE "AioStreamsWatchEvents" AS receipt
-                    SET "ExternalCompletionAt" = GREATEST(receipt."ExternalCompletionAt", completion_at)
-                    WHERE receipt."MediaLibraryEntryId" = NEW."Id"
-                        AND receipt."MediaEpisodeId" IS NULL
-                        AND receipt."Type" = 'movie';
+                movie_completed := NEW."Status" = 'completed' AND OLD."Status" IS DISTINCT FROM 'completed'
+                    AND EXISTS (
+                        SELECT 1 FROM "MediaTitles"
+                        WHERE "Id" = NEW."MediaTitleId"
+                            AND ("MediaKind" = 'movie' OR ("MediaKind" = 'anime' AND "Format" = 'movie')));
+                IF NOT (episode_progress_increased OR movie_completed) THEN
+                    RETURN NULL;
+                END IF;
+
+                SELECT COALESCE(MAX("Id"), 0) INTO last_receipt_id
+                FROM "AioStreamsWatchEvents"
+                WHERE "MediaLibraryEntryId" = NEW."Id";
+
+                IF episode_progress_increased THEN
+                    INSERT INTO "AioStreamsExternalCompletions"
+                        ("MediaLibraryEntryId", "FirstEpisode", "LastEpisode", "At", "LastReceiptId")
+                    VALUES (NEW."Id", previous_progress + 1, NEW."ProgressEpisodes", completion_at, last_receipt_id);
+                END IF;
+
+                IF movie_completed THEN
+                    INSERT INTO "AioStreamsExternalCompletions" ("MediaLibraryEntryId", "At", "LastReceiptId")
+                    VALUES (NEW."Id", completion_at, last_receipt_id);
                 END IF;
 
                 RETURN NULL;
@@ -37,22 +51,42 @@ namespace Cantaro.Api.Migrations
             $function$;
 
             CREATE TRIGGER "MarkAioStreamsExternalCompletion"
-                AFTER UPDATE OF "Status", "ProgressEpisodes" ON "MediaLibraryEntries"
+                AFTER INSERT OR UPDATE OF "Status", "ProgressEpisodes" ON "MediaLibraryEntries"
                 FOR EACH ROW
-                WHEN (NEW."LastMutationSource" IS DISTINCT FROM 'aiostreams_watch_state'
-                    AND (NEW."ProgressEpisodes" > COALESCE(OLD."ProgressEpisodes", 0)
-                        OR (NEW."Status" = 'completed' AND OLD."Status" IS DISTINCT FROM 'completed')))
+                WHEN (NEW."LastMutationSource" IS DISTINCT FROM 'aiostreams_watch_state')
                 EXECUTE FUNCTION "MarkAioStreamsExternalCompletion"();
             """;
 
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<long>(
-                name: "ExternalCompletionAt",
-                table: "AioStreamsWatchEvents",
-                type: "bigint",
-                nullable: true);
+            migrationBuilder.CreateTable(
+                name: "AioStreamsExternalCompletions",
+                columns: table => new
+                {
+                    Id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    MediaLibraryEntryId = table.Column<Guid>(type: "uuid", nullable: false),
+                    FirstEpisode = table.Column<int>(type: "integer", nullable: true),
+                    LastEpisode = table.Column<int>(type: "integer", nullable: true),
+                    At = table.Column<long>(type: "bigint", nullable: false),
+                    LastReceiptId = table.Column<long>(type: "bigint", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AioStreamsExternalCompletions", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_AioStreamsExternalCompletions_MediaLibraryEntries_MediaLibr~",
+                        column: x => x.MediaLibraryEntryId,
+                        principalTable: "MediaLibraryEntries",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AioStreamsExternalCompletions_MediaLibraryEntryId",
+                table: "AioStreamsExternalCompletions",
+                column: "MediaLibraryEntryId");
 
             migrationBuilder.Sql(InstallTriggerSql);
         }
@@ -65,9 +99,7 @@ namespace Cantaro.Api.Migrations
                 DROP FUNCTION "MarkAioStreamsExternalCompletion"();
                 """);
 
-            migrationBuilder.DropColumn(
-                name: "ExternalCompletionAt",
-                table: "AioStreamsWatchEvents");
+            migrationBuilder.DropTable(name: "AioStreamsExternalCompletions");
         }
     }
 }

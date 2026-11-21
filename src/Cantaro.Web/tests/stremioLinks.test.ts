@@ -226,13 +226,36 @@ describe('AIOStreams playback destinations', () => {
     expect(destinations).toEqual(original);
   });
 
-  it('opens a movie without a video ID and refuses an unsafe instance address', () => {
+  it('opens a movie without a video ID', () => {
     const original = catalogDestinations();
     const targets = [{ type: 'movie', id: 'tt1000001' }];
     const destinations = addAioStreamsDestinations(original, instance, targets, 'movie', []);
     expect(destinations.seriesDestinations.at(-1)?.url)
       .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=movie&metaId=tt1000001');
-    expect(addAioStreamsDestinations(original, 'https://user:secret@aio.example/', targets, 'movie', [])).toBe(original);
+  });
+
+  it.each([
+    'http://aio.example',
+    'https://user:secret@aio.example/',
+    'https://aio.example/hosted?token=example',
+    'https://aio.example/hosted#fragment',
+    'https://aio.example/hosted/jellyfin/web',
+    'https://aio.example/hosted/private/manifest.json',
+    'https://aio.example/hosted/private/%6danifest%2ejson',
+    'https://aio.example/hosted/stremio/852a2fb0-764b-43ef-870e-054724c98f08',
+    'https://aio.example/hosted/stremio/u/private',
+    'https://aio.example/hosted/%73tremio%2fu%2fprivate/configure',
+  ])('rejects unsafe playback instance address %s', (url) => {
+    const original = catalogDestinations();
+    const targets = [{ type: 'movie', id: 'tt1000001' }];
+    expect(addAioStreamsDestinations(original, url, targets, 'movie', [])).toBe(original);
+  });
+
+  it('accepts a deployment subpath containing a non-credential stremio segment', () => {
+    const destinations = addAioStreamsDestinations(catalogDestinations(), 'https://aio.example/hosted/stremio/custom/',
+      [{ type: 'movie', id: 'tt1000001' }], 'movie', []);
+    expect(destinations.seriesDestinations.at(-1)?.url)
+      .toBe('https://aio.example/hosted/stremio/custom/jellyfin/web/#/open?type=movie&metaId=tt1000001');
   });
 });
 
