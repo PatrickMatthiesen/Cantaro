@@ -1,7 +1,5 @@
 namespace Cantaro.Api.Models;
 
-using System.ComponentModel.DataAnnotations.Schema;
-
 /// <summary>
 /// Cantaro's canonical episode number for a media title.
 /// </summary>
@@ -32,8 +30,4 @@ public class MediaEpisode
     public MediaTitle? MediaTitle { get; set; }
 
     public ICollection<MediaEpisodeProviderContent> ProviderContents { get; set; } = [];
-
-    [NotMapped]
-    public ICollection<MediaEpisodeProviderIdentity> ProviderIdentities =>
-        ProviderContents.SelectMany(content => content.Variants).ToList();
 }

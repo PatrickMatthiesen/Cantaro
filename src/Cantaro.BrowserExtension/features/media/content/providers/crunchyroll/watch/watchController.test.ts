@@ -14,7 +14,10 @@ function createContext(): ContentScriptContext {
   return {
     isInvalid: false,
     setTimeout: (callback: () => void, delay: number) => window.setTimeout(callback, delay),
-    addEventListener: () => undefined,
+    addEventListener: (target: EventTarget, type: string, listener: EventListener, capture?: boolean) => {
+      target.addEventListener(type, listener, capture);
+      invalidationCallbacks.push(() => target.removeEventListener(type, listener, capture));
+    },
     onInvalidated: (callback: () => void) => invalidationCallbacks.push(callback),
     abort: () => invalidationCallbacks.forEach(callback => callback()),
   } as unknown as ContentScriptContext;
@@ -123,6 +126,113 @@ it.each(['atomic', 'staggered', 'pending threshold'])(
     controller.dispose();
   },
 );
+
+it.each([
+  { providerId: 'NEXT6', releaseTrack: undefined },
+  { providerId: 'GE00374383JAJP', releaseTrack: 'sub:en' },
+])('keeps the release track for $providerId when the current player audio changes', async ({ providerId, releaseTrack }) => {
+  vi.useFakeTimers();
+  const page = parseHTML(`
+    <html>
+      <head><title>Episode 5 - My Show - Crunchyroll</title></head>
+      <body>
+        <div role="menu" aria-label="Audio Track Selection">
+          <button role="menuitemradio" aria-checked="true">English</button>
+          <button role="menuitemradio" aria-checked="false">German</button>
+        </div>
+        <div data-t="next-episode"><a href="/watch/${providerId}/episode-6">Episode 6</a></div>
+        <video></video>
+      </body>
+    </html>
+  `);
+  vi.stubGlobal('window', page.window);
+  vi.stubGlobal('document', page.document);
+  vi.stubGlobal('location', new URL('https://www.crunchyroll.com/watch/CURRENT5/episode-5'));
+  vi.stubGlobal('MutationObserver', page.window.MutationObserver);
+  vi.stubGlobal('Element', page.window.Element);
+  const video = page.document.querySelector('video')!;
+  setVideoProgress(video, 40);
+  const submitWatch = vi.fn<Parameters<typeof createCrunchyrollWatchController>[1]['submitWatch']>()
+    .mockResolvedValue({ ok: true, correlationId: '', value: { status: 'accepted' } });
+  const controller = createCrunchyrollWatchController(createContext(), {
+    isTrackingPaused: async () => false,
+    watchTrackingPause: () => () => undefined,
+    readVerboseLogging: async () => false,
+    watchVerboseLogging: () => () => undefined,
+    readCollectionConsent: async () => true,
+    watchCollectionConsent: () => () => undefined,
+    readCatalogCollectionConsent: async () => true,
+    watchCatalogCollectionConsent: () => () => undefined,
+    submitWatch,
+    resolveWatch: async () => ({ ok: true, correlationId: '', value: { resolved: true } }),
+    showResolution: () => ({ close: () => undefined }),
+  });
+
+  await vi.advanceTimersByTimeAsync(500);
+  expect(controller.getSnapshot()).toMatchObject({ status: 'ready', watchProgressPercent: 40 });
+  page.document.querySelector('[aria-checked="false"]')!.dispatchEvent(new page.window.Event('click', { bubbles: true }));
+  // If the page title is unavailable at submission, the tracker uses the metadata it already captured.
+  page.document.title = '';
+  video.currentTime = 85;
+  video.dispatchEvent(new page.window.Event('timeupdate'));
+  await vi.advanceTimersByTimeAsync(0);
+
+  expect(submitWatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    releaseTrack: 'dub:de',
+    nextEpisodeProviderId: providerId,
+    nextEpisodeReleaseTrack: releaseTrack,
+  }), expect.any(String));
+  controller.dispose();
+});
+
+it('resolves the observation version shown in the overlay', async () => {
+  vi.useFakeTimers();
+  const page = parseHTML('<html><head><title>Episode 5 - My Show - Crunchyroll</title></head><body><video></video></body></html>');
+  vi.stubGlobal('window', page.window);
+  vi.stubGlobal('document', page.document);
+  vi.stubGlobal('location', new URL('https://www.crunchyroll.com/watch/EPISODE5/episode-5'));
+  vi.stubGlobal('MutationObserver', page.window.MutationObserver);
+  vi.stubGlobal('Element', page.window.Element);
+  const video = page.document.querySelector('video')!;
+  setVideoProgress(video, 40);
+  const updatedAt = '2026-11-21T10:20:30.123456+00:00';
+  const showResolution = vi.fn<Parameters<typeof createCrunchyrollWatchController>[1]['showResolution']>()
+    .mockReturnValue({ close: () => undefined });
+  const resolveWatch = vi.fn(async () => (
+    { ok: true, correlationId: '', value: { resolved: true } } as const
+  ));
+  const controller = createCrunchyrollWatchController(createContext(), {
+    isTrackingPaused: async () => false,
+    watchTrackingPause: () => () => undefined,
+    readVerboseLogging: async () => false,
+    watchVerboseLogging: () => () => undefined,
+    readCollectionConsent: async () => true,
+    watchCollectionConsent: () => () => undefined,
+    readCatalogCollectionConsent: async () => false,
+    watchCatalogCollectionConsent: () => () => undefined,
+    submitWatch: async () => ({
+      ok: true, correlationId: '', value: {
+        status: 'pending_resolution',
+        resolution: {
+          observationId: 'observation', updatedAt, observedTitle: 'Episode', matchStatus: 'ambiguous',
+          suggestedEpisodeOffset: 0, candidates: [], providerChoices: [],
+        },
+      },
+    }),
+    resolveWatch,
+    showResolution,
+  });
+
+  await vi.advanceTimersByTimeAsync(500);
+  video.currentTime = 85;
+  video.dispatchEvent(new page.window.Event('timeupdate'));
+  await vi.advanceTimersByTimeAsync(0);
+
+  const request = { observationId: 'observation', candidateId: 'candidate', episodeOffset: 0 };
+  await showResolution.mock.calls[0]![1](request);
+  expect(resolveWatch).toHaveBeenCalledExactlyOnceWith({ ...request, expectedUpdatedAt: updatedAt }, expect.any(String));
+  controller.dispose();
+});
 
 describe('Crunchyroll watch controller consent gate', () => {
   it('does not inspect the player before consent and clears state when revoked', async () => {

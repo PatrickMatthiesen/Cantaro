@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Security.Claims;
 using Cantaro.Api.Controllers;
 using Cantaro.Api.Data;
@@ -31,6 +32,42 @@ public class MediaLibraryApiTests
             .GetCustomAttributes(typeof(AllowAnonymousAttribute), true).SingleOrDefault());
         Assert.NotNull(typeof(MediaLibraryController)
             .GetCustomAttributes(typeof(AuthorizeAttribute), true).SingleOrDefault());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetEpisodes_AnonymousReturnsPlaybackAndLanguagesWithoutWatchMetadata(bool standalone)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Titles.ControllerContext.HttpContext.User = new ClaimsPrincipal();
+        var title = fixture.MakeTitle("Public playback");
+        title.IsCompletionOnly = standalone;
+        title.SupportsEpisodeProgress = !standalone;
+        var now = DateTimeOffset.UtcNow;
+        fixture.Db.AddRange(title, new MediaProviderEpisode
+        {
+            Provider = "crunchyroll", ProviderEpisodeId = "PUBLIC1", ProviderUrlPath = "/watch/PUBLIC1",
+            ProviderSeriesId = "PUBLICSERIES", SeenCount = 7, FirstSeenAt = now.AddMinutes(-1), LastSeenAt = now,
+            AvailableSubtitleLanguageCodes = ["en"], AvailableAudioLanguageCodes = ["ja"]
+        }, new MediaProviderEpisodeMapping
+        {
+            Provider = "crunchyroll", ProviderEpisodeId = "PUBLIC1", MediaTitleId = title.Id,
+            MappingSource = MediaProviderSeasonMappingSources.Manual, CanonicalEpisodeNumber = standalone ? null : 1
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Titles.GetEpisodes(title.Id, default);
+        var catalog = Assert.IsType<MediaEpisodeCatalogDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var destination = standalone ? Assert.Single(catalog.StandaloneDestinations)
+            : Assert.Single(Assert.Single(catalog.Episodes).Destinations);
+        Assert.Equal("https://www.crunchyroll.com/watch/PUBLIC1", destination.Url);
+        Assert.Equal(["en"], destination.AvailableSubtitleLanguageCodes);
+        Assert.Equal(["ja"], destination.AvailableAudioLanguageCodes);
+        var json = JsonSerializer.Serialize(catalog, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.DoesNotContain("firstSeenAt", json);
+        Assert.DoesNotContain("lastSeenAt", json);
+        Assert.DoesNotContain("seenCount", json);
     }
 
     [Fact]

@@ -20,7 +20,7 @@ import {
 } from "./episodeAvailability";
 import {
   filterDestinationsByAudioLanguage,
-  getLanguageCode,
+  getDestinationAudioLanguages,
 } from "./episodeAudioDestinations";
 import { getEpisodeRows } from "./episodeRows";
 import type { EpisodeCatalogState } from "./mediaEntryDetailTypes";
@@ -87,12 +87,7 @@ function formatAudioLanguage(language: string) {
 function getAudioLanguages(destinations: MediaStreamingDestinations) {
   return [...new Set(destinations.episodes
     .flatMap((episode) => episode.destinations)
-    .map((destination) => destination.audioLocale
-      ?? (destination.releaseTrack?.startsWith("dub:")
-        ? destination.releaseTrack.slice(4)
-        : destination.releaseTrack?.startsWith("sub:") ? "ja" : undefined))
-    .filter((locale): locale is string => Boolean(locale))
-    .map(getLanguageCode))]
+    .flatMap(getDestinationAudioLanguages))]
     .sort((left, right) => formatAudioLanguage(left).localeCompare(formatAudioLanguage(right)));
 }
 
@@ -163,7 +158,6 @@ function EpisodeRow({
   watchedThrough,
   seriesDestinations,
   audioLanguage,
-  preferredReleaseTrack,
   onSelectStreamingService,
 }: {
   episodeNumber: number;
@@ -172,7 +166,6 @@ function EpisodeRow({
   watchedThrough: number;
   seriesDestinations: readonly StreamingDestination[];
   audioLanguage: string | null;
-  preferredReleaseTrack?: string;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
 }) {
   const hasLinks = seriesDestinations.length > 0 || (destination?.destinations.length ?? 0) > 0;
@@ -207,7 +200,6 @@ function EpisodeRow({
           episodeDestinations={filterDestinationsByAudioLanguage(
             destination?.destinations ?? [],
             audioLanguage,
-            preferredReleaseTrack,
           )}
           seriesDestinations={seriesDestinations}
           onSelectStreamingService={onSelectStreamingService}
@@ -289,7 +281,6 @@ function EpisodeSectionContent({
   windowStart,
   seriesDestinations,
   audioLanguage,
-  preferredReleaseTrack,
   onSelectStreamingService,
   onRefresh,
   onShowEarlier,
@@ -304,7 +295,6 @@ function EpisodeSectionContent({
   windowStart: number;
   seriesDestinations: readonly StreamingDestination[];
   audioLanguage: string | null;
-  preferredReleaseTrack?: string;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onRefresh: () => void;
   onShowEarlier: () => void;
@@ -331,7 +321,6 @@ function EpisodeSectionContent({
       windowStart={windowStart}
       seriesDestinations={seriesDestinations}
       audioLanguage={audioLanguage}
-      preferredReleaseTrack={preferredReleaseTrack}
       onSelectStreamingService={onSelectStreamingService}
       onShowEarlier={onShowEarlier}
       onShowLater={onShowLater}
@@ -406,7 +395,6 @@ function EpisodeWindow({
   windowStart,
   seriesDestinations,
   audioLanguage,
-  preferredReleaseTrack,
   onSelectStreamingService,
   onShowEarlier,
   onShowLater,
@@ -418,7 +406,6 @@ function EpisodeWindow({
   windowStart: number;
   seriesDestinations: readonly StreamingDestination[];
   audioLanguage: string | null;
-  preferredReleaseTrack?: string;
   onSelectStreamingService: (serviceId: StreamingServiceId) => void;
   onShowEarlier: () => void;
   onShowLater: () => void;
@@ -446,7 +433,6 @@ function EpisodeWindow({
             watchedThrough={entry.progressEpisodes ?? 0}
             seriesDestinations={seriesDestinations}
             audioLanguage={audioLanguage}
-            preferredReleaseTrack={preferredReleaseTrack}
             onSelectStreamingService={onSelectStreamingService}
           />
         ))}
@@ -534,11 +520,11 @@ export function EpisodesSection({
     () => getAudioLanguages(streamingDestinations),
     [streamingDestinations],
   );
-  const [audioLanguage, setAudioLanguage] = useState<string | null>(null);
   const preferredAudioLanguage = resolvePreferredEpisodeAudioLanguage(
     preferredMediaReleaseTrack,
     audioLanguages,
   );
+  const [audioLanguage, setAudioLanguage] = useState(preferredAudioLanguage);
 
   useEffect(() => {
     setWindowStart(initialWindowStart);
@@ -610,7 +596,6 @@ export function EpisodesSection({
         windowStart={windowStart}
         seriesDestinations={orderedSeriesDestinations}
         audioLanguage={audioLanguage}
-        preferredReleaseTrack={preferredMediaReleaseTrack}
         onSelectStreamingService={onSelectStreamingService}
         onRefresh={onRefresh}
         onShowEarlier={() =>

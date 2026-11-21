@@ -179,7 +179,7 @@ public class MediaLinkConflictDto
 public class MediaContinueWatchingDto
 {
     /// <summary>
-    /// direct | series_fallback | completed | unavailable | conflict
+    /// direct | series_fallback | completed | unavailable
     /// </summary>
     public required string Outcome { get; set; }
 
@@ -193,6 +193,7 @@ public class MediaContinueWatchingDto
 public class MediaEpisodeCatalogDto
 {
     public required IReadOnlyList<MediaStreamingDestinationDto> SeriesDestinations { get; set; }
+    public IReadOnlyList<MediaStreamingDestinationDto> StandaloneDestinations { get; set; } = [];
     public required IReadOnlyList<MediaEpisodeDestinationDto> Episodes { get; set; }
     public required IReadOnlyList<MediaSpecialEpisodeDestinationDto> Specials { get; set; }
     public required MediaReleaseAvailabilityDto ReleaseAvailability { get; set; }
@@ -226,17 +227,15 @@ public class MediaEpisodeDestinationDto
     public required IReadOnlyList<string> AvailableSubtitleLanguageCodes { get; set; }
     public required IReadOnlyList<string> AvailableAudioLanguageCodes { get; set; }
     public required IReadOnlyList<MediaStreamingDestinationDto> Destinations { get; set; }
-    public int SeenCount { get; set; }
-    public bool HasConflict { get; set; }
 }
 
 public class MediaStreamingDestinationDto
 {
     public required string ServiceId { get; set; }
     public required string Url { get; set; }
+    public string? Title { get; set; }
+    public IReadOnlyList<string> AvailableSubtitleLanguageCodes { get; set; } = [];
+    public IReadOnlyList<string> AvailableAudioLanguageCodes { get; set; } = [];
     public string? AudioLocale { get; set; }
     public string? ReleaseTrack { get; set; }
-    public int SeenCount { get; set; }
-    public DateTimeOffset FirstSeenAt { get; set; }
-    public DateTimeOffset LastSeenAt { get; set; }
 }

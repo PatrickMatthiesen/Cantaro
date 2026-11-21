@@ -517,7 +517,38 @@ public sealed class ProfileControllerTests
     }
 
     [Fact]
-    public async Task RetentionKeepsConflictedCatalogEvidenceAndDeletesFullyRecordedCatalogEvidence()
+    public async Task RetentionRemovesMovieObservationAfterCompletionWasSaved()
+    {
+        await using var fixture = await ProfileFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var movie = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Movie", MediaKind = MediaKinds.Movie,
+            IsCompletionOnly = true, PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(), MediaTitleId = movie.Id, UserId = fixture.User.Id,
+            Status = MediaLibraryStatuses.Current
+        };
+        var observation = CreateObservation(fixture.User.Id, "movie-watch", now, now);
+        observation.MatchStatus = MediaObservationStatuses.Matched;
+        observation.MediaTitleId = movie.Id;
+        observation.ProgressHint = null;
+        fixture.Db.AddRange(movie, entry, observation);
+        await fixture.Db.SaveChangesAsync();
+        var retention = new MediaObservationRetentionService(fixture.Db);
+
+        Assert.Equal(0, await retention.CleanupCompletedAsync());
+        entry.Status = MediaLibraryStatuses.Completed;
+        await fixture.Db.SaveChangesAsync();
+        Assert.Equal(1, await retention.CleanupCompletedAsync());
+        Assert.Empty(fixture.Db.MediaObservations);
+    }
+
+    [Fact]
+    public async Task RetentionKeepsCatalogEvidenceUntilAllEpisodesResolveToTheTitle()
     {
         await using var fixture = await ProfileFixture.CreateAsync();
         var now = DateTimeOffset.UtcNow;
@@ -526,69 +557,23 @@ public sealed class ProfileControllerTests
             Id = Guid.NewGuid(),
             CanonicalTitle = "Catalog target",
             MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode
         };
-        var conflictingTitle = new MediaTitle
+        var recorded = new MediaProviderEpisode
         {
-            Id = Guid.NewGuid(),
-            CanonicalTitle = "Catalog conflict target",
-            MediaKind = MediaKinds.Anime,
-            PrimaryProgressDimension = MediaProgressDimensions.Episode,
-            ReleaseStatusDimension = MediaProgressDimensions.Episode
+            Provider = MediaObservationSiteIdentifiers.Crunchyroll, ProviderEpisodeId = "RECORDED",
+            ProviderUrlPath = "/watch/RECORDED", SeenCount = 1, FirstSeenAt = now, LastSeenAt = now
         };
-        var targetEpisode = new MediaEpisode
-        {
-            Id = Guid.NewGuid(),
-            MediaTitle = targetTitle,
-            MediaTitleId = targetTitle.Id,
-            EpisodeNumber = 1,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var conflictingEpisode = new MediaEpisode
-        {
-            Id = Guid.NewGuid(),
-            MediaTitle = conflictingTitle,
-            MediaTitleId = conflictingTitle.Id,
-            EpisodeNumber = 1,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var recordedContent = new MediaEpisodeProviderContent
-        {
-            Id = Guid.NewGuid(),
-            MediaEpisode = targetEpisode,
-            MediaEpisodeId = targetEpisode.Id,
-            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-            ProviderContentKey = "recorded-content"
-        };
-        var conflictedContent = new MediaEpisodeProviderContent
-        {
-            Id = Guid.NewGuid(),
-            MediaEpisode = conflictingEpisode,
-            MediaEpisodeId = conflictingEpisode.Id,
-            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-            ProviderContentKey = "conflicted-content"
-        };
-        var recordedIdentity = CreateProviderIdentity(
-            recordedContent,
-            "RECORDED",
-            now,
-            hasConflict: false);
-        var conflictedIdentity = CreateProviderIdentity(
-            conflictedContent,
-            "CONFLICTED",
-            now,
-            hasConflict: true);
-        var retained = CreateObservation(fixture.User.Id, "catalog-conflict", now, now);
+        var retained = CreateObservation(fixture.User.Id, "catalog-unrecorded", now, now);
         retained.MatchStatus = MediaObservationStatuses.Matched;
         retained.IsCatalogObservation = true;
         retained.MediaTitle = targetTitle;
         retained.Episodes.Add(new MediaObservationEpisode
         {
-            ProviderEpisodeId = "CONFLICTED",
-            ProviderUrl = "https://www.crunchyroll.com/watch/CONFLICTED",
+            ProviderEpisodeId = "MISSING",
+            ProviderUrl = "https://www.crunchyroll.com/watch/MISSING",
             EpisodeNumber = 1
         });
         var removable = CreateObservation(fixture.User.Id, "catalog-recorded", now, now);
@@ -601,42 +586,22 @@ public sealed class ProfileControllerTests
             ProviderUrl = "https://www.crunchyroll.com/watch/RECORDED",
             EpisodeNumber = 1
         });
-        fixture.Db.AddRange(
-            targetTitle,
-            conflictingTitle,
-            targetEpisode,
-            conflictingEpisode,
-            recordedContent,
-            conflictedContent,
-            recordedIdentity,
-            conflictedIdentity,
-            retained,
-            removable);
+        fixture.Db.AddRange(targetTitle, recorded, retained, removable);
         await fixture.Db.SaveChangesAsync();
 
-        var deleted = await new MediaObservationRetentionService(fixture.Db).CleanupCompletedAsync();
-
-        Assert.Equal(1, deleted);
-        Assert.Equal("catalog-conflict", await fixture.Db.MediaObservations.Select(item => item.SiteMediaId).SingleAsync());
-    }
-
-    private static MediaEpisodeProviderIdentity CreateProviderIdentity(
-        MediaEpisodeProviderContent content,
-        string providerEpisodeId,
-        DateTimeOffset now,
-        bool hasConflict) => new()
+        var retention = new MediaObservationRetentionService(fixture.Db);
+        Assert.Equal(0, await retention.CleanupCompletedAsync());
+        fixture.Db.MediaProviderEpisodeMappings.Add(new MediaProviderEpisodeMapping
         {
-            Id = Guid.NewGuid(),
-            Content = content,
-            MediaEpisodeProviderContentId = content.Id,
-            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-            ProviderEpisodeId = providerEpisodeId,
-            ProviderUrlPath = $"/watch/{providerEpisodeId}",
-            SeenCount = 1,
-            FirstSeenAt = now,
-            LastSeenAt = now,
-            HasConflict = hasConflict
-        };
+            Provider = recorded.Provider, ProviderEpisodeId = recorded.ProviderEpisodeId,
+            MediaTitleId = targetTitle.Id, CanonicalEpisodeNumber = 1,
+            MappingSource = MediaProviderSeasonMappingSources.Automatic, CreatedAt = now, UpdatedAt = now
+        });
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.Equal(1, await retention.CleanupCompletedAsync());
+        Assert.Equal("catalog-unrecorded", await fixture.Db.MediaObservations.Select(item => item.SiteMediaId).SingleAsync());
+    }
 
     private static MediaObservation CreateObservation(int userId, string siteMediaId, DateTimeOffset createdAt, DateTimeOffset updatedAt) => new()
     {

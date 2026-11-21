@@ -182,7 +182,7 @@ export interface MediaLinkConflictDto {
 }
 
 export interface MediaContinueWatchingDto {
-    outcome: 'direct' | 'series_fallback' | 'completed' | 'unavailable' | 'conflict';
+    outcome: 'direct' | 'series_fallback' | 'completed' | 'unavailable';
     episodeNumber?: number;
     provider?: string;
     url?: string;
@@ -190,6 +190,7 @@ export interface MediaContinueWatchingDto {
 
 export interface MediaEpisodeCatalogDto {
     seriesDestinations: MediaStreamingDestinationDto[];
+    standaloneDestinations?: MediaStreamingDestinationDto[];
     episodes: MediaEpisodeDestinationDto[];
     specials: MediaSpecialEpisodeDestinationDto[];
     releaseAvailability?: MediaReleaseAvailabilityDto;
@@ -214,8 +215,6 @@ export interface MediaEpisodeDestinationDto {
     destinations: MediaStreamingDestinationDto[];
     availableAudioLanguageCodes?: string[];
     availableSubtitleLanguageCodes?: string[];
-    seenCount: number;
-    hasConflict: boolean;
 }
 
 export interface MediaSpecialEpisodeDestinationDto {
@@ -224,13 +223,13 @@ export interface MediaSpecialEpisodeDestinationDto {
 }
 
 export interface MediaStreamingDestinationDto {
+  title?: string | null;
+  availableSubtitleLanguageCodes?: string[];
+  availableAudioLanguageCodes?: string[];
     serviceId: string;
     url: string;
-    audioLocale?: string;
-    releaseTrack?: string;
-    seenCount: number;
-    firstSeenAt: string;
-    lastSeenAt: string;
+    audioLocale?: string | null;
+    releaseTrack?: string | null;
 }
 
 export interface MediaProviderAccountStatusDto {
@@ -373,11 +372,13 @@ export interface MediaObservationDto {
     lastMatchAttemptedAt?: string;
     lastMatchError?: string;
     createdAt: string;
+    updatedAt: string;
     candidates: MediaObservationCandidateDto[];
 }
 
 export interface ResolveMediaObservationDto {
     candidateId: string;
+    expectedUpdatedAt: string;
 }
 
 export interface MediaCatalogLibraryStateDto {

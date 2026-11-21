@@ -92,7 +92,6 @@ export function extractCrunchyrollWatchMetadata(
   const nextEpisode = readCatalogNextEpisode(
     doc,
     identity.pageUrl.href,
-    releaseTrack,
     options.includeCatalogEvidence,
   );
 
@@ -118,11 +117,10 @@ export function extractCrunchyrollWatchMetadata(
 function readCatalogNextEpisode(
   doc: Document,
   pageUrl: string,
-  releaseTrack: string | undefined,
   includeCatalogEvidence: boolean | undefined,
 ) {
   if (includeCatalogEvidence === false) return undefined;
-  return readNextEpisode(doc, pageUrl, releaseTrack);
+  return readNextEpisode(doc, pageUrl);
 }
 
 function readResolvedWatchReleaseTrack(
@@ -247,7 +245,9 @@ function buildProgressObservation(
     ...refreshed,
     releaseTrack: refreshed.releaseTrack ?? metadata.releaseTrack,
     nextEpisodeReleaseTrack: refreshed.nextEpisodeReleaseTrack
-      ?? metadata.nextEpisodeReleaseTrack,
+      ?? (refreshed.nextEpisodeProviderId === metadata.nextEpisodeProviderId
+        ? metadata.nextEpisodeReleaseTrack
+        : undefined),
     ...snapshot,
     observedAt: new Date().toISOString(),
     extensionVersion: getExtensionVersion(),
@@ -342,7 +342,6 @@ function readProviderSeriesId(doc: Document, baseUrl: string): string | undefine
 function readNextEpisode(
   doc: Document,
   baseUrl: string,
-  currentReleaseTrack?: string,
 ): { providerId: string; url: string; title?: string; episodeNumber?: number; releaseTrack?: string } | null {
   const link = NEXT_EPISODE_SELECTORS
     .map(selector => doc.querySelector<HTMLAnchorElement>(selector))
@@ -368,8 +367,7 @@ function readNextEpisode(
     title,
     episodeNumber: extractEpisodeNumber(`${cardText ?? ''} ${url.pathname}`) ?? undefined,
     releaseTrack: releaseTrackFromProviderEpisodeId(providerId)
-      ?? releaseTrackFromPresentationLabel(cardText)
-      ?? currentReleaseTrack,
+      ?? releaseTrackFromPresentationLabel(cardText),
   };
 }
 

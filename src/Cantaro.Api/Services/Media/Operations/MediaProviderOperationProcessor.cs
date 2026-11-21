@@ -24,6 +24,9 @@ public class MediaProviderOperationProcessor(
     IMediaProviderRegistry mediaProviderRegistry,
     ILogger<MediaProviderOperationProcessor> logger)
 {
+    internal static readonly TimeSpan ProcessingLeaseTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ExecutionTimeout = TimeSpan.FromMinutes(4);
+    private static readonly Dictionary<Guid, BindingExecutionGate> BindingExecutionGates = new();
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly IMediaProviderRegistry _mediaProviderRegistry = mediaProviderRegistry;
@@ -49,14 +52,16 @@ public class MediaProviderOperationProcessor(
         int userId,
         MediaLibraryProviderBinding binding,
         AutoProgressUpdatePayload payload,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferSave = false)
     {
         return await EnqueueAsync(
             userId,
             binding,
             MediaProviderOperationTypes.AutoProgressUpdate,
             payload,
-            cancellationToken);
+            cancellationToken,
+            deferSave);
     }
 
     public async Task<MediaProviderOperation> EnqueueStatusUpdateAsync(
@@ -109,77 +114,201 @@ public class MediaProviderOperationProcessor(
     {
         DetachTrackedOperation(operationId);
 
-        var claimResult = await TryClaimOperationAsync(operationId, cancellationToken);
-        if (claimResult is not null)
+        var claimedAt = await TryClaimOperationAsync(operationId, cancellationToken);
+        if (claimedAt is null)
         {
-            return claimResult;
+            var failed = await _dbContext.MediaProviderOperations.AsNoTracking()
+                .Where(item => item.Id == operationId && item.Status == MediaProviderOperationStatuses.Failed)
+                .Select(item => new MediaProviderOperationExecutionResult
+                {
+                    Outcome = MediaProviderOperationExecutionOutcome.Failed,
+                    LastError = item.LastError
+                })
+                .SingleOrDefaultAsync(cancellationToken);
+            return failed ?? Queued();
         }
 
-        var operation = await _dbContext.MediaProviderOperations
-            .Include(item => item.MediaLibraryProviderBinding)
-                .ThenInclude(binding => binding!.MediaLibraryEntry)
-            .Include(item => item.MediaLibraryProviderBinding)
-                .ThenInclude(binding => binding!.MediaProviderLink)
-            .FirstOrDefaultAsync(item => item.Id == operationId, cancellationToken)
-            ?? throw new InvalidOperationException($"Media provider operation {operationId} was not found.");
-
+        var claim = OwnedClaim(operationId, claimedAt.Value);
         try
         {
-            if (ShouldSkipStaleOperation(operation))
+            var operation = await ActiveClaim(operationId, claimedAt.Value)
+                .Include(item => item.MediaLibraryProviderBinding)
+                    .ThenInclude(binding => binding!.MediaLibraryEntry)
+                .Include(item => item.MediaLibraryProviderBinding)
+                    .ThenInclude(binding => binding!.MediaProviderLink)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (operation is null)
             {
-                _logger.LogInformation("Skipped stale media provider operation {OperationId} ({OperationType}).",
-                    operation.Id, operation.OperationType);
-                _dbContext.MediaProviderOperations.Remove(operation);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                return new MediaProviderOperationExecutionResult
+                return Queued();
+            }
+
+            AutoProgressUpdatePayload? autoProgress;
+            MediaProviderMutationResult? mutationResult;
+            DateTimeOffset? expectedRemoteUpdateAt;
+            try
+            {
+                var binding = operation.MediaLibraryProviderBinding!;
+                await _dbContext.Entry(binding).ReloadAsync(cancellationToken);
+                await _dbContext.Entry(binding.MediaLibraryEntry!).ReloadAsync(cancellationToken);
+
+                if (ShouldSkipStaleOperation(operation))
                 {
-                    Outcome = MediaProviderOperationExecutionOutcome.Succeeded
+                    var deleted = await ActiveClaim(operation).ExecuteDeleteAsync(cancellationToken) == 1;
+                    if (deleted)
+                    {
+                        _logger.LogInformation("Skipped stale media provider operation {OperationId} ({OperationType}).",
+                            operation.Id, operation.OperationType);
+                    }
+                    return CompletionResult(deleted);
+                }
+
+                var provider = _mediaProviderRegistry.GetRequired(binding.MediaProviderLink!.Provider);
+                autoProgress = operation.OperationType == MediaProviderOperationTypes.AutoProgressUpdate
+                    ? DeserializePayload<AutoProgressUpdatePayload>(operation.PayloadJson) : null;
+                expectedRemoteUpdateAt = autoProgress is null
+                    ? binding.LastRemoteUpdateAt
+                    : autoProgress.LastKnownRemoteUpdateAt;
+                using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var remaining = claimedAt.Value + ExecutionTimeout - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    throw new TimeoutException("The media provider operation execution deadline elapsed.");
+                }
+                execution.CancelAfter(remaining);
+                mutationResult = await ExecuteOperationAsync(provider, operation, execution.Token);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                ApplyMutationFailure(operation, ex);
+                var affected = await ActiveClaim(operationId, claimedAt.Value).ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.Status, operation.Status)
+                    .SetProperty(item => item.AttemptCount, operation.AttemptCount)
+                    .SetProperty(item => item.NextAttemptAt, operation.NextAttemptAt)
+                    .SetProperty(item => item.LastError, operation.LastError)
+                    .SetProperty(item => item.UpdatedAt, operation.UpdatedAt), cancellationToken);
+                return affected == 0 ? Queued() : new MediaProviderOperationExecutionResult
+                {
+                    Outcome = operation.Status == MediaProviderOperationStatuses.Failed
+                        ? MediaProviderOperationExecutionOutcome.Failed
+                        : MediaProviderOperationExecutionOutcome.Queued,
+                    LastError = operation.LastError
                 };
             }
 
-            var provider = _mediaProviderRegistry.GetRequired(
-                operation.MediaLibraryProviderBinding!.MediaProviderLink!.Provider);
-            var mutationResult = await ExecuteOperationAsync(provider, operation, cancellationToken);
-            ApplyMutationSuccess(operation, mutationResult);
-            _dbContext.MediaProviderOperations.Remove(operation);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            return new MediaProviderOperationExecutionResult
+            if (mutationResult is null)
             {
-                Outcome = MediaProviderOperationExecutionOutcome.Succeeded
-            };
+                return CompletionResult(await ActiveClaim(operation).ExecuteDeleteAsync(cancellationToken) == 1);
+            }
+
+            return CompletionResult(autoProgress is not null
+                ? await CompleteAutoProgressAsync(operation, autoProgress, mutationResult, cancellationToken)
+                : await CompleteMutationAsync(operation, mutationResult, expectedRemoteUpdateAt, cancellationToken));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            operation.Status = MediaProviderOperationStatuses.Retrying;
-            operation.AttemptCount = Math.Max(0, operation.AttemptCount - 1);
-            await _dbContext.SaveChangesAsync(CancellationToken.None);
+            await claim.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, MediaProviderOperationStatuses.Retrying)
+                .SetProperty(item => item.AttemptCount, item => item.AttemptCount - 1)
+                .SetProperty(item => item.NextAttemptAt, (DateTimeOffset?)null)
+                .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow), CancellationToken.None);
             throw;
         }
-        catch (Exception ex)
+        finally
         {
-            ApplyMutationFailure(operation, ex);
+            DetachTrackedOperation(operationId);
+        }
+    }
+
+    private static MediaProviderOperationExecutionResult Queued() =>
+        new() { Outcome = MediaProviderOperationExecutionOutcome.Queued };
+
+    private sealed class BindingExecutionGate
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public int References { get; set; }
+    }
+
+    private sealed class BindingExecutionLease : IDisposable
+    {
+        private readonly Guid _bindingId;
+        private readonly BindingExecutionGate _gate;
+        private bool _entered;
+
+        public BindingExecutionLease(Guid bindingId)
+        {
+            _bindingId = bindingId;
+            lock (BindingExecutionGates)
+            {
+                if (!BindingExecutionGates.TryGetValue(bindingId, out var gate))
+                {
+                    gate = new BindingExecutionGate();
+                    BindingExecutionGates.Add(bindingId, gate);
+                }
+                _gate = gate;
+                _gate.References++;
+            }
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return new MediaProviderOperationExecutionResult
+        public async Task EnterAsync(CancellationToken cancellationToken)
         {
-            Outcome = operation.Status == MediaProviderOperationStatuses.Failed
-                ? MediaProviderOperationExecutionOutcome.Failed
-                : MediaProviderOperationExecutionOutcome.Queued,
-            LastError = operation.LastError
+            await _gate.Semaphore.WaitAsync(cancellationToken);
+            _entered = true;
+        }
+
+        public void Dispose()
+        {
+            if (_entered)
+            {
+                _gate.Semaphore.Release();
+            }
+            lock (BindingExecutionGates)
+            {
+                if (--_gate.References == 0)
+                {
+                    BindingExecutionGates.Remove(_bindingId);
+                    _gate.Semaphore.Dispose();
+                }
+            }
+        }
+    }
+
+    private static MediaProviderOperationExecutionResult CompletionResult(bool completed) =>
+        new()
+        {
+            Outcome = completed ? MediaProviderOperationExecutionOutcome.Succeeded
+                : MediaProviderOperationExecutionOutcome.Queued
         };
+
+    private IQueryable<MediaProviderOperation> OwnedClaim(Guid operationId, DateTimeOffset claimedAt) =>
+        _dbContext.MediaProviderOperations.Where(item => item.Id == operationId
+            && item.Status == MediaProviderOperationStatuses.Processing && item.UpdatedAt == claimedAt);
+
+    private IQueryable<MediaProviderOperation> ActiveClaim(MediaProviderOperation operation) =>
+        ActiveClaim(operation.Id, operation.UpdatedAt);
+
+    private IQueryable<MediaProviderOperation> ActiveClaim(Guid operationId, DateTimeOffset claimedAt)
+    {
+        var cutoff = DateTimeOffset.UtcNow - ProcessingLeaseTimeout;
+        return OwnedClaim(operationId, claimedAt).Where(item => item.UpdatedAt > cutoff);
+    }
+
+    private IQueryable<MediaProviderOperation> EligibleOperations(DateTimeOffset now)
+    {
+        var cutoff = now - ProcessingLeaseTimeout;
+        return _dbContext.MediaProviderOperations.Where(item =>
+                ((item.Status == MediaProviderOperationStatuses.Pending || item.Status == MediaProviderOperationStatuses.Retrying)
+                    && (item.NextAttemptAt == null || item.NextAttemptAt <= now))
+                || (item.Status == MediaProviderOperationStatuses.Processing && item.UpdatedAt <= cutoff))
+            .Where(item => item.MediaLibraryProviderBinding!.ConnectedServiceAccount == null
+                || item.MediaLibraryProviderBinding.ConnectedServiceAccount.ConnectionState != "reconnect_required")
+            .Where(item => !_dbContext.MediaProviderOperations.Any(other =>
+                other.MediaLibraryProviderBindingId == item.MediaLibraryProviderBindingId
+                && other.Status == MediaProviderOperationStatuses.Processing && other.UpdatedAt > cutoff));
     }
 
     public async Task<int> ProcessDueOperationsAsync(CancellationToken cancellationToken)
     {
-        var now = DateTimeOffset.UtcNow;
-        var dueOperationIds = await _dbContext.MediaProviderOperations
-            .Where(operation =>
-                (operation.Status == MediaProviderOperationStatuses.Pending
-                    || operation.Status == MediaProviderOperationStatuses.Retrying)
-                && (operation.NextAttemptAt == null || operation.NextAttemptAt <= now))
-            .Where(operation => operation.MediaLibraryProviderBinding!.ConnectedServiceAccount == null
-                || operation.MediaLibraryProviderBinding.ConnectedServiceAccount.ConnectionState != "reconnect_required")
+        var dueOperationIds = await EligibleOperations(DateTimeOffset.UtcNow)
             .OrderBy(operation => operation.CreatedAt)
             .Select(operation => operation.Id)
             .Take(10)
@@ -198,67 +327,59 @@ public class MediaProviderOperationProcessor(
         var trackedEntry = _dbContext.ChangeTracker
             .Entries<MediaProviderOperation>()
             .FirstOrDefault(entry => entry.Entity.Id == operationId);
-
         if (trackedEntry is not null)
         {
             trackedEntry.State = EntityState.Detached;
         }
     }
 
-    private async Task<MediaProviderOperationExecutionResult?> TryClaimOperationAsync(Guid operationId, CancellationToken cancellationToken)
+    private Task<DateTimeOffset?> TryClaimOperationAsync(Guid operationId, CancellationToken cancellationToken)
     {
-        var claimedAt = DateTimeOffset.UtcNow;
-        var claimedCount = await _dbContext.MediaProviderOperations
-            .Where(item =>
-                item.Id == operationId
-                && (item.MediaLibraryProviderBinding!.ConnectedServiceAccount == null
-                    || item.MediaLibraryProviderBinding.ConnectedServiceAccount.ConnectionState != "reconnect_required")
-                && (item.Status == MediaProviderOperationStatuses.Pending
-                    || item.Status == MediaProviderOperationStatuses.Retrying))
-            .ExecuteUpdateAsync(
-                setters => setters
+        // SQLite serializes writers for the single UPDATE. PostgreSQL needs a binding lock
+        // before the UPDATE takes its statement snapshot, since claims can update different rows.
+        return _dbContext.Database.IsNpgsql()
+            ? _dbContext.Database.CreateExecutionStrategy().ExecuteAsync(ClaimOnPostgresAsync, cancellationToken)
+            : ClaimAsync(cancellationToken);
+
+        async Task<DateTimeOffset?> ClaimOnPostgresAsync(CancellationToken token)
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(token);
+            var bindingId = await _dbContext.MediaProviderOperations.Where(item => item.Id == operationId)
+                .Select(item => (Guid?)item.MediaLibraryProviderBindingId).SingleOrDefaultAsync(token);
+            if (bindingId is null)
+            {
+                return null;
+            }
+
+            await LockBindingClaimsAsync(bindingId.Value, token);
+            var claimedAt = await ClaimAsync(token);
+            // Once the claim was written, finish the commit so the caller can release it on cancellation.
+            await transaction.CommitAsync(CancellationToken.None);
+            return claimedAt;
+        }
+
+        async Task<DateTimeOffset?> ClaimAsync(CancellationToken token)
+        {
+            // PostgreSQL stores microseconds. Keep an exact token and require it to
+            // advance even when a cancelled attempt has restored the attempt count.
+            var now = DateTimeOffset.UtcNow;
+            var claimedAt = TruncateToMicroseconds(now);
+            var count = await EligibleOperations(now)
+                .Where(item => item.Id == operationId && (item.LastAttemptAt == null || item.LastAttemptAt < claimedAt))
+                .ExecuteUpdateAsync(setters => setters
                     .SetProperty(item => item.Status, MediaProviderOperationStatuses.Processing)
                     .SetProperty(item => item.LastAttemptAt, claimedAt)
                     .SetProperty(item => item.AttemptCount, item => item.AttemptCount + 1)
-                    .SetProperty(item => item.UpdatedAt, claimedAt),
-                cancellationToken);
-
-        if (claimedCount > 0)
-        {
-            return null;
+                    .SetProperty(item => item.UpdatedAt, claimedAt), token);
+            return count == 1 ? claimedAt : null;
         }
+    }
 
-        var operationState = await _dbContext.MediaProviderOperations
-            .AsNoTracking()
-            .Where(item => item.Id == operationId)
-            .Select(item => new
-            {
-                item.Status,
-                item.LastError
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (operationState is null)
-        {
-            _logger.LogInformation(
-                "Media provider operation {OperationId} was already completed before it could be claimed.",
-                operationId);
-            return new MediaProviderOperationExecutionResult
-            {
-                Outcome = MediaProviderOperationExecutionOutcome.Queued
-            };
-        }
-
-        return operationState.Status == MediaProviderOperationStatuses.Failed
-            ? new MediaProviderOperationExecutionResult
-            {
-                Outcome = MediaProviderOperationExecutionOutcome.Failed,
-                LastError = operationState.LastError
-            }
-            : new MediaProviderOperationExecutionResult
-            {
-                Outcome = MediaProviderOperationExecutionOutcome.Queued
-            };
+    private Task LockBindingClaimsAsync(Guid bindingId, CancellationToken cancellationToken)
+    {
+        var lockKey = $"media-provider-operation:{bindingId}";
+        return _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", cancellationToken);
     }
 
     private async Task<MediaProviderOperation> EnqueueAsync<TRequest>(
@@ -290,7 +411,7 @@ public class MediaProviderOperationProcessor(
         return operation;
     }
 
-    private async Task<MediaProviderMutationResult> ExecuteOperationAsync(
+    private async Task<MediaProviderMutationResult?> ExecuteOperationAsync(
         IMediaProvider provider,
         MediaProviderOperation operation,
         CancellationToken cancellationToken)
@@ -307,14 +428,12 @@ public class MediaProviderOperationProcessor(
                 provider,
                 operation,
                 cancellationToken),
-            MediaProviderOperationTypes.UpdateStatus or MediaProviderOperationTypes.ImportFanOutStatus => await provider.UpdateStatusAsync(
-                operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
-                DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson),
-                cancellationToken),
-            MediaProviderOperationTypes.UpdateScore or MediaProviderOperationTypes.ImportFanOutScore => await provider.UpdateScoreAsync(
-                operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
-                DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson),
-                cancellationToken),
+            MediaProviderOperationTypes.UpdateStatus or MediaProviderOperationTypes.ImportFanOutStatus => await DispatchAsync(operation,
+                () => provider.UpdateStatusAsync(operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
+                    DeserializePayload<MediaStatusUpdateRequest>(operation.PayloadJson), cancellationToken), cancellationToken),
+            MediaProviderOperationTypes.UpdateScore or MediaProviderOperationTypes.ImportFanOutScore => await DispatchAsync(operation,
+                () => provider.UpdateScoreAsync(operation.MediaLibraryProviderBinding.MediaLibraryEntry.UserId,
+                    DeserializePayload<MediaScoreUpdateRequest>(operation.PayloadJson), cancellationToken), cancellationToken),
             MediaProviderOperationTypes.SyncLibraryState => await ExecuteLibraryStateSyncAsync(
                 provider, operation, cancellationToken),
             MediaProviderOperationTypes.AutoProgressUpdate => await ExecuteAutoProgressAsync(
@@ -323,6 +442,33 @@ public class MediaProviderOperationProcessor(
                 cancellationToken),
             _ => throw new InvalidOperationException($"Provider operation type '{operation.OperationType}' is not supported.")
         };
+    }
+
+    private async Task<MediaProviderMutationResult?> DispatchAsync(MediaProviderOperation operation,
+        Func<Task<MediaProviderMutationResult>> dispatch, CancellationToken cancellationToken,
+        AutoProgressUpdatePayload? autoProgress = null)
+    {
+        using var bindingGate = new BindingExecutionLease(operation.MediaLibraryProviderBindingId);
+        await bindingGate.EnterAsync(cancellationToken);
+        var binding = operation.MediaLibraryProviderBinding!;
+        await _dbContext.Entry(binding).ReloadAsync(cancellationToken);
+        await _dbContext.Entry(binding.MediaLibraryEntry!).ReloadAsync(cancellationToken);
+        if (!await ActiveClaim(operation).AnyAsync(cancellationToken)
+            || DateTimeOffset.UtcNow >= operation.UpdatedAt + ProcessingLeaseTimeout)
+        {
+            throw new InvalidOperationException("The media provider operation lease was lost.");
+        }
+        if (DateTimeOffset.UtcNow >= operation.UpdatedAt + ExecutionTimeout)
+        {
+            throw new TimeoutException("The media provider operation execution deadline elapsed.");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ShouldSkipStaleOperation(operation)
+            || (autoProgress is not null && IsAutoProgressRemoteVersionStale(autoProgress, binding.LastRemoteUpdateAt)))
+        {
+            return null;
+        }
+        return await dispatch();
     }
 
     private static TRequest DeserializePayload<TRequest>(string payloadJson)
@@ -344,6 +490,12 @@ public class MediaProviderOperationProcessor(
             MediaProviderOperationTypes.ImportFanOutScore or
             MediaProviderOperationTypes.ImportFanOutProgress;
         var isNewerLocalEdit = entry.LastLocalEditAt > operation.CreatedAt;
+        if (operation.OperationType == MediaProviderOperationTypes.AutoProgressUpdate)
+        {
+            var progress = DeserializePayload<AutoProgressUpdatePayload>(operation.PayloadJson);
+            return (progress.LocalProgressCommitted || isNewerLocalEdit) && AutoProgressDoesNotMatch(entry, progress);
+        }
+
         if (!isImportFanOut && !isNewerLocalEdit
             && operation.OperationType != MediaProviderOperationTypes.SyncLibraryState)
         {
@@ -365,6 +517,16 @@ public class MediaProviderOperationProcessor(
         };
     }
 
+    private static bool AutoProgressDoesNotMatch(MediaLibraryEntry entry, AutoProgressUpdatePayload payload) =>
+        (payload.ProgressEpisodes.HasValue && payload.ProgressEpisodes != entry.ProgressEpisodes)
+        || (payload.ProgressChapters.HasValue && payload.ProgressChapters != entry.ProgressChapters)
+        || (payload.ProgressVolumes.HasValue && payload.ProgressVolumes != entry.ProgressVolumes);
+
+    private static bool IsAutoProgressRemoteVersionStale(AutoProgressUpdatePayload payload, DateTimeOffset? currentRemoteUpdateAt) =>
+        (payload.LocalProgressCommitted || payload.LastKnownRemoteUpdateAt.HasValue)
+        && currentRemoteUpdateAt.HasValue
+        && (payload.LastKnownRemoteUpdateAt is null || currentRemoteUpdateAt > payload.LastKnownRemoteUpdateAt);
+
     private static bool ProgressDoesNotMatch(
         MediaLibraryEntry entry, MediaProgressUpdateRequest request, bool compareNulls)
         => (compareNulls || request.ProgressEpisodes.HasValue) && request.ProgressEpisodes != entry.ProgressEpisodes
@@ -379,61 +541,73 @@ public class MediaProviderOperationProcessor(
                 || request.ProgressChapters is { } chapters && chapters != (entry.ProgressChapters ?? 0)
                 || request.ProgressVolumes is { } volumes && volumes != (entry.ProgressVolumes ?? 0));
 
-    private async Task<MediaProviderMutationResult> ExecuteLibraryStateSyncAsync(
+    private async Task<MediaProviderMutationResult?> ExecuteLibraryStateSyncAsync(
         IMediaProvider provider, MediaProviderOperation operation, CancellationToken cancellationToken)
     {
         var binding = operation.MediaLibraryProviderBinding!;
         var userId = binding.MediaLibraryEntry!.UserId;
         var account = await provider.GetConnectedAccountAsync(userId, cancellationToken);
-        if (account is null || account.Id != binding.ConnectedServiceAccountId
-            || account.ExternalAccountId != binding.ProviderAccountId)
-        {
-            throw new PlatformApiException(
-                "platform_account_changed", "The connected account changed. Create a new sync preview.", 409);
-        }
-
         var request = DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson);
-        var sourceVersion = request.VerifiedSourceBindingId.HasValue ? null : binding.MediaLibraryEntry.LastLocalEditAt;
-        if (request.VerifiedSourceBindingId is { } sourceBindingId && request.VerifiedSourceVersion.HasValue
-            && binding.MediaLibraryEntry.LastMutationSource == MediaMutationSources.ProviderImport
+        var sourceVerified = request.VerifiedSourceBindingId is { } sourceBindingId && request.VerifiedSourceVersion.HasValue
             && await _dbContext.MediaLibraryProviderBindings.AnyAsync(candidate =>
                 candidate.Id == sourceBindingId && candidate.MediaLibraryEntryId == binding.MediaLibraryEntryId
                 && candidate.ConnectedServiceAccountId.HasValue
-                && candidate.LastRemoteUpdateAt == request.VerifiedSourceVersion, cancellationToken))
-        {
-            sourceVersion = request.VerifiedSourceVersion;
-        }
-        if (request.LastKnownRemoteUpdateAt is { } expectedVersion
-            ? binding.LastRemoteUpdateAt > expectedVersion
-                || !MediaLibraryStateSyncRequest.IsNewerVersion(sourceVersion, expectedVersion)
-            : binding.LastRemoteUpdateAt.HasValue || binding.LastSyncedAt.HasValue || !request.ExpectMissingRemote)
-        {
-            throw new PlatformApiException(
-                "platform_sync_conflict", "The provider entry changed. Create a new sync preview.", 409);
-        }
+                && candidate.LastRemoteUpdateAt == request.VerifiedSourceVersion, cancellationToken);
 
         request.SaveCheckpointAsync = async token =>
         {
-            operation.PayloadJson = JsonSerializer.Serialize(request, SerializerOptions);
-            await _dbContext.SaveChangesAsync(token);
+            var payload = JsonSerializer.Serialize(request, SerializerOptions);
+            var affected = await ActiveClaim(operation)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.PayloadJson, payload), token);
+            if (affected == 0)
+            {
+                throw new InvalidOperationException("The media provider operation lease was lost.");
+            }
+            operation.PayloadJson = payload;
+            _dbContext.Entry(operation).Property(item => item.PayloadJson).OriginalValue = payload;
         };
-        return await provider.SyncLibraryStateAsync(userId, request, cancellationToken);
+        return await DispatchAsync(operation, () =>
+        {
+            if (account is null || account.Id != binding.ConnectedServiceAccountId
+                || account.ExternalAccountId != binding.ProviderAccountId)
+            {
+                throw new PlatformApiException(
+                    "platform_account_changed", "The connected account changed. Create a new sync preview.", 409);
+            }
+
+            var entry = binding.MediaLibraryEntry;
+            var sourceVersion = request.VerifiedSourceBindingId.HasValue ? null : entry.LastLocalEditAt;
+            if (sourceVerified && entry.LastMutationSource == MediaMutationSources.ProviderImport)
+            {
+                sourceVersion = request.VerifiedSourceVersion;
+            }
+            if (request.LastKnownRemoteUpdateAt is { } expectedVersion
+                ? binding.LastRemoteUpdateAt > expectedVersion
+                    || !MediaLibraryStateSyncRequest.IsNewerVersion(sourceVersion, expectedVersion)
+                : binding.LastRemoteUpdateAt.HasValue || binding.LastSyncedAt.HasValue || !request.ExpectMissingRemote)
+            {
+                throw new PlatformApiException(
+                    "platform_sync_conflict", "The provider entry changed. Create a new sync preview.", 409);
+            }
+
+            return provider.SyncLibraryStateAsync(userId, request, cancellationToken);
+        }, cancellationToken);
     }
 
-    private async Task<MediaProviderMutationResult> ExecuteProgressUpdateAsync(
+    private async Task<MediaProviderMutationResult?> ExecuteProgressUpdateAsync(
         IMediaProvider provider,
         MediaProviderOperation operation,
         CancellationToken cancellationToken)
     {
         var request = DeserializePayload<MediaProgressUpdateRequest>(operation.PayloadJson);
         LogProviderProgressUpdateAttempt(operation, request);
-        return await provider.UpdateProgressAsync(
+        return await DispatchAsync(operation, () => provider.UpdateProgressAsync(
             operation.MediaLibraryProviderBinding!.MediaLibraryEntry!.UserId,
             request,
-            cancellationToken);
+            cancellationToken), cancellationToken);
     }
 
-    private async Task<MediaProviderMutationResult> ExecuteAutoProgressAsync(
+    private async Task<MediaProviderMutationResult?> ExecuteAutoProgressAsync(
         IMediaProvider provider,
         MediaProviderOperation operation,
         CancellationToken cancellationToken)
@@ -444,7 +618,7 @@ public class MediaProviderOperationProcessor(
         // If the provider has written a newer timestamp since we enqueued this
         // operation, the entry may already be ahead and we should skip the write.
         if (operation.MediaLibraryProviderBinding is not null
-            && payload.LastKnownRemoteUpdateAt.HasValue)
+            && (payload.LocalProgressCommitted || payload.LastKnownRemoteUpdateAt.HasValue))
         {
             var currentRemoteUpdateAt = await _dbContext.MediaLibraryProviderBindings
                 .AsNoTracking()
@@ -452,25 +626,16 @@ public class MediaProviderOperationProcessor(
                 .Select(binding => binding.LastRemoteUpdateAt)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            if (currentRemoteUpdateAt.HasValue
-                && currentRemoteUpdateAt.Value > payload.LastKnownRemoteUpdateAt.Value)
+            if (IsAutoProgressRemoteVersionStale(payload, currentRemoteUpdateAt))
             {
                 _logger.LogInformation(
                     "Auto-progress skipped for operation {OperationId}: " +
-                    "provider has newer remote state ({RemoteAt} > {KnownAt}).",
+                    "provider has newer remote state (current {RemoteAt}, expected {KnownAt}).",
                     operation.Id,
-                    currentRemoteUpdateAt.Value,
-                    payload.LastKnownRemoteUpdateAt.Value);
+                    currentRemoteUpdateAt,
+                    payload.LastKnownRemoteUpdateAt);
 
-                // Return a synthetic "already up-to-date" result so the operation
-                // is treated as successful and removed from the queue.
-                return new MediaProviderMutationResult
-                {
-                    ProviderId = operation.MediaLibraryProviderBinding.MediaProviderLink!.Provider,
-                    ProviderMediaId = payload.ProviderMediaId,
-                    AppliedAt = DateTimeOffset.UtcNow,
-                    LastRemoteUpdateAt = currentRemoteUpdateAt
-                };
+                return null;
             }
         }
 
@@ -483,11 +648,69 @@ public class MediaProviderOperationProcessor(
             LastKnownRemoteUpdateAt = payload.LastKnownRemoteUpdateAt
         };
         LogProviderProgressUpdateAttempt(operation, request);
-        return await provider.UpdateProgressAsync(
+        return await DispatchAsync(operation, () => provider.UpdateProgressAsync(
             operation.MediaLibraryProviderBinding!.MediaLibraryEntry!.UserId,
             request,
-            cancellationToken);
+            cancellationToken), cancellationToken, payload);
     }
+
+    private Task<bool> CompleteMutationAsync(MediaProviderOperation operation,
+        MediaProviderMutationResult result, DateTimeOffset? expectedRemoteUpdateAt, CancellationToken cancellationToken) =>
+        MediaProviderSeasonMappingService.WithWriteAsync(_dbContext, async () =>
+        {
+            if (_dbContext.Database.IsNpgsql())
+            {
+                await LockBindingClaimsAsync(operation.MediaLibraryProviderBindingId, cancellationToken);
+                await LockBindingRowAsync(operation.MediaLibraryProviderBindingId, cancellationToken);
+            }
+            if (await ActiveClaim(operation).ExecuteDeleteAsync(cancellationToken) == 0)
+            {
+                return false;
+            }
+
+            await _dbContext.Entry(operation.MediaLibraryProviderBinding!).ReloadAsync(cancellationToken);
+            await ApplyMutationSuccessAsync(operation, result, expectedRemoteUpdateAt, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }, cancellationToken);
+
+    private Task<bool> CompleteAutoProgressAsync(MediaProviderOperation operation, AutoProgressUpdatePayload payload,
+        MediaProviderMutationResult result, CancellationToken cancellationToken) =>
+        MediaProviderSeasonMappingService.WithWriteAsync(_dbContext, async () =>
+        {
+            var binding = operation.MediaLibraryProviderBinding!;
+            var entry = binding.MediaLibraryEntry!;
+            if (_dbContext.Database.IsNpgsql())
+            {
+                await LockBindingClaimsAsync(binding.Id, cancellationToken);
+                if (!payload.LocalProgressCommitted)
+                {
+                    await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                        SELECT "Id" FROM "MediaLibraryEntries" WHERE "Id" = {entry.Id} FOR UPDATE
+                        """, cancellationToken);
+                }
+                await LockBindingRowAsync(binding.Id, cancellationToken);
+            }
+            if (await ActiveClaim(operation).ExecuteDeleteAsync(cancellationToken) == 0)
+            {
+                return false;
+            }
+
+            await _dbContext.Entry(binding).ReloadAsync(cancellationToken);
+            if (!payload.LocalProgressCommitted)
+            {
+                await _dbContext.Entry(entry).ReloadAsync(cancellationToken);
+                ApplyLegacyAutoProgress(entry, payload);
+            }
+            await ApplyMutationSuccessAsync(operation, result, payload.LastKnownRemoteUpdateAt, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }, cancellationToken);
+
+    private Task LockBindingRowAsync(Guid bindingId, CancellationToken cancellationToken) =>
+        _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            SELECT "Id" FROM "MediaLibraryProviderBindings" WHERE "Id" = {bindingId} FOR UPDATE
+            """, cancellationToken);
 
     private void LogProviderProgressUpdateAttempt(
         MediaProviderOperation operation,
@@ -504,52 +727,32 @@ public class MediaProviderOperationProcessor(
             request.ProgressVolumes);
     }
 
-    private void ApplyMutationSuccess(MediaProviderOperation operation, MediaProviderMutationResult result)
+    private static void ApplyLegacyAutoProgress(MediaLibraryEntry entry, AutoProgressUpdatePayload payload)
+    {
+        var current = (entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes);
+        var advanced = (Advance(current.ProgressEpisodes, payload.ProgressEpisodes),
+            Advance(current.ProgressChapters, payload.ProgressChapters),
+            Advance(current.ProgressVolumes, payload.ProgressVolumes));
+        if (advanced == current)
+        {
+            return;
+        }
+
+        (entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes) = advanced;
+        entry.LastMutationSource = MediaMutationSources.ObservationAutoProgress;
+        entry.LastLocalEditAt = entry.UpdatedAt = DateTimeOffset.UtcNow;
+
+        static int? Advance(int? current, int? requested) => requested > (current ?? 0) ? requested : current;
+    }
+
+    private async Task ApplyMutationSuccessAsync(MediaProviderOperation operation, MediaProviderMutationResult result,
+        DateTimeOffset? expectedRemoteUpdateAt, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        var isProviderPropagation = operation.OperationType is
-            MediaProviderOperationTypes.UpdateProgress or
-            MediaProviderOperationTypes.UpdateStatus or
-            MediaProviderOperationTypes.UpdateScore or
-            MediaProviderOperationTypes.SyncLibraryState or
-            MediaProviderOperationTypes.ImportFanOutProgress or
-            MediaProviderOperationTypes.ImportFanOutStatus or
-            MediaProviderOperationTypes.ImportFanOutScore;
         var binding = operation.MediaLibraryProviderBinding
             ?? throw new InvalidOperationException("Provider operation is missing a provider binding.");
         var entry = binding.MediaLibraryEntry
             ?? throw new InvalidOperationException("Provider binding is missing a media library entry.");
-
-        switch (operation.OperationType)
-        {
-            case MediaProviderOperationTypes.AutoProgressUpdate:
-            {
-                var payload = DeserializePayload<AutoProgressUpdatePayload>(operation.PayloadJson);
-                entry.ProgressEpisodes = payload.ProgressEpisodes ?? entry.ProgressEpisodes;
-                entry.ProgressChapters = payload.ProgressChapters ?? entry.ProgressChapters;
-                entry.ProgressVolumes = payload.ProgressVolumes ?? entry.ProgressVolumes;
-                entry.LastMutationSource = MediaMutationSources.ObservationAutoProgress;
-
-                _logger.LogInformation(
-                    "Auto-progress applied for user {UserId}, entry {EntryId}: " +
-                    "ep={Ep}/ch={Ch}/vol={Vol}.",
-                    entry.UserId,
-                    entry.Id,
-                    payload.ProgressEpisodes,
-                    payload.ProgressChapters,
-                    payload.ProgressVolumes);
-                break;
-            }
-            case MediaProviderOperationTypes.SyncLibraryState:
-            case MediaProviderOperationTypes.UpdateProgress:
-            case MediaProviderOperationTypes.UpdateStatus:
-            case MediaProviderOperationTypes.UpdateScore:
-            case MediaProviderOperationTypes.ImportFanOutProgress:
-            case MediaProviderOperationTypes.ImportFanOutStatus:
-            case MediaProviderOperationTypes.ImportFanOutScore:
-                // The local entry already contains the requested values.
-                break;
-        }
 
         var librarySyncRequest = operation.OperationType == MediaProviderOperationTypes.SyncLibraryState
             ? DeserializePayload<MediaLibraryStateSyncRequest>(operation.PayloadJson)
@@ -564,27 +767,46 @@ public class MediaProviderOperationProcessor(
                 _ => null
             };
             binding.LastAppliedStatus = result.AppliedStatus;
-            if (!isProviderPropagation)
-            {
-                entry.Status = result.AppliedStatus;
-            }
-        }
-        if (result.AppliedProgressEpisodes.HasValue
-            && !isProviderPropagation)
-        {
-            entry.ProgressEpisodes = result.AppliedProgressEpisodes.Value;
-        }
-
-        if (!isProviderPropagation)
-        {
-            entry.LastLocalEditAt = now;
-            entry.UpdatedAt = now;
         }
         binding.LastSyncedAt = now;
-        var remoteUpdateAt = result.LastRemoteUpdateAt ?? (librarySyncRequest is null ? now : null);
+        var remoteUpdateAt = RemoteVersionAtStoragePrecision(
+            result.LastRemoteUpdateAt ?? (librarySyncRequest is null ? now : null));
         if (remoteUpdateAt.HasValue && (binding.LastRemoteUpdateAt is null || remoteUpdateAt > binding.LastRemoteUpdateAt))
         {
+            var previousRemoteUpdateAt = binding.LastRemoteUpdateAt;
             binding.LastRemoteUpdateAt = remoteUpdateAt;
+            // Carry this acknowledgement forward only if the binding still has the version this write started from.
+            if (previousRemoteUpdateAt == RemoteVersionAtStoragePrecision(expectedRemoteUpdateAt))
+            {
+                var preservesRemoteProgress = operation.OperationType is
+                    MediaProviderOperationTypes.UpdateStatus or MediaProviderOperationTypes.UpdateScore or
+                    MediaProviderOperationTypes.ImportFanOutStatus or MediaProviderOperationTypes.ImportFanOutScore
+                    || librarySyncRequest?.UpdateProgress == false;
+                var leaseCutoff = now - ProcessingLeaseTimeout;
+                var queued = await _dbContext.MediaProviderOperations.Where(item =>
+                    item.Id != operation.Id && item.MediaLibraryProviderBindingId == binding.Id &&
+                    item.OperationType == MediaProviderOperationTypes.AutoProgressUpdate &&
+                    (item.Status == MediaProviderOperationStatuses.Pending ||
+                        item.Status == MediaProviderOperationStatuses.Retrying ||
+                        (item.Status == MediaProviderOperationStatuses.Processing && item.UpdatedAt <= leaseCutoff)))
+                    .ToListAsync(cancellationToken);
+                if (preservesRemoteProgress && queued.Count > 0)
+                {
+                    await _dbContext.Entry(entry).ReloadAsync(cancellationToken);
+                }
+
+                foreach (var next in queued.Where(item => preservesRemoteProgress || item.CreatedAt > operation.CreatedAt))
+                {
+                    var nextPayload = DeserializePayload<AutoProgressUpdatePayload>(next.PayloadJson);
+                    if (nextPayload.LocalProgressCommitted
+                        && RemoteVersionAtStoragePrecision(nextPayload.LastKnownRemoteUpdateAt) == previousRemoteUpdateAt
+                        && (!preservesRemoteProgress || !AutoProgressDoesNotMatch(entry, nextPayload)))
+                    {
+                        nextPayload.LastKnownRemoteUpdateAt = remoteUpdateAt;
+                        next.PayloadJson = JsonSerializer.Serialize(nextPayload, SerializerOptions);
+                    }
+                }
+            }
         }
         binding.UpdatedAt = now;
         _logger.LogInformation(
@@ -594,6 +816,13 @@ public class MediaProviderOperationProcessor(
             entry.UserId,
             binding.MediaProviderLink?.Provider);
     }
+
+    // A queued JSON payload can retain the original tick precision of a tracked binding.
+    private DateTimeOffset? RemoteVersionAtStoragePrecision(DateTimeOffset? version) =>
+        version is { } timestamp && _dbContext.Database.IsNpgsql() ? TruncateToMicroseconds(timestamp) : version;
+
+    private static DateTimeOffset TruncateToMicroseconds(DateTimeOffset timestamp) =>
+        timestamp.AddTicks(-(timestamp.Ticks % 10));
 
     private void ApplyMutationFailure(MediaProviderOperation operation, Exception exception)
     {

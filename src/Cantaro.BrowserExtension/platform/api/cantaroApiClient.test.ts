@@ -14,6 +14,21 @@ const settingsRepository: SettingsRepository = {
   save: vi.fn(),
 };
 
+const watchObservation: WatchProgressObservation = {
+  schemaVersion: 1,
+  provider: 'crunchyroll',
+  providerEpisodeId: 'EPISODE',
+  observedUrl: 'https://www.crunchyroll.com/watch/EPISODE/title?token=secret#player',
+  nextEpisodeUrl: 'https://www.crunchyroll.com/watch/NEXT/title?token=secret#player',
+  seriesTitle: 'Series',
+  episodeTitle: 'Episode',
+  watchProgressPercent: 85,
+  durationSeconds: 100,
+  positionSeconds: 85,
+  observedAt: '2026-09-05T00:00:00.000Z',
+  extensionVersion: '0.1.0',
+};
+
 function authService(getAccessToken: AuthService['getAccessToken']): AuthService {
   return {
     beginInteractiveSignIn: vi.fn(),
@@ -76,9 +91,13 @@ describe('cantaroApiClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('strips query strings and fragments before transmitting watch URLs', async () => {
+  it.each([
+    { observationId: 'observation' },
+    { observationId: null },
+    {},
+  ])('strips private watch URL data and accepts observation ID $observationId', async (response) => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      observationId: 'observation',
+      ...response,
       matchStatus: 'matched',
       wasDeduplicated: false,
       progressUpdated: false,
@@ -90,27 +109,41 @@ describe('cantaroApiClient', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const observation: WatchProgressObservation = {
-      schemaVersion: 1,
-      provider: 'crunchyroll',
-      providerEpisodeId: 'EPISODE',
-      observedUrl: 'https://www.crunchyroll.com/watch/EPISODE/title?token=secret#player',
-      nextEpisodeUrl: 'https://www.crunchyroll.com/watch/NEXT/title?token=secret#player',
-      seriesTitle: 'Series',
-      episodeTitle: 'Episode',
-      watchProgressPercent: 85,
-      durationSeconds: 100,
-      positionSeconds: 85,
-      observedAt: '2026-09-05T00:00:00.000Z',
-      extensionVersion: '0.1.0',
-    };
+    const result = await createCantaroApiClient(settingsRepository, authService(vi.fn(async () => 'token')))
+      .submitWatch(watchObservation);
 
-    await createCantaroApiClient(settingsRepository, authService(vi.fn(async () => 'token')))
-      .submitWatch(observation);
-
+    expect(result.status).toBe('accepted');
+    expect(result.observationId).toBe(response.observationId ?? undefined);
+    expect(result.resolution).toBeUndefined();
     const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string) as Record<string, unknown>;
     expect(body.observedUrl).toBe('https://www.crunchyroll.com/watch/EPISODE/title');
     expect(body.nextEpisodeUrl).toBe('https://www.crunchyroll.com/watch/NEXT/title');
+  });
+
+  it('preserves the observation version in the watch response and resolve request', async () => {
+    const updatedAt = '2026-11-21T10:20:30.123456+00:00';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        observationId: 'observation',
+        matchStatus: 'ambiguous',
+        requiresResolution: true,
+        suggestedEpisodeOffset: 0,
+        observation: { observedTitle: 'Episode', updatedAt, candidates: [] },
+        providerChoices: [],
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createCantaroApiClient(settingsRepository, authService(vi.fn(async () => 'token')));
+
+    const { resolution } = await client.submitWatch(watchObservation);
+    expect(resolution?.updatedAt).toBe(updatedAt);
+    await client.resolveWatch({
+      observationId: 'observation', candidateId: 'candidate', episodeOffset: 0,
+      expectedUpdatedAt: resolution?.updatedAt,
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[1]![1].body as string);
+    expect(body).toEqual({ candidateId: 'candidate', episodeOffset: 0, expectedUpdatedAt: updatedAt });
   });
 
   it('strips query strings and fragments before transmitting catalog URLs', async () => {

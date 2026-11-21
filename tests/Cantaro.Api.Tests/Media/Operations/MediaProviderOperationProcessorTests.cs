@@ -7,6 +7,7 @@ using Cantaro.Api.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -15,6 +16,283 @@ namespace Cantaro.Api.Tests;
 
 public class MediaProviderOperationProcessorTests
 {
+    [Theory]
+    [InlineData("complete")]
+    [InlineData("retry")]
+    [InlineData("fail")]
+    [InlineData("cancel")]
+    [InlineData("before-dispatch")]
+    public async Task ReclaimedSqliteLease_FencesOriginalWorker(string staleOutcome)
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertReclaimedLeaseAsync(db, staleOutcome);
+    }
+
+    [PostgresTheory]
+    [InlineData("complete")]
+    [InlineData("retry")]
+    [InlineData("fail")]
+    [InlineData("cancel")]
+    [InlineData("before-dispatch")]
+    public async Task ReclaimedPostgresLease_FencesOriginalWorker(string staleOutcome)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertReclaimedLeaseAsync(schema.Db, staleOutcome);
+    }
+
+    private static async Task AssertReclaimedLeaseAsync(ApplicationDbContext db, string staleOutcome)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 414, "lease@example.test");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var staleCancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var originalEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reclaimedEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseOriginal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseReclaimed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var beforeDispatch = staleOutcome == "before-dispatch";
+        var originalPaused = false;
+        var remoteProgress = 9;
+        var baseline = await db.MediaLibraryProviderBindings.AsNoTracking().SingleAsync(timeout.Token);
+        var sharedProvider = new FakeMediaProvider("anilist")
+        {
+            ProgressRemoteUpdateAt = beforeDispatch ? baseline.LastRemoteUpdateAt : null,
+            BeforeProgressUpdate = async (request, token) =>
+            {
+                if (!beforeDispatch && !originalPaused)
+                {
+                    originalPaused = true;
+                    originalEntered.SetResult();
+                    await releaseOriginal.Task.WaitAsync(token);
+                    if (staleOutcome == "retry")
+                    {
+                        throw new InvalidOperationException("Old provider attempt failed.");
+                    }
+                    if (staleOutcome == "fail")
+                    {
+                        throw new PlatformApiException("platform_sync_conflict", "Old provider attempt failed.", 409);
+                    }
+                }
+                else if (request.ProgressEpisodes == 10)
+                {
+                    reclaimedEntered.SetResult();
+                    await releaseReclaimed.Task.WaitAsync(token);
+                }
+
+                remoteProgress = request.ProgressEpisodes!.Value;
+            }
+        };
+
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        var originalOptions = new DbContextOptionsBuilder<ApplicationDbContext>(options);
+        if (beforeDispatch)
+        {
+            // Stop before the remote version query, after the original worker loaded its claim.
+            originalOptions.AddInterceptors(new BeforeReaderInterceptor(
+                sql => sql.Contains("FROM \"MediaLibraryProviderBindings\"", StringComparison.Ordinal)
+                    && sql[..sql.IndexOf("FROM", StringComparison.Ordinal)].Contains("LastRemoteUpdateAt", StringComparison.Ordinal),
+                async token =>
+                {
+                    originalEntered.SetResult();
+                    await releaseOriginal.Task.WaitAsync(token);
+                }));
+        }
+        var restartedClaimed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var restartedOptions = new DbContextOptionsBuilder<ApplicationDbContext>(options)
+            .AddInterceptors(new BeforeReaderInterceptor(IsClaimedOperationLoad, _ =>
+            {
+                restartedClaimed.TrySetResult();
+                return Task.CompletedTask;
+            }));
+        await using var originalDb = new ApplicationDbContext(originalOptions.Options);
+        await using var restartedDb = new ApplicationDbContext(restartedOptions.Options);
+        var original = CreateProcessor(originalDb, sharedProvider);
+        var restarted = CreateProcessor(restartedDb, sharedProvider);
+        var operation = await CreateProcessor(db, sharedProvider).EnqueueAutoProgressAsync(entry.UserId, binding,
+            new AutoProgressUpdatePayload
+            {
+                ProviderMediaId = "140960", ProgressEpisodes = 10,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            }, timeout.Token);
+        await CreateProcessor(db, sharedProvider).EnqueueAutoProgressAsync(entry.UserId, binding,
+            new AutoProgressUpdatePayload { ProviderMediaId = "140960", ProgressEpisodes = 11 }, timeout.Token);
+        var firstRun = original.ProcessOperationAsync(operation.Id, staleCancellation.Token);
+        Task<int>? restartedRun = null;
+        try
+        {
+            await originalEntered.Task.WaitAsync(timeout.Token);
+            Assert.Equal(0, await restarted.ProcessDueOperationsAsync(timeout.Token));
+            var expired = DateTimeOffset.UtcNow - MediaProviderOperationProcessor.ProcessingLeaseTimeout - TimeSpan.FromMinutes(1);
+            await db.MediaProviderOperations.Where(row => row.Id == operation.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.UpdatedAt, expired), timeout.Token);
+
+            restartedRun = restarted.ProcessDueOperationsAsync(timeout.Token);
+            await restartedClaimed.Task.WaitAsync(timeout.Token);
+            var reclaimed = await db.MediaProviderOperations.AsNoTracking().SingleAsync(row => row.Id == operation.Id, timeout.Token);
+            Assert.Equal(2, reclaimed.AttemptCount);
+
+            if (beforeDispatch)
+            {
+                await reclaimedEntered.Task.WaitAsync(timeout.Token);
+                releaseReclaimed.SetResult();
+                Assert.Equal(2, await restartedRun);
+                Assert.Equal(11, remoteProgress);
+                releaseOriginal.SetResult();
+                Assert.Equal(MediaProviderOperationExecutionOutcome.Queued, (await firstRun).Outcome);
+            }
+            else
+            {
+                Assert.False(reclaimedEntered.Task.IsCompleted);
+                if (staleOutcome == "cancel")
+                {
+                    await staleCancellation.CancelAsync();
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstRun);
+                }
+                else
+                {
+                    releaseOriginal.SetResult();
+                    Assert.Equal(MediaProviderOperationExecutionOutcome.Queued, (await firstRun).Outcome);
+                }
+                await reclaimedEntered.Task.WaitAsync(timeout.Token);
+                await AssertClaimAndBindingUnchangedAsync(reclaimed);
+            }
+        }
+        finally
+        {
+            releaseOriginal.TrySetResult();
+            releaseReclaimed.TrySetResult();
+            if (restartedRun is not null)
+            {
+                Assert.Equal(2, await restartedRun);
+            }
+            if (staleOutcome != "cancel")
+            {
+                await firstRun;
+            }
+        }
+
+        Assert.Equal(beforeDispatch ? 2 : 3, sharedProvider.ProgressUpdateCallCount);
+        Assert.Equal(11, remoteProgress);
+        Assert.Equal(11, await db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync(timeout.Token));
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync(timeout.Token));
+
+        async Task AssertClaimAndBindingUnchangedAsync(MediaProviderOperation reclaimed)
+        {
+            var stillOwned = await db.MediaProviderOperations.AsNoTracking().SingleAsync(row => row.Id == operation.Id, timeout.Token);
+            Assert.Equal(MediaProviderOperationStatuses.Processing, stillOwned.Status);
+            Assert.Equal(reclaimed.AttemptCount, stillOwned.AttemptCount);
+            Assert.Equal(reclaimed.UpdatedAt, stillOwned.UpdatedAt);
+            Assert.Equal(reclaimed.PayloadJson, stillOwned.PayloadJson);
+            Assert.Null(stillOwned.LastError);
+            var unchanged = await db.MediaLibraryProviderBindings.AsNoTracking().SingleAsync(timeout.Token);
+            Assert.Equal(baseline.LastSyncedAt, unchanged.LastSyncedAt);
+            Assert.Equal(baseline.LastRemoteUpdateAt, unchanged.LastRemoteUpdateAt);
+            Assert.Equal(baseline.UpdatedAt, unchanged.UpdatedAt);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancelledSqliteLease_ReleasesBinding(bool duringLoad)
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertCancelledLeaseAsync(db, duringLoad);
+    }
+
+    [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancelledPostgresLease_ReleasesBinding(bool duringLoad)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertCancelledLeaseAsync(schema.Db, duringLoad);
+    }
+
+    private static async Task AssertCancelledLeaseAsync(ApplicationDbContext db, bool duringLoad)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 415, "cancel-lease@example.test");
+        using var cancelled = new CancellationTokenSource();
+        var healthy = new FakeMediaProvider("anilist");
+        var queue = CreateProcessor(db, healthy);
+        var operation = await queue.EnqueueProgressUpdateAsync(entry.UserId, binding,
+            new MediaProgressUpdateRequest { ProviderMediaId = "140960", ProgressEpisodes = 11 }, default);
+        await queue.EnqueueProgressUpdateAsync(entry.UserId, binding,
+            new MediaProgressUpdateRequest { ProviderMediaId = "140960", ProgressEpisodes = 12 }, default);
+
+        var cancellingProvider = new FakeMediaProvider("anilist")
+        {
+            BeforeProgressUpdate = async (_, token) =>
+            {
+                await cancelled.CancelAsync();
+                token.ThrowIfCancellationRequested();
+            }
+        };
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>((DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>());
+        if (duringLoad)
+        {
+            options.AddInterceptors(new CancelOperationLoadInterceptor(cancelled));
+        }
+        await using var workerDb = new ApplicationDbContext(options.Options);
+        var worker = CreateProcessor(workerDb, cancellingProvider);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => worker.ProcessOperationAsync(operation.Id, cancelled.Token));
+        Assert.Equal(duringLoad ? 0 : 1, cancellingProvider.ProgressUpdateCallCount);
+        var released = await db.MediaProviderOperations.AsNoTracking().SingleAsync(row => row.Id == operation.Id);
+        Assert.Equal(MediaProviderOperationStatuses.Retrying, released.Status);
+        Assert.Equal(0, released.AttemptCount);
+        Assert.Null(released.NextAttemptAt);
+
+        Assert.Equal(2, await queue.ProcessDueOperationsAsync(default));
+        Assert.Equal(2, healthy.ProgressUpdateCallCount);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+    }
+
+    private static MediaProviderOperationProcessor CreateProcessor(ApplicationDbContext db, IMediaProvider provider) =>
+        new(db, new MediaProviderRegistry([provider]), NullLogger<MediaProviderOperationProcessor>.Instance);
+
+    private static async Task<ApplicationDbContext> OpenLeaseTestSqliteAsync()
+    {
+        var path = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(path).Options);
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        return db;
+    }
+
+    private static bool IsClaimedOperationLoad(string sql) =>
+        sql.Contains("SELECT", StringComparison.Ordinal)
+        && sql.Contains("JOIN \"MediaLibraryEntries\"", StringComparison.Ordinal)
+        && sql.Contains("FROM \"MediaProviderOperations\"", StringComparison.Ordinal);
+
+    private sealed class BeforeReaderInterceptor(Func<string, bool> matches, Func<CancellationToken, Task> beforeRead)
+        : DbCommandInterceptor
+    {
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (matches(command.CommandText))
+            {
+                await beforeRead(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    private sealed class CancelOperationLoadInterceptor(CancellationTokenSource cancelled) : DbCommandInterceptor
+    {
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (IsClaimedOperationLoad(command.CommandText))
+            {
+                await cancelled.CancelAsync();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            return result;
+        }
+    }
+
     [PostgresFact]
     public async Task BlockedOperations_RemainQueuedWithoutStarvingHealthyAccountAndResume()
     {
@@ -203,6 +481,59 @@ public class MediaProviderOperationProcessorTests
         Assert.Empty(await dbContext.MediaProviderOperations.ToListAsync());
     }
 
+    [Fact]
+    public async Task ProcessDueOperationsAsync_ReloadsLocalStatusBetweenSqliteOperations()
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertBatchReloadsLocalStatusAsync(db);
+    }
+
+    [PostgresFact]
+    public async Task ProcessDueOperationsAsync_ReloadsLocalStatusBetweenPostgresOperations()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertBatchReloadsLocalStatusAsync(schema.Db);
+    }
+
+    private static async Task AssertBatchReloadsLocalStatusAsync(ApplicationDbContext db)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 418, "batch-status@example.com");
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await using var workerDb = new ApplicationDbContext(options);
+        var updatedAt = DateTimeOffset.UtcNow;
+        var provider = new FakeMediaProvider("anilist", appliedStatus: MediaLibraryStatuses.Current)
+        {
+            BeforeProgressUpdate = async (_, cancellationToken) =>
+            {
+                await using var editor = new ApplicationDbContext(options);
+                var edited = await editor.MediaLibraryEntries.SingleAsync(cancellationToken);
+                edited.Status = MediaLibraryStatuses.Current;
+                edited.ProgressEpisodes = 3;
+                edited.LastLocalEditAt = updatedAt.AddSeconds(2);
+                await editor.SaveChangesAsync(cancellationToken);
+            }
+        };
+        var queue = CreateProcessor(db, provider);
+        var progress = await queue.EnqueueProgressUpdateAsync(entry.UserId, binding,
+            new() { ProviderMediaId = "140960", ProgressEpisodes = 10 }, default);
+        var status = await queue.EnqueueStatusUpdateAsync(entry.UserId, binding,
+            new() { ProviderMediaId = "140960", Status = MediaLibraryStatuses.Current }, default);
+        progress.CreatedAt = updatedAt.AddSeconds(-2);
+        status.CreatedAt = updatedAt.AddSeconds(-1);
+        entry.Status = MediaLibraryStatuses.Completed;
+        entry.LastLocalEditAt = updatedAt;
+        await db.SaveChangesAsync();
+
+        Assert.Equal(2, await CreateProcessor(workerDb, provider).ProcessDueOperationsAsync(default));
+
+        Assert.Equal(1, provider.ProgressUpdateCallCount);
+        Assert.Equal(1, provider.StatusUpdateCallCount);
+        Assert.Equal(MediaLibraryStatuses.Current, await db.MediaLibraryProviderBindings
+            .Select(row => row.LastRequestedStatus).SingleAsync());
+        Assert.Equal(3, await db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
+        Assert.Empty(db.MediaProviderOperations);
+    }
+
     [Theory]
     [InlineData("confirmed")]
     [InlineData("unconfirmed")]
@@ -293,6 +624,71 @@ public class MediaProviderOperationProcessorTests
         Assert.NotNull(persistedBinding.LastRemoteUpdateAt);
         Assert.NotNull(request.LastKnownRemoteUpdateAt);
         Assert.True(persistedBinding.LastRemoteUpdateAt.Value > request.LastKnownRemoteUpdateAt.Value);
+    }
+
+    [Fact]
+    public async Task SyncLibraryState_RechecksLocalEditAfterAccountPreflightOnSqlite()
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertSyncSkipsLocalEditDuringAccountPreflightAsync(db);
+    }
+
+    [PostgresFact]
+    public async Task SyncLibraryState_RechecksLocalEditAfterAccountPreflightOnPostgres()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertSyncSkipsLocalEditDuringAccountPreflightAsync(schema.Db);
+    }
+
+    private static async Task AssertSyncSkipsLocalEditDuringAccountPreflightAsync(ApplicationDbContext db)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 414, "sync-preflight@example.test");
+        entry.LastLocalEditAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await db.SaveChangesAsync();
+        var account = await db.ConnectedServiceAccounts.AsNoTracking().SingleAsync();
+        var enteredPreflight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePreflight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new FakeMediaProvider("anilist")
+        {
+            ConnectedAccount = account,
+            BeforeGetConnectedAccount = async token =>
+            {
+                enteredPreflight.SetResult();
+                await releasePreflight.Task.WaitAsync(token);
+            }
+        };
+        var operation = await CreateProcessor(db, provider).EnqueueLibraryStateSyncAsync(entry.UserId, binding, new()
+        {
+            ProviderMediaId = "140960",
+            Status = entry.Status,
+            ProgressEpisodes = entry.ProgressEpisodes,
+            LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+        }, default);
+        operation.BatchId = Guid.NewGuid();
+        await db.SaveChangesAsync();
+
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await using var workerDb = new ApplicationDbContext(options);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var processing = CreateProcessor(workerDb, provider).ProcessOperationAsync(operation.Id, timeout.Token);
+        MediaProviderOperationExecutionResult result;
+        try
+        {
+            await enteredPreflight.Task.WaitAsync(timeout.Token);
+            entry.ProgressEpisodes = 11;
+            entry.LastLocalEditAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(timeout.Token);
+        }
+        finally
+        {
+            releasePreflight.TrySetResult();
+            result = await processing;
+        }
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, provider.LibraryStateSyncCallCount);
+        Assert.Empty(await db.MediaProviderOperations.AsNoTracking().ToListAsync());
+        Assert.Equal(11, await db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
     }
 
     [Fact]
@@ -537,6 +933,8 @@ public class MediaProviderOperationProcessorTests
         await dbContext.Database.EnsureCreatedAsync();
 
         var (entry, binding) = await SeedMediaEntryAsync(dbContext, 411, "auto-progress@example.com");
+        entry.ProgressChapters = 20;
+        entry.ProgressVolumes = 2;
         var provider = new FakeMediaProvider("anilist");
         var registry = new MediaProviderRegistry([provider]);
         var processor = new MediaProviderOperationProcessor(dbContext, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
@@ -545,6 +943,8 @@ public class MediaProviderOperationProcessorTests
         {
             ProviderMediaId = "140960",
             ProgressEpisodes = 15,
+            ProgressChapters = 18,
+            ProgressVolumes = 4,
             LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt,
         };
 
@@ -555,6 +955,8 @@ public class MediaProviderOperationProcessorTests
 
         Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
         Assert.Equal(15, persistedEntry.ProgressEpisodes);
+        Assert.Equal(20, persistedEntry.ProgressChapters);
+        Assert.Equal(4, persistedEntry.ProgressVolumes);
         Assert.Equal(MediaMutationSources.ObservationAutoProgress, persistedEntry.LastMutationSource);
         Assert.NotNull(persistedEntry.LastLocalEditAt);
         Assert.Equal(1, provider.ProgressUpdateCallCount);
@@ -607,6 +1009,503 @@ public class MediaProviderOperationProcessorTests
         Assert.Equal(0, provider.ProgressUpdateCallCount);
         // Operation was removed from queue after clean skip
         Assert.Equal(0, await dbContext.MediaProviderOperations.CountAsync());
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_CommittedProgressSkipsFirstExternalTimestamp()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dbContext = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 415, "first-remote-timestamp@example.com");
+        binding.LastRemoteUpdateAt = null;
+        entry.ProgressEpisodes = 15;
+        await dbContext.SaveChangesAsync();
+        var provider = new FakeMediaProvider("anilist");
+        var processor = new MediaProviderOperationProcessor(dbContext, new MediaProviderRegistry([provider]),
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, binding, new AutoProgressUpdatePayload
+        {
+            ProviderMediaId = "140960", ProgressEpisodes = 15, LocalProgressCommitted = true
+        }, default);
+
+        var externalTimestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await dbContext.MediaLibraryProviderBindings.Where(row => row.Id == binding.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.LastRemoteUpdateAt, externalTimestamp));
+        var result = await processor.ProcessOperationAsync(operation.Id, default);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, provider.ProgressUpdateCallCount);
+        Assert.Empty(dbContext.MediaProviderOperations);
+    }
+
+    [Fact]
+    public async Task ProcessOperationAsync_DoesNotSendSupersededObservationProgress()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dbContext = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await dbContext.Database.EnsureCreatedAsync();
+        var (entry, binding) = await SeedMediaEntryAsync(dbContext, 413, "superseded-progress@example.com");
+        var provider = new FakeMediaProvider("anilist");
+        var processor = new MediaProviderOperationProcessor(dbContext, new MediaProviderRegistry([provider]),
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        entry.ProgressEpisodes = 15;
+        var operation = await processor.EnqueueAutoProgressAsync(entry.UserId, binding, new AutoProgressUpdatePayload
+        {
+            ProviderMediaId = "140960", ProgressEpisodes = 15, LocalProgressCommitted = true
+        }, default);
+
+        entry.ProgressEpisodes = 16;
+        await dbContext.SaveChangesAsync();
+        var result = await processor.ProcessOperationAsync(operation.Id, default);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, provider.ProgressUpdateCallCount);
+        Assert.Equal(16, await dbContext.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
+        Assert.Empty(dbContext.MediaProviderOperations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DispatchSkipsNewerRemoteVersionOnSqlite(bool startsWithoutRemoteTimestamp)
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertDispatchSkipsNewerRemoteVersionAsync(db, startsWithoutRemoteTimestamp);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DispatchSkipsNewerRemoteVersionOnPostgres(bool startsWithoutRemoteTimestamp)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertDispatchSkipsNewerRemoteVersionAsync(schema.Db, startsWithoutRemoteTimestamp);
+    }
+
+    private static async Task AssertDispatchSkipsNewerRemoteVersionAsync(
+        ApplicationDbContext db, bool startsWithoutRemoteTimestamp)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 416, "dispatch-remote-version@example.com");
+        var newerVersion = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        binding.LastRemoteUpdateAt = startsWithoutRemoteTimestamp ? null : newerVersion.AddMinutes(-1);
+        entry.ProgressEpisodes = 15;
+        await db.SaveChangesAsync();
+
+        var provider = new FakeMediaProvider("anilist");
+        var operation = await CreateProcessor(db, provider).EnqueueAutoProgressAsync(entry.UserId, binding,
+            new AutoProgressUpdatePayload
+            {
+                ProviderMediaId = "140960", ProgressEpisodes = 15, LocalProgressCommitted = true,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            }, default);
+
+        var preflightSeen = false;
+        var interceptor = new BeforeReaderInterceptor(sql =>
+        {
+            if (!sql.StartsWith("SELECT", StringComparison.Ordinal)
+                || !sql.Contains("FROM \"MediaLibraryProviderBindings\"", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // The preflight projects only the remote version. The next binding query reloads the full row.
+            if (!sql.Contains("\"LastSyncedAt\"", StringComparison.Ordinal))
+            {
+                preflightSeen = true;
+                return false;
+            }
+
+            return preflightSeen;
+        }, async token =>
+        {
+            Assert.Equal(1, await db.MediaLibraryProviderBindings.Where(row => row.Id == binding.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.LastRemoteUpdateAt, newerVersion), token));
+        });
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await using var worker = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>(options)
+            .AddInterceptors(interceptor).Options);
+
+        var result = await CreateProcessor(worker, provider).ProcessOperationAsync(operation.Id, default);
+
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, result.Outcome);
+        Assert.Equal(0, provider.ProgressUpdateCallCount);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+        Assert.Equal(15, await db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
+        Assert.Equal(newerVersion, await db.MediaLibraryProviderBindings.Select(row => row.LastRemoteUpdateAt).SingleAsync());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task InFlightObservationAcknowledgementPreservesNewerLocalProgress(
+        bool externalRemoteUpdate, bool startsWithoutRemoteTimestamp)
+    {
+        var connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(connectionString);
+        await keeper.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connectionString).Options;
+        await using var observationsDb = new ApplicationDbContext(options);
+        await observationsDb.Database.EnsureCreatedAsync();
+        await AssertOrderedProgressAsync(observationsDb, options, externalRemoteUpdate, startsWithoutRemoteTimestamp);
+    }
+
+    [Fact]
+    public async Task LegacyAutoProgressAcknowledgementPreservesNewerSqliteObservation()
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await AssertOrderedProgressAsync(db, options, externalRemoteUpdate: false, startsWithoutRemoteTimestamp: false, legacy: true);
+    }
+
+    [PostgresFact]
+    public async Task LegacyAutoProgressAcknowledgementPreservesNewerPostgresObservation()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var options = (DbContextOptions<ApplicationDbContext>)schema.Db.GetService<IDbContextOptions>();
+        await AssertOrderedProgressAsync(schema.Db, options, externalRemoteUpdate: false, startsWithoutRemoteTimestamp: false, legacy: true);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentPostgresProcessorsDispatchOneOperationPerBinding(bool startsWithoutRemoteTimestamp)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql(schema.Db.Database.GetConnectionString(), provider => provider.EnableRetryOnFailure(1)).Options;
+        await AssertOrderedProgressAsync(schema.Db, options, externalRemoteUpdate: false, startsWithoutRemoteTimestamp);
+    }
+
+    [Theory]
+    [InlineData(MediaProviderOperationTypes.UpdateScore, false)]
+    [InlineData(MediaProviderOperationTypes.UpdateStatus, false)]
+    [InlineData(MediaProviderOperationTypes.UpdateScore, true)]
+    public async Task InFlightMutationAcknowledgementPreservesQueuedSqliteProgress(string mutation, bool externalRemoteUpdate)
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await AssertOrderedProgressAsync(db, options, externalRemoteUpdate, startsWithoutRemoteTimestamp: false,
+            firstMutation: mutation);
+    }
+
+    [PostgresTheory]
+    [InlineData(MediaProviderOperationTypes.UpdateScore, false)]
+    [InlineData(MediaProviderOperationTypes.UpdateStatus, false)]
+    [InlineData(MediaProviderOperationTypes.UpdateScore, true)]
+    public async Task InFlightMutationAcknowledgementPreservesQueuedPostgresProgress(string mutation, bool externalRemoteUpdate)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var options = (DbContextOptions<ApplicationDbContext>)schema.Db.GetService<IDbContextOptions>();
+        await AssertOrderedProgressAsync(schema.Db, options, externalRemoteUpdate, startsWithoutRemoteTimestamp: false,
+            firstMutation: mutation);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LaterScoreAcknowledgementPreservesRetryingSqliteProgress(bool externalRemoteUpdate)
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertRetryingProgressAfterScoreAsync(db, externalRemoteUpdate);
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LaterScoreAcknowledgementPreservesRetryingPostgresProgress(bool externalRemoteUpdate)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertRetryingProgressAfterScoreAsync(schema.Db, externalRemoteUpdate);
+    }
+
+    [Fact]
+    public async Task LaterScoreAcknowledgementPreservesExpiredSqliteProgress()
+    {
+        await using var db = await OpenLeaseTestSqliteAsync();
+        await AssertExpiredProgressAfterScoreAsync(db);
+    }
+
+    [PostgresFact]
+    public async Task LaterScoreAcknowledgementPreservesExpiredPostgresProgress()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertExpiredProgressAfterScoreAsync(schema.Db);
+    }
+
+    private static async Task AssertExpiredProgressAfterScoreAsync(ApplicationDbContext db)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 414, "expired-progress@example.test");
+        entry.ProgressEpisodes = 11;
+        entry.Score = 8;
+        binding.LastRemoteUpdateAt = DateTimeOffset.UtcNow.AddHours(-1);
+        await db.SaveChangesAsync();
+
+        var remoteProgress = 10;
+        var provider = new FakeMediaProvider("anilist")
+        {
+            BeforeProgressUpdate = (request, _) =>
+            {
+                remoteProgress = request.ProgressEpisodes!.Value;
+                return Task.CompletedTask;
+            }
+        };
+        var enqueueProcessor = CreateProcessor(db, provider);
+        var progress = await enqueueProcessor.EnqueueAutoProgressAsync(entry.UserId, binding,
+            new AutoProgressUpdatePayload
+            {
+                ProviderMediaId = "140960", ProgressEpisodes = 11, LocalProgressCommitted = true,
+                LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+            }, default);
+        var expired = DateTimeOffset.UtcNow - MediaProviderOperationProcessor.ProcessingLeaseTimeout - TimeSpan.FromSeconds(1);
+        progress.CreatedAt = expired;
+        progress.UpdatedAt = expired;
+        progress.LastAttemptAt = expired;
+        progress.Status = MediaProviderOperationStatuses.Processing;
+        progress.AttemptCount = 1;
+        await db.SaveChangesAsync();
+        var score = await enqueueProcessor.EnqueueScoreUpdateAsync(entry.UserId, binding,
+            new MediaScoreUpdateRequest { ProviderMediaId = "140960", Score = 8 }, default);
+
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await using var processorDb = new ApplicationDbContext(options);
+        var processor = CreateProcessor(processorDb, provider);
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded,
+            (await processor.ProcessOperationAsync(score.Id, default)).Outcome);
+        Assert.Equal(10, remoteProgress);
+        Assert.Equal(MediaProviderOperationStatuses.Processing,
+            await db.MediaProviderOperations.Where(row => row.Id == progress.Id).Select(row => row.Status).SingleAsync());
+
+        Assert.Equal(1, await processor.ProcessDueOperationsAsync(default));
+        Assert.Equal(1, provider.ProgressUpdateCallCount);
+        Assert.Equal(11, remoteProgress);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+    }
+
+    private static async Task AssertRetryingProgressAfterScoreAsync(ApplicationDbContext db, bool externalRemoteUpdate)
+    {
+        var (entry, binding) = await SeedMediaEntryAsync(db, 414, "retrying-progress@example.test");
+        entry.ProgressEpisodes = 10;
+        var initialVersion = DateTimeOffset.UtcNow.AddHours(-2);
+        binding.LastRemoteUpdateAt = initialVersion.AddTicks(-(initialVersion.Ticks % 10));
+        await db.SaveChangesAsync();
+
+        var remoteProgress = 10;
+        var failFirstProgressUpdate = true;
+        var provider = new FakeMediaProvider("anilist")
+        {
+            BeforeProgressUpdate = (request, _) =>
+            {
+                if (failFirstProgressUpdate)
+                {
+                    failFirstProgressUpdate = false;
+                    throw new TimeoutException("Simulated transient progress failure.");
+                }
+
+                remoteProgress = request.ProgressEpisodes!.Value;
+                return Task.CompletedTask;
+            }
+        };
+        var registry = new MediaProviderRegistry([provider]);
+        var enqueueProcessor = CreateProcessor(db, provider);
+        var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var matching = new MediaObservationMatchingService(db, mappings,
+            new MediaRelationGraphRefreshQueue(), NullLogger<MediaObservationMatchingService>.Instance);
+        var progress = new MediaObservationProgressService(db, enqueueProcessor,
+            new MediaLibraryEventHub(), NullLogger<MediaObservationProgressService>.Instance, mappings, matching);
+        Assert.Equal(1, await progress.TryEnqueueAutoProgressAsync(new MediaObservation
+        {
+            UserId = entry.UserId, SiteIdentifier = "crunchyroll",
+            ObservedTitle = "Spy x Family", ObservedUrl = "https://www.crunchyroll.com/watch/SPY11",
+            SiteMediaId = "SPY11", MediaTitleId = entry.MediaTitleId,
+            MatchStatus = MediaObservationStatuses.Matched, ResolvedProgress = 11
+        }, default));
+        Assert.Equal(11, entry.ProgressEpisodes);
+
+        var options = (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>();
+        await using var processorDb = new ApplicationDbContext(options);
+        var processor = new MediaProviderOperationProcessor(processorDb, registry,
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        var progressId = await db.MediaProviderOperations.Select(row => row.Id).SingleAsync();
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Queued,
+            (await processor.ProcessOperationAsync(progressId, default)).Outcome);
+        var retry = await db.MediaProviderOperations.AsNoTracking().SingleAsync(row => row.Id == progressId);
+        Assert.Equal(MediaProviderOperationStatuses.Retrying, retry.Status);
+        Assert.Equal(10, remoteProgress);
+
+        if (externalRemoteUpdate)
+        {
+            binding.LastRemoteUpdateAt = binding.LastRemoteUpdateAt!.Value.AddHours(1);
+            await db.SaveChangesAsync();
+        }
+
+        entry.Score = 8;
+        var score = await enqueueProcessor.EnqueueScoreUpdateAsync(entry.UserId, binding,
+            new MediaScoreUpdateRequest { ProviderMediaId = "140960", Score = 8 }, default);
+        Assert.True(score.CreatedAt > retry.CreatedAt);
+        Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded,
+            (await processor.ProcessOperationAsync(score.Id, default)).Outcome);
+
+        await db.MediaProviderOperations.Where(row => row.Id == progressId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.NextAttemptAt, DateTimeOffset.UtcNow.AddSeconds(-1)));
+        Assert.Equal(1, await processor.ProcessDueOperationsAsync(default));
+        Assert.Equal(externalRemoteUpdate ? 1 : 2, provider.ProgressUpdateCallCount);
+        Assert.Equal(externalRemoteUpdate ? 10 : 11, remoteProgress);
+        Assert.Empty(await db.MediaProviderOperations.ToListAsync());
+    }
+
+    private static async Task AssertOrderedProgressAsync(ApplicationDbContext observationsDb,
+        DbContextOptions<ApplicationDbContext> options, bool externalRemoteUpdate, bool startsWithoutRemoteTimestamp,
+        bool legacy = false, string? firstMutation = null)
+    {
+        await using var processorDb = new ApplicationDbContext(options);
+        await using var secondProcessorDb = new ApplicationDbContext(options);
+        var (entry, binding) = await SeedMediaEntryAsync(observationsDb, 414, "in-flight-progress@example.test");
+        var initialProgress = firstMutation is null ? 9 : 10;
+        entry.ProgressEpisodes = initialProgress;
+        binding.LastRemoteUpdateAt = startsWithoutRemoteTimestamp ? null : DateTimeOffset.UtcNow.AddHours(-2);
+        await observationsDb.SaveChangesAsync();
+
+        var enteredProvider = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acknowledge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sentProgress = new List<int?>();
+        var sentVersions = new List<DateTimeOffset?>();
+        int? remoteProgress = initialProgress;
+        async Task SuspendWriteAsync(CancellationToken cancellationToken)
+        {
+            enteredProvider.SetResult();
+            await acknowledge.Task.WaitAsync(cancellationToken);
+        }
+
+        var provider = new FakeMediaProvider("anilist")
+        {
+            BeforeStatusOrScoreUpdate = SuspendWriteAsync,
+            BeforeProgressUpdate = async (request, cancellationToken) =>
+            {
+                sentProgress.Add(request.ProgressEpisodes);
+                sentVersions.Add(request.LastKnownRemoteUpdateAt);
+                if (request.ProgressEpisodes == 10)
+                {
+                    await SuspendWriteAsync(cancellationToken);
+                }
+                remoteProgress = request.ProgressEpisodes;
+            }
+        };
+        var registry = new MediaProviderRegistry([provider]);
+        var mappings = new MediaProviderSeasonMappingService(observationsDb, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var matching = new MediaObservationMatchingService(observationsDb, mappings,
+            new MediaRelationGraphRefreshQueue(), NullLogger<MediaObservationMatchingService>.Instance);
+        var progress = new MediaObservationProgressService(observationsDb,
+            new MediaProviderOperationProcessor(observationsDb, registry, NullLogger<MediaProviderOperationProcessor>.Instance),
+            new MediaLibraryEventHub(), NullLogger<MediaObservationProgressService>.Instance, mappings, matching);
+        var processor = new MediaProviderOperationProcessor(processorDb, registry,
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+        var secondProcessor = new MediaProviderOperationProcessor(secondProcessorDb, registry,
+            NullLogger<MediaProviderOperationProcessor>.Instance);
+
+        Task<int> CommitEpisodeAsync(int number) => progress.TryEnqueueAutoProgressAsync(new MediaObservation
+        {
+            UserId = entry.UserId, SiteIdentifier = "crunchyroll",
+            ObservedTitle = "Spy x Family", ObservedUrl = $"https://www.crunchyroll.com/watch/SPY{number}",
+            SiteMediaId = $"SPY{number}", MediaTitleId = entry.MediaTitleId,
+            MatchStatus = MediaObservationStatuses.Matched, ResolvedProgress = number
+        }, default);
+
+        var enqueueProcessor = CreateProcessor(observationsDb, provider);
+        if (firstMutation == MediaProviderOperationTypes.UpdateScore)
+        {
+            await enqueueProcessor.EnqueueScoreUpdateAsync(entry.UserId, binding,
+                new MediaScoreUpdateRequest { ProviderMediaId = "140960", Score = 8 }, default);
+        }
+        else if (firstMutation == MediaProviderOperationTypes.UpdateStatus)
+        {
+            await enqueueProcessor.EnqueueStatusUpdateAsync(entry.UserId, binding,
+                new MediaStatusUpdateRequest { ProviderMediaId = "140960", Status = MediaLibraryStatuses.Current }, default);
+        }
+        else if (legacy)
+        {
+            await enqueueProcessor.EnqueueAutoProgressAsync(entry.UserId, binding,
+                new AutoProgressUpdatePayload
+                {
+                    ProviderMediaId = "140960", ProgressEpisodes = 10, LocalProgressCommitted = false,
+                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+                }, default);
+        }
+        else
+        {
+            Assert.Equal(1, await CommitEpisodeAsync(10));
+        }
+        var firstId = await observationsDb.MediaProviderOperations.Select(row => row.Id).SingleAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var firstWrite = processor.ProcessOperationAsync(firstId, timeout.Token);
+        Guid secondId;
+        DateTimeOffset? latestLocalEdit;
+        var expectedProgress = new List<int?>();
+        if (firstMutation is null)
+        {
+            expectedProgress.Add(10);
+        }
+        try
+        {
+            await enteredProvider.Task.WaitAsync(timeout.Token);
+            Assert.Equal(1, await CommitEpisodeAsync(11));
+            secondId = await observationsDb.MediaProviderOperations.Where(row => row.Id != firstId)
+                .Select(row => row.Id).SingleAsync();
+            latestLocalEdit = await observationsDb.MediaLibraryEntries.Where(row => row.Id == entry.Id)
+                .Select(row => row.LastLocalEditAt).SingleAsync(timeout.Token);
+            Assert.Equal(MediaProviderOperationExecutionOutcome.Queued,
+                (await secondProcessor.ProcessOperationAsync(secondId, timeout.Token)).Outcome);
+            if (observationsDb.Database.IsNpgsql())
+            {
+                Assert.Equal(0, await secondProcessor.ProcessDueOperationsAsync(timeout.Token));
+            }
+            var queued = await secondProcessorDb.MediaProviderOperations.AsNoTracking().SingleAsync(row => row.Id == secondId);
+            Assert.Equal(MediaProviderOperationStatuses.Pending, queued.Status);
+            Assert.Equal(0, queued.AttemptCount);
+            Assert.Equal(expectedProgress, sentProgress);
+            Assert.Equal(initialProgress, remoteProgress);
+            if (externalRemoteUpdate)
+            {
+                binding.LastRemoteUpdateAt = DateTimeOffset.UtcNow.AddHours(-1);
+                await observationsDb.SaveChangesAsync();
+            }
+        }
+        finally
+        {
+            acknowledge.TrySetResult();
+            Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded, (await firstWrite).Outcome);
+        }
+
+        await observationsDb.Entry(entry).ReloadAsync();
+        Assert.Equal(11, entry.ProgressEpisodes);
+        Assert.Equal(latestLocalEdit, entry.LastLocalEditAt);
+        if (observationsDb.Database.IsNpgsql())
+        {
+            Assert.Equal(1, await secondProcessor.ProcessDueOperationsAsync(timeout.Token));
+        }
+        else
+        {
+            Assert.Equal(MediaProviderOperationExecutionOutcome.Succeeded,
+                (await secondProcessor.ProcessOperationAsync(secondId, timeout.Token)).Outcome);
+        }
+        if (!externalRemoteUpdate)
+        {
+            expectedProgress.Add(11);
+        }
+        Assert.Equal(expectedProgress, sentProgress);
+        Assert.Equal(externalRemoteUpdate ? 10 : 11, remoteProgress);
+        if (startsWithoutRemoteTimestamp && !externalRemoteUpdate)
+        {
+            Assert.Null(sentVersions[0]);
+            Assert.NotNull(sentVersions[1]);
+        }
+        Assert.Empty(await observationsDb.MediaProviderOperations.ToListAsync());
     }
 
     private static MediaProviderOperation CreateImportFanOutStatus(MediaLibraryProviderBinding binding, string status)
@@ -710,6 +1609,9 @@ public class MediaProviderOperationProcessorTests
         public string ProviderId => _providerId;
 
         public int ProgressUpdateCallCount { get; private set; }
+        public DateTimeOffset? ProgressRemoteUpdateAt { get; init; }
+        public Func<MediaProgressUpdateRequest, CancellationToken, Task>? BeforeProgressUpdate { get; init; }
+        public Func<CancellationToken, Task>? BeforeStatusOrScoreUpdate { get; init; }
 
         public int StatusUpdateCallCount { get; private set; }
 
@@ -717,10 +1619,15 @@ public class MediaProviderOperationProcessorTests
 
         public MediaLibraryStateSyncRequest? LastLibraryStateSyncRequest { get; private set; }
         public ConnectedServiceAccount? ConnectedAccount { get; init; }
+        public Func<CancellationToken, Task>? BeforeGetConnectedAccount { get; init; }
 
-        public Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
+        public async Task<ConnectedServiceAccount?> GetConnectedAccountAsync(int userId, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(ConnectedAccount);
+            if (BeforeGetConnectedAccount is not null)
+            {
+                await BeforeGetConnectedAccount(cancellationToken);
+            }
+            return ConnectedAccount;
         }
 
         public string GetAuthorizationUrl(string redirectUri, string state, string codeChallenge)
@@ -753,7 +1660,7 @@ public class MediaProviderOperationProcessorTests
             throw new NotSupportedException();
         }
 
-        public Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken)
+        public async Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken)
         {
             ProgressUpdateCallCount += 1;
 
@@ -763,16 +1670,22 @@ public class MediaProviderOperationProcessorTests
                 throw new InvalidOperationException("Simulated provider write failure.");
             }
 
-            return Task.FromResult(new MediaProviderMutationResult
+            if (BeforeProgressUpdate is not null)
+            {
+                await BeforeProgressUpdate(request, cancellationToken);
+            }
+
+            return new MediaProviderMutationResult
             {
                 ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
-                LastRemoteUpdateAt = DateTimeOffset.UtcNow
-            });
+                AppliedProgressEpisodes = request.ProgressEpisodes,
+                LastRemoteUpdateAt = ProgressRemoteUpdateAt ?? DateTimeOffset.UtcNow
+            };
         }
 
-        public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
+        public async Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
         {
             StatusUpdateCallCount += 1;
 
@@ -782,17 +1695,22 @@ public class MediaProviderOperationProcessorTests
                 throw new InvalidOperationException("Simulated provider write failure.");
             }
 
-            return Task.FromResult(new MediaProviderMutationResult
+            if (BeforeStatusOrScoreUpdate is not null)
+            {
+                await BeforeStatusOrScoreUpdate(cancellationToken);
+            }
+
+            return new MediaProviderMutationResult
             {
                 ProviderId = _providerId,
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedStatus = _appliedStatus,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow
-            });
+            };
         }
 
-        public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken)
+        public async Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken)
         {
             if (_failure is not null) throw _failure;
             if (_shouldThrow)
@@ -800,13 +1718,18 @@ public class MediaProviderOperationProcessorTests
                 throw new InvalidOperationException("Simulated provider write failure.");
             }
 
-            return Task.FromResult(new MediaProviderMutationResult
+            if (BeforeStatusOrScoreUpdate is not null)
+            {
+                await BeforeStatusOrScoreUpdate(cancellationToken);
+            }
+
+            return new MediaProviderMutationResult
             {
                 ProviderId = "anilist",
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow
-            });
+            };
         }
 
         public Task<MediaProviderMutationResult> SyncLibraryStateAsync(

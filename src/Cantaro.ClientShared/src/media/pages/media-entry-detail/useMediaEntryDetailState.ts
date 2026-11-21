@@ -18,6 +18,7 @@ import {
 } from '../../services/mediaRefreshCache';
 import type {
   MediaEntryDetailModel,
+  MediaEpisodeCatalogDto,
   MediaProviderLinkSummaryDto,
   MediaProviderTitleDetailsDto,
   MediaTitleDetailDto,
@@ -389,11 +390,12 @@ export function useProviderAvailability(
 
 function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
   if (state.status !== 'loaded') return state.status;
-  return state.value.episodes
-    .map((episode) => `${episode.episodeNumber}:${episode.destinations
-      .map((destination) => `${destination.serviceId}:${destination.url}`)
-      .join(',')}:${episode.hasConflict}`)
-    .join('|');
+  const destinations = (items: MediaEpisodeCatalogDto['standaloneDestinations']) =>
+    items?.map(({ serviceId, url }) => `${serviceId}:${url}`).join(',') ?? '';
+  return [
+    destinations(state.value.standaloneDestinations),
+    ...state.value.episodes.map(episode => `${episode.episodeNumber}:${destinations(episode.destinations)}`),
+  ].join('|');
 }
 
 export function useContinueWatching(

@@ -43,7 +43,8 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderLink> MediaProviderLinks => Set<MediaProviderLink>();
     public DbSet<MediaEpisode> MediaEpisodes => Set<MediaEpisode>();
     public DbSet<MediaEpisodeProviderContent> MediaEpisodeProviderContents => Set<MediaEpisodeProviderContent>();
-    public DbSet<MediaEpisodeProviderIdentity> MediaEpisodeProviderIdentities => Set<MediaEpisodeProviderIdentity>();
+    public DbSet<MediaProviderEpisode> MediaProviderEpisodes => Set<MediaProviderEpisode>();
+    public DbSet<MediaProviderEpisodeMapping> MediaProviderEpisodeMappings => Set<MediaProviderEpisodeMapping>();
     public DbSet<MediaLibraryEntry> MediaLibraryEntries => Set<MediaLibraryEntry>();
     public DbSet<MediaLibraryProviderBinding> MediaLibraryProviderBindings => Set<MediaLibraryProviderBinding>();
     public DbSet<MediaProviderLibrarySnapshot> MediaProviderLibrarySnapshots => Set<MediaProviderLibrarySnapshot>();
@@ -51,7 +52,6 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
     public DbSet<MediaProviderOperation> MediaProviderOperations => Set<MediaProviderOperation>();
     public DbSet<MediaObservation> MediaObservations => Set<MediaObservation>();
     public DbSet<MediaObservationCandidate> MediaObservationCandidates => Set<MediaObservationCandidate>();
-    public DbSet<MediaObservationEpisodeOffset> MediaObservationEpisodeOffsets => Set<MediaObservationEpisodeOffset>();
     public DbSet<ExtensionAuthorizationCode> ExtensionAuthorizationCodes => Set<ExtensionAuthorizationCode>();
     public DbSet<ExtensionRefreshToken> ExtensionRefreshTokens => Set<ExtensionRefreshToken>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
@@ -680,14 +680,27 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.Property(e => e.ProviderSeasonId).HasMaxLength(256);
             entity.Property(e => e.MappingSource).HasMaxLength(64);
             entity.Property(e => e.Confidence).HasPrecision(5, 4);
+            entity.Property(e => e.LastObservedAt).HasPrecision(6);
 
-            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonId })
-                .IsUnique()
-                .HasFilter("\"ProviderSeasonId\" IS NOT NULL");
-            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonNumber })
-                .IsUnique()
-                .HasFilter("\"ProviderSeasonId\" IS NULL AND \"ProviderSeasonNumber\" IS NOT NULL");
+            entity.Property(e => e.ProviderSeasonKey).HasMaxLength(264);
+            entity.Property(e => e.NormalizedSeasonTitle).HasMaxLength(512);
+            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonKey, e.ProviderEpisodeStart, e.ProviderEpisodeEnd })
+                .IsUnique();
+            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonKey, e.ProviderEpisodeStart })
+                .IsUnique().HasFilter("\"ProviderEpisodeEnd\" IS NULL");
+            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonKey, e.ProviderEpisodeEnd })
+                .IsUnique().HasFilter("\"ProviderEpisodeStart\" IS NULL");
+            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonKey })
+                .IsUnique().HasFilter("\"ProviderEpisodeStart\" IS NULL AND \"ProviderEpisodeEnd\" IS NULL");
+            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId, e.ProviderSeasonNumber });
             entity.HasIndex(e => e.MediaTitleId);
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_MediaProviderSeasonMappings_Source",
+                    "\"MappingSource\" IN ('automatic', 'manual')");
+                table.HasCheckConstraint("CK_MediaProviderSeasonMappings_Range",
+                    "COALESCE(\"ProviderEpisodeStart\", 1) >= 1 AND COALESCE(\"ProviderEpisodeEnd\", 2147483647) >= COALESCE(\"ProviderEpisodeStart\", 1)");
+            });
 
             entity.HasOne(e => e.MediaTitle)
                 .WithMany(title => title.ProviderSeasonMappings)
@@ -737,30 +750,38 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<MediaEpisodeProviderIdentity>(entity =>
+        modelBuilder.Entity<MediaProviderEpisode>(entity =>
         {
-            entity.HasKey(e => e.Id);
-
-            entity.HasIndex(e => new { e.Provider, e.ProviderEpisodeId })
-                .IsUnique();
-
-            entity.HasIndex(e => new { e.MediaEpisodeProviderContentId, e.HasConflict });
-
+            entity.HasKey(e => new { e.Provider, e.ProviderEpisodeId });
+            entity.HasIndex(e => new { e.Provider, e.ContentKey });
+            entity.HasIndex(e => new { e.Provider, e.ProviderSeriesId });
             entity.Property(e => e.Provider).HasMaxLength(64);
             entity.Property(e => e.ProviderEpisodeId).HasMaxLength(256);
+            entity.Property(e => e.ProviderSeriesId).HasMaxLength(256);
+            entity.Property(e => e.ProviderSeasonId).HasMaxLength(256);
+            entity.Property(e => e.NormalizedSeasonTitle).HasMaxLength(512);
+            entity.Property(e => e.ContentKey).HasMaxLength(256);
             entity.Property(e => e.AudioLocale).HasMaxLength(35);
             entity.Property(e => e.ReleaseTrack).HasMaxLength(64);
+            entity.Property(e => e.EpisodeTitle).HasMaxLength(512);
             entity.Property(e => e.ProviderUrlPath).HasMaxLength(1024);
-            entity.Property(e => e.SeenCount).HasDefaultValue(1);
+            entity.ToTable(table => table.HasCheckConstraint("CK_MediaProviderEpisodes_SeenCount", "\"SeenCount\" > 0"));
+        });
 
-            entity.ToTable(table => table.HasCheckConstraint(
-                "CK_MediaEpisodeProviderIdentities_SeenCount",
-                "\"SeenCount\" > 0"));
-
-            entity.HasOne(e => e.Content)
-                .WithMany(e => e.Variants)
-                .HasForeignKey(e => e.MediaEpisodeProviderContentId)
-                .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<MediaProviderEpisodeMapping>(entity =>
+        {
+            entity.HasKey(e => new { e.Provider, e.ProviderEpisodeId });
+            entity.Property(e => e.Provider).HasMaxLength(64);
+            entity.Property(e => e.ProviderEpisodeId).HasMaxLength(256);
+            entity.Property(e => e.MappingSource).HasMaxLength(64);
+            entity.Property(e => e.LastObservedAt).HasPrecision(6);
+            entity.HasOne(e => e.MediaTitle).WithMany().HasForeignKey(e => e.MediaTitleId);
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_MediaProviderEpisodeMappings_Source",
+                    "\"MappingSource\" IN ('automatic', 'manual')");
+                table.HasCheckConstraint("CK_MediaProviderEpisodeMappings_Number", "\"CanonicalEpisodeNumber\" > 0");
+            });
         });
 
         modelBuilder.Entity<MediaLibraryEntry>(entity =>
@@ -856,6 +877,18 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+            {
+                // Keep SQLite's timestamp format and allow SQL to order and compare UTC values.
+                var timestamp = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTimeOffset, string>(
+                    value => value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss.FFFFFFFzzz", System.Globalization.CultureInfo.InvariantCulture),
+                    value => DateTimeOffset.Parse(value, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AssumeUniversal));
+                entity.Property(e => e.CreatedAt).HasConversion(timestamp);
+                entity.Property(e => e.UpdatedAt).HasConversion(timestamp);
+                entity.Property(e => e.LastAttemptAt).HasConversion(timestamp);
+                entity.Property(e => e.NextAttemptAt).HasConversion(timestamp);
+            }
 
             entity.HasOne(e => e.MediaLibraryProviderBinding)
                 .WithMany(binding => binding.ProviderOperations)
@@ -877,7 +910,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.HasIndex(e => e.UpdatedAt);
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).IsConcurrencyToken().HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasOne(e => e.User)
                 .WithMany()
@@ -914,26 +947,6 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        modelBuilder.Entity<MediaObservationEpisodeOffset>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-
-            entity.HasIndex(e => new { e.UserId, e.SiteIdentifier, e.MediaTitleId })
-                .IsUnique();
-
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-            entity.HasOne(e => e.User)
-                .WithMany()
-                .HasForeignKey(e => e.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.MediaTitle)
-                .WithMany()
-                .HasForeignKey(e => e.MediaTitleId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
     }
 
     private void UpdateUserTimestamps()
@@ -958,7 +971,6 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
         }
         UpdateUserTimestamps();
         UpdateProviderCatalogProjections();
-        NormalizeMediaProviderContents();
     }
 
     private void UpdateProviderCatalogProjections()
@@ -971,25 +983,6 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entry.Entity.NormalizedArtist = normalized.Artist;
             entry.Entity.NormalizedIsrc = normalized.Isrc;
             entry.Entity.NormalizedMusicBrainzRecordingId = normalized.MusicBrainzRecordingId;
-        }
-    }
-
-    private void NormalizeMediaProviderContents()
-    {
-        foreach (var entry in ChangeTracker.Entries<MediaEpisodeProviderIdentity>())
-        {
-            if (entry.State is not (EntityState.Added or EntityState.Modified)
-                || entry.Entity.Content is null)
-            {
-                continue;
-            }
-
-            entry.Entity.Content.Provider = entry.Entity.Provider;
-            var parsed = Cantaro.Api.Services.MediaProviderVariantIdentities.Parse(
-                entry.Entity.Provider,
-                entry.Entity.ProviderEpisodeId);
-            entry.Entity.Content.ProviderContentKey ??= parsed.ContentKey;
-            entry.Entity.AudioLocale ??= parsed.AudioLocale;
         }
     }
 

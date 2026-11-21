@@ -304,12 +304,13 @@ export function createCrunchyrollWatchController(
       status: result.status === 'queued' ? 'queued' : 'submitted',
       message: watchDeliveryMessage(result),
     });
-    if (result.status !== 'pending_resolution' || !result.resolution) return;
+    const resolution = result.resolution;
+    if (result.status !== 'pending_resolution' || !resolution) return;
 
     overlay?.close();
     overlay = dependencies.showResolution(
-      result.resolution,
-      request => resolveWatchProgress(request),
+      resolution,
+      request => resolveWatchProgress({ ...request, expectedUpdatedAt: resolution.updatedAt }),
     );
   };
 
@@ -358,7 +359,6 @@ export function createCrunchyrollWatchController(
     const changed = metadata?.releaseTrack !== selection.releaseTrack;
     if (metadata) {
       metadata.releaseTrack = selection.releaseTrack;
-      metadata.nextEpisodeReleaseTrack = selection.releaseTrack;
     }
     verboseLog('Cantaro: selected Crunchyroll release track observed', {
       watchId: currentWatchId,

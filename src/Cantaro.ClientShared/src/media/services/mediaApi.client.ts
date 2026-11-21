@@ -432,19 +432,19 @@ export class MediaApiClient {
         return response.json() as Promise<MediaObservationDto>;
     }
 
-    async rejectObservation(observationId: string): Promise<MediaObservationDto> {
+    async rejectObservation(observationId: string, expectedUpdatedAt: string): Promise<MediaObservationDto> {
         const response = await this.request(
             `/api/media/observations/${encodeURIComponent(observationId)}/reject`,
-            { method: 'POST' },
+            { method: 'POST', body: JSON.stringify({ expectedUpdatedAt }) },
         );
         await this.ensureOk(response, 'Failed to reject media observation');
         return response.json() as Promise<MediaObservationDto>;
     }
 
-    async retryObservation(observationId: string): Promise<MediaObservationDto> {
+    async retryObservation(observationId: string, expectedUpdatedAt: string): Promise<MediaObservationDto> {
         const response = await this.request(
             `/api/media/observations/${encodeURIComponent(observationId)}/retry`,
-            { method: 'POST' },
+            { method: 'POST', body: JSON.stringify({ expectedUpdatedAt }) },
         );
         await this.ensureOk(response, 'Failed to retry media observation matching');
         return response.json() as Promise<MediaObservationDto>;

@@ -110,7 +110,13 @@ public class MediaTitlesController(
         Guid mediaTitleId,
         CancellationToken cancellationToken)
     {
-        var result = await _episodeIdentityService.GetEpisodeCatalogAsync(mediaTitleId, cancellationToken);
+        string? preferredTrack = null;
+        if (User?.Identity?.IsAuthenticated == true && int.TryParse(_userManager.GetUserId(User), out var userId))
+        {
+            preferredTrack = await _dbContext.UserSettings.AsNoTracking().Where(settings => settings.UserId == userId)
+                .Select(settings => settings.PreferredMediaReleaseTrack).SingleOrDefaultAsync(cancellationToken);
+        }
+        var result = await _episodeIdentityService.GetEpisodeCatalogAsync(mediaTitleId, cancellationToken, preferredTrack);
         return result is null
             ? NotFound(new { error = "Media title not found." })
             : Ok(result);
