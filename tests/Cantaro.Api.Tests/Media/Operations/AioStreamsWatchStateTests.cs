@@ -111,10 +111,11 @@ public sealed class AioStreamsWatchStateTests
         schema.Db.Users.Add(new User { Id = 2, UserName = "other-tracker-owner" });
         await schema.Db.SaveChangesAsync();
 
-        async Task<HttpResponseMessage> ManageAsync(HttpMethod method, int account)
+        async Task<HttpResponseMessage> ManageAsync(HttpMethod method, int account, string? instanceUrl = null)
         {
-            using var request = new HttpRequestMessage(method, pairingPath);
+            using var request = new HttpRequestMessage(method, instanceUrl is null ? pairingPath : pairingPath + "/playback");
             request.Headers.Add("X-Fixture-User", account.ToString());
+            if (instanceUrl is not null) request.Content = JsonContent.Create(new { instanceUrl });
             return await fixture.Client.SendAsync(request);
         }
 
@@ -129,6 +130,16 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
         var first = await PairAsync(1);
         var second = await PairAsync(2);
+        foreach (var url in new[] { "http://aio.test", "https://name:password@aio.test", "https://aio.test/?token=example", "https://aio.test/jellyfin/account/configuration" })
+        {
+            using var invalid = await ManageAsync(HttpMethod.Put, 1, url);
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        }
+        using var configured = await ManageAsync(HttpMethod.Put, 1, "https://aio.test:8452/deployment/");
+        Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+        using var other = await ManageAsync(HttpMethod.Get, 2);
+        Assert.Equal(JsonValueKind.Null, (await other.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("playbackInstanceUrl").ValueKind);
         var firstPush = first.Replace("/manifest.json", "/watch_state/push/anime/kitsu%3A1%3A1.json");
         using var push = await fixture.Client.PostAsJsonAsync(firstPush, Event("paired", "stop", At, 1_000));
         Assert.Equal(HttpStatusCode.NoContent, push.StatusCode);
@@ -136,12 +147,18 @@ public sealed class AioStreamsWatchStateTests
         Assert.Empty(secondPull.GetProperty("items").EnumerateArray());
 
         var rotated = await PairAsync(1);
+        using var retained = await ManageAsync(HttpMethod.Get, 1);
+        Assert.Equal("https://aio.test:8452/deployment", (await retained.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("playbackInstanceUrl").GetString());
         using var replaced = await fixture.Client.GetAsync(first);
         Assert.Equal(HttpStatusCode.Unauthorized, replaced.StatusCode);
         using var active = await fixture.Client.GetAsync(rotated);
         Assert.Equal(HttpStatusCode.OK, active.StatusCode);
         using var disconnected = await ManageAsync(HttpMethod.Delete, 1);
         Assert.Equal(HttpStatusCode.NoContent, disconnected.StatusCode);
+        using var removed = await ManageAsync(HttpMethod.Get, 1);
+        Assert.Equal(JsonValueKind.Null, (await removed.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("playbackInstanceUrl").ValueKind);
         using var revoked = await fixture.Client.GetAsync(rotated);
         Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
         using var stillActive = await fixture.Client.GetAsync(second);

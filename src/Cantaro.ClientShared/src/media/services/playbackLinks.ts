@@ -55,10 +55,7 @@ export function addStremioDestinations(
   const kind = mediaKind.trim().toLowerCase();
   if (!supportedMediaKinds.has(kind)) return destinations;
 
-  const candidates = targets.flatMap(target => {
-    const parsed = stremioTargetSchema.safeParse(target);
-    return parsed.success ? [parsed.data] : [];
-  });
+  const candidates = parseTargets(targets);
   const target = candidates[0];
   if (!target) return destinations;
 
@@ -80,6 +77,98 @@ export function addStremioDestinations(
 
 type StremioTarget = z.infer<typeof stremioTargetSchema>;
 
+function parseTargets(targets: readonly unknown[]): StremioTarget[] {
+  return targets.flatMap(target => {
+    const parsed = stremioTargetSchema.safeParse(target);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+export function addAioStreamsDestinations(
+  destinations: MediaStreamingDestinations,
+  instanceUrl: string | undefined,
+  targets: readonly unknown[],
+  mediaKind: string,
+  episodeNumbers: readonly number[],
+  conflictingEpisodes: ReadonlySet<number>,
+): MediaStreamingDestinations {
+  const base = parseAioStreamsInstance(instanceUrl);
+  if (!base || !supportedMediaKinds.has(mediaKind)) return destinations;
+
+  const candidates = parseTargets(targets);
+  if (mediaKind === 'movie' || mediaKind === 'anime' && candidates.some(target => target.type === 'movie')) {
+    return withAioStreamsMovie(destinations, base, candidates);
+  }
+
+  const withAioStreams = (episode: EpisodeStreamingDestinations) => conflictingEpisodes.has(episode.episodeNumber)
+    ? episode
+    : withAioStreamsEpisode(episode, base, candidates, mediaKind);
+  const episodes = destinations.episodes.map(withAioStreams);
+  const missing = createMissingEpisodes(episodes, episodeNumbers).map(withAioStreams)
+    .filter(episode => episode.destinations.length > 0);
+  return { ...destinations, episodes: [...episodes, ...missing].sort((left, right) => left.episodeNumber - right.episodeNumber) };
+}
+
+function withAioStreamsMovie(
+  destinations: MediaStreamingDestinations,
+  base: URL,
+  candidates: StremioTarget[],
+): MediaStreamingDestinations {
+  const ids = new Set(candidates.filter(target => target.type === 'movie' && isImdbId(target.id)).map(target => target.id));
+  if (ids.size !== 1) return destinations;
+  return {
+    ...destinations,
+    seriesDestinations: [...destinations.seriesDestinations, aioStreamsDestination(base, 'movie', [...ids][0]!)],
+  };
+}
+
+function withAioStreamsEpisode(
+  episode: EpisodeStreamingDestinations,
+  base: URL,
+  candidates: StremioTarget[],
+  mediaKind: string,
+): EpisodeStreamingDestinations {
+  const routes = new Map<string, string>();
+  for (const target of candidates) {
+    const videoId = buildEpisodeVideoId(target, episode, mediaKind);
+    if (videoId) routes.set(videoId, target.id);
+  }
+  // Prefer entry-numbered anime IDs when the provider supplies one.
+  const kitsu = [...routes].filter(([videoId]) => videoId.startsWith('kitsu:'));
+  const choices = kitsu.length ? kitsu : [...routes];
+  if (choices.length !== 1) return episode;
+  const [videoId, metaId] = choices[0]!;
+  const type = kitsu.length ? 'anime' : 'series';
+  return { ...episode, destinations: [...episode.destinations, aioStreamsDestination(base, type, metaId, videoId)] };
+}
+
+function parseAioStreamsInstance(value: string | undefined): URL | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null;
+    return new URL('jellyfin/web/', `${url.href.replace(/\/$/, '')}/`);
+  } catch {
+    return null;
+  }
+}
+
+function aioStreamsDestination(
+  base: URL,
+  type: 'anime' | 'series' | 'movie',
+  metaId: string,
+  videoId?: string,
+): StreamingDestination {
+  const params = new URLSearchParams({ type, metaId });
+  if (videoId) params.set('videoId', videoId);
+  return {
+    serviceId: 'aiostreams',
+    displayName: 'AIOStreams',
+    kind: videoId ? 'episode' : 'series',
+    url: `${base.href}#/open?${params}`,
+  };
+}
+
 function createMissingEpisodes(
   episodes: EpisodeStreamingDestinations[],
   episodeNumbers: readonly number[],
@@ -99,7 +188,7 @@ function isImdbId(id: string): boolean {
   return /^tt\d+$/.test(id);
 }
 
-function buildImdbEpisodeUrl(
+function buildImdbEpisodeVideoId(
   id: string,
   seasonNumber: number | undefined,
   seasonEpisodeNumber: number | undefined,
@@ -108,26 +197,26 @@ function buildImdbEpisodeUrl(
     return null;
   }
 
-  return `stremio:///detail/series/${id}/${id}:${seasonNumber}:${seasonEpisodeNumber}`;
+  return `${id}:${seasonNumber}:${seasonEpisodeNumber}`;
 }
 
-function buildEpisodeUrl(
+function buildEpisodeVideoId(
   target: StremioTarget,
   episode: EpisodeStreamingDestinations,
   mediaKind: string,
 ): string | null {
   if (target.type !== 'series' || !isPositiveInteger(episode.episodeNumber)) return null;
   if (target.episodeMapping) {
-    return buildMappedEpisodeUrl(target.id, target.episodeMapping, episode.episodeNumber);
+    return buildMappedEpisodeVideoId(target.id, target.episodeMapping, episode.episodeNumber);
   }
 
   // Anime season numbering may come from TVDB or another provider, not IMDb.
   return mediaKind === 'series' && isImdbId(target.id)
-    ? buildImdbEpisodeUrl(target.id, episode.seasonNumber, episode.seasonEpisodeNumber)
+    ? buildImdbEpisodeVideoId(target.id, episode.seasonNumber, episode.seasonEpisodeNumber)
     : null;
 }
 
-function buildMappedEpisodeUrl(
+function buildMappedEpisodeVideoId(
   id: string,
   mapping: NonNullable<StremioTarget['episodeMapping']>,
   episodeNumber: number,
@@ -135,10 +224,10 @@ function buildMappedEpisodeUrl(
   const number = episodeNumber + mapping.episodeOffset;
   if (!isPositiveInteger(number)) return null;
   if (isImdbId(id)) {
-    return buildImdbEpisodeUrl(id, mapping.seasonNumber ?? undefined, number);
+    return buildImdbEpisodeVideoId(id, mapping.seasonNumber ?? undefined, number);
   }
   return mapping.seasonNumber === null
-    ? `stremio:///detail/series/${id}/${id}:${number}` : null;
+    ? `${id}:${number}` : null;
 }
 
 function addEpisodeDestination(
@@ -146,8 +235,14 @@ function addEpisodeDestination(
   candidates: StremioTarget[],
   mediaKind: string,
 ): EpisodeStreamingDestinations {
-  const url = candidates.map(target => buildEpisodeUrl(target, episode, mediaKind))
-    .find(candidate => candidate !== null);
+  let url: string | null = null;
+  for (const target of candidates) {
+    const videoId = buildEpisodeVideoId(target, episode, mediaKind);
+    if (videoId) {
+      url = `stremio:///detail/series/${target.id}/${videoId}`;
+      break;
+    }
+  }
   return url
     ? {
         ...episode,

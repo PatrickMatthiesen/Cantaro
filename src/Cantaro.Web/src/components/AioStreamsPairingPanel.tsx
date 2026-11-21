@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { ConnectionCard } from './ConnectionCard';
 
-const endpoint = '/api/media/aiostreams-pairing';
+export const aioStreamsPairingEndpoint = '/api/media/aiostreams-pairing';
+const endpoint = aioStreamsPairingEndpoint;
 const buttonClass = 'inline-flex min-h-10 items-center justify-center px-4 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60';
 const primaryButton = `${buttonClass} bg-personal-accent text-personal-accent-content enabled:cursor-pointer enabled:hover:bg-personal-accent-hover`;
 const disconnectButton = `${buttonClass} border border-danger-border text-danger-content enabled:cursor-pointer enabled:hover:bg-danger-surface`;
@@ -10,6 +11,8 @@ const disconnectButton = `${buttonClass} border border-danger-border text-danger
 export function AioStreamsPairingPanel() {
   const [paired, setPaired] = useState<boolean | null>(null);
   const [manifestUrl, setManifestUrl] = useState('');
+  const [instanceUrl, setInstanceUrl] = useState('');
+  const [savedInstanceUrl, setSavedInstanceUrl] = useState('');
   const [showManage, setShowManage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
@@ -22,8 +25,10 @@ export function AioStreamsPairingPanel() {
       try {
         const response = await fetch(endpoint, { signal: controller.signal });
         if (!response.ok) throw new Error();
-        const status = await response.json() as { paired: boolean };
+        const status = await response.json() as { paired: boolean; playbackInstanceUrl?: string };
         setPaired(status.paired);
+        setInstanceUrl(status.playbackInstanceUrl ?? '');
+        setSavedInstanceUrl(status.playbackInstanceUrl ?? '');
       } catch {
         if (!controller.signal.aborted) setError('Could not load the AIOStreams connection.');
       }
@@ -52,6 +57,8 @@ export function AioStreamsPairingPanel() {
       } else {
         setPaired(false);
         setManifestUrl('');
+        setInstanceUrl('');
+        setSavedInstanceUrl('');
         setShowManage(false);
       }
     } catch {
@@ -61,11 +68,35 @@ export function AioStreamsPairingPanel() {
     }
   }
 
+  async function saveInstance() {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`${endpoint}/playback`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceUrl }),
+      });
+      if (response.status === 400) {
+        setError('Enter the HTTPS address of your AIOStreams instance.');
+        return;
+      }
+      if (!response.ok) throw new Error();
+      const settings = await response.json() as { playbackInstanceUrl?: string };
+      setInstanceUrl(settings.playbackInstanceUrl ?? '');
+      setSavedInstanceUrl(settings.playbackInstanceUrl ?? '');
+    } catch {
+      setError('Could not save the AIOStreams playback address.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div>
       <ConnectionCard
         name="AIOStreams"
-        detail={paired ? 'Pairing link active' : 'Watch progress and history'}
+        detail={savedInstanceUrl ? 'Playback and watch history' : paired ? 'Pairing link active' : 'Watch progress and history'}
         icon={<img src="https://aiostreams.org/logo.png" alt="" className="h-10 w-10 shrink-0 object-contain" />}
         implemented
         connected={paired === true}
@@ -96,6 +127,22 @@ export function AioStreamsPairingPanel() {
             Disconnect
           </button>
         </div>
+      )}
+      {paired && showManage && (
+        <form className="space-y-2 pb-3" onSubmit={event => {
+          event.preventDefault();
+          void saveInstance();
+        }}>
+          <label htmlFor="aiostreams-instance" className="block text-sm text-content">Playback instance URL</label>
+          <div className="flex gap-2">
+            <input id="aiostreams-instance" type="url" autoComplete="off" spellCheck={false}
+              className="min-w-0 flex-1 border border-border-strong bg-surface px-3 text-sm text-content"
+              value={instanceUrl} onChange={event => setInstanceUrl(event.target.value)} disabled={busy} />
+            <button type="submit" className={primaryButton} disabled={busy || instanceUrl === savedInstanceUrl}>
+              Save
+            </button>
+          </div>
+        </form>
       )}
       {showManage && manifestUrl && (
         <div className="space-y-2 pb-3">

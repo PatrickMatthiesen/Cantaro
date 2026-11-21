@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  addAioStreamsDestinations,
   addStremioDestinations,
   buildStremioDetailUrl,
   findStremioDetailUrl,
@@ -167,6 +168,38 @@ describe('Stremio title links', () => {
       [{ type: 'series', id: 'tt0108778' }],
       'manga',
     )).toBe(destinations);
+  });
+});
+
+describe('AIOStreams playback destinations', () => {
+  const instance = 'https://aio.example:8452/hosted';
+
+  it('opens the verified IMDb episode at its provider coordinates', () => {
+    const destinations = addAioStreamsDestinations(catalogDestinations(), instance,
+      [{ type: 'series', id: 'tt1000002' }], 'series', [15, 16], new Set());
+    expect(destinations.episodes[0]?.destinations.at(-1)?.url)
+      .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=series&metaId=tt1000002&videoId=tt1000002%3A2%3A3');
+    expect(destinations.episodes[1]?.destinations).toEqual([]);
+    expect(destinations.seriesDestinations).toHaveLength(1);
+  });
+
+  it('prefers an exact Kitsu video and skips flagged episode conflicts', () => {
+    const destinations = addAioStreamsDestinations(catalogDestinations(), instance, [
+      { type: 'series', id: 'tt0213338', episodeMapping: { seasonNumber: 2, episodeOffset: 10 } },
+      { type: 'series', id: 'kitsu:1', episodeMapping: { seasonNumber: null, episodeOffset: 0 } },
+    ], 'anime', [1, 15], new Set([15]));
+    expect(destinations.episodes[0]?.destinations[0]?.url)
+      .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=anime&metaId=kitsu%3A1&videoId=kitsu%3A1%3A1');
+    expect(destinations.episodes[1]?.destinations.some(destination => destination.serviceId === 'aiostreams')).toBeFalse();
+  });
+
+  it('opens a movie without a video ID and refuses an unsafe instance address', () => {
+    const original = catalogDestinations();
+    const targets = [{ type: 'movie', id: 'tt1000001' }];
+    const destinations = addAioStreamsDestinations(original, instance, targets, 'movie', [], new Set());
+    expect(destinations.seriesDestinations.at(-1)?.url)
+      .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=movie&metaId=tt1000001');
+    expect(addAioStreamsDestinations(original, 'https://user:secret@aio.example/', targets, 'movie', [], new Set())).toBe(original);
   });
 });
 

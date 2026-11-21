@@ -10,7 +10,8 @@ import {
   type MediaStreamingDestinations,
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
-import { addStremioDestinations } from "../../services/stremioLinks";
+import { addAioStreamsDestinations, addStremioDestinations } from "../../services/playbackLinks";
+import { providerAvailabilityKey, type ProviderAvailabilityMap } from "../../components/media-entry-detail/providerAvailability";
 import { getEpisodeRows } from "./episodeRows";
 import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
@@ -263,14 +264,25 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
       ? props.episodeCatalog.value
       : null;
   const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
+  const targetsFor = (state: ProviderAvailabilityMap[string] | undefined) =>
+    state?.stremioTargets?.length ? state.stremioTargets : [state?.stremioTarget];
+  const stremioTargets = availabilityStates.flatMap(targetsFor);
+  const episodeNumbers = getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
+    .map((row) => row.episodeNumber);
+  const verifiedLinks = props.entry.providerLinks.filter(link => link.lastVerifiedAt);
+  const verifiedTargets = verifiedLinks.flatMap(link =>
+    targetsFor(props.availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]));
+  const imdb = verifiedLinks.find(link => link.provider === "imdb");
+  const playbackTargets = imdb && (mediaKind === "series" || mediaKind === "movie")
+    ? [...verifiedTargets, { id: imdb.externalId, type: mediaKind }] : verifiedTargets;
   const streamingDestinations = filterWatchProviders(
-    addStremioDestinations(
-      providerDestinations,
-      availabilityStates.flatMap((state) => state.stremioTargets?.length
-        ? state.stremioTargets : [state.stremioTarget]),
+    addAioStreamsDestinations(
+      addStremioDestinations(providerDestinations, stremioTargets, mediaKind, episodeNumbers),
+      props.aioStreamsInstanceUrl,
+      playbackTargets,
       mediaKind,
-      getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
-        .map((row) => row.episodeNumber),
+      episodeNumbers,
+      new Set(episodeCatalog?.episodes.filter(episode => episode.hasConflict).map(episode => episode.episodeNumber)),
     ),
     props.disabledWatchProviders,
   );

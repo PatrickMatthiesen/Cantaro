@@ -19,6 +19,9 @@ export function StreamingServiceIcon({
   ...props
 }: SVGProps<SVGSVGElement> & { serviceId: StreamingServiceId }) {
   const service = STREAMING_SERVICES[serviceId];
+  if (serviceId === 'aiostreams') {
+    return <img src="https://aiostreams.org/logo.png" alt="" className={className} style={style} aria-hidden />;
+  }
   const Icon = service.icon;
   if (!Icon) {
     return (

@@ -28,6 +28,10 @@ namespace Cantaro.Api.Migrations
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("PlaybackInstanceUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasMaxLength(43)

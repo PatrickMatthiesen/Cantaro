@@ -24,6 +24,7 @@ export const STREAMING_SERVICE_IDS = [
   'peacock',
   'youtube',
   'stremio',
+  'aiostreams',
 ] as const;
 
 export type StreamingServiceId = typeof STREAMING_SERVICE_IDS[number];
@@ -78,6 +79,7 @@ export const STREAMING_SERVICES: Readonly<Record<StreamingServiceId, StreamingSe
   peacock: service('peacock', 'Peacock', ['peacocktv.com'], '#f5e500', '#7b7300', seriesOnly, Peacock, [/^\/(?:watch\/asset|collections)\//i]),
   youtube: service('youtube', 'YouTube', ['youtube.com', 'youtu.be'], '#ff0033', '#ed002f', seriesOnly, YouTube, [/^\/(?:playlist|channel|@)/i]),
   stremio: service('stremio', 'Stremio', [], '#8b7cf6', '#6758d9', direct, MonitorPlay),
+  aiostreams: service('aiostreams', 'AIOStreams', [], '#8b7cf6', '#6758d9', direct),
 };
 
 const SERVICE_ALIASES: Readonly<Record<string, StreamingServiceId>> = {
@@ -104,6 +106,7 @@ const SERVICE_ALIASES: Readonly<Record<string, StreamingServiceId>> = {
   peacock: 'peacock',
   youtube: 'youtube',
   stremio: 'stremio',
+  aiostreams: 'aiostreams',
 };
 
 export function resolveStreamingServiceId(value: string): StreamingServiceId | null {

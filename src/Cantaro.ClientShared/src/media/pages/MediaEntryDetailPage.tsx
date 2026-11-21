@@ -21,6 +21,7 @@ interface MediaEntryDetailPageProps {
   mediaTitleId: string;
   preferredMediaReleaseTrack?: string;
   disabledWatchProviders?: readonly string[];
+  aioStreamsInstanceUrl?: string;
   franchiseMediaTitleId?: string;
   onNavigateBack: () => void;
   onNavigateTitle?: (mediaTitleId: string) => void;
@@ -36,6 +37,7 @@ export function MediaEntryDetailPage({
   mediaTitleId,
   preferredMediaReleaseTrack,
   disabledWatchProviders,
+  aioStreamsInstanceUrl,
   franchiseMediaTitleId,
   onNavigateBack,
   onNavigateTitle,
@@ -167,6 +169,7 @@ export function MediaEntryDetailPage({
       mediaTitleId={mediaTitleId}
       preferredMediaReleaseTrack={preferredMediaReleaseTrack}
       disabledWatchProviders={disabledWatchProviders}
+      aioStreamsInstanceUrl={aioStreamsInstanceUrl}
       onNavigateBack={onNavigateBack}
       onNavigateTitle={onNavigateTitle}
       embedded={embedded}

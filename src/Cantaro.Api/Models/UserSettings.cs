@@ -79,7 +79,8 @@ public static class WatchProviderPreferences
         "paramount-plus",
         "peacock",
         "youtube",
-        "stremio"
+        "stremio",
+        "aiostreams"
     };
 
     public static bool TryNormalize(IEnumerable<string> values, out string[] normalized)

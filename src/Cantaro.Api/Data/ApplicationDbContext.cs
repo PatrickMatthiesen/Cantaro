@@ -817,6 +817,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
             entity.ToTable("AioStreamsPairings");
             entity.HasKey(e => e.UserId);
             entity.Property(e => e.TokenHash).HasMaxLength(43);
+            entity.Property(e => e.PlaybackInstanceUrl).HasMaxLength(2048);
             entity.HasIndex(e => e.TokenHash).IsUnique();
             entity.HasOne<User>().WithMany().HasForeignKey(e => e.UserId);
         });

@@ -14,4 +14,4 @@ export * from './services/mediaRefreshCache';
 export * from './services/streamingDestinations';
 export * from './services/streamingServicePreference';
 export * from './services/streamingServices';
-export * from './services/stremioLinks';
+export * from './services/playbackLinks';
