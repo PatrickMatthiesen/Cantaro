@@ -22,7 +22,7 @@ interface CatalogApiResponse {
 }
 
 interface WatchApiResponse {
-  observationId: string;
+  observationId?: string | null;
   matchStatus: string;
   wasDeduplicated: boolean;
   matchedMediaTitleId?: string;
@@ -33,6 +33,7 @@ interface WatchApiResponse {
   suggestedEpisodeOffset: number;
   observation?: {
     observedTitle: string;
+    updatedAt?: string;
     candidates: WatchResolution['candidates'];
   };
   providerChoices: WatchResolution['providerChoices'];
@@ -99,26 +100,33 @@ function catalogRequest(observation: SeriesCatalogObservation): SeriesCatalogObs
   };
 }
 
-function toWatchResult(response: WatchApiResponse): WatchSubmissionResult {
-  const resolution = response.requiresResolution ? {
+function toWatchResolution(response: WatchApiResponse): WatchSubmissionResult['resolution'] {
+  if (!response.requiresResolution || !response.observationId) return undefined;
+
+  const { observedTitle, updatedAt, candidates } = response.observation ?? {};
+  return {
     observationId: response.observationId,
-    observedTitle: response.observation?.observedTitle ?? response.matchedTitle ?? '',
+    updatedAt,
+    observedTitle: observedTitle ?? response.matchedTitle ?? '',
     matchStatus: response.matchStatus,
     suggestedEpisodeOffset: response.suggestedEpisodeOffset,
-    candidates: response.observation?.candidates ?? [],
+    candidates: candidates ?? [],
     providerChoices: response.providerChoices ?? [],
     providerChoicesUnavailableReason: response.providerChoicesUnavailableReason,
-  } : undefined;
+  };
+}
+
+function toWatchResult(response: WatchApiResponse): WatchSubmissionResult {
   return {
     status: response.wasDeduplicated
       ? 'deduplicated'
       : response.requiresResolution ? 'pending_resolution' : 'accepted',
-    observationId: response.observationId,
+    observationId: response.observationId ?? undefined,
     matchedMediaTitleId: response.matchedMediaTitleId,
     matchedTitle: response.matchedTitle,
     resolvedProgress: response.resolvedProgress,
     progressUpdated: response.progressUpdated,
-    resolution,
+    resolution: toWatchResolution(response),
   };
 }
 

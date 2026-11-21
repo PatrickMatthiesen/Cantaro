@@ -571,11 +571,10 @@ function getContinueWatchingLabel(state: ContinueWatchingState): string {
   > = {
     series_fallback: "Open streaming service",
     completed: "Completed",
-    conflict: "Episode link needs review",
     unavailable: "Streaming link not available",
   };
   return state.value.outcome === "direct"
-    ? `Play episode ${state.value.episodeNumber ?? ""}`.trim()
+    ? (state.value.episodeNumber == null ? "Play" : `Play episode ${state.value.episodeNumber}`)
     : labels[state.value.outcome];
 }
 

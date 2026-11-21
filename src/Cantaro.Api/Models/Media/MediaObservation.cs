@@ -138,7 +138,32 @@ public class MediaObservation
 
     public DateTimeOffset CreatedAt { get; set; }
 
-    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    internal void ResetMatch()
+    {
+        MatchStatus = MediaObservationStatuses.Pending;
+        MediaTitleId = null;
+        MediaTitle = null;
+        AcceptedCandidateId = null;
+        ResolutionNotes = null;
+        EpisodeOffset = null;
+        ResolvedProgress = null;
+        ResolvedLibraryEntryId = null;
+        LastMatchError = null;
+        foreach (var candidate in Candidates)
+        {
+            candidate.IsAccepted = false;
+        }
+    }
+
+    internal void Touch(DateTimeOffset now)
+    {
+        var minimum = UpdatedAt.AddMilliseconds(1);
+        var ticks = (now > minimum ? now : minimum).UtcTicks;
+        // Keep the in-memory version identical to the PostgreSQL timestamp.
+        UpdatedAt = new DateTimeOffset(ticks - ticks % TimeSpan.TicksPerMicrosecond, TimeSpan.Zero);
+    }
 
     public User? User { get; set; }
 

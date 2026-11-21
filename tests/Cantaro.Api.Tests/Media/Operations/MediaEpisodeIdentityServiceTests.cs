@@ -173,45 +173,12 @@ public class MediaEpisodeIdentityServiceTests
 
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
-        var episodes = await fixture.Db.MediaEpisodes
-            .Include(item => item.ProviderContents)
-                .ThenInclude(content => content.Variants)
-            .OrderBy(item => item.EpisodeNumber)
-            .ToListAsync();
-        Assert.Equal([7, 8], episodes.Select(item => item.EpisodeNumber));
-        Assert.Equal("/watch/CURRENT7", episodes[0].ProviderIdentities.Single().ProviderUrlPath);
-        Assert.Equal("/watch/NEXT8", episodes[1].ProviderIdentities.Single().ProviderUrlPath);
-        Assert.All(episodes.SelectMany(item => item.ProviderIdentities), identity => Assert.False(identity.IsTrusted));
-        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
-
-        var destination = await fixture.Service.ResolveContinueWatchingAsync(
-            fixture.UserId,
-            fixture.TitleId,
-            CancellationToken.None);
-        Assert.NotNull(destination);
-        Assert.Equal("direct", destination.Outcome);
-        Assert.Equal(8, destination.EpisodeNumber);
-        Assert.Equal("https://www.crunchyroll.com/watch/NEXT8", destination.Url);
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None);
+        Assert.Collection(catalog!.Episodes,
+            item => Assert.Equal("https://www.crunchyroll.com/watch/CURRENT7", Assert.Single(item.Destinations).Url),
+            item => Assert.Equal("https://www.crunchyroll.com/watch/NEXT8", Assert.Single(item.Destinations).Url));
     }
 
-    [Fact]
-    public async Task RecordObservation_UserConfirmedAssignmentCreatesTrustedIdentities()
-    {
-        await using var fixture = await EpisodeIdentityFixture.CreateAsync();
-        var observation = fixture.MakeObservation(
-            3,
-            "CONFIRMED3",
-            "https://www.crunchyroll.com/watch/CONFIRMED3");
-
-        await fixture.Service.RecordObservationAsync(
-            observation,
-            CancellationToken.None,
-            isUserConfirmed: true);
-
-        var identity = await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync();
-        Assert.True(identity.IsTrusted);
-        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
-    }
 
     [Fact]
     public async Task RecordObservation_RepeatedIdentityIncrementsSeenCount()
@@ -222,9 +189,8 @@ public class MediaEpisodeIdentityServiceTests
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
-        var identity = await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync();
+        var identity = await fixture.Db.MediaProviderEpisodes.SingleAsync();
         Assert.Equal(2, identity.SeenCount);
-        Assert.False(identity.HasConflict);
     }
 
     [Fact]
@@ -239,24 +205,12 @@ public class MediaEpisodeIdentityServiceTests
             fixture.MakeObservation(3, "GE00375194JAJP", "https://www.crunchyroll.com/watch/GE00375194JAJP/example"),
             CancellationToken.None);
 
-        var content = await fixture.Db.MediaEpisodeProviderContents
-            .Include(item => item.Variants)
-            .SingleAsync();
-        Assert.Equal("GE00375194", content.ProviderContentKey);
-        Assert.Equal(2, content.Variants.Count);
-        Assert.Equal(
-            ["en-US", "ja-JP"],
-            content.Variants.OrderBy(item => item.AudioLocale).Select(item => item.AudioLocale));
-
-        var catalog = await fixture.Service.GetEpisodeCatalogAsync(
-            fixture.TitleId,
-            CancellationToken.None);
-        Assert.NotNull(catalog);
-        Assert.Equal(
-            ["en-US", "ja-JP"],
-            Assert.Single(catalog.Episodes).Destinations
-                .OrderBy(item => item.AudioLocale)
-                .Select(item => item.AudioLocale));
+        var variants = await fixture.Db.MediaProviderEpisodes.OrderBy(row => row.ProviderEpisodeId).ToListAsync();
+        Assert.Equal(2, variants.Count);
+        Assert.All(variants, row => Assert.Equal("GE00375194", row.ContentKey));
+        Assert.Equal(new[] { "en-US", "ja-JP" }, variants.Select(row => row.AudioLocale));
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None);
+        Assert.Equal(2, Assert.Single(catalog!.Episodes).Destinations.Count);
     }
 
     [Fact]
@@ -327,12 +281,9 @@ public class MediaEpisodeIdentityServiceTests
             fixture.MakeObservation(3, "GRQW9GW7R", "https://www.crunchyroll.com/watch/GRQW9GW7R/example"),
             CancellationToken.None);
 
-        var content = await fixture.Db.MediaEpisodeProviderContents
-            .Include(item => item.Variants)
-            .SingleAsync();
-        Assert.Null(content.ProviderContentKey);
-        Assert.All(content.Variants, item => Assert.Null(item.AudioLocale));
-        Assert.Equal(2, content.Variants.Count);
+        Assert.All(await fixture.Db.MediaProviderEpisodes.ToListAsync(), row => Assert.Null(row.ContentKey));
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None);
+        Assert.Equal(2, Assert.Single(catalog!.Episodes).Destinations.Count);
     }
 
     [Fact]
@@ -361,6 +312,10 @@ public class MediaEpisodeIdentityServiceTests
                 }),
             CancellationToken.None);
 
+        var mappings = new MediaProviderSeasonMappingService(fixture.Db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        await mappings.EstablishAsync("crunchyroll", "SERIES1", null, 4, fixture.TitleId, 0,
+            MediaProviderSeasonMappingSources.Manual, 1m, CancellationToken.None);
+
         var destination = await fixture.Service.ResolveContinueWatchingAsync(
             fixture.UserId,
             fixture.TitleId,
@@ -372,6 +327,56 @@ public class MediaEpisodeIdentityServiceTests
             ["dub:en", "sub:en"],
             (await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None))!
                 .Episodes.Single().Destinations.OrderBy(item => item.ReleaseTrack).Select(item => item.ReleaseTrack));
+    }
+
+    [Theory]
+    [InlineData("dub:en", true)]
+    [InlineData("sub:en", false)]
+    public async Task PlaybackPrefersLanguageAvailabilityForOpaqueCrunchyrollIds(string preferredTrack, bool dubbed)
+    {
+        const string matchingId = "G31UXQKKG";
+        const string unknownId = "GQ8BRAPFQ";
+        const string otherId = "GRQW9GW7R";
+        await using var fixture = await EpisodeIdentityFixture.CreateAsync(progressEpisodes: 2);
+        await fixture.SetPreferredReleaseTrackAsync(preferredTrack);
+        await RecordEpisodeAsync(matchingId, dubbed ? ["en"] : ["ja"], dubbed ? ["de"] : ["en"]);
+        await RecordEpisodeAsync(unknownId, [], []);
+        await RecordEpisodeAsync(otherId, dubbed ? ["ja"] : ["en"], dubbed ? ["en"] : ["de"]);
+        await RecordEpisodeAsync(otherId, dubbed ? ["ja"] : ["en"], dubbed ? ["en"] : ["de"]);
+
+        var raw = await fixture.Db.MediaProviderEpisodes.AsNoTracking().ToDictionaryAsync(row => row.ProviderEpisodeId);
+        Assert.All(raw.Values, row =>
+        {
+            Assert.Null(row.ReleaseTrack);
+            Assert.Null(row.AudioLocale);
+        });
+        Assert.True(raw[otherId].SeenCount > raw[matchingId].SeenCount);
+        Assert.True(raw[otherId].LastSeenAt > raw[matchingId].LastSeenAt);
+
+        var destination = await fixture.Service.ResolveContinueWatchingAsync(fixture.UserId, fixture.TitleId, default);
+        Assert.NotNull(destination);
+        Assert.Equal("direct", destination.Outcome);
+        Assert.Equal(3, destination.EpisodeNumber);
+        Assert.Equal(WatchUrl(matchingId), destination.Url);
+
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, default, preferredTrack);
+        Assert.NotNull(catalog);
+        Assert.Equal(
+            new[] { WatchUrl(matchingId), WatchUrl(unknownId), WatchUrl(otherId) },
+            Assert.Single(catalog.Episodes).Destinations.Select(item => item.Url));
+
+        Task RecordEpisodeAsync(string id, List<string> audio, List<string> subtitles)
+        {
+            var observation = fixture.MakeSeriesObservation(new ObservedProviderEpisodeDto
+            {
+                ProviderEpisodeId = id, ProviderUrl = WatchUrl(id), EpisodeNumber = 3,
+                AvailableAudioLanguageCodes = audio, AvailableSubtitleLanguageCodes = subtitles
+            });
+            observation.SeasonNumber = 1;
+            return fixture.Service.RecordCatalogObservationAsync(observation, default);
+        }
+
+        static string WatchUrl(string id) => $"https://www.crunchyroll.com/watch/{id}";
     }
 
     [Fact]
@@ -415,98 +420,19 @@ public class MediaEpisodeIdentityServiceTests
                 }),
             CancellationToken.None);
 
-        var episodeTwo = await fixture.Db.MediaEpisodes
-            .SingleAsync(episode => episode.EpisodeNumber == 2);
-        episodeTwo.AvailableSubtitleLanguageCodes = ["en", "da"];
-        episodeTwo.AvailableAudioLanguageCodes = ["en"];
-        var now = DateTimeOffset.UtcNow;
-        fixture.Db.MediaEpisodeProviderIdentities.AddRange(
-            new MediaEpisodeProviderIdentity
-            {
-                Id = Guid.NewGuid(),
-                MediaEpisodeId = episodeTwo.Id,
-                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-                ProviderSeriesId = "SERIES1",
-                ProviderEpisodeId = "EPISODE2ALT",
-                ProviderUrlPath = "/watch/EPISODE2ALT",
-                SeenCount = 3,
-                FirstSeenAt = now.AddDays(-2),
-                LastSeenAt = now.AddDays(-1)
-            },
-            new MediaEpisodeProviderIdentity
-            {
-                Id = Guid.NewGuid(),
-                MediaEpisodeId = episodeTwo.Id,
-                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-                ProviderSeriesId = "SERIES1",
-                ProviderEpisodeId = "CONFLICT2",
-                ProviderUrlPath = "/watch/CONFLICT2",
-                SeenCount = 9,
-                FirstSeenAt = now.AddDays(-3),
-                LastSeenAt = now,
-                HasConflict = true
-            });
-        await fixture.Db.SaveChangesAsync();
+        var mappings = new MediaProviderSeasonMappingService(fixture.Db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        await mappings.EstablishAsync("crunchyroll", "SERIES1", null, 4, fixture.TitleId, 0,
+            MediaProviderSeasonMappingSources.Manual, 1m, CancellationToken.None);
 
-        var catalog = await fixture.Service.GetEpisodeCatalogAsync(
-            fixture.TitleId,
-            CancellationToken.None);
-
-        Assert.NotNull(catalog);
-        var seriesDestination = Assert.Single(catalog.SeriesDestinations);
-        Assert.Equal("crunchyroll", seriesDestination.ServiceId);
-        Assert.Equal("https://www.crunchyroll.com/series/SERIES1", seriesDestination.Url);
-        Assert.Equal(5, seriesDestination.SeenCount);
-        Assert.Equal([1, 2], catalog.Episodes.Select(episode => episode.EpisodeNumber));
-        var secondEpisode = catalog.Episodes[1];
-        Assert.Equal("Two", secondEpisode.Title);
-        Assert.Equal(["en", "da"], secondEpisode.AvailableSubtitleLanguageCodes);
-        Assert.Equal(["en"], secondEpisode.AvailableAudioLanguageCodes);
-        Assert.Collection(
-            catalog.ReleaseAvailability.Languages,
-            danish =>
-            {
-                Assert.Equal("da", danish.LanguageCode);
-                Assert.Equal(2, danish.SubReleasedEpisodes);
-                Assert.Null(danish.DubReleasedEpisodes);
-            },
-            english =>
-            {
-                Assert.Equal("en", english.LanguageCode);
-                Assert.Equal(2, english.SubReleasedEpisodes);
-                Assert.Equal(2, english.DubReleasedEpisodes);
-            });
-        Assert.Equal(2, secondEpisode.Destinations.Count);
-        Assert.Equal(
-            ["https://www.crunchyroll.com/watch/EPISODE2ALT", "https://www.crunchyroll.com/watch/EPISODE2"],
-            secondEpisode.Destinations.Select(destination => destination.Url));
-        Assert.Equal([3, 1], secondEpisode.Destinations.Select(destination => destination.SeenCount));
-        Assert.Equal(9, secondEpisode.SeenCount);
-        Assert.True(secondEpisode.HasConflict);
-        Assert.DoesNotContain(
-            secondEpisode.Destinations,
-            destination => destination.Url.EndsWith("CONFLICT2", StringComparison.Ordinal));
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None);
+        Assert.Equal("https://www.crunchyroll.com/series/SERIES1", Assert.Single(catalog!.SeriesDestinations).Url);
+        Assert.Equal(2, catalog.Episodes.Count);
+        Assert.All(catalog.Episodes, episode => Assert.Single(episode.Destinations));
     }
 
-    [Fact]
-    public async Task RecordObservation_ConflictingCanonicalEpisodeDoesNotRemapIdentity()
-    {
-        await using var fixture = await EpisodeIdentityFixture.CreateAsync();
-        var first = fixture.MakeObservation(3, "SAMEID", "https://www.crunchyroll.com/watch/SAMEID");
-        var second = fixture.MakeObservation(4, "SAMEID", "https://www.crunchyroll.com/watch/SAMEID");
-
-        await fixture.Service.RecordObservationAsync(first, CancellationToken.None, isUserConfirmed: true);
-        var originalEpisodeId = (await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync()).MediaEpisodeId;
-        await fixture.Service.RecordObservationAsync(second, CancellationToken.None);
-
-        var identity = await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync();
-        Assert.Equal(originalEpisodeId, identity.MediaEpisodeId);
-        Assert.True(identity.HasConflict);
-        Assert.Equal(2, identity.SeenCount);
-    }
 
     [Fact]
-    public async Task RecordObservation_DoesNotCreateNextEpisodePastKnownFinale()
+    public async Task NextEpisodeBeyondCanonicalCountStaysInRawCatalog()
     {
         await using var fixture = await EpisodeIdentityFixture.CreateAsync(episodeCount: 12);
         var observation = fixture.MakeObservation(
@@ -518,8 +444,9 @@ public class MediaEpisodeIdentityServiceTests
 
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
-        Assert.Equal(1, await fixture.Db.MediaEpisodes.CountAsync());
-        Assert.Equal(12, (await fixture.Db.MediaEpisodes.SingleAsync()).EpisodeNumber);
+        Assert.Equal(2, await fixture.Db.MediaProviderEpisodes.CountAsync());
+        var catalog = await fixture.Service.GetEpisodeCatalogAsync(fixture.TitleId, CancellationToken.None);
+        Assert.Equal(12, Assert.Single(catalog!.Episodes).EpisodeNumber);
     }
 
     [Fact]
@@ -544,26 +471,14 @@ public class MediaEpisodeIdentityServiceTests
 
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
-        var episodes = await fixture.Db.MediaEpisodes
-            .Include(item => item.ProviderContents)
-                .ThenInclude(content => content.Variants)
-            .OrderBy(item => item.EpisodeNumber)
-            .ToListAsync();
-        Assert.Equal([1, 2], episodes.Select(item => item.EpisodeNumber));
-        Assert.Equal("One", episodes[0].Title);
-        Assert.Equal("/watch/EPISODE2", episodes[1].ProviderIdentities.Single().ProviderUrlPath);
-        Assert.All(
-            episodes.SelectMany(item => item.ProviderIdentities),
-            identity =>
-            {
-                Assert.Equal("SERIES1", identity.ProviderSeriesId);
-                Assert.Equal(4, identity.ProviderSeasonNumber);
-                Assert.Equal(1, identity.SeenCount);
-            });
+        Assert.Equal(2, await fixture.Db.MediaProviderEpisodes.CountAsync());
+        Assert.Empty(fixture.Db.MediaEpisodes);
+        var rows = await fixture.Db.MediaProviderEpisodes.OrderBy(row => row.ProviderEpisodeNumber).ToListAsync();
+        Assert.Equal("One", rows[0].EpisodeTitle);
     }
 
     [Fact]
-    public async Task RecordCatalogObservation_RejectsEpisodesPastTrustedTitleCount()
+    public async Task RecordCatalogObservation_KeepsRawEpisodesPastCanonicalCount()
     {
         await using var fixture = await EpisodeIdentityFixture.CreateAsync(episodeCount: 12);
         var payload = new SubmitMediaCatalogObservationRequest
@@ -616,15 +531,13 @@ public class MediaEpisodeIdentityServiceTests
             observation,
             CancellationToken.None);
 
-        Assert.Equal(12, recorded);
-        Assert.Equal(12, await fixture.Db.MediaEpisodeProviderIdentities.CountAsync());
-        Assert.DoesNotContain(
-            fixture.Db.MediaEpisodeProviderIdentities,
-            identity => identity.ProviderEpisodeNumber > 12);
+        Assert.Equal(15, recorded);
+        Assert.Equal(15, await fixture.Db.MediaProviderEpisodes.CountAsync());
+        Assert.Contains(fixture.Db.MediaProviderEpisodes, episode => episode.ProviderEpisodeNumber == 15);
     }
 
     [Fact]
-    public async Task RecordObservation_AppliesConfirmedOffsetAndRejectsUnsafeRenderedUrls()
+    public async Task RecordObservation_KeepsRawNumberAndRejectsUnsafeRenderedUrls()
     {
         await using var fixture = await EpisodeIdentityFixture.CreateAsync(episodeCount: 24);
         var observation = fixture.MakeSeriesObservation(
@@ -644,9 +557,9 @@ public class MediaEpisodeIdentityServiceTests
 
         await fixture.Service.RecordObservationAsync(observation, CancellationToken.None);
 
-        var episode = await fixture.Db.MediaEpisodes.SingleAsync();
-        Assert.Equal(13, episode.EpisodeNumber);
-        Assert.Equal("EPISODE1", (await fixture.Db.MediaEpisodeProviderIdentities.SingleAsync()).ProviderEpisodeId);
+        var episode = await fixture.Db.MediaProviderEpisodes.SingleAsync();
+        Assert.Equal("EPISODE1", episode.ProviderEpisodeId);
+        Assert.Equal(1, episode.ProviderEpisodeNumber);
     }
 
     [Theory]
@@ -748,6 +661,10 @@ public class MediaEpisodeIdentityServiceTests
             db.MediaTitles.Add(title);
             db.MediaLibraryEntries.Add(entry);
             await db.SaveChangesAsync();
+
+            var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+            await mappings.EstablishAsync("crunchyroll", "SERIES1", null, 1, title.Id, 0,
+                MediaProviderSeasonMappingSources.Manual, 1m, CancellationToken.None);
 
             return new EpisodeIdentityFixture(
                 connection,

@@ -9,16 +9,199 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
 
-public class MediaObservationsApiTests
+public partial class MediaObservationsApiTests
 {
+    [Theory]
+    [InlineData("retained")]
+    [InlineData("after-insert")]
+    [InlineData("before-update")]
+    [InlineData("before-child-insert")]
+    public async Task Submit_RecoversFromDuplicateWatchRaceOnSqlite(string interleaving)
+    {
+        var connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        await using var keeper = new SqliteConnection(connectionString);
+        await keeper.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connectionString).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        await AssertDuplicateWatchRecoveryAsync(db, interleaving);
+    }
+
+    [PostgresTheory]
+    [InlineData("retained")]
+    [InlineData("after-insert")]
+    [InlineData("before-update")]
+    [InlineData("before-child-insert")]
+    public async Task Submit_RecoversFromDuplicateWatchRaceOnPostgres(string interleaving)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await AssertDuplicateWatchRecoveryAsync(schema.Db, interleaving);
+    }
+
+    private static async Task AssertDuplicateWatchRecoveryAsync(ApplicationDbContext db, string interleaving)
+    {
+        db.Users.Add(TestUserFactory.Create(MediaObservationFixture.TestUserId, MediaObservationFixture.TestEmail));
+        await db.SaveChangesAsync();
+        var winner = MediaObservationFixture.CreateController(db);
+        var request = new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = "crunchyroll", SiteMediaId = " DUPLICATE2 ",
+            ObservedUrl = "https://www.crunchyroll.com/watch/DUPLICATE2",
+            ObservedTitle = "Duplicate watch", EpisodeNumber = 2,
+            ObservedAt = new DateTimeOffset(2026, 11, 20, 10, 0, 0, TimeSpan.Zero)
+        };
+        string? winnerId = null;
+        async Task InsertWinnerAsync()
+        {
+            var result = await winner.Submit(request, default);
+            var response = Assert.IsType<SubmitMediaObservationResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+            Assert.False(response.WasDeduplicated);
+            winnerId = response.ObservationId;
+        }
+
+        async Task CompleteWinnerAsync()
+        {
+            var title = new MediaTitle
+            {
+                Id = Guid.NewGuid(), CanonicalTitle = "Duplicate watch", MediaKind = MediaKinds.Anime,
+                PrimaryProgressDimension = MediaProgressDimensions.Episode, SupportsEpisodeProgress = true,
+                ReleaseStatusDimension = MediaProgressDimensions.Episode,
+                EpisodeCount = 12
+            };
+            db.MediaTitles.Add(title);
+            db.MediaLibraryEntries.Add(new MediaLibraryEntry
+            {
+                Id = Guid.NewGuid(), UserId = MediaObservationFixture.TestUserId,
+                MediaTitleId = title.Id, Status = MediaLibraryStatuses.Current, ProgressEpisodes = 1
+            });
+            await db.SaveChangesAsync();
+            var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+            await mappings.EstablishDirectAsync("crunchyroll", "DUPLICATE2", title.Id, 2,
+                MediaProviderSeasonMappingSources.Manual, default);
+            var response = Assert.IsType<SubmitMediaObservationResponse>(
+                Assert.IsType<OkObjectResult>((await winner.Submit(request, default)).Result).Value);
+            Assert.True(response.WasDeduplicated);
+            Assert.True(response.ProgressUpdated);
+            Assert.Empty(await db.MediaObservations.ToListAsync());
+        }
+
+        var winnerAlreadyExists = interleaving is "before-update" or "before-child-insert";
+        if (winnerAlreadyExists)
+        {
+            await InsertWinnerAsync();
+        }
+        var collision = new DuplicateObservationSaveInterceptor(
+            winnerAlreadyExists ? CompleteWinnerAsync : InsertWinnerAsync,
+            winnerAlreadyExists ? EntityState.Modified : EntityState.Added,
+            interleaving == "after-insert" ? CompleteWinnerAsync : null);
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>(
+                (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>())
+            .AddInterceptors(collision).Options;
+        await using var contenderDb = new ApplicationDbContext(options);
+        var contender = MediaObservationFixture.CreateController(contenderDb);
+        var recovered = await contender.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = request.SiteIdentifier, SiteMediaId = "duplicate2",
+            ObservedUrl = request.ObservedUrl, ObservedTitle = "Updated duplicate watch", EpisodeNumber = 2,
+            ObservedAt = request.ObservedAt!.Value.AddMinutes(1),
+            ReleaseTrack = "dub:en",
+            ObservedEpisodes = interleaving == "before-update" ? [] :
+            [
+                new ObservedProviderEpisodeDto
+                {
+                    ProviderEpisodeId = "DUPLICATE3",
+                    ProviderUrl = "https://www.crunchyroll.com/watch/DUPLICATE3", EpisodeNumber = 3
+                }
+            ]
+        }, default);
+
+        var ok = Assert.IsType<OkObjectResult>(recovered.Result);
+        Assert.Equal(StatusCodes.Status200OK, ok.StatusCode);
+        var duplicate = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
+        Assert.NotNull(winnerId);
+        Assert.Equal(winnerAlreadyExists ? 0 : 1, collision.UniqueViolationCount);
+        Assert.Equal(interleaving == "before-child-insert" ? 1 : 0, collision.ForeignKeyViolationCount);
+        Assert.Equal(interleaving == "before-update" ? 1 : 0, collision.ConcurrencyViolationCount);
+        if (interleaving == "retained")
+        {
+            Assert.True(duplicate.WasDeduplicated);
+            Assert.Equal(winnerId, duplicate.ObservationId);
+            var persisted = await contenderDb.MediaObservations.AsNoTracking().Include(row => row.Episodes).SingleAsync();
+            Assert.Equal("Updated duplicate watch", persisted.ObservedTitle);
+            Assert.Equal(request.ObservedAt.Value.AddMinutes(1), persisted.ObservedAt);
+            Assert.Equal("DUPLICATE3", Assert.Single(persisted.Episodes).ProviderEpisodeId);
+        }
+        else
+        {
+            Assert.False(duplicate.WasDeduplicated);
+            Assert.NotEqual(winnerId, duplicate.ObservationId);
+            Assert.Empty(await contenderDb.MediaObservations.ToListAsync());
+            Assert.Equal(2, await contenderDb.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+        }
+
+        var rawEpisode = await contenderDb.MediaProviderEpisodes.AsNoTracking()
+            .SingleAsync(row => row.ProviderEpisodeId == "DUPLICATE2");
+        Assert.Equal("dub:en", rawEpisode.ReleaseTrack);
+        Assert.Contains("en", rawEpisode.AvailableAudioLanguageCodes);
+    }
+
+    internal sealed class DuplicateObservationSaveInterceptor(Func<Task> beforeSave, EntityState observedState,
+        Func<Task>? afterUniqueViolation) : SaveChangesInterceptor
+    {
+        private bool _interleaved;
+        public int UniqueViolationCount { get; private set; }
+        public int ForeignKeyViolationCount { get; private set; }
+        public int ConcurrencyViolationCount { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!_interleaved && eventData.Context!.ChangeTracker.Entries<MediaObservation>()
+                    .Any(entry => entry.State == observedState))
+            {
+                _interleaved = true;
+                await beforeSave();
+            }
+            return result;
+        }
+
+        public override async Task SaveChangesFailedAsync(DbContextErrorEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Exception.InnerException is SqliteException { SqliteExtendedErrorCode: 2067 }
+                or PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                UniqueViolationCount++;
+                if (afterUniqueViolation is not null)
+                {
+                    await afterUniqueViolation();
+                }
+            }
+            else if (eventData.Exception.InnerException is SqliteException { SqliteExtendedErrorCode: 787 }
+                or PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
+            {
+                ForeignKeyViolationCount++;
+            }
+        }
+
+        public override ValueTask<InterceptionResult> ThrowingConcurrencyExceptionAsync(
+            ConcurrencyExceptionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            ConcurrencyViolationCount++;
+            return ValueTask.FromResult(result);
+        }
+    }
+
     [Fact]
     public async Task Submit_MatchedWithoutLibraryProgress_RetainsActionableObservation()
     {
@@ -181,6 +364,13 @@ public class MediaObservationsApiTests
             FirstSeenAt = now,
             LastVerifiedAt = now
         });
+        fixture.Db.MediaProviderEpisodes.Add(new MediaProviderEpisode
+        {
+            Provider = "crunchyroll", ProviderEpisodeId = "GE00340376ENUS",
+            ProviderSeriesId = "GW4HM7WK9", ProviderSeasonId = "WISTORIA2", ProviderSeasonNumber = 2,
+            ProviderEpisodeNumber = 22, ProviderUrlPath = "/watch/GE00340376ENUS",
+            SeenCount = 1, FirstSeenAt = now, LastSeenAt = now
+        });
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
@@ -191,12 +381,12 @@ public class MediaObservationsApiTests
             ObservedTitle = "E22 - Hoping, Blooming, Thundering",
             SeriesTitle = "Wistoria: Wand and Sword",
             EpisodeTitle = "E22 - Hoping, Blooming, Thundering",
-            EpisodeNumber = 22,
+            EpisodeNumber = 1,
             SeasonTitle = "Season 2",
             SeasonNumber = 2,
             ProviderSeriesId = "GW4HM7WK9",
             WatchProgressPercent = 85.1m,
-            ObservedAt = now,
+            ObservedAt = now.AddMinutes(-1),
             ExtensionVersion = "0.1.0"
         }, CancellationToken.None);
 
@@ -207,11 +397,9 @@ public class MediaObservationsApiTests
         var seasonTwoEntry = await fixture.Db.MediaLibraryEntries
             .SingleAsync(entry => entry.MediaTitleId == seasonTwo.Id);
         Assert.Equal(10, seasonTwoEntry.ProgressEpisodes);
-        var identity = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(item => item.Content)
-                .ThenInclude(content => content!.MediaEpisode)
+        var identity = await fixture.Db.MediaProviderEpisodes
             .SingleAsync(item => item.ProviderEpisodeId == "GE00340376ENUS");
-        Assert.Equal(10, identity.MediaEpisode!.EpisodeNumber);
+        Assert.Null(response.ObservationId);
         Assert.Equal(22, identity.ProviderEpisodeNumber);
     }
 
@@ -268,13 +456,11 @@ public class MediaObservationsApiTests
         Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
         Assert.Equal(seasonTwo.Id.ToString(), response.MatchedMediaTitleId);
         Assert.Empty(fixture.Db.MediaObservations);
-        Assert.Equal(12, await fixture.Db.MediaEpisodeProviderIdentities.CountAsync());
-        Assert.Contains(
-            fixture.Db.MediaEpisodeProviderIdentities
-                .Include(identity => identity.Content)
-                    .ThenInclude(content => content!.MediaEpisode),
-            identity => identity.ProviderEpisodeNumber == 22
-                && identity.MediaEpisode!.EpisodeNumber == 10);
+        Assert.Equal(12, await fixture.Db.MediaProviderEpisodes.CountAsync());
+        var mapping = await fixture.Db.MediaProviderSeasonMappings.SingleAsync();
+        Assert.Equal(-12, mapping.EpisodeOffset);
+        Assert.Equal(13, mapping.ProviderEpisodeStart);
+        Assert.Equal(24, mapping.ProviderEpisodeEnd);
     }
 
     [Fact]
@@ -307,148 +493,6 @@ public class MediaObservationsApiTests
         Assert.Equal(MediaObservationStatuses.NoMatch, observation.MatchStatus);
     }
 
-    [Fact]
-    public async Task Retry_RemapsUntrustedCatalogIdentitiesToTheRematchedSeason()
-    {
-        await using var fixture = await MediaObservationFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-        var seasonOne = CreateWistoriaTitle("Wistoria: Wand and Sword", 2024, now);
-        var seasonTwo = CreateWistoriaTitle("Wistoria: Wand and Sword Season 2", 2026, now);
-        var relationSnapshotId = Guid.NewGuid();
-        var catalogRequest = new SubmitMediaCatalogObservationRequest
-        {
-            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-            SeriesUrl = "https://www.crunchyroll.com/series/GW4HM7WK9/wistoria-wand-and-sword",
-            ProviderSeriesId = "GW4HM7WK9",
-            SeriesTitle = seasonOne.CanonicalTitle,
-            ProviderSeasonId = "WISTORIA2",
-            SeasonTitle = "Season 2",
-            SeasonNumber = 2,
-            Episodes = Enumerable.Range(1, 2)
-                .Select(number => new MediaCatalogEpisodeObservationDto
-                {
-                    ProviderEpisodeId = $"WISTORIA{number}",
-                    ProviderUrl = $"https://www.crunchyroll.com/watch/WISTORIA{number}/episode-{number}",
-                    EpisodeNumber = number,
-                    EpisodeTitle = $"Episode {number}"
-                })
-                .ToList()
-        };
-        var observation = new MediaObservation
-        {
-            Id = Guid.NewGuid(),
-            UserId = fixture.UserId,
-            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
-            SiteMediaId = "catalog:wistoria-season-2",
-            ObservedUrl = catalogRequest.SeriesUrl,
-            ObservedTitle = "Wistoria: Wand and Sword — Season 2",
-            SeriesTitle = catalogRequest.SeriesTitle,
-            SeasonTitle = catalogRequest.SeasonTitle,
-            ProviderSeriesId = catalogRequest.ProviderSeriesId,
-            ProviderSeasonId = catalogRequest.ProviderSeasonId,
-            SeasonNumber = catalogRequest.SeasonNumber,
-            IsCatalogObservation = true,
-            Episodes = catalogRequest.Episodes.Select(episode => new MediaObservationEpisode
-            {
-                Id = Guid.NewGuid(),
-                ProviderEpisodeId = episode.ProviderEpisodeId,
-                ProviderUrl = episode.ProviderUrl,
-                EpisodeNumber = episode.EpisodeNumber,
-                EpisodeTitle = episode.EpisodeTitle,
-                ReleaseTrack = episode.ReleaseTrack,
-                AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(),
-                AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
-            }).ToList(),
-            MatchStatus = MediaObservationStatuses.Matched,
-            MediaTitleId = seasonOne.Id,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var staleCandidate = new MediaObservationCandidate
-        {
-            Id = Guid.NewGuid(),
-            MediaObservationId = observation.Id,
-            CandidateSource = MediaObservationCandidateSources.CatalogTitleSearch,
-            MediaTitleId = seasonOne.Id,
-            Title = seasonOne.CanonicalTitle,
-            MediaKind = seasonOne.MediaKind,
-            Score = 1m,
-            IsAccepted = true,
-            CreatedAt = now
-        };
-        observation.AcceptedCandidateId = staleCandidate.Id;
-
-        var wrongSeasonEpisodes = Enumerable.Range(1, 2)
-            .Select(number => new MediaEpisode
-            {
-                Id = Guid.NewGuid(),
-                MediaTitleId = seasonOne.Id,
-                EpisodeNumber = number,
-                CreatedAt = now,
-                UpdatedAt = now
-            })
-            .ToList();
-        var wrongSeasonIdentities = wrongSeasonEpisodes
-            .Select((episode, index) => new MediaEpisodeProviderIdentity
-            {
-                Id = Guid.NewGuid(),
-                MediaEpisodeId = episode.Id,
-                Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-                ProviderSeriesId = catalogRequest.ProviderSeriesId,
-                ProviderSeasonId = catalogRequest.ProviderSeasonId,
-                ProviderEpisodeId = $"WISTORIA{index + 1}",
-                ProviderSeasonNumber = catalogRequest.SeasonNumber,
-                ProviderEpisodeNumber = index + 1,
-                ProviderUrlPath = $"/watch/WISTORIA{index + 1}/episode-{index + 1}",
-                SeenCount = 1,
-                FirstSeenAt = now,
-                LastSeenAt = now,
-                IsTrusted = false
-            })
-            .ToList();
-
-        fixture.Db.MediaTitles.AddRange(seasonOne, seasonTwo);
-        fixture.Db.MediaProviderLinks.AddRange(
-            CreateWistoriaProviderLink(seasonOne, "wistoria-1", relationSnapshotId, now),
-            CreateWistoriaProviderLink(seasonTwo, "wistoria-2", relationSnapshotId, now));
-        fixture.Db.MediaLibraryEntries.AddRange(
-            CreateWistoriaEntry(fixture.UserId, seasonOne, now),
-            CreateWistoriaEntry(fixture.UserId, seasonTwo, now));
-        fixture.Db.MediaTitleRelations.Add(new MediaTitleRelation
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = seasonOne.Id,
-            RelatedMediaTitleId = seasonTwo.Id,
-            RelationType = MediaRelationTypes.Sequel,
-            SourceProvider = "anilist",
-            FirstSeenAt = now,
-            LastVerifiedAt = now
-        });
-        fixture.Db.MediaEpisodes.AddRange(wrongSeasonEpisodes);
-        fixture.Db.MediaEpisodeProviderIdentities.AddRange(wrongSeasonIdentities);
-        fixture.Db.MediaObservations.Add(observation);
-        fixture.Db.MediaObservationCandidates.Add(staleCandidate);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.Retry(observation.Id, CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var response = Assert.IsType<MediaObservationDto>(ok.Value);
-        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
-        Assert.Equal(seasonTwo.Id.ToString(), response.MediaTitleId);
-
-        var persistedIdentities = await fixture.Db.MediaEpisodeProviderIdentities
-            .Include(identity => identity.Content)
-                .ThenInclude(content => content!.MediaEpisode)
-            .ToListAsync();
-        Assert.Equal(2, persistedIdentities.Count);
-        Assert.All(persistedIdentities, identity =>
-            Assert.Equal(seasonTwo.Id, identity.MediaEpisode!.MediaTitleId));
-        Assert.All(persistedIdentities, identity => Assert.False(identity.IsTrusted));
-        Assert.Empty(await fixture.Db.MediaEpisodeProviderIdentities
-            .Where(identity => identity.Content!.MediaEpisode!.MediaTitleId == seasonOne.Id)
-            .ToListAsync());
-    }
 
     private static MediaTitle CreateWistoriaTitle(string title, int startYear, DateTimeOffset now) => new()
     {
@@ -525,6 +569,51 @@ public class MediaObservationsApiTests
         var observation = await fixture.Db.MediaObservations.SingleAsync();
         Assert.NotNull(observation.ProviderChoicesPayload);
         Assert.Contains("154587", observation.ProviderChoicesPayload);
+    }
+
+    [Fact]
+    public async Task Submit_RefreshesProviderChoicesWhenSeriesTitleChanges()
+    {
+        var queries = new List<string>();
+        var provider = new SearchOnlyMediaProvider
+        {
+            Search = query =>
+            {
+                queries.Add(query);
+                return
+                [
+                    new MediaProviderSearchResult
+                    {
+                        ProviderId = "anilist", ProviderMediaId = queries.Count.ToString(), Title = query,
+                        MediaKind = MediaKinds.Anime, PrimaryProgressDimension = MediaProgressDimensions.Episode,
+                        ReleaseStatusDimension = MediaProgressDimensions.Episode
+                    }
+                ];
+            }
+        };
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var request = new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = "crunchyroll", SiteMediaId = "CORRECTEDTITLE",
+            ObservedUrl = "https://www.crunchyroll.com/watch/CORRECTEDTITLE", ObservedTitle = "Episode 4",
+            SeriesTitle = "Original series title", EpisodeNumber = 4, ObservedAt = DateTimeOffset.UtcNow.AddMinutes(-2)
+        };
+
+        var first = await fixture.Controller.Submit(request, default);
+        Assert.Equal("1", GetChoice(first).ProviderMediaId);
+        request.ObservedTitle = "Corrected episode title";
+        request.ObservedAt = request.ObservedAt!.Value.AddMinutes(1);
+        var unchangedQuery = await fixture.Controller.Submit(request, default);
+        Assert.Equal("1", GetChoice(unchangedQuery).ProviderMediaId);
+        request.SeriesTitle = "Corrected series title";
+        request.ObservedAt = request.ObservedAt.Value.AddSeconds(30);
+        var corrected = await fixture.Controller.Submit(request, default);
+
+        Assert.Equal("2", GetChoice(corrected).ProviderMediaId);
+        Assert.Equal(["Original series title", "Corrected series title"], queries);
+
+        static MediaObservationProviderChoiceDto GetChoice(ActionResult<SubmitMediaObservationResponse> result) =>
+            Assert.Single(Assert.IsType<SubmitMediaObservationResponse>(Assert.IsType<OkObjectResult>(result.Result).Value).ProviderChoices);
     }
 
     [Fact]
@@ -694,6 +783,7 @@ public class MediaObservationsApiTests
             ObservedUrl = "https://www.crunchyroll.com/watch/GWDU8WDNQ/episode-5",
             SiteMediaId = "GWDU8WDNQ",
             ObservedTitle = "The Genius Prince's Guide to Raising a Nation Out of Debt - E5 - A Diabolical Scheme",
+            SeriesTitle = title.CanonicalTitle,
             EpisodeNumber = 5,
             ProviderSeriesId = "GYGENIUS1",
             NextEpisodeProviderId = "NEXTGEN6",
@@ -718,186 +808,20 @@ public class MediaObservationsApiTests
 
         Assert.Null(await fixture.Db.MediaObservations.FindAsync(existingObservation.Id));
 
-        var recordedEpisodes = await fixture.Db.MediaEpisodes
-            .Include(item => item.ProviderContents)
-                .ThenInclude(content => content.Variants)
-            .OrderBy(item => item.EpisodeNumber)
-            .ToListAsync();
-        Assert.Equal([5, 6], recordedEpisodes.Select(item => item.EpisodeNumber));
-        Assert.Equal("GWDU8WDNQ", recordedEpisodes[0].ProviderIdentities.Single().ProviderEpisodeId);
-        Assert.Equal("NEXTGEN6", recordedEpisodes[1].ProviderIdentities.Single().ProviderEpisodeId);
+        var recordedEpisodes = await fixture.Db.MediaProviderEpisodes
+            .OrderBy(item => item.ProviderEpisodeNumber).ToListAsync();
+        Assert.Equal([5, 6], recordedEpisodes.Select(item => item.ProviderEpisodeNumber));
+        Assert.Equal(["GWDU8WDNQ", "NEXTGEN6"], recordedEpisodes.Select(item => item.ProviderEpisodeId));
     }
+
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Submit_DeduplicatedCumulativeEpisode_UsesCompatibleProviderIdentityAndCorrectsSeasonProgress(
-        bool initiallyTrusted)
-    {
-        await using var fixture = await MediaObservationFixture.CreateAsync();
-        var now = DateTimeOffset.UtcNow;
-        var seasonOne = CreateWistoriaTitle("Wistoria: Wand and Sword", 2024, now);
-        var seasonTwo = CreateWistoriaTitle("Wistoria: Wand and Sword Season 2", 2026, now);
-        var seasonOneEntry = CreateWistoriaEntry(fixture.UserId, seasonOne, now);
-        var seasonTwoEntry = CreateWistoriaEntry(fixture.UserId, seasonTwo, now);
-        seasonTwoEntry.ProgressEpisodes = 6;
-        var canonicalEpisode = new MediaEpisode
-        {
-            Id = Guid.NewGuid(),
-            MediaTitleId = seasonTwo.Id,
-            EpisodeNumber = 12,
-            Title = "A Story of a Dream with No End",
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var knownIdentity = new MediaEpisodeProviderIdentity
-        {
-            Id = Guid.NewGuid(),
-            MediaEpisodeId = canonicalEpisode.Id,
-            Provider = MediaObservationSiteIdentifiers.Crunchyroll,
-            ProviderSeriesId = "GW4HM7WK9",
-            ProviderEpisodeId = "GE00340382ENUS",
-            ProviderSeasonNumber = 2,
-            ProviderEpisodeNumber = 24,
-            ProviderUrlPath = "/watch/GE00340382ENUS/a-story-of-a-dream-with-no-end",
-            SeenCount = 1,
-            FirstSeenAt = now.AddMinutes(-10),
-            LastSeenAt = now.AddMinutes(-10),
-            IsTrusted = initiallyTrusted,
-            HasConflict = true
-        };
-        var existingObservation = new MediaObservation
-        {
-            Id = Guid.NewGuid(),
-            UserId = fixture.UserId,
-            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
-            ObservedUrl = "https://www.crunchyroll.com/watch/GE00340382ENUS/a-story-of-a-dream-with-no-end",
-            SiteMediaId = "GE00340382ENUS",
-            ObservedTitle = "E24 - A Story of a Dream with No End",
-            ProgressHint = "24",
-            ObservedAt = now.AddMinutes(-10),
-            MatchStatus = MediaObservationStatuses.Matched,
-            MediaTitleId = seasonOne.Id,
-            EpisodeOffset = 0,
-            ResolvedProgress = 24,
-            CreatedAt = now.AddMinutes(-10),
-            UpdatedAt = now.AddMinutes(-10)
-        };
-        var staleCandidate = new MediaObservationCandidate
-        {
-            Id = Guid.NewGuid(),
-            MediaObservationId = existingObservation.Id,
-            CandidateSource = MediaObservationCandidateSources.CatalogTitleSearch,
-            MediaTitleId = seasonOne.Id,
-            Title = seasonOne.CanonicalTitle,
-            MediaKind = seasonOne.MediaKind,
-            Score = 1m,
-            IsAccepted = true,
-            CreatedAt = now.AddMinutes(-10)
-        };
-        existingObservation.AcceptedCandidateId = staleCandidate.Id;
-
-        fixture.Db.MediaTitles.AddRange(seasonOne, seasonTwo);
-        fixture.Db.MediaLibraryEntries.AddRange(seasonOneEntry, seasonTwoEntry);
-        fixture.Db.MediaEpisodes.Add(canonicalEpisode);
-        fixture.Db.MediaEpisodeProviderIdentities.Add(knownIdentity);
-        fixture.Db.MediaObservations.Add(existingObservation);
-        fixture.Db.MediaObservationCandidates.Add(staleCandidate);
-        await fixture.Db.SaveChangesAsync();
-
-        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
-        {
-            SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
-            ObservedUrl = "https://www.crunchyroll.com/watch/GE00340382ENUS/a-story-of-a-dream-with-no-end",
-            SiteMediaId = "GE00340382ENUS",
-            ObservedTitle = "E24 - A Story of a Dream with No End",
-            SeriesTitle = "Wistoria: Wand and Sword",
-            EpisodeTitle = "E24 - A Story of a Dream with No End",
-            EpisodeNumber = 24,
-            SeasonNumber = 2,
-            ProviderSeriesId = "GW4HM7WK9",
-            WatchProgressPercent = 86m,
-            ObservedAt = now,
-            ExtensionVersion = "0.1.0"
-        }, CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var response = Assert.IsType<SubmitMediaObservationResponse>(ok.Value);
-        Assert.True(response.WasDeduplicated);
-
-        if (initiallyTrusted)
-        {
-            Assert.Equal(MediaObservationStatuses.NoMatch, response.MatchStatus);
-            Assert.True(response.RequiresResolution);
-            Assert.False(response.ProgressUpdated);
-            Assert.Equal(6, seasonTwoEntry.ProgressEpisodes);
-            Assert.True(knownIdentity.HasConflict);
-            var summary = await fixture.Controller.GetSummary(CancellationToken.None);
-            Assert.Equal(1, Assert.IsType<MediaObservationSummaryDto>(
-                Assert.IsType<OkObjectResult>(summary.Result).Value).TotalUnresolved);
-
-            var reviewObservation = await fixture.Db.MediaObservations
-                .Include(item => item.Candidates)
-                .SingleAsync(item => item.Id == existingObservation.Id);
-            var explicitCandidate = new MediaObservationCandidate
-            {
-                Id = Guid.NewGuid(),
-                MediaObservationId = reviewObservation.Id,
-                CandidateSource = MediaObservationCandidateSources.CatalogTitleSearch,
-                MediaTitleId = seasonTwo.Id,
-                Title = seasonTwo.CanonicalTitle,
-                MediaKind = seasonTwo.MediaKind,
-                Score = 1m,
-                CreatedAt = now
-            };
-            fixture.Db.MediaObservationCandidates.Add(explicitCandidate);
-            await fixture.Db.SaveChangesAsync();
-
-            var resolved = await fixture.Controller.Resolve(
-                reviewObservation.Id,
-                new ResolveMediaObservationRequest
-                {
-                    CandidateId = explicitCandidate.Id,
-                    EpisodeOffset = -12,
-                    AddToLibraryConfirmed = false
-                },
-                CancellationToken.None);
-            var resolvedOk = Assert.IsType<OkObjectResult>(resolved.Result);
-            var resolvedDto = Assert.IsType<MediaObservationDto>(resolvedOk.Value);
-            Assert.Equal(MediaObservationStatuses.Matched, resolvedDto.MatchStatus);
-            Assert.Equal(seasonTwo.Id.ToString(), resolvedDto.MediaTitleId);
-            Assert.Equal(-12, resolvedDto.EpisodeOffset);
-            Assert.Equal(12, resolvedDto.ResolvedProgress);
-
-            var resolvedIdentity = await fixture.Db.MediaEpisodeProviderIdentities
-                .SingleAsync(item => item.ProviderEpisodeId == knownIdentity.ProviderEpisodeId);
-            Assert.Equal(canonicalEpisode.Id, resolvedIdentity.MediaEpisodeId);
-            Assert.False(resolvedIdentity.HasConflict);
-            Assert.Equal(12, seasonTwoEntry.ProgressEpisodes);
-            var resolvedSummary = await fixture.Controller.GetSummary(CancellationToken.None);
-            Assert.Equal(0, Assert.IsType<MediaObservationSummaryDto>(
-                Assert.IsType<OkObjectResult>(resolvedSummary.Result).Value).TotalUnresolved);
-            return;
-        }
-
-        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
-        Assert.True(response.ProgressUpdated);
-
-        Assert.Null(await fixture.Db.MediaObservations.FindAsync(existingObservation.Id));
-
-        var establishedMapping = await fixture.Db.MediaProviderSeasonMappings.SingleAsync();
-        Assert.Equal(seasonTwo.Id, establishedMapping.MediaTitleId);
-        Assert.Equal(-12, establishedMapping.EpisodeOffset);
-        Assert.Equal(MediaProviderSeasonMappingSources.ProviderEpisodeIdentity, establishedMapping.MappingSource);
-
-        Assert.Equal(0, seasonOneEntry.ProgressEpisodes);
-        Assert.Equal(12, seasonTwoEntry.ProgressEpisodes);
-        Assert.True(knownIdentity.IsTrusted);
-        Assert.False(knownIdentity.HasConflict);
-    }
-
-    [Fact]
-    public async Task Resolve_WithOffset_StoresResolvedProgressAndOffset()
+    [InlineData(false, 16, -12, false)]
+    [InlineData(true, 16, -12, false)]
+    [InlineData(true, 13, 0, true)]
+    [InlineData(false, 13, -13, true)]
+    public async Task Resolve_WithOffset_ValidatesAndStoresProgress(
+        bool hasContainer, int episodeNumber, int offset, bool outOfRange)
     {
         await using var fixture = await MediaObservationFixture.CreateAsync();
         var now = DateTimeOffset.UtcNow;
@@ -906,6 +830,8 @@ public class MediaObservationsApiTests
             Id = Guid.NewGuid(),
             CanonicalTitle = "Season Two Show",
             MediaKind = MediaKinds.Anime,
+            EpisodeCount = outOfRange ? 12 : null,
+            SupportsEpisodeProgress = true,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode,
             CreatedAt = now,
@@ -919,7 +845,12 @@ public class MediaObservationsApiTests
             ObservedUrl = "https://www.crunchyroll.com/watch/OFFSET/episode-16",
             SiteMediaId = "OFFSET",
             ObservedTitle = "Season Two Show - Episode 16",
-            ProgressHint = "16",
+            ProgressHint = episodeNumber.ToString(),
+            EpisodeNumber = hasContainer ? episodeNumber : null,
+            ProviderSeriesId = hasContainer ? "SEASONSHOW" : null,
+            ProviderSeasonId = hasContainer ? "SEASON2" : null,
+            SeasonNumber = hasContainer ? 2 : null,
+            SeasonTitle = hasContainer ? "Season 2 (29-40)" : null,
             ObservedAt = now,
             MatchStatus = MediaObservationStatuses.Ambiguous,
             CreatedAt = now,
@@ -954,15 +885,309 @@ public class MediaObservationsApiTests
         var result = await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
         {
             CandidateId = candidate.Id,
-            EpisodeOffset = -12
+            EpisodeOffset = offset
         }, CancellationToken.None);
+
+        if (outOfRange)
+        {
+            Assert.IsType<BadRequestObjectResult>(result.Result);
+            Assert.Equal(0, await fixture.Db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
+            Assert.Empty(fixture.Db.MediaProviderOperations);
+            Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
+            Assert.Empty(fixture.Db.MediaProviderEpisodeMappings);
+            Assert.Equal(MediaObservationStatuses.Ambiguous, observation.MatchStatus);
+            return;
+        }
 
         var resolvedResponse = Assert.IsType<MediaObservationDto>(
             Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(-12, resolvedResponse.EpisodeOffset);
         Assert.Equal(4, resolvedResponse.ResolvedProgress);
         Assert.Null(await fixture.Db.MediaObservations.FindAsync(observation.Id));
-        Assert.Single(await fixture.Db.MediaObservationEpisodeOffsets.ToListAsync());
+        if (hasContainer)
+        {
+            var season = await fixture.Db.MediaProviderSeasonMappings.SingleAsync();
+            Assert.Equal(MediaProviderSeasonMappingSources.Manual, season.MappingSource);
+            Assert.Equal(13, season.ProviderEpisodeStart);
+            Assert.Null(season.ProviderEpisodeEnd);
+        }
+        else
+        {
+            var direct = await fixture.Db.MediaProviderEpisodeMappings.SingleAsync();
+            Assert.Equal(MediaProviderSeasonMappingSources.Manual, direct.MappingSource);
+            Assert.Equal(4, direct.CanonicalEpisodeNumber);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Submit_SeasonlessWatchDoesNotUseFallbackAcrossNumberedSeasons(bool secondSeasonOnlyInMappings)
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var title = CreateWistoriaTitle("Mapped First Season", 2026, now);
+        var entry = CreateWistoriaEntry(fixture.UserId, title, now);
+        fixture.Db.AddRange(title, entry);
+        var observedSeasonCount = secondSeasonOnlyInMappings ? 1 : 2;
+        for (var season = 1; season <= observedSeasonCount; season++)
+        {
+            fixture.Db.MediaProviderEpisodes.Add(new MediaProviderEpisode
+            {
+                Provider = "crunchyroll", ProviderSeriesId = "NUMBERED", ProviderSeasonNumber = season,
+                ProviderEpisodeNumber = 1, ProviderEpisodeId = $"NUMBERED{season}",
+                ProviderUrlPath = $"/watch/NUMBERED{season}", SeenCount = 1, FirstSeenAt = now, LastSeenAt = now
+            });
+        }
+        await fixture.Db.SaveChangesAsync();
+        var mappings = new MediaProviderSeasonMappingService(fixture.Db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        await mappings.EstablishAsync("crunchyroll", "NUMBERED", null, 1, title.Id, 0,
+            MediaProviderSeasonMappingSources.Automatic, 1m, default);
+        if (secondSeasonOnlyInMappings)
+        {
+            await mappings.EstablishAsync("crunchyroll", "NUMBERED", null, 2, title.Id, -12,
+                MediaProviderSeasonMappingSources.Automatic, 1m, default, episodeStart: 13, episodeEnd: 24);
+        }
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = "crunchyroll", SiteMediaId = "SEASONLESS3", ProviderSeriesId = "NUMBERED",
+            ObservedUrl = "https://www.crunchyroll.com/watch/SEASONLESS3", ObservedTitle = "Unidentified episode",
+            EpisodeNumber = 3, WatchProgressPercent = 90
+        }, default);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(0, await fixture.Db.MediaLibraryEntries.Select(row => row.ProgressEpisodes).SingleAsync());
+        var episodes = await MediaProviderSeasonMappingService.GetMappedEpisodesAsync(fixture.Db, [title.Id], default);
+        Assert.Equal("NUMBERED1", Assert.Single(episodes).Episode.ProviderEpisodeId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Resolve_ConfirmedProviderAddRejectsInvalidMappingBeforeWritingEitherLibrary(bool overlapsExistingRange)
+    {
+        var provider = new SearchOnlyMediaProvider(titleDetails: new MediaProviderTitleDetails
+        {
+            ProviderId = "anilist", ProviderMediaId = "1234", Title = "New Provider Title",
+            MediaKind = MediaKinds.Anime, EpisodeCount = 12,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        });
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var now = DateTimeOffset.UtcNow;
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, SiteIdentifier = "crunchyroll",
+            SiteMediaId = "OFFSET13", ObservedUrl = "https://www.crunchyroll.com/watch/OFFSET13",
+            ObservedTitle = "New Provider Title", EpisodeNumber = 12,
+            MatchStatus = MediaObservationStatuses.NoMatch, ObservedAt = now, CreatedAt = now, UpdatedAt = now
+        };
+        if (overlapsExistingRange)
+        {
+            observation.ProviderSeriesId = "RANGED";
+            observation.ProviderSeasonId = "SEASON1";
+            observation.SeasonTitle = "Part 2 (11-12)";
+            var previous = CreateWistoriaTitle("Previous Title", 2025, now);
+            fixture.Db.MediaTitles.Add(previous);
+            await fixture.Db.SaveChangesAsync();
+            var mappings = new MediaProviderSeasonMappingService(fixture.Db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+            await mappings.EstablishAsync("crunchyroll", "RANGED", "SEASON1", null, previous.Id, 0,
+                MediaProviderSeasonMappingSources.Manual, 1m, default, episodeStart: 1, episodeEnd: 12);
+        }
+        fixture.Db.AddRange(observation, (await provider.GetConnectedAccountAsync(fixture.UserId))!);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            ProviderId = "anilist", ProviderMediaId = "1234", AddToLibraryConfirmed = true,
+            EpisodeOffset = overlapsExistingRange ? 0 : 1
+        }, default);
+
+        var error = Assert.IsType<BadRequestObjectResult>(result.Result);
+        if (overlapsExistingRange)
+        {
+            Assert.Contains("overlap", System.Text.Json.JsonSerializer.Serialize(error.Value));
+            Assert.Equal(12, (await fixture.Db.MediaProviderSeasonMappings.SingleAsync()).ProviderEpisodeEnd);
+        }
+        Assert.Equal(0, provider.StatusUpdateCallCount);
+        Assert.Empty(fixture.Db.MediaLibraryEntries);
+        Assert.Empty(fixture.Db.MediaLibraryProviderBindings);
+        Assert.Empty(fixture.Db.MediaProviderLinks);
+        Assert.Empty(fixture.Db.MediaProviderOperations);
+        Assert.Equal(overlapsExistingRange ? 1 : 0, await fixture.Db.MediaTitles.CountAsync());
+        var persisted = await fixture.Db.MediaObservations.AsNoTracking().SingleAsync();
+        Assert.Equal(MediaObservationStatuses.NoMatch, persisted.MatchStatus);
+        Assert.Null(persisted.MediaTitleId);
+        Assert.Null(persisted.ResolvedProgress);
+    }
+
+    [Theory]
+    [InlineData(MediaKinds.Manga, MediaProgressDimensions.Chapter)]
+    [InlineData(MediaKinds.Anime, MediaProgressDimensions.Chapter)]
+    [InlineData(MediaKinds.Anime, MediaProgressDimensions.Volume)]
+    public async Task Resolve_CrunchyrollRejectsReadingTitlesBeforeLibraryWrites(string kind, string dimension)
+    {
+        var provider = new SearchOnlyMediaProvider(titleDetails: new MediaProviderTitleDetails
+        {
+            ProviderId = "anilist", ProviderMediaId = "1234", Title = "Provider Reading Title",
+            MediaKind = kind, ChapterCount = 20, VolumeCount = 5,
+            PrimaryProgressDimension = dimension, ReleaseStatusDimension = dimension
+        });
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var now = DateTimeOffset.UtcNow;
+        var title = CreateWistoriaTitle("Existing Reading Title", 2026, now);
+        title.MediaKind = kind;
+        title.PrimaryProgressDimension = dimension;
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, MediaTitleId = title.Id,
+            Status = MediaLibraryStatuses.Current, ProgressChapters = 3, ProgressVolumes = 1,
+            CreatedAt = now, UpdatedAt = now
+        };
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, SiteIdentifier = "crunchyroll",
+            SiteMediaId = "READING8", ObservedUrl = "https://www.crunchyroll.com/watch/READING8",
+            ObservedTitle = "Reading Title", EpisodeNumber = 8,
+            MatchStatus = MediaObservationStatuses.Ambiguous, ObservedAt = now, CreatedAt = now, UpdatedAt = now
+        };
+        var candidate = new MediaObservationCandidate
+        {
+            Id = Guid.NewGuid(), MediaObservationId = observation.Id, MediaTitleId = title.Id,
+            CandidateSource = MediaObservationCandidateSources.LibraryTitleSearch, Title = title.CanonicalTitle,
+            MediaKind = kind, Score = 0.5m
+        };
+        fixture.Db.AddRange(title, entry, observation, candidate, (await provider.GetConnectedAccountAsync(fixture.UserId))!);
+        await fixture.Db.SaveChangesAsync();
+
+        Assert.IsType<BadRequestObjectResult>((await fixture.Controller.Resolve(observation.Id,
+            new() { CandidateId = candidate.Id }, default)).Result);
+        Assert.IsType<BadRequestObjectResult>((await fixture.Controller.Resolve(observation.Id,
+            new() { ProviderId = "anilist", ProviderMediaId = "1234", AddToLibraryConfirmed = true }, default)).Result);
+
+        var persisted = await fixture.Db.MediaLibraryEntries.AsNoTracking().SingleAsync();
+        Assert.Equal(3, persisted.ProgressChapters);
+        Assert.Equal(1, persisted.ProgressVolumes);
+        Assert.Equal(0, provider.StatusUpdateCallCount);
+        Assert.Empty(fixture.Db.MediaLibraryProviderBindings);
+        Assert.Empty(fixture.Db.MediaProviderOperations);
+        Assert.Empty(fixture.Db.MediaProviderSeasonMappings);
+        Assert.Empty(fixture.Db.MediaProviderEpisodeMappings);
+        Assert.Null((await fixture.Db.MediaObservations.AsNoTracking().SingleAsync()).MediaTitleId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Resolve_ConfirmedProviderAddCommitsBeforeDispatchingStatus(bool transientFailure)
+    {
+        var provider = new SearchOnlyMediaProvider(titleDetails: new MediaProviderTitleDetails
+        {
+            ProviderId = "anilist", ProviderMediaId = "1234", Title = "New Provider Title",
+            MediaKind = MediaKinds.Anime, EpisodeCount = 12,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        }, failStatusUpdate: transientFailure);
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, SiteIdentifier = "crunchyroll",
+            SiteMediaId = "NEWTITLE1", ObservedUrl = "https://www.crunchyroll.com/watch/NEWTITLE1",
+            ProviderSeriesId = "NEWTITLE", ProviderSeasonId = "SEASON1", EpisodeNumber = 1,
+            ObservedTitle = "New Provider Title", MatchStatus = MediaObservationStatuses.NoMatch
+        };
+        fixture.Db.AddRange(observation, (await provider.GetConnectedAccountAsync(fixture.UserId))!);
+        await fixture.Db.SaveChangesAsync();
+        var statusSawCommittedDecision = false;
+        provider.BeforeStatusUpdate = async () =>
+        {
+            Assert.Null(fixture.Db.Database.CurrentTransaction);
+            Assert.Equal(MediaObservationStatuses.Matched, await fixture.Db.MediaObservations
+                .Select(row => row.MatchStatus).SingleAsync());
+            Assert.Equal(1, await fixture.Db.MediaLibraryEntries.CountAsync());
+            Assert.Equal(1, await fixture.Db.MediaProviderSeasonMappings.CountAsync());
+            statusSawCommittedDecision = true;
+        };
+
+        var result = await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            ProviderId = "anilist", ProviderMediaId = "1234", AddToLibraryConfirmed = true
+        }, default);
+
+        var response = Assert.IsType<MediaObservationDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var entry = await fixture.Db.MediaLibraryEntries.SingleAsync();
+        var binding = await fixture.Db.MediaLibraryProviderBindings.Include(item => item.MediaProviderLink).SingleAsync();
+        var mapping = await fixture.Db.MediaProviderSeasonMappings.SingleAsync();
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Equal(entry.Id, binding.MediaLibraryEntryId);
+        Assert.Equal("1234", binding.MediaProviderLink!.ExternalId);
+        Assert.Equal(entry.MediaTitleId, mapping.MediaTitleId);
+        Assert.Equal(MediaProviderSeasonMappingSources.Manual, mapping.MappingSource);
+        Assert.Equal(1, provider.StatusUpdateCallCount);
+        Assert.Equal(MediaLibraryStatuses.Current, provider.LastStatusUpdate);
+        Assert.True(statusSawCommittedDecision);
+        var operations = await fixture.Db.MediaProviderOperations.AsNoTracking()
+            .Where(row => row.OperationType == MediaProviderOperationTypes.UpdateStatus).ToListAsync();
+        if (transientFailure)
+        {
+            var queued = Assert.Single(operations);
+            Assert.Equal(MediaProviderOperationStatuses.Retrying, queued.Status);
+            Assert.NotNull(queued.NextAttemptAt);
+            Assert.Null(binding.LastSyncedAt);
+        }
+        else
+        {
+            Assert.Empty(operations);
+            Assert.NotNull(binding.LastSyncedAt);
+        }
+    }
+
+    [Theory]
+    [InlineData(15, 3)]
+    [InlineData(12, null)]
+    [InlineData(25, null)]
+    public async Task Submit_DuplicateNetflixObservationKeepsManualResolution(int episodeNumber, int? expectedProgress)
+    {
+        await using var fixture = await MediaObservationFixture.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        var title = CreateWistoriaTitle("Manually selected title", 2025, now);
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, SiteIdentifier = "netflix",
+            SiteMediaId = "1234", ObservedUrl = "https://www.netflix.com/watch/1234",
+            ObservedTitle = "Unmatched title", ProgressHint = "14",
+            MatchStatus = MediaObservationStatuses.Ambiguous
+        };
+        var candidate = new MediaObservationCandidate
+        {
+            Id = Guid.NewGuid(), MediaObservationId = observation.Id, MediaTitleId = title.Id,
+            CandidateSource = MediaObservationCandidateSources.LibraryTitleSearch, Title = title.CanonicalTitle,
+            MediaKind = title.MediaKind, Score = 0.5m
+        };
+        fixture.Db.AddRange(title, observation, candidate);
+        await fixture.Db.SaveChangesAsync();
+        Assert.IsType<OkObjectResult>((await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            CandidateId = candidate.Id, EpisodeOffset = -12
+        }, default)).Result);
+        Assert.Empty(fixture.Db.MediaLibraryEntries);
+
+        var result = await fixture.Controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = "netflix", SiteMediaId = "1234", ObservedUrl = observation.ObservedUrl,
+            ObservedTitle = observation.ObservedTitle, EpisodeNumber = episodeNumber
+        }, default);
+
+        var response = Assert.IsType<SubmitMediaObservationResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.True(response.WasDeduplicated);
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Equal(expectedProgress, response.ResolvedProgress);
+        var persisted = await fixture.Db.MediaObservations.AsNoTracking().SingleAsync();
+        Assert.Equal(title.Id, persisted.MediaTitleId);
+        Assert.Equal(candidate.Id, persisted.AcceptedCandidateId);
+        Assert.Equal(-12, persisted.EpisodeOffset);
+        Assert.Equal(expectedProgress, persisted.ResolvedProgress);
     }
 
     [Fact]
@@ -996,6 +1221,7 @@ public class MediaObservationsApiTests
             CanonicalTitle = "AniList title",
             PosterUrl = "https://example.test/anilist.jpg",
             MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode,
             CreatedAt = now,
@@ -1054,6 +1280,70 @@ public class MediaObservationsApiTests
             link => link.Provider == MediaObservationSiteIdentifiers.MyAnimeList);
     }
 
+    [Theory]
+    [InlineData(MediaObservationSiteIdentifiers.AniList, MediaProgressDimensions.Chapter, 0, true)]
+    [InlineData(MediaObservationSiteIdentifiers.Crunchyroll, MediaProgressDimensions.Episode, 0, true)]
+    [InlineData(MediaObservationSiteIdentifiers.Crunchyroll, MediaProgressDimensions.CompletionOnly, 0, true)]
+    [InlineData(MediaObservationSiteIdentifiers.AniList, MediaProgressDimensions.Chapter, 1, false)]
+    [InlineData(MediaObservationSiteIdentifiers.Crunchyroll, MediaProgressDimensions.Episode, -1, false)]
+    [InlineData(MediaObservationSiteIdentifiers.Crunchyroll, MediaProgressDimensions.Chapter, 0, false)]
+    public async Task Resolve_ConfirmedTitleOnlyProviderSelection(string site, string dimension, int offset, bool succeeds)
+    {
+        var reading = dimension == MediaProgressDimensions.Chapter;
+        var completionOnly = dimension == MediaProgressDimensions.CompletionOnly;
+        var provider = new SearchOnlyMediaProvider(titleDetails: new MediaProviderTitleDetails
+        {
+            ProviderId = MediaObservationSiteIdentifiers.AniList,
+            ProviderMediaId = "154587",
+            Title = "Title without observed progress",
+            MediaKind = reading ? MediaKinds.Manga : completionOnly ? MediaKinds.Movie : MediaKinds.Anime,
+            PrimaryProgressDimension = dimension,
+            ReleaseStatusDimension = dimension
+        });
+        await using var fixture = await MediaObservationFixture.CreateAsync(new SingleProviderRegistry(provider));
+        var now = DateTimeOffset.UtcNow;
+        var observation = new MediaObservation
+        {
+            Id = Guid.NewGuid(), UserId = fixture.UserId, SiteIdentifier = site,
+            SiteMediaId = site == MediaObservationSiteIdentifiers.Crunchyroll
+                ? completionOnly ? "SERIES1" : "EPISODE1" : "154587",
+            ObservedUrl = site == MediaObservationSiteIdentifiers.Crunchyroll
+                ? completionOnly ? "https://www.crunchyroll.com/series/SERIES1" : "https://www.crunchyroll.com/watch/EPISODE1"
+                : "https://anilist.co/manga/154587",
+            ObservedTitle = "Title without observed progress",
+            MatchStatus = MediaObservationStatuses.NoMatch, ObservedAt = now, CreatedAt = now, UpdatedAt = now
+        };
+        fixture.Db.AddRange(observation, (await provider.GetConnectedAccountAsync(fixture.UserId))!);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Controller.Resolve(observation.Id, new ResolveMediaObservationRequest
+        {
+            ProviderId = MediaObservationSiteIdentifiers.AniList,
+            ProviderMediaId = "154587",
+            AddToLibraryConfirmed = true,
+            EpisodeOffset = offset
+        }, default);
+
+        Assert.Empty(await fixture.Db.MediaProviderEpisodeMappings.ToListAsync());
+        Assert.Empty(await fixture.Db.MediaProviderSeasonMappings.ToListAsync());
+        if (!succeeds)
+        {
+            Assert.IsType<BadRequestObjectResult>(result.Result);
+            Assert.Empty(await fixture.Db.MediaLibraryEntries.ToListAsync());
+            Assert.Equal(0, provider.StatusUpdateCallCount);
+            return;
+        }
+
+        var response = Assert.IsType<MediaObservationDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var entry = await fixture.Db.MediaLibraryEntries.SingleAsync();
+        Assert.Equal(MediaObservationStatuses.Matched, response.MatchStatus);
+        Assert.Null(response.ResolvedProgress);
+        Assert.Equal(entry.Id.ToString(), response.ResolvedLibraryEntryId);
+        Assert.Equal(completionOnly ? (int?)null : 0, reading ? entry.ProgressChapters : entry.ProgressEpisodes);
+        Assert.Equal(MediaLibraryStatuses.Current, entry.Status);
+        Assert.Equal(1, provider.StatusUpdateCallCount);
+    }
+
     private sealed class MediaObservationFixture : IAsyncDisposable
     {
         private MediaObservationFixture(
@@ -1070,13 +1360,12 @@ public class MediaObservationsApiTests
 
         public ApplicationDbContext Db { get; }
         public MediaObservationsController Controller { get; }
-        public int UserId { get; } = 611;
+        public const int TestUserId = 611;
+        public const string TestEmail = "observations.api@example.com";
+        public int UserId => TestUserId;
 
         public static async Task<MediaObservationFixture> CreateAsync(IMediaProviderRegistry? registry = null)
         {
-            const int userId = 611;
-            const string email = "observations.api@example.com";
-
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
 
@@ -1086,9 +1375,14 @@ public class MediaObservationsApiTests
 
             var db = new ApplicationDbContext(options);
             await db.Database.EnsureCreatedAsync();
-            db.Users.Add(TestUserFactory.Create(userId, email));
+            db.Users.Add(TestUserFactory.Create(TestUserId, TestEmail));
             await db.SaveChangesAsync();
+            return new MediaObservationFixture(connection, db, CreateController(db, registry));
+        }
 
+        public static MediaObservationsController CreateController(ApplicationDbContext db,
+            IMediaProviderRegistry? registry = null, int userId = TestUserId)
+        {
             var seasonMappingService = new MediaProviderSeasonMappingService(
                 db,
                 NullLogger<MediaProviderSeasonMappingService>.Instance);
@@ -1097,16 +1391,17 @@ public class MediaObservationsApiTests
                 seasonMappingService,
                 new MediaRelationGraphRefreshQueue(),
                 NullLogger<MediaObservationMatchingService>.Instance);
+            registry ??= new EmptyMediaProviderRegistry();
             var operationProcessor = new MediaProviderOperationProcessor(
                 db,
-                new EmptyMediaProviderRegistry(),
+                registry,
                 NullLogger<MediaProviderOperationProcessor>.Instance);
             var eventHub = new MediaLibraryEventHub();
             var progressService = new MediaObservationProgressService(
                 db,
                 operationProcessor,
                 eventHub,
-                NullLogger<MediaObservationProgressService>.Instance);
+                NullLogger<MediaObservationProgressService>.Instance, seasonMappingService, matchingService);
             var episodeIdentityService = new MediaEpisodeIdentityService(
                 db,
                 seasonMappingService,
@@ -1120,12 +1415,13 @@ public class MediaObservationsApiTests
                 progressService,
                 episodeIdentityService,
                 seasonMappingService,
-                registry ?? new EmptyMediaProviderRegistry(),
+                registry,
                 eventHub,
                 NullLogger<MediaObservationsController>.Instance,
                 new MediaCatalogCanonicalizationService(
                     (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
-                    NullLogger<MediaCatalogCanonicalizationService>.Instance));
+                    NullLogger<MediaCatalogCanonicalizationService>.Instance),
+                operationProcessor);
 
             controller.ControllerContext = new ControllerContext
             {
@@ -1135,14 +1431,14 @@ public class MediaObservationsApiTests
                         new ClaimsIdentity(
                             [
                                 new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                                new Claim(ClaimTypes.Name, email),
-                                new Claim(ClaimTypes.Email, email)
+                                new Claim(ClaimTypes.Name, TestEmail),
+                                new Claim(ClaimTypes.Email, TestEmail)
                             ],
                             authenticationType: "Test"))
                 }
             };
 
-            return new MediaObservationFixture(connection, db, controller);
+            return controller;
         }
 
         public async ValueTask DisposeAsync()
@@ -1177,13 +1473,18 @@ public class MediaObservationsApiTests
         bool connected = true,
         IReadOnlyList<MediaProviderSearchResult>? searchResults = null,
         string providerId = MediaObservationSiteIdentifiers.AniList,
-        MediaProviderTitleDetails? titleDetails = null) : IMediaProvider
+        MediaProviderTitleDetails? titleDetails = null,
+        bool failStatusUpdate = false) : IMediaProvider
     {
         public string ProviderId => providerId;
+        public int StatusUpdateCallCount { get; private set; }
+        public string? LastStatusUpdate { get; private set; }
+        public Func<Task>? BeforeStatusUpdate { get; set; }
+        public Func<string, IReadOnlyList<MediaProviderSearchResult>>? Search { get; init; }
 
         public Task<IReadOnlyList<MediaProviderSearchResult>> SearchAsync(int userId, MediaCatalogSearchRequest request, CancellationToken cancellationToken)
         {
-            IReadOnlyList<MediaProviderSearchResult> results = searchResults ??
+            IReadOnlyList<MediaProviderSearchResult> results = Search?.Invoke(request.Query) ?? searchResults ??
             [
                 new MediaProviderSearchResult
                 {
@@ -1221,14 +1522,26 @@ public class MediaObservationsApiTests
         public Task<MediaProviderTitleDetails?> GetTitleDetailsAsync(int userId, string providerMediaId, CancellationToken cancellationToken)
             => Task.FromResult(titleDetails);
         public Task<MediaProviderMutationResult> UpdateProgressAsync(int userId, MediaProgressUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
-            => Task.FromResult(new MediaProviderMutationResult
+        public async Task<MediaProviderMutationResult> UpdateStatusAsync(int userId, MediaStatusUpdateRequest request, CancellationToken cancellationToken)
+        {
+            StatusUpdateCallCount++;
+            LastStatusUpdate = request.Status;
+            if (BeforeStatusUpdate is not null)
+            {
+                await BeforeStatusUpdate();
+            }
+            if (failStatusUpdate)
+            {
+                throw new HttpRequestException("Provider temporarily unavailable.");
+            }
+            return new MediaProviderMutationResult
             {
                 ProviderId = ProviderId,
                 ProviderMediaId = request.ProviderMediaId,
                 AppliedAt = DateTimeOffset.UtcNow,
                 LastRemoteUpdateAt = DateTimeOffset.UtcNow
-            });
+            };
+        }
         public Task<MediaProviderMutationResult> UpdateScoreAsync(int userId, MediaScoreUpdateRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<MediaReleaseMetadata?> GetReleaseMetadataAsync(int userId, string providerMediaId, CancellationToken cancellationToken) => throw new NotSupportedException();
     }

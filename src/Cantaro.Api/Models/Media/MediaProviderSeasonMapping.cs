@@ -15,7 +15,15 @@ public sealed class MediaProviderSeasonMapping
 
     public string? ProviderSeasonId { get; set; }
 
+    public required string ProviderSeasonKey { get; set; }
+
     public int? ProviderSeasonNumber { get; set; }
+
+    public string? NormalizedSeasonTitle { get; set; }
+
+    public int? ProviderEpisodeStart { get; set; }
+
+    public int? ProviderEpisodeEnd { get; set; }
 
     public Guid MediaTitleId { get; set; }
 
@@ -29,11 +37,11 @@ public sealed class MediaProviderSeasonMapping
 
     public decimal Confidence { get; set; }
 
-    public bool HasConflict { get; set; }
-
     public DateTimeOffset FirstSeenAt { get; set; }
 
     public DateTimeOffset LastVerifiedAt { get; set; }
+
+    public DateTimeOffset? LastObservedAt { get; set; }
 
     public MediaTitle? MediaTitle { get; set; }
 }

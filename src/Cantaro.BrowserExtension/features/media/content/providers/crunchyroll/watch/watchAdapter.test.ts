@@ -302,19 +302,22 @@ describe('Crunchyroll watch metadata extraction', () => {
     });
   });
 
-  it('reads the selected dub and sibling next-card metadata for opaque episode IDs', () => {
+  it.each([
+    { providerId: 'GEVUW3NPM', releaseTrack: undefined },
+    { providerId: 'GE00374383JAJP', releaseTrack: 'sub:en' },
+  ])('reads next-card release evidence independently of the current dub for $providerId', ({ providerId, releaseTrack }) => {
     const metadata = extractCrunchyrollWatchMetadata(
-      fixtureDoc(opaqueEnglishDubWatchHtml),
+      fixtureDoc(opaqueEnglishDubWatchHtml.replaceAll('GEVUW3NPM', providerId)),
       'https://www.crunchyroll.com/watch/GVWU8X9GQ/a-ghost-may-show-up-during-training-but-nobody-told-me-about-it',
     );
 
     expect(metadata).toMatchObject({
       providerEpisodeId: 'GVWU8X9GQ',
       releaseTrack: 'dub:en',
-      nextEpisodeProviderId: 'GEVUW3NPM',
+      nextEpisodeProviderId: providerId,
       nextEpisodeNumber: 11,
       nextEpisodeTitle: 'It May Be a Trap, but I Have to Keep Moving Forward',
-      nextEpisodeReleaseTrack: 'dub:en',
+      nextEpisodeReleaseTrack: releaseTrack,
     });
   });
 
@@ -434,6 +437,28 @@ describe('trackVideoProgress', () => {
       nextEpisodeUrl: 'https://www.crunchyroll.com/watch/NEXT8/episode-8',
       nextEpisodeNumber: 8,
     });
+  });
+
+  it('clears the old release track when the next episode card changes to an opaque ID', () => {
+    const video = new FakeVideo();
+    let nextHref = '/watch/GE00374383JAJP/episode-8';
+    const doc = makeDoc('Episode 7 - Frieren - Crunchyroll', {
+      '[data-t="next-episode"] a[href*="/watch/"]': [
+        linkElement('Episode 8', () => nextHref),
+      ],
+    }, [video]);
+    const initial = extractCrunchyrollWatchMetadata(doc, metadata.observedUrl)!;
+    expect(initial.nextEpisodeReleaseTrack).toBe('sub:en');
+    const observations: WatchProgressObservation[] = [];
+    trackVideoProgress(doc, initial, observation => observations.push(observation));
+
+    nextHref = '/watch/GEVUW3NPM/episode-8';
+    video.currentTime = 90;
+    video.emit('timeupdate');
+
+    expect(observations).toHaveLength(1);
+    expect(observations[0]?.nextEpisodeProviderId).toBe('GEVUW3NPM');
+    expect(observations[0]?.nextEpisodeReleaseTrack).toBeUndefined();
   });
 
   it('reports but does not submit invalid or zero-duration progress', () => {

@@ -244,7 +244,7 @@ export function StreamingDestinationsSection({
                     </strong>
                     <span className="mt-0.5 block text-sm text-content-muted">
                       {destination.kind === "episode"
-                        ? "Episode destination"
+                        ? "Direct watch link"
                         : "Series destination"}
                     </span>
                   </span>

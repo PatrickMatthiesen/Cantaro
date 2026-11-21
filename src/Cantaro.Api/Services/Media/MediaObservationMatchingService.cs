@@ -41,7 +41,8 @@ public class MediaObservationMatchingService(
 
     internal async Task<MediaObservation> ProcessObservationAsync(
         MediaObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool reconsiderAutomaticMapping = false)
     {
         observation.MatchAttemptCount++;
         observation.LastMatchAttemptedAt = DateTimeOffset.UtcNow;
@@ -51,255 +52,337 @@ public class MediaObservationMatchingService(
 
         try
         {
-            if (!await TryApplyProviderEpisodeIdentityCoreAsync(observation, cancellationToken))
-            {
-                var candidates = await GenerateCandidatesAsync(observation, cancellationToken);
-
-                // Remove stale candidates from previous runs.
-                _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
-                observation.Candidates.Clear();
-
-                foreach (var candidate in candidates)
-                {
-                    _dbContext.MediaObservationCandidates.Add(candidate);
-                }
-
-                ApplyMatchDecision(observation, candidates);
-                if (observation.MatchStatus == MediaObservationStatuses.Matched
-                    && observation.MediaTitleId is { } matchedMediaTitleId)
-                {
-                    if (observation.EpisodeOffset is null)
-                    {
-                        observation.EpisodeOffset = await InferCumulativeEpisodeOffsetAsync(
-                            observation,
-                            matchedMediaTitleId,
-                            cancellationToken);
-                    }
-                }
-            }
+            return MediaProviderSeasonMappingService.IsSupported(observation.SiteIdentifier)
+                ? await _seasonMappingService.WithWriteAsync(MatchAsync, cancellationToken)
+                : await MatchAsync();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException and not DbUpdateException
+            and not System.Data.Common.DbException)
         {
-            // Exception messages can contain provider URLs or other payload
-            // data. Keep both the persisted diagnostic and log metadata
-            // bounded to a safe exception type.
-            _logger.LogError(
-                "Candidate generation failed for MediaObservation {ObservationId}; failure type {FailureType}.",
-                observation.Id,
-                ex.GetType().Name);
+            _logger.LogError("Candidate generation failed for MediaObservation {ObservationId}; failure type {FailureType}.",
+                observation.Id, ex.GetType().Name);
             observation.LastMatchError = "Candidate generation failed.";
             observation.MatchStatus = MediaObservationStatuses.Pending;
+            await SaveMatchAsync();
         }
-
-        observation.UpdatedAt = DateTimeOffset.UtcNow;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation(
-            "Processed MediaObservation {ObservationId}: status={Status}, candidates={CandidateCount}.",
-            observation.Id,
-            observation.MatchStatus,
-            observation.Candidates.Count);
 
         return observation;
+
+        async Task<MediaObservation> MatchAsync()
+        {
+            var mapping = await _seasonMappingService.ResolveAsync(observation, cancellationToken);
+            var coverage = await MediaProviderSeasonMappingService.GetCatalogCoverageAsync(_dbContext, observation, cancellationToken);
+            if (coverage is not null && (mapping is null || coverage.Any(item => item.MediaTitleId != mapping.Title.Id)))
+            {
+                observation.ResetMatch();
+                observation.MatchStatus = MediaObservationStatuses.Matched;
+                ReplaceCandidates(observation, []);
+                await SaveMatchAsync();
+                return observation;
+            }
+
+            if (mapping is not null && (mapping.Source == MediaProviderSeasonMappingSources.Manual
+                || (!observation.IsCatalogObservation && !reconsiderAutomaticMapping)))
+            {
+                await ApplyExistingMappingAsync(mapping);
+            }
+            else
+            {
+                var coordinates = await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
+                var independent = await GenerateIndependentCandidatesAsync(observation, coordinates, cancellationToken);
+                var orderedIndependent = OrderCandidates(independent);
+                var top = orderedIndependent.FirstOrDefault();
+                var independentlyMatched = top?.Score >= HighConfidenceThreshold
+                    && (orderedIndependent.Count == 1 || top.Score > orderedIndependent[1].Score);
+
+                if (!independentlyMatched && mapping is not null)
+                {
+                    await ApplyExistingMappingAsync(mapping);
+                }
+                else
+                {
+                    var library = independentlyMatched || top?.CandidateSource == MediaObservationCandidateSources.ProviderLinkExact
+                        ? [] : OrderCandidates(await FindByUserLibraryTitleAsync(observation, coordinates, cancellationToken));
+                    var privateMatch = library.FirstOrDefault();
+                    if (observation.IsCatalogObservation || privateMatch?.Score < HighConfidenceThreshold
+                        || privateMatch?.Score < top?.Score
+                        || (library.Count > 1 && privateMatch?.Score == library[1].Score))
+                    {
+                        privateMatch = null;
+                    }
+
+                    var candidates = independentlyMatched ? orderedIndependent : OrderCandidates(
+                        privateMatch is null ? MergeCandidates(independent, library) :
+                            MergeCandidates([privateMatch, .. independent], library));
+                    if (privateMatch is not null)
+                    {
+                        candidates.Remove(privateMatch);
+                        candidates.Insert(0, privateMatch);
+                    }
+                    ApplyMatchDecision(observation, candidates, independentlyMatched || privateMatch is not null);
+
+                    if (observation.MatchStatus == MediaObservationStatuses.Matched
+                        && observation.MediaTitleId is { } titleId)
+                    {
+                        var title = await _dbContext.MediaTitles.FindAsync([titleId], cancellationToken);
+                        observation.MediaTitle = title;
+                        observation.EpisodeOffset = await InferCumulativeEpisodeOffsetAsync(observation, coordinates, titleId, cancellationToken);
+                        var rawNumber = coordinates.EpisodeNumber;
+                        if (rawNumber is null && MediaObservationProgressService.TryParseProgressHint(observation.ProgressHint, out var hint))
+                        {
+                            rawNumber = hint;
+                        }
+
+                        rawNumber ??= title?.EpisodeCount == 1 && string.Equals(title.Format, "ova", StringComparison.OrdinalIgnoreCase)
+                            ? 1 : null;
+                        var progress = (long?)rawNumber + (observation.EpisodeOffset ?? 0);
+                        observation.ResolvedProgress = title?.IsCompletionOnly != true && progress is > 0 and <= int.MaxValue
+                            ? (int)progress : null;
+                        if (independentlyMatched && title is not null)
+                        {
+                            await EstablishMappingAsync(observation, title, observation.EpisodeOffset ?? 0,
+                                MediaProviderSeasonMappingSources.Automatic, top!.Score, cancellationToken);
+                            var effective = await _seasonMappingService.ResolveAsync(observation, cancellationToken);
+                            if (effective is not null)
+                            {
+                                ApplyMapping(observation, effective);
+                                await SaveMatchAsync();
+                                return observation;
+                            }
+                        }
+                    }
+                    ReplaceCandidates(observation, candidates);
+                }
+            }
+
+            await SaveMatchAsync();
+            return observation;
+        }
+
+        Task SaveMatchAsync()
+        {
+            observation.Touch(DateTimeOffset.UtcNow);
+            return _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        async Task ApplyExistingMappingAsync(ProviderEpisodeResolution mapping)
+        {
+            ApplyMapping(observation, mapping);
+            if (mapping.Direct)
+            {
+                await EstablishDirectSuccessorAsync(observation, mapping.Title, mapping.EpisodeNumber, cancellationToken);
+            }
+        }
     }
 
-    public async Task<bool> TryApplyProviderEpisodeIdentityAsync(
-        MediaObservation observation,
-        CancellationToken cancellationToken)
+    internal async Task<bool> EstablishMappingAsync(MediaObservation observation, MediaTitle title, int offset,
+        string source, decimal confidence, CancellationToken cancellationToken)
     {
-        var applied = await TryApplyProviderEpisodeIdentityCoreAsync(observation, cancellationToken);
-        if (!applied)
+        var provider = observation.SiteIdentifier;
+        if (!MediaProviderSeasonMappingService.IsSupported(provider))
         {
             return false;
         }
 
-        observation.UpdatedAt = DateTimeOffset.UtcNow;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-        return true;
-    }
-
-    private async Task<bool> TryApplyProviderEpisodeIdentityCoreAsync(
-        MediaObservation observation,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(observation.SiteMediaId))
+        if (title.IsCompletionOnly && observation.IsCatalogObservation && observation.Episodes.Count == 1)
         {
-            return false;
-        }
-
-        var provider = observation.SiteIdentifier.Trim().ToLowerInvariant();
-        var providerEpisodeId = provider == MediaObservationSiteIdentifiers.Crunchyroll
-            ? observation.SiteMediaId.Trim().ToUpperInvariant()
-            : observation.SiteMediaId.Trim();
-        var identity = await _dbContext.MediaEpisodeProviderIdentities
-            .Include(item => item.Content)
-                .ThenInclude(content => content!.MediaEpisode)
-                .ThenInclude(episode => episode!.MediaTitle)
-            .FirstOrDefaultAsync(item =>
-                item.Provider == provider
-                && item.ProviderEpisodeId == providerEpisodeId,
+            await _seasonMappingService.EstablishCatalogDirectMappingsAsync(observation, title, offset, source,
                 cancellationToken);
-        var episode = identity?.Content?.MediaEpisode;
-        var title = episode?.MediaTitle;
-        if (identity is null || episode is null || title is null
-            || !CanUseEpisodeIdentityForMatching(identity, observation))
+            return false;
+        }
+
+        // A catalog review can edit only the season identified by the reviewed scan.
+        var coordinates = observation.IsCatalogObservation && source == MediaProviderSeasonMappingSources.Manual
+            ? MediaProviderSeasonMappingService.GetObservedCoordinates(observation)
+            : await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
+        var episodeId = MediaProviderSeasonMappingService.NormalizeId(observation.SiteMediaId);
+        var hasWatchEpisode = !observation.IsCatalogObservation &&
+            MediaDestinationUrlPolicy.TryNormalizePath(provider, observation.ObservedUrl, episodeId, out _);
+        if (!hasWatchEpisode && observation.Episodes.Count == 0)
         {
             return false;
         }
 
-        _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates);
-        observation.Candidates.Clear();
+        if (CanEstablishSeason(title, coordinates, hasWatchEpisode, observation))
+        {
+            return await _seasonMappingService.WithWriteAsync(async () =>
+            {
+                var (start, end) = await GetSeasonBoundsAsync(observation, title, coordinates, offset, cancellationToken);
+                var mapping = await _seasonMappingService.EstablishAsync(provider, coordinates.SeriesId, coordinates.SeasonId,
+                    coordinates.SeasonNumber, title.Id, offset, source, confidence, cancellationToken,
+                    observation.SeasonTitle, start, end, observation.ObservedAt);
+                if (mapping is not null && source == MediaProviderSeasonMappingSources.Manual)
+                {
+                    if (observation.IsCatalogObservation)
+                    {
+                        var episodeIds = observation.Episodes
+                            .Select(episode => MediaProviderSeasonMappingService.NormalizeId(episode.ProviderEpisodeId))
+                            .OfType<string>().Distinct().ToArray();
+                        await _seasonMappingService.RemoveCoveredDirectMappingsAsync(mapping, episodeIds, cancellationToken);
+                    }
+                    else if (IsCanonicalEpisodeNumber(title,
+                        MediaProviderSeasonMappingService.CanonicalNumber(mapping, coordinates.EpisodeNumber)))
+                    {
+                        await _dbContext.MediaProviderEpisodeMappings
+                            .Where(row => row.Provider == provider && row.ProviderEpisodeId == episodeId)
+                            .ExecuteDeleteAsync(cancellationToken);
+                    }
+                }
+                return mapping is not null;
+            }, cancellationToken);
+        }
+        else if (observation.IsCatalogObservation && !title.IsCompletionOnly)
+        {
+            await _seasonMappingService.EstablishCatalogDirectMappingsAsync(observation, title, offset, source,
+                cancellationToken);
+        }
+        else if (hasWatchEpisode && (title.IsCompletionOnly || observation.ResolvedProgress is > 0))
+        {
+            if (!title.IsCompletionOnly && !IsCanonicalEpisodeNumber(title, observation.ResolvedProgress))
+            {
+                return false;
+            }
+            var written = await _seasonMappingService.EstablishDirectAsync(provider, episodeId!, title.Id,
+                title.IsCompletionOnly ? null : observation.ResolvedProgress, source, cancellationToken, observation.ObservedAt);
+            if (written)
+            {
+                await EstablishDirectSuccessorAsync(observation, title, observation.ResolvedProgress, cancellationToken);
+            }
+            return written;
+        }
+        return false;
+    }
+
+    private async Task EstablishDirectSuccessorAsync(MediaObservation observation, MediaTitle title,
+        int? canonicalEpisode, CancellationToken cancellationToken)
+    {
+        var next = (long?)canonicalEpisode + 1;
+        if (observation.IsCatalogObservation || title.IsCompletionOnly || next is not { } nextNumber
+            || !IsCanonicalEpisodeNumber(title, nextNumber)
+            || !MediaEpisodeIdentityService.HasConsecutiveNextEpisode(observation))
+        {
+            return;
+        }
+
+        var coordinates = await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
+        if (coordinates.EpisodeNumber is not null && coordinates.EpisodeNumber != observation.EpisodeNumber)
+        {
+            return;
+        }
+
+        var provider = observation.SiteIdentifier;
+        var nextId = MediaProviderSeasonMappingService.NormalizeId(observation.NextEpisodeProviderId)!;
+        var successor = await _dbContext.MediaProviderEpisodes.AsNoTracking().SingleOrDefaultAsync(
+            row => row.Provider == provider && row.ProviderEpisodeId == nextId, cancellationToken);
+        if (MediaEpisodeIdentityService.HasConflictingSuccessorCoordinates(successor, coordinates, observation))
+        {
+            return;
+        }
+
+        var successorCoordinates = await _seasonMappingService.CompleteCoordinatesAsync(provider, nextId, successor,
+            coordinates with { EpisodeNumber = observation.NextEpisodeNumber }, cancellationToken);
+        var season = await _seasonMappingService.ResolveSeasonAsync(provider, successorCoordinates, cancellationToken);
+        if (season is not null
+            && MediaProviderSeasonMappingService.CanonicalNumber(season, successorCoordinates.EpisodeNumber) is { } mappedNumber
+            && (season.MediaTitleId != title.Id || mappedNumber != nextNumber))
+        {
+            return;
+        }
+
+        await _seasonMappingService.EstablishDirectAsync(provider, nextId, title.Id, (int)nextNumber,
+            MediaProviderSeasonMappingSources.Automatic, cancellationToken, observation.ObservedAt);
+    }
+
+    internal static bool IsCanonicalEpisodeNumber(MediaTitle title, long? number) =>
+        number is > 0 and <= int.MaxValue && (title.EpisodeCount is not > 0 || number <= title.EpisodeCount);
+
+    private static bool CanEstablishSeason(MediaTitle title, ProviderEpisodeCoordinates coordinates,
+        bool hasWatchEpisode, MediaObservation observation) =>
+        (hasWatchEpisode || observation.Episodes.Count > 0)
+        && coordinates.SeriesId is not null
+        && MediaProviderSeasonMappingService.SeasonKey(coordinates.SeasonId, coordinates.SeasonNumber) is not null
+        && !title.IsCompletionOnly && (coordinates.EpisodeNumber is > 0 || !hasWatchEpisode);
+
+    private async Task<(int? Start, int? End)> GetSeasonBoundsAsync(MediaObservation observation, MediaTitle title,
+        ProviderEpisodeCoordinates coordinates, int offset, CancellationToken cancellationToken)
+    {
+        var evidence = ReadEpisodeEvidence(observation, coordinates);
+        if (observation.SeasonTitle is not null
+            && TryReadEpisodeRange(observation.SeasonTitle, out var rangeStart, out var rangeEnd)
+            && evidence?.LowestEpisodeNumber >= rangeStart
+            && (rangeEnd is null || evidence.HighestEpisodeNumber <= rangeEnd))
+        {
+            return (rangeStart, rangeEnd);
+        }
+
+        var existing = await _seasonMappingService.FindAsync(observation.SiteIdentifier, coordinates, cancellationToken);
+        if (existing is not null
+            && existing.ProviderSeasonKey == MediaProviderSeasonMappingService.SeasonKey(coordinates.SeasonId, coordinates.SeasonNumber)
+            && (offset >= 0 || (existing.ProviderEpisodeStart is not null || existing.ProviderEpisodeEnd is not null)
+                || MediaProviderSeasonMappingService.CanonicalNumber(existing, evidence?.HighestEpisodeNumber) is not null))
+        {
+            return (existing.ProviderEpisodeStart, existing.ProviderEpisodeEnd);
+        }
+
+        var first = 1L - offset;
+        if (offset < 0 && first <= int.MaxValue)
+        {
+            var last = first + title.EpisodeCount - 1;
+            return ((int)first, last <= int.MaxValue ? (int?)last : null);
+        }
+        return (null, null);
+    }
+
+    internal void ApplyMapping(MediaObservation observation, ProviderEpisodeResolution mapping)
+    {
+        var title = mapping.Title;
         var candidate = new MediaObservationCandidate
         {
-            Id = Guid.NewGuid(),
-            MediaObservationId = observation.Id,
-            CandidateSource = MediaObservationCandidateSources.ProviderEpisodeIdentityExact,
-            MediaTitleId = title.Id,
-            Title = title.CanonicalTitle,
-            MediaKind = title.MediaKind,
-            Score = 1m,
-            Explanation = $"Exact provider episode identity: {provider}/{providerEpisodeId}",
-            IsAccepted = true,
-            CreatedAt = DateTimeOffset.UtcNow
+            Id = Guid.NewGuid(), MediaObservationId = observation.Id,
+            CandidateSource = mapping.Direct ? MediaObservationCandidateSources.ProviderEpisodeMappingExact
+                : MediaObservationCandidateSources.ProviderSeasonMappingExact,
+            MediaTitleId = title.Id, Title = title.CanonicalTitle, MediaKind = title.MediaKind,
+            Score = 1m, Explanation = "Established provider mapping.", CreatedAt = DateTimeOffset.UtcNow
         };
-        _dbContext.MediaObservationCandidates.Add(candidate);
-        observation.MatchStatus = MediaObservationStatuses.Matched;
-        observation.MediaTitleId = title.Id;
-        observation.MediaTitle = title;
-        observation.AcceptedCandidateId = candidate.Id;
-        observation.ResolutionNotes = $"Automatically matched by exact provider episode identity: {provider}/{providerEpisodeId}.";
-        if (MediaObservationProgressService.TryParseProgressHint(observation.ProgressHint, out var observedProgress))
-        {
-            observation.EpisodeOffset = episode.EpisodeNumber - observedProgress;
-            observation.ResolvedProgress = episode.EpisodeNumber;
-        }
-        _logger.LogInformation(
-            "Matched MediaObservation {ObservationId} through provider episode identity {Provider}/{ProviderEpisodeId}: title {MediaTitleId}, episode {EpisodeNumber}.",
-            observation.Id,
-            provider,
-            providerEpisodeId,
-            title.Id,
-            episode.EpisodeNumber);
-        return true;
+        ReplaceCandidates(observation, [candidate]);
+        ApplyMatchDecision(observation, [candidate], canAutoMatch: true);
+        observation.MediaTitle = _dbContext.MediaTitles.Local.FirstOrDefault(item => item.Id == title.Id)
+            ?? _dbContext.Attach(title).Entity;
+        observation.EpisodeOffset = mapping.EpisodeOffset ?? (mapping.EpisodeNumber - observation.EpisodeNumber);
+        observation.ResolvedProgress = mapping.EpisodeNumber;
     }
 
-    private static bool CanUseEpisodeIdentityForMatching(
-        MediaEpisodeProviderIdentity identity,
-        MediaObservation observation)
+    internal static bool UsedSharedMapping(MediaObservation observation) =>
+        observation.Candidates.Any(candidate => candidate.Id == observation.AcceptedCandidateId
+            && candidate.CandidateSource is MediaObservationCandidateSources.ProviderSeasonMappingExact
+                or MediaObservationCandidateSources.ProviderEpisodeMappingExact);
+
+    private void ReplaceCandidates(MediaObservation observation, IReadOnlyCollection<MediaObservationCandidate> candidates)
     {
-        // A trusted conflict remains in the resolution workflow. An untrusted
-        // conflict may still be corrected by a compatible, newer observation.
-        if (identity.HasConflict && identity.IsTrusted)
-        {
-            return false;
-        }
-
-        if (identity.HasConflict)
-        {
-            var content = identity.Content;
-            return !string.IsNullOrWhiteSpace(content?.ProviderSeriesId)
-                && string.Equals(
-                    content.ProviderSeriesId,
-                    observation.ProviderSeriesId,
-                    StringComparison.OrdinalIgnoreCase)
-                && content.ProviderEpisodeNumber is > 0
-                && content.ProviderEpisodeNumber == observation.EpisodeNumber;
-        }
-
-        if (identity.IsTrusted)
-        {
-            return true;
-        }
-
-        // Catalog observations may discover a correct episode destination before
-        // a user has confirmed the surrounding season mapping. Reuse an
-        // untrusted identity only when the watch payload independently confirms
-        // both its provider series and provider episode number.
-        return !string.IsNullOrWhiteSpace(identity.Content?.ProviderSeriesId)
-            && string.Equals(
-                identity.Content.ProviderSeriesId,
-                observation.ProviderSeriesId,
-                StringComparison.OrdinalIgnoreCase)
-            && identity.Content.ProviderEpisodeNumber is > 0
-            && identity.Content.ProviderEpisodeNumber == observation.EpisodeNumber;
+        _dbContext.MediaObservationCandidates.RemoveRange(observation.Candidates.ToList());
+        observation.Candidates.Clear();
+        _dbContext.MediaObservationCandidates.AddRange(candidates);
     }
 
-    private async Task<List<MediaObservationCandidate>> GenerateCandidatesAsync(
+    private async Task<List<MediaObservationCandidate>> GenerateIndependentCandidatesAsync(
         MediaObservation observation,
-        CancellationToken cancellationToken)
+        ProviderEpisodeCoordinates coordinates, CancellationToken cancellationToken)
     {
-        var candidates = new List<MediaObservationCandidate>();
-
-        // --- Strategy 1: an established provider season/container mapping ---
-        var mappedCandidates = await FindByProviderSeasonMappingAsync(observation, cancellationToken);
-        candidates.AddRange(mappedCandidates);
-        if (mappedCandidates.Count > 0)
-        {
-            return mappedCandidates;
-        }
-
-        // --- Strategy 2: exact provider link lookup via SiteMediaId ---
         if (!string.IsNullOrWhiteSpace(observation.SiteMediaId))
         {
-            var exactCandidates = await FindByProviderLinkAsync(
-                observation, observation.SiteMediaId, cancellationToken);
-            candidates.AddRange(exactCandidates);
-        }
-
-        // If we already have a high-confidence exact match, skip fuzzy search.
-        if (candidates.Any(c => c.Score >= HighConfidenceThreshold))
-        {
-            return [.. candidates.OrderByDescending(c => c.Score)];
-        }
-
-        // --- Strategy 3: fuzzy title search against user library entries ---
-        var libraryCandidates = await FindByUserLibraryTitleAsync(
-            observation, cancellationToken);
-        MergeCandidates(candidates, libraryCandidates);
-
-        // --- Strategy 4: fuzzy title search against full catalog ---
-        var catalogCandidates = await FindByCatalogTitleAsync(
-            observation, cancellationToken);
-        MergeCandidates(candidates, catalogCandidates);
-
-        return [.. candidates
-            .Where(c => c.Score >= LowConfidenceThreshold)
-            .OrderByDescending(c => c.Score)
-            .Take(10)];
-    }
-
-    private async Task<List<MediaObservationCandidate>> FindByProviderSeasonMappingAsync(
-        MediaObservation observation,
-        CancellationToken cancellationToken)
-    {
-        var mapping = await _seasonMappingService.FindAsync(
-            observation.SiteIdentifier,
-            observation.ProviderSeriesId,
-            observation.ProviderSeasonId,
-            observation.SeasonNumber,
-            cancellationToken);
-        if (mapping?.MediaTitle is null)
-        {
-            return [];
-        }
-
-        observation.EpisodeOffset = mapping.EpisodeOffset;
-        return
-        [
-            new MediaObservationCandidate
+            var exact = await FindByProviderLinkAsync(observation, observation.SiteMediaId, cancellationToken);
+            if (exact.Count > 0)
             {
-                Id = Guid.NewGuid(),
-                MediaObservationId = observation.Id,
-                CandidateSource = MediaObservationCandidateSources.ProviderSeasonMappingExact,
-                MediaTitleId = mapping.MediaTitleId,
-                Title = mapping.MediaTitle.CanonicalTitle,
-                MediaKind = mapping.MediaTitle.MediaKind,
-                Score = 1m,
-                Explanation = $"Established provider season mapping: {mapping.Provider}/{mapping.ProviderSeriesId}",
-                CreatedAt = DateTimeOffset.UtcNow
+                return exact;
             }
-        ];
+        }
+
+        return await FindByCatalogTitleAsync(observation, coordinates, cancellationToken);
     }
+
+    private static List<MediaObservationCandidate> OrderCandidates(IEnumerable<MediaObservationCandidate> candidates) =>
+        candidates.Where(candidate => candidate.Score >= LowConfidenceThreshold)
+            .OrderByDescending(candidate => candidate.Score).Take(10).ToList();
 
     private async Task<List<MediaObservationCandidate>> FindByProviderLinkAsync(
         MediaObservation observation,
@@ -386,6 +469,7 @@ public class MediaObservationMatchingService(
 
     private async Task<List<MediaObservationCandidate>> FindByUserLibraryTitleAsync(
         MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         CancellationToken cancellationToken)
     {
         var queryTitles = GetCandidateQueryTitles(observation);
@@ -419,6 +503,7 @@ public class MediaObservationMatchingService(
 
         return await ScoreTitleCandidatesAsync(
             observation,
+            coordinates,
             libraryTitles,
             queryTitles,
             MediaObservationCandidateSources.LibraryTitleSearch,
@@ -427,6 +512,7 @@ public class MediaObservationMatchingService(
 
     private async Task<List<MediaObservationCandidate>> FindByCatalogTitleAsync(
         MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         CancellationToken cancellationToken)
     {
         var queryTitles = GetCandidateQueryTitles(observation);
@@ -484,6 +570,7 @@ public class MediaObservationMatchingService(
         }
         return await ScoreTitleCandidatesAsync(
             observation,
+            coordinates,
             distinctCandidates,
             queryTitles,
             MediaObservationCandidateSources.CatalogTitleSearch,
@@ -492,6 +579,7 @@ public class MediaObservationMatchingService(
 
     private async Task<List<MediaObservationCandidate>> ScoreTitleCandidatesAsync(
         MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         IEnumerable<MediaTitle> titles,
         IReadOnlyList<string> queryTitles,
         string source,
@@ -503,9 +591,8 @@ public class MediaObservationMatchingService(
             .Select(NormalizeTitle)
             .Where(query => !string.IsNullOrWhiteSpace(query))
             .ToList();
-        var catalogEvidence = ReadEpisodeEvidence(observation);
-        var hasProviderSeasonContext = !string.IsNullOrWhiteSpace(observation.ProviderSeasonId)
-            || observation.SeasonNumber is > 0;
+        var catalogEvidence = ReadEpisodeEvidence(observation, coordinates);
+        var hasProviderSeasonContext = coordinates.SeasonId is not null || coordinates.SeasonNumber is > 0;
         var normalizedObservedTitle = NormalizeTitle(observation.ObservedTitle);
         var normalizedSeriesTitle = NormalizeTitle(observation.SeriesTitle ?? string.Empty);
         var hasSeasonSpecificObservedTitle = hasProviderSeasonContext
@@ -519,6 +606,7 @@ public class MediaObservationMatchingService(
                 hasProviderSeasonContext,
                 hasSeasonSpecificObservedTitle,
                 observation,
+                coordinates,
                 normalizedObservedTitle,
                 normalizedSeriesTitle,
                 title,
@@ -631,7 +719,7 @@ public class MediaObservationMatchingService(
         return titles;
     }
 
-    private static CatalogEvidence? ReadEpisodeEvidence(MediaObservation observation)
+    private static CatalogEvidence? ReadEpisodeEvidence(MediaObservation observation, ProviderEpisodeCoordinates coordinates)
     {
         if (!string.Equals(
                 observation.SiteIdentifier,
@@ -645,24 +733,25 @@ public class MediaObservationMatchingService(
             .Where(episode => episode.EpisodeNumber > 0)
             .Select(episode => episode.EpisodeNumber)
             .ToList();
-        if (observation.EpisodeNumber is > 0)
+        if (coordinates.EpisodeNumber is > 0)
         {
-            episodeNumbers.Add(observation.EpisodeNumber.Value);
+            episodeNumbers.Add(coordinates.EpisodeNumber.Value);
         }
 
         var lowestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Min() : (int?)null;
         var highestEpisodeNumber = episodeNumbers.Count > 0 ? episodeNumbers.Max() : (int?)null;
-        return highestEpisodeNumber > 0 || observation.SeasonNumber is > 0
-            ? new CatalogEvidence(observation.SeasonNumber, lowestEpisodeNumber, highestEpisodeNumber)
+        return highestEpisodeNumber > 0 || coordinates.SeasonNumber is > 0
+            ? new CatalogEvidence(coordinates.SeasonNumber, lowestEpisodeNumber, highestEpisodeNumber)
             : null;
     }
 
     private async Task<int?> InferCumulativeEpisodeOffsetAsync(
         MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         Guid matchedMediaTitleId,
         CancellationToken cancellationToken)
     {
-        var evidence = ReadEpisodeEvidence(observation);
+        var evidence = ReadEpisodeEvidence(observation, coordinates);
         if (evidence?.LowestEpisodeNumber is not > 0
             || evidence.HighestEpisodeNumber is not > 0)
         {
@@ -1004,6 +1093,7 @@ public class MediaObservationMatchingService(
         bool hasProviderSeasonContext,
         bool hasSeasonSpecificObservedTitle,
         MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title,
@@ -1011,29 +1101,30 @@ public class MediaObservationMatchingService(
         => hasProviderSeasonContext
             && ((hasSeasonSpecificObservedTitle && IsExactTitleMatch(normalizedObservedTitle, title))
                 || IsFirstSeasonBaseTitleMatch(
-                    observation,
+                    coordinates,
                     normalizedObservedTitle,
                     normalizedSeriesTitle,
                     title)
                 || IsExplicitNumberedSeasonAliasMatch(
-                    observation,
+                    coordinates,
                     normalizedObservedTitle,
                     normalizedSeriesTitle,
                     title)
                 || IsEpisodeRangeSegmentMatch(
                     observation,
+                    coordinates,
                     normalizedObservedTitle,
                     normalizedSeriesTitle,
                     title,
                     catalogEvidence));
 
     private static bool IsFirstSeasonBaseTitleMatch(
-        MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title)
     {
-        if (observation.SeasonNumber != 1
+        if (coordinates.SeasonNumber != 1
             || !IsTvAnime(title)
             || string.IsNullOrWhiteSpace(normalizedSeriesTitle)
             || !IsExactTitleMatch(normalizedSeriesTitle, title))
@@ -1050,19 +1141,19 @@ public class MediaObservationMatchingService(
             .Contains("season", StringComparer.Ordinal);
 
     private static bool IsExplicitNumberedSeasonAliasMatch(
-        MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title)
     {
-        if (observation.SeasonNumber is not > 1
+        if (coordinates.SeasonNumber is not > 1
             || !IsTvAnime(title)
             || string.IsNullOrWhiteSpace(normalizedSeriesTitle))
         {
             return false;
         }
 
-        var seasonNumber = observation.SeasonNumber.Value;
+        var seasonNumber = coordinates.SeasonNumber.Value;
         var providerSeasonTitle = $"{normalizedSeriesTitle} season {seasonNumber}";
         if (!string.Equals(normalizedObservedTitle, providerSeasonTitle, StringComparison.Ordinal))
         {
@@ -1075,12 +1166,13 @@ public class MediaObservationMatchingService(
 
     private static bool IsEpisodeRangeSegmentMatch(
         MediaObservation observation,
+        ProviderEpisodeCoordinates coordinates,
         string normalizedObservedTitle,
         string normalizedSeriesTitle,
         MediaTitle title,
         CatalogEvidence? catalogEvidence)
     {
-        if (string.IsNullOrWhiteSpace(observation.ProviderSeasonId)
+        if (coordinates.SeasonId is null
             || string.IsNullOrWhiteSpace(observation.SeasonTitle)
             || catalogEvidence?.LowestEpisodeNumber is not > 0
             || catalogEvidence.HighestEpisodeNumber is not > 0
@@ -1172,7 +1264,10 @@ public class MediaObservationMatchingService(
         MediaObservation observation,
         MediaTitle title)
         => !MediaObservationSiteIdentifiers.IsStreamingService(observation.SiteIdentifier)
-            || !(string.Equals(title.MediaKind, MediaKinds.Manga, StringComparison.OrdinalIgnoreCase)
+            || IsStreamingCompatibleTitle(title);
+
+    internal static bool IsStreamingCompatibleTitle(MediaTitle title)
+        => !(string.Equals(title.MediaKind, MediaKinds.Manga, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(title.Format, MediaFormats.Manga, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(title.Format, MediaFormats.Novel, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(title.Format, MediaFormats.OneShot, StringComparison.OrdinalIgnoreCase)
@@ -1221,40 +1316,28 @@ public class MediaObservationMatchingService(
         return string.Join(' ', chars.Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
-    private static void MergeCandidates(
-        List<MediaObservationCandidate> existing,
-        List<MediaObservationCandidate> incoming)
-    {
-        var existingTitleIds = existing
-            .Select(c => c.MediaTitleId)
-            .ToHashSet();
-
-        foreach (var candidate in incoming)
-        {
-            if (!existingTitleIds.Contains(candidate.MediaTitleId))
-            {
-                existing.Add(candidate);
-                existingTitleIds.Add(candidate.MediaTitleId);
-            }
-        }
-    }
+    private static IEnumerable<MediaObservationCandidate> MergeCandidates(
+        IEnumerable<MediaObservationCandidate> independent, IEnumerable<MediaObservationCandidate> library)
+        => independent.Concat(library).GroupBy(candidate => candidate.MediaTitleId)
+            .Select(group => group.OrderByDescending(candidate => candidate.Score).First());
 
     private static void ApplyMatchDecision(
         MediaObservation observation,
-        List<MediaObservationCandidate> candidates)
+        List<MediaObservationCandidate> candidates, bool canAutoMatch)
     {
         if (candidates.Count == 0)
         {
             observation.MatchStatus = MediaObservationStatuses.NoMatch;
             observation.ResolutionNotes = "No candidates found.";
             observation.MediaTitleId = null;
+            observation.MediaTitle = null;
             observation.AcceptedCandidateId = null;
             return;
         }
 
         var top = candidates[0];
 
-        if (top.Score >= HighConfidenceThreshold)
+        if (canAutoMatch && top.Score >= HighConfidenceThreshold)
         {
             // High-confidence single match: auto-accept.
             top.IsAccepted = true;
@@ -1277,6 +1360,7 @@ public class MediaObservationMatchingService(
         }
 
         observation.MediaTitleId = null;
+        observation.MediaTitle = null;
         observation.AcceptedCandidateId = null;
     }
 

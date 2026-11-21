@@ -91,24 +91,22 @@ describe('getContinueLinkActions', () => {
     }
   });
 
-  it('suppresses generated Stremio episodes after completion or a conflict', () => {
-    for (const outcome of ['completed', 'conflict'] as const) {
-      const actions = getContinueLinkActions(
-        { status: 'loaded', value: { outcome, episodeNumber: 4 } },
-        [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778', kind: 'series', displayName: 'Stremio' }],
-        [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778/tt0108778:1:4', kind: 'episode', displayName: 'Stremio' }],
-        'stremio',
-        'Title',
-        'series',
-      );
+  it('suppresses generated Stremio episodes after completion', () => {
+    const actions = getContinueLinkActions(
+      { status: 'loaded', value: { outcome: 'completed', episodeNumber: 4 } },
+      [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778', kind: 'series', displayName: 'Stremio' }],
+      [{ serviceId: 'stremio', url: 'stremio:///detail/series/tt0108778/tt0108778:1:4', kind: 'episode', displayName: 'Stremio' }],
+      'stremio',
+      'Title',
+      'series',
+    );
 
-      expect(actions).toEqual([{
-        serviceId: 'stremio',
-        url: 'stremio:///detail/series/tt0108778',
-        label: 'Open on Stremio',
-        kind: 'series',
-      }]);
-    }
+    expect(actions).toEqual([{
+      serviceId: 'stremio',
+      url: 'stremio:///detail/series/tt0108778',
+      label: 'Open on Stremio',
+      kind: 'series',
+    }]);
   });
 
   it('prefers a saved series service over another services episode link', () => {
@@ -123,24 +121,6 @@ describe('getContinueLinkActions', () => {
 
     expect(actions.map(action => action.serviceId)).toEqual(['netflix', 'crunchyroll']);
     expect(actions[0]?.kind).toBe('series');
-  });
-
-  it('does not expose episode destinations when matching reports a conflict', () => {
-    const actions = getContinueLinkActions(
-      { status: 'loaded', value: { outcome: 'conflict', episodeNumber: 4 } },
-      [{ serviceId: 'netflix', url: 'https://www.netflix.com/title/123', kind: 'series', displayName: 'Netflix' }],
-      [{ serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/EP123', kind: 'episode', displayName: 'Crunchyroll' }],
-      'crunchyroll',
-      'Title',
-      'anime',
-    );
-
-    expect(actions).toEqual([{
-      serviceId: 'netflix',
-      url: 'https://www.netflix.com/title/123',
-      label: 'Open on Netflix',
-      kind: 'series',
-    }]);
   });
 
   it('retains the server-resolved direct destination', () => {

@@ -135,8 +135,8 @@ public static class MediaObservationStatuses
 
 public static class MediaObservationCandidateSources
 {
-    /// <summary>Exact lookup through a previously catalogued provider episode identity.</summary>
-    public const string ProviderEpisodeIdentityExact = "provider_episode_identity_exact";
+    /// <summary>Exact lookup through an established direct episode mapping.</summary>
+    public const string ProviderEpisodeMappingExact = "provider_episode_mapping_exact";
 
     /// <summary>Exact lookup through an established provider series/season mapping.</summary>
     public const string ProviderSeasonMappingExact = "provider_season_mapping_exact";
@@ -153,7 +153,7 @@ public static class MediaObservationCandidateSources
 
 public static class MediaProviderSeasonMappingSources
 {
-    public const string ProviderEpisodeIdentity = "provider_episode_identity";
+    public const string Automatic = "automatic";
     public const string Manual = "manual";
 }
 

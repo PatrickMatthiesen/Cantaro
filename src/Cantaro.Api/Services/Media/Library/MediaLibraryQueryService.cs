@@ -153,6 +153,13 @@ public class MediaLibraryQueryService(ApplicationDbContext dbContext)
                 episode.AvailableSubtitleLanguageCodes,
                 episode.AvailableAudioLanguageCodes))
             .ToListAsync(cancellationToken);
+        if (titleIds.Length > 0)
+        {
+            var mapped = await MediaProviderSeasonMappingService.GetMappedEpisodesAsync(_dbContext, titleIds, cancellationToken);
+            episodeAvailability.AddRange(mapped.Select(item =>
+                new EpisodeAvailabilityProjection(item.MediaTitleId, item.EpisodeNumber ?? 1,
+                    item.Episode.AvailableSubtitleLanguageCodes, item.Episode.AvailableAudioLanguageCodes)));
+        }
         var availableCounts = ResolveAvailableReleasedCounts(episodeAvailability, preferredTrack);
 
         return new MediaLibraryPageDto

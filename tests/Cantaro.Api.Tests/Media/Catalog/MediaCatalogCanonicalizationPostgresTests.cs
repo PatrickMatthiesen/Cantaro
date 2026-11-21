@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,6 +27,391 @@ namespace Cantaro.Api.Tests.Media.Catalog;
 [Collection("Media catalog PostgreSQL")]
 public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper output)
 {
+    [PostgresFact]
+    public async Task ProviderEpisodeMigrationRetainsTrustedPlaybackWithSeasonPrecedence()
+    {
+        await using var schema = await SchemaContext.CreateAsync(createTables: false);
+        var db = schema.Db;
+        await db.GetService<IMigrator>().MigrateAsync("20261114093133_RetainCandidateVersionAnchor");
+        var first = CreateSeries("Legacy destination");
+        var second = CreateSeries("Automatic season destination");
+        var movie = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Legacy movie", MediaKind = MediaKinds.Movie,
+            IsCompletionOnly = true, PrimaryProgressDimension = MediaProgressDimensions.CompletionOnly,
+            ReleaseStatusDimension = MediaProgressDimensions.CompletionOnly
+        };
+        db.MediaTitles.AddRange(first, second, movie);
+        await db.SaveChangesAsync();
+        var firstEpisode = Guid.NewGuid();
+        var secondEpisode = Guid.NewGuid();
+        var movieEpisode = Guid.NewGuid();
+        var uncovered = Guid.NewGuid();
+        var divergent = Guid.NewGuid();
+        var siblingCovered = Guid.NewGuid();
+        var localizedSibling = Guid.NewGuid();
+        var standalone = Guid.NewGuid();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "MediaEpisodes" ("Id", "MediaTitleId", "EpisodeNumber",
+                "AvailableSubtitleLanguageCodes", "AvailableAudioLanguageCodes")
+            VALUES ({firstEpisode}, {first.Id}, 2, ARRAY[]::text[], ARRAY[]::text[]),
+                   ({secondEpisode}, {second.Id}, 3, ARRAY[]::text[], ARRAY[]::text[]),
+                   ({movieEpisode}, {movie.Id}, 1, ARRAY[]::text[], ARRAY[]::text[]);
+            INSERT INTO "MediaEpisodeProviderContents" ("Id", "MediaEpisodeId", "Provider", "ProviderContentKey",
+                "ProviderSeriesId", "ProviderSeasonId", "ProviderSeasonNumber", "ProviderEpisodeNumber")
+            VALUES ({uncovered}, {firstEpisode}, 'crunchyroll', 'UNCOVERED', 'SERIES', 'UNCOVERED', 2, 2),
+                   ({divergent}, {firstEpisode}, 'crunchyroll', 'DIVERGENT', 'SERIES', 'COVERED', 1, 1),
+                   ({siblingCovered}, {secondEpisode}, 'crunchyroll', 'SHAREDKEY', 'SERIES', 'COVERED', 1, 3),
+                   ({localizedSibling}, {firstEpisode}, 'crunchyroll', 'SHAREDKEY', null, null, null, null),
+                   ({standalone}, {movieEpisode}, 'crunchyroll', 'MOVIE', 'SERIES', 'COVERED', 1, 2);
+            INSERT INTO "MediaEpisodeProviderIdentities" ("Id", "MediaEpisodeProviderContentId", "Provider",
+                "ProviderEpisodeId", "ProviderUrlPath", "SeenCount", "FirstSeenAt", "LastSeenAt", "IsTrusted", "HasConflict")
+            VALUES ({Guid.NewGuid()}, {uncovered}, 'crunchyroll', 'UNCOVERED', '/watch/UNCOVERED', 1, {now}, {now}, true, false),
+                   ({Guid.NewGuid()}, {divergent}, 'crunchyroll', 'DIVERGENT', '/watch/DIVERGENT', 1, {now}, {now}, true, false),
+                   ({Guid.NewGuid()}, {siblingCovered}, 'crunchyroll', 'SIBLINGBASE', '/watch/SIBLINGBASE', 1, {now}, {now}, true, false),
+                   ({Guid.NewGuid()}, {localizedSibling}, 'crunchyroll', 'LOCALIZED', '/watch/LOCALIZED', 1, {now}, {now}, true, false),
+                   ({Guid.NewGuid()}, {standalone}, 'crunchyroll', 'MOVIE', '/watch/MOVIE', 1, {now}, {now}, true, false);
+            INSERT INTO "MediaProviderSeasonMappings" ("Id", "Provider", "ProviderSeriesId",
+                "ProviderSeasonId", "ProviderSeasonNumber", "MediaTitleId", "EpisodeOffset",
+                "MappingSource", "Confidence", "HasConflict", "FirstSeenAt", "LastVerifiedAt")
+            VALUES ({Guid.NewGuid()}, 'crunchyroll', 'SERIES', 'COVERED', 1, {second.Id}, 0,
+                'provider_episode_identity', 1, false, {now}, {now});
+            """);
+
+        await db.Database.MigrateAsync();
+        var direct = await db.MediaProviderEpisodeMappings.ToDictionaryAsync(row => row.ProviderEpisodeId);
+        Assert.Equal("automatic", direct["UNCOVERED"].MappingSource);
+        Assert.Equal("manual", direct["DIVERGENT"].MappingSource);
+        Assert.DoesNotContain("SIBLINGBASE", direct.Keys);
+        Assert.Equal("manual", direct["LOCALIZED"].MappingSource);
+        Assert.Equal("manual", direct["MOVIE"].MappingSource);
+
+        var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var playback = new MediaEpisodeIdentityService(db, mappings, NullLogger<MediaEpisodeIdentityService>.Instance);
+        var firstCatalog = Assert.IsType<MediaEpisodeCatalogDto>(await playback.GetEpisodeCatalogAsync(first.Id, default));
+        var episodeTwo = Assert.Single(firstCatalog.Episodes, item => item.EpisodeNumber == 2);
+        Assert.Contains(episodeTwo.Destinations, item => item.Url == "https://www.crunchyroll.com/watch/UNCOVERED");
+        Assert.Contains(episodeTwo.Destinations, item => item.Url == "https://www.crunchyroll.com/watch/DIVERGENT");
+        Assert.Contains(episodeTwo.Destinations, item => item.Url == "https://www.crunchyroll.com/watch/LOCALIZED");
+        var secondCatalogBefore = Assert.IsType<MediaEpisodeCatalogDto>(await playback.GetEpisodeCatalogAsync(second.Id, default));
+        Assert.DoesNotContain(secondCatalogBefore.Episodes.SelectMany(item => item.Destinations),
+            item => item.Url == "https://www.crunchyroll.com/watch/LOCALIZED");
+        var movieCatalog = Assert.IsType<MediaEpisodeCatalogDto>(await playback.GetEpisodeCatalogAsync(movie.Id, default));
+        Assert.Equal("https://www.crunchyroll.com/watch/MOVIE", Assert.Single(movieCatalog.StandaloneDestinations).Url);
+
+        Assert.NotNull(await mappings.EstablishAsync("crunchyroll", "SERIES", "UNCOVERED", 2, second.Id, -1,
+            "manual", 1m, default, episodeStart: 2, episodeEnd: 2));
+        var corrected = Assert.IsType<MediaEpisodeCatalogDto>(await playback.GetEpisodeCatalogAsync(second.Id, default));
+        Assert.Equal("https://www.crunchyroll.com/watch/UNCOVERED",
+            Assert.Single(Assert.Single(corrected.Episodes, item => item.EpisodeNumber == 1).Destinations).Url);
+        Assert.DoesNotContain(corrected.Episodes.SelectMany(item => item.Destinations),
+            item => item.Url is "https://www.crunchyroll.com/watch/DIVERGENT" or "https://www.crunchyroll.com/watch/LOCALIZED" or "https://www.crunchyroll.com/watch/MOVIE");
+
+        static MediaTitle CreateSeries(string name) => new()
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = name, MediaKind = MediaKinds.Anime, EpisodeCount = 12,
+            SupportsEpisodeProgress = true, PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+    }
+
+    [PostgresFact]
+    public async Task ProviderEpisodeMigrationBackfillsRawFactsAndPreservesExplicitManualMappings()
+    {
+        await using var schema = await SchemaContext.CreateAsync(createTables: false);
+        var db = schema.Db;
+        await db.GetService<IMigrator>().MigrateAsync("20261114093133_RetainCandidateVersionAnchor");
+        var titleId = Guid.NewGuid();
+        var mangaTitleId = Guid.NewGuid();
+        var episodeId = Guid.NewGuid();
+        var contentId = Guid.NewGuid();
+        var secondEpisodeId = Guid.NewGuid();
+        var secondContentId = Guid.NewGuid();
+        var unscopedContentId = Guid.NewGuid();
+        var manualSeasonMappingId = Guid.NewGuid();
+        var latestAutomaticSeasonMappingId = Guid.NewGuid();
+        var legacyWatchId = Guid.NewGuid();
+        var newestDuplicateWatchId = Guid.NewGuid();
+        var retriedDuplicateWatchId = Guid.NewGuid();
+        var futureDuplicateWatchId = Guid.NewGuid();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var earlier = now.AddDays(-1);
+        var future = now.AddYears(73);
+        var viewer = TestUserFactory.Create(713, "migrated-episode-viewer@example.test");
+        db.Users.Add(viewer);
+        db.MediaTitles.Add(new MediaTitle
+        {
+            Id = titleId, CanonicalTitle = "Legacy title", MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true, PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode, CreatedAt = now, UpdatedAt = now
+        });
+        db.MediaTitles.Add(new MediaTitle
+        {
+            Id = mangaTitleId, CanonicalTitle = "Legacy manga", MediaKind = MediaKinds.Manga,
+            SupportsChapterProgress = true, PrimaryProgressDimension = MediaProgressDimensions.Chapter,
+            ReleaseStatusDimension = MediaProgressDimensions.Chapter, CreatedAt = now, UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "MediaObservations" ("Id", "UserId", "SiteIdentifier", "SiteMediaId", "ObservedTitle",
+                "ObservedUrl", "ObservedAt", "IsCatalogObservation", "MatchStatus", "MatchAttemptCount", "UpdatedAt")
+                VALUES ({legacyWatchId}, {viewer.Id}, 'crunchyroll', 'abc123', 'Pending watch',
+                        'https://www.crunchyroll.com/watch/abc123', {future}, false, 'pending', 0, {earlier}),
+                       ({newestDuplicateWatchId}, {viewer.Id}, 'crunchyroll', ' dup123 ', 'Newer watch',
+                        'https://www.crunchyroll.com/watch/dup123', {now}, false, 'pending', 0, {now}),
+                       ({retriedDuplicateWatchId}, {viewer.Id}, 'crunchyroll', 'DUP123', 'Older retried watch',
+                        'https://www.crunchyroll.com/watch/DUP123', {earlier}, false, 'pending', 1, {now.AddMinutes(3)}),
+                       ({futureDuplicateWatchId}, {viewer.Id}, 'crunchyroll', 'dup123', 'Watch with a future client clock',
+                        'https://www.crunchyroll.com/watch/dup123', {future}, false, 'pending', 0, {earlier}),
+                       ({Guid.NewGuid()}, {viewer.Id}, 'crunchyroll', 'catalog:series:SEASON1', 'Catalog observation',
+                        'https://www.crunchyroll.com/series/GSERIES1', {earlier}, true, 'pending', 0, {now});
+            INSERT INTO "MediaEpisodes" ("Id", "MediaTitleId", "EpisodeNumber", "Title",
+                "AvailableSubtitleLanguageCodes", "AvailableAudioLanguageCodes")
+                VALUES ({episodeId}, {titleId}, 1, 'SIMKL title', ARRAY['en','fr'], ARRAY['de']),
+                       ({secondEpisodeId}, {titleId}, 2, 'Crunchyroll title', ARRAY['en'], ARRAY['de']);
+            INSERT INTO "MediaEpisodeProviderContents" ("Id", "MediaEpisodeId", "Provider",
+                "ProviderContentKey", "ProviderSeriesId", "ProviderSeasonId", "ProviderSeasonNumber", "ProviderEpisodeNumber")
+                VALUES ({contentId}, {episodeId}, 'crunchyroll', ' ge00340376 ', 'gseries1', 'season1', 1, 1),
+                       ({Guid.NewGuid()}, {episodeId}, 'simkl', 'simkl-content', 'simkl-series', null, 1, 1),
+                       ({secondContentId}, {secondEpisodeId}, 'crunchyroll', 'SECOND', 'GSERIES1', 'SEASON3', 3, 2),
+                       ({unscopedContentId}, {secondEpisodeId}, 'crunchyroll', 'UNSCOPED', null, null, null, 2);
+            INSERT INTO "MediaEpisodeProviderIdentities" ("Id", "MediaEpisodeProviderContentId", "Provider",
+                "ProviderEpisodeId", "ProviderUrlPath", "AudioLocale", "ReleaseTrack", "SeenCount", "FirstSeenAt", "LastSeenAt",
+                "IsTrusted", "HasConflict")
+                VALUES ({Guid.NewGuid()}, {contentId}, 'crunchyroll', 'GE00340376ENUS', '/watch/GE00340376ENUS', 'en-US', null, 7,
+                        {now}, {now}, true, false),
+                       ({Guid.NewGuid()}, {contentId}, 'crunchyroll', 'GE00340376JAJP', '/watch/GE00340376JAJP', 'ja-JP', 'sub:fr', 2,
+                        {earlier}, {future}, true, false),
+                       ({Guid.NewGuid()}, {secondContentId}, 'crunchyroll', 'SECOND', '/watch/SECOND', null, 'dub:es', 1,
+                        {future}, {future}, true, false),
+                       ({Guid.NewGuid()}, {unscopedContentId}, 'crunchyroll', 'UNSCOPED', '/watch/UNSCOPED', null, 'sub:en', 1,
+                        {earlier}, {now}, false, false),
+                       ({Guid.NewGuid()}, {unscopedContentId}, 'crunchyroll', 'CONFIRMED', '/watch/CONFIRMED', null, 'dub:en', 1,
+                        {earlier}, {future}, true, false),
+                       ({Guid.NewGuid()}, {contentId}, 'crunchyroll', 'AMBIGUOUS', '/watch/AMBIGUOUS', null, null, 1,
+                        {now}, {now}, true, false),
+                       ({Guid.NewGuid()}, {secondContentId}, 'crunchyroll', 'ambiguous', '/watch/AMBIGUOUS', null, null, 1,
+                        {now}, {now}, true, false),
+                       ({Guid.NewGuid()}, {secondContentId}, 'crunchyroll', 'DISPUTED', '/watch/DISPUTED', null, null, 1,
+                        {now}, {now}, false, true),
+                       ({Guid.NewGuid()}, {contentId}, 'crunchyroll', 'UNSAFE', 'https://example.com/watch/UNSAFE', null, null, 1,
+                        {now}, {now}, false, false);
+            INSERT INTO "MediaProviderSeasonMappings" ("Id", "Provider", "ProviderSeriesId",
+                "ProviderSeasonId", "ProviderSeasonNumber", "MediaTitleId", "EpisodeOffset",
+                "MappingSource", "Confidence", "HasConflict", "FirstSeenAt", "LastVerifiedAt")
+                VALUES ({Guid.NewGuid()}, 'crunchyroll', 'GSERIES1', 'SEASON2', 2, {titleId}, 0,
+                        'provider_episode_identity', 1, true, {now}, {now}),
+                       ({manualSeasonMappingId}, 'crunchyroll', 'GSERIES1', 'SEASON1', 1, {titleId}, 0,
+                        'manual', 1, false, {earlier}, {earlier}),
+                       ({Guid.NewGuid()}, ' Crunchyroll ', 'GSERIES1', ' season1 ', 1, {mangaTitleId}, 0,
+                        'manual', 1, false, {now}, {now}),
+                       ({Guid.NewGuid()}, ' Crunchyroll ', ' gseries1 ', ' season1 ', 1, {titleId}, 1,
+                        'provider_episode_identity', 1, false, {now}, {now}),
+                       ({Guid.NewGuid()}, 'crunchyroll', ' gseries1 ', ' season3 ', 3, {titleId}, 0,
+                        'provider_episode_identity', 1, false, {earlier}, {earlier}),
+                       ({latestAutomaticSeasonMappingId}, 'crunchyroll', 'GSERIES1', 'SEASON3', 3, {titleId}, 0,
+                        'provider_episode_identity', 1, false, {now}, {now}),
+                       ({Guid.NewGuid()}, 'crunchyroll', 'GSERIES1', 'SEASON4', 4, {titleId}, 0,
+                        'manual', 1, false, {earlier}, {earlier}),
+                       ({Guid.NewGuid()}, 'crunchyroll', 'GSERIES1', ' season4 ', 4, {titleId}, 1,
+                        'manual', 1, false, {now}, {now}),
+                       ({Guid.NewGuid()}, 'crunchyroll', 'GSERIES1', 'SEASON5', 5, {titleId}, 0,
+                        'provider_episode_identity', 1, false, {earlier}, {earlier}),
+                       ({Guid.NewGuid()}, 'crunchyroll', 'GSERIES1', ' season5 ', 5, {titleId}, 1,
+                        'provider_episode_identity', 1, false, {now}, {now});
+            """);
+
+        await db.Database.MigrateAsync();
+        var episodes = await db.MediaProviderEpisodes.ToDictionaryAsync(row => row.ProviderEpisodeId);
+        Assert.Equal(5, episodes.Count);
+        Assert.Contains("UNSCOPED", episodes.Keys);
+        Assert.DoesNotContain("AMBIGUOUS", episodes.Keys);
+        var raw = episodes["GE00340376ENUS"];
+        Assert.Equal("GE00340376", raw.ContentKey);
+        Assert.Equal(7, raw.SeenCount);
+        Assert.Equal("GSERIES1", raw.ProviderSeriesId);
+        Assert.Equal("SEASON1", raw.ProviderSeasonId);
+        Assert.Equal(1, raw.ProviderEpisodeNumber);
+        Assert.Null(raw.EpisodeTitle);
+        Assert.Empty(raw.AvailableSubtitleLanguageCodes);
+        Assert.Equal(["en"], raw.AvailableAudioLanguageCodes);
+        Assert.Equal(now, raw.FirstSeenAt);
+        Assert.Equal(now, raw.LastSeenAt);
+        Assert.Null(episodes["GE00340376JAJP"].EpisodeTitle);
+        Assert.Equal(["fr"], episodes["GE00340376JAJP"].AvailableSubtitleLanguageCodes);
+        Assert.Empty(episodes["GE00340376JAJP"].AvailableAudioLanguageCodes);
+        Assert.Equal(earlier, episodes["GE00340376JAJP"].FirstSeenAt);
+        Assert.InRange(episodes["GE00340376JAJP"].LastSeenAt, now, DateTimeOffset.UtcNow);
+        Assert.Equal("Crunchyroll title", episodes["SECOND"].EpisodeTitle);
+        Assert.Equal(["es"], episodes["SECOND"].AvailableAudioLanguageCodes);
+        Assert.InRange(episodes["SECOND"].FirstSeenAt, now, DateTimeOffset.UtcNow);
+        Assert.Equal(episodes["SECOND"].FirstSeenAt, episodes["SECOND"].LastSeenAt);
+        Assert.DoesNotContain("DISPUTED", episodes.Keys);
+        Assert.Equal("simkl-content", (await db.MediaEpisodeProviderContents.SingleAsync()).ProviderContentKey);
+        Assert.Equal("SIMKL title", (await db.MediaEpisodes.FindAsync(episodeId))!.Title);
+        var directMappings = await db.MediaProviderEpisodeMappings.ToDictionaryAsync(row => row.ProviderEpisodeId);
+        var confirmed = Assert.Single(directMappings).Value;
+        Assert.Equal("CONFIRMED", confirmed.ProviderEpisodeId);
+        Assert.Equal(titleId, confirmed.MediaTitleId);
+        Assert.Equal(2, confirmed.CanonicalEpisodeNumber);
+        Assert.Equal(MediaProviderSeasonMappingSources.Automatic, confirmed.MappingSource);
+        Assert.Equal(episodes["CONFIRMED"].LastSeenAt, confirmed.LastObservedAt);
+        var mappings = await db.MediaProviderSeasonMappings.OrderBy(row => row.ProviderSeasonKey).ToListAsync();
+        Assert.Collection(mappings,
+            row =>
+            {
+                Assert.Equal(manualSeasonMappingId, row.Id);
+                Assert.Equal("id:SEASON1", row.ProviderSeasonKey);
+                Assert.Equal("manual", row.MappingSource);
+                Assert.Null(row.LastObservedAt);
+            },
+            row =>
+            {
+                Assert.Equal(latestAutomaticSeasonMappingId, row.Id);
+                Assert.Equal("GSERIES1", row.ProviderSeriesId);
+                Assert.Equal("SEASON3", row.ProviderSeasonId);
+                Assert.Equal("id:SEASON3", row.ProviderSeasonKey);
+                Assert.Equal("automatic", row.MappingSource);
+                Assert.Equal(now, row.LastVerifiedAt);
+                Assert.Equal(row.LastVerifiedAt, row.LastObservedAt);
+            });
+        var service = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        Assert.Null(await service.FindAsync("crunchyroll", "GSERIES1", "SEASON2", 2, default));
+        Assert.Null(await service.FindAsync("crunchyroll", "GSERIES1", "SEASON4", 4, default));
+        Assert.Null(await service.FindAsync("crunchyroll", "GSERIES1", "SEASON5", 5, default));
+        var published = await MediaProviderSeasonMappingService.GetMappedEpisodesAsync(db, [titleId], default);
+        Assert.DoesNotContain(published, row => row.Episode.ProviderUrlPath is "/watch/DISPUTED" or "/watch/AMBIGUOUS" or "/watch/UNSCOPED");
+
+        db.MediaLibraryEntries.Add(new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(), UserId = viewer.Id, MediaTitleId = titleId,
+            Status = MediaLibraryStatuses.Current, ProgressEpisodes = 0
+        });
+        await db.SaveChangesAsync();
+        var playback = new MediaEpisodeIdentityService(db, service, NullLogger<MediaEpisodeIdentityService>.Instance);
+        const string migratedUrl = "https://www.crunchyroll.com/watch/GE00340376JAJP";
+        var catalog = await playback.GetEpisodeCatalogAsync(titleId, default);
+        var firstEpisode = Assert.Single(Assert.IsType<MediaEpisodeCatalogDto>(catalog).Episodes, row => row.EpisodeNumber == 1);
+        Assert.Contains(firstEpisode.Destinations, destination => destination.Url == migratedUrl);
+        Assert.DoesNotContain(firstEpisode.Destinations, destination => destination.Url == "https://www.crunchyroll.com/watch/AMBIGUOUS");
+        var secondEpisode = Assert.Single(catalog!.Episodes, row => row.EpisodeNumber == 2);
+        Assert.DoesNotContain(secondEpisode.Destinations, destination => destination.Url == "https://www.crunchyroll.com/watch/UNSCOPED");
+        Assert.Contains(secondEpisode.Destinations, destination => destination.Url == "https://www.crunchyroll.com/watch/CONFIRMED");
+        var next = Assert.IsType<MediaContinueWatchingDto>(await playback.ResolveContinueWatchingAsync(viewer.Id, titleId, default));
+        Assert.Equal("direct", next.Outcome);
+        Assert.Equal(1, next.EpisodeNumber);
+        Assert.Equal(migratedUrl, next.Url);
+
+        var legacyWatch = await db.MediaObservations.AsNoTracking().SingleAsync(row => row.Id == legacyWatchId);
+        Assert.Equal(earlier, legacyWatch.ObservedAt);
+        var controller = CreateObservationsController(db, new MediaProviderRegistry([]), viewer.Id, viewer.Email!);
+        var currentReportAt = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var submission = await controller.Submit(new SubmitMediaObservationRequest
+        {
+            SiteIdentifier = "crunchyroll", SiteMediaId = "ABC123", ObservedTitle = "Updated pending watch",
+            ObservedUrl = "https://www.crunchyroll.com/watch/ABC123", EpisodeNumber = 1, ObservedAt = currentReportAt
+        }, default);
+        var response = Assert.IsType<SubmitMediaObservationResponse>(Assert.IsType<OkObjectResult>(submission.Result).Value);
+        Assert.True(response.WasDeduplicated);
+        Assert.Equal(legacyWatchId.ToString(), response.ObservationId);
+        var observations = await db.MediaObservations.AsNoTracking().Where(row => row.UserId == viewer.Id)
+            .ToDictionaryAsync(row => row.SiteMediaId!);
+        Assert.Equal(3, observations.Count);
+        Assert.Equal(legacyWatchId, observations["ABC123"].Id);
+        Assert.Equal("Updated pending watch", observations["ABC123"].ObservedTitle);
+        Assert.Equal(currentReportAt, observations["ABC123"].ObservedAt);
+        Assert.Equal(newestDuplicateWatchId, observations["DUP123"].Id);
+        Assert.Equal(now, observations["DUP123"].ObservedAt);
+        Assert.DoesNotContain(observations.Values, row => row.Id == retriedDuplicateWatchId || row.Id == futureDuplicateWatchId);
+        Assert.True(observations["catalog:series:SEASON1"].IsCatalogObservation);
+        Assert.Equal(earlier, observations["catalog:series:SEASON1"].ObservedAt);
+        Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+
+        var replacement = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Replacement series", MediaKind = MediaKinds.Anime,
+            EpisodeCount = 12, SupportsEpisodeProgress = true, PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        db.MediaTitles.Add(replacement);
+        await db.SaveChangesAsync();
+        var catalogController = new MediaCatalogObservationsController(db, CreateUserManager(db),
+            new MediaObservationMatchingService(db, service, new MediaRelationGraphRefreshQueue(),
+                NullLogger<MediaObservationMatchingService>.Instance),
+            playback, NullLogger<MediaCatalogObservationsController>.Instance)
+        {
+            ControllerContext = controller.ControllerContext
+        };
+
+        await SubmitCatalogAsync(earlier, titleId, now);
+        var newerReportAt = now.AddTicks(TimeSpan.TicksPerMicrosecond);
+        await SubmitCatalogAsync(newerReportAt, replacement.Id, newerReportAt);
+
+        async Task SubmitCatalogAsync(DateTimeOffset observedAt, Guid expectedTitleId, DateTimeOffset expectedEvidenceAt)
+        {
+            var result = await catalogController.Submit(new SubmitMediaCatalogObservationRequest
+            {
+                Provider = "crunchyroll", ProviderSeriesId = "GSERIES1", ProviderSeasonId = "SEASON3", SeasonNumber = 3,
+                SeriesUrl = "https://www.crunchyroll.com/series/GSERIES1", SeriesTitle = replacement.CanonicalTitle,
+                ObservedAt = observedAt,
+                Episodes = [new()
+                {
+                    ProviderEpisodeId = "SEASONTHREE", EpisodeNumber = 2,
+                    ProviderUrl = "https://www.crunchyroll.com/watch/SEASONTHREE"
+                }]
+            }, default);
+            var catalogResponse = Assert.IsType<SubmitMediaCatalogObservationResponse>(Assert.IsType<OkObjectResult>(result.Result).Value);
+            Assert.Equal(expectedTitleId.ToString(), catalogResponse.MatchedMediaTitleId);
+            var mapping = await db.MediaProviderSeasonMappings.AsNoTracking()
+                .SingleAsync(row => row.Id == latestAutomaticSeasonMappingId);
+            Assert.Equal(expectedTitleId, mapping.MediaTitleId);
+            Assert.Equal(expectedEvidenceAt, mapping.LastObservedAt);
+        }
+    }
+
+    [PostgresFact]
+    public async Task GetMappedEpisodes_ResolvesSeasonOffsetAndSeriesLessVariantOnPostgres()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        var db = schema.Db;
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Mapped title", MediaKind = MediaKinds.Anime,
+            SupportsEpisodeProgress = true,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        db.MediaTitles.Add(title);
+        db.MediaProviderEpisodes.AddRange(
+            new MediaProviderEpisode
+            {
+                Provider = "crunchyroll", ProviderEpisodeId = "GE00340376JAJP", ProviderUrlPath = "/watch/GE00340376JAJP",
+                ProviderSeriesId = "SERIES", ProviderSeasonNumber = 2, ProviderEpisodeNumber = 13,
+                ContentKey = "GE00340376", SeenCount = 1
+            },
+            new MediaProviderEpisode
+            {
+                Provider = "crunchyroll", ProviderEpisodeId = "GE00340376ENUS", ProviderUrlPath = "/watch/GE00340376ENUS",
+                ContentKey = "GE00340376", SeenCount = 1
+            });
+        await db.SaveChangesAsync();
+        var service = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        await service.EstablishAsync("crunchyroll", "SERIES", null, 2, title.Id, -12, "automatic", 1m, default);
+
+        var mapped = await MediaProviderSeasonMappingService.GetMappedEpisodesAsync(db, [title.Id], default);
+        Assert.Equal(["GE00340376ENUS", "GE00340376JAJP"], mapped.Select(row => row.Episode.ProviderEpisodeId).Order());
+        Assert.All(mapped, row => Assert.Equal(1, row.EpisodeNumber));
+    }
+
+    [PostgresFact]
+    public async Task ProgressRevalidatesProviderMappingAfterConcurrentEdit()
+    {
+        await using var schema = await SchemaContext.CreateAsync();
+        await using var editor = new ApplicationDbContext(schema.Options);
+        await MediaEpisodeIdentityRemappingPolicyTests.AssertProgressRevalidatesAsync(schema.Db, editor);
+    }
+
     [PostgresFact]
     public async Task CanonicalizeAsync_RetriesSummaryFillWhenDetailsChangeAfterPreload()
     {
@@ -274,7 +660,7 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
     {
         await using var schema = await SchemaContext.CreateAsync();
         const int userId = 47813;
-        const string providerId = "anilist";
+        const string providerId = "simkl";
         const string providerMediaId = "details-discovery-race";
         const string titleName = "Details discovered during identity race";
         schema.Db.Users.Add(TestUserFactory.Create(userId, "details-discovery-race@example.test"));
@@ -283,7 +669,7 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
         {
             ProviderId = providerId,
             ProviderMediaId = providerMediaId,
-            ExternalUrl = "https://anilist.co/anime/12345",
+            ExternalUrl = "https://simkl.com/anime/12345",
             Title = titleName,
             MediaKind = MediaKinds.Anime,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
@@ -345,7 +731,7 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
         Assert.Equal(titleName, (await schema.Db.MediaTitles.AsNoTracking().SingleAsync()).CanonicalTitle);
         Assert.Equal(1, await schema.Db.MediaTitles.CountAsync());
         Assert.Equal(1, await schema.Db.MediaProviderLinks.CountAsync());
-        Assert.Equal("https://anilist.co/anime/12345", canonicalLink.ExternalUrl);
+        Assert.Equal("https://simkl.com/anime/12345", canonicalLink.ExternalUrl);
         Assert.Equal("fresh", response.AvailabilityStatus);
         Assert.NotNull(response.AvailabilityLastVerifiedAt);
         Assert.Equal("https://www.crunchyroll.com/series/example",
@@ -605,9 +991,10 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
             NullLogger<MediaObservationMatchingService>.Instance);
         var eventHub = new MediaLibraryEventHub();
         var operationProcessor = new MediaProviderOperationProcessor(
-            db, new MediaProviderRegistry([]), NullLogger<MediaProviderOperationProcessor>.Instance);
+            db, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
         var progressService = new MediaObservationProgressService(
-            db, operationProcessor, eventHub, NullLogger<MediaObservationProgressService>.Instance);
+            db, operationProcessor, eventHub, NullLogger<MediaObservationProgressService>.Instance,
+            seasonMappingService, matchingService);
         var episodeIdentityService = new MediaEpisodeIdentityService(
             db, seasonMappingService, NullLogger<MediaEpisodeIdentityService>.Instance);
         var controller = new MediaObservationsController(
@@ -622,7 +1009,8 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
             NullLogger<MediaObservationsController>.Instance,
             new MediaCatalogCanonicalizationService(
                 (DbContextOptions<ApplicationDbContext>)db.GetService<IDbContextOptions>(),
-                NullLogger<MediaCatalogCanonicalizationService>.Instance));
+                NullLogger<MediaCatalogCanonicalizationService>.Instance),
+            operationProcessor);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -722,7 +1110,7 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
         public ApplicationDbContext Db { get; }
         public DbContextOptions<ApplicationDbContext> Options { get; }
 
-        public static async Task<SchemaContext> CreateAsync(CommandCounter? counter = null)
+        public static async Task<SchemaContext> CreateAsync(CommandCounter? counter = null, bool createTables = true)
         {
             var raw = Environment.GetEnvironmentVariable("CANTARO_TEST_POSTGRES");
             if (string.IsNullOrWhiteSpace(raw)) throw new InvalidOperationException("CANTARO_TEST_POSTGRES is required.");
@@ -754,7 +1142,10 @@ public sealed class MediaCatalogCanonicalizationPostgresTests(ITestOutputHelper 
             {
                 // Other suites use separate schemas in the same test database.
                 // EnsureCreated checks for tables database-wide and may skip this schema.
-                await db.GetService<IRelationalDatabaseCreator>().CreateTablesAsync();
+                if (createTables)
+                {
+                    await db.GetService<IRelationalDatabaseCreator>().CreateTablesAsync();
+                }
                 return context;
             }
             catch
