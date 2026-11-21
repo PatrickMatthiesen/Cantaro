@@ -13,6 +13,7 @@ internal sealed class AioStreamsWatchEvent
     public int? Season { get; set; }
     public int? Episode { get; set; }
     public long At { get; set; }
+    public long? ExternalCompletionAt { get; set; }
     public long? PositionMs { get; set; }
     public long? DurationMs { get; set; }
     public bool Played { get; set; }

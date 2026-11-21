@@ -89,7 +89,7 @@ export function addAioStreamsDestinations(
   instanceUrl: string | undefined,
   targets: readonly unknown[],
   mediaKind: string,
-  episodeNumbers: readonly number[],
+  catalogEpisodeNumbers: readonly number[],
 ): MediaStreamingDestinations {
   const base = parseAioStreamsInstance(instanceUrl);
   if (!base || !supportedMediaKinds.has(mediaKind)) return destinations;
@@ -99,8 +99,18 @@ export function addAioStreamsDestinations(
     return withAioStreamsMovie(destinations, base, candidates);
   }
 
-  const episodes = addAioStreamsEpisodes(destinations.episodes, episodeNumbers, base, candidates, mediaKind);
-  return { ...destinations, episodes: episodes.sort((left, right) => left.episodeNumber - right.episodeNumber) };
+  const episodes = addAioStreamsEpisodes(destinations.episodes, catalogEpisodeNumbers, base, candidates, mediaKind);
+  return { ...destinations, episodes };
+}
+
+function isAioStreamsEpisodeTarget(target: StremioTarget, type: 'anime' | 'series'): boolean {
+  if (target.type !== 'series') return false;
+  if (type === 'series') return isImdbId(target.id);
+
+  // IMDb title offsets omit anime episode gaps. Kitsu uses entry-relative numbering.
+  return target.id.startsWith('kitsu:')
+    && target.episodeMapping?.seasonNumber === null
+    && target.episodeMapping.episodeOffset === 0;
 }
 
 function withAioStreamsMovie(
@@ -117,47 +127,38 @@ function withAioStreamsMovie(
 }
 
 function addAioStreamsEpisodes(
-  existing: EpisodeStreamingDestinations[],
-  episodeNumbers: readonly number[],
+  episodes: EpisodeStreamingDestinations[],
+  catalogEpisodeNumbers: readonly number[],
   base: URL,
   candidates: StremioTarget[],
   mediaKind: string,
 ): EpisodeStreamingDestinations[] {
-  const episodes = [...existing, ...createMissingEpisodes(existing, episodeNumbers)];
+  const type = mediaKind === 'anime' ? 'anime' : 'series';
+  const episodeTargets = candidates.filter(target => isAioStreamsEpisodeTarget(target, type));
+  const ids = new Set(episodeTargets.map(target => target.id));
+  if (ids.size !== 1) return episodes;
+
+  const metaId = [...ids][0]!;
+  const catalogNumbers = new Set(catalogEpisodeNumbers);
   // One provider video must not open from two different canonical episode rows.
   const urlCounts = new Map<string, number>();
   const routes = episodes.map(episode => {
-    const route = aioStreamsEpisodeDestination(episode, base, candidates, mediaKind);
-    if (route) urlCounts.set(route.url, (urlCounts.get(route.url) ?? 0) + 1);
+    if (!catalogNumbers.has(episode.episodeNumber) || !isPositiveInteger(episode.episodeNumber)) return;
+    const videoId = type === 'anime'
+      ? `${metaId}:${episode.episodeNumber}`
+      : buildImdbEpisodeVideoId(metaId, episode.seasonNumber, episode.seasonEpisodeNumber);
+    if (!videoId) return;
+
+    const route = aioStreamsDestination(base, type, metaId, videoId);
+    urlCounts.set(route.url, (urlCounts.get(route.url) ?? 0) + 1);
     return route;
   });
-  return episodes.flatMap((episode, index) => {
+  return episodes.map((episode, index) => {
     const route = routes[index];
-    if (route && urlCounts.get(route.url) === 1) {
-      return [{ ...episode, destinations: [...episode.destinations, route] }];
-    }
-    return index < existing.length ? [episode] : [];
-  });
-}
-
-function aioStreamsEpisodeDestination(
-  episode: EpisodeStreamingDestinations,
-  base: URL,
-  candidates: StremioTarget[],
-  mediaKind: string,
-): StreamingDestination | undefined {
-  const routes = new Map<string, string>();
-  for (const target of candidates) {
-    const videoId = buildEpisodeVideoId(target, episode, mediaKind);
-    if (videoId) routes.set(videoId, target.id);
-  }
-  // Prefer entry-numbered anime IDs when the provider supplies one.
-  const kitsu = [...routes].filter(([videoId]) => videoId.startsWith('kitsu:'));
-  const choices = kitsu.length ? kitsu : [...routes];
-  if (choices.length !== 1) return undefined;
-  const [videoId, metaId] = choices[0]!;
-  const type = kitsu.length ? 'anime' : 'series';
-  return aioStreamsDestination(base, type, metaId, videoId);
+    return route && urlCounts.get(route.url) === 1
+      ? { ...episode, destinations: [...episode.destinations, route] }
+      : episode;
+  }).sort((left, right) => left.episodeNumber - right.episodeNumber);
 }
 
 function parseAioStreamsInstance(value: string | undefined): URL | null {

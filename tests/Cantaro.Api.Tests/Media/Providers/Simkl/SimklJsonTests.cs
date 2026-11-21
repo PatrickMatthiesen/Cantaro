@@ -162,6 +162,51 @@ public sealed class SimklJsonTests
     }
 
     [Theory]
+    [InlineData("movie", " tt0275277 ", "tt0275277")]
+    [InlineData("movie", "tt0275277?autoplay=1", null)]
+    [InlineData("tv", "tt0213338", null)]
+    [InlineData(null, "tt0275277", null)]
+    public void AnimeMappingsExposeOnlyValidatedImdbMovieCrossReferences(
+        string? animeType,
+        string imdbId,
+        string? expectedImdbId)
+    {
+        using var json = JsonDocument.Parse($$"""
+            {
+              "anime": [{
+                "show": {
+                  "title": "Example",
+                  "anime_type": {{JsonSerializer.Serialize(animeType)}},
+                  "ids": {"simkl":123,"mal":"12","anilist":"34","imdb":{{JsonSerializer.Serialize(imdbId)}} }
+                }
+              }]
+            }
+            """);
+        var media = json.RootElement.GetProperty("anime")[0].GetProperty("show");
+
+        var item = Assert.Single(SimklJson.MapLibraryItems(json.RootElement));
+        var search = SimklJson.MapSearchResult(media, MediaKinds.Anime);
+        Assert.NotNull(search);
+        var details = SimklJson.MapDetails(media, "anime", 123);
+
+        foreach (var references in new[] { item.CrossReferences, search.CrossReferences, details.CrossReferences })
+        {
+            Assert.Contains(references, reference => reference.ProviderId == "myanimelist" && reference.ProviderMediaId == "anime:12");
+            Assert.Contains(references, reference => reference.ProviderId == "anilist" && reference.ProviderMediaId == "34");
+            var imdb = references.Where(reference => reference.ProviderId == "imdb");
+            if (expectedImdbId is null)
+            {
+                Assert.Empty(imdb);
+                continue;
+            }
+
+            var reference = Assert.Single(imdb);
+            Assert.Equal(expectedImdbId, reference.ProviderMediaId);
+            Assert.Equal($"https://www.imdb.com/title/{expectedImdbId}/", reference.ExternalUrl);
+        }
+    }
+
+    [Theory]
     [InlineData("{}")]
     [InlineData("{\"imdb\":\"tt123?autoplay=1\"}")]
     [InlineData("{\"imdb\":\"https://imdb.com/title/tt123\"}")]

@@ -268,6 +268,7 @@ function getPlaybackDestinations(
     state.status !== "loading" ? state.links : []);
   const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
   const stremioTargets = availabilityStates.flatMap(getStremioTargets);
+  const catalogEpisodeNumbers = providerDestinations.episodes.map((episode) => episode.episodeNumber);
   const episodeNumbers = getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
     .map((row) => row.episodeNumber);
   return filterWatchProviders(
@@ -276,7 +277,7 @@ function getPlaybackDestinations(
       props.aioStreamsInstanceUrl,
       getAioStreamsTargets(props),
       mediaKind,
-      episodeNumbers,
+      catalogEpisodeNumbers,
     ),
     props.disabledWatchProviders,
   );

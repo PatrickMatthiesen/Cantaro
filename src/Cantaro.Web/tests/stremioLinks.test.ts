@@ -176,22 +176,46 @@ describe('AIOStreams playback destinations', () => {
 
   it('opens the verified IMDb episode at its provider coordinates', () => {
     const destinations = addAioStreamsDestinations(catalogDestinations(), instance,
-      [{ type: 'series', id: 'tt1000002' }], 'series', [15, 16]);
+      [{ type: 'series', id: 'tt1000002', episodeMapping: { seasonNumber: 1, episodeOffset: 10 } }],
+      'series', [15, 16]);
     expect(destinations.episodes[0]?.destinations.at(-1)?.url)
       .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=series&metaId=tt1000002&videoId=tt1000002%3A2%3A3');
     expect(destinations.episodes[1]?.destinations).toEqual([]);
     expect(destinations.seriesDestinations).toHaveLength(1);
   });
 
-  it('prefers an exact Kitsu video', () => {
+  it('opens the canonical episode by its Kitsu entry number', () => {
     const destinations = addAioStreamsDestinations(catalogDestinations(), instance, [
       { type: 'series', id: 'tt0213338', episodeMapping: { seasonNumber: 2, episodeOffset: 10 } },
       { type: 'series', id: 'kitsu:1', episodeMapping: { seasonNumber: null, episodeOffset: 0 } },
-    ], 'anime', [1, 15]);
-    expect(destinations.episodes[0]?.destinations[0]?.url)
-      .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=anime&metaId=kitsu%3A1&videoId=kitsu%3A1%3A1');
-    expect(destinations.episodes[1]?.destinations.at(-1)?.url)
+    ], 'anime', [15, 16]);
+    expect(destinations.episodes[0]?.destinations.at(-1)?.url)
       .toBe('https://aio.example:8452/hosted/jellyfin/web/#/open?type=anime&metaId=kitsu%3A1&videoId=kitsu%3A1%3A15');
+  });
+
+  it('keeps Stremio links for count-only rows without adding AIOStreams links', () => {
+    const targets = [
+      { type: 'series', id: 'kitsu:1', episodeMapping: { seasonNumber: null, episodeOffset: 0 } },
+    ];
+    const original = addStremioDestinations({ seriesDestinations: [], episodes: [] }, targets, 'anime', [1]);
+    const destinations = addAioStreamsDestinations(original, instance, targets, 'anime', []);
+
+    expect(destinations).toEqual(original);
+    expect(destinations.episodes[0]?.destinations[0]?.url).toBe('stremio:///detail/series/kitsu:1/kitsu:1:1');
+  });
+
+  it('keeps provider destinations when anime episode evidence is missing or ambiguous', () => {
+    const original = catalogDestinations();
+    const imdb = { type: 'series', id: 'tt0213338', episodeMapping: { seasonNumber: 2, episodeOffset: 10 } };
+    const kitsuMapping = { seasonNumber: null, episodeOffset: 0 };
+    for (const targets of [
+      [imdb],
+      [imdb, { type: 'series', id: 'kitsu:1' }],
+      [imdb, { type: 'series', id: 'kitsu:1', episodeMapping: { ...kitsuMapping, episodeOffset: 1 } }],
+      [imdb, ...['kitsu:1', 'kitsu:2'].map(id => ({ type: 'series', id, episodeMapping: kitsuMapping }))],
+    ]) {
+      expect(addAioStreamsDestinations(original, instance, targets, 'anime', [15, 16])).toEqual(original);
+    }
   });
 
   it('keeps provider links when two canonical episodes share the same IMDb coordinates', () => {

@@ -69,18 +69,23 @@ internal static class SimklJson
                 var count = type == "movie" ? null : Int(row, "watched_episodes_count");
                 var total = type == "movie" ? null : Int(row, "total_episodes_count");
                 var status = MapStatus(String(row, "status"));
+                var format = type switch
+                {
+                    "tv" => MediaFormats.Tv,
+                    "movie" => MediaFormats.Movie,
+                    _ => MapAnimeFormat(String(row, "anime_type") ?? String(media, "anime_type"))
+                };
                 items.Add(new MediaProviderLibraryItem
                 {
                     ProviderMediaId = $"{type}:{id}",
                     ProviderLibraryEntryId = $"{type}:{id}",
                     Title = title,
                     MediaKind = MediaKind(type),
-                    Format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie,
-                        _ => MapAnimeFormat(String(row, "anime_type") ?? String(media, "anime_type")) },
+                    Format = format,
                     PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
                     BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
                     ExternalUrl = ExternalUrl(type, id.Value),
-                    CrossReferences = CrossReferences(type, ids),
+                    CrossReferences = CrossReferences(type, format, ids),
                     StartYear = Int(media, "year"),
                     EpisodeCount = total,
                     ReleasedCount = total is { } t && Int(row, "not_aired_episodes_count") is { } remaining
@@ -124,14 +129,15 @@ internal static class SimklJson
         var title = String(media, "title_en") ?? String(media, "title");
         if (id is not > 0 || string.IsNullOrWhiteSpace(title)) return null;
         var type = kind switch { MediaKinds.Series => "tv", MediaKinds.Movie => "movie", _ => "anime" };
+        var format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie, _ => MapAnimeFormat(String(media, "anime_type")) };
         return new MediaProviderSearchResult
         {
             ProviderId = MediaObservationSiteIdentifiers.Simkl, ProviderMediaId = $"{type}:{id}", Title = title,
             NativeTitle = String(media, "title_romaji"),
             Synonyms = Array(Property(media, "all_titles")).Where(x => x.ValueKind == JsonValueKind.String)
                 .Select(x => x.GetString()!).Where(x => !string.Equals(x, title, StringComparison.OrdinalIgnoreCase)).Distinct().ToArray(),
-            MediaKind = kind, Format = type switch { "tv" => MediaFormats.Tv, "movie" => MediaFormats.Movie, _ => MapAnimeFormat(String(media, "anime_type")) },
-            ExternalUrl = ExternalUrl(type, id.Value), CrossReferences = CrossReferences(type, ids),
+            MediaKind = kind, Format = format,
+            ExternalUrl = ExternalUrl(type, id.Value), CrossReferences = CrossReferences(type, format, ids),
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             StartYear = Int(media, "year"), EpisodeCount = Int(media, "ep_count"),
             PrimaryProgressDimension = ProgressDimension(type), ReleaseStatusDimension = ProgressDimension(type)
@@ -157,7 +163,7 @@ internal static class SimklJson
             ExternalUrl = ExternalUrl(type, id),
             PosterUrl = Image(String(media, "poster"), "posters", "_m.webp"),
             BackgroundUrl = Image(String(media, "fanart"), "fanart", "_medium.webp"),
-            CrossReferences = CrossReferences(type, ids),
+            CrossReferences = CrossReferences(type, format, ids),
             StartYear = Int(media, "year"),
             StremioTargets = stremioTargets,
             StremioTarget = stremioTargets.FirstOrDefault(),
@@ -370,17 +376,21 @@ internal static class SimklJson
             throw new InvalidOperationException("SIMKL could not resolve the requested title or episode.");
     }
 
-    private static IReadOnlyList<MediaProviderCrossReference> CrossReferences(string type, JsonElement ids)
+    private static IReadOnlyList<MediaProviderCrossReference> CrossReferences(string type, string? format, JsonElement ids)
     {
-        if (type != "anime")
-            return ImdbId(ids) is { } imdb
-                ? [new() { ProviderId = "imdb", ProviderMediaId = imdb, ExternalUrl = $"https://www.imdb.com/title/{imdb}/" }]
-                : [];
         var references = new List<MediaProviderCrossReference>();
-        if (String(ids, "mal") is { Length: > 0 } mal)
-            references.Add(new MediaProviderCrossReference { ProviderId = "myanimelist", ProviderMediaId = $"anime:{mal}", ExternalUrl = $"https://myanimelist.net/anime/{mal}" });
-        if (String(ids, "anilist") is { Length: > 0 } anilist)
-            references.Add(new MediaProviderCrossReference { ProviderId = "anilist", ProviderMediaId = anilist, ExternalUrl = $"https://anilist.co/anime/{anilist}" });
+        if (type == "anime")
+        {
+            if (String(ids, "mal") is { Length: > 0 } mal)
+                references.Add(new MediaProviderCrossReference { ProviderId = "myanimelist", ProviderMediaId = $"anime:{mal}", ExternalUrl = $"https://myanimelist.net/anime/{mal}" });
+            if (String(ids, "anilist") is { Length: > 0 } anilist)
+                references.Add(new MediaProviderCrossReference { ProviderId = "anilist", ProviderMediaId = anilist, ExternalUrl = $"https://anilist.co/anime/{anilist}" });
+        }
+
+        // An IMDb series ID can cover several SIMKL anime entries.
+        if ((type != "anime" || format == MediaFormats.Movie) && ImdbId(ids) is { } imdb)
+            references.Add(new MediaProviderCrossReference { ProviderId = "imdb", ProviderMediaId = imdb, ExternalUrl = $"https://www.imdb.com/title/{imdb}/" });
+
         return references;
     }
 

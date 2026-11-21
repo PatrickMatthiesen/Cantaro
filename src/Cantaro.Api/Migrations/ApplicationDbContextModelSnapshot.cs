@@ -67,6 +67,9 @@ namespace Cantaro.Api.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<long?>("ExternalCompletionAt")
+                        .HasColumnType("bigint");
+
                     b.Property<Guid?>("MediaEpisodeId")
                         .HasColumnType("uuid");
 

@@ -24,6 +24,7 @@ public class MediaEpisodeIdentityServiceTests
             Provider = "simkl",
             ExternalId = "tv:123",
             LinkSource = MediaMappingSources.Imported,
+            LastVerifiedAt = now,
             CreatedAt = now,
             UpdatedAt = now
         });
