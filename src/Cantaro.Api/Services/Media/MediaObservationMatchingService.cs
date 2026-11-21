@@ -195,6 +195,12 @@ public class MediaObservationMatchingService(
         var coordinates = observation.IsCatalogObservation && source == MediaProviderSeasonMappingSources.Manual
             ? MediaProviderSeasonMappingService.GetObservedCoordinates(observation)
             : await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
+        if (!observation.IsCatalogObservation && source == MediaProviderSeasonMappingSources.Automatic
+            && coordinates.ConflictsWithEpisode(MediaProviderSeasonMappingService.GetObservedCoordinates(observation)))
+        {
+            return false;
+        }
+
         var episodeId = MediaProviderSeasonMappingService.NormalizeId(observation.SiteMediaId);
         var hasWatchEpisode = !observation.IsCatalogObservation &&
             MediaDestinationUrlPolicy.TryNormalizePath(provider, observation.ObservedUrl, episodeId, out _);
@@ -257,30 +263,15 @@ public class MediaObservationMatchingService(
         int? canonicalEpisode, CancellationToken cancellationToken)
     {
         var next = (long?)canonicalEpisode + 1;
-        if (observation.IsCatalogObservation || title.IsCompletionOnly || next is not { } nextNumber
-            || !IsCanonicalEpisodeNumber(title, nextNumber)
-            || !MediaEpisodeIdentityService.HasConsecutiveNextEpisode(observation))
-        {
-            return;
-        }
-
-        var coordinates = await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
-        if (coordinates.EpisodeNumber is not null && coordinates.EpisodeNumber != observation.EpisodeNumber)
+        if (title.IsCompletionOnly || next is not { } nextNumber || !IsCanonicalEpisodeNumber(title, nextNumber)
+            || await _seasonMappingService.GetSuccessorCoordinatesAsync(observation, cancellationToken) is not { } successor)
         {
             return;
         }
 
         var provider = observation.SiteIdentifier;
         var nextId = MediaProviderSeasonMappingService.NormalizeId(observation.NextEpisodeProviderId)!;
-        var successor = await _dbContext.MediaProviderEpisodes.AsNoTracking().SingleOrDefaultAsync(
-            row => row.Provider == provider && row.ProviderEpisodeId == nextId, cancellationToken);
-        if (MediaEpisodeIdentityService.HasConflictingSuccessorCoordinates(successor, coordinates, observation))
-        {
-            return;
-        }
-
-        var successorCoordinates = await _seasonMappingService.CompleteCoordinatesAsync(provider, nextId, successor,
-            coordinates with { EpisodeNumber = observation.NextEpisodeNumber }, cancellationToken);
+        var successorCoordinates = successor.Effective;
         var season = await _seasonMappingService.ResolveSeasonAsync(provider, successorCoordinates, cancellationToken);
         if (season is not null
             && MediaProviderSeasonMappingService.CanonicalNumber(season, successorCoordinates.EpisodeNumber) is { } mappedNumber

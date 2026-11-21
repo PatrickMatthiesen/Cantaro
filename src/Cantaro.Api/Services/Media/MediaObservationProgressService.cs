@@ -63,30 +63,8 @@ public class MediaObservationProgressService(
                 return MediaObservationProgressResult.None;
             }
 
-            var effective = await mappingService.ResolveAsync(observation, cancellationToken);
-            if (expectedAssignment is { } expected
-                && (effective is not null
-                    ? (effective.Title.Id, effective.EpisodeNumber) != expected
-                    : requireSharedAssignment))
-            {
-                return new(0, 0, AssignmentChanged: true);
-            }
-
-            if (effective is not null
-                && (effective.Title.Id != observation.MediaTitleId || effective.EpisodeNumber != observation.ResolvedProgress))
-            {
-                matchingService.ApplyMapping(observation, effective);
-                observation.Touch(DateTimeOffset.UtcNow);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-            }
-            else if (effective is null && MediaObservationMatchingService.UsedSharedMapping(observation))
-            {
-                await matchingService.ProcessObservationAsync(observation, cancellationToken);
-            }
-
-            var progress = await ApplyProgressAsync(observation, cancellationToken);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            return progress;
+            return await StageAutoProgressAsync(observation, cancellationToken, expectedAssignment,
+                requireSharedAssignment, applyProgress: true);
         }, cancellationToken);
 
         if (result.ProgressUpdated)
@@ -97,17 +75,62 @@ public class MediaObservationProgressService(
         return result;
     }
 
-    private async Task<bool> LockCurrentMatchAsync(MediaObservation observation, CancellationToken cancellationToken)
+    // The caller holds the mapping lock and has locked or updated the observation.
+    internal async Task<MediaObservationProgressResult> StageAutoProgressAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken,
+        (Guid TitleId, int? EpisodeNumber)? expectedAssignment,
+        bool requireSharedAssignment,
+        bool applyProgress)
+    {
+        var effective = await mappingService.ResolveAsync(observation, cancellationToken);
+        var hasPlaybackProgress = applyProgress && !observation.IsCatalogObservation;
+        if (expectedAssignment is { } expected
+            && (effective is not null
+                ? effective.Title.Id != expected.TitleId
+                    || (hasPlaybackProgress && effective.EpisodeNumber != expected.EpisodeNumber)
+                : requireSharedAssignment))
+        {
+            return new(0, 0, AssignmentChanged: true);
+        }
+
+        if (!hasPlaybackProgress)
+        {
+            return MediaObservationProgressResult.None;
+        }
+
+        if (effective is not null
+            && (effective.Title.Id != observation.MediaTitleId || effective.EpisodeNumber != observation.ResolvedProgress))
+        {
+            matchingService.ApplyMapping(observation, effective);
+            observation.Touch(DateTimeOffset.UtcNow);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        else if (effective is null && MediaObservationMatchingService.UsedSharedMapping(observation))
+        {
+            await matchingService.ProcessObservationAsync(observation, cancellationToken);
+        }
+
+        var progress = await ApplyProgressAsync(observation, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return progress;
+    }
+
+    internal async Task LockObservationAsync(Guid observationId, CancellationToken cancellationToken)
     {
         if (_dbContext.Database.IsNpgsql())
         {
             await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
                 SELECT "Id" FROM "MediaObservations"
-                WHERE "Id" = {observation.Id}
+                WHERE "Id" = {observationId}
                 FOR UPDATE
                 """, cancellationToken);
         }
+    }
 
+    private async Task<bool> LockCurrentMatchAsync(MediaObservation observation, CancellationToken cancellationToken)
+    {
+        await LockObservationAsync(observation.Id, cancellationToken);
         return await _dbContext.MediaObservations.AsNoTracking().AnyAsync(row =>
             row.Id == observation.Id && row.MatchStatus == MediaObservationStatuses.Matched
             && row.UpdatedAt == observation.UpdatedAt, cancellationToken);

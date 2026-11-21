@@ -330,6 +330,8 @@ public class MediaObservationsController(
         Guid? statusOperationId = null;
         var applyProgress = false;
         var requireSharedAssignment = false;
+        var commitProgressWithResolution = request.CandidateId is null && request.AddToLibraryConfirmed;
+        var progress = MediaObservationProgressResult.None;
         var reviewedAt = observation.UpdatedAt;
         if (request.ExpectedUpdatedAt is { } expectedUpdatedAt && reviewedAt != expectedUpdatedAt)
         {
@@ -363,8 +365,29 @@ public class MediaObservationsController(
                             return ObservationUpdatedConflict();
                         }
 
-                        (statusOperationId, applyProgress, requireSharedAssignment) = await CommitResolutionAsync(userId, observation, selection,
-                            request.EpisodeOffset, cancellationToken);
+                        if (commitProgressWithResolution)
+                        {
+                            await _progressService.LockObservationAsync(observation.Id, cancellationToken);
+                            if (!await _dbContext.MediaObservations.AnyAsync(row =>
+                                row.Id == observationId && row.UpdatedAt == reviewedAt, cancellationToken))
+                            {
+                                return ObservationUpdatedConflict();
+                            }
+                        }
+
+                        (statusOperationId, applyProgress, requireSharedAssignment) = await CommitResolutionAsync(userId,
+                            observation, selection, request.EpisodeOffset, cancellationToken);
+                        if (commitProgressWithResolution)
+                        {
+                            progress = await _progressService.StageAutoProgressAsync(observation, cancellationToken,
+                                (observation.MediaTitleId!.Value, observation.ResolvedProgress), requireSharedAssignment,
+                                applyProgress);
+                            if (progress.AssignmentChanged)
+                            {
+                                throw new ProviderEpisodeAssignmentChangedException();
+                            }
+                        }
+
                         return null;
                     }, cancellationToken);
                     if (error is not null)
@@ -384,6 +407,11 @@ public class MediaObservationsController(
         {
             return ObservationUpdatedConflict();
         }
+        catch (ProviderEpisodeAssignmentChangedException)
+        {
+            _dbContext.ChangeTracker.Clear();
+            return ProviderEpisodeAssignmentChangedConflict();
+        }
         catch (ArgumentException exception)
         {
             _dbContext.ChangeTracker.Clear();
@@ -398,22 +426,33 @@ public class MediaObservationsController(
         if (statusOperationId is { } operationId)
         {
             await operationProcessor.ProcessOperationAsync(operationId, cancellationToken);
+        }
+        if (statusOperationId is not null || (commitProgressWithResolution && progress.ProgressUpdated))
+        {
             _mediaLibraryEventHub.Publish(userId);
         }
 
-        var progress = applyProgress
-            ? await _progressService.TryEnqueueAutoProgressWithResultAsync(observation, cancellationToken,
-                (observation.MediaTitleId!.Value, observation.ResolvedProgress), requireSharedAssignment)
-            : MediaObservationProgressResult.None;
-        if (progress.AssignmentChanged)
+        if (!commitProgressWithResolution && applyProgress)
         {
-            return Conflict(new { error = "The provider episode assignment changed during review." });
+            progress = await _progressService.TryEnqueueAutoProgressWithResultAsync(observation, cancellationToken,
+                (observation.MediaTitleId!.Value, observation.ResolvedProgress), requireSharedAssignment);
+            if (progress.AssignmentChanged)
+            {
+                return ProviderEpisodeAssignmentChangedConflict();
+            }
         }
 
         var response = MapToDto(observation);
         await DeleteCompletedObservationIfSafeAsync(observation, progress, cancellationToken);
 
         return Ok(response);
+    }
+
+    private ConflictObjectResult ProviderEpisodeAssignmentChangedConflict() =>
+        Conflict(new { error = "The provider episode assignment changed during review." });
+
+    private sealed class ProviderEpisodeAssignmentChangedException : Exception
+    {
     }
 
     /// <summary>

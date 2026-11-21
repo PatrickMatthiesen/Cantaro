@@ -26,7 +26,7 @@ export function getDestinationAudioLanguages(destination: StreamingDestination) 
   const dubLocale = getDubAudioLocale(track);
   if (dubLocale) locales.push(dubLocale);
   if (locales.length === 0 && track?.startsWith("sub:")) locales.push("ja");
-  return locales.map(getLanguageCode);
+  return [...new Set(locales.map(getLanguageCode))];
 }
 
 function getDubAudioLocale(track: string | undefined) {
