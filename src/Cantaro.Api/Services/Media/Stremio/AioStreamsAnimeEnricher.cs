@@ -43,7 +43,8 @@ public sealed class AioStreamsAnimeEnricher(
 
         if (!_options.TryGetBaseUri(out var baseUri)) return;
 
-        var (entry, _, _) = await GetEntryAsync(baseUri, source, cancellationToken);
+        var (entry, _, _) = await GetEntryAsync(baseUri, source.IdType,
+            source.IdValue.ToString(CultureInfo.InvariantCulture), cancellationToken);
         if (entry is null || !HasExactSourceIdentity(entry, source)) return;
 
         var candidates = BuildCandidates(details, entry);
@@ -61,17 +62,31 @@ public sealed class AioStreamsAnimeEnricher(
         int kitsuId, CancellationToken cancellationToken)
     {
         if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
-        var (entry, unavailable, stale) = await GetEntryAsync(baseUri, new("kitsuId", kitsuId), cancellationToken);
+        var (entry, unavailable, stale) = await GetEntryAsync(baseUri, "kitsuId",
+            kitsuId.ToString(CultureInfo.InvariantCulture), cancellationToken);
         return (!stale && entry?.Mappings?.KitsuId == kitsuId && HasConsistentImdbIdentity(entry)
             ? entry : null, unavailable);
     }
 
-    private async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable, bool Stale)> GetEntryAsync(
-        Uri baseUri,
-        SourceIdentity source,
-        CancellationToken cancellationToken)
+    internal async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable)> LookupImdbEpisodeAsync(
+        string imdbId, int season, int episode, CancellationToken cancellationToken)
     {
-        var cacheKey = $"aiostreams:anime:{baseUri.AbsoluteUri}:{source.IdType}:{source.IdValue.ToString(CultureInfo.InvariantCulture)}";
+        if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
+        var (candidate, unavailable, stale) = await GetEntryAsync(baseUri, "imdbId", imdbId,
+            cancellationToken, season, episode);
+        if (stale || candidate?.Mappings?.KitsuId is not > 0) return (null, unavailable);
+
+        // The reverse lookup can return a fallback entry and restate the queried IMDb ID.
+        // Read its own Kitsu record to check the explicit IMDb mapping before using it.
+        var (entry, kitsuUnavailable) = await LookupKitsuAsync(candidate.Mappings.KitsuId.Value, cancellationToken);
+        return ((entry?.Imdb?.Id ?? entry?.Mappings?.ImdbId) == imdbId ? entry : null, kitsuUnavailable);
+    }
+
+    private async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable, bool Stale)> GetEntryAsync(
+        Uri baseUri, string idType, string idValue, CancellationToken cancellationToken,
+        int? season = null, int? episode = null)
+    {
+        var cacheKey = $"aiostreams:anime:{baseUri.AbsoluteUri}:{idType}:{idValue}:{season}:{episode}";
         var now = timeProvider.GetUtcNow();
         if (cache.TryGetValue<CacheEntry>(cacheKey, out var cached)
             && cached is not null
@@ -113,9 +128,10 @@ public sealed class AioStreamsAnimeEnricher(
             {
                 using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeoutSource.CancelAfter(RequestTimeout);
-                var requestUri = new Uri(
-                    baseUri,
-                    $"api/v1/anime?idType={source.IdType}&idValue={source.IdValue.ToString(CultureInfo.InvariantCulture)}");
+                var path = $"api/v1/anime?idType={idType}&idValue={Uri.EscapeDataString(idValue)}";
+                if (season is not null && episode is not null)
+                    path += FormattableString.Invariant($"&season={season}&episode={episode}");
+                var requestUri = new Uri(baseUri, path);
                 using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
                 using var response = await httpClientFactory.CreateClient(HttpClientName)
                     .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutSource.Token);
@@ -423,5 +439,7 @@ public sealed class AioStreamsAnimeEnricher(
         public int? SeasonNumber { get; set; }
 
         public int? FromEpisode { get; set; }
+
+        public int[]? NonImdbEpisodes { get; set; }
     }
 }
