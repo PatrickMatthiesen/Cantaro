@@ -195,7 +195,8 @@ public class MediaObservationMatchingService(
         var coordinates = observation.IsCatalogObservation && source == MediaProviderSeasonMappingSources.Manual
             ? MediaProviderSeasonMappingService.GetObservedCoordinates(observation)
             : await _seasonMappingService.GetCoordinatesAsync(observation, cancellationToken);
-        if (!observation.IsCatalogObservation && source == MediaProviderSeasonMappingSources.Automatic
+        if (source == MediaProviderSeasonMappingSources.Automatic
+            && (!observation.IsCatalogObservation || observation.Episodes.Count == 1)
             && coordinates.ConflictsWithEpisode(MediaProviderSeasonMappingService.GetObservedCoordinates(observation)))
         {
             return false;
@@ -318,7 +319,7 @@ public class MediaObservationMatchingService(
         var first = 1L - offset;
         if (offset < 0 && first <= int.MaxValue)
         {
-            var last = first + title.EpisodeCount - 1;
+            var last = title.EpisodeCount is > 0 ? first + title.EpisodeCount - 1 : null;
             return ((int)first, last <= int.MaxValue ? (int?)last : null);
         }
         return (null, null);

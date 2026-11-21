@@ -111,6 +111,7 @@ public partial class MediaObservationsApiTests
         const string episodeId = "ORIGINALWATCH4";
         const string successorId = "CORRECTEDWATCH5";
         const string originalSeries = "ORIGINALCRSERIES";
+        const string originalSeason = "ORIGINALCRSEASON";
         const string correctedSeries = "CORRECTEDCRSERIES";
         const string correctedSeason = "CORRECTEDCRSEASON";
         const string successorUrl = $"https://www.crunchyroll.com/watch/{successorId}";
@@ -138,7 +139,7 @@ public partial class MediaObservationsApiTests
         {
             SiteIdentifier = provider, SiteMediaId = episodeId, ObservedUrl = $"https://www.crunchyroll.com/watch/{episodeId}",
             ObservedTitle = original.CanonicalTitle, EpisodeNumber = 4, ObservedAt = observedAt,
-            ProviderSeriesId = originalSeries, ProviderSeasonId = "ORIGINALCRSEASON", SeasonNumber = 1,
+            ProviderSeriesId = originalSeries, ProviderSeasonId = originalSeason, SeasonNumber = 1,
             NextEpisodeProviderId = successorId, NextEpisodeUrl = successorUrl, NextEpisodeNumber = 5
         }, default);
         var firstWatch = Assert.IsType<SubmitMediaObservationResponse>(Assert.IsType<OkObjectResult>(first.Result).Value);
@@ -170,6 +171,30 @@ public partial class MediaObservationsApiTests
                 Episodes = [new MediaObservationEpisode { ProviderEpisodeId = successorId, ProviderUrl = successorUrl, EpisodeNumber = 5 }]
             }, default));
             await AssertCorrectedScopeAndPlaybackAsync();
+
+            if (!manualOverride)
+            {
+                var delayedCatalog = new MediaObservation
+                {
+                    Id = Guid.NewGuid(), UserId = MediaObservationFixture.TestUserId,
+                    SiteIdentifier = provider, ObservedUrl = $"https://www.crunchyroll.com/series/{originalSeries}",
+                    ObservedTitle = original.CanonicalTitle, SeriesTitle = original.CanonicalTitle,
+                    ObservedAt = observedAt, IsCatalogObservation = true,
+                    MatchStatus = MediaObservationStatuses.Pending,
+                    ProviderSeriesId = originalSeries, ProviderSeasonId = originalSeason, SeasonNumber = 1,
+                    Episodes = [new MediaObservationEpisode { ProviderEpisodeId = successorId, ProviderUrl = successorUrl, EpisodeNumber = 5 }]
+                };
+                Assert.Equal(1, await identities.RecordCatalogObservationAsync(delayedCatalog, default));
+                db.MediaObservations.Add(delayedCatalog);
+                await db.SaveChangesAsync();
+
+                var matching = new MediaObservationMatchingService(db, mappings, new MediaRelationGraphRefreshQueue(),
+                    NullLogger<MediaObservationMatchingService>.Instance);
+                var processedCatalog = await matching.ProcessObservationAsync(delayedCatalog.Id, default);
+                Assert.Null(processedCatalog.LastMatchError);
+                Assert.Empty(await db.MediaProviderSeasonMappings.ToListAsync());
+                await AssertCorrectedScopeAndPlaybackAsync();
+            }
         }
 
         var second = await watch.Submit(new SubmitMediaObservationRequest

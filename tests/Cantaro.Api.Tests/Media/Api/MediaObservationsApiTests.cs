@@ -816,12 +816,13 @@ public partial class MediaObservationsApiTests
 
 
     [Theory]
-    [InlineData(false, 16, -12, false)]
-    [InlineData(true, 16, -12, false)]
-    [InlineData(true, 13, 0, true)]
-    [InlineData(false, 13, -13, true)]
+    [InlineData(false, 16, -12, null, false)]
+    [InlineData(true, 16, -12, null, false)]
+    [InlineData(true, 4, -1, 0, false)]
+    [InlineData(true, 13, 0, 12, true)]
+    [InlineData(false, 13, -13, 12, true)]
     public async Task Resolve_WithOffset_ValidatesAndStoresProgress(
-        bool hasContainer, int episodeNumber, int offset, bool outOfRange)
+        bool hasContainer, int episodeNumber, int offset, int? episodeCount, bool outOfRange)
     {
         await using var fixture = await MediaObservationFixture.CreateAsync();
         var now = DateTimeOffset.UtcNow;
@@ -830,7 +831,7 @@ public partial class MediaObservationsApiTests
             Id = Guid.NewGuid(),
             CanonicalTitle = "Season Two Show",
             MediaKind = MediaKinds.Anime,
-            EpisodeCount = outOfRange ? 12 : null,
+            EpisodeCount = episodeCount,
             SupportsEpisodeProgress = true,
             PrimaryProgressDimension = MediaProgressDimensions.Episode,
             ReleaseStatusDimension = MediaProgressDimensions.Episode,
@@ -842,9 +843,9 @@ public partial class MediaObservationsApiTests
             Id = Guid.NewGuid(),
             UserId = fixture.UserId,
             SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
-            ObservedUrl = "https://www.crunchyroll.com/watch/OFFSET/episode-16",
+            ObservedUrl = $"https://www.crunchyroll.com/watch/OFFSET/episode-{episodeNumber}",
             SiteMediaId = "OFFSET",
-            ObservedTitle = "Season Two Show - Episode 16",
+            ObservedTitle = $"{title.CanonicalTitle} - Episode {episodeNumber}",
             ProgressHint = episodeNumber.ToString(),
             EpisodeNumber = hasContainer ? episodeNumber : null,
             ProviderSeriesId = hasContainer ? "SEASONSHOW" : null,
@@ -901,21 +902,21 @@ public partial class MediaObservationsApiTests
 
         var resolvedResponse = Assert.IsType<MediaObservationDto>(
             Assert.IsType<OkObjectResult>(result.Result).Value);
-        Assert.Equal(-12, resolvedResponse.EpisodeOffset);
-        Assert.Equal(4, resolvedResponse.ResolvedProgress);
+        Assert.Equal(offset, resolvedResponse.EpisodeOffset);
+        Assert.Equal(episodeNumber + offset, resolvedResponse.ResolvedProgress);
         Assert.Null(await fixture.Db.MediaObservations.FindAsync(observation.Id));
         if (hasContainer)
         {
             var season = await fixture.Db.MediaProviderSeasonMappings.SingleAsync();
             Assert.Equal(MediaProviderSeasonMappingSources.Manual, season.MappingSource);
-            Assert.Equal(13, season.ProviderEpisodeStart);
+            Assert.Equal(1 - offset, season.ProviderEpisodeStart);
             Assert.Null(season.ProviderEpisodeEnd);
         }
         else
         {
             var direct = await fixture.Db.MediaProviderEpisodeMappings.SingleAsync();
             Assert.Equal(MediaProviderSeasonMappingSources.Manual, direct.MappingSource);
-            Assert.Equal(4, direct.CanonicalEpisodeNumber);
+            Assert.Equal(episodeNumber + offset, direct.CanonicalEpisodeNumber);
         }
     }
 
