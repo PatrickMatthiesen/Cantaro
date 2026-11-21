@@ -2,15 +2,32 @@ import { mediaFormatLabel } from '../../services/mediaFormatting';
 
 export const libraryCollectionStorageKey = 'cantaro.media.library.collection';
 
+const defaultCollectionFormats = new Map<string | undefined, string>([
+  ['anime', 'tv'],
+  ['manga', 'manga'],
+  ['books', 'novel'],
+]);
+
+const mediaKindCollections = new Map([
+  ['anime', 'anime'],
+  ['manga', 'manga'],
+  ['oneShot', 'manga'],
+  ['lightNovel', 'books'],
+  ['movie', 'film-tv'],
+  ['series', 'film-tv'],
+]);
+
+function animeFilmTvLabel(format?: string): string {
+  return !format || format === 'tv' ? 'Anime' : `Anime · ${mediaFormatLabel(format)}`;
+}
+
 export function libraryFormatLabel(mediaKind: string, format?: string, collection?: string): string | undefined {
   const normalized = format?.toLowerCase();
-  if (collection === 'anime' && (!normalized || normalized === 'tv')) return undefined;
-  if (collection === 'manga' && (!normalized || normalized === 'manga')) return undefined;
-  if (collection === 'books' && (!normalized || normalized === 'novel')) return undefined;
   if (mediaKind === 'anime' && collection === 'film-tv') {
-    return !normalized || normalized === 'tv' ? 'Anime' : `Anime · ${mediaFormatLabel(normalized)}`;
+    return animeFilmTvLabel(normalized);
   }
-  return normalized ? mediaFormatLabel(normalized) : undefined;
+  if (!normalized || normalized === defaultCollectionFormats.get(collection)) return undefined;
+  return mediaFormatLabel(normalized);
 }
 
 export function libraryCollection(value: unknown): string | undefined {
@@ -19,9 +36,5 @@ export function libraryCollection(value: unknown): string | undefined {
 }
 
 export function collectionForMediaKind(kind?: string): string | undefined {
-  if (kind === 'anime') return 'anime';
-  if (kind === 'manga' || kind === 'oneShot') return 'manga';
-  if (kind === 'lightNovel') return 'books';
-  if (kind === 'movie' || kind === 'series') return 'film-tv';
-  return undefined;
+  return mediaKindCollections.get(kind ?? '');
 }

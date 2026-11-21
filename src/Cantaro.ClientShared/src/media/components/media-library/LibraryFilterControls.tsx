@@ -9,38 +9,18 @@ export interface FilterOption {
 
 const selectClassName = 'h-9 w-full min-w-0 border border-border-strong bg-surface px-2 text-sm font-semibold text-content outline-none transition-colors hover:bg-surface-hover focus:border-focus focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 
-interface LibraryStatusControlProps {
-  value: string;
+interface LibraryFilterSelectProps {
+  label: string;
+  widthClassName?: 'w-30' | 'w-44';
+  value?: string;
   options: FilterOption[];
   onChange: (value: string | undefined) => void;
 }
 
-export function LibraryStatusControl({ value, options, onChange }: LibraryStatusControlProps) {
+export function LibraryFilterSelect({ label, widthClassName = 'w-30', value = '', options, onChange }: LibraryFilterSelectProps) {
   return (
-    <label className="w-30 shrink-0">
-      <span className="sr-only">Status</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value || undefined)}
-        className={selectClassName}
-      >
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
-  );
-}
-
-interface LibrarySortControlsProps {
-  sortBy: string;
-  sortDir: 'asc' | 'desc';
-  onSortByChange: (value: string) => void;
-  onToggleSortDir: () => void;
-}
-
-export function LibraryFormatControl({ value, options, onChange }: LibraryStatusControlProps) {
-  return (
-    <label className="w-30 shrink-0">
-      <span className="sr-only">Format</span>
+    <label className={`${widthClassName} shrink-0`}>
+      <span className="sr-only">{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value || undefined)} className={selectClassName}>
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
@@ -48,7 +28,14 @@ export function LibraryFormatControl({ value, options, onChange }: LibraryStatus
   );
 }
 
-export function LibrarySortControls({ sortBy, sortDir, onSortByChange, onToggleSortDir }: LibrarySortControlsProps) {
+interface LibrarySortControlsProps {
+  sortBy?: string;
+  sortDir?: 'asc' | 'desc';
+  onSortByChange: (value: string) => void;
+  onToggleSortDir: () => void;
+}
+
+export function LibrarySortControls({ sortBy = 'updatedAt', sortDir = 'desc', onSortByChange, onToggleSortDir }: LibrarySortControlsProps) {
   return (
     <div className="flex shrink-0 items-center gap-1">
       <label className="w-24 shrink-0">
@@ -68,27 +55,6 @@ export function LibrarySortControls({ sortBy, sortDir, onSortByChange, onToggleS
         {sortDir === 'asc' ? <ArrowUp className="size-4" aria-hidden /> : <ArrowDown className="size-4" aria-hidden />}
       </button>
     </div>
-  );
-}
-
-interface LibraryProviderControlProps {
-  providerValue: string;
-  providerOptions: FilterOption[];
-  onProviderChange: (value: string | undefined) => void;
-}
-
-export function LibraryProviderControl({
-  providerValue,
-  providerOptions,
-  onProviderChange,
-}: LibraryProviderControlProps) {
-  return (
-    <label className="w-44 shrink-0">
-      <span className="sr-only">Provider</span>
-      <select value={providerValue} onChange={(event) => onProviderChange(event.target.value || undefined)} className={selectClassName}>
-        {providerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
   );
 }
 

@@ -5,7 +5,7 @@ import { MusicArtwork } from '../MusicArtwork';
 import { useMusicPlayback } from './musicPlaybackContextValue';
 import {
   currentPlaybackTrack, isPlayerVisible, playbackAvailability, selectedPlaybackSource,
-  type PlaybackSource, type PlaybackTrack,
+  type PlaybackAvailability, type PlaybackSource, type PlaybackTrack,
 } from './playbackState';
 import { loadingYouTubePlayback, mountYouTubePlayback, type YouTubePlaybackSnapshot } from './youtubePlayback';
 
@@ -113,11 +113,19 @@ function PlaybackProgress({ positionSeconds, durationSeconds, disabled, onSeek }
   );
 }
 
-function PlaybackNotice({ reason, externalUrl, externalLabel }: {
-  reason?: string;
-  externalUrl?: string;
-  externalLabel?: string;
+function playbackNotice({ availability, mediaId, snapshot, showEmbed }: {
+  availability: PlaybackAvailability;
+  mediaId?: string;
+  snapshot: YouTubePlaybackSnapshot;
+  showEmbed: boolean;
 }) {
+  const reason = mediaId
+    ? snapshot.error ?? phaseMessages[snapshot.phase]
+    : availability.reason ?? 'In-app playback is unavailable.';
+  return { reason, externalUrl: showEmbed ? undefined : availability.externalUrl, externalLabel: availability.externalLabel };
+}
+
+function PlaybackNotice({ reason, externalUrl, externalLabel }: ReturnType<typeof playbackNotice>) {
   if (!reason) return null;
   return (
     <div role="status" className="flex w-full flex-wrap items-center gap-x-3 text-xs text-content-muted">
@@ -172,11 +180,10 @@ function ActiveMusicPlayer({ track, source, index }: {
   index: number;
 }) {
   const { state } = useMusicPlayback();
-  const availability = playbackAvailability(state);
   const { mediaId, snapshot, mount, transport } = useYouTubeTransport(source);
   const showEmbed = Boolean(mediaId && snapshot.phase !== 'error');
   const canControl = showEmbed && snapshot.phase !== 'loading';
-  const reason = mediaId ? snapshot.error ?? phaseMessages[snapshot.phase] : availability.reason ?? 'In-app playback is unavailable.';
+  const notice = playbackNotice({ availability: playbackAvailability(state), mediaId, snapshot, showEmbed });
 
   return (
     <section
@@ -210,11 +217,7 @@ function ActiveMusicPlayer({ track, source, index }: {
           />
         ) : null}
 
-        <PlaybackNotice
-          reason={reason}
-          externalUrl={showEmbed ? undefined : availability.externalUrl}
-          externalLabel={availability.externalLabel}
-        />
+        <PlaybackNotice {...notice} />
       </div>
     </section>
   );

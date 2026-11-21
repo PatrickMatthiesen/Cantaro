@@ -48,21 +48,26 @@ function statusOf(error: unknown): number | undefined {
     return typeof status === 'number' ? status : undefined;
 }
 
-function kindForStatus(status: number): MediaApiErrorKind {
-    if (status === 401) return 'authentication';
-    if (status === 403) return 'authorization';
-    if (status === 502 || status === 503 || status === 504) return 'service-unavailable';
-    if (status >= 500) return 'server';
-    return 'request';
-}
+type StatusError = { kind: MediaApiErrorKind; message: string };
 
-function messageForStatus(status: number, fallbackMessage: string): string {
-    if (status === 401) return 'Your Cantaro session has expired. Sign in again, then try again.';
-    if (status === 403) return 'Cantaro cannot access this request with your current permissions.';
-    if (status === 502 || status === 503 || status === 504) return 'The Cantaro server is temporarily unavailable. Try again in a moment.';
-    if (status >= 500) return 'The Cantaro server could not complete this request. Try again in a moment.';
-    if (status === 429) return 'Too many requests. Try again in a moment.';
-    return fallbackMessage;
+const serviceUnavailable: StatusError = {
+    kind: 'service-unavailable',
+    message: 'The Cantaro server is temporarily unavailable. Try again in a moment.',
+};
+
+const statusErrors = new Map<number, StatusError>([
+    [401, { kind: 'authentication', message: 'Your Cantaro session has expired. Sign in again, then try again.' }],
+    [403, { kind: 'authorization', message: 'Cantaro cannot access this request with your current permissions.' }],
+    [429, { kind: 'request', message: 'Too many requests. Try again in a moment.' }],
+    [502, serviceUnavailable],
+    [503, serviceUnavailable],
+    [504, serviceUnavailable],
+]);
+
+function describeStatus(status: number, fallbackMessage: string): StatusError {
+    return statusErrors.get(status) ?? (status >= 500
+        ? { kind: 'server', message: 'The Cantaro server could not complete this request. Try again in a moment.' }
+        : { kind: 'request', message: fallbackMessage });
 }
 
 export function mediaApiErrorFromStatus(
@@ -70,8 +75,8 @@ export function mediaApiErrorFromStatus(
     fallbackMessage: string,
     options: Omit<MediaApiErrorOptions, 'status'> = {},
 ): MediaApiError {
-    const kind = kindForStatus(status);
-    return new MediaApiError(kind, messageForStatus(status, fallbackMessage), {
+    const { kind, message } = describeStatus(status, fallbackMessage);
+    return new MediaApiError(kind, message, {
         ...options,
         status,
         retryable: options.retryable ?? (kind !== 'authorization' && status !== 401),
