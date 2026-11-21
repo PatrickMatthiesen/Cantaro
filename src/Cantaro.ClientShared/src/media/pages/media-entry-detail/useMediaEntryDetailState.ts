@@ -9,15 +9,9 @@ import {
 } from '../../components/media-entry-detail/providerAvailability';
 import { type ShowSnackbar, type SnackbarNotification } from '../../../ui';
 import { mediaApi } from '../../services/mediaApi';
-import { mainMediaProviderId } from '../../services/mediaProviders';
-import {
-  isRemoteCheckStale,
-  readStoredValue,
-  remoteCheckTimestampKey,
-  writeStoredValue,
-} from '../../services/mediaRefreshCache';
 import type {
   MediaEntryDetailModel,
+  MediaEpisodeCatalogDto,
   MediaProviderLinkSummaryDto,
   MediaProviderTitleDetailsDto,
   MediaTitleDetailDto,
@@ -31,14 +25,8 @@ const getErrorMessage = (error: unknown, fallbackMessage: string) =>
   error instanceof Error ? error.message : fallbackMessage;
 const getPrefixedErrorMessage = (error: unknown, fallbackMessage: string) =>
   `Error: ${getErrorMessage(error, fallbackMessage)}`;
-function getImportErrorMessage(error: unknown, fallbackMessage: string): string {
-  const errorCode = (error as { code?: string } | null)?.code;
-  return errorCode === 'platform_reconnect_required'
-    ? 'Reconnect this provider in Settings to refresh its library.' : fallbackMessage;
-}
-
 function buildAvailabilityMap(
-  providerLinks: MediaProviderLinkSummaryDto[],
+  providerLinks: readonly MediaProviderLinkSummaryDto[],
   current: ProviderAvailabilityMap,
 ): ProviderAvailabilityMap {
   const next: ProviderAvailabilityMap = {};
@@ -50,20 +38,21 @@ function buildAvailabilityMap(
   return next;
 }
 
-async function loadAvailabilityStates(
-  providerLinks: MediaProviderLinkSummaryDto[],
-  forceRefresh = false,
-) {
-  return Promise.all(providerLinks.map(async (link) => {
-    const key = providerAvailabilityKey(link.provider, link.externalId);
+async function loadAvailabilityState(link: MediaProviderLinkSummaryDto, forceRefresh: boolean) {
+  const key = providerAvailabilityKey(link.provider, link.externalId);
+  try {
+    const details = await getProviderTitleDetails(link, forceRefresh);
+    return { key, state: buildLoadedAvailabilityState(details), hydrated: true };
+  } catch (error) {
+    return { key, state: buildFailedAvailabilityState(link, error), hydrated: false };
+  }
+}
 
-    try {
-      const details = await getProviderTitleDetails(link, forceRefresh);
-      return { key, state: buildLoadedAvailabilityState(details), hydrated: true };
-    } catch (error) {
-      return { key, state: buildFailedAvailabilityState(link, error), hydrated: false };
-    }
-  }));
+function getProviderLinksSignature(links: readonly MediaProviderLinkSummaryDto[]) {
+  return JSON.stringify(links
+    .map(({ provider, externalId }) => [provider.toLowerCase(), externalId])
+    .sort(([providerA, idA], [providerB, idB]) =>
+      String(providerA).localeCompare(String(providerB)) || String(idA).localeCompare(String(idB))));
 }
 
 function buildLoadedAvailabilityState(details: MediaProviderTitleDetailsDto) {
@@ -201,50 +190,65 @@ async function loadComposedEntry(mediaTitleId: string) {
   return composeEntry(title, viewer, 'loaded');
 }
 
+function useStatusDraft() {
+  const [selectedStatus, setSelectedStatus] = useState('');
+  const [progressEpisodes, setProgressEpisodes] = useState<number | undefined>();
+  const [progressChapters, setProgressChapters] = useState<number | undefined>();
+  const [progressVolumes, setProgressVolumes] = useState<number | undefined>();
+  const draftRef = useRef<StatusDraft>({
+    selectedStatus,
+    progressEpisodes,
+    progressChapters,
+    progressVolumes,
+  });
+
+  useEffect(() => {
+    draftRef.current = { selectedStatus, progressEpisodes, progressChapters, progressVolumes };
+  }, [selectedStatus, progressEpisodes, progressChapters, progressVolumes]);
+
+  const setDraft = useCallback((draft: StatusDraft) => {
+    setSelectedStatus(draft.selectedStatus);
+    setProgressEpisodes(draft.progressEpisodes);
+    setProgressChapters(draft.progressChapters);
+    setProgressVolumes(draft.progressVolumes);
+  }, []);
+
+  return {
+    draftRef,
+    setDraft,
+    selectedStatus,
+    progressEpisodes,
+    progressChapters,
+    progressVolumes,
+    setSelectedStatus,
+    setProgressEpisodes,
+    setProgressChapters,
+    setProgressVolumes,
+  };
+}
+
 export function useEntryDetailState(mediaTitleId: string) {
   const [entry, setEntry] = useState<MediaEntryDetailModel | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [progressEpisodes, setProgressEpisodes] = useState<number | undefined>();
-  const [progressChapters, setProgressChapters] = useState<number | undefined>();
-  const [progressVolumes, setProgressVolumes] = useState<number | undefined>();
-  const [selectedStatus, setSelectedStatus] = useState('');
+  const { draftRef, setDraft, ...draftState } = useStatusDraft();
   const entryRef = useRef<MediaEntryDetailModel | null>(null);
   const mediaTitleIdRef = useRef(mediaTitleId);
   mediaTitleIdRef.current = mediaTitleId;
-  const draftRef = useRef<StatusDraft>({
-    selectedStatus: '',
-    progressEpisodes: undefined,
-    progressChapters: undefined,
-    progressVolumes: undefined,
-  });
 
   useEffect(() => {
     entryRef.current = entry;
   }, [entry]);
 
-  useEffect(() => {
-    draftRef.current = {
-      selectedStatus,
-      progressEpisodes,
-      progressChapters,
-      progressVolumes,
-    };
-  }, [progressChapters, progressEpisodes, progressVolumes, selectedStatus]);
-
-  const applyEntryData = useCallback((data: MediaEntryDetailModel, draft?: StatusDraft) => {
-    const nextDraft = draft ?? {
+  const applyEntryData = useCallback((data: MediaEntryDetailModel, preservedDraft?: StatusDraft) => {
+    setEntry(data);
+    setDraft(preservedDraft ?? {
       selectedStatus: data.status,
       progressEpisodes: data.progressEpisodes,
       progressChapters: data.progressChapters,
       progressVolumes: data.progressVolumes,
-    };
-    setEntry(data);
-    setProgressEpisodes(nextDraft.progressEpisodes);
-    setProgressChapters(nextDraft.progressChapters);
-    setProgressVolumes(nextDraft.progressVolumes);
-    setSelectedStatus(nextDraft.selectedStatus);
-  }, []);
+    });
+  }, [setDraft]);
 
   const loadEntry = useCallback(async () => {
     setIsLoading(true);
@@ -274,15 +278,12 @@ export function useEntryDetailState(mediaTitleId: string) {
     const data = await loadComposedEntry(mediaTitleId);
     const currentEntry = entryRef.current;
     const currentDraft = draftRef.current;
-    const hasUnsavedProgress = currentEntry !== null && (
-      currentDraft.selectedStatus !== currentEntry.status
-      || currentDraft.progressEpisodes !== currentEntry.progressEpisodes
-      || currentDraft.progressChapters !== currentEntry.progressChapters
-      || currentDraft.progressVolumes !== currentEntry.progressVolumes
-    );
-    applyEntryData(data, hasUnsavedProgress ? currentDraft : undefined);
+    const unsavedDraft = currentEntry && hasStatusChanges(currentEntry, currentDraft)
+      ? currentDraft
+      : undefined;
+    applyEntryData(data, unsavedDraft);
     return data;
-  }, [applyEntryData, mediaTitleId]);
+  }, [applyEntryData, draftRef, mediaTitleId]);
 
   const refreshTitleMetadata = useCallback(async () => {
     const title = await mediaApi.getMediaTitle(mediaTitleId);
@@ -306,16 +307,11 @@ export function useEntryDetailState(mediaTitleId: string) {
     loadEntry,
     reloadEntry,
     refreshTitleMetadata,
-    progressEpisodes,
-    setProgressEpisodes,
-    progressChapters,
-    setProgressChapters,
-    progressVolumes,
-    setProgressVolumes,
-    selectedStatus,
-    setSelectedStatus,
+    ...draftState,
   };
 }
+
+const noProviderLinks: readonly MediaProviderLinkSummaryDto[] = [];
 
 export function useProviderAvailability(
   entry: MediaEntryDetailModel | null,
@@ -326,16 +322,14 @@ export function useProviderAvailability(
   const [seasonCatalogHydrationRevision, setSeasonCatalogHydrationRevision] = useState(0);
   const forceRefreshRef = useRef(false);
   const refreshTitleMetadataRef = useRef(refreshTitleMetadata);
-  const providerLinksRef = useRef(entry?.providerLinks ?? []);
+  const providerLinks = entry?.providerLinks ?? noProviderLinks;
+  const providerLinksRef = useRef(providerLinks);
   const titleId = entry?.mediaTitleId;
-  const providerLinksSignature = JSON.stringify((entry?.providerLinks ?? [])
-    .map(({ provider, externalId }) => [provider.toLowerCase(), externalId])
-    .sort(([providerA, idA], [providerB, idB]) =>
-      String(providerA).localeCompare(String(providerB)) || String(idA).localeCompare(String(idB))));
+  const providerLinksSignature = getProviderLinksSignature(providerLinks);
 
   useEffect(() => {
-    providerLinksRef.current = entry?.providerLinks ?? [];
-  }, [entry?.providerLinks]);
+    providerLinksRef.current = providerLinks;
+  }, [providerLinks]);
 
   useEffect(() => {
     refreshTitleMetadataRef.current = refreshTitleMetadata;
@@ -360,8 +354,8 @@ export function useProviderAvailability(
 
     const loadAvailability = async () => {
       const results = await Promise.all(providerLinks.map(async (link) => {
-        const [result] = await loadAvailabilityStates([link], forceRefresh);
-        if (isCancelled || !result) return false;
+        const result = await loadAvailabilityState(link, forceRefresh);
+        if (isCancelled) return false;
 
         setAvailabilityByProviderLink((current) => ({
           ...current,
@@ -389,11 +383,12 @@ export function useProviderAvailability(
 
 function getEpisodeCatalogRevision(state: EpisodeCatalogState): string {
   if (state.status !== 'loaded') return state.status;
-  return state.value.episodes
-    .map((episode) => `${episode.episodeNumber}:${episode.destinations
-      .map((destination) => `${destination.serviceId}:${destination.url}`)
-      .join(',')}:${episode.hasConflict}`)
-    .join('|');
+  const destinations = (items: MediaEpisodeCatalogDto['standaloneDestinations']) =>
+    items?.map(({ serviceId, url }) => `${serviceId}:${url}`).join(',') ?? '';
+  return [
+    destinations(state.value.standaloneDestinations),
+    ...state.value.episodes.map(episode => `${episode.episodeNumber}:${destinations(episode.destinations)}`),
+  ].join('|');
 }
 
 export function useContinueWatching(
@@ -502,100 +497,6 @@ export function useFranchiseGraph(
   );
 }
 
-export function useRemoteEntryRefresh(
-  entry: MediaEntryDetailModel | null,
-  reloadEntry: () => Promise<MediaEntryDetailModel>,
-  showSnackbar: ShowSnackbar,
-) {
-  const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
-  const entryId = entry?.id;
-  const entryProvider = entry?.provider;
-  const entryIsConnected = entry?.isConnected;
-
-  useEffect(() => {
-    const refreshProviderId = entryProvider || mainMediaProviderId;
-    if (!entryId || !entryIsConnected
-      || !isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(refreshProviderId)))) {
-      setIsRefreshingRemote(false);
-      return;
-    }
-
-    const abortController = new AbortController();
-
-    const refreshFromRemote = async () => {
-      setIsRefreshingRemote(true);
-
-      try {
-        const event = await mediaApi.importLibraryAndWait(refreshProviderId, abortController.signal);
-        if (abortController.signal.aborted) return;
-        writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
-        await reloadEntry();
-      } catch (refreshError) {
-        if (!abortController.signal.aborted) showSnackbar({
-          message: getImportErrorMessage(refreshError, 'Could not refresh this entry. Try again.'),
-          variant: 'error',
-        });
-      } finally {
-        if (!abortController.signal.aborted) setIsRefreshingRemote(false);
-      }
-    };
-
-    void refreshFromRemote();
-    return () => abortController.abort();
-  }, [entryId, entryIsConnected, entryProvider, reloadEntry, showSnackbar]);
-
-  return isRefreshingRemote;
-}
-
-export function useManualRemoteRefresh(
-  entry: MediaEntryDetailModel | null,
-  reloadEntry: () => Promise<MediaEntryDetailModel>,
-  showSnackbar: ShowSnackbar,
-) {
-  const [isRefreshingRemote, setIsRefreshingRemote] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const entryId = entry?.id;
-
-  useEffect(() => {
-    setIsRefreshingRemote(false);
-    return () => {
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = null;
-    };
-  }, [entryId]);
-
-  const handleRefreshFromProvider = useCallback(async () => {
-    if (!entry?.isConnected || abortControllerRef.current) {
-      return;
-    }
-
-    const refreshProviderId = entry.provider || mainMediaProviderId;
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    setIsRefreshingRemote(true);
-
-    try {
-      const event = await mediaApi.importLibraryAndWait(refreshProviderId, abortController.signal);
-      if (abortController.signal.aborted) return;
-      writeStoredValue(remoteCheckTimestampKey(refreshProviderId), event.occurredAt);
-      await reloadEntry();
-      if (!abortController.signal.aborted) showSnackbar({ message: 'Status refreshed from provider', variant: 'success' });
-    } catch (refreshError) {
-      if (!abortController.signal.aborted) showSnackbar({
-        message: getImportErrorMessage(refreshError, 'Could not refresh from this provider. Try again.'),
-        variant: 'error',
-      });
-    } finally {
-      if (abortControllerRef.current === abortController) {
-        abortControllerRef.current = null;
-        setIsRefreshingRemote(false);
-      }
-    }
-  }, [entry, reloadEntry, showSnackbar]);
-
-  return { isRefreshingRemote, handleRefreshFromProvider };
-}
-
 function getStatusChanges(entry: MediaEntryDetailModel, draft: StatusDraft) {
   return {
     statusChanged: draft.selectedStatus !== entry.status,
@@ -604,6 +505,11 @@ function getStatusChanges(entry: MediaEntryDetailModel, draft: StatusDraft) {
       || draft.progressChapters !== entry.progressChapters
       || draft.progressVolumes !== entry.progressVolumes,
   };
+}
+
+function hasStatusChanges(entry: MediaEntryDetailModel, draft: StatusDraft) {
+  const changes = getStatusChanges(entry, draft);
+  return changes.statusChanged || changes.progressChanged;
 }
 
 async function saveStatusChanges(

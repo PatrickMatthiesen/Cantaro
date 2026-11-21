@@ -139,7 +139,7 @@ public class ObservedProviderEpisodeDto
 /// </summary>
 public class SubmitMediaObservationResponse
 {
-    public required string ObservationId { get; set; }
+    public string? ObservationId { get; set; }
 
     /// <summary>
     /// pending | matched | ambiguous | no_match | rejected
@@ -232,6 +232,7 @@ public class MediaObservationDto
     public DateTimeOffset? LastMatchAttemptedAt { get; set; }
     public string? LastMatchError { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     public List<MediaObservationCandidateDto> Candidates { get; set; } = [];
     public List<MediaObservationProviderChoiceDto> ProviderChoices { get; set; } = [];
 }
@@ -248,7 +249,12 @@ public class MediaObservationSummaryDto
 // Resolution actions
 // ---------------------------------------------------------------------------
 
-public class ResolveMediaObservationRequest
+public class MediaObservationVersionRequest
+{
+    public DateTimeOffset? ExpectedUpdatedAt { get; set; }
+}
+
+public class ResolveMediaObservationRequest : MediaObservationVersionRequest
 {
     public Guid? CandidateId { get; set; }
 

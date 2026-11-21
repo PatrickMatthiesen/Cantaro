@@ -327,15 +327,15 @@ function ObservationReviewContent({
           busyObservationId={state.busyObservationId}
           onResolve={(observationId, candidateId) => void state.runAction(
             observationId,
-            () => mediaApi.resolveObservation(observationId, { candidateId }),
+            () => mediaApi.resolveObservation(observationId, { candidateId, expectedUpdatedAt: observation.updatedAt }),
           )}
           onReject={(observationId) => void state.runAction(
             observationId,
-            () => mediaApi.rejectObservation(observationId),
+            () => mediaApi.rejectObservation(observationId, observation.updatedAt),
           )}
           onRetry={(observationId) => void state.runAction(
             observationId,
-            () => mediaApi.retryObservation(observationId),
+            () => mediaApi.retryObservation(observationId, observation.updatedAt),
           )}
         />
       ))}
@@ -352,9 +352,6 @@ function ReviewPageIntro({ embedded, navigation }: { embedded: boolean; navigati
     <section>
       <p className="text-sm font-semibold text-content-muted">Cantaro · Media</p>
       <h1 className="mt-1 text-3xl font-black text-content sm:text-4xl">Resolve media matches</h1>
-      <p className="mt-2 max-w-3xl text-sm text-content-muted">
-        Choose a candidate when Cantaro is unsure, or mark the observation as no match. Confirmed choices apply to your account only.
-      </p>
     </section>
   );
 }

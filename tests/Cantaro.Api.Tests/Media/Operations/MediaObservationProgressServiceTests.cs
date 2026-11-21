@@ -100,6 +100,22 @@ public class MediaObservationProgressServiceTests
     }
 
     [Fact]
+    public async Task TryEnqueueAutoProgress_RejectsProgressAboveTheEpisodeCount()
+    {
+        await using var fixture = await ProgressFixture.CreateAsync();
+        var (title, entry) = await fixture.SeedTitleAndEntryAsync(currentEpisodes: 12);
+        title.EpisodeCount = 12;
+        await fixture.Db.SaveChangesAsync();
+        var observation = fixture.MakeObservation(MediaObservationStatuses.Matched, "13", title.Id);
+
+        Assert.Equal(0, await fixture.Service.TryEnqueueAutoProgressAsync(observation, default));
+        Assert.Equal(12, await fixture.Db.MediaLibraryEntries.Where(row => row.Id == entry.Id)
+            .Select(row => row.ProgressEpisodes).SingleAsync());
+        Assert.Empty(fixture.Db.MediaProviderOperations);
+        Assert.False(fixture.LibraryEvents.TryRead(out _));
+    }
+
+    [Fact]
     public async Task TryEnqueueAutoProgress_ReturnsZero_WhenProgressDoesNotAdvance()
     {
         await using var fixture = await ProgressFixture.CreateAsync();
@@ -336,11 +352,11 @@ public class MediaObservationProgressServiceTests
             var processor = new MediaProviderOperationProcessor(db, registry, NullLogger<MediaProviderOperationProcessor>.Instance);
             var eventHub = new MediaLibraryEventHub();
             var libraryEvents = eventHub.Subscribe(901, out _);
-            var service = new MediaObservationProgressService(
-                db,
-                processor,
-                eventHub,
-                NullLogger<MediaObservationProgressService>.Instance);
+            var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+            var matching = new MediaObservationMatchingService(db, mappings, new MediaRelationGraphRefreshQueue(),
+                NullLogger<MediaObservationMatchingService>.Instance);
+            var service = new MediaObservationProgressService(db, processor, eventHub,
+                NullLogger<MediaObservationProgressService>.Instance, mappings, matching);
 
             return new ProgressFixture(connection, db, service, libraryEvents);
         }
@@ -447,7 +463,6 @@ public class MediaObservationProgressServiceTests
             var now = DateTimeOffset.UtcNow;
             return new MediaObservation
             {
-                Id = Guid.NewGuid(),
                 UserId = UserId,
                 SiteIdentifier = MediaObservationSiteIdentifiers.Crunchyroll,
                 ObservedUrl = "https://crunchyroll.com/watch/test",

@@ -41,29 +41,34 @@ function LibraryLoadingGrid({ density }: { density: MediaLibraryDensity }) {
     );
 }
 
+const libraryErrorMessages: Partial<Record<MediaApiError['kind'], { title: string; detail: string }>> = {
+    connection: {
+        title: "Can't connect to the Cantaro server",
+        detail: 'Check your connection, then try again.',
+    },
+    authentication: {
+        title: 'Your Cantaro session has expired',
+        detail: 'Sign in again, then try loading your library.',
+    },
+    authorization: {
+        title: "Cantaro can't access your library",
+        detail: 'Check your account permissions, then try again.',
+    },
+    'service-unavailable': {
+        title: 'The Cantaro server is temporarily unavailable',
+        detail: 'Try again in a moment.',
+    },
+    server: {
+        title: "The Cantaro server couldn't load your library",
+        detail: 'Try again in a moment.',
+    },
+};
+
 function LibraryErrorState({ error, onRetry }: { error: MediaApiError; onRetry: () => Promise<void> }) {
-    const title = error.kind === 'connection'
-        ? "Can't connect to the Cantaro server"
-        : error.kind === 'authentication'
-            ? 'Your Cantaro session has expired'
-                : error.kind === 'authorization'
-                    ? "Cantaro can't access your library"
-                : error.kind === 'service-unavailable'
-                    ? 'The Cantaro server is temporarily unavailable'
-                    : error.kind === 'server'
-                        ? "The Cantaro server couldn't load your library"
-                        : "Cantaro couldn't load your library";
-    const detail = error.kind === 'connection'
-        ? 'Check your connection, then try again.'
-        : error.kind === 'authentication'
-            ? 'Sign in again, then try loading your library.'
-            : error.kind === 'authorization'
-                ? 'Check your account permissions, then try again.'
-                : error.kind === 'service-unavailable'
-                    ? 'Try again in a moment.'
-                    : error.kind === 'server'
-                        ? 'Try again in a moment.'
-                        : 'Try again to reload your library.';
+    const { title, detail } = libraryErrorMessages[error.kind] ?? {
+        title: "Cantaro couldn't load your library",
+        detail: 'Try again to reload your library.',
+    };
 
     return (
         <section className="border-y border-danger-border bg-danger-surface px-4 py-6">
@@ -127,41 +132,23 @@ function LibraryPagination({ filters, totalPages, onPreviousPage, onNextPage }: 
     );
 }
 
-export function LibraryContentSection({
-    error,
-    isLoading,
-    hasCurrentData,
+function LibraryResults({
     items,
     filters,
     hasActiveFilters,
     totalPages,
-    onRetry,
     onNavigateEntry,
     onNavigateProviders,
     onPreviousPage,
     onNextPage,
-    density = 'comfortable',
-}: LibraryContentSectionProps) {
-    if (error && !hasCurrentData) {
-        return <LibraryErrorState error={error} onRetry={onRetry} />;
-    }
-
-    if (isLoading && !hasCurrentData) {
-        return <LibraryLoadingGrid density={density} />;
-    }
-
+    density,
+}: Omit<LibraryContentSectionProps, 'error' | 'isLoading' | 'hasCurrentData' | 'onRetry' | 'density'> & { density: MediaLibraryDensity }) {
     if (items.length === 0) {
-        return (
-            <>
-                {error && hasCurrentData ? <LibraryInlineError error={error} onRetry={onRetry} /> : null}
-                <LibraryEmptyState hasActiveFilters={hasActiveFilters} onNavigateProviders={onNavigateProviders} />
-            </>
-        );
+        return <LibraryEmptyState hasActiveFilters={hasActiveFilters} onNavigateProviders={onNavigateProviders} />;
     }
 
     return (
         <>
-            {error && hasCurrentData ? <LibraryInlineError error={error} onRetry={onRetry} /> : null}
             <div className={libraryGridClassName(density)}>
                 {items.map((entry) => (
                     <LibraryEntryCard
@@ -173,13 +160,33 @@ export function LibraryContentSection({
                     />
                 ))}
             </div>
-
             <LibraryPagination
                 filters={filters}
                 totalPages={totalPages}
                 onPreviousPage={onPreviousPage}
                 onNextPage={onNextPage}
             />
+        </>
+    );
+}
+
+export function LibraryContentSection({
+    error,
+    isLoading,
+    hasCurrentData,
+    onRetry,
+    density = 'comfortable',
+    ...results
+}: LibraryContentSectionProps) {
+    if (!hasCurrentData) {
+        if (error) return <LibraryErrorState error={error} onRetry={onRetry} />;
+        if (isLoading) return <LibraryLoadingGrid density={density} />;
+    }
+
+    return (
+        <>
+            {error && <LibraryInlineError error={error} onRetry={onRetry} />}
+            <LibraryResults {...results} density={density} />
         </>
     );
 }

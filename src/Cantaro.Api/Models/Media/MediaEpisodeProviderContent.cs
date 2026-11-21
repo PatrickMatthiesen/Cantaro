@@ -1,8 +1,7 @@
 namespace Cantaro.Api.Models;
 
 /// <summary>
-/// A provider's logical episode content. One content can have several playable
-/// variants, for example one Crunchyroll watch identity per audio locale.
+/// SIMKL's episode numbering for a canonical episode.
 /// </summary>
 public class MediaEpisodeProviderContent
 {
@@ -29,6 +28,4 @@ public class MediaEpisodeProviderContent
     public int? ProviderSequenceNumber { get; set; }
 
     public MediaEpisode? MediaEpisode { get; set; }
-
-    public ICollection<MediaEpisodeProviderIdentity> Variants { get; set; } = [];
 }

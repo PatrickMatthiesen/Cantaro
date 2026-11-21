@@ -81,6 +81,15 @@ export interface MusicSyncJobListOptions {
   limit?: number;
 }
 
+function syncJobQuery({ service, status, cursor, limit }: MusicSyncJobListOptions): URLSearchParams {
+  const query = new URLSearchParams();
+  if (service) query.set('service', service);
+  if (status) query.set('status', status);
+  if (cursor) query.set('cursor', cursor);
+  if (limit !== undefined) query.set('limit', limit.toString());
+  return query;
+}
+
 export const syncApi = {
   async getSyncStatus(service?: string): Promise<SyncStatusResponse> {
     const query = service ? `?service=${encodeURIComponent(service)}` : '';
@@ -143,11 +152,7 @@ export const syncApi = {
   },
 
   async listSyncJobs(options: MusicSyncJobListOptions = {}): Promise<MusicSyncJobListResponse> {
-    const query = new URLSearchParams();
-    if (options.service) query.set('service', options.service);
-    if (options.status) query.set('status', options.status);
-    if (options.cursor) query.set('cursor', options.cursor);
-    if (options.limit !== undefined) query.set('limit', options.limit.toString());
+    const query = syncJobQuery(options);
     const suffix = query.size > 0 ? `?${query.toString()}` : '';
     const response = await fetch(`/api/sync/jobs${suffix}`, { credentials: 'include' });
     if (!response.ok) {

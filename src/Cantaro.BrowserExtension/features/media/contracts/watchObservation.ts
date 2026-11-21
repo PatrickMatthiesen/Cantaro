@@ -48,6 +48,7 @@ export interface WatchProviderChoice {
 
 export interface WatchResolution {
   observationId: string;
+  updatedAt?: string;
   observedTitle: string;
   matchStatus: string;
   suggestedEpisodeOffset: number;
@@ -68,6 +69,7 @@ export interface WatchSubmissionResult {
 
 export interface ResolveWatchObservationRequest {
   observationId: string;
+  expectedUpdatedAt?: string;
   candidateId?: string;
   providerId?: string;
   providerMediaId?: string;

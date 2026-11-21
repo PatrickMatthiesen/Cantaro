@@ -24,7 +24,9 @@ public class MediaObservationProgressService(
     ApplicationDbContext dbContext,
     MediaProviderOperationProcessor operationProcessor,
     MediaLibraryEventHub eventHub,
-    ILogger<MediaObservationProgressService> logger)
+    ILogger<MediaObservationProgressService> logger,
+    MediaProviderSeasonMappingService mappingService,
+    MediaObservationMatchingService matchingService)
 {
     private readonly ApplicationDbContext _dbContext = dbContext;
     private readonly MediaProviderOperationProcessor _operationProcessor = operationProcessor;
@@ -43,140 +45,188 @@ public class MediaObservationProgressService(
 
     public async Task<MediaObservationProgressResult> TryEnqueueAutoProgressWithResultAsync(
         MediaObservation observation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        (Guid TitleId, int? EpisodeNumber)? expectedAssignment = null,
+        bool requireSharedAssignment = false)
     {
-        if (observation.MatchStatus != MediaObservationStatuses.Matched
+        if (observation.IsCatalogObservation || observation.MatchStatus != MediaObservationStatuses.Matched
             || observation.MediaTitleId is null)
         {
             return MediaObservationProgressResult.None;
         }
 
-        if (!TryResolveObservationProgress(observation, out var parsedProgress))
+        var result = await MediaProviderSeasonMappingService.WithWriteAsync(_dbContext, async () =>
         {
-            _logger.LogDebug(
-                "Skipping auto-progress for observation {ObservationId}: progress hint " +
-                "\"{ProgressHint}\" could not be parsed as a positive integer.",
-                observation.Id,
-                observation.ProgressHint);
+            if (observation.Id != Guid.Empty
+                && !await LockCurrentMatchAsync(observation, cancellationToken))
+            {
+                return MediaObservationProgressResult.None;
+            }
+
+            return await StageAutoProgressAsync(observation, cancellationToken, expectedAssignment,
+                requireSharedAssignment, applyProgress: true);
+        }, cancellationToken);
+
+        if (result.ProgressUpdated)
+        {
+            _eventHub.Publish(observation.UserId);
+        }
+
+        return result;
+    }
+
+    // The caller holds the mapping lock and has locked or updated the observation.
+    internal async Task<MediaObservationProgressResult> StageAutoProgressAsync(
+        MediaObservation observation,
+        CancellationToken cancellationToken,
+        (Guid TitleId, int? EpisodeNumber)? expectedAssignment,
+        bool requireSharedAssignment,
+        bool applyProgress)
+    {
+        var effective = await mappingService.ResolveAsync(observation, cancellationToken);
+        var hasPlaybackProgress = applyProgress && !observation.IsCatalogObservation;
+        if (expectedAssignment is { } expected
+            && (effective is not null
+                ? effective.Title.Id != expected.TitleId
+                    || (hasPlaybackProgress && effective.EpisodeNumber != expected.EpisodeNumber)
+                : requireSharedAssignment))
+        {
+            return new(0, 0, AssignmentChanged: true);
+        }
+
+        if (!hasPlaybackProgress)
+        {
             return MediaObservationProgressResult.None;
         }
 
-        // Load the matched title so we know which progress dimension to update.
-        var mediaTitle = await _dbContext.MediaTitles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Id == observation.MediaTitleId, cancellationToken);
+        if (effective is not null
+            && (effective.Title.Id != observation.MediaTitleId || effective.EpisodeNumber != observation.ResolvedProgress))
+        {
+            matchingService.ApplyMapping(observation, effective);
+            observation.Touch(DateTimeOffset.UtcNow);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        else if (effective is null && MediaObservationMatchingService.UsedSharedMapping(observation))
+        {
+            await matchingService.ProcessObservationAsync(observation, cancellationToken);
+        }
 
-        if (mediaTitle is null)
+        var progress = await ApplyProgressAsync(observation, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return progress;
+    }
+
+    internal async Task LockObservationAsync(Guid observationId, CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.IsNpgsql())
+        {
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                SELECT "Id" FROM "MediaObservations"
+                WHERE "Id" = {observationId}
+                FOR UPDATE
+                """, cancellationToken);
+        }
+    }
+
+    private async Task<bool> LockCurrentMatchAsync(MediaObservation observation, CancellationToken cancellationToken)
+    {
+        await LockObservationAsync(observation.Id, cancellationToken);
+        return await _dbContext.MediaObservations.AsNoTracking().AnyAsync(row =>
+            row.Id == observation.Id && row.MatchStatus == MediaObservationStatuses.Matched
+            && row.UpdatedAt == observation.UpdatedAt, cancellationToken);
+    }
+
+    private async Task<MediaObservationProgressResult> ApplyProgressAsync(
+        MediaObservation observation, CancellationToken cancellationToken)
+    {
+        if (observation.MatchStatus != MediaObservationStatuses.Matched || observation.MediaTitleId is not { } titleId)
         {
             return MediaObservationProgressResult.None;
         }
 
-        // Find all library entries for this user and title. Local Cantaro state
-        // advances immediately; connected entries also sync to the provider.
+        var title = await _dbContext.MediaTitles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == titleId, cancellationToken);
+        if (title is null)
+        {
+            return MediaObservationProgressResult.None;
+        }
+
+        var completion = title.IsCompletionOnly;
+        var parsedProgress = 0;
+        if (!completion && !TryResolveObservationProgress(observation, out parsedProgress))
+        {
+            _logger.LogDebug("No numeric progress for observation {ObservationId}.", observation.Id);
+            return MediaObservationProgressResult.None;
+        }
+
+        var (episodes, chapters, volumes) = DetermineProgressValues(title, parsedProgress);
+        if (!completion && title.EpisodeCount is > 0 && episodes > title.EpisodeCount)
+        {
+            return MediaObservationProgressResult.None;
+        }
+
+        if (_dbContext.Database.IsNpgsql())
+        {
+            await _dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                SELECT "Id" FROM "MediaLibraryEntries"
+                WHERE "UserId" = {observation.UserId} AND "MediaTitleId" = {titleId}
+                FOR UPDATE
+                """, cancellationToken);
+        }
+
         var entries = await _dbContext.MediaLibraryEntries
-            .Include(entry => entry.ProviderBindings)
-                .ThenInclude(binding => binding.MediaProviderLink)
-            .Where(e => e.UserId == observation.UserId
-                        && e.MediaTitleId == observation.MediaTitleId)
+            .Include(entry => entry.ProviderBindings).ThenInclude(binding => binding.MediaProviderLink)
+            .Where(entry => entry.UserId == observation.UserId && entry.MediaTitleId == titleId)
             .ToListAsync(cancellationToken);
-
-        if (entries.Count == 0)
-        {
-            _logger.LogDebug(
-                "No library entries for user {UserId} / title {MediaTitleId}. " +
-                "Auto-progress skipped.",
-                observation.UserId,
-                observation.MediaTitleId);
-            return MediaObservationProgressResult.None;
-        }
-
         var enqueuedCount = 0;
         var localUpdatesCount = 0;
-
         foreach (var entry in entries)
         {
-            var (progressEpisodes, progressChapters, progressVolumes) =
-                DetermineProgressValues(mediaTitle, parsedProgress);
-
-            if (!IsProgressAdvancing(entry, progressEpisodes, progressChapters, progressVolumes))
+            await _dbContext.Entry(entry).ReloadAsync(cancellationToken);
+            if (completion ? entry.Status == MediaLibraryStatuses.Completed :
+                !IsProgressAdvancing(entry, episodes, chapters, volumes))
             {
-                _logger.LogDebug(
-                    "Auto-progress suppressed for entry {EntryId} (user {UserId}): " +
-                    "new value ep={Ep}/ch={Ch}/vol={Vol} does not exceed current " +
-                    "ep={CurEp}/ch={CurCh}/vol={CurVol}.",
-                    entry.Id,
-                    entry.UserId,
-                    progressEpisodes, progressChapters, progressVolumes,
-                    entry.ProgressEpisodes, entry.ProgressChapters, entry.ProgressVolumes);
                 continue;
             }
 
-            ApplyLocalProgressUpdate(entry, progressEpisodes, progressChapters, progressVolumes);
+            if (completion)
+            {
+                entry.Status = MediaLibraryStatuses.Completed;
+            }
+
+            ApplyLocalProgressUpdate(entry, completion ? null : episodes, completion ? null : chapters,
+                completion ? null : volumes);
             localUpdatesCount++;
-
-            var connectedBindings = entry.ProviderBindings
-                .Where(binding => binding.ConnectedServiceAccountId is not null
-                    && binding.MediaProviderLink is not null)
-                .ToList();
-            if (connectedBindings.Count == 0)
+            foreach (var binding in entry.ProviderBindings.Where(binding =>
+                         binding.ConnectedServiceAccountId is not null && binding.MediaProviderLink is not null))
             {
-                _logger.LogInformation(
-                    "Applied local observation progress for user {UserId}, entry {EntryId}: " +
-                    "episodes={Ep}, chapters={Ch}, volumes={Vol} from observation {ObservationId}. " +
-                    "Provider sync was not queued because the entry is disconnected.",
-                    entry.UserId,
-                    entry.Id,
-                    progressEpisodes,
-                    progressChapters,
-                    progressVolumes,
-                    observation.Id);
-                continue;
-            }
-
-            foreach (var binding in connectedBindings)
-            {
-                var payload = new AutoProgressUpdatePayload
+                if (completion)
                 {
-                    ProviderMediaId = binding.MediaProviderLink!.ExternalId,
-                    ProgressEpisodes = progressEpisodes,
-                    ProgressChapters = progressChapters,
-                    ProgressVolumes = progressVolumes,
-                    LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
-                };
-
-                await _operationProcessor.EnqueueAutoProgressAsync(
-                    entry.UserId, binding, payload, cancellationToken);
-
-                _logger.LogInformation(
-                    "Queued auto-progress for user {UserId}, entry {EntryId} " +
-                    "(provider={Provider}, providerMediaId={ProviderMediaId}): " +
-                    "episodes={Ep}.",
-                    entry.UserId,
-                    entry.Id,
-                    binding.MediaProviderLink.Provider,
-                    binding.MediaProviderLink.ExternalId,
-                    progressEpisodes);
-
+                    await _operationProcessor.EnqueueStatusUpdateAsync(entry.UserId, binding,
+                        new MediaStatusUpdateRequest
+                        {
+                            ProviderMediaId = binding.MediaProviderLink!.ExternalId,
+                            Status = MediaLibraryStatuses.Completed
+                        }, cancellationToken, deferSave: true);
+                }
+                else
+                {
+                    await _operationProcessor.EnqueueAutoProgressAsync(entry.UserId, binding,
+                        new AutoProgressUpdatePayload
+                        {
+                            ProviderMediaId = binding.MediaProviderLink!.ExternalId,
+                            ProgressEpisodes = episodes, ProgressChapters = chapters, ProgressVolumes = volumes,
+                            LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt,
+                            LocalProgressCommitted = true
+                        }, cancellationToken, deferSave: true);
+                }
                 enqueuedCount++;
             }
         }
 
-        if (localUpdatesCount > 0)
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            _eventHub.Publish(observation.UserId);
-        }
-
-        return new MediaObservationProgressResult(enqueuedCount, localUpdatesCount);
+        return new(enqueuedCount, localUpdatesCount, entries.Count > 0);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Attempt to parse a numeric episode/chapter count from the raw progress hint.
-    /// Accepts plain integers ("5"), strings like "5", and falls back gracefully.
-    /// Returns false when the hint is null, empty, or not parseable.
-    /// </summary>
     public static bool TryParseProgressHint(string? hint, out int value)
     {
         value = 0;
@@ -203,7 +253,10 @@ public class MediaObservationProgressService(
             return true;
         }
 
-        return TryParseProgressHint(observation.ProgressHint, out value);
+        value = 0;
+        return observation.EpisodeOffset is null or 0
+            && !MediaObservationMatchingService.UsedSharedMapping(observation)
+            && TryParseProgressHint(observation.ProgressHint, out value);
     }
 
     /// <summary>
@@ -268,7 +321,8 @@ public class MediaObservationProgressService(
 
 }
 
-public readonly record struct MediaObservationProgressResult(int EnqueuedCount, int LocalUpdatesCount)
+public readonly record struct MediaObservationProgressResult(int EnqueuedCount, int LocalUpdatesCount,
+    bool OutcomeSatisfied = false, bool AssignmentChanged = false)
 {
     public static MediaObservationProgressResult None => new(0, 0);
 

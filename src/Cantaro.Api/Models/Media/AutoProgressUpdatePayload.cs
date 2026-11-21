@@ -7,6 +7,10 @@ namespace Cantaro.Api.Models;
 /// </summary>
 public class AutoProgressUpdatePayload
 {
+    // New observation operations commit their local update with the queue entry.
+    // Older queued payloads lack this field and still apply local progress on success.
+    public bool LocalProgressCommitted { get; set; }
+
     /// <summary>Provider-specific ID of the media entry being updated.</summary>
     public required string ProviderMediaId { get; set; }
 

@@ -230,6 +230,33 @@ function useProviderRefresh(
     activeRefresh.current = null;
   }, []);
 
+  const refreshProvider = useCallback(async (providerId: string, signal: AbortSignal) => {
+    try {
+      const event = await mediaApi.importLibraryAndWait(providerId, signal);
+      if (signal.aborted) return;
+      writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
+      setLastRemoteCheckAt(event.occurredAt);
+    } catch (error) {
+      if (!signal.aborted && needsProviderReconnect(error)) {
+        refreshableProviderIds.current = refreshableProviderIds.current.filter(id => id !== providerId);
+        setProviderStatuses(current => current.map(status =>
+          status.providerId === providerId ? { ...status, needsReconnect: true } : status));
+      }
+      throw error;
+    } finally {
+      if (!signal.aborted) setSyncingProviderIds(current => current.filter(id => id !== providerId));
+    }
+  }, []);
+
+  const applyRefreshResults = useCallback((results: PromiseSettledResult<void>[]) => {
+    if (results.some(result => result.status === 'rejected' && !needsProviderReconnect(result.reason))) {
+      setRefreshError(PROVIDER_REFRESH_ERROR);
+    }
+    if (results.some(result => result.status === 'fulfilled')) {
+      void loadLibrary(filtersRef.current);
+    }
+  }, [filtersRef, loadLibrary]);
+
   const refreshFromRemote = useCallback(async (providerIds?: string[]) => {
     const providersToRefresh = providerIds ?? refreshableProviderIds.current;
     if (providersToRefresh.length === 0 || activeRefresh.current) return;
@@ -240,43 +267,22 @@ function useProviderRefresh(
     setRefreshError(null);
 
     try {
-      const results = await Promise.allSettled(providersToRefresh.map(async (providerId) => {
-        try {
-          const event = await mediaApi.importLibraryAndWait(providerId, refresh.signal);
-          if (refresh.signal.aborted) return;
-          writeStoredValue(remoteCheckTimestampKey(providerId), event.occurredAt);
-          setLastRemoteCheckAt(event.occurredAt);
-        } catch (error) {
-          if (!refresh.signal.aborted && needsProviderReconnect(error)) {
-            refreshableProviderIds.current = refreshableProviderIds.current.filter(id => id !== providerId);
-            setProviderStatuses(current => current.map(status =>
-              status.providerId === providerId ? { ...status, needsReconnect: true } : status));
-          }
-          throw error;
-        } finally {
-          if (!refresh.signal.aborted) setSyncingProviderIds(current => current.filter(id => id !== providerId));
-        }
-      }));
+      const results = await Promise.allSettled(providersToRefresh.map(providerId =>
+        refreshProvider(providerId, refresh.signal)));
       if (refresh.signal.aborted) return;
 
-      if (results.some(result => result.status === 'rejected' && !needsProviderReconnect(result.reason))) {
-        setRefreshError(PROVIDER_REFRESH_ERROR);
-      }
-      if (results.some((result) => result.status === 'fulfilled')) {
-        void loadLibrary(filtersRef.current);
-      }
+      applyRefreshResults(results);
     } finally {
       if (activeRefresh.current === refresh) {
         activeRefresh.current = null;
         setSyncingProviderIds([]);
       }
     }
-  }, [filtersRef, loadLibrary]);
+  }, [applyRefreshResults, refreshProvider]);
 
   useEffect(() => {
     let isCancelled = false;
 
-    // fallow-ignore-next-line complexity
     const loadProviderState = async () => {
       try {
         const summary = await mediaApi.getProviderStatuses();
@@ -294,9 +300,7 @@ function useProviderRefresh(
 
         const staleProviderIds = connectedIds.filter((providerId) =>
           isRemoteCheckStale(readStoredValue(remoteCheckTimestampKey(providerId))));
-        if (staleProviderIds.length > 0) {
-          await refreshFromRemote(staleProviderIds);
-        }
+        await refreshFromRemote(staleProviderIds);
       } catch {
         if (!isCancelled) {
           setRefreshError(PROVIDER_REFRESH_ERROR);

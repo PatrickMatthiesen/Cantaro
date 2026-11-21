@@ -114,6 +114,7 @@ public class AniListApiClient(
         }
 
         using var requestLease = await _requestGate.AcquireAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var retryAfter = _requestGate.ObserveResponse(response);
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);

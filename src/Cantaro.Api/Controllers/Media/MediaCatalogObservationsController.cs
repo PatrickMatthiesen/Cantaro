@@ -47,188 +47,155 @@ public class MediaCatalogObservationsController(
 
         var userId = await GetCurrentUserIdAsync();
         var now = DateTimeOffset.UtcNow;
+        var observedAt = MediaObservationLifecycleService.NormalizeObservedAt(request.ObservedAt, now);
+        var observedTitle = BuildObservedTitle(request);
         var catalogKey = BuildCatalogKey(
             validation.Provider,
             validation.ProviderSeriesId,
             request.ProviderSeasonId,
             request.SeasonNumber);
-        var existing = await _dbContext.MediaObservations
-            .Include(item => item.Candidates)
-            .Include(item => item.Episodes)
-            .FirstOrDefaultAsync(item =>
-                item.UserId == userId
-                && item.SiteIdentifier == validation.Provider
-                && item.SiteMediaId == catalogKey,
-                cancellationToken);
+        // Record provider facts from detached evidence before inspecting the private observation.
+        var evidence = CreateObservation();
+        var recordedCount = await _episodeIdentityService.RecordCatalogObservationAsync(evidence, cancellationToken);
 
-        if (existing is not null)
+        const int maxAttempts = 3;
+        var retryingAfterSaveConflict = false;
+        var incomingEvidenceSaved = false;
+        for (var attempt = 1; ; attempt++)
         {
-            return Ok(await ProcessDuplicateAsync(
-                existing,
-                request,
-                validation,
-                userId,
-                now,
-                cancellationToken));
-        }
-
-        var observation = new MediaObservation
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            SiteIdentifier = validation.Provider,
-            SiteMediaId = catalogKey,
-            ObservedUrl = validation.SeriesUrl,
-            ObservedTitle = BuildObservedTitle(request),
-            ObservedAt = request.ObservedAt ?? now,
-            SeriesTitle = request.SeriesTitle.Trim(),
-            SeasonTitle = TrimToNull(request.SeasonTitle),
-            ProviderSeriesId = validation.ProviderSeriesId,
-            ProviderSeasonId = TrimToNull(request.ProviderSeasonId),
-            SeasonNumber = request.SeasonNumber,
-            IsCatalogObservation = true,
-            MatchStatus = MediaObservationStatuses.Pending,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        ApplyEpisodeEvidence(observation, request);
-        _dbContext.MediaObservations.Add(observation);
-        try
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException)
-        {
-            _dbContext.Entry(observation).State = EntityState.Detached;
-            existing = await _dbContext.MediaObservations
+            var observation = await _dbContext.MediaObservations
                 .Include(item => item.Candidates)
                 .Include(item => item.Episodes)
-                .FirstOrDefaultAsync(item =>
-                    item.UserId == userId
+                .FirstOrDefaultAsync(item => item.UserId == userId
                     && item.SiteIdentifier == validation.Provider
-                    && item.SiteMediaId == catalogKey,
-                    cancellationToken);
-            if (existing is null)
+                    && item.SiteMediaId == catalogKey, cancellationToken);
+            if (observation is not null && MediaObservationLifecycleService.ShouldKeepPersistedEvidence(
+                observation.ObservedAt, observedAt, retryingAfterSaveConflict, incomingEvidenceSaved))
             {
-                throw;
+                return Ok(CreateResponse(observation, MediaCatalogObservationStatuses.Deduplicated,
+                    validation.ObservedEpisodeCount, recordedCount, validation.RejectedEpisodeCount));
+            }
+            var isDuplicate = observation is not null;
+            if (observation is null)
+            {
+                observation = attempt == 1 ? evidence : CreateObservation();
+                _dbContext.MediaObservations.Add(observation);
+            }
+            else
+            {
+                ApplyLatestEvidence(observation, request, validation, observedTitle, observedAt, now);
             }
 
-            return Ok(await ProcessDuplicateAsync(
-                existing,
-                request,
-                validation,
-                userId,
-                now,
-                cancellationToken));
+            var saved = false;
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                saved = true;
+                observation = await _matchingService.ProcessObservationAsync(observation, cancellationToken);
+                var status = isDuplicate ? MediaCatalogObservationStatuses.Deduplicated
+                    : observation.MatchStatus == MediaObservationStatuses.Matched
+                        ? MediaCatalogObservationStatuses.Accepted
+                        : MediaCatalogObservationStatuses.PendingMatch;
+
+                _logger.LogInformation(
+                    "Stored catalog observation {ObservationId} for user {UserId}: {Provider}/{ProviderSeriesId}, status={Status}.",
+                    observation.Id, userId, validation.Provider, validation.ProviderSeriesId, status);
+
+                var response = CreateResponse(
+                    observation,
+                    status,
+                    validation.ObservedEpisodeCount,
+                    recordedCount,
+                    observation.MatchStatus == MediaObservationStatuses.Matched
+                        ? validation.ObservedEpisodeCount - recordedCount
+                        : validation.RejectedEpisodeCount);
+                if (await DeleteCompletedCatalogObservationIfSafeAsync(observation, recordedCount, cancellationToken))
+                {
+                    response.ObservationId = null;
+                }
+                return Ok(response);
+            }
+            catch (DbUpdateException exception) when (attempt < maxAttempts && !isDuplicate && !saved
+                && _lifecycleService.IsDuplicateObservationInsert(exception))
+            {
+                retryingAfterSaveConflict = true;
+                _lifecycleService.DetachSubmission(observation);
+            }
+            catch (DbUpdateConcurrencyException exception) when ((isDuplicate || saved)
+                && MediaObservationLifecycleService.IsSubmissionConcurrency(exception, observation))
+            {
+                if (attempt == maxAttempts)
+                {
+                    return Conflict(new { error = "Observation was updated by a newer submission." });
+                }
+                retryingAfterSaveConflict = true;
+                incomingEvidenceSaved |= saved;
+                _lifecycleService.DetachSubmission(observation);
+            }
+            catch (DbUpdateException exception) when (attempt < maxAttempts && (isDuplicate || saved)
+                && _lifecycleService.IsSubmissionForeignKeyViolation(exception, observation.Id))
+            {
+                if (await _dbContext.MediaObservations.AnyAsync(item => item.Id == observation.Id, cancellationToken))
+                {
+                    throw;
+                }
+                retryingAfterSaveConflict = true;
+                incomingEvidenceSaved |= saved;
+                _lifecycleService.DetachSubmission(observation);
+            }
         }
 
-        observation = await _matchingService.ProcessObservationAsync(observation.Id, cancellationToken);
-        var acceptedCount = await RecordMatchedCatalogAsync(observation, request, cancellationToken);
-        var status = observation.MatchStatus == MediaObservationStatuses.Matched
-            ? MediaCatalogObservationStatuses.Accepted
-            : MediaCatalogObservationStatuses.PendingMatch;
-
-        _logger.LogInformation(
-            "Stored catalog observation {ObservationId} for user {UserId}: {Provider}/{ProviderSeriesId}, status={Status}.",
-            observation.Id,
-            userId,
-            validation.Provider,
-            validation.ProviderSeriesId,
-            status);
-
-        var response = CreateResponse(
-            observation,
-            status,
-            validation.ObservedEpisodeCount,
-            acceptedCount,
-            observation.MatchStatus == MediaObservationStatuses.Matched
-                ? validation.ObservedEpisodeCount - acceptedCount
-                : validation.RejectedEpisodeCount);
-        await DeleteCompletedCatalogObservationIfSafeAsync(observation, acceptedCount, cancellationToken);
-        return Ok(response);
-    }
-
-    private async Task<SubmitMediaCatalogObservationResponse> ProcessDuplicateAsync(
-        MediaObservation observation,
-        SubmitMediaCatalogObservationRequest request,
-        CatalogRequestValidation validation,
-        int userId,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
-    {
-        ApplyLatestEvidence(observation, request, validation.SeriesUrl, now);
-        observation = await RefreshMatchAsync(observation, cancellationToken);
-        var recordedCount = await RecordMatchedCatalogAsync(observation, request, cancellationToken);
-
-        _logger.LogInformation(
-            "Deduplicated catalog observation {ObservationId} for user {UserId}: {Provider}/{ProviderSeriesId}.",
-            observation.Id,
-            userId,
-            validation.Provider,
-            validation.ProviderSeriesId);
-
-        var response = CreateResponse(
-            observation,
-            MediaCatalogObservationStatuses.Deduplicated,
-            validation.ObservedEpisodeCount,
-            recordedCount,
-            observation.MatchStatus == MediaObservationStatuses.Matched
-                ? validation.ObservedEpisodeCount - recordedCount
-                : validation.RejectedEpisodeCount);
-        await DeleteCompletedCatalogObservationIfSafeAsync(observation, recordedCount, cancellationToken);
-        return response;
-    }
-
-    private async Task<MediaObservation> RefreshMatchAsync(
-        MediaObservation observation,
-        CancellationToken cancellationToken)
-    {
-        // Re-evaluate catalog observations as split-season titles arrive.
-        return await _matchingService.ProcessObservationAsync(observation.Id, cancellationToken);
-    }
-
-    private async Task<int> RecordMatchedCatalogAsync(
-        MediaObservation observation,
-        SubmitMediaCatalogObservationRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (observation.MatchStatus != MediaObservationStatuses.Matched)
+        MediaObservation CreateObservation()
         {
-            return 0;
+            var observation = new MediaObservation
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                SiteIdentifier = validation.Provider,
+                SiteMediaId = catalogKey,
+                ObservedUrl = validation.SeriesUrl,
+                ObservedTitle = observedTitle,
+                MatchStatus = MediaObservationStatuses.Pending,
+                CreatedAt = now
+            };
+            ApplyLatestEvidence(observation, request, validation, observedTitle, observedAt, now);
+            return observation;
         }
-
-        return await _episodeIdentityService.RecordCatalogObservationAsync(observation, cancellationToken);
     }
 
-    private Task DeleteCompletedCatalogObservationIfSafeAsync(
+    private Task<bool> DeleteCompletedCatalogObservationIfSafeAsync(
         MediaObservation observation,
         int recordedCount,
         CancellationToken cancellationToken)
-        => _lifecycleService.DeleteAfterDurableOutcomeAsync(
-            observation,
-            observation.MatchStatus == MediaObservationStatuses.Matched
-                && recordedCount > 0
-                && recordedCount == observation.Episodes.Count,
-            cancellationToken);
+        => recordedCount > 0 && recordedCount == observation.Episodes.Count
+            ? _lifecycleService.DeletePublishedCatalogObservationAsync(observation, cancellationToken)
+            : Task.FromResult(false);
 
-    private void ApplyLatestEvidence(
+    private static void ApplyLatestEvidence(
         MediaObservation observation,
         SubmitMediaCatalogObservationRequest request,
-        string normalizedSeriesUrl,
+        CatalogRequestValidation validation,
+        string observedTitle,
+        DateTimeOffset observedAt,
         DateTimeOffset now)
     {
-        observation.ObservedUrl = normalizedSeriesUrl;
-        observation.ObservedTitle = BuildObservedTitle(request);
-        observation.ObservedAt = request.ObservedAt ?? now;
-        observation.SeriesTitle = request.SeriesTitle.Trim();
+        observation.ObservedUrl = validation.SeriesUrl;
+        observation.ObservedTitle = observedTitle;
+        observation.ObservedAt = observedAt;
+        var seriesTitle = request.SeriesTitle.Trim();
+        if (!string.Equals(observation.SeriesTitle, seriesTitle, StringComparison.Ordinal))
+        {
+            observation.ProviderChoicesPayload = null;
+        }
+        observation.SeriesTitle = seriesTitle;
+        observation.ResetMatch();
         observation.SeasonTitle = TrimToNull(request.SeasonTitle);
-        observation.ProviderSeriesId = observation.ProviderSeriesId ?? request.ProviderSeriesId.Trim();
+        observation.ProviderSeriesId = validation.ProviderSeriesId;
         observation.ProviderSeasonId = TrimToNull(request.ProviderSeasonId);
         observation.SeasonNumber = request.SeasonNumber;
         observation.IsCatalogObservation = true;
         ApplyEpisodeEvidence(observation, request);
-        observation.UpdatedAt = now;
+        observation.Touch(now);
     }
 
     private static void ApplyEpisodeEvidence(MediaObservation observation, SubmitMediaCatalogObservationRequest request)
@@ -253,9 +220,10 @@ public class MediaCatalogObservationsController(
                 string.Equals(item.ProviderEpisodeId, episode.ProviderEpisodeId, StringComparison.OrdinalIgnoreCase));
             if (existing is null)
             {
+                // A default key lets EF track this episode as a new dependent.
                 observation.Episodes.Add(new MediaObservationEpisode
                 {
-                    Id = Guid.NewGuid(), ProviderEpisodeId = episode.ProviderEpisodeId.Trim(), ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl),
+                    ProviderEpisodeId = episode.ProviderEpisodeId.Trim(), ProviderUrl = MediaDestinationUrlPolicy.NormalizeObservedUrl(episode.ProviderUrl),
                     EpisodeNumber = episode.EpisodeNumber, EpisodeTitle = TrimToNull(episode.EpisodeTitle), ReleaseTrack = TrimToNull(episode.ReleaseTrack),
                     AvailableSubtitleLanguageCodes = episode.AvailableSubtitleLanguageCodes.ToList(), AvailableAudioLanguageCodes = episode.AvailableAudioLanguageCodes.ToList()
                 });

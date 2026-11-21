@@ -9,6 +9,19 @@ namespace Cantaro.Api.Tests;
 public class MediaDomainModelTests
 {
     [Fact]
+    public void RawProviderEpisodeHasNoCanonicalOrUserRelationship()
+    {
+        using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite("Data Source=:memory:").Options);
+        var raw = db.Model.FindEntityType(typeof(MediaProviderEpisode))!;
+        Assert.Equal(["Provider", "ProviderEpisodeId"], raw.FindPrimaryKey()!.Properties.Select(property => property.Name));
+        Assert.Empty(raw.GetForeignKeys());
+        Assert.Null(raw.FindProperty("IsTrusted"));
+        Assert.Null(raw.FindProperty("HasConflict"));
+        Assert.Null(db.Model.FindEntityType("Cantaro.Api.Models.MediaObservationEpisodeOffset"));
+    }
+
+    [Fact]
     public async Task MediaDomainEntities_SeparateCanonicalTitleViewerStateAndProviderBinding()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

@@ -20,9 +20,8 @@ export interface StreamingDestination {
   displayName: string;
   audioLocale?: string;
   releaseTrack?: string;
-  seenCount?: number;
-  firstSeenAt?: string;
-  lastSeenAt?: string;
+  availableAudioLanguageCodes?: string[];
+  availableSubtitleLanguageCodes?: string[];
 }
 
 export interface EpisodeStreamingDestinations {
@@ -82,7 +81,10 @@ function resolveSeriesDestinations(
       'series',
     ));
   const observed = (catalog?.seriesDestinations ?? []).map(item => destination(item, 'series'));
-  return normalizeAndOrder(compact([...availability, ...observed]), preferredServiceId);
+  const standalone = compact((catalog?.standaloneDestinations ?? []).map(item => destination(item, 'episode')));
+  const standaloneServices = new Set(standalone.map(item => item.serviceId));
+  const series = compact([...observed, ...availability]).filter(item => !standaloneServices.has(item.serviceId));
+  return normalizeAndOrder([...standalone, ...series], preferredServiceId);
 }
 
 function resolveEpisodeDestinations(
@@ -96,7 +98,8 @@ function resolveEpisodeDestinations(
     title: episode.title,
     availableAudioLanguageCodes: episode.availableAudioLanguageCodes ?? [],
     availableSubtitleLanguageCodes: episode.availableSubtitleLanguageCodes ?? [],
-    destinations: normalizeAndOrder(
+    // Episode actions select one URL per service after applying the audio filter.
+    destinations: orderDestinations(
       compact(episode.destinations.map(item => destination(item, 'episode'))),
       preferredServiceId,
     ),
@@ -107,20 +110,22 @@ export function normalizeAndOrder(
   destinations: readonly StreamingDestination[],
   preferredServiceId?: StreamingServiceId | null,
 ): StreamingDestination[] {
-  const ordered = destinations
-    .filter(item => isStreamingDestinationUrl(item.serviceId, item.url, item.kind))
-    .sort((left, right) => compareDestinations(left, right, preferredServiceId));
   const seen = new Set<string>();
-  return ordered.filter(item => {
-    // A destination is an action for a streaming service. Providers can report
-    // more than one valid URL for the same title, but rendering each URL would
-    // present indistinguishable duplicate actions. Ordering above keeps the
-    // strongest observation, then this collapses the rest per service.
-    const key = `${item.serviceId}:${item.releaseTrack ?? item.audioLocale ?? "default"}`;
+  return orderDestinations(destinations, preferredServiceId).filter(item => {
+    const key = item.serviceId;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+function orderDestinations(
+  destinations: readonly StreamingDestination[],
+  preferredServiceId?: StreamingServiceId | null,
+): StreamingDestination[] {
+  return destinations
+    .filter(item => isStreamingDestinationUrl(item.serviceId, item.url, item.kind))
+    .sort((left, right) => compareDestinations(left, right, preferredServiceId));
 }
 
 function compareDestinations(
@@ -128,22 +133,12 @@ function compareDestinations(
   right: StreamingDestination,
   preferredServiceId?: StreamingServiceId | null,
 ): number {
-  const comparisons = [
-    preferenceRank(left.serviceId, preferredServiceId) - preferenceRank(right.serviceId, preferredServiceId),
-    left.displayName.localeCompare(right.displayName),
-    (right.seenCount ?? 0) - (left.seenCount ?? 0),
-    compareTimestampDescending(left.lastSeenAt, right.lastSeenAt),
-    left.url.localeCompare(right.url),
-  ];
-  return comparisons.find(value => value !== 0) ?? 0;
+  return preferenceRank(left.serviceId, preferredServiceId) - preferenceRank(right.serviceId, preferredServiceId)
+    || left.displayName.localeCompare(right.displayName);
 }
 
 function preferenceRank(serviceId: StreamingServiceId, preferredServiceId?: StreamingServiceId | null): number {
   return serviceId === preferredServiceId ? 0 : 1;
-}
-
-function compareTimestampDescending(left?: string, right?: string): number {
-  return (right ? Date.parse(right) : 0) - (left ? Date.parse(left) : 0);
 }
 
 function destination(
@@ -164,11 +159,16 @@ function destination(
     url: normalizeUrl(url),
     kind,
     displayName: definition.displayName,
-    audioLocale: source.audioLocale,
-    releaseTrack: source.releaseTrack,
-    seenCount: source.seenCount,
-    firstSeenAt: source.firstSeenAt,
-    lastSeenAt: source.lastSeenAt,
+    ...getDestinationLanguageMetadata(source),
+  };
+}
+
+function getDestinationLanguageMetadata(source: DestinationSource) {
+  return {
+    audioLocale: source.audioLocale ?? undefined,
+    releaseTrack: source.releaseTrack ?? undefined,
+    availableAudioLanguageCodes: source.availableAudioLanguageCodes,
+    availableSubtitleLanguageCodes: source.availableSubtitleLanguageCodes,
   };
 }
 

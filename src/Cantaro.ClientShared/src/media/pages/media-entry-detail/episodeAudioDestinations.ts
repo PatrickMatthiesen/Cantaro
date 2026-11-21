@@ -1,6 +1,6 @@
 import type { StreamingDestination } from "../../services/streamingDestinations";
 
-export function getLanguageCode(locale: string) {
+function getLanguageCode(locale: string) {
   try {
     return new Intl.Locale(locale).language;
   } catch {
@@ -11,33 +11,24 @@ export function getLanguageCode(locale: string) {
 export function filterDestinationsByAudioLanguage(
   destinations: readonly StreamingDestination[],
   audioLanguage: string | null,
-  preferredReleaseTrack?: string,
 ) {
   if (!audioLanguage) return destinations;
 
   return destinations.filter((destination) =>
     destination.serviceId === "stremio"
-    || matchesAudioLocale(destination, audioLanguage)
-    || matchesReleaseTrack(destination, audioLanguage, preferredReleaseTrack));
+    || getDestinationAudioLanguages(destination).includes(audioLanguage));
 }
 
-function matchesAudioLocale(
-  destination: StreamingDestination,
-  audioLanguage: string,
-) {
-  return destination.audioLocale !== undefined
-    && getLanguageCode(destination.audioLocale) === audioLanguage;
+export function getDestinationAudioLanguages(destination: StreamingDestination) {
+  const locales = [...(destination.availableAudioLanguageCodes ?? [])];
+  if (destination.audioLocale) locales.push(destination.audioLocale);
+  const track = destination.releaseTrack;
+  const dubLocale = getDubAudioLocale(track);
+  if (dubLocale) locales.push(dubLocale);
+  if (locales.length === 0 && track?.startsWith("sub:")) locales.push("ja");
+  return [...new Set(locales.map(getLanguageCode))];
 }
 
-function matchesReleaseTrack(
-  destination: StreamingDestination,
-  audioLanguage: string,
-  preferredReleaseTrack: string | undefined,
-) {
-  if (preferredReleaseTrack === undefined
-    || destination.releaseTrack !== preferredReleaseTrack) return false;
-
-  return preferredReleaseTrack.startsWith("dub:")
-    ? getLanguageCode(preferredReleaseTrack.slice(4)) === audioLanguage
-    : audioLanguage === "ja";
+function getDubAudioLocale(track: string | undefined) {
+  return track?.startsWith("dub:") && track.length > 4 ? track.slice(4) : undefined;
 }

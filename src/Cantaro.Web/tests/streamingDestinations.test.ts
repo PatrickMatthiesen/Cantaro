@@ -5,6 +5,8 @@ import {
   resolveStreamingServiceId,
   STREAMING_SERVICES,
 } from '@cantaro/client-shared/media';
+import { getContinueLinkActions } from '../../Cantaro.ClientShared/src/media/pages/media-entry-detail/continueWatchingAction';
+import { preferEpisodeDestinationsByService } from '../../Cantaro.ClientShared/src/media/services/streamingDestinations';
 
 describe('streaming service definitions', () => {
   it('resolves provider aliases into the closed service set', () => {
@@ -43,15 +45,13 @@ describe('streaming destination resolution', () => {
     expect(result.seriesDestinations.map(item => item.serviceId)).toEqual(['netflix', 'crunchyroll']);
   });
 
-  it('keeps one strongest series destination per service', () => {
+  it('prefers the catalog series destination for each service', () => {
     const result = resolveStreamingDestinations([
       { serviceId: 'crunchyroll', displayName: 'Crunchyroll', url: 'https://www.crunchyroll.com/series/OLDER/show', availabilityKind: 'streaming' },
     ], {
       seriesDestinations: [{
         serviceId: 'crunchyroll',
         url: 'https://www.crunchyroll.com/series/STRONGER/show',
-        seenCount: 4,
-        lastSeenAt: '2026-08-20T00:00:00Z',
       }],
       episodes: [],
       specials: [],
@@ -72,6 +72,35 @@ describe('streaming destination resolution', () => {
     expect(result.seriesDestinations).toEqual([]);
   });
 
+  it('prefers a standalone movie watch link over a series fallback from the same service', () => {
+    const url = 'https://www.crunchyroll.com/watch/MOVIESUB/title';
+    const result = resolveStreamingDestinations([
+      { serviceId: 'netflix', displayName: 'Netflix', url: 'https://www.netflix.com/title/1', availabilityKind: 'streaming' },
+    ], {
+      standaloneDestinations: [
+        { serviceId: 'crunchyroll', url, releaseTrack: 'sub:en' },
+        { serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/MOVIEDUB/title', releaseTrack: 'dub:en' },
+      ],
+      seriesDestinations: [{
+        serviceId: 'crunchyroll',
+        url: 'https://www.crunchyroll.com/series/SERIES1/title',
+      }],
+      episodes: [],
+      specials: [],
+    }, 'crunchyroll');
+
+    expect(result.episodes).toEqual([]);
+    expect(result.seriesDestinations.map(item => item.url)).toEqual([url, 'https://www.netflix.com/title/1']);
+    expect(getContinueLinkActions(
+      { status: 'loaded', value: { outcome: 'unavailable' } },
+      result.seriesDestinations,
+      [],
+      'crunchyroll',
+      'Title',
+      'movie',
+    )[0]).toMatchObject({ kind: 'episode', url });
+  });
+
   it('upgrades a trusted legacy Crunchyroll series link to HTTPS', () => {
     const result = resolveStreamingDestinations([{
       serviceId: 'Crunchyroll',
@@ -84,24 +113,42 @@ describe('streaming destination resolution', () => {
     expect(result.seriesDestinations[0]?.url).toBe('https://www.crunchyroll.com/one-piece');
   });
 
-  it('keeps the strongest observed identity first for one service', () => {
+  it('keeps the API language ranking for opaque episode and movie destinations', () => {
+    const preferredUrl = 'https://www.crunchyroll.com/watch/G31UXQKKG';
+    const destinations = [
+      { url: preferredUrl, availableAudioLanguageCodes: ['en'], availableSubtitleLanguageCodes: ['de'] },
+      { url: 'https://www.crunchyroll.com/watch/GQ8BRAPFQ', availableAudioLanguageCodes: [], availableSubtitleLanguageCodes: [] },
+      { url: 'https://www.crunchyroll.com/watch/GRQW9GW7R', availableAudioLanguageCodes: ['ja'], availableSubtitleLanguageCodes: ['en'] },
+    ].map(item => ({
+      ...item,
+      serviceId: 'crunchyroll',
+      audioLocale: null,
+      releaseTrack: null,
+    }));
     const result = resolveStreamingDestinations([], {
       seriesDestinations: [],
+      standaloneDestinations: destinations,
       specials: [],
       episodes: [{
         episodeNumber: 1,
-        seenCount: 4,
-        hasConflict: false,
         availableSubtitleLanguageCodes: ['en'],
         availableAudioLanguageCodes: ['ja', 'en'],
-        destinations: [
-          { serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/AAA/one', seenCount: 1, firstSeenAt: '2026-08-01', lastSeenAt: '2026-08-09' },
-          { serviceId: 'crunchyroll', url: 'https://www.crunchyroll.com/watch/ZZZ/one', seenCount: 3, firstSeenAt: '2026-08-01', lastSeenAt: '2026-08-08' },
-        ],
+        destinations,
       }],
     });
 
-    expect(result.episodes[0]?.destinations[0]?.url).toContain('/watch/ZZZ/');
+    expect(preferEpisodeDestinationsByService(
+      result.episodes[0]?.destinations ?? [],
+      result.seriesDestinations,
+    ).map(action => action.url)).toEqual([preferredUrl]);
+    expect(getContinueLinkActions(
+      { status: 'loaded', value: { outcome: 'unavailable' } },
+      result.seriesDestinations,
+      [],
+      'crunchyroll',
+      'Title',
+      'movie',
+    ).map(action => action.url)).toEqual([preferredUrl]);
     expect(result.episodes[0]?.availableSubtitleLanguageCodes).toEqual(['en']);
     expect(result.episodes[0]?.availableAudioLanguageCodes).toEqual(['ja', 'en']);
   });
@@ -111,31 +158,21 @@ describe('streaming destination resolution', () => {
       seriesDestinations: [{
         serviceId: 'crunchyroll',
         url: 'https://www.crunchyroll.com/series/SERIES1/show',
-        seenCount: 2,
-        firstSeenAt: '2026-08-08T00:00:00Z',
-        lastSeenAt: '2026-08-09T00:00:00Z',
       }],
       episodes: [
         {
           episodeNumber: 2,
-          seenCount: 1,
-          hasConflict: false,
           destinations: [],
         },
         {
           episodeNumber: 1,
           title: 'One',
-          seenCount: 2,
-          hasConflict: false,
           availableSubtitleLanguageCodes: ['en'],
           availableAudioLanguageCodes: ['en'],
           destinations: [
             {
               serviceId: 'crunchyroll',
               url: 'https://www.crunchyroll.com/watch/EP1/one',
-              seenCount: 2,
-              firstSeenAt: '2026-08-08T00:00:00Z',
-              lastSeenAt: '2026-08-09T00:00:00Z',
             },
           ],
         },
@@ -146,7 +183,6 @@ describe('streaming destination resolution', () => {
     expect(result.seriesDestinations).toHaveLength(1);
     expect(result.episodes.map(item => item.episodeNumber)).toEqual([1, 2]);
     expect(result.episodes[0]?.destinations.map(item => item.serviceId)).toEqual(['crunchyroll']);
-    expect(result.episodes[0]?.destinations[0]?.seenCount).toBe(2);
     expect(result.episodes[0]?.availableSubtitleLanguageCodes).toEqual(['en']);
     expect(result.episodes[0]?.availableAudioLanguageCodes).toEqual(['en']);
   });
