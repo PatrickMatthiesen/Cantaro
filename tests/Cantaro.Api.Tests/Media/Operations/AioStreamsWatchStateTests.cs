@@ -635,6 +635,31 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(2_000, item.GetProperty("positionMs").GetInt64());
     }
 
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrackerCompletionWinsTheSameSecondRegardlessOfDeliveryOrder(bool differentAlias)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db, imdbSeason: 1, imdbFromEpisode: 1, nonImdbEpisodes: []);
+        AddLink(schema.Db, await schema.Db.MediaTitles.SingleAsync(), "imdb", MetaId);
+        await schema.Db.SaveChangesAsync();
+
+        await fixture.ExpectPushAsync(Event("played", "played", At), HttpStatusCode.NoContent);
+        var pause = Event("late-pause", "pause", At, position: 1_250);
+        var path = PushRoute;
+        if (differentAlias)
+        {
+            pause = pause with { VideoId = MetaId + ":1:1" };
+            path = $"{Route}/watch_state/push/series/{MetaId}%3A1%3A1.json";
+        }
+
+        await fixture.ExpectPushAsync(pause, HttpStatusCode.NoContent, path);
+        Assert.Empty((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+        await fixture.ExpectPushAsync(pause with { Id = "fresh-rewatch", At = At + 1 }, HttpStatusCode.NoContent, path);
+        Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+    }
+
     [PostgresFact]
     public async Task PullKeepsLibraryCompletionAcrossRouteAliasesAndScoreEdits()
     {
@@ -843,14 +868,20 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(pause.VideoId, Assert.Single(rewatch.GetProperty("watched").GetProperty(watchedType).EnumerateArray()).GetString());
     }
 
-    [PostgresFact]
-    public async Task CompletionWhileDisconnectedSuppressesAnExistingPauseAfterPairingAgain()
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletionWhileDisconnectedSuppressesOldPausesAfterPairingAgain(bool pauseAlreadyReceived)
     {
         const string pairingPath = "/api/media/aiostreams-pairing";
         await using var schema = await PostgresTestSchema.CreateAsync();
         await using var fixture = await Fixture.StartAsync(schema.Db);
-        await fixture.ExpectPushAsync(Event("before-disconnect", "pause", At, position: 1_250), HttpStatusCode.NoContent);
-        Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+        var pause = Event("before-disconnect", "pause", At, position: 1_250);
+        if (pauseAlreadyReceived)
+        {
+            await fixture.ExpectPushAsync(pause, HttpStatusCode.NoContent);
+            Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+        }
 
         using var disconnect = new HttpRequestMessage(HttpMethod.Delete, pairingPath);
         disconnect.Headers.Add("X-Fixture-User", "1");
@@ -868,6 +899,12 @@ public sealed class AioStreamsWatchStateTests
         using var paired = await fixture.Client.SendAsync(pair);
         Assert.Equal(HttpStatusCode.OK, paired.StatusCode);
         var manifest = (await paired.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("manifestPath").GetString()!;
+        if (!pauseAlreadyReceived)
+        {
+            using var delivered = await fixture.Client.PostAsJsonAsync(
+                manifest.Replace("/manifest.json", "/watch_state/push/anime/kitsu%3A1%3A1.json"), pause);
+            Assert.Equal(HttpStatusCode.NoContent, delivered.StatusCode);
+        }
         var state = await fixture.Client.GetFromJsonAsync<JsonElement>(manifest.Replace("/manifest.json", "/watch_state/pull.json"));
         Assert.Empty(state.GetProperty("items").EnumerateArray());
         Assert.Equal(VideoId, Assert.Single(state.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());

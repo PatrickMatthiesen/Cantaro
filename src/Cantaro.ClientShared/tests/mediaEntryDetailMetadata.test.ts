@@ -107,7 +107,7 @@ test.each([
   expect(findStremioDetailUrl(getStremioTargets(availabilityByProviderLink['simkl:456']))).toContain('tt7654321');
 });
 
-test('AIOStreams retains Kitsu episode targets for anime series', () => {
+test('AIOStreams retains Kitsu targets only when provider evidence agrees with verified IMDb', () => {
   const link = {
     id: 'simkl-link', provider: 'simkl', externalId: 'anime:456', linkSource: 'imported',
     lastVerifiedAt: '2026-10-15T12:00:00Z',
@@ -124,6 +124,9 @@ test('AIOStreams retains Kitsu episode targets for anime series', () => {
   const title = { ...createTitle('media-1', [link]), format: 'tv' };
 
   expect(getAioStreamsTargets({ entry: createEntry(title), availabilityByProviderLink })).toEqual([target]);
+  const imdb = { ...link, id: 'imdb-link', provider: 'imdb', externalId: 'tt1234567' };
+  const linkedTitle = { ...title, providerLinks: [link, imdb] };
+  expect(getAioStreamsTargets({ entry: createEntry(linkedTitle), availabilityByProviderLink })).toEqual([]);
 });
 
 test('a conflict from a verified provider blocks AIOStreams across providers and keeps Stremio targets', () => {

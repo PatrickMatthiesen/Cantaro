@@ -1,6 +1,7 @@
 import { providerAvailabilityKey, type ProviderAvailabilityState } from "../../components/media-entry-detail/providerAvailability";
 import type { MediaEntryDetailModel, MediaTitleDetailDto } from "../../services/mediaApi";
 import { mediaFormatLabel } from "../../services/mediaFormatting";
+import { isImdbId } from "../../services/playbackLinks";
 import type {
   MediaEntryDetailContentProps,
   ProgressSummary,
@@ -12,6 +13,16 @@ export function getStremioTargets(state: ProviderAvailabilityState | undefined) 
 
 function getAioStreamsType({ mediaKind, format }: MediaTitleDetailDto) {
   return mediaKind === "anime" && format === "movie" ? "movie" : mediaKind;
+}
+
+function getAioStreamsAnimeTargets(
+  title: MediaTitleDetailDto,
+  availability: (ProviderAvailabilityState | undefined)[],
+) {
+  const imdb = title.providerLinks.find(link => link.provider === "imdb" && link.lastVerifiedAt);
+  const targets = availability.flatMap(getStremioTargets);
+  if (imdb && targets.some(target => target && isImdbId(target.id) && target.id !== imdb.externalId)) return [];
+  return targets.filter(target => target?.type === "series");
 }
 
 export function getAioStreamsTargets({
@@ -29,9 +40,7 @@ export function getAioStreamsTargets({
       return entry.title.providerLinks.filter(link => link.provider === "imdb" && link.lastVerifiedAt)
         .map(link => ({ id: link.externalId, type }));
     case "anime":
-      return verifiedAvailability
-        .flatMap(getStremioTargets)
-        .filter(target => target?.type === "series");
+      return getAioStreamsAnimeTargets(entry.title, verifiedAvailability);
     default:
       return [];
   }

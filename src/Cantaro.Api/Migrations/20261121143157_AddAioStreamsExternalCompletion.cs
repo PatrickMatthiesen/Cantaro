@@ -26,12 +26,6 @@ namespace Cantaro.Api.Migrations
                     RETURN NULL;
                 END IF;
 
-                IF NOT EXISTS (SELECT 1 FROM "AioStreamsPairings" WHERE "UserId" = NEW."UserId")
-                    AND NOT EXISTS (SELECT 1 FROM "AioStreamsWatchEvents" WHERE "MediaLibraryEntryId" = NEW."Id")
-                THEN
-                    RETURN NULL;
-                END IF;
-
                 IF episode_progress_increased THEN
                     INSERT INTO "AioStreamsExternalCompletions"
                         ("MediaLibraryEntryId", "FirstEpisode", "LastEpisode", "At")

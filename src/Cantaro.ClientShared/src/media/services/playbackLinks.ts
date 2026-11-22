@@ -211,7 +211,7 @@ function createMissingEpisodes(
     }));
 }
 
-function isImdbId(id: string): boolean {
+export function isImdbId(id: string): boolean {
   return /^tt\d+$/.test(id);
 }
 

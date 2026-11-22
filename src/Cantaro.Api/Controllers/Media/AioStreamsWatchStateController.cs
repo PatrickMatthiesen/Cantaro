@@ -195,7 +195,8 @@ public sealed class AioStreamsWatchStateController(
                                   : events.Key.ProgressEpisodes >= events.Key.EpisodeNumber,
                               TrackerPlayed = events.Any(e => e.Watch.Played),
                               Latest = events.Where(e => e.Watch.Played || e.Watch.PositionMs != null)
-                                  .OrderByDescending(e => e.Watch.At).ThenByDescending(e => e.Watch.Id)
+                                  .OrderByDescending(e => e.Watch.At).ThenByDescending(e => e.Watch.Played)
+                                  .ThenByDescending(e => e.Watch.Id)
                                   .Select(e => new
                                   {
                                       Event = e.Watch,
@@ -214,6 +215,7 @@ public sealed class AioStreamsWatchStateController(
             .SelectMany(item => item.Select(row => row.VideoId!))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var items = media.Select(item => item.OrderByDescending(row => row.Latest?.Event.At)
+                .ThenByDescending(row => row.Latest?.Event.Played)
                 .ThenByDescending(row => row.Latest?.Event.Id).First().Latest)
             .Where(latest => latest is { ExternallyCompleted: false, Event: { Played: false, PositionMs: > 0 } })
             .Select(latest => latest!.Event)

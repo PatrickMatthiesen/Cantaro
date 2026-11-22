@@ -47,7 +47,13 @@ public sealed class AioStreamsAnimeEnricher(
         if (entry is null || !HasExactSourceIdentity(entry, source)) return;
 
         var candidates = BuildCandidates(details, entry);
-        if (candidates is null || candidates.Count == 0) return;
+        if (candidates is null)
+        {
+            details.AioStreamsIdentityConflict = true;
+            return;
+        }
+
+        if (candidates.Count == 0) return;
 
         var currentTargets = details.StremioTargets.Count > 0
             ? details.StremioTargets
