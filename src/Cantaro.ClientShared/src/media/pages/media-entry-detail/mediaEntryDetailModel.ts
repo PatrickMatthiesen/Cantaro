@@ -19,6 +19,8 @@ function getAioStreamsAnimeTargets(
   title: MediaTitleDetailDto,
   availability: (ProviderAvailabilityState | undefined)[],
 ) {
+  if (title.format === "special" || title.primaryProgressDimension !== "episode") return [];
+
   const imdb = title.providerLinks.find(link => link.provider === "imdb" && link.lastVerifiedAt);
   const targets = availability.flatMap(getStremioTargets);
   if (imdb && targets.some(target => target && isImdbId(target.id) && target.id !== imdb.externalId)) return [];

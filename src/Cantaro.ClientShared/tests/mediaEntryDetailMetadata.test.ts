@@ -124,6 +124,8 @@ test('AIOStreams retains Kitsu targets only when provider evidence agrees with v
   const title = { ...createTitle('media-1', [link]), format: 'tv' };
 
   expect(getAioStreamsTargets({ entry: createEntry(title), availabilityByProviderLink })).toEqual([target]);
+  const special = createEntry({ ...title, format: 'special' });
+  expect(getAioStreamsTargets({ entry: special, availabilityByProviderLink })).toEqual([]);
   const imdb = { ...link, id: 'imdb-link', provider: 'imdb', externalId: 'tt1234567' };
   const linkedTitle = { ...title, providerLinks: [link, imdb] };
   expect(getAioStreamsTargets({ entry: createEntry(linkedTitle), availabilityByProviderLink })).toEqual([]);

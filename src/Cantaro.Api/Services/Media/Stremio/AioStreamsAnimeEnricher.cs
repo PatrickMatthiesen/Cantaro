@@ -46,6 +46,9 @@ public sealed class AioStreamsAnimeEnricher(
         var (entry, _, _) = await GetEntryAsync(baseUri, source, cancellationToken);
         if (entry is null || !HasExactSourceIdentity(entry, source)) return;
 
+        if (entry.Type == "SPECIAL" || (entry.Type == "MOVIE" && details.Format != MediaFormats.Movie))
+            details.AioStreamsIdentityConflict = true;
+
         var candidates = BuildCandidates(details, entry);
         if (candidates is null)
         {

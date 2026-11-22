@@ -130,6 +130,22 @@ public sealed class AioStreamsAnimeEnricherTests
         Assert.Equal(8, details.StremioTargets.Single(target => target.Id == "tt2098220").EpisodeMapping!.EpisodeOffset);
     }
 
+    [Theory]
+    [InlineData("SPECIAL")]
+    [InlineData("MOVIE")]
+    public async Task EnrichAsync_BlocksAioStreamsEpisodeLaunchForStandaloneAnime(string providerType)
+    {
+        var handler = new QueueHandler(Response($$"""
+            {"success":true,"data":{"type":"{{providerType}}","mappings":{"simklId":40398,"kitsuId":6448}}}
+            """));
+        var details = CreateDetails();
+
+        await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
+
+        Assert.True(details.AioStreamsIdentityConflict);
+        Assert.Equal("kitsu:6448", Assert.Single(details.StremioTargets).Id);
+    }
+
     [Fact]
     public async Task EnrichAsync_CachesOneSourceAcrossCallers()
     {
