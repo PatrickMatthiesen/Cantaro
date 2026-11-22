@@ -174,15 +174,10 @@ function parseAioStreamsInstance(value: string | undefined): URL | null {
 function isAioStreamsInstance(url: URL): boolean {
   if (url.protocol !== 'https:' || url.username || url.password) return false;
 
-  const segments = decodeURIComponent(url.pathname).toLowerCase().split('/').filter(Boolean);
-  const configurationUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-  return !segments.includes('jellyfin') && !segments.includes('manifest.json')
-    && !segments.some((segment, index) => {
-      const next = segments[index + 1] ?? '';
-      return (['stremio', 'chilllink', 'seanime'].includes(segment) && configurationUuid.test(next))
-        || (segment === 'stremio' && next === 'u' && index + 2 < segments.length)
-        || (segment === 'seanime' && next === 'extensions');
-    });
+  const path = `/${decodeURIComponent(url.pathname).split('/').filter(Boolean).join('/')}/`;
+  const accountPath = /\/(?:stremio|chilllink|seanime)\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\//i;
+  const installPath = /\/(?:jellyfin|manifest\.json|seanime\/extensions|stremio\/u\/[^/]+)\//i;
+  return !accountPath.test(path) && !installPath.test(path);
 }
 
 function aioStreamsDestination(
