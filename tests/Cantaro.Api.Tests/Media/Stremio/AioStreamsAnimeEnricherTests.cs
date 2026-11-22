@@ -90,8 +90,8 @@ public sealed class AioStreamsAnimeEnricherTests
     [InlineData("tt9999999")]
     public async Task EnrichAsync_ConflictingExistingIdentityRejectsWholeResponse(string hintedImdbId)
     {
-        var handler = new QueueHandler(Response($$"""
-            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"{{hintedImdbId}}","seasonNumber":1,"fromEpisode":1}}}
+        var handler = new QueueHandler(Response($$$$"""
+            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"{{{{hintedImdbId}}}}","seasonNumber":1,"fromEpisode":1}}}
             """));
         var details = CreateDetails();
         details.StremioTargets =
@@ -135,8 +135,8 @@ public sealed class AioStreamsAnimeEnricherTests
     [InlineData("MOVIE")]
     public async Task EnrichAsync_BlocksAioStreamsEpisodeLaunchForStandaloneAnime(string providerType)
     {
-        var handler = new QueueHandler(Response($$"""
-            {"success":true,"data":{"type":"{{providerType}}","mappings":{"simklId":40398,"kitsuId":6448}}}
+        var handler = new QueueHandler(Response($$$$"""
+            {"success":true,"data":{"type":"{{{{providerType}}}}","mappings":{"simklId":40398,"kitsuId":6448}}}
             """));
         var details = CreateDetails();
 
