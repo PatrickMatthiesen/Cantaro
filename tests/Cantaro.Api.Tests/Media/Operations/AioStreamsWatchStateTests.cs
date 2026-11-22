@@ -110,6 +110,9 @@ public sealed class AioStreamsWatchStateTests
     [InlineData("https://aio.test/hosted/stremio/852a2fb0-764b-43ef-870e-054724c98f08")]
     [InlineData("https://aio.test/hosted/stremio/u/private")]
     [InlineData("https://aio.test/hosted/%73tremio%2fu%2fprivate/configure")]
+    [InlineData("https://aio.test/hosted/chilllink/852a2fb0-764b-43ef-870e-054724c98f08/example/v/1")]
+    [InlineData("https://aio.test/hosted/%73eanime%2f852a2fb0-764b-43ef-870e-054724c98f08/example/extensions/aiostreams-plugin.json")]
+    [InlineData("https://aio.test/hosted/seanime/extensions/encoded-configuration/stremio-custom-source.json")]
     public void PlaybackInstanceRejectsPrivateInstallUrls(string url)
     {
         Assert.Null(AioStreamsPairingController.NormalizePlaybackInstance(url));
@@ -151,6 +154,15 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
         var first = await PairAsync(1);
         var second = await PairAsync(2);
+        const string privateInstallUrl = "https://aio.test/chilllink/852a2fb0-764b-43ef-870e-054724c98f08/example";
+        await schema.Db.Set<AioStreamsPairing>().Where(p => p.UserId == 1)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.PlaybackInstanceUrl, privateInstallUrl));
+        using var legacyStatus = await ManageAsync(HttpMethod.Get, 1);
+        var legacy = await legacyStatus.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(legacy.GetProperty("paired").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, legacy.GetProperty("playbackInstanceUrl").ValueKind);
+        using var privateInstall = await ManageAsync(HttpMethod.Put, 1, privateInstallUrl);
+        Assert.Equal(HttpStatusCode.BadRequest, privateInstall.StatusCode);
         foreach (var url in new[] { "http://aio.test", "https://name:password@aio.test", "https://aio.test/?token=example", "https://aio.test/jellyfin/account/configuration" })
         {
             using var invalid = await ManageAsync(HttpMethod.Put, 1, url);
@@ -580,6 +592,30 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresFact]
+    public async Task RejectsMixedImdbParentVerifiedOnAnotherTitleButAcceptsNativeKitsu()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var otherTitle = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Other title", MediaKind = MediaKinds.Series,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode,
+            ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        AddLink(schema.Db, otherTitle, "imdb", MetaId);
+        await schema.Db.SaveChangesAsync();
+
+        var played = Event("mixed", "played", At);
+        await fixture.ExpectPushAsync(played, HttpStatusCode.NotFound);
+        Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+        Assert.Null(await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+
+        await fixture.ExpectPushAsync(played with { Id = "native", MetaId = "kitsu:1" }, HttpStatusCode.NoContent);
+        Assert.Equal("native", (await schema.Db.AioStreamsWatchEvents.SingleAsync()).EventId);
+        Assert.Equal(1, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+    }
+
+    [PostgresFact]
     public async Task CompletionSupersedesAnExistingPauseAtTheSameSecond()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
@@ -593,7 +629,8 @@ public sealed class AioStreamsWatchStateTests
             .SetProperty(entry => entry.UpdatedAt, DateTimeOffset.FromUnixTimeSeconds(At)));
         Assert.Empty((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
 
-        await fixture.ExpectPushAsync(pause with { Id = "rewatch", PositionMs = 2_000 }, HttpStatusCode.NoContent);
+        await fixture.ExpectPushAsync(pause with { Id = "rewatch", At = At + 1, PositionMs = 2_000 },
+            HttpStatusCode.NoContent);
         var item = Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
         Assert.Equal(2_000, item.GetProperty("positionMs").GetInt64());
     }
@@ -754,15 +791,18 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresTheory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task PullSuppressesTheFirstDelayedPauseAfterExternalCompletionAndKeepsARewatch(bool movie)
+    [InlineData(false, -1)]
+    [InlineData(false, 0)]
+    [InlineData(true, -1)]
+    [InlineData(true, 0)]
+    public async Task PullSuppressesTheFirstDelayedPauseAfterExternalCompletionAndKeepsARewatch(
+        bool movie, int secondsAfterCompletion)
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
         await using var fixture = await Fixture.StartAsync(schema.Db);
-        var pause = Event("delayed-first-pause", "pause", At + 1, position: 2_000);
+        var pause = Event("delayed-first-pause", "pause", At + secondsAfterCompletion, position: 2_000);
         var path = PushRoute;
-        var completionTime = DateTimeOffset.FromUnixTimeSeconds(At + 2);
+        var completionTime = DateTimeOffset.FromUnixTimeSeconds(At).AddMilliseconds(500);
 
         if (movie)
         {
@@ -796,11 +836,64 @@ public sealed class AioStreamsWatchStateTests
         var watchedType = movie ? "movies" : "episodes";
         Assert.Equal(pause.VideoId, Assert.Single(state.GetProperty("watched").GetProperty(watchedType).EnumerateArray()).GetString());
 
-        await fixture.ExpectPushAsync(pause with { Id = "first-rewatch", At = At + 3, PositionMs = 2_500 },
+        await fixture.ExpectPushAsync(pause with { Id = "first-rewatch", At = At + 1, PositionMs = 2_500 },
             HttpStatusCode.NoContent, path);
         var rewatch = await fixture.PullAsync();
         Assert.Equal(2_500, Assert.Single(rewatch.GetProperty("items").EnumerateArray()).GetProperty("positionMs").GetInt64());
         Assert.Equal(pause.VideoId, Assert.Single(rewatch.GetProperty("watched").GetProperty(watchedType).EnumerateArray()).GetString());
+    }
+
+    [PostgresFact]
+    public async Task CompletionWhileDisconnectedSuppressesAnExistingPauseAfterPairingAgain()
+    {
+        const string pairingPath = "/api/media/aiostreams-pairing";
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        await fixture.ExpectPushAsync(Event("before-disconnect", "pause", At, position: 1_250), HttpStatusCode.NoContent);
+        Assert.Single((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+
+        using var disconnect = new HttpRequestMessage(HttpMethod.Delete, pairingPath);
+        disconnect.Headers.Add("X-Fixture-User", "1");
+        using var disconnected = await fixture.Client.SendAsync(disconnect);
+        Assert.Equal(HttpStatusCode.NoContent, disconnected.StatusCode);
+        Assert.False(await schema.Db.Set<AioStreamsPairing>().AnyAsync());
+
+        await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+            .SetProperty(entry => entry.ProgressEpisodes, 1)
+            .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.UserProgressUpdate)
+            .SetProperty(entry => entry.UpdatedAt, DateTimeOffset.FromUnixTimeSeconds(At + 1)));
+
+        using var pair = new HttpRequestMessage(HttpMethod.Put, pairingPath);
+        pair.Headers.Add("X-Fixture-User", "1");
+        using var paired = await fixture.Client.SendAsync(pair);
+        Assert.Equal(HttpStatusCode.OK, paired.StatusCode);
+        var manifest = (await paired.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("manifestPath").GetString()!;
+        var state = await fixture.Client.GetFromJsonAsync<JsonElement>(manifest.Replace("/manifest.json", "/watch_state/pull.json"));
+        Assert.Empty(state.GetProperty("items").EnumerateArray());
+        Assert.Equal(VideoId, Assert.Single(state.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
+    }
+
+    [PostgresFact]
+    public async Task CompletionSuppressesASameSecondPauseCommittedWhileTheCompletionIsInFlight()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        await schema.Db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var completion = await schema.Db.Database.BeginTransactionAsync();
+            await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+                .SetProperty(entry => entry.ProgressEpisodes, 1)
+                .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.UserProgressUpdate)
+                .SetProperty(entry => entry.UpdatedAt, DateTimeOffset.FromUnixTimeSeconds(At)));
+
+            await fixture.ExpectPushAsync(Event("concurrent-pause", "pause", At, position: 1_250), HttpStatusCode.NoContent)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            await completion.CommitAsync();
+        });
+
+        var state = await fixture.PullAsync();
+        Assert.Empty(state.GetProperty("items").EnumerateArray());
+        Assert.Equal(VideoId, Assert.Single(state.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
     }
 
     [PostgresFact]

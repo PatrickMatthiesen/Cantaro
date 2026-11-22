@@ -22,7 +22,8 @@ public sealed class AioStreamsPairingController(ApplicationDbContext db, UserMan
         if (!int.TryParse(users.GetUserId(User), out var userId)) return Unauthorized();
         var pairing = await db.Set<AioStreamsPairing>().Where(p => p.UserId == userId)
             .Select(p => new { p.PlaybackInstanceUrl }).SingleOrDefaultAsync(cancellationToken);
-        return Ok(new { paired = pairing is not null, playbackInstanceUrl = pairing?.PlaybackInstanceUrl });
+        var playbackInstanceUrl = pairing?.PlaybackInstanceUrl is { } saved ? NormalizePlaybackInstance(saved) : null;
+        return Ok(new { paired = pairing is not null, playbackInstanceUrl });
     }
 
     [HttpPut("playback")]
@@ -58,10 +59,15 @@ public sealed class AioStreamsPairingController(ApplicationDbContext db, UserMan
                 || segment.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            if (segment.Equals("stremio", StringComparison.OrdinalIgnoreCase)
-                && index + 1 < segments.Length
-                && (Guid.TryParseExact(segments[index + 1], "D", out _)
-                    || (segments[index + 1].Equals("u", StringComparison.OrdinalIgnoreCase) && index + 2 < segments.Length)))
+            if (index + 1 >= segments.Length) continue;
+
+            var next = segments[index + 1];
+            var stremio = segment.Equals("stremio", StringComparison.OrdinalIgnoreCase);
+            var seanime = segment.Equals("seanime", StringComparison.OrdinalIgnoreCase);
+            var chillLink = segment.Equals("chilllink", StringComparison.OrdinalIgnoreCase);
+            if ((stremio || seanime || chillLink) && Guid.TryParseExact(next, "D", out _)
+                || (stremio && next.Equals("u", StringComparison.OrdinalIgnoreCase) && index + 2 < segments.Length)
+                || (seanime && next.Equals("extensions", StringComparison.OrdinalIgnoreCase)))
                 return null;
         }
 

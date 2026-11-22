@@ -60,6 +60,7 @@ public sealed class AioStreamsAnimeEnricherTests
         await CreateEnricher(handler, baseUrl: string.Empty).EnrichAsync(details, CancellationToken.None);
 
         Assert.Empty(handler.RequestUris);
+        Assert.False(details.AioStreamsIdentityConflict);
         var target = Assert.Single(details.StremioTargets);
         Assert.Null(target.EpisodeMapping!.SeasonNumber);
         Assert.Equal(0, target.EpisodeMapping.EpisodeOffset);
@@ -79,6 +80,7 @@ public sealed class AioStreamsAnimeEnricherTests
         await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
 
         var retained = Assert.Single(details.StremioTargets);
+        Assert.False(details.AioStreamsIdentityConflict);
         Assert.Equal("kitsu:7000", retained.Id);
         Assert.Equal(0, retained.EpisodeMapping!.EpisodeOffset);
     }
@@ -97,7 +99,33 @@ public sealed class AioStreamsAnimeEnricherTests
 
         await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
 
-        Assert.Equal("kitsu:7000", Assert.Single(details.StremioTargets).Id);
+        Assert.True(details.AioStreamsIdentityConflict);
+        var fallback = Assert.Single(details.StremioTargets);
+        Assert.Equal("kitsu:7000", fallback.Id);
+        Assert.Equal(0, fallback.EpisodeMapping!.EpisodeOffset);
+    }
+
+    [Fact]
+    public async Task EnrichAsync_FlagsConflictingImdbCoordinatesEvenWhenKitsuAgrees()
+    {
+        var handler = new QueueHandler(Response("""
+            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"tt2098220","seasonNumber":2,"fromEpisode":13}}}
+            """));
+        var details = CreateDetails();
+        details.StremioTargets =
+        [
+            new MediaProviderStremioTarget { Type = "series", Id = "kitsu:6448" },
+            new MediaProviderStremioTarget
+            {
+                Type = "series", Id = "tt2098220",
+                EpisodeMapping = new MediaProviderStremioEpisodeMapping { SeasonNumber = 2, EpisodeOffset = 8 }
+            }
+        ];
+
+        await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
+
+        Assert.True(details.AioStreamsIdentityConflict);
+        Assert.Equal(8, details.StremioTargets.Single(target => target.Id == "tt2098220").EpisodeMapping!.EpisodeOffset);
     }
 
     [Fact]

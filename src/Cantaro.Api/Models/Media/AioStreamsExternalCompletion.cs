@@ -7,5 +7,4 @@ internal sealed class AioStreamsExternalCompletion
     public int? FirstEpisode { get; set; }
     public int? LastEpisode { get; set; }
     public long At { get; set; }
-    public long LastReceiptId { get; set; }
 }

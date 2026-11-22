@@ -175,12 +175,13 @@ function isAioStreamsInstance(url: URL): boolean {
   if (url.protocol !== 'https:' || url.username || url.password) return false;
 
   const segments = decodeURIComponent(url.pathname).toLowerCase().split('/').filter(Boolean);
-  const stremioUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+  const configurationUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   return !segments.includes('jellyfin') && !segments.includes('manifest.json')
     && !segments.some((segment, index) => {
-      if (segment !== 'stremio') return false;
-      const credential = segments[index + 1] ?? '';
-      return stremioUuid.test(credential) || (credential === 'u' && index + 2 < segments.length);
+      const next = segments[index + 1] ?? '';
+      return (['stremio', 'chilllink', 'seanime'].includes(segment) && configurationUuid.test(next))
+        || (segment === 'stremio' && next === 'u' && index + 2 < segments.length)
+        || (segment === 'seanime' && next === 'extensions');
     });
 }
 

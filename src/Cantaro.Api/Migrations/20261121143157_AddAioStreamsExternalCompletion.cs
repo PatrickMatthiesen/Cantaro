@@ -16,12 +16,7 @@ namespace Cantaro.Api.Migrations
                 episode_progress_increased boolean := COALESCE(NEW."ProgressEpisodes", 0) > previous_progress;
                 movie_completed boolean;
                 completion_at bigint := floor(extract(epoch FROM NEW."UpdatedAt"))::bigint;
-                last_receipt_id bigint;
             BEGIN
-                IF NOT EXISTS (SELECT 1 FROM "AioStreamsPairings" WHERE "UserId" = NEW."UserId") THEN
-                    RETURN NULL;
-                END IF;
-
                 movie_completed := NEW."Status" = 'completed' AND OLD."Status" IS DISTINCT FROM 'completed'
                     AND EXISTS (
                         SELECT 1 FROM "MediaTitles"
@@ -31,19 +26,21 @@ namespace Cantaro.Api.Migrations
                     RETURN NULL;
                 END IF;
 
-                SELECT COALESCE(MAX("Id"), 0) INTO last_receipt_id
-                FROM "AioStreamsWatchEvents"
-                WHERE "MediaLibraryEntryId" = NEW."Id";
+                IF NOT EXISTS (SELECT 1 FROM "AioStreamsPairings" WHERE "UserId" = NEW."UserId")
+                    AND NOT EXISTS (SELECT 1 FROM "AioStreamsWatchEvents" WHERE "MediaLibraryEntryId" = NEW."Id")
+                THEN
+                    RETURN NULL;
+                END IF;
 
                 IF episode_progress_increased THEN
                     INSERT INTO "AioStreamsExternalCompletions"
-                        ("MediaLibraryEntryId", "FirstEpisode", "LastEpisode", "At", "LastReceiptId")
-                    VALUES (NEW."Id", previous_progress + 1, NEW."ProgressEpisodes", completion_at, last_receipt_id);
+                        ("MediaLibraryEntryId", "FirstEpisode", "LastEpisode", "At")
+                    VALUES (NEW."Id", previous_progress + 1, NEW."ProgressEpisodes", completion_at);
                 END IF;
 
                 IF movie_completed THEN
-                    INSERT INTO "AioStreamsExternalCompletions" ("MediaLibraryEntryId", "At", "LastReceiptId")
-                    VALUES (NEW."Id", completion_at, last_receipt_id);
+                    INSERT INTO "AioStreamsExternalCompletions" ("MediaLibraryEntryId", "At")
+                    VALUES (NEW."Id", completion_at);
                 END IF;
 
                 RETURN NULL;
@@ -69,8 +66,7 @@ namespace Cantaro.Api.Migrations
                     MediaLibraryEntryId = table.Column<Guid>(type: "uuid", nullable: false),
                     FirstEpisode = table.Column<int>(type: "integer", nullable: true),
                     LastEpisode = table.Column<int>(type: "integer", nullable: true),
-                    At = table.Column<long>(type: "bigint", nullable: false),
-                    LastReceiptId = table.Column<long>(type: "bigint", nullable: false)
+                    At = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
                 {

@@ -52,7 +52,11 @@ public sealed class AioStreamsAnimeEnricher(
         var currentTargets = details.StremioTargets.Count > 0
             ? details.StremioTargets
             : locallyEnrichedTargets;
-        if (HasConflict(currentTargets, candidates)) return;
+        if (HasConflict(currentTargets, candidates))
+        {
+            details.AioStreamsIdentityConflict = true;
+            return;
+        }
 
         details.StremioTargets = MergeTargets(currentTargets, candidates);
     }

@@ -67,6 +67,7 @@ function buildLoadedAvailabilityState(details: MediaProviderTitleDetailsDto) {
     characters: details.characters ?? [],
     stremioTarget: details.stremioTarget,
     stremioTargets: details.stremioTargets,
+    aioStreamsIdentityConflict: details.aioStreamsIdentityConflict,
     isStale: isAvailabilityStale(details),
     refreshedAt: metadata.refreshedAt,
   };

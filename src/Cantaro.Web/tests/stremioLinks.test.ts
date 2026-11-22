@@ -245,6 +245,9 @@ describe('AIOStreams playback destinations', () => {
     'https://aio.example/hosted/stremio/852a2fb0-764b-43ef-870e-054724c98f08',
     'https://aio.example/hosted/stremio/u/private',
     'https://aio.example/hosted/%73tremio%2fu%2fprivate/configure',
+    'https://aio.example/hosted/chilllink/852a2fb0-764b-43ef-870e-054724c98f08/example/v/1',
+    'https://aio.example/hosted/%73eanime%2f852a2fb0-764b-43ef-870e-054724c98f08/example/extensions/aiostreams-plugin.json',
+    'https://aio.example/hosted/seanime/extensions/encoded-configuration/stremio-custom-source.json',
   ])('rejects unsafe playback instance address %s', (url) => {
     const original = catalogDestinations();
     const targets = [{ type: 'movie', id: 'tt1000001' }];

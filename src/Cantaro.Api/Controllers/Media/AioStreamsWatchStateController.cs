@@ -85,7 +85,8 @@ public sealed class AioStreamsWatchStateController(
             if (unavailable) return StatusCode(StatusCodes.Status503ServiceUnavailable);
             if (identity?.Mappings is not { } mappings || identity.Type is "SPECIAL" or "MOVIE") return NotFound();
             var imdbId = identity.Imdb?.Id ?? mappings.ImdbId;
-            if (payload.MetaId != kitsuParent)
+            var usesImdbParent = payload.MetaId != kitsuParent;
+            if (usesImdbParent)
             {
                 var imdbMapping = AioStreamsAnimeEnricher.GetImdbEpisodeMapping(identity.Imdb);
                 var matchesNumbering = imdbMapping is not null && payload.Season == imdbMapping.SeasonNumber
@@ -93,7 +94,8 @@ public sealed class AioStreamsWatchStateController(
                     : matchesKitsuNumbering;
                 if (payload.MetaId != imdbId || !matchesNumbering) return NotFound();
             }
-            episode = await FindEpisodeAsync(userId, new AnimeEpisodeRoute(kitsuNumber, mappings, imdbId), cancellationToken);
+            var route = new AnimeEpisodeRoute(kitsuNumber, mappings, imdbId, HasMixedImdbParent: usesImdbParent);
+            episode = await FindEpisodeAsync(userId, route, cancellationToken);
         }
         else
         {
@@ -136,10 +138,13 @@ public sealed class AioStreamsWatchStateController(
                 if (bound is null) return (false, false, true);
             }
 
-            // Order every receipt against progress updates, which record the last receipt seen on completion.
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
-                SELECT "Id" FROM "MediaLibraryEntries" WHERE "Id" = {bound.EntryId} FOR NO KEY UPDATE
-                """, cancellationToken);
+            // Serialize played events with library progress updates so contiguous progress cannot lose a write.
+            if (played)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    SELECT "Id" FROM "MediaLibraryEntries" WHERE "Id" = {bound.EntryId} FOR NO KEY UPDATE
+                    """, cancellationToken);
+            }
 
             var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "AioStreamsWatchEvents"
@@ -200,8 +205,8 @@ public sealed class AioStreamsWatchStateController(
                                               ? completion.FirstEpisode == null && completion.LastEpisode == null
                                               : completion.FirstEpisode <= e.EpisodeNumber
                                                   && e.EpisodeNumber <= completion.LastEpisode)
-                                          && (completion.At > e.Watch.At
-                                              || completion.At == e.Watch.At && completion.LastReceiptId >= e.Watch.Id))
+                                          // The wire timestamp has second precision. Receipt order cannot resolve a tie.
+                                          && completion.At >= e.Watch.At)
                                   }).FirstOrDefault()
                           }).ToListAsync(cancellationToken);
         var media = rows.ToLookup(row => (row.MediaLibraryEntryId, row.MediaEpisodeId));
@@ -355,7 +360,7 @@ public sealed class AioStreamsWatchStateController(
     private async Task<BoundEpisode?> FindEpisodeAsync(int userId, AnimeEpisodeRoute route,
         CancellationToken cancellationToken, Guid? materializeForEntry = null)
     {
-        var (number, identity, imdb, imdbEntryId) = route;
+        var (number, identity, imdb, imdbEntryId, hasMixedImdbParent) = route;
         var simkl = identity.SimklId is > 0 ? $"anime:{identity.SimklId.Value}" : null;
         var anilist = identity.AniListId is > 0 ? identity.AniListId.Value.ToString(CultureInfo.InvariantCulture) : null;
         var mal = identity.MalId is > 0 ? $"anime:{identity.MalId.Value}" : null;
@@ -366,6 +371,11 @@ public sealed class AioStreamsWatchStateController(
         var titleIds = await matches.Select(link => link.MediaTitleId).Distinct().Take(2).ToListAsync(cancellationToken);
         if (titleIds.Count != 1 || !await matches.AnyAsync(link => link.LastVerifiedAt != null, cancellationToken)) return null;
         var titleId = titleIds[0];
+
+        if (hasMixedImdbParent && await db.MediaProviderLinks.AnyAsync(link =>
+                link.Provider == "imdb" && link.ExternalId == imdb && link.LastVerifiedAt != null
+                && link.MediaTitleId != titleId, cancellationToken))
+            return null;
 
         // Local links for the same providers must agree with the anime entry.
         if (await db.MediaProviderLinks.AnyAsync(link => link.MediaTitleId == titleId
@@ -440,7 +450,7 @@ public sealed class AioStreamsWatchStateController(
     }
 
     private sealed record AnimeEpisodeRoute(int Number, AioStreamsAnimeEnricher.AioStreamsMappings Identity,
-        string? Imdb, Guid? ImdbEntryId = null);
+        string? Imdb, Guid? ImdbEntryId = null, bool HasMixedImdbParent = false);
 
     private sealed record BoundEpisode(Guid EntryId, Guid? Id, AnimeEpisodeRoute? MissingAnimeEpisode = null);
 

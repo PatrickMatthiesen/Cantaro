@@ -420,6 +420,7 @@ export interface MediaProviderTitleDetailsDto extends MediaProviderMetadataDto {
     availabilityLinks: MediaProviderAvailabilityLinkDto[];
     stremioTarget: MediaProviderStremioTargetDto | null;
     stremioTargets?: MediaProviderStremioTargetDto[];
+    aioStreamsIdentityConflict?: boolean;
     /** `fresh` when the provider was reached; `stale` when a cached snapshot was returned. */
     availabilityStatus?: string;
     availabilityLastVerifiedAt?: string;

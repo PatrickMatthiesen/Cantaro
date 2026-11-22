@@ -43,9 +43,6 @@ namespace Cantaro.Api.Migrations
                     b.Property<int?>("LastEpisode")
                         .HasColumnType("integer");
 
-                    b.Property<long>("LastReceiptId")
-                        .HasColumnType("bigint");
-
                     b.Property<Guid>("MediaLibraryEntryId")
                         .HasColumnType("uuid");
 

@@ -125,3 +125,23 @@ test('AIOStreams retains Kitsu episode targets for anime series', () => {
 
   expect(getAioStreamsTargets({ entry: createEntry(title), availabilityByProviderLink })).toEqual([target]);
 });
+
+test('a conflict from a verified provider blocks AIOStreams across providers and keeps Stremio targets', () => {
+  const lastVerifiedAt = '2026-10-15T12:00:00Z';
+  const simkl = { id: 'simkl-link', provider: 'simkl', externalId: 'anime:456', linkSource: 'imported' };
+  const anilist = { id: 'anilist-link', provider: 'anilist', externalId: '123', linkSource: 'imported', lastVerifiedAt };
+  const fallback = { type: 'series' as const, id: 'kitsu:1', episodeMapping: { seasonNumber: null, episodeOffset: 0 } };
+  const alternative = { ...fallback, id: 'kitsu:2' };
+  const availabilityByProviderLink: ProviderAvailabilityMap = {
+    'simkl:anime:456': {
+      status: 'loaded', links: [], characters: [], stremioTargets: [fallback], aioStreamsIdentityConflict: true,
+    },
+    'anilist:123': { status: 'loaded', links: [], characters: [], stremioTargets: [alternative] },
+  };
+  const verifiedEntry = createEntry(createTitle('media-1', [anilist, { ...simkl, lastVerifiedAt }]));
+  const unverifiedEntry = createEntry(createTitle('media-1', [anilist, simkl]));
+
+  expect(getAioStreamsTargets({ entry: verifiedEntry, availabilityByProviderLink })).toEqual([]);
+  expect(getAioStreamsTargets({ entry: unverifiedEntry, availabilityByProviderLink })).toEqual([alternative]);
+  expect(getStremioTargets(availabilityByProviderLink['simkl:anime:456'])).toEqual([fallback]);
+});
