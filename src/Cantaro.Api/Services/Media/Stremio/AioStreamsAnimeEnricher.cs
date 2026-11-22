@@ -52,7 +52,10 @@ public sealed class AioStreamsAnimeEnricher(
         var candidates = BuildCandidates(details, entry);
         if (candidates is null)
         {
-            details.AioStreamsIdentityConflict = true;
+            var kitsuId = entry.Mappings?.KitsuId;
+            details.AioStreamsIdentityConflict |= !HasConsistentImdbIdentity(entry)
+                || (kitsuId is > 0 && locallyEnrichedTargets.Any(target =>
+                    IsValidKitsuId(target.Id) && target.Id != $"kitsu:{kitsuId.Value}"));
             return;
         }
 
