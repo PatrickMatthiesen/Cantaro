@@ -3,7 +3,7 @@ import { filterDestinationsByAudioLanguage } from "../../Cantaro.ClientShared/sr
 import type { StreamingDestination } from "@cantaro/client-shared/media";
 
 describe("episode destination audio filtering", () => {
-  it("keeps exact Stremio episode links for player-side language selection", () => {
+  it("keeps exact Stremio and AIOStreams episode links for player-side language selection", () => {
     const destinations: StreamingDestination[] = [
       {
         serviceId: "crunchyroll",
@@ -25,11 +25,18 @@ describe("episode destination audio filtering", () => {
         kind: "episode",
         url: "stremio:///detail/series/tt0108778/tt0108778:1:1",
       },
+      {
+        serviceId: "aiostreams",
+        displayName: "AIOStreams",
+        kind: "episode",
+        url: "https://aio.example/jellyfin/web/#/open?type=series&metaId=tt0108778&videoId=tt0108778%3A1%3A1",
+      },
     ];
 
     expect(filterDestinationsByAudioLanguage(destinations, "en")).toEqual([
       destinations[1],
       destinations[2],
+      destinations[3],
     ]);
   });
 

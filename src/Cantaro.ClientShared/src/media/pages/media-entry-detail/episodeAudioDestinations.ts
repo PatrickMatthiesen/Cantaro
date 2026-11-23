@@ -15,7 +15,7 @@ export function filterDestinationsByAudioLanguage(
   if (!audioLanguage) return destinations;
 
   return destinations.filter((destination) =>
-    destination.serviceId === "stremio"
+    destination.serviceId === "stremio" || destination.serviceId === "aiostreams"
     || getDestinationAudioLanguages(destination).includes(audioLanguage));
 }
 

@@ -76,6 +76,7 @@ public static class MediaMutationSources
     public const string UserScoreUpdate = "user_score_update";
     public const string UserProviderIdentityCorrection = "user_provider_identity_correction";
     public const string ProviderDisconnect = "provider_disconnect";
+    public const string AioStreamsWatchState = "aiostreams_watch_state";
 
     /// <summary>
     /// Progress was automatically advanced by a matched site observation,

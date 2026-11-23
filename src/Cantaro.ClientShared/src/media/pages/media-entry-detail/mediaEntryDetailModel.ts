@@ -1,9 +1,52 @@
+import { providerAvailabilityKey, type ProviderAvailabilityState } from "../../components/media-entry-detail/providerAvailability";
 import type { MediaEntryDetailModel, MediaTitleDetailDto } from "../../services/mediaApi";
 import { mediaFormatLabel } from "../../services/mediaFormatting";
+import { isImdbId } from "../../services/playbackLinks";
 import type {
   MediaEntryDetailContentProps,
   ProgressSummary,
 } from "./mediaEntryDetailTypes";
+
+export function getStremioTargets(state: ProviderAvailabilityState | undefined) {
+  return state?.stremioTargets?.length ? state.stremioTargets : [state?.stremioTarget];
+}
+
+function getAioStreamsType({ mediaKind, format }: MediaTitleDetailDto) {
+  return mediaKind === "anime" && format === "movie" ? "movie" : mediaKind;
+}
+
+function getAioStreamsAnimeTargets(
+  title: MediaTitleDetailDto,
+  availability: (ProviderAvailabilityState | undefined)[],
+) {
+  if (title.format === "special" || title.primaryProgressDimension !== "episode") return [];
+
+  const imdb = title.providerLinks.find(link => link.provider === "imdb" && link.lastVerifiedAt);
+  const targets = availability.flatMap(getStremioTargets);
+  if (imdb && targets.some(target => target && isImdbId(target.id) && target.id !== imdb.externalId)) return [];
+  return targets.filter(target => target?.type === "series");
+}
+
+export function getAioStreamsTargets({
+  entry,
+  availabilityByProviderLink,
+}: Pick<MediaEntryDetailContentProps, "entry" | "availabilityByProviderLink">) {
+  const verifiedAvailability = entry.providerLinks.filter(link => link.lastVerifiedAt)
+    .map(link => availabilityByProviderLink[providerAvailabilityKey(link.provider, link.externalId)]);
+  if (verifiedAvailability.some(state => state?.aioStreamsIdentityConflict)) return [];
+
+  const type = getAioStreamsType(entry.title);
+  switch (type) {
+    case "movie":
+    case "series":
+      return entry.title.providerLinks.filter(link => link.provider === "imdb" && link.lastVerifiedAt)
+        .map(link => ({ id: link.externalId, type }));
+    case "anime":
+      return getAioStreamsAnimeTargets(entry.title, verifiedAvailability);
+    default:
+      return [];
+  }
+}
 
 export function mergeTitleMetadata(
   current: MediaEntryDetailModel | null,

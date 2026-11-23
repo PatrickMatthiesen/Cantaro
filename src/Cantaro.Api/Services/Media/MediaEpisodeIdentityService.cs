@@ -242,15 +242,22 @@ public class MediaEpisodeIdentityService(
         }
 
         var canonical = await _dbContext.MediaEpisodes.AsNoTracking()
-            .Where(episode => episode.MediaTitleId == mediaTitleId).Include(episode => episode.ProviderContents)
+            .Where(episode => episode.MediaTitleId == mediaTitleId)
             .ToDictionaryAsync(episode => episode.EpisodeNumber, cancellationToken);
+        var simklCoordinates = await QueryVerifiedSimklEpisodeCoordinates(_dbContext, mediaTitleId)
+            .ToDictionaryAsync(item => item.MediaEpisodeId, cancellationToken);
         var mapped = await MediaProviderSeasonMappingService.GetMappedEpisodesAsync(_dbContext, [mediaTitleId], cancellationToken);
         var variants = mapped.Where(item => item.EpisodeNumber is not null).ToLookup(item => item.EpisodeNumber!.Value);
         var preferredTrack = MediaReleaseTrackPreferences.TryNormalize(preferredReleaseTrack, out var track)
             ? track : MediaReleaseTrackPreferences.Default;
         var episodes = canonical.Keys.Union(variants.Select(group => group.Key)).Order()
-            .Select(number => MapEpisodeDestination(number, canonical.GetValueOrDefault(number),
-                variants[number].Select(item => item.Episode), preferredTrack))
+            .Select(number =>
+            {
+                var episode = canonical.GetValueOrDefault(number);
+                var coordinates = episode is null ? null : simklCoordinates.GetValueOrDefault(episode.Id);
+                return MapEpisodeDestination(number, episode, coordinates,
+                    variants[number].Select(item => item.Episode), preferredTrack);
+            })
             .ToList();
         var standalone = OrderVariants(mapped.Where(item => item.EpisodeNumber is null)
                 .Select(item => item.Episode), preferredTrack)
@@ -266,6 +273,56 @@ public class MediaEpisodeIdentityService(
                 .OrderBy(item => item.SpecialEpisodeNumber).ToList(),
             ReleaseAvailability = BuildReleaseAvailability(episodes, standalone, title.ReleasedCount)
         };
+    }
+
+    internal sealed record SimklEpisodeCoordinates
+    {
+        public Guid MediaTitleId { get; init; }
+        public Guid MediaEpisodeId { get; init; }
+        public int SeasonNumber { get; init; }
+        public int SeasonEpisodeNumber { get; init; }
+    }
+
+    internal static IQueryable<SimklEpisodeCoordinates> QueryVerifiedSimklEpisodeCoordinates(
+        ApplicationDbContext db, Guid mediaTitleId) =>
+        QueryVerifiedSimklEpisodeCoordinates(db, [mediaTitleId]);
+
+    internal static IQueryable<SimklEpisodeCoordinates> QueryVerifiedSimklEpisodeCoordinates(
+        ApplicationDbContext db, Guid[] mediaTitleIds)
+    {
+        var candidates = from episode in db.MediaEpisodes
+                         from content in episode.ProviderContents
+                         where mediaTitleIds.Contains(episode.MediaTitleId)
+                             && content.Provider == MediaObservationSiteIdentifiers.Simkl
+                             && content.ProviderSeasonNumber > 0 && content.ProviderEpisodeNumber > 0
+                             && content.ProviderSequenceNumber == episode.EpisodeNumber
+                             && episode.MediaTitle!.ProviderLinks.Any(link =>
+                                 link.Provider == MediaObservationSiteIdentifiers.Simkl
+                                 && link.LastVerifiedAt != null && link.ExternalId == content.ProviderSeriesId)
+                         select new
+                         {
+                             episode.MediaTitleId,
+                             MediaEpisodeId = episode.Id,
+                             SeasonNumber = content.ProviderSeasonNumber!.Value,
+                             SeasonEpisodeNumber = content.ProviderEpisodeNumber!.Value
+                         };
+
+        // A playable coordinate must identify exactly one canonical episode and vice versa.
+        return candidates.Where(candidate => !candidates.Any(other => other.MediaTitleId == candidate.MediaTitleId
+                && ((other.MediaEpisodeId == candidate.MediaEpisodeId
+                    && (other.SeasonNumber != candidate.SeasonNumber
+                        || other.SeasonEpisodeNumber != candidate.SeasonEpisodeNumber))
+                || (other.MediaEpisodeId != candidate.MediaEpisodeId
+                    && other.SeasonNumber == candidate.SeasonNumber
+                    && other.SeasonEpisodeNumber == candidate.SeasonEpisodeNumber))))
+            .Select(candidate => new SimklEpisodeCoordinates
+            {
+                MediaTitleId = candidate.MediaTitleId,
+                MediaEpisodeId = candidate.MediaEpisodeId,
+                SeasonNumber = candidate.SeasonNumber,
+                SeasonEpisodeNumber = candidate.SeasonEpisodeNumber
+            })
+            .Distinct();
     }
 
     public Task CacheProviderEpisodeCatalogAsync(
@@ -327,6 +384,12 @@ public class MediaEpisodeIdentityService(
                     }));
             providerLink.EpisodeCatalogLastVerifiedAt = now;
             providerLink.UpdatedAt = now;
+            // Every catalog refresh writes the SIMKL link because tracker writes lock it to recheck coordinates.
+            var linkEntry = db.Entry(providerLink);
+            if (linkEntry.State != EntityState.Added)
+            {
+                linkEntry.Property(link => link.EpisodeCatalogLastVerifiedAt).IsModified = true;
+            }
         }
 
         var episodes = await db.MediaEpisodes
@@ -520,19 +583,14 @@ public class MediaEpisodeIdentityService(
 
 
     private static MediaEpisodeDestinationDto MapEpisodeDestination(int number, MediaEpisode? episode,
-        IEnumerable<MediaProviderEpisode> variants, string preferredTrack)
+        SimklEpisodeCoordinates? simkl, IEnumerable<MediaProviderEpisode> variants, string preferredTrack)
     {
-        var simkl = episode?.ProviderContents
-            .Where(content => content.Provider == MediaObservationSiteIdentifiers.Simkl
-                && content.ProviderSequenceNumber == number
-                && content.ProviderSeasonNumber is > 0 && content.ProviderEpisodeNumber is > 0)
-            .OrderBy(content => content.ProviderContentKey, StringComparer.Ordinal).FirstOrDefault();
         var ordered = OrderVariants(variants, preferredTrack).ToList();
         return new MediaEpisodeDestinationDto
         {
             EpisodeNumber = number,
-            SeasonNumber = simkl?.ProviderSeasonNumber,
-            SeasonEpisodeNumber = simkl?.ProviderEpisodeNumber,
+            SeasonNumber = simkl?.SeasonNumber,
+            SeasonEpisodeNumber = simkl?.SeasonEpisodeNumber,
             Title = episode?.Title ?? ordered.Select(item => item.EpisodeTitle).FirstOrDefault(title => title is not null),
             AvailableSubtitleLanguageCodes = NormalizeLanguageCodes(
                 (episode?.AvailableSubtitleLanguageCodes ?? []).Concat(ordered.SelectMany(item => item.AvailableSubtitleLanguageCodes))),

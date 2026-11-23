@@ -53,6 +53,7 @@ export interface MediaEntryDetailContentProps {
   embedded: boolean;
   preferredMediaReleaseTrack?: string;
   disabledWatchProviders?: readonly string[];
+  aioStreamsInstanceUrl?: string;
   availabilityByProviderLink: ProviderAvailabilityMap;
   isRefreshingProgress: boolean;
   isSavingStatus: boolean;

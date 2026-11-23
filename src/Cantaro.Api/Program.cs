@@ -29,6 +29,13 @@ var extensionJwtSigningKey = ExtensionAuthSigningKeyResolver.ResolveSigningKey(e
 
 // Add service defaults & Aspire client integrations.
 builder.AddServiceDefaults();
+builder.Services.PostConfigure<OpenTelemetry.Instrumentation.AspNetCore.AspNetCoreTraceInstrumentationOptions>(options =>
+{
+    var existingFilter = options.Filter;
+    options.Filter = context =>
+        !context.Request.Path.StartsWithSegments(AioStreamsWatchState.Route)
+        && (existingFilter?.Invoke(context) ?? true);
+});
 
 // Add PostgreSQL database context via Aspire defaults.
 builder.Configuration.ConfigurePostgresConnection("cantaro-db");
@@ -113,7 +120,8 @@ builder.Services.AddHttpClient(AioStreamsAnimeEnricher.HttpClientName, client =>
     client.Timeout = AioStreamsAnimeEnricher.RequestTimeout;
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Cantaro/1.0 (+https://github.com/PatrickMatthiesen/Cantaro)");
 });
-builder.Services.AddSingleton<IAioStreamsAnimeEnricher, AioStreamsAnimeEnricher>();
+builder.Services.AddSingleton<AioStreamsAnimeEnricher>();
+builder.Services.AddSingleton<IAioStreamsAnimeEnricher>(services => services.GetRequiredService<AioStreamsAnimeEnricher>());
 builder.Services.AddHttpClient<AnimeScheduleApiClient>();
 builder.Services.AddHttpClient("lrclib", (serviceProvider, client) =>
 {
@@ -305,6 +313,7 @@ builder.Services.AddOpenApi();
 // Add CORS for frontend communication
 builder.Services.AddCors(options =>
 {
+    options.AddPolicy(AioStreamsWatchState.ManifestCorsPolicy, policy => policy.AllowAnyOrigin().WithMethods("GET"));
     options.AddDefaultPolicy(policy =>
     {
         var frontendOptions = builder.Configuration
@@ -360,7 +369,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseForwardedHeaders();
 app.UseMiddleware<SecurityHeadersMiddleware>();
-app.UseCors();
 app.UseHttpsRedirection();
 var hasWebRoot = Directory.Exists(app.Environment.WebRootPath);
 if (hasWebRoot)
@@ -370,6 +378,7 @@ if (hasWebRoot)
 }
 
 app.UseRouting();
+app.UseCors();
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseMiddleware<AuthenticationModeGuardMiddleware>();

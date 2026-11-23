@@ -23,6 +23,122 @@ namespace Cantaro.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsExternalCompletion", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("At")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("FirstEpisode")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LastEpisode")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("MediaLibraryEntryId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaLibraryEntryId");
+
+                    b.ToTable("AioStreamsExternalCompletions", (string)null);
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsPairing", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PlaybackInstanceUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(43)
+                        .HasColumnType("character varying(43)");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("AioStreamsPairings", (string)null);
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsWatchEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("At")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Episode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid?>("MediaEpisodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MediaLibraryEntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MetaId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("Played")
+                        .HasColumnType("boolean");
+
+                    b.Property<long?>("PositionMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Season")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("VideoId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaEpisodeId");
+
+                    b.HasIndex("UserId", "EventId")
+                        .IsUnique();
+
+                    b.HasIndex("MediaLibraryEntryId", "MediaEpisodeId", "EventId")
+                        .IsUnique();
+
+                    b.HasIndex("MediaLibraryEntryId", "MediaEpisodeId", "At", "Id");
+
+                    b.ToTable("AioStreamsWatchEvents", (string)null);
+                });
+
             modelBuilder.Entity("Cantaro.Api.Models.Artist", b =>
                 {
                     b.Property<Guid>("Id")
@@ -420,6 +536,10 @@ namespace Cantaro.Api.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<long?>("AioStreamsProgressResetAt")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bigint");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -2523,6 +2643,38 @@ namespace Cantaro.Api.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsExternalCompletion", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("MediaLibraryEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsPairing", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cantaro.Api.Models.AioStreamsWatchEvent", b =>
+                {
+                    b.HasOne("Cantaro.Api.Models.MediaEpisode", null)
+                        .WithMany()
+                        .HasForeignKey("MediaEpisodeId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Cantaro.Api.Models.MediaLibraryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("MediaLibraryEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cantaro.Api.Models.ArtistProviderLink", b =>

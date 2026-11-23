@@ -177,6 +177,8 @@ public class MediaProviderTitleDetails
 
     public IReadOnlyList<MediaProviderStremioTarget> StremioTargets { get; set; } = [];
 
+    public bool AioStreamsIdentityConflict { get; set; }
+
     /// <summary>
     /// Legacy single-target contract. New callers should use <see cref="StremioTargets"/>.
     /// </summary>

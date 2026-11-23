@@ -8,6 +8,7 @@ export interface ProviderAvailabilityState {
   characters: MediaProviderCharacterCreditDto[];
   stremioTarget?: MediaProviderStremioTargetDto | null;
   stremioTargets?: MediaProviderStremioTargetDto[];
+  aioStreamsIdentityConflict?: boolean;
   /** The provider returned cached data rather than a fresh availability check. */
   isStale?: boolean;
   refreshedAt?: string;

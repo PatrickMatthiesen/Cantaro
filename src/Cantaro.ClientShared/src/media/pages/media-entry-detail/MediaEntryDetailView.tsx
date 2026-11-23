@@ -10,7 +10,7 @@ import {
   type MediaStreamingDestinations,
 } from "../../services/streamingDestinations";
 import { useStreamingServicePreference } from "../../services/streamingServicePreference";
-import { addStremioDestinations } from "../../services/stremioLinks";
+import { addAioStreamsDestinations, addStremioDestinations } from "../../services/playbackLinks";
 import { getEpisodeRows } from "./episodeRows";
 import { filterWatchProviders } from "../../services/watchProviderVisibility";
 import type { StreamingServiceId } from "../../services/streamingServices";
@@ -33,8 +33,10 @@ import {
 import { FranchiseSection } from "./FranchiseSection";
 import { FranchiseExplorer } from "../FranchiseExplorer";
 import {
+  getAioStreamsTargets,
   getEntryStatusChanged,
   getPrimaryProgressSummary,
+  getStremioTargets,
 } from "./mediaEntryDetailModel";
 import { DetailTabs } from "./DetailTabs";
 import {
@@ -241,6 +243,32 @@ function MediaDetailTabPanel({
   return panels[activeTab];
 }
 
+function getPlaybackDestinations(
+  props: MediaEntryDetailContentProps,
+  episodeCatalog: MediaEpisodeCatalogDto | null,
+  preferredServiceId: StreamingServiceId | null,
+) {
+  const mediaKind = props.entry.title.mediaKind;
+  const availabilityStates = Object.values(props.availabilityByProviderLink);
+  const availabilityLinks = availabilityStates.flatMap((state) =>
+    state.status !== "loading" ? state.links : []);
+  const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
+  const stremioTargets = availabilityStates.flatMap(getStremioTargets);
+  const catalogEpisodeNumbers = providerDestinations.episodes.map((episode) => episode.episodeNumber);
+  const episodeNumbers = getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
+    .map((row) => row.episodeNumber);
+  return filterWatchProviders(
+    addAioStreamsDestinations(
+      addStremioDestinations(providerDestinations, stremioTargets, mediaKind, episodeNumbers),
+      props.aioStreamsInstanceUrl,
+      getAioStreamsTargets(props),
+      mediaKind,
+      catalogEpisodeNumbers,
+    ),
+    props.disabledWatchProviders,
+  );
+}
+
 function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
   const activeTab = props.activeTab;
   const mediaKind = props.entry.title.mediaKind;
@@ -251,29 +279,9 @@ function MediaEntryDetailContent(props: MediaEntryDetailContentProps) {
     props.progressVolumes,
   );
   const hasStatusChanged = getEntryStatusChanged(props);
-  const [preferredServiceId, setPreferredServiceId] =
-    useStreamingServicePreference();
-  const availabilityStates = Object.values(
-    props.availabilityByProviderLink,
-  );
-  const availabilityLinks = availabilityStates.flatMap((state) =>
-    state.status !== "loading" ? state.links : []);
-  const episodeCatalog =
-    props.episodeCatalog.status === "loaded"
-      ? props.episodeCatalog.value
-      : null;
-  const providerDestinations = resolveStreamingDestinations(availabilityLinks, episodeCatalog, preferredServiceId);
-  const streamingDestinations = filterWatchProviders(
-    addStremioDestinations(
-      providerDestinations,
-      availabilityStates.flatMap((state) => state.stremioTargets?.length
-        ? state.stremioTargets : [state.stremioTarget]),
-      mediaKind,
-      getEpisodeRows({ ...props.entry, progressEpisodes: props.progressEpisodes }, providerDestinations.episodes)
-        .map((row) => row.episodeNumber),
-    ),
-    props.disabledWatchProviders,
-  );
+  const [preferredServiceId, setPreferredServiceId] = useStreamingServicePreference();
+  const episodeCatalog = props.episodeCatalog.status === "loaded" ? props.episodeCatalog.value : null;
+  const streamingDestinations = getPlaybackDestinations(props, episodeCatalog, preferredServiceId);
   const specials = getSpecials(episodeCatalog);
   const season = useSeasonView(
     streamingDestinations.episodes,

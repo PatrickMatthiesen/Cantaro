@@ -684,6 +684,7 @@ public class MediaProvidersController(
             StremioTarget = stremioTargets.FirstOrDefault() is { } stremioTarget
                 ? MapStremioTarget(stremioTarget)
                 : null,
+            AioStreamsIdentityConflict = details.AioStreamsIdentityConflict,
             AvailabilityLinks = details.AvailabilityLinks.Select(link => new MediaProviderAvailabilityLinkDto
             {
                 ServiceId = link.ServiceId,

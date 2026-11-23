@@ -12,6 +12,10 @@ Cantaro is for people who keep music and media libraries across multiple service
 
 Cantaro unifies music playlists, media watch progress, provider connections, and browser-extension observations into a personal archive. Success means users can trust Cantaro as the source of truth while still using their preferred external platforms.
 
+## AIOStreams playback links
+
+When a user connects their AIOStreams instance as a playback provider, show AIOStreams alongside other streaming destinations on title pages, episode rows, and Continue Watching. Open the exact title or episode on the user's instance when AIOStreams can resolve its identity. Keep the episode fallback when the mapping is missing or ambiguous, and let the AIOStreams player handle sign-in. [AIOStreams link contract](https://aiostreams.org/reference/jellyfin-extensions/#remote-control-and-links)
+
 ## Brand Personality
 
 Calm, capable, personal. The product should feel like a living archive of collected music and watched stories, with enough warmth to invite browsing and enough precision to make sync and provider state feel trustworthy.

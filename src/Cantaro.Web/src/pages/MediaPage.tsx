@@ -10,6 +10,7 @@ import {
   type MediaLibraryQueryParams,
 } from '@cantaro/client-shared/media';
 import { RequireAuth, type GlobalHeadingState } from '../components/AppShell';
+import { getAioStreamsPairingStatus } from '../media/aioStreamsPairing';
 import { MediaPageShell } from '../media/MediaPageShell';
 import { MediaProvidersPage } from './MediaProvidersPage';
 import { getMediaFilterDefaults, mediaLibraryFilterSearch } from '../media/mediaLibraryRouteFilters';
@@ -155,6 +156,18 @@ export function MediaTitleRoutePage({
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const userId = user?.id;
+  const [aioStreamsPlayback, setAioStreamsPlayback] = useState<{ userId: typeof userId; url?: string }>();
+  useEffect(() => {
+    if (!userId) return;
+    const controller = new AbortController();
+    void getAioStreamsPairingStatus(controller.signal)
+      .then(settings => {
+        if (!controller.signal.aborted) setAioStreamsPlayback({ userId, url: settings.playbackInstanceUrl ?? undefined });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [userId]);
   const { setHeading } = useMediaShell();
   const heading = useMemo(() => ({
     eyebrow: 'Cantaro · Media',
@@ -169,6 +182,7 @@ export function MediaTitleRoutePage({
       mediaTitleId={mediaTitleId}
       preferredMediaReleaseTrack={user?.preferences.preferredMediaReleaseTrack}
       disabledWatchProviders={user?.preferences.disabledWatchProviders}
+      aioStreamsInstanceUrl={aioStreamsPlayback?.userId === userId ? aioStreamsPlayback?.url : undefined}
       franchiseMediaTitleId={franchiseMediaTitleId}
       activeTab={tab}
       onTabChange={(nextTab) => void navigate({

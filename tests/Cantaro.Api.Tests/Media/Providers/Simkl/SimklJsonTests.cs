@@ -26,7 +26,7 @@ public sealed class SimklJsonTests
     {
         using var json = JsonDocument.Parse("""
             {"shows":[{"status":"watching","watched_episodes_count":4,"total_episodes_count":20,
-              "user_rating":8,"show":{"title":"Example","year":2020,"ids":{"simkl":123}},
+              "user_rating":8,"show":{"title":"Example","year":2020,"ids":{"simkl":123,"imdb":"tt1234567"}},
               "seasons":[{"number":0,"episodes":[{"number":1}]},
                          {"number":1,"episodes":[{"number":1},{"number":2}]},
                          {"number":2,"episodes":[{"number":3}]}]}]}
@@ -34,6 +34,7 @@ public sealed class SimklJsonTests
         var item = Assert.Single(SimklJson.MapLibraryItems(json.RootElement));
         Assert.Equal("tv:123", item.ProviderMediaId);
         Assert.Equal(MediaKinds.Series, item.MediaKind);
+        Assert.Contains(item.CrossReferences, reference => reference.ProviderId == "imdb" && reference.ProviderMediaId == "tt1234567");
         Assert.Equal(80m, item.Score);
         Assert.Contains(item.WatchedEpisodes!, x => x.SeasonNumber == 0 && x.EpisodeNumber == 1);
         Assert.Contains(item.WatchedEpisodes!, x => x.SeasonNumber == 2 && x.EpisodeNumber == 3);
@@ -147,6 +148,62 @@ public sealed class SimklJsonTests
             [("series", "kitsu:1"), ("series", "tt0213338")],
             details.StremioTargets.Select(target => (target.Type, target.Id)));
         Assert.Equal("kitsu:1", details.StremioTarget?.Id);
+    }
+
+    [Theory]
+    [InlineData("tv")]
+    [InlineData("movie")]
+    public void DetailsExposeImdbAsACatalogCrossReference(string type)
+    {
+        using var json = JsonDocument.Parse("""{"title":"Example","ids":{"imdb":"tt0213338"}}""");
+        var reference = Assert.Single(SimklJson.MapDetails(json.RootElement, type, 123).CrossReferences);
+        Assert.Equal("imdb", reference.ProviderId);
+        Assert.Equal("tt0213338", reference.ProviderMediaId);
+    }
+
+    [Theory]
+    [InlineData("movie", " tt0275277 ", "tt0275277")]
+    [InlineData("movie", "tt0275277?autoplay=1", null)]
+    [InlineData("tv", "tt0213338", null)]
+    [InlineData(null, "tt0275277", null)]
+    public void AnimeMappingsExposeOnlyValidatedImdbMovieCrossReferences(
+        string? animeType,
+        string imdbId,
+        string? expectedImdbId)
+    {
+        using var json = JsonDocument.Parse($$"""
+            {
+              "anime": [{
+                "show": {
+                  "title": "Example",
+                  "anime_type": {{JsonSerializer.Serialize(animeType)}},
+                  "ids": {"simkl":123,"mal":"12","anilist":"34","imdb":{{JsonSerializer.Serialize(imdbId)}} }
+                }
+              }]
+            }
+            """);
+        var media = json.RootElement.GetProperty("anime")[0].GetProperty("show");
+
+        var item = Assert.Single(SimklJson.MapLibraryItems(json.RootElement));
+        var search = SimklJson.MapSearchResult(media, MediaKinds.Anime);
+        Assert.NotNull(search);
+        var details = SimklJson.MapDetails(media, "anime", 123);
+
+        foreach (var references in new[] { item.CrossReferences, search.CrossReferences, details.CrossReferences })
+        {
+            Assert.Contains(references, reference => reference.ProviderId == "myanimelist" && reference.ProviderMediaId == "anime:12");
+            Assert.Contains(references, reference => reference.ProviderId == "anilist" && reference.ProviderMediaId == "34");
+            var imdb = references.Where(reference => reference.ProviderId == "imdb");
+            if (expectedImdbId is null)
+            {
+                Assert.Empty(imdb);
+                continue;
+            }
+
+            var reference = Assert.Single(imdb);
+            Assert.Equal(expectedImdbId, reference.ProviderMediaId);
+            Assert.Equal($"https://www.imdb.com/title/{expectedImdbId}/", reference.ExternalUrl);
+        }
     }
 
     [Theory]

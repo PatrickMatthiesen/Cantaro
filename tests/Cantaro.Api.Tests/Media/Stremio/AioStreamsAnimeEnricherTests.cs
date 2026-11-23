@@ -60,6 +60,7 @@ public sealed class AioStreamsAnimeEnricherTests
         await CreateEnricher(handler, baseUrl: string.Empty).EnrichAsync(details, CancellationToken.None);
 
         Assert.Empty(handler.RequestUris);
+        Assert.False(details.AioStreamsIdentityConflict);
         var target = Assert.Single(details.StremioTargets);
         Assert.Null(target.EpisodeMapping!.SeasonNumber);
         Assert.Equal(0, target.EpisodeMapping.EpisodeOffset);
@@ -79,15 +80,18 @@ public sealed class AioStreamsAnimeEnricherTests
         await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
 
         var retained = Assert.Single(details.StremioTargets);
+        Assert.False(details.AioStreamsIdentityConflict);
         Assert.Equal("kitsu:7000", retained.Id);
         Assert.Equal(0, retained.EpisodeMapping!.EpisodeOffset);
     }
 
-    [Fact]
-    public async Task EnrichAsync_ConflictingExistingIdentityRejectsWholeResponse()
+    [Theory]
+    [InlineData("tt2098220")]
+    [InlineData("tt9999999")]
+    public async Task EnrichAsync_ConflictingExistingIdentityRejectsWholeResponse(string hintedImdbId)
     {
-        var handler = new QueueHandler(Response("""
-            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"tt2098220","seasonNumber":1,"fromEpisode":1}}}
+        var handler = new QueueHandler(Response($$$$"""
+            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"{{{{hintedImdbId}}}}","seasonNumber":1,"fromEpisode":1}}}
             """));
         var details = CreateDetails();
         details.StremioTargets =
@@ -97,7 +101,66 @@ public sealed class AioStreamsAnimeEnricherTests
 
         await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
 
-        Assert.Equal("kitsu:7000", Assert.Single(details.StremioTargets).Id);
+        Assert.True(details.AioStreamsIdentityConflict);
+        var fallback = Assert.Single(details.StremioTargets);
+        Assert.Equal("kitsu:7000", fallback.Id);
+        Assert.Equal(0, fallback.EpisodeMapping!.EpisodeOffset);
+    }
+
+    [Fact]
+    public async Task EnrichAsync_FlagsConflictingImdbCoordinatesEvenWhenKitsuAgrees()
+    {
+        var handler = new QueueHandler(Response("""
+            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"tt2098220","seasonNumber":2,"fromEpisode":13}}}
+            """));
+        var details = CreateDetails();
+        details.StremioTargets =
+        [
+            new MediaProviderStremioTarget { Type = "series", Id = "kitsu:6448" },
+            new MediaProviderStremioTarget
+            {
+                Type = "series", Id = "tt2098220",
+                EpisodeMapping = new MediaProviderStremioEpisodeMapping { SeasonNumber = 2, EpisodeOffset = 8 }
+            }
+        ];
+
+        await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
+
+        Assert.True(details.AioStreamsIdentityConflict);
+        Assert.Equal(8, details.StremioTargets.Single(target => target.Id == "tt2098220").EpisodeMapping!.EpisodeOffset);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 0)]
+    public async Task EnrichAsync_PreservesImdbIdentityWithoutInvalidEpisodeCoordinates(int season, int fromEpisode)
+    {
+        var handler = new QueueHandler(Response($$$$"""
+            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"tt2098220","seasonNumber":{{{{season}}}},"fromEpisode":{{{{fromEpisode}}}}}}}
+            """));
+        var details = CreateDetails();
+        details.StremioTargets = [new MediaProviderStremioTarget { Type = "series", Id = "kitsu:6448" }];
+
+        await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
+
+        Assert.Null(details.StremioTargets.Single(target => target.Id == "tt2098220").EpisodeMapping);
+        Assert.Equal(0, details.StremioTargets.Single(target => target.Id == "kitsu:6448").EpisodeMapping!.EpisodeOffset);
+    }
+
+    [Theory]
+    [InlineData("SPECIAL")]
+    [InlineData("MOVIE")]
+    public async Task EnrichAsync_BlocksAioStreamsEpisodeLaunchForStandaloneAnime(string providerType)
+    {
+        var handler = new QueueHandler(Response($$$$"""
+            {"success":true,"data":{"type":"{{{{providerType}}}}","mappings":{"simklId":40398,"kitsuId":6448}}}
+            """));
+        var details = CreateDetails();
+
+        await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
+
+        Assert.True(details.AioStreamsIdentityConflict);
+        Assert.Equal("kitsu:6448", Assert.Single(details.StremioTargets).Id);
     }
 
     [Fact]

@@ -167,6 +167,8 @@ public class MediaProviderTitleDetailsDto
     public IReadOnlyList<MediaProviderAvailabilityLinkDto> AvailabilityLinks { get; set; } = [];
     public IReadOnlyList<MediaProviderStremioTargetDto> StremioTargets { get; set; } = [];
     public MediaProviderStremioTargetDto? StremioTarget { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AioStreamsIdentityConflict { get; set; }
     /// <summary>
     /// fresh when returned by the provider, stale when served from the last
     /// successful snapshot, or unavailable when no snapshot exists after an
