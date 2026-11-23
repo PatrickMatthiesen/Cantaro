@@ -277,6 +277,127 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueuesProviderUpdatesOnlyWhenTrackerChangesCanonicalState(bool movie)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var entry = await schema.Db.MediaLibraryEntries.Include(candidate => candidate.MediaTitle).SingleAsync();
+        var remoteUpdate = DateTimeOffset.FromUnixTimeSeconds(At - 1);
+        var connected = new ConnectedServiceAccount { UserId = 1, Service = "simkl", ExternalAccountId = "connected" };
+        var unbound = new ConnectedServiceAccount { UserId = 1, Service = "anilist", ExternalAccountId = "unbound" };
+        schema.Db.AddRange(connected, unbound);
+        AddLink(schema.Db, entry.MediaTitle!, "anilist", "1");
+        var binding = AddProviderBinding(schema.Db, entry, connected.ExternalAccountId, connected, remoteUpdate);
+        AddProviderBinding(schema.Db, entry, "disconnected", null, remoteUpdate);
+
+        var played = Event("played-first", "played", At);
+        var path = PushRoute;
+        if (movie)
+        {
+            entry.MediaTitle!.Format = MediaFormats.Movie;
+            AddLink(schema.Db, entry.MediaTitle, "imdb", MetaId);
+            path = $"{Route}/watch_state/push/movie/{MetaId}.json";
+            played = played with { VideoId = MetaId, Scope = "movie", Season = null, Episode = null };
+        }
+        await schema.Db.SaveChangesAsync();
+
+        await fixture.ExpectPushAsync(played with { Id = "paused", Event = "pause", PositionMs = 500 }, HttpStatusCode.NoContent, path);
+        if (!movie)
+        {
+            await fixture.ExpectPushAsync(played with { Id = "played-second", VideoId = "kitsu:1:2", Episode = 2 },
+                HttpStatusCode.NoContent, EpisodeRoute(1, 2));
+        }
+        Assert.Empty(await schema.Db.MediaProviderOperations.ToListAsync());
+
+        await fixture.ExpectPushAsync(played, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(played, HttpStatusCode.NoContent, path);
+        await fixture.ExpectPushAsync(played with { Id = "played-again", At = At + 1 }, HttpStatusCode.NoContent, path);
+
+        var operation = await schema.Db.MediaProviderOperations.SingleAsync();
+        Assert.Equal(binding.Id, operation.MediaLibraryProviderBindingId);
+        Assert.Equal(MediaProviderOperationStatuses.Pending, operation.Status);
+        Assert.Equal(0, operation.AttemptCount);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        if (movie)
+        {
+            Assert.Equal(MediaProviderOperationTypes.UpdateStatus, operation.OperationType);
+            var request = JsonSerializer.Deserialize<MediaStatusUpdateRequest>(operation.PayloadJson, options)!;
+            Assert.Equal("anime:37089", request.ProviderMediaId);
+            Assert.Equal(MediaLibraryStatuses.Completed, request.Status);
+            Assert.Equal(remoteUpdate, request.LastKnownRemoteUpdateAt);
+        }
+        else
+        {
+            Assert.Equal(MediaProviderOperationTypes.UpdateProgress, operation.OperationType);
+            var request = JsonSerializer.Deserialize<MediaProgressUpdateRequest>(operation.PayloadJson, options)!;
+            Assert.Equal("anime:37089", request.ProviderMediaId);
+            Assert.Equal(2, request.ProgressEpisodes);
+            Assert.Null(request.ProgressChapters);
+            Assert.Null(request.ProgressVolumes);
+            Assert.Equal(remoteUpdate, request.LastKnownRemoteUpdateAt);
+        }
+    }
+
+    [PostgresTheory]
+    [InlineData(2)]
+    [InlineData(1)]
+    public async Task RetriesTrackerWriteAndProviderQueueTogether(long firstInsertAttempt)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var entry = await schema.Db.MediaLibraryEntries.SingleAsync();
+        var account = new ConnectedServiceAccount { UserId = 1, Service = "simkl", ExternalAccountId = "connected" };
+        var binding = AddProviderBinding(schema.Db, entry, account.ExternalAccountId, account);
+        await schema.Db.SaveChangesAsync();
+        // PostgreSQL rolls back the insert on a serialization failure but preserves the sequence value.
+        await schema.Db.Database.ExecuteSqlRawAsync("""
+            CREATE SEQUENCE queue_insert_attempt;
+            CREATE FUNCTION fail_first_queue_inserts() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF nextval('queue_insert_attempt') <= 2 THEN
+                    RAISE EXCEPTION 'retry tracker transaction' USING ERRCODE = '40001';
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+            CREATE TRIGGER fail_first_queue_inserts BEFORE INSERT ON "MediaProviderOperations"
+                FOR EACH ROW EXECUTE FUNCTION fail_first_queue_inserts();
+            """);
+        await schema.Db.Database.ExecuteSqlInterpolatedAsync($"SELECT setval('queue_insert_attempt', {firstInsertAttempt}, false)");
+
+        var notifications = fixture.EventHub.Subscribe(1, out var subscriptionId);
+        try
+        {
+            var played = Event("retry-queue", "played", At);
+            if (firstInsertAttempt == 1)
+            {
+                await fixture.ExpectPushAsync(played, HttpStatusCode.InternalServerError);
+                Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+                Assert.Empty(await schema.Db.MediaProviderOperations.ToListAsync());
+                Assert.Null(await schema.Db.MediaLibraryEntries.Select(candidate => candidate.ProgressEpisodes).SingleAsync());
+                Assert.False(notifications.TryRead(out _));
+            }
+
+            await fixture.ExpectPushAsync(played, HttpStatusCode.NoContent);
+            Assert.Single(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+            Assert.Equal(1, await schema.Db.MediaLibraryEntries.Select(candidate => candidate.ProgressEpisodes).SingleAsync());
+            var operation = await schema.Db.MediaProviderOperations.SingleAsync();
+            Assert.Equal(binding.Id, operation.MediaLibraryProviderBindingId);
+            Assert.True(notifications.TryRead(out _));
+
+            await fixture.ExpectPushAsync(played, HttpStatusCode.NoContent);
+            Assert.Equal(1, await schema.Db.MediaProviderOperations.CountAsync());
+            Assert.False(notifications.TryRead(out _));
+        }
+        finally
+        {
+            fixture.EventHub.Unsubscribe(1, subscriptionId);
+        }
+    }
+
+    [PostgresTheory]
     [InlineData("coordinates-replaced")]
     [InlineData("coordinates-removed")]
     [InlineData("imdb-replaced")]
@@ -722,7 +843,7 @@ public sealed class AioStreamsWatchStateTests
         Assert.All(await schema.Db.AioStreamsWatchEvents.Where(watch => watch.EventId != first.Id).ToListAsync(),
             watch => Assert.Equal(episodeId, watch.MediaEpisodeId));
 
-        if (!unavailable)
+        if (!unavailable && !empty)
         {
             const string replacement = MetaId + ":2:12";
             var delayed = imdb with { Id = "current-imdb", VideoId = replacement, Episode = 12, At = At };
@@ -985,6 +1106,111 @@ public sealed class AioStreamsWatchStateTests
         Assert.Equal(2, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
         watched = (await fixture.PullAsync()).GetProperty("watched").GetProperty("episodes");
         Assert.Equal(new[] { VideoId, "kitsu:1:2" }, watched.Deserialize<string[]>());
+    }
+
+    [PostgresFact]
+    public async Task ManualProgressResetStartsANewWatchThroughAndRetainsReceipts()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        const string secondVideo = "kitsu:1:2";
+        var secondPath = EpisodeRoute(1, 2);
+        var first = Event("old-first", "played", At - 2);
+        var second = Event("old-second", "played", At - 1) with { VideoId = secondVideo, Episode = 2 };
+        var pause = second with { Id = "old-pause", Event = "pause", At = At, PositionMs = 1_250 };
+        await fixture.ExpectPushAsync(first, HttpStatusCode.NoContent);
+        await fixture.ExpectPushAsync(second, HttpStatusCode.NoContent, secondPath);
+        await fixture.ExpectPushAsync(pause, HttpStatusCode.NoContent, secondPath);
+        Assert.Equal(2, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+        var beforeReset = await fixture.PullAsync();
+        Assert.Single(beforeReset.GetProperty("items").EnumerateArray());
+        Assert.Equal(new[] { VideoId, secondVideo },
+            beforeReset.GetProperty("watched").GetProperty("episodes").Deserialize<string[]>());
+
+        var resetTime = DateTimeOffset.FromUnixTimeSeconds(At).AddMilliseconds(500);
+        await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+            .SetProperty(entry => entry.ProgressEpisodes, 0)
+            .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.UserProgressUpdate)
+            .SetProperty(entry => entry.LastLocalEditAt, resetTime)
+            .SetProperty(entry => entry.UpdatedAt, resetTime));
+
+        var delayed = second with { Id = "delayed-played", At = At };
+        await fixture.ExpectPushAsync(delayed, HttpStatusCode.NoContent, secondPath);
+        await fixture.ExpectPushAsync(delayed, HttpStatusCode.NoContent, secondPath);
+        await fixture.ExpectPushAsync(first, HttpStatusCode.NoContent);
+        Assert.Equal(4, await schema.Db.AioStreamsWatchEvents.CountAsync());
+        Assert.Equal(0, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+        var reset = await fixture.PullAsync(beforeReset.GetProperty("version").GetString());
+        Assert.Empty(reset.GetProperty("items").EnumerateArray());
+        Assert.Empty(reset.GetProperty("watched").GetProperty("episodes").EnumerateArray());
+
+        await fixture.ExpectPushAsync(first with { Id = "new-first", At = At + 1 }, HttpStatusCode.NoContent);
+        Assert.Equal(1, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+        await fixture.ExpectPushAsync(pause with { Id = "new-pause", At = At + 2 }, HttpStatusCode.NoContent, secondPath);
+        var rewatch = await fixture.PullAsync();
+        Assert.Equal(secondVideo,
+            Assert.Single(rewatch.GetProperty("items").EnumerateArray()).GetProperty("videoId").GetString());
+        Assert.Equal(new[] { VideoId }, rewatch.GetProperty("watched").GetProperty("episodes").Deserialize<string[]>());
+
+        await fixture.ExpectPushAsync(second with { Id = "new-second", At = At + 3 }, HttpStatusCode.NoContent, secondPath);
+        Assert.Equal(2, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+        Assert.Empty((await fixture.PullAsync()).GetProperty("items").EnumerateArray());
+    }
+
+    [PostgresFact]
+    public async Task ProviderProgressDecreaseKeepsExistingWatchThrough()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var first = Event("first", "played", At - 2);
+        var second = Event("second", "played", At - 1) with { VideoId = "kitsu:1:2", Episode = 2 };
+        await fixture.ExpectPushAsync(first, HttpStatusCode.NoContent);
+        await fixture.ExpectPushAsync(second, HttpStatusCode.NoContent, EpisodeRoute(1, 2));
+
+        await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+            .SetProperty(entry => entry.ProgressEpisodes, 1)
+            .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.ProviderImport)
+            .SetProperty(entry => entry.UpdatedAt, DateTimeOffset.FromUnixTimeSeconds(At)));
+
+        Assert.Null(await schema.Db.MediaLibraryEntries.Select(entry => entry.AioStreamsProgressResetAt).SingleAsync());
+        var watched = (await fixture.PullAsync()).GetProperty("watched").GetProperty("episodes");
+        Assert.Equal(new[] { VideoId, second.VideoId }, watched.Deserialize<string[]>());
+        await fixture.ExpectPushAsync(first with { Id = "replayed", At = At + 1 }, HttpStatusCode.NoContent);
+        Assert.Equal(2, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+    }
+
+    [PostgresFact]
+    public async Task PlayedWaitingForAProgressResetUsesTheCommittedBoundary()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var lockAttempt = new ProgressLockAttempt();
+        await using var fixture = await Fixture.StartAsync(schema.Db, interceptor: lockAttempt);
+        await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+            .SetProperty(entry => entry.ProgressEpisodes, 2));
+        await schema.Db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var reset = await schema.Db.Database.BeginTransactionAsync();
+            await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+                .SetProperty(entry => entry.ProgressEpisodes, 1)
+                .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.UserProgressUpdate)
+                .SetProperty(entry => entry.UpdatedAt, DateTimeOffset.FromUnixTimeSeconds(At)));
+
+            var played = Event("in-flight-played", "played", At) with { VideoId = "kitsu:1:2", Episode = 2 };
+            var push = fixture.PushAsync(played, EpisodeRoute(1, 2));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var pid = await lockAttempt.Pid.Task.WaitAsync(timeout.Token);
+            while (!await schema.Db.Database.SqlQuery<bool>($"""
+                SELECT cardinality(pg_blocking_pids({pid})) > 0 AS "Value"
+                """).SingleAsync(timeout.Token))
+                await Task.Delay(10, timeout.Token);
+
+            await reset.CommitAsync(timeout.Token);
+            Assert.Equal(HttpStatusCode.NoContent, await push.WaitAsync(timeout.Token));
+        });
+
+        Assert.Single(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+        Assert.Equal(1, await schema.Db.MediaLibraryEntries.Select(entry => entry.ProgressEpisodes).SingleAsync());
+        Assert.Empty((await fixture.PullAsync()).GetProperty("watched").GetProperty("episodes").EnumerateArray());
     }
 
     [PostgresFact]
@@ -1261,6 +1487,20 @@ public sealed class AioStreamsWatchStateTests
             LinkSource = MediaMappingSources.Imported, LastVerifiedAt = DateTimeOffset.UtcNow
         });
 
+    private static MediaLibraryProviderBinding AddProviderBinding(ApplicationDbContext db, MediaLibraryEntry entry,
+        string accountId, ConnectedServiceAccount? account, DateTimeOffset? remoteUpdate = null)
+    {
+        var binding = new MediaLibraryProviderBinding
+        {
+            Id = Guid.NewGuid(), MediaLibraryEntry = entry, ProviderAccountId = accountId,
+            MediaProviderLink = db.MediaProviderLinks.Local.Single(link => link.MediaTitleId == entry.MediaTitleId
+                && link.Provider == "simkl"),
+            ConnectedServiceAccount = account, LastRemoteUpdateAt = remoteUpdate
+        };
+        db.Add(binding);
+        return binding;
+    }
+
     private static AioStreamsWatchStateController.PlaybackEvent Event(
         string id, string kind, long at, long? position = null, long? duration = 9_000, bool? played = null)
         => new(id, kind, "episode", at, MetaId, VideoId, 1, 1, position, duration, played);
@@ -1270,6 +1510,7 @@ public sealed class AioStreamsWatchStateTests
     private sealed class Fixture(WebApplication app, HttpClient client, string token) : IAsyncDisposable
     {
         public HttpClient Client => client;
+        public MediaLibraryEventHub EventHub => app.Services.GetRequiredService<MediaLibraryEventHub>();
 
         public static async Task<Fixture> StartAsync(ApplicationDbContext db, string animeType = "TV",
             string imdbHint = MetaId, DbCommandInterceptor? interceptor = null, int? imdbSeason = null,
@@ -1277,6 +1518,7 @@ public sealed class AioStreamsWatchStateTests
             AnimeApiFixture? animeApi = null, TimeProvider? timeProvider = null)
         {
             await db.Database.ExecuteSqlRawAsync(AddAioStreamsExternalCompletion.InstallTriggerSql);
+            await db.Database.ExecuteSqlRawAsync(AddAioStreamsProgressReset.InstallTriggerSql);
             var title = new MediaTitle
             {
                 Id = Guid.NewGuid(), CanonicalTitle = "Owned demo", MediaKind = MediaKinds.Anime,
@@ -1309,6 +1551,8 @@ public sealed class AioStreamsWatchStateTests
             });
             builder.Services.AddSingleton(timeProvider ?? TimeProvider.System);
             builder.Services.AddSingleton<MediaLibraryEventHub>();
+            builder.Services.AddSingleton<IMediaProviderRegistry, MediaProviderRegistry>();
+            builder.Services.AddScoped<MediaProviderOperationProcessor>();
             builder.Services.Configure<AioStreamsOptions>(options => options.BaseUrl = "https://aio.test");
             builder.Services.AddMemoryCache();
             builder.Services.AddHttpClient(AioStreamsAnimeEnricher.HttpClientName).ConfigurePrimaryHttpMessageHandler(
@@ -1417,6 +1661,20 @@ public sealed class AioStreamsWatchStateTests
         {
             if (command.CommandText.Contains("FROM \"MediaProviderLinks\"", StringComparison.Ordinal)
                 && command.CommandText.Contains("FOR SHARE", StringComparison.Ordinal))
+                Pid.TrySetResult(((NpgsqlConnection)command.Connection!).ProcessID);
+            return new(result);
+        }
+    }
+
+    private sealed class ProgressLockAttempt : DbCommandInterceptor
+    {
+        public TaskCompletionSource<int> Pid { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"MediaLibraryEntries\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("FOR NO KEY UPDATE", StringComparison.Ordinal))
                 Pid.TrySetResult(((NpgsqlConnection)command.Connection!).ProcessID);
             return new(result);
         }

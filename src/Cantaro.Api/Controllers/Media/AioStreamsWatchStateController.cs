@@ -21,6 +21,7 @@ public sealed class AioStreamsWatchStateController(
     ApplicationDbContext db,
     AioStreamsAnimeEnricher anime,
     MediaLibraryEventHub eventHub,
+    MediaProviderOperationProcessor operationProcessor,
     TimeProvider clock) : ControllerBase
 {
     private static readonly string[] Types = ["anime", "series", "movie"];
@@ -168,8 +169,54 @@ public sealed class AioStreamsWatchStateController(
 
             var progressChanged = inserted > 0 && played
                 && (movie ? await CompleteMovieAsync(bound.EntryId, cancellationToken)
-                    : await AdvanceProgressAsync(bound.EntryId, cancellationToken));
+                    : await AdvanceProgressAsync(bound.EntryId, payload.At, cancellationToken));
+            if (progressChanged)
+                await EnqueueProviderUpdatesAsync(userId, bound.EntryId, movie, cancellationToken);
             return (accepted, progressChanged, true);
+        }
+    }
+
+    private async Task EnqueueProviderUpdatesAsync(int userId, Guid entryId, bool movie, CancellationToken cancellationToken)
+    {
+        var bindings = await db.MediaLibraryProviderBindings.AsNoTracking()
+            .Include(binding => binding.MediaProviderLink)
+            .Where(binding => binding.MediaLibraryEntryId == entryId
+                && binding.ConnectedServiceAccountId != null && binding.MediaProviderLink != null)
+            .ToListAsync(cancellationToken);
+        if (bindings.Count == 0) return;
+
+        // The progress write uses ExecuteUpdate, so read the value from the transaction.
+        var progress = movie ? null : await db.MediaLibraryEntries.Where(entry => entry.Id == entryId)
+            .Select(entry => entry.ProgressEpisodes).SingleAsync(cancellationToken);
+        var operations = new List<MediaProviderOperation>(bindings.Count);
+        try
+        {
+            foreach (var binding in bindings)
+            {
+                var providerMediaId = binding.MediaProviderLink!.ExternalId;
+                var operation = movie
+                    ? await operationProcessor.EnqueueStatusUpdateAsync(userId, binding, new MediaStatusUpdateRequest
+                    {
+                        ProviderMediaId = providerMediaId,
+                        Status = MediaLibraryStatuses.Completed,
+                        LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+                    }, cancellationToken, deferSave: true)
+                    : await operationProcessor.EnqueueProgressUpdateAsync(userId, binding, new MediaProgressUpdateRequest
+                    {
+                        ProviderMediaId = providerMediaId,
+                        ProgressEpisodes = progress,
+                        LastKnownRemoteUpdateAt = binding.LastRemoteUpdateAt
+                    }, cancellationToken, deferSave: true);
+                operations.Add(operation);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            // The execution strategy can repeat this transaction after a rollback.
+            foreach (var operation in operations)
+                db.Entry(operation).State = EntityState.Detached;
         }
     }
 
@@ -186,7 +233,9 @@ public sealed class AioStreamsWatchStateController(
                               && watch.UserId == userId && watch.VideoId != null
                               && (episode.MediaTitleId == entry.MediaTitleId
                                   || watch.MediaEpisodeId == null && watch.Type == "movie")
-                          group new { Watch = watch, EpisodeNumber = (int?)episode.EpisodeNumber }
+                          let afterReset = watch.MediaEpisodeId == null || entry.AioStreamsProgressResetAt == null
+                              || watch.At > entry.AioStreamsProgressResetAt
+                          group new { Watch = watch, EpisodeNumber = (int?)episode.EpisodeNumber, AfterReset = afterReset }
                           by new { watch.MediaLibraryEntryId, watch.MediaEpisodeId, entry.MediaTitleId,
                               watch.Type, watch.MetaId, watch.VideoId, watch.Season, watch.Episode,
                               ImdbTvTitleId = entry.MediaTitle!.MediaKind == MediaKinds.Series
@@ -206,8 +255,8 @@ public sealed class AioStreamsWatchStateController(
                               LibraryPlayed = events.Key.MediaEpisodeId == null
                                   ? events.Key.Status == MediaLibraryStatuses.Completed
                                   : events.Key.ProgressEpisodes >= events.Key.EpisodeNumber,
-                              LastPlayedAt = events.Where(e => e.Watch.Played).Max(e => (long?)e.Watch.At),
-                              Latest = events.Where(e => e.Watch.Played || e.Watch.PositionMs != null)
+                              LastPlayedAt = events.Where(e => e.AfterReset && e.Watch.Played).Max(e => (long?)e.Watch.At),
+                              Latest = events.Where(e => e.AfterReset && (e.Watch.Played || e.Watch.PositionMs != null))
                                   .OrderByDescending(e => e.Watch.At).ThenByDescending(e => e.Watch.Played)
                                   .ThenByDescending(e => e.Watch.Id)
                                   .Select(e => new
@@ -552,22 +601,28 @@ public sealed class AioStreamsWatchStateController(
             .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private async Task<bool> AdvanceProgressAsync(Guid entryId, CancellationToken cancellationToken)
+    private async Task<bool> AdvanceProgressAsync(Guid entryId, long playedAt, CancellationToken cancellationToken)
     {
-        var current = await db.MediaLibraryEntries.Where(entry => entry.Id == entryId)
-            .Select(entry => entry.ProgressEpisodes ?? 0).SingleAsync(cancellationToken);
+        var state = await db.MediaLibraryEntries.Where(entry => entry.Id == entryId)
+            .Select(entry => new { Progress = entry.ProgressEpisodes ?? 0, entry.AioStreamsProgressResetAt })
+            .SingleAsync(cancellationToken);
+        // The wire timestamp has second precision. A manual reset takes precedence in its own second.
+        if (playedAt <= state.AioStreamsProgressResetAt) return false;
+
+        var resetAt = state.AioStreamsProgressResetAt;
         var completed = await (from watch in db.AioStreamsWatchEvents
                                join episode in db.MediaEpisodes on watch.MediaEpisodeId equals episode.Id
-                               where watch.MediaLibraryEntryId == entryId && watch.Played && episode.EpisodeNumber > current
+                               where watch.MediaLibraryEntryId == entryId && watch.Played
+                                   && episode.EpisodeNumber > state.Progress && (resetAt == null || watch.At > resetAt)
                                select episode.EpisodeNumber).Distinct().Order().ToListAsync(cancellationToken);
-        var next = current;
+        var next = state.Progress;
         foreach (var number in completed)
         {
             if (number != next + 1) break;
             next = number;
         }
 
-        if (next == current) return false;
+        if (next == state.Progress) return false;
         var now = clock.GetUtcNow();
         return await db.MediaLibraryEntries.Where(entry => entry.Id == entryId)
             .ExecuteUpdateAsync(setters => setters

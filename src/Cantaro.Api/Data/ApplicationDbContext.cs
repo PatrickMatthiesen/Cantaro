@@ -797,6 +797,7 @@ public class ApplicationDbContext : IdentityDbContext<User, IdentityRole<int>, i
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.AioStreamsProgressResetAt).ValueGeneratedOnAddOrUpdate();
             entity.Property(e => e.Score).HasPrecision(5, 2);
             entity.ToTable(table => table.HasCheckConstraint(
                 "CK_MediaLibraryEntries_Score",

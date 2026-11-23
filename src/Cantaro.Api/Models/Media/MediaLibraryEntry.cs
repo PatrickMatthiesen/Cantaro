@@ -22,6 +22,8 @@ public class MediaLibraryEntry
 
     public int? ProgressEpisodes { get; set; }
 
+    internal long? AioStreamsProgressResetAt { get; private set; }
+
     public int? ProgressChapters { get; set; }
 
     public int? ProgressVolumes { get; set; }
