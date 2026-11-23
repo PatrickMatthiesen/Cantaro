@@ -10,6 +10,14 @@ namespace Cantaro.Api.Migrations
             CREATE FUNCTION "MarkAioStreamsProgressReset"() RETURNS trigger
             LANGUAGE plpgsql AS $function$
             BEGIN
+                IF NEW."LastMutationSource" = 'user_status_update'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM "MediaTitles" WHERE "Id" = NEW."MediaTitleId"
+                            AND ("MediaKind" = 'movie' OR ("MediaKind" = 'anime' AND "Format" = 'movie')))
+                THEN
+                    RETURN NEW;
+                END IF;
+
                 NEW."AioStreamsProgressResetAt" := GREATEST(OLD."AioStreamsProgressResetAt",
                     floor(extract(epoch FROM NEW."UpdatedAt"))::bigint);
                 RETURN NEW;
@@ -17,10 +25,12 @@ namespace Cantaro.Api.Migrations
             $function$;
 
             CREATE TRIGGER "MarkAioStreamsProgressReset"
-                BEFORE UPDATE OF "ProgressEpisodes" ON "MediaLibraryEntries"
+                BEFORE UPDATE OF "ProgressEpisodes", "Status" ON "MediaLibraryEntries"
                 FOR EACH ROW
-                WHEN (NEW."LastMutationSource" = 'user_progress_update'
+                WHEN ((NEW."LastMutationSource" = 'user_progress_update'
                     AND GREATEST(NEW."ProgressEpisodes", 0) < GREATEST(OLD."ProgressEpisodes", 0))
+                    OR (NEW."LastMutationSource" = 'user_status_update' AND OLD."Status" = 'completed'
+                        AND NEW."Status" IS DISTINCT FROM 'completed'))
                 EXECUTE FUNCTION "MarkAioStreamsProgressReset"();
             """;
 

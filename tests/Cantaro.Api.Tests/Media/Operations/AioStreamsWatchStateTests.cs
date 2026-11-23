@@ -1109,6 +1109,37 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresFact]
+    public async Task ManualMovieResetClearsWatchedAndIgnoresDelayedPlayed()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var title = await schema.Db.MediaTitles.SingleAsync();
+        title.Format = MediaFormats.Movie;
+        AddLink(schema.Db, title, "imdb", MetaId);
+        await schema.Db.SaveChangesAsync();
+
+        const string path = Route + "/watch_state/push/movie/" + MetaId + ".json";
+        var played = Event("movie-played", "played", At - 1) with
+            { VideoId = MetaId, Scope = "movie", Season = null, Episode = null };
+        await fixture.ExpectPushAsync(played, HttpStatusCode.NoContent, path);
+        var before = await fixture.PullAsync();
+        Assert.Single(before.GetProperty("watched").GetProperty("movies").EnumerateArray());
+
+        await schema.Db.MediaLibraryEntries.ExecuteUpdateAsync(setters => setters
+            .SetProperty(entry => entry.Status, MediaLibraryStatuses.Planned)
+            .SetProperty(entry => entry.UpdatedAt, DateTimeOffset.FromUnixTimeSeconds(At))
+            .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.UserStatusUpdate));
+        await fixture.ExpectPushAsync(played with { Id = "movie-delayed", At = At }, HttpStatusCode.NoContent, path);
+        var after = await fixture.PullAsync(before.GetProperty("version").GetString());
+        Assert.Empty(after.GetProperty("watched").GetProperty("movies").EnumerateArray());
+        Assert.Equal(MediaLibraryStatuses.Planned, await schema.Db.MediaLibraryEntries.Select(entry => entry.Status).SingleAsync());
+
+        await fixture.ExpectPushAsync(played with { Id = "movie-new-watch", At = At + 1 }, HttpStatusCode.NoContent, path);
+        Assert.Single((await fixture.PullAsync()).GetProperty("watched").GetProperty("movies").EnumerateArray());
+        Assert.Equal(3, await schema.Db.AioStreamsWatchEvents.CountAsync());
+    }
+
+    [PostgresFact]
     public async Task ManualProgressResetStartsANewWatchThroughAndRetainsReceipts()
     {
         await using var schema = await PostgresTestSchema.CreateAsync();

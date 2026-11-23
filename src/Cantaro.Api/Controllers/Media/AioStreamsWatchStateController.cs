@@ -168,7 +168,7 @@ public sealed class AioStreamsWatchStateController(
                     ?? await AdoptLegacyReceiptAsync(db.Database.CurrentTransaction!, bound, userId, type, payload, cancellationToken);
 
             var progressChanged = inserted > 0 && played
-                && (movie ? await CompleteMovieAsync(bound.EntryId, cancellationToken)
+                && (movie ? await CompleteMovieAsync(bound.EntryId, payload.At, cancellationToken)
                     : await AdvanceProgressAsync(bound.EntryId, payload.At, cancellationToken));
             if (progressChanged)
                 await EnqueueProviderUpdatesAsync(userId, bound.EntryId, movie, cancellationToken);
@@ -233,7 +233,7 @@ public sealed class AioStreamsWatchStateController(
                               && watch.UserId == userId && watch.VideoId != null
                               && (episode.MediaTitleId == entry.MediaTitleId
                                   || watch.MediaEpisodeId == null && watch.Type == "movie")
-                          let afterReset = watch.MediaEpisodeId == null || entry.AioStreamsProgressResetAt == null
+                          let afterReset = entry.AioStreamsProgressResetAt == null
                               || watch.At > entry.AioStreamsProgressResetAt
                           group new { Watch = watch, EpisodeNumber = (int?)episode.EpisodeNumber, AfterReset = afterReset }
                           by new { watch.MediaLibraryEntryId, watch.MediaEpisodeId, entry.MediaTitleId,
@@ -527,10 +527,11 @@ public sealed class AioStreamsWatchStateController(
         return new AnimeEpisodeRoute(number, new AnimeEntryRoute(mappings, route.MetaId, entryId));
     }
 
-    private async Task<bool> CompleteMovieAsync(Guid entryId, CancellationToken cancellationToken)
+    private async Task<bool> CompleteMovieAsync(Guid entryId, long playedAt, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
-        return await db.MediaLibraryEntries.Where(entry => entry.Id == entryId && entry.Status != MediaLibraryStatuses.Completed)
+        return await db.MediaLibraryEntries.Where(entry => entry.Id == entryId && entry.Status != MediaLibraryStatuses.Completed
+                && (entry.AioStreamsProgressResetAt == null || playedAt > entry.AioStreamsProgressResetAt))
             .ExecuteUpdateAsync(setters => setters.SetProperty(entry => entry.Status, MediaLibraryStatuses.Completed)
                 .SetProperty(entry => entry.LastLocalEditAt, now).SetProperty(entry => entry.UpdatedAt, now)
                 .SetProperty(entry => entry.LastMutationSource, MediaMutationSources.AioStreamsWatchState), cancellationToken) > 0;
