@@ -237,9 +237,7 @@ public sealed class AioStreamsAnimeEnricher(
         var isMovie = string.Equals(details.Format, MediaFormats.Movie, StringComparison.Ordinal);
         if (mappings is null
             || mappings.KitsuId.HasValue && mappings.KitsuId is not > 0
-            || !HasConsistentImdbIdentity(entry)
-            || !isMovie && entry.Imdb?.SeasonNumber is <= 0
-            || !isMovie && entry.Imdb?.FromEpisode is <= 0)
+            || !HasConsistentImdbIdentity(entry))
         {
             return null;
         }

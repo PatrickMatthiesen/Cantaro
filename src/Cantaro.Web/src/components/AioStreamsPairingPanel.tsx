@@ -187,13 +187,16 @@ function PairingManagement({
       }}>
         <label htmlFor="aiostreams-instance" className="block text-sm text-content">Playback instance URL</label>
         <div className="flex gap-2">
-          <input id="aiostreams-instance" type="url" autoComplete="off" spellCheck={false}
+          <input id="aiostreams-instance" type="url" autoComplete="off" spellCheck={false} aria-describedby="aiostreams-playback-support"
             className="min-w-0 flex-1 border border-border-strong bg-surface px-3 text-sm text-content"
             value={instanceUrl} onChange={event => onInstanceUrlChange(event.target.value)} disabled={busy} />
           <button type="submit" className={primaryButton} disabled={busy || instanceUrl === savedInstanceUrl}>
             Save
           </button>
         </div>
+        <p id="aiostreams-playback-support" className="text-sm text-content-muted">
+          Direct playback requires an AIOStreams build with exact web launch support.
+        </p>
       </form>
       {manifestUrl && (
         <div className="space-y-2 pb-3">

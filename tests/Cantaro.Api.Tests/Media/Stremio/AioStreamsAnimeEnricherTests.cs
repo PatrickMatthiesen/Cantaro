@@ -131,6 +131,23 @@ public sealed class AioStreamsAnimeEnricherTests
     }
 
     [Theory]
+    [InlineData(0, 1)]
+    [InlineData(1, 0)]
+    public async Task EnrichAsync_PreservesImdbIdentityWithoutInvalidEpisodeCoordinates(int season, int fromEpisode)
+    {
+        var handler = new QueueHandler(Response($$$$"""
+            {"success":true,"data":{"mappings":{"simklId":40398,"kitsuId":6448,"imdbId":"tt2098220"},"imdb":{"id":"tt2098220","seasonNumber":{{{{season}}}},"fromEpisode":{{{{fromEpisode}}}}}}}
+            """));
+        var details = CreateDetails();
+        details.StremioTargets = [new MediaProviderStremioTarget { Type = "series", Id = "kitsu:6448" }];
+
+        await CreateEnricher(handler).EnrichAsync(details, CancellationToken.None);
+
+        Assert.Null(details.StremioTargets.Single(target => target.Id == "tt2098220").EpisodeMapping);
+        Assert.Equal(0, details.StremioTargets.Single(target => target.Id == "kitsu:6448").EpisodeMapping!.EpisodeOffset);
+    }
+
+    [Theory]
     [InlineData("SPECIAL")]
     [InlineData("MOVIE")]
     public async Task EnrichAsync_BlocksAioStreamsEpisodeLaunchForStandaloneAnime(string providerType)
