@@ -283,7 +283,7 @@ public sealed class AioStreamsWatchStateController(
             {
                 if (!kitsuIdentities.TryGetValue(kitsuId, out var identity))
                 {
-                    (identity, identityUnavailable) = await anime.LookupKitsuAsync(kitsuId, cancellationToken);
+                    (identity, identityUnavailable) = await anime.LookupKitsuAsync(kitsuId, cancellationToken, requireDeterminate: true);
                     kitsuIdentities.Add(kitsuId, identity);
                 }
                 resolved = ResolveKitsuRoute(route, kitsuId, kitsuNumber, identity);
@@ -303,7 +303,8 @@ public sealed class AioStreamsWatchStateController(
                 if (link is null) return false;
                 if (!linkedIdentities.TryGetValue(link, out var identity))
                 {
-                    (identity, identityUnavailable) = await anime.LookupLinkedAnimeAsync(link.Provider, link.ExternalId, cancellationToken);
+                    (identity, identityUnavailable) = await anime.LookupLinkedAnimeAsync(link.Provider, link.ExternalId,
+                        cancellationToken, requireDeterminate: true);
                     linkedIdentities.Add(link, identity);
                 }
                 resolved = ResolveImdbAnimeRoute(route, entryId, identity);

@@ -666,9 +666,10 @@ public sealed class AioStreamsWatchStateTests
     }
 
     [PostgresTheory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task PullRevalidatesAnimeRoutesAfterTheIdentityCacheExpires(bool unavailable)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task PullRevalidatesAnimeRoutesAfterTheIdentityCacheExpires(bool unavailable, bool empty)
     {
         await using var schema = await PostgresTestSchema.CreateAsync();
         var api = new AnimeApiFixture("TV", MetaId, 2, 10, []);
@@ -695,9 +696,10 @@ public sealed class AioStreamsWatchStateTests
 
         api.ImdbFromEpisode = 11;
         api.Unavailable = unavailable;
+        api.ReturnEmpty = empty;
         clock.Advance(AioStreamsAnimeEnricher.FreshDuration);
 
-        if (unavailable)
+        if (unavailable || empty)
         {
             using var after = await fixture.Client.GetAsync(fixture.Authorize(PullRoute));
             Assert.Equal(HttpStatusCode.ServiceUnavailable, after.StatusCode);
@@ -1428,6 +1430,7 @@ public sealed class AioStreamsWatchStateTests
         public int RequestCount => Volatile.Read(ref _requestCount);
         public int? ImdbFromEpisode { get; set; } = imdbFromEpisode;
         public bool Unavailable { get; set; }
+        public bool ReturnEmpty { get; set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -1442,7 +1445,7 @@ public sealed class AioStreamsWatchStateTests
             if (Unavailable || query["idType"] == "kitsuId" && query["idValue"] == "9")
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
-            var data = known
+            var data = known && !ReturnEmpty
                 ? new { type = animeType, imdb = new { id = imdbHint, seasonNumber = imdbSeason, fromEpisode = ImdbFromEpisode, nonImdbEpisodes },
                     mappings = new { kitsuId = 1, simklId = 37089, anilistId = 1, malId = 1, imdbId = MetaId } }
                 : null;

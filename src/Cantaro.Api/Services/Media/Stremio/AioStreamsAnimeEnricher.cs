@@ -74,22 +74,22 @@ public sealed class AioStreamsAnimeEnricher(
     }
 
     internal async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable)> LookupKitsuAsync(
-        int kitsuId, CancellationToken cancellationToken)
+        int kitsuId, CancellationToken cancellationToken, bool requireDeterminate = false)
     {
         if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
         var (entry, unavailable, stale) = await GetEntryAsync(baseUri, new("kitsuId", kitsuId), cancellationToken);
         return (!stale && entry?.Mappings?.KitsuId == kitsuId && HasConsistentImdbIdentity(entry)
-            ? entry : null, unavailable);
+            ? entry : null, unavailable || (requireDeterminate && stale));
     }
 
     internal async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable)> LookupLinkedAnimeAsync(
-        string provider, string externalId, CancellationToken cancellationToken)
+        string provider, string externalId, CancellationToken cancellationToken, bool requireDeterminate = false)
     {
         if (!TryGetSourceIdentity(provider, externalId, out var source)) return (null, false);
         if (!_options.TryGetBaseUri(out var baseUri)) return (null, true);
         var (entry, unavailable, stale) = await GetEntryAsync(baseUri, source, cancellationToken);
         return (!stale && entry is not null && HasExactSourceIdentity(entry, source)
-            && HasConsistentImdbIdentity(entry) ? entry : null, unavailable);
+            && HasConsistentImdbIdentity(entry) ? entry : null, unavailable || (requireDeterminate && stale));
     }
 
     private async Task<(AioStreamsAnimeEntry? Entry, bool Unavailable, bool Stale)> GetEntryAsync(
