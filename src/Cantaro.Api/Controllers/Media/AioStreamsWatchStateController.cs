@@ -128,11 +128,27 @@ public sealed class AioStreamsWatchStateController(
                 """).AsNoTracking().ToListAsync(cancellationToken);
             if (pairing.Count == 0) return (false, false, false);
 
+            if ((episode.ImdbTvTitleId != null || episode.MissingAnimeEpisode != null)
+                && await ReceiptMatchesAsync(userId, type, payload, cancellationToken) is { } existing)
+                return (existing, false, true);
+
             var bound = episode;
-            if (episode.MissingAnimeEpisode is { } route)
+            if (episode.ImdbTvTitleId is { } titleId)
             {
-                if (await ReceiptMatchesAsync(userId, type, payload, cancellationToken) is { } existing)
-                    return (existing, false, true);
+                // Catalog refreshes write the SIMKL link with the coordinates. Share locks also
+                // serialize with link replacement or unlink while allowing foreign key checks.
+                var lockedLinks = await db.Database.SqlQuery<Guid>($"""
+                    SELECT "Id" AS "Value" FROM "MediaProviderLinks"
+                    WHERE "MediaTitleId" = {titleId} AND "Provider" IN ('imdb', 'simkl')
+                    ORDER BY "Id" FOR SHARE
+                    """).ToArrayAsync(cancellationToken);
+                if (lockedLinks.Length != 2
+                    || await FindVerifiedImdbTvEpisodeIdAsync(userId, episode.EntryId, titleId, payload, cancellationToken)
+                        != episode.Id)
+                    return (false, false, true);
+            }
+            else if (episode.MissingAnimeEpisode is { } route)
+            {
                 // Recheck the binding under the mapping lock before creating an episode for this receipt.
                 bound = await FindEpisodeAsync(userId, route, cancellationToken, materializeForEntry: episode.EntryId);
                 if (bound is null) return (false, false, true);
@@ -183,6 +199,9 @@ public sealed class AioStreamsWatchStateController(
                                   || watch.MediaEpisodeId == null && watch.Type == "movie")
                           group new { Watch = watch, EpisodeNumber = (int?)episode.EpisodeNumber }
                           by new { watch.MediaLibraryEntryId, watch.MediaEpisodeId, watch.VideoId,
+                              ImdbTvTitleId = entry.MediaTitle!.MediaKind == MediaKinds.Series
+                                  && watch.Type == "series" && watch.VideoId!.StartsWith("tt")
+                                      ? (Guid?)entry.MediaTitleId : null,
                               EpisodeNumber = (int?)episode.EpisodeNumber, entry.ProgressEpisodes, entry.Status }
                           into events
                           select new
@@ -190,10 +209,11 @@ public sealed class AioStreamsWatchStateController(
                               events.Key.MediaEpisodeId,
                               events.Key.MediaLibraryEntryId,
                               events.Key.VideoId,
+                              events.Key.ImdbTvTitleId,
                               LibraryPlayed = events.Key.MediaEpisodeId == null
                                   ? events.Key.Status == MediaLibraryStatuses.Completed
                                   : events.Key.ProgressEpisodes >= events.Key.EpisodeNumber,
-                              TrackerPlayed = events.Any(e => e.Watch.Played),
+                              LastPlayedAt = events.Where(e => e.Watch.Played).Max(e => (long?)e.Watch.At),
                               Latest = events.Where(e => e.Watch.Played || e.Watch.PositionMs != null)
                                   .OrderByDescending(e => e.Watch.At).ThenByDescending(e => e.Watch.Played)
                                   .ThenByDescending(e => e.Watch.Id)
@@ -210,15 +230,26 @@ public sealed class AioStreamsWatchStateController(
                                           && completion.At >= e.Watch.At)
                                   }).FirstOrDefault()
                           }).ToListAsync(cancellationToken);
+        var tvTitleIds = rows.Select(row => row.ImdbTvTitleId).OfType<Guid>().Distinct().ToArray();
+        Dictionary<Guid, string> tvRoutes = tvTitleIds.Length == 0 ? [] : await QueryVerifiedImdbTvRoutes(tvTitleIds)
+            .ToDictionaryAsync(route => route.MediaEpisodeId,
+                route => FormattableString.Invariant($"{route.ImdbId}:{route.Season}:{route.Episode}"), cancellationToken);
         var media = rows.ToLookup(row => (row.MediaLibraryEntryId, row.MediaEpisodeId));
-        var watched = media.Where(item => item.Any(row => row.LibraryPlayed || row.TrackerPlayed))
-            .SelectMany(item => item.Select(row => row.VideoId!))
+        // A stale route can still have completed its canonical episode.
+        var watched = media.Where(item => item.Any(row => row.LibraryPlayed || row.LastPlayedAt != null))
+            .SelectMany(item => item.Where(row => IsCurrentRoute(row.ImdbTvTitleId, row.MediaEpisodeId, row.VideoId))
+                .Select(row => row.VideoId!))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        var items = media.Select(item => item.OrderByDescending(row => row.Latest?.Event.At)
-                .ThenByDescending(row => row.Latest?.Event.Played)
-                .ThenByDescending(row => row.Latest?.Event.Id).First().Latest)
-            .Where(latest => latest is { ExternallyCompleted: false, Event: { Played: false, PositionMs: > 0 } })
-            .Select(latest => latest!.Event)
+        var items = media.Select(item => new
+            {
+                LastPlayedAt = item.Max(row => row.LastPlayedAt),
+                Latest = item.Where(row => IsCurrentRoute(row.ImdbTvTitleId, row.MediaEpisodeId, row.VideoId))
+                    .OrderByDescending(row => row.Latest?.Event.At).ThenByDescending(row => row.Latest?.Event.Played)
+                    .ThenByDescending(row => row.Latest?.Event.Id).FirstOrDefault()?.Latest
+            })
+            .Where(item => item.Latest is { ExternallyCompleted: false, Event: { Played: false, PositionMs: > 0 } } latest
+                && !(item.LastPlayedAt >= latest.Event.At))
+            .Select(item => item.Latest!.Event)
             .OrderByDescending(e => e.At).ThenByDescending(e => e.Id).Take(50)
             .Select(e => new ResumeItem(e.Type!, e.MetaId!, e.VideoId!, e.Season, e.Episode,
                 e.At, e.PositionMs!.Value, e.DurationMs)).ToArray();
@@ -229,6 +260,9 @@ public sealed class AioStreamsWatchStateController(
             : Ok(new { version, items, watched = new {
                 movies = watched.Where(id => !id.Contains(':')).ToArray(),
                 episodes = watched.Where(id => id.Contains(':')).ToArray() } });
+
+        bool IsCurrentRoute(Guid? tvTitleId, Guid? episodeId, string? videoId) => tvTitleId is null
+            || (episodeId is { } id && tvRoutes.GetValueOrDefault(id) == videoId);
     }
 
     private Task<int?> ResolveUserAsync(CancellationToken cancellationToken)
@@ -323,12 +357,27 @@ public sealed class AioStreamsWatchStateController(
             return await FindImdbAnimeEpisodeAsync(userId, linked.Id, linked.MediaTitleId, payload, cancellationToken);
         if (type != "series" || linked.MediaKind != MediaKinds.Series) return (null, false);
 
-        var episodeId = await MediaEpisodeIdentityService.QueryVerifiedSimklEpisodeCoordinates(db, linked.MediaTitleId)
-            .Where(item => item.SeasonNumber == payload.Season && item.SeasonEpisodeNumber == payload.Episode)
-            .Select(item => (Guid?)item.MediaEpisodeId)
-            .SingleOrDefaultAsync(cancellationToken);
-        return (episodeId is { } id ? new BoundEpisode(linked.Id, id) : null, false);
+        var episodeId = await FindVerifiedImdbTvEpisodeIdAsync(userId, linked.Id, linked.MediaTitleId, payload, cancellationToken);
+        return (episodeId is { } id ? new BoundEpisode(linked.Id, id, ImdbTvTitleId: linked.MediaTitleId) : null, false);
     }
+
+    private Task<Guid?> FindVerifiedImdbTvEpisodeIdAsync(int userId, Guid entryId, Guid titleId, PlaybackEvent payload,
+        CancellationToken cancellationToken) =>
+        QueryVerifiedImdbTvRoutes([titleId])
+            .Where(route => route.ImdbId == payload.MetaId && route.Season == payload.Season && route.Episode == payload.Episode
+                && db.MediaLibraryEntries.Any(entry => entry.Id == entryId && entry.UserId == userId
+                    && entry.MediaTitleId == titleId))
+            .Select(route => (Guid?)route.MediaEpisodeId).SingleOrDefaultAsync(cancellationToken);
+
+    private IQueryable<ImdbTvRoute> QueryVerifiedImdbTvRoutes(Guid[] titleIds) =>
+        from coordinates in MediaEpisodeIdentityService.QueryVerifiedSimklEpisodeCoordinates(db, titleIds)
+        join link in db.MediaProviderLinks on coordinates.MediaTitleId equals link.MediaTitleId
+        where link.Provider == "imdb" && link.LastVerifiedAt != null && link.MediaTitle!.MediaKind == MediaKinds.Series
+        select new ImdbTvRoute
+        {
+            MediaEpisodeId = coordinates.MediaEpisodeId, ImdbId = link.ExternalId,
+            Season = coordinates.SeasonNumber, Episode = coordinates.SeasonEpisodeNumber
+        };
 
     private async Task<(BoundEpisode? Episode, bool Unavailable)> FindImdbAnimeEpisodeAsync(int userId,
         Guid entryId, Guid titleId, PlaybackEvent payload, CancellationToken cancellationToken)
@@ -454,7 +503,16 @@ public sealed class AioStreamsWatchStateController(
     private sealed record AnimeEpisodeRoute(int Number, AioStreamsAnimeEnricher.AioStreamsMappings Identity,
         string? Imdb, Guid? ImdbEntryId = null, bool HasMixedImdbParent = false);
 
-    private sealed record BoundEpisode(Guid EntryId, Guid? Id, AnimeEpisodeRoute? MissingAnimeEpisode = null);
+    private sealed record BoundEpisode(Guid EntryId, Guid? Id, AnimeEpisodeRoute? MissingAnimeEpisode = null,
+        Guid? ImdbTvTitleId = null);
+
+    private sealed class ImdbTvRoute
+    {
+        public Guid MediaEpisodeId { get; init; }
+        public required string ImdbId { get; init; }
+        public int Season { get; init; }
+        public int Episode { get; init; }
+    }
 
     private sealed record ResumeItem(
         string Type, string MetaId, string VideoId,

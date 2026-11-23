@@ -21,6 +21,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Xunit;
 
 namespace Cantaro.Api.Tests;
@@ -29,6 +30,7 @@ public sealed class AioStreamsWatchStateTests
 {
     private const string MetaId = "tt0213338";
     private const string VideoId = "kitsu:1:1";
+    private const string TvMetaId = "tt1000002";
     private const string Route = AioStreamsWatchState.Route;
     private const string PushRoute = $"{Route}/watch_state/push/anime/kitsu%3A1%3A1.json";
     private const string PullRoute = $"{Route}/watch_state/pull.json";
@@ -272,6 +274,113 @@ public sealed class AioStreamsWatchStateTests
             .Select(e => e.Status).SingleAsync());
         Assert.Equal(4, await schema.Db.MediaLibraryEntries.Where(e => e.MediaTitleId == series.Id)
             .Select(e => e.ProgressEpisodes).SingleAsync());
+    }
+
+    [PostgresTheory]
+    [InlineData("coordinates-replaced")]
+    [InlineData("coordinates-removed")]
+    [InlineData("imdb-replaced")]
+    [InlineData("imdb-unverified")]
+    public async Task PullHidesStaleImdbTvRoutesAndRetainsCanonicalReceipts(string change)
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        await using var fixture = await Fixture.StartAsync(schema.Db);
+        var entry = await AddImdbTvEntryAsync(schema.Db);
+        var played = ImdbTvEvent("tv-played", "played", At);
+        var rewatch = ImdbTvEvent("tv-rewatch", "pause", At + 1);
+        await fixture.ExpectPushAsync(played, HttpStatusCode.NoContent, ImdbTvPath(played));
+        await fixture.ExpectPushAsync(rewatch, HttpStatusCode.NoContent, ImdbTvPath(rewatch));
+        var before = await fixture.PullAsync();
+        Assert.Equal(rewatch.VideoId, Assert.Single(before.GetProperty("items").EnumerateArray()).GetProperty("videoId").GetString());
+        Assert.Equal(played.VideoId, Assert.Single(before.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
+        var canonicalEpisodeId = await schema.Db.MediaEpisodes.Where(episode => episode.MediaTitleId == entry.MediaTitleId
+            && episode.EpisodeNumber == 2).Select(episode => episode.Id).SingleAsync();
+
+        var imdb = TvMetaId;
+        switch (change)
+        {
+            case "coordinates-replaced":
+                await RefreshImdbTvCatalogAsync(schema.Db, entry.MediaTitleId, replaceCoordinates: true);
+                break;
+            case "coordinates-removed":
+                await schema.Db.MediaEpisodeProviderContents.Where(content => content.MediaEpisodeId == canonicalEpisodeId)
+                    .ExecuteDeleteAsync();
+                break;
+            case "imdb-replaced":
+                imdb = "tt1000003";
+                await schema.Db.MediaProviderLinks.Where(link => link.MediaTitleId == entry.MediaTitleId && link.Provider == "imdb")
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(link => link.ExternalId, imdb));
+                break;
+            case "imdb-unverified":
+                await schema.Db.MediaProviderLinks.Where(link => link.MediaTitleId == entry.MediaTitleId && link.Provider == "imdb")
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(link => link.LastVerifiedAt, (DateTimeOffset?)null));
+                break;
+        }
+
+        var stale = await fixture.PullAsync(before.GetProperty("version").GetString());
+        Assert.Empty(stale.GetProperty("items").EnumerateArray());
+        Assert.Empty(stale.GetProperty("watched").GetProperty("episodes").EnumerateArray());
+        await fixture.ExpectPushAsync(rewatch, HttpStatusCode.NoContent, ImdbTvPath(rewatch));
+        var receipts = await schema.Db.AioStreamsWatchEvents.Where(watch => watch.MediaLibraryEntryId == entry.Id)
+            .OrderBy(watch => watch.At).ToListAsync();
+        Assert.Equal(new[] { played.Id, rewatch.Id }, receipts.Select(watch => watch.EventId));
+        Assert.All(receipts, watch => Assert.Equal(canonicalEpisodeId, watch.MediaEpisodeId));
+        Assert.Equal(2, await schema.Db.MediaLibraryEntries.Where(candidate => candidate.Id == entry.Id)
+            .Select(candidate => candidate.ProgressEpisodes).SingleAsync());
+
+        if (change is "coordinates-replaced" or "imdb-replaced")
+        {
+            var replacement = change == "coordinates-replaced"
+                ? ImdbTvEvent("replacement-rewatch", "pause", At + 2, season: 1, episode: 2)
+                : ImdbTvEvent("replacement-rewatch", "pause", At + 2, imdb: imdb);
+            var delayed = replacement with { Id = "replacement-delayed", At = At };
+            await fixture.ExpectPushAsync(delayed, HttpStatusCode.NoContent, ImdbTvPath(delayed));
+            var delayedPull = await fixture.PullAsync();
+            Assert.Empty(delayedPull.GetProperty("items").EnumerateArray());
+            Assert.Equal(replacement.VideoId,
+                Assert.Single(delayedPull.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
+
+            await fixture.ExpectPushAsync(replacement, HttpStatusCode.NoContent, ImdbTvPath(replacement));
+            var current = await fixture.PullAsync();
+            Assert.Equal(replacement.VideoId, Assert.Single(current.GetProperty("items").EnumerateArray())
+                .GetProperty("videoId").GetString());
+            Assert.Equal(replacement.VideoId,
+                Assert.Single(current.GetProperty("watched").GetProperty("episodes").EnumerateArray()).GetString());
+        }
+    }
+
+    [PostgresFact]
+    public async Task FreshImdbTvPushWaitsForCatalogRefreshAndRejectsReboundCoordinates()
+    {
+        await using var schema = await PostgresTestSchema.CreateAsync();
+        var lockAttempt = new ImdbTvLinkLockAttempt();
+        await using var fixture = await Fixture.StartAsync(schema.Db, interceptor: lockAttempt);
+        var entry = await AddImdbTvEntryAsync(schema.Db);
+        var played = ImdbTvEvent("in-flight", "played", At);
+        await schema.Db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var refresh = await schema.Db.Database.BeginTransactionAsync();
+            await RefreshImdbTvCatalogAsync(schema.Db, entry.MediaTitleId, replaceCoordinates: true);
+            var push = fixture.PushAsync(played, ImdbTvPath(played));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var pid = await lockAttempt.Pid.Task.WaitAsync(timeout.Token);
+            while (!await schema.Db.Database.SqlQuery<bool>($"""
+                SELECT cardinality(pg_blocking_pids({pid})) > 0 AS "Value"
+                """).SingleAsync(timeout.Token))
+                await Task.Delay(10, timeout.Token);
+
+            await refresh.CommitAsync(timeout.Token);
+            Assert.Equal(HttpStatusCode.NotFound, await push.WaitAsync(timeout.Token));
+        });
+
+        Assert.Empty(await schema.Db.AioStreamsWatchEvents.ToListAsync());
+        Assert.Equal(1, await schema.Db.MediaLibraryEntries.Where(candidate => candidate.Id == entry.Id)
+            .Select(candidate => candidate.ProgressEpisodes).SingleAsync());
+        var nextPause = ImdbTvEvent("new-episode", "pause", At + 1);
+        await fixture.ExpectPushAsync(nextPause, HttpStatusCode.NoContent, ImdbTvPath(nextPause));
+        var boundEpisode = await schema.Db.AioStreamsWatchEvents.Select(watch => watch.MediaEpisodeId).SingleAsync();
+        Assert.Equal(3, await schema.Db.MediaEpisodes.Where(episode => episode.Id == boundEpisode)
+            .Select(episode => episode.EpisodeNumber).SingleAsync());
     }
 
     [PostgresTheory]
@@ -967,6 +1076,51 @@ public sealed class AioStreamsWatchStateTests
     private static string EpisodeRoute(int id, int number, string type = "anime")
         => $"{Route}/watch_state/push/{type}/kitsu%3A{id}%3A{number}.json";
 
+    private static AioStreamsWatchStateController.PlaybackEvent ImdbTvEvent(string id, string kind, long at,
+        int season = 2, int episode = 1, string imdb = TvMetaId)
+        => Event(id, kind, at, 2_000) with { MetaId = imdb, VideoId = $"{imdb}:{season}:{episode}", Season = season, Episode = episode };
+
+    private static string ImdbTvPath(AioStreamsWatchStateController.PlaybackEvent payload)
+        => $"{Route}/watch_state/push/series/{Uri.EscapeDataString(payload.VideoId!)}.json";
+
+    private static async Task<MediaLibraryEntry> AddImdbTvEntryAsync(ApplicationDbContext db)
+    {
+        var title = new MediaTitle
+        {
+            Id = Guid.NewGuid(), CanonicalTitle = "Fixture series", MediaKind = MediaKinds.Series,
+            PrimaryProgressDimension = MediaProgressDimensions.Episode, ReleaseStatusDimension = MediaProgressDimensions.Episode
+        };
+        AddLink(db, title, "imdb", TvMetaId);
+        AddLink(db, title, "simkl", "tv:1000002");
+        var entry = new MediaLibraryEntry
+        {
+            Id = Guid.NewGuid(), MediaTitle = title, UserId = 1, Status = MediaLibraryStatuses.Current, ProgressEpisodes = 1
+        };
+        db.Add(entry);
+        await db.SaveChangesAsync();
+        await RefreshImdbTvCatalogAsync(db, title.Id);
+        return entry;
+    }
+
+    private static async Task RefreshImdbTvCatalogAsync(ApplicationDbContext db, Guid titleId, bool replaceCoordinates = false)
+    {
+        var mappings = new MediaProviderSeasonMappingService(db, NullLogger<MediaProviderSeasonMappingService>.Instance);
+        var catalog = new MediaEpisodeIdentityService(db, mappings, NullLogger<MediaEpisodeIdentityService>.Instance);
+        List<MediaProviderWatchedEpisode> episodes = [new() { SeasonNumber = 1, EpisodeNumber = 1, ProviderEpisodeId = "1" }];
+        if (replaceCoordinates)
+        {
+            episodes.Add(new() { SeasonNumber = 1, EpisodeNumber = 2, ProviderEpisodeId = "2" });
+            episodes.Add(new() { SeasonNumber = 2, EpisodeNumber = 1, ProviderEpisodeId = "3" });
+        }
+        else
+        {
+            episodes.Add(new() { SeasonNumber = 2, EpisodeNumber = 1, ProviderEpisodeId = "2" });
+        }
+        await catalog.CacheProviderEpisodeCatalogAsync(titleId, "simkl", "tv:1000002", episodes, [],
+            episodes.Count, CancellationToken.None);
+        await db.SaveChangesAsync();
+    }
+
     private static void AddLink(ApplicationDbContext db, MediaTitle title, string provider, string externalId)
         => db.MediaProviderLinks.Add(new MediaProviderLink
         {
@@ -1117,6 +1271,20 @@ public sealed class AioStreamsWatchStateTests
                 && command.CommandText.Contains("FOR UPDATE", StringComparison.Ordinal))
                 await revoke(cancellationToken);
             return result;
+        }
+    }
+
+    private sealed class ImdbTvLinkLockAttempt : DbCommandInterceptor
+    {
+        public TaskCompletionSource<int> Pid { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"MediaProviderLinks\"", StringComparison.Ordinal)
+                && command.CommandText.Contains("FOR SHARE", StringComparison.Ordinal))
+                Pid.TrySetResult(((NpgsqlConnection)command.Connection!).ProcessID);
+            return new(result);
         }
     }
 

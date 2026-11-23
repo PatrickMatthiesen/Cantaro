@@ -277,17 +277,22 @@ public class MediaEpisodeIdentityService(
 
     internal sealed record SimklEpisodeCoordinates
     {
+        public Guid MediaTitleId { get; init; }
         public Guid MediaEpisodeId { get; init; }
         public int SeasonNumber { get; init; }
         public int SeasonEpisodeNumber { get; init; }
     }
 
     internal static IQueryable<SimklEpisodeCoordinates> QueryVerifiedSimklEpisodeCoordinates(
-        ApplicationDbContext db, Guid mediaTitleId)
+        ApplicationDbContext db, Guid mediaTitleId) =>
+        QueryVerifiedSimklEpisodeCoordinates(db, [mediaTitleId]);
+
+    internal static IQueryable<SimklEpisodeCoordinates> QueryVerifiedSimklEpisodeCoordinates(
+        ApplicationDbContext db, Guid[] mediaTitleIds)
     {
         var candidates = from episode in db.MediaEpisodes
                          from content in episode.ProviderContents
-                         where episode.MediaTitleId == mediaTitleId
+                         where mediaTitleIds.Contains(episode.MediaTitleId)
                              && content.Provider == MediaObservationSiteIdentifiers.Simkl
                              && content.ProviderSeasonNumber > 0 && content.ProviderEpisodeNumber > 0
                              && content.ProviderSequenceNumber == episode.EpisodeNumber
@@ -296,21 +301,23 @@ public class MediaEpisodeIdentityService(
                                  && link.LastVerifiedAt != null && link.ExternalId == content.ProviderSeriesId)
                          select new
                          {
+                             episode.MediaTitleId,
                              MediaEpisodeId = episode.Id,
                              SeasonNumber = content.ProviderSeasonNumber!.Value,
                              SeasonEpisodeNumber = content.ProviderEpisodeNumber!.Value
                          };
 
         // A playable coordinate must identify exactly one canonical episode and vice versa.
-        return candidates.Where(candidate => !candidates.Any(other =>
-                (other.MediaEpisodeId == candidate.MediaEpisodeId
+        return candidates.Where(candidate => !candidates.Any(other => other.MediaTitleId == candidate.MediaTitleId
+                && ((other.MediaEpisodeId == candidate.MediaEpisodeId
                     && (other.SeasonNumber != candidate.SeasonNumber
                         || other.SeasonEpisodeNumber != candidate.SeasonEpisodeNumber))
                 || (other.MediaEpisodeId != candidate.MediaEpisodeId
                     && other.SeasonNumber == candidate.SeasonNumber
-                    && other.SeasonEpisodeNumber == candidate.SeasonEpisodeNumber)))
+                    && other.SeasonEpisodeNumber == candidate.SeasonEpisodeNumber))))
             .Select(candidate => new SimklEpisodeCoordinates
             {
+                MediaTitleId = candidate.MediaTitleId,
                 MediaEpisodeId = candidate.MediaEpisodeId,
                 SeasonNumber = candidate.SeasonNumber,
                 SeasonEpisodeNumber = candidate.SeasonEpisodeNumber
@@ -377,6 +384,12 @@ public class MediaEpisodeIdentityService(
                     }));
             providerLink.EpisodeCatalogLastVerifiedAt = now;
             providerLink.UpdatedAt = now;
+            // Every catalog refresh writes the SIMKL link because tracker writes lock it to recheck coordinates.
+            var linkEntry = db.Entry(providerLink);
+            if (linkEntry.State != EntityState.Added)
+            {
+                linkEntry.Property(link => link.EpisodeCatalogLastVerifiedAt).IsModified = true;
+            }
         }
 
         var episodes = await db.MediaEpisodes
