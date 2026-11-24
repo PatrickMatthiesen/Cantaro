@@ -61,51 +61,50 @@ afterEach(() => {
 });
 
 describe('YouTube lyrics content entrypoint', () => {
-  it('does not read page URLs before consent, tracks SPA video changes, and stops on revocation', async () => {
+  it('mounts after authenticated consent, reuses the host across Mix videos, and stops on revocation', async () => {
     vi.useFakeTimers();
-    const page = setupPage('https://www.youtube.com/watch?v=abcdefghijk');
+    const page = setupPage('https://www.youtube.com/watch?v=abcdefghijk&list=RDabcdefghijk&index=1');
     let notifyConsent!: (status: ReturnType<typeof consent>) => void;
     const unsubscribe = vi.fn();
-    consentMocks.getRuntimeConsentStatus.mockResolvedValue(consent(false, false));
+    consentMocks.getRuntimeConsentStatus.mockResolvedValue(consent(false, true));
     consentMocks.subscribeRuntimeConsent.mockImplementation((listener: typeof notifyConsent) => {
       notifyConsent = listener;
       return unsubscribe;
     });
+    const sendMessage = vi.fn(async (_request: YouTubeLyricsRequest) => ({
+      ok: true,
+      value: { song: null, lyrics: null },
+    }));
+    vi.stubGlobal('browser', { runtime: { sendMessage } });
 
     const ctx = createContext();
     startYouTubeLyrics(ctx);
-    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(page.reads).toBe(0);
+    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
+
+    notifyConsent(consent(true, false));
     expect(page.reads).toBe(0);
     expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
 
     notifyConsent(consent(true, true));
     expect(page.reads).toBe(1);
-    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
-    // Sanitized narrow watch-page structure captured on Snowfall.
-    page.document.body.innerHTML = `
-      <ytd-watch-flexy>
-        <div id="player-full-bleed-container"><ytd-player><video></video></ytd-player></div>
-        <div id="primary-inner"><div id="below"><div>
-          <ytd-watch-metadata><div id="title"><h1>Video title</h1></div></ytd-watch-metadata>
-        </div></div></div>
-      </ytd-watch-flexy>
-    `;
-    const metadata = page.document.querySelector('ytd-watch-metadata')!;
+    const host = page.document.querySelector<HTMLElement>('[data-cantaro-youtube-lyrics]')!;
+    expect(host?.parentElement).toBe(page.document.body);
+    expect(host.getAttribute('data-placement')).toBe('floating');
+    host.shadowRoot!.querySelector('.launcher')!.dispatchEvent(new page.window.Event('click'));
+    await vi.advanceTimersByTimeAsync(0);
 
-    page.setUrl('https://www.youtube.com/watch?v=lmnopqrstuv');
+    page.setUrl('https://www.youtube.com/watch?v=lmnopqrstuv&list=RDabcdefghijk&index=2');
     await vi.advanceTimersByTimeAsync(500);
     expect(page.reads).toBe(2);
-    const host = metadata.querySelector('[data-cantaro-youtube-lyrics]');
-    expect(host).not.toBeNull();
-    expect(page.document.querySelector('#player-full-bleed-container [data-cantaro-youtube-lyrics]')).toBeNull();
-
-    metadata.remove();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
-    const newMetadata = page.document.createElement('ytd-watch-metadata');
-    page.document.body.append(newMetadata);
-    await vi.advanceTimersByTimeAsync(500);
-    expect(newMetadata.querySelector('[data-cantaro-youtube-lyrics]')).toBe(host);
+    const hosts = page.document.querySelectorAll('[data-cantaro-youtube-lyrics]');
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]).toBe(host);
+    expect(host.parentElement).toBe(page.document.body);
+    expect(sendMessage.mock.calls.map(([request]) => request.payload)).toEqual([
+      { videoId: 'abcdefghijk' }, { videoId: 'lmnopqrstuv' },
+    ]);
 
     notifyConsent(consent(true, false));
     expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBeNull();
@@ -116,6 +115,42 @@ describe('YouTube lyrics content entrypoint', () => {
 
     ctx.invalidate();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the floating host through watch metadata replacement and fullscreen', async () => {
+    vi.useFakeTimers();
+    const page = setupPage('https://www.youtube.com/watch?v=abcdefghijk', `
+      <html><body>
+        <ytd-watch-flexy>
+          <div id="player-full-bleed-container"><ytd-player><video></video></ytd-player></div>
+          <div id="below"><ytd-watch-metadata></ytd-watch-metadata></div>
+        </ytd-watch-flexy>
+      </body></html>
+    `);
+    consentMocks.getRuntimeConsentStatus.mockResolvedValue(consent(true, true));
+    consentMocks.subscribeRuntimeConsent.mockReturnValue(() => undefined);
+
+    const ctx = createContext();
+    startYouTubeLyrics(ctx);
+    await vi.advanceTimersByTimeAsync(0);
+    const host = page.document.querySelector<HTMLElement>('[data-cantaro-youtube-lyrics]')!;
+    expect(host?.parentElement).toBe(page.document.body);
+
+    const metadata = page.document.querySelector('ytd-watch-metadata')!;
+    metadata.replaceWith(page.document.createElement('ytd-watch-metadata'));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(page.document.querySelector('[data-cantaro-youtube-lyrics]')).toBe(host);
+    expect(host.parentElement).toBe(page.document.body);
+
+    let fullscreenElement = page.document.querySelector('#player-full-bleed-container');
+    Object.defineProperty(page.document, 'fullscreenElement', { get: () => fullscreenElement });
+    page.document.dispatchEvent(new page.window.Event('fullscreenchange'));
+    expect(host.hidden).toBe(true);
+    fullscreenElement = null;
+    page.document.dispatchEvent(new page.window.Event('fullscreenchange'));
+    expect(host.hidden).toBe(false);
+    expect(host.parentElement).toBe(page.document.body);
+    ctx.invalidate();
   });
 
   it('clears its consent-scoped URL poll when the content context is invalidated', async () => {
