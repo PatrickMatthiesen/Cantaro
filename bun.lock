@@ -10,7 +10,7 @@
     },
     "src/Cantaro.BrowserExtension": {
       "name": "cantaro-browser-extension",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "dependencies": {
         "@cantaro/client-shared": "workspace:*",
         "react": "^19.3.1",
