@@ -13,6 +13,7 @@ type LyricsView =
 interface DrawerOptions {
   document: Document;
   container?: Element | null;
+  floating?: boolean;
   /** Open mode lets the in-app preview and component tests inspect the shipped drawer. */
   shadowMode?: ShadowRootMode;
   getCurrentVideoId: () => string | null;
@@ -22,10 +23,12 @@ interface DrawerOptions {
 
 const styles = `
 :host{all:initial;color-scheme:dark;font-family:Roboto,Arial,sans-serif;display:block;--bg:var(--yt-spec-base-background,#0f0f0f);--text:var(--yt-spec-text-primary,#f1f1f1);--muted:var(--yt-spec-text-secondary,#aaa);--line:var(--yt-spec-10-percent-layer,rgba(255,255,255,.1));--hover:var(--yt-spec-badge-chip-background,rgba(255,255,255,.1));color:var(--text);font-size:14px;line-height:1.45}
+:host([data-placement="floating"]){position:fixed;inset:auto 16px 16px auto;z-index:2147483646}
 *{box-sizing:border-box}
 button{font:inherit;color:inherit}
 button:focus-visible,select:focus-visible,input:focus-visible,.heading:focus-visible{outline:2px solid var(--text);outline-offset:2px}
 .launcher{display:block;margin:12px 0 12px auto;border:0;background:var(--yt-spec-raised-background,#212121);border-radius:18px;padding:9px 16px;cursor:pointer;font-weight:500}
+:host([data-placement="floating"]) .launcher{margin:0}
 .launcher:hover{background:color-mix(in srgb,var(--bg) 85%,var(--text))}
 .launcher:focus-visible{outline:1px solid var(--muted);outline-offset:-3px}
 :host([hidden]),.launcher[hidden]{display:none}
@@ -243,6 +246,7 @@ export function mountYouTubeLyricsDrawer(options: DrawerOptions): YouTubeLyricsD
   const { document: doc } = options;
   const host = doc.createElement('div');
   host.setAttribute('data-cantaro-youtube-lyrics', '');
+  if (options.floating) host.dataset.placement = 'floating';
   const root = host.attachShadow({ mode: options.shadowMode ?? 'closed' });
   const style = doc.createElement('style');
   style.textContent = styles;

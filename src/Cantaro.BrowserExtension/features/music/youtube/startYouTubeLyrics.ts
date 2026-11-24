@@ -38,14 +38,14 @@ export function startYouTubeLyrics(ctx: ContentContext): void {
       return;
     }
     const isMusic = new URL(url).hostname === 'music.youtube.com';
-    // Keep the launcher in the watch details or queue, outside the player.
-    const container = document.querySelector(isMusic ? 'ytmusic-player-page #side-panel' : 'ytd-watch-metadata');
+    const container = isMusic ? document.querySelector('ytmusic-player-page #side-panel') : document.body;
     if (!drawer) {
       if (!container) return;
       activeVideoId = nextVideoId;
       drawer = mountYouTubeLyricsDrawer({
         document,
         container,
+        floating: !isMusic,
         getCurrentVideoId: () => activeVideoId,
         requestLyrics: requestYouTubeLyrics,
         // YouTube Music's page title may describe an ad.
